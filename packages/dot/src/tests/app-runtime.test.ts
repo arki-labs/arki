@@ -85,6 +85,43 @@ describe('createAppRuntime', () => {
     expect(await started.dispose()).toBeUndefined();
   });
 
+  it('eager: starts when the runtime is created, so the first get() finds the app booted', async () => {
+    const { app, counts } = countedApp();
+    const runtime = createAppRuntime(app, { eager: true });
+
+    // No get() yet: the boot ran on its own, so the plugin's factory already ran.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(counts.starts).toBe(1);
+    const started = orThrow(await runtime.get());
+    expect(counts.starts).toBe(1);
+    expect(started.services.probe).toBe('probe');
+    expect(await started.dispose()).toBeUndefined();
+  });
+
+  it('eager: a failed start is not cached, the next get() retries', async () => {
+    let failNext = true;
+    const app = defineApp('flaky-eager').use(
+      plugin({
+        name: 'flaky',
+        provides: {
+          flaky: () => {
+            if (failNext) {
+              failNext = false;
+              return Unavailable();
+            }
+            return 'up';
+          },
+        },
+      }),
+    );
+    const runtime = createAppRuntime(app, { eager: true });
+
+    expect(Unavailable.is(await runtime.get())).toBe(true);
+    const started = orThrow(await runtime.get());
+    expect(started.services.flaky).toBe('up');
+    expect(await started.dispose()).toBeUndefined();
+  });
+
   it('starts the replacing module only after the replaced app finished disposing', async () => {
     const { app, counts } = countedApp();
     const data: Record<string, unknown> = {};

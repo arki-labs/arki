@@ -101,9 +101,18 @@ export function createAppRuntime<
         }
       | undefined;
     readonly onStarted?: ((app: DotApp<S, Close, Open, Phases>) => void) | undefined;
+    /**
+     * Start the app as soon as the runtime is created instead of on the first
+     * `get()`. A production server boots before it serves, so the first
+     * request pays no boot and a boot failure shows at process start. Leave
+     * it off in dev: Vite re-runs the module on a hot update, and the lazy
+     * start lets the previous instance finish disposing first. A failed start
+     * is not cached, so the next `get()` still retries.
+     */
+    readonly eager?: boolean | undefined;
   } = {},
 ) {
-  const { hot, onStarted } = options;
+  const { hot, onStarted, eager = false } = options;
   const previousGone = previousDisposal(hot?.data[DISPOSING_KEY]);
   let running: ReturnType<typeof start> | undefined;
   let unhookSignals: (() => void) | undefined;
@@ -163,14 +172,17 @@ export function createAppRuntime<
     })();
   });
 
-  return {
-    get() {
-      if (replaced) return Promise.resolve(RuntimeReplaced());
-      running ??= start().then(outcome => {
-        if (failed(outcome)) running = undefined;
-        return outcome;
-      });
-      return running;
-    },
-  };
+  function get() {
+    if (replaced) return Promise.resolve(RuntimeReplaced());
+    running ??= start().then(outcome => {
+      if (failed(outcome)) running = undefined;
+      return outcome;
+    });
+    return running;
+  }
+
+  // eslint-disable-next-line failure/must-use -- the first `get()` observes the same outcome: a success is cached in `running`, a failure is not and that `get()` retries.
+  if (eager) void get();
+
+  return { get };
 }
