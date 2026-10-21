@@ -42,11 +42,15 @@
     "reading-time": "catalog:content",
     "rehype-autolink-headings": "catalog:content",
     "rehype-pretty-code": "catalog:content",
+    "rehype-raw": "catalog:content",
     "rehype-slug": "catalog:content",
+    "rehype-stringify": "catalog:content",
     "remark-gfm": "catalog:content",
     "remark-mdx": "^3.1.1",
     "remark-parse": "catalog:content",
+    "remark-rehype": "catalog:content",
     "sharp": "catalog:image-processing",
+    "shiki": "catalog:content",
     "unified": "catalog:",
     "unist-util-visit": "^5.1.0",
     "vfile": "^6.0.3"
@@ -61,7 +65,6 @@
     "@types/mdast": "^4.0.4",
     "@types/unist": "^3.0.3",
     "contentlayer2": "0.5.8",
-    "remark-rehype": "catalog:content",
     "velite": "0.4.0",
     "vite": "catalog:build-tools",
     "vitest": "catalog:"
