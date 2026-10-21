@@ -77,8 +77,23 @@ export const config: ReleaseConfig = {
       packages: ['@arki/cli', '@arki/dot', '@arki/env', '@arki/resilience'],
     },
     {
+      id: 'frontend',
+      label: 'Wave 3 — Frontend',
+      // Promoted 2026-10-09 for the Drop Studio demo (external consumer of
+      // the storefront stack). Leaves first: theme / icons / react-hooks /
+      // design-systems have no @arki deps; `@arki/ui` depends on all four
+      // plus `@arki/date` (Wave 1). Ships before infrastructure-adapters since
+      // 2026-10-21: `@arki/auth` peers on `@arki/ui` and `@arki/icons`, and
+      // nothing here depends on that wave.
+      packages: ['@arki/theme', '@arki/icons', '@arki/react-hooks', '@arki/design-systems', '@arki/ui'],
+      // Source-first: these ship TypeScript source as the runtime entry plus
+      // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
+      // READMEs say so. Compiled dist output is a later, separate decision.
+      buildOutput: 'source',
+    },
+    {
       id: 'infrastructure-adapters',
-      label: 'Wave 3 — Infrastructure Adapters',
+      label: 'Wave 4 — Infrastructure Adapters',
       // Stable v1: the env + kv + db trio — they pass every
       // scorecard dimension and back the DOT fixture. `@arki/http` joined
       // 2026-07-07 (typed HTTP + the DOT http() pip). `@arki/fs`,
@@ -96,19 +111,6 @@ export const config: ReleaseConfig = {
         '@arki/lock', '@arki/mail', '@arki/auth', '@arki/schedule', '@arki/queue',
         '@arki/testing',
       ],
-    },
-    {
-      id: 'frontend',
-      label: 'Wave 4 — Frontend',
-      // Promoted 2026-10-09 for the Drop Studio demo (external consumer of
-      // the storefront stack). Leaves first: theme / icons / react-hooks /
-      // design-systems have no @arki deps; `@arki/ui` depends on all four
-      // plus `@arki/date` (Wave 1).
-      packages: ['@arki/theme', '@arki/icons', '@arki/react-hooks', '@arki/design-systems', '@arki/ui'],
-      // Source-first: these ship TypeScript source as the runtime entry plus
-      // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
-      // READMEs say so. Compiled dist output is a later, separate decision.
-      buildOutput: 'source',
     },
     {
       id: 'specialized',

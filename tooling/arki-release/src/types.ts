@@ -157,8 +157,8 @@ export type PackageWave = 'public-candidate' | 'blocked' | 'internal' | 'unclass
 export const RELEASE_WAVE_IDS = [
   'foundation',
   'dot-kernel',
-  'infrastructure-adapters',
   'frontend',
+  'infrastructure-adapters',
   'specialized',
   'ai',
 ] as const;
