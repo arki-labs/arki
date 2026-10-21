@@ -24,7 +24,7 @@ import type { Failure, FailureIn, FailureOf, SuccessOf } from '@arki/failure';
 import { createLifetime, isScopeEntry } from '@arki/async';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-import type { MountedFeature } from './feature.js';
+import type { AnyDefinedFeature } from './define-feature.js';
 import type { Lazy } from './lazy.js';
 import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
 import type { DotTelemetry } from './telemetry.js';
@@ -289,7 +289,7 @@ export type BootSlot<Ctx, Boot> = {
 
 /**
  * A capability handle: a token on the wire key `K`, stamped with the name
- * of the unit that provides it. `infra()` and `feature()` mint one per
+ * of the unit that provides it. `infra()` and `defineFeature()` mint one per
  * `provides` key, so a consumer names the capability in its `needs`
  * (`needs: { db: database.provides.db }`) and never restates the type —
  * the Drizzle `references(() => table.column)` of services. Identity is
@@ -797,7 +797,7 @@ export type NoRole = { readonly role?: undefined };
  */
 export type UnitBinder<TRole extends 'infra' | 'entrypoint', U extends AnyUnit = AnyUnit> = {
   readonly role: TRole;
-  readonly bind: (features: readonly MountedFeature[]) => U;
+  readonly bind: (features: readonly AnyDefinedFeature[]) => U;
 };
 
 /** Infrastructure built from the mounted features' declarations (the journal reads their handlers). It boots before them. */
@@ -929,7 +929,7 @@ export function infra(def: AnyUnitDefinition): AnyUnit {
  * TypeScript type a definition's hooks against it first and keep that type.
  */
 infra.fromFeatures = function infraFromFeatures<const U extends AnyUnit>(
-  bind: (features: readonly MountedFeature[]) => U,
+  bind: (features: readonly AnyDefinedFeature[]) => U,
 ): UnitBinder<'infra', U> {
   return { role: 'infra', bind };
 };
@@ -982,7 +982,7 @@ export function entrypoint(def: AnyUnitDefinition): AnyUnit {
  * the features' declarations before anything boots.
  */
 entrypoint.fromFeatures = function entrypointFromFeatures<const U extends AnyUnit>(
-  bind: (features: readonly MountedFeature[]) => U,
+  bind: (features: readonly AnyDefinedFeature[]) => U,
 ): UnitBinder<'entrypoint', U> {
   return { role: 'entrypoint', bind };
 };

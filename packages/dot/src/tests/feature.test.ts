@@ -12,15 +12,7 @@ import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Provided, ServicesBag, ServicesOf } from '../feature.js';
 import { defineFeature } from '../define-feature.js';
-import {
-  entrypoint,
-  entrypointsOf,
-  FEATURE_ERROR_CODES,
-  providesOf,
-  resolveNeeds,
-  servicesOf,
-  sliceOf,
-} from '../feature.js';
+import { entrypoint, FEATURE_ERROR_CODES, providesOf, resolveNeeds, servicesOf, sliceOf } from '../feature.js';
 import { defineApp, infra, service } from '../index.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { unit } from '../unit-contract.js';
@@ -326,7 +318,7 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
       name: 'registry',
       provides: {
         registry: () => ({
-          handlers: features.flatMap(f => entrypointsOf(f).map(s => `${f.name}:${s.key}`)),
+          handlers: features.flatMap(f => f.entrypoints.map(s => `${f.name}:${s.key}`)),
         }),
       },
     }),

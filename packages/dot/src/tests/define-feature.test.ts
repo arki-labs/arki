@@ -23,7 +23,7 @@ import type {
 import type { SupervisedUsecase, SupervisedUsecases } from '../kernel/usecase.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
-import { defineFeature, entrypoint, entrypointsOf, FEATURE_ERROR_CODES, resolveNeeds, routerFor } from '../feature.js';
+import { defineFeature, entrypoint, FEATURE_ERROR_CODES, resolveNeeds, routerFor } from '../feature.js';
 import { defineApp, infra, testApp } from '../index.js';
 import { unit } from '../unit-contract.js';
 
@@ -535,7 +535,7 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
       unit({
         name: 'collector',
         boot: () => {
-          declared = features.flatMap(f => entrypointsOf(f).map(slice => `${f.name}:${slice.key}`));
+          declared = features.flatMap(f => f.entrypoints.map(slice => `${f.name}:${slice.key}`));
         },
       }),
     );

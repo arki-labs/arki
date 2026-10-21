@@ -4,8 +4,7 @@
  * `http()` is an entrypoint: `.entrypoints(http(...))` binds it to the features the
  * app mounted, and it serves every feature's `routes` slice — declared with
  * `endpoints(core, build)` from this module in a `defineFeature` feature's
- * `.entrypoints(...)`, or with `endpoints(build)` from `@arki/http` in an
- * object-form feature's `use` list. The app never lists its features twice:
+ * `.entrypoints(...)`. The app never lists its features twice:
  *
  * ```ts
  * import { defineApp } from '@arki/dot';
@@ -13,7 +12,7 @@
  *
  * const app = await defineApp('shop-api')
  *   .infra(db({ url }))
- *   .features([orders, billing])   // each declares `use: [endpoints(build)]`
+ *   .features([orders, billing])   // each lists `endpoints(core, build)` in `.entrypoints(...)`
  *   .entrypoints(http({ port: 3000 }))
  *   .start();
  * ```
@@ -41,7 +40,7 @@
  * adapter only makes sense inside a DOT app.
  */
 
-import type { AnyFeatureCore, DepsOf, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder } from '@arki/dot/feature';
 import type { Deferred, DotConfigureContext, EmptyShape, Unit, Token } from '@arki/dot/unit';
 import { entrypoint, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, resolveDeferred, unit } from '@arki/dot/unit';
@@ -225,14 +224,15 @@ function isRouteBundle(value: unknown): value is RouteBundle {
 }
 
 /** The `routes` slice of one mounted feature, or `undefined` when it declares none. */
-function featureRoutes(ctx: object, f: MountedFeature): RouteBundle | undefined {
+function featureRoutes(ctx: object, f: AnyDefinedFeature): RouteBundle | undefined {
   const routes = sliceOf(ctx, f)['routes'];
   if (routes === undefined) return undefined;
   if (!isRouteBundle(routes)) {
     throw new DotUnitError({
       code: HTTP_PLUGIN_ERROR_CODES.routesSliceInvalid,
       message: `[http] feature "${f.name}" published a "routes" slice that is not a route bundle.`,
-      remediation: 'Declare the feature\'s HTTP surface with endpoints(build) from @arki/http, where build returns routes()….',
+      remediation:
+        "Declare the feature's HTTP surface with endpoints(core, build) from @arki/http/dot, where build returns routes()….",
       docsUrl: 'https://arki.dev/http/errors/arki-http-e010',
     });
   }
@@ -267,7 +267,7 @@ export type EndpointsEntrypoint<TServices> = {
  * `contracts` are the route contracts the bundle binds; they join the
  * manifest as the feature's actions (a chain feature has no `actions` list
  * of its own). The `.entrypoints(http(...))` entrypoint collects the bundle under
- * `routes`, exactly as for `endpoints(build)`.
+ * `routes`.
  */
 export function endpoints<C extends AnyFeatureCore>(
   _core: C,
@@ -313,7 +313,7 @@ function bindHttp(
   options: HttpOptions<readonly BundleToken[]>,
   bundleTokens: readonly BundleToken[],
   needs: Record<string, BundleToken>,
-  features: readonly MountedFeature[],
+  features: readonly AnyDefinedFeature[],
 ): Unit<EmptyShape, HttpServices> {
   const state: PluginState = { served: undefined, handle: undefined };
   const gauge: InflightGauge = { count: 0, waiters: [] };

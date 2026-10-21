@@ -3,10 +3,11 @@
  * protocol-2 routes under `/api/foreman`.
  *
  * ```ts
- * export const operations = feature('operations', {
- *   needs: { kv: cache.provides.kv, db: database.provides.db },
- *   use: [
- *     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
+ * export const operations = defineFeature('operations')
+ *   .needs({ kv: cache.provides.kv, db: database.provides.db })
+ *   .entrypoints({
+ *     kind: 'routes',
+ *     ...foreman(({ kv, db }: { kv: KV; db: Db }) => ({
  *       env,
  *       environment: 'prod',
  *       app: { version: pkg.version },
@@ -15,13 +16,12 @@
  *       modules: [queueModule(queue)],
  *       context: () => ({}),
  *     })),
- *   ],
- * });
+ *   });
  * ```
  *
  * The slice lands under the `routes` key, where `.entrypoints(http(...))` collects
- * it. `feature()` rejects two slices with one key, so put `foreman()` in
- * its own feature, not next to an `endpoints()` slice.
+ * it. `defineFeature` rejects two entrypoints with one key, so put `foreman()` in
+ * its own feature, not next to an `endpoints()` entrypoint.
  *
  * `@arki/http` is an optional peer: this entry only makes sense in a DOT http app.
  */

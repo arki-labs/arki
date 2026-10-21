@@ -206,10 +206,9 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
   `daily-digest --[daily-digest.store]--> daily-digest/store --[db]--> database`.
 
 Adapter authors: `entrypoint.fromFeatures` and `infra.fromFeatures` units receive the features as mounted
-(`MountedFeature`). Read a feature's declarations with
-`entrypointsOf(f)` (its `entrypoints`), its slice
-record with `sliceOf(ctx, f)`, and a chain feature's own units with
-`f.units()`.
+(`AnyDefinedFeature`). Read a feature's declarations from
+`f.entrypoints`, its slice record with `sliceOf(ctx, f)`, and its own
+units with `f.units()`.
 
 ### oRPC, contract first: `@arki/dot/orpc`
 

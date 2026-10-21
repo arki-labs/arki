@@ -106,8 +106,8 @@ The pin makes the hand list compiler-enforced instead of trusted.
 ## 3. One declaration, many projections
 
 A feature is declared **once** (`defineFeature()`) and everything else is a
-projection of it: the unit `.features()` mounts, the slice token
-(`tokenOf`), manifest actions (`dot explain` attribution), the router
+projection of it: the units `.features()` mounts, the slice record
+(`sliceOf`), manifest actions (`dot explain` attribution), the router
 (`routerFor`, client types), the feature's own store (`repos`). If adding a capability requires editing a second
 place, the design is wrong — extend the declaration and derive.
 

@@ -1,9 +1,9 @@
 /**
- * Feature-owned schedules (`schedules(needs, defs)`), the host clock, the
+ * Feature-owned schedules (`schedules(core, defs)`), the host clock, the
  * `scheduler` service and the typed `composeSchedules` client.
  *
  * The founder rule these tests guard: every type is written once. The
- * handler's services come from `needs`, the trigger names and result
+ * handler's services come from the core, the trigger names and result
  * types come from the declarations — no caller restates any of them.
  */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -68,7 +68,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('schedules(needs, defs) — feature-owned schedules', () => {
+describe('schedules(core, defs) — feature-owned schedules', () => {
   // The point of the form: a schedule is part of its feature and works with
   // that feature's services, not with one app-wide context.
   it("runs each handler with its own feature's services", async () => {
@@ -98,8 +98,8 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
     await orThrow(app.dispose());
   });
 
-  it('types the handler parameter from needs, with no annotation', () => {
-    schedules(mailerNeeds, [
+  it("types the handler parameter from the core's needs, with no annotation", () => {
+    schedules(digestCore, [
       {
         name: 'typed',
         every: '1h',
@@ -122,7 +122,7 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
   // A durable tick runs in another process that does not hold these services.
   it('refuses durable: true in the type and with a coded error at declaration', () => {
     try {
-      schedules(mailerNeeds, [
+      schedules(digestCore, [
         // @ts-expect-error feature-owned schedules cannot be durable.
         { name: 'durable-digest', every: '1h', durable: true, handler: ({ mailer }) => mailer.send('x') },
       ]);
@@ -136,7 +136,7 @@ describe('schedules(needs, defs) — feature-owned schedules', () => {
 
   it('validates cron and every at declaration, like defineSchedule', () => {
     expect(() =>
-      schedules(mailerNeeds, [{ name: 'bad', cron: 'not a cron', handler: ({ mailer }) => mailer.send('x') }]),
+      schedules(digestCore, [{ name: 'bad', cron: 'not a cron', handler: ({ mailer }) => mailer.send('x') }]),
     ).toThrow(expect.objectContaining({ code: SCHEDULE_ERROR_CODES.invalidDefinition }));
   });
 });

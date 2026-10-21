@@ -1,6 +1,6 @@
 /**
- * Error codes for feature composition. Shared by `feature()` (object form)
- * and `defineFeature()` (chain form), so both report through one class.
+ * Error codes for feature composition: `defineFeature()` and the
+ * services-bag helpers report through this one class.
  */
 
 import { dotErrorDocsUrl } from './lifecycle.js';

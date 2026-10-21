@@ -9,17 +9,17 @@
  * ```ts
  * defineApp('shop')
  *   .infra(db({ url }))
- *   .features([billing, reports])           // each declares `use: [schedules(...)]`
+ *   .features([billing, reports])           // each lists `schedules(core, [...])` in `.entrypoints(...)`
  *   .entrypoints(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
  * ```
  *
  * A feature declares its schedules in one of two forms:
  *
- * - `schedules(needs, [{ name, cron | every, handler: s => ... }])` — the
- *   feature owns them. Each handler receives the services `needs` names,
- *   typed with no annotation, and the feature's own `needs` must cover
- *   them (a compile error otherwise). Not durable: a durable run happens
- *   in another process that does not hold these services.
+ * - `schedules(core, [{ name, cron | every, handler: s => ... }])` — the
+ *   feature owns them. Each handler receives what the feature's entrypoints
+ *   get (its needs, its private infra and `usecases`), typed from the core
+ *   with no annotation (a missing need is a compile error). Not durable: a
+ *   durable run happens in another process that does not hold these services.
  * - `schedules([defineSchedule(...)])` — handlers receive the driver's
  *   `context`. The features are bound at runtime, so the compiler cannot
  *   check that these schedules expect that context: keep one context type
@@ -33,10 +33,10 @@
  * declarations.
  */
 
-import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureCore, AnyFeatureSlice, DepsOf, EntrypointBinder } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Unit, WireNeeds } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
-import { allFeatures, entrypoint, entrypointsOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { allFeatures, entrypoint, instanceOf, sliceOf, unit } from '@arki/dot/feature';
 import { token } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -252,7 +252,7 @@ export function scheduleActions<TContext>(
 
 /** The `@arki/dot/feature` slice contract a `schedules(...)` declaration produces. */
 export type ScheduleFeatureSlice<TDefinitions extends readonly ScheduleDef<never>[]> = {
-  /** Lets a `defineFeature` feature list it in `.entrypoints(...)`; object-form features ignore it. */
+  /** Lets a `defineFeature` feature list it in `.entrypoints(...)`. */
   readonly kind: 'schedules';
   readonly key: 'schedules';
   readonly actions: readonly ScheduleDotAction[];
@@ -269,8 +269,8 @@ export type FeatureLockOption = true | string | { readonly key?: string; readonl
 
 /**
  * One schedule a feature owns, written as a plain option object inside
- * `schedules(needs, [...])` so the handler's parameter is typed from
- * `needs`. The handler may return a value; `composeSchedules` types the
+ * `schedules(core, [...])` so the handler's parameter is typed from
+ * the core. The handler may return a value; `composeSchedules` types the
  * `ran` outcome with it. No `durable: true` (see the module docs).
  */
 export type FeatureScheduleOptions<TServices> = FeatureScheduleTiming & {
@@ -349,7 +349,7 @@ function locksOf(services: unknown, schedule: string): Locker {
 }
 
 /**
- * The slice `schedules(needs, defs)` produces. `resolve` binds each
+ * The slice `schedules(core, defs)` produces. `resolve` binds each
  * handler to the feature's services (the driver runs the closed handlers
  * and ignores its own context for them); `definitions` keeps the declared
  * objects so `composeSchedules` can read their names and result types.
@@ -416,14 +416,14 @@ function boundLock(schedule: string, plan: LockPlan, services: unknown): NonNull
 }
 
 function isScheduleDefList<TContext>(
-  value: NeedsShape | AnyFeatureCore | readonly ScheduleDef<TContext>[],
+  value: AnyFeatureCore | readonly ScheduleDef<TContext>[],
 ): value is readonly ScheduleDef<TContext>[] {
   return Array.isArray(value);
 }
 
 /**
- * Declare a feature's in-process schedules as a boot-time slice
- * (`feature(..., { use: [schedules(...)] })`). The payload lands
+ * Declare a feature's in-process schedules, in its `.entrypoints(...)`
+ * (`defineFeature(...)….entrypoints(schedules(...))`). The payload lands
  * under `schedules` in the feature's slice record — where the
  * `.entrypoints(schedule(...))` entrypoint collects it — and the derived actions
  * join the feature's manifest.
@@ -435,10 +435,6 @@ function isScheduleDefList<TContext>(
  *   its needs, its private infra and `usecases` — typed from the core, so a
  *   schedules file of its own needs no annotation:
  *   `export const digestSchedules = (c: typeof core) => schedules(c, [{ name, cron, handler: ({ usecases }) => usecases.sendDue() }])`.
- * - `schedules(needs, defs)`: plain option objects whose handlers receive
- *   the services `needs` names. List the same services in the feature's
- *   `needs`; a missing one is a compile error. (Object-form features; the
- *   core form replaces it.)
  */
 export function schedules<const TDefinitions extends readonly ScheduleDef<never>[]>(
   defs: TDefinitions,
@@ -447,32 +443,32 @@ export function schedules<C extends AnyFeatureCore, const D extends readonly Fea
   core: C,
   defs: D & LockGuard<DepsOf<C>, D>,
 ): FeatureScheduleSlice<D, DepsOf<C>>;
-export function schedules<N extends NeedsShape, const D extends readonly FeatureScheduleOptions<CtxOf<N>>[]>(
-  needs: N,
-  defs: D & LockGuard<CtxOf<N>, D>,
-): FeatureScheduleSlice<D, CtxOf<N>>;
-export function schedules<TContext, N extends NeedsShape, const D extends readonly FeatureScheduleOptions<CtxOf<N>>[]>(
-  needsOrDefs: N | AnyFeatureCore | readonly ScheduleDef<TContext>[],
+export function schedules<
+  TContext,
+  C extends AnyFeatureCore,
+  const D extends readonly FeatureScheduleOptions<DepsOf<C>>[],
+>(
+  coreOrDefs: C | readonly ScheduleDef<TContext>[],
   defs?: D,
-): ScheduleFeatureSlice<readonly ScheduleDef<TContext>[]> | FeatureScheduleSlice<D, CtxOf<N>> {
-  if (isScheduleDefList(needsOrDefs)) {
+): ScheduleFeatureSlice<readonly ScheduleDef<TContext>[]> | FeatureScheduleSlice<D, DepsOf<C>> {
+  if (isScheduleDefList(coreOrDefs)) {
     return {
       kind: 'schedules',
       key: 'schedules',
-      actions: scheduleActions(needsOrDefs),
-      resolve: () => needsOrDefs,
-      definitions: needsOrDefs,
+      actions: scheduleActions(coreOrDefs),
+      resolve: () => coreOrDefs,
+      definitions: coreOrDefs,
     };
   }
-  // `needs` (or the core) is a type witness: the feature hands its own services to `resolve`.
+  // The core is a type witness: the feature hands its own services to `resolve`.
   if (defs === undefined) {
     throw new ScheduleError({
       code: SCHEDULE_ERROR_CODES.invalidDefinition,
-      message: '[schedule] schedules(needs, defs) was called without defs.',
-      remediation: 'Pass the schedule list as the second argument: schedules(needs, [{ name, cron, handler }]).',
+      message: '[schedule] schedules(core, defs) was called without defs.',
+      remediation: 'Pass the schedule list as the second argument: schedules(core, [{ name, cron, handler }]).',
     });
   }
-  return featureOwnedSchedules<CtxOf<N>, D>(defs);
+  return featureOwnedSchedules<DepsOf<C>, D>(defs);
 }
 
 function isScheduleList(value: unknown): value is readonly ScheduleDef<unknown>[] {
@@ -498,7 +494,7 @@ function isScheduleList(value: unknown): value is readonly ScheduleDef<unknown>[
 /** A collected schedule; `declaredName` is set on an instance's, whose name was qualified. */
 type CollectedSchedule = ScheduleDef<unknown> & { readonly declaredName?: string };
 
-function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[]): readonly CollectedSchedule[] {
+function collectFeatureSchedules(ctx: object, features: readonly AnyDefinedFeature[]): readonly CollectedSchedule[] {
   const collected: CollectedSchedule[] = [];
   for (const f of features) {
     const defs = sliceOf(ctx, f)['schedules'];
@@ -508,7 +504,7 @@ function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[
         code: SCHEDULE_ERROR_CODES.invalidDefinition,
         message: `[schedule] feature "${f.name}" published a "schedules" slice that is not a list of schedules.`,
         remediation:
-          'Declare feature schedules with schedules([...]) or schedules(needs, [...]) from @arki/schedule/dot.',
+          'Declare feature schedules with schedules([...]) or schedules(core, [...]) from @arki/schedule/dot.',
       });
     }
     // Only an instance ('reports#eu') gets a qualified name; a plain feature's names, and the lock
@@ -604,7 +600,7 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
         if (clock === 'host') {
           // Feature schedules declared before the driver knew its clock: fix the unlocked warning.
           for (const f of features) {
-            for (const slice of entrypointsOf(f)) {
+            for (const slice of f.entrypoints) {
               for (const action of slice.key === 'schedules' ? unlockedActionIds(slice) : []) {
                 ctx.describeAction(action, { summary: noLockSummary(clock) });
               }
@@ -679,14 +675,10 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
 /* Typed client                                                        */
 /* ------------------------------------------------------------------ */
 
-/** A feature's declarations, either form: a chain feature's `entrypoints`, an object-form feature's `use`. */
-type DeclarationsOf<F> = F extends { readonly entrypoints: readonly (infer TSlice)[] }
-  ? TSlice
-  : F extends { readonly use: readonly (infer TSlice)[] }
-    ? TSlice
-    : never;
+/** A feature's declarations: its `entrypoints`. */
+type DeclarationsOf<F> = F extends { readonly entrypoints: readonly (infer TSlice)[] } ? TSlice : never;
 
-/** The option objects every `schedules(needs | core, defs)` declaration of one feature lists. */
+/** The option objects every `schedules(core, defs)` declaration of one feature lists. */
 type FeatureScheduleDefsOf<F> =
   DeclarationsOf<F> extends infer TSlice
     ? TSlice extends {
@@ -700,7 +692,7 @@ type FeatureScheduleDefsOf<F> =
 /**
  * A feature and every feature nested under it (`.features(...)`), as a
  * union. Bounded to eight levels, so a loosely typed list
- * (`readonly MountedFeature[]`) cannot recurse without end.
+ * (`readonly AnyDefinedFeature[]`) cannot recurse without end.
  */
 type FeatureTreeOf<F, TDepth extends readonly unknown[] = []> = TDepth['length'] extends 8
   ? F
@@ -721,7 +713,7 @@ type RegisteredName<F, TName extends string> = [
   : `${TName}#${InstanceSegmentOf<F extends { readonly name: infer N } ? N : never>}`;
 
 /** Every feature-owned schedule name the feature tuple declares, nested children included, as registered. */
-export type ScheduleNameOf<TFeatures extends readonly MountedFeature[]> =
+export type ScheduleNameOf<TFeatures extends readonly AnyDefinedFeature[]> =
   FeatureTreeOf<TFeatures[number]> extends infer F
     ? F extends unknown
       ? RegisteredName<F, FeatureScheduleDefsOf<F>['name']>
@@ -729,7 +721,7 @@ export type ScheduleNameOf<TFeatures extends readonly MountedFeature[]> =
     : never;
 
 /** The resolved value of the handler named `TName`. */
-export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName extends string> =
+export type ScheduleValueOf<TFeatures extends readonly AnyDefinedFeature[], TName extends string> =
   FeatureTreeOf<TFeatures[number]> extends infer F
     ? F extends unknown
       ? FeatureScheduleDefsOf<F> extends infer TDef
@@ -746,21 +738,21 @@ export type ScheduleValueOf<TFeatures extends readonly MountedFeature[], TName e
     : never;
 
 /** Successful values and returned failures inferred from the named handler. */
-export type ScheduleSuccessOf<TFeatures extends readonly MountedFeature[], TName extends string> = SuccessOf<
+export type ScheduleSuccessOf<TFeatures extends readonly AnyDefinedFeature[], TName extends string> = SuccessOf<
   () => ScheduleValueOf<TFeatures, TName>
 >;
-export type ScheduleFailureOf<TFeatures extends readonly MountedFeature[], TName extends string> = ScheduleRefusal<
+export type ScheduleFailureOf<TFeatures extends readonly AnyDefinedFeature[], TName extends string> = ScheduleRefusal<
   ScheduleValueOf<TFeatures, TName>
 >;
 
 /** A `scheduler` service typed from the features' own schedule declarations. */
-export type ScheduleClient<TFeatures extends readonly MountedFeature[]> = {
+export type ScheduleClient<TFeatures extends readonly AnyDefinedFeature[]> = {
   trigger<TName extends ScheduleNameOf<TFeatures>>(
     name: TName,
   ): Promise<ScheduleOutcome<ScheduleValueOf<TFeatures, TName>>>;
 };
 
-/** The names a `schedules(needs, defs)` slice declared; `[]` for any other slice. */
+/** The names a `schedules(core, defs)` slice declared; `[]` for any other slice. */
 function declaredNames(slice: AnyFeatureSlice): readonly string[] {
   if (slice.key !== 'schedules' || !('definitions' in slice) || !Array.isArray(slice.definitions)) return [];
   return slice.definitions.flatMap((definition: unknown) =>
@@ -772,8 +764,8 @@ function declaredNames(slice: AnyFeatureSlice): readonly string[] {
 
 /**
  * A typed client over the `scheduler` service: `trigger` accepts only the
- * names the features declared with `schedules(needs | core, defs)` — object-form
- * and chain features alike, nested children included — and a `ran`
+ * names the features declared with `schedules(core, defs)` — nested
+ * children included — and a `ran`
  * outcome's `value` is that handler's resolved return type. Throws a coded
  * error when the scheduler does not run one of those schedules (the
  * features were not mounted on this app).
@@ -783,14 +775,14 @@ function declaredNames(slice: AnyFeatureSlice): readonly string[] {
  * const outcome = await schedules.trigger('send-digest');
  * ```
  */
-export function composeSchedules<const TFeatures extends readonly MountedFeature[]>(
+export function composeSchedules<const TFeatures extends readonly AnyDefinedFeature[]>(
   features: TFeatures,
   scheduler: ScheduleService,
 ): ScheduleClient<TFeatures> {
   const served = new Set(scheduler.names);
   for (const f of allFeatures(features)) {
     const instance = instanceOf(f.name);
-    for (const declared of entrypointsOf(f).flatMap(slice => declaredNames(slice))) {
+    for (const declared of f.entrypoints.flatMap(slice => declaredNames(slice))) {
       const name = instance === undefined ? declared : `${declared}#${instance}`;
       if (served.has(name)) continue;
       throw new ScheduleError({

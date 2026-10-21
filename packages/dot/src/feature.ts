@@ -2,22 +2,19 @@
  * `@arki/dot/feature` — Domain modules for Dot apps: `defineFeature`, its routers and the services bag.
  *
  * A feature is a named, inert declaration of what one domain module
- * contributes to an app:
+ * contributes to an app, written as one chain:
  *
- * - `router` / `repos` — compile-time fragments. Fold them with
- *   `composeRouter` / `composeRepos` from one membership list; no
- *   kernel is involved, so tests and plain scripts consume them
- *   directly.
- * - `use` — boot-time slices (jobs, schedules, HTTP routes) declared
- *   through slice contracts exported by the adapter that consumes them
- *   (e.g. `jobs()` from `@arki/queue/dot`). Each contract carries its
- *   payload plus the manifest actions derived from it, so this module
- *   depends on no adapter and the slice set stays open.
- * - `needs` / `provides` / `boot` — the runtime escape hatch for genuine
- *   lifecycle (an auth instance, an event store). `provides` holds one
- *   factory per capability; its keys are static, so the graph is data
- *   before anything boots. `boot` may return a typed private ownership plan or business failure.
- *   Most features never use any of them.
+ *   defineFeature('orders')
+ *     .needs({ db })       what the feature takes from the app
+ *     .infra({ ... })      its driven adapters (repositories, clients)
+ *     .usecases({ ... })   its business rules
+ *     .provides({ ... })   capabilities other features may need
+ *     .entrypoints(...)    what drives it (rpc routers, jobs, schedules, HTTP routes)
+ *
+ * Entrypoint declarations come from the adapter that consumes them
+ * (e.g. `jobs()` from `@arki/queue/dot`). Each carries its payload plus
+ * the manifest actions derived from it, so this module depends on no
+ * adapter and the set stays open.
  *
  * The app mounts features in the middle phase of the hexagon:
  *
@@ -26,42 +23,22 @@
  *     .features([...]) the domain core
  *     .entrypoints(...) what calls the features (http, workers)
  *
- * `.features()` turns each feature into a unit; driving adapters are
+ * `.features()` turns each feature into its units; driving adapters are
  * `entrypoint(...)` values that `.entrypoints()` binds to the mounted feature list.
  */
-import type { ScopePlan } from '@arki/async';
-import type { Failure } from '@arki/failure';
-
 import type { AnyDefinedFeature } from './define-feature.js';
 import type {
   ActionSource,
   AnyHandle,
   AnyUnit,
-  BootGuard,
   CtxOf,
-  EmptyHookReturns,
-  EmptyShape,
-  FactoryContract,
-  FactoryContractOf,
-  Handles,
-  HookReturns,
-  KernelCtx,
   NeedsShape,
-  NoReservedKeys,
-  PhaseHooks,
-  Unit,
-  UnitBinder,
-  UnitPhaseFailures,
-  UnitRuntime,
-  ProvidedValues,
-  ProvidesFactories,
   Service,
-  ServiceRecord,
   Token,
-  WireNeeds,
+  UnitBinder,
 } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
-import { createUnitRuntime, handleOf, isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
+import { isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
 
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 export type { FeatureErrorCode } from './feature-error.js';
@@ -130,11 +107,6 @@ export type {
 
 export type { Handle, Handles, LazyHandle, Provided, ProvidesFactories } from './unit-contract.js';
 
-export type MaybePromise<T> = T | Promise<T>;
-
-export type RouterFragments = Record<string, unknown>;
-export type RepoFactories = Record<string, (database: never) => unknown>;
-
 /**
  * A boot-time slice contract. Adapter packages export factories that
  * produce these (`jobs()`, `schedules()`, `endpoints()`): the payload
@@ -146,7 +118,7 @@ export type RepoFactories = Record<string, (database: never) => unknown>;
 export type FeatureSlice<K extends string = string, P = unknown, TServices = never> = {
   readonly key: K;
   readonly actions: readonly ActionSource[];
-  /** Actions named after the mounting feature (an instance's ids carry its name); `plug()` and the chain form both read it. */
+  /** Actions named after the mounting feature (an instance's ids carry its name); the chain form reads it. */
   readonly actionsOf?: (feature: string, children: readonly AnyDefinedFeature[]) => readonly ActionSource[];
   readonly resolve: (services: TServices) => P;
 };
@@ -157,360 +129,6 @@ type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) e
   ? I
   : never;
 
-/** The slice record a feature's `use` tuple publishes, keyed by slice key. */
-export type SlicePayloads<TUse extends readonly AnyFeatureSlice[]> = TUse extends readonly []
-  ? EmptyShape
-  : UnionToIntersection<
-      {
-        [I in keyof TUse]: TUse[I] extends FeatureSlice<infer K, infer P, never> ? Readonly<Record<K, P>> : never;
-      }[number]
-    >;
-
-export type Feature<
-  TName extends string = string,
-  TNeeds extends NeedsShape = NeedsShape,
-  TProvides extends ServiceRecord = ServiceRecord,
-  TUse extends readonly AnyFeatureSlice[] = readonly AnyFeatureSlice[],
-  TRouter extends RouterFragments = RouterFragments,
-  TRepos extends RepoFactories = RepoFactories,
-  TBoot extends undefined | ScopePlan | Failure = undefined,
-  TReturns extends HookReturns = EmptyHookReturns,
-> = PhaseHooks<CtxOf<TNeeds> & ProvidedValues<TProvides> & KernelCtx, TReturns> &
-  FactoryContract<ProvidedValues<TProvides>> & {
-    readonly runtime: UnitRuntime<never, never>;
-    readonly name: TName;
-    /** Compile-time fragments, folded by `composeRouter` / `composeRepos`. */
-    readonly router: TRouter;
-    readonly repos: TRepos;
-    /** Boot-time slice contracts + static manifest actions. */
-    readonly use: TUse;
-    readonly actions: readonly ActionSource[];
-    /** Runtime escape hatch — becomes the unit lifecycle in `.features()`. */
-    readonly needs: TNeeds;
-    /** One factory per capability, run in key order when the feature boots. */
-    readonly factories: ProvidesFactories<TNeeds, TProvides>;
-    /** Runs after providers; may return a typed private ownership plan or failure. */
-    readonly boot?: (services: CtxOf<TNeeds> & ProvidedValues<TProvides> & KernelCtx) => MaybePromise<TBoot>;
-    /**
-     * Typed handles for what the feature provides: `billing.provides.entitlements`
-     * is a `Token` on the same wire key, typed from billing's factory and
-     * stamped with the providing feature. A consumer names the capability in
-     * its `needs` and never restates the type — the Drizzle
-     * `references(() => table.column)` of features. The keys are static, so
-     * `Object.keys(billing.provides)` is known before anything boots.
-     */
-    readonly provides: Handles<ProvidedValues<TProvides>, TName>;
-  };
-
-/**
- * The erased feature bound list helpers fold over. `boot`'s parameter
- * is `never` (the contravariant top) so features with concrete `needs`
- * remain assignable — same trick as `RepoFactories`' `(database: never)`.
- */
-export type AnyFeature = {
-  readonly name: string;
-  readonly router: RouterFragments;
-  readonly repos: RepoFactories;
-  readonly use: readonly AnyFeatureSlice[];
-  readonly actions: readonly ActionSource[];
-  readonly needs: NeedsShape;
-  readonly factories: Readonly<Record<string, (services: never) => unknown>>;
-  readonly boot?: (services: never) => unknown;
-  readonly runtime: UnitRuntime<Failure, Failure>;
-  readonly provides: Readonly<Record<string, AnyHandle>>;
-} & PhaseHooks<never, HookReturns>;
-
-/**
- * A feature as an adapter sees it while both feature forms exist: an
- * object-form `feature()` value or a `defineFeature` feature. Drivers and
- * driven adapters receive these, as mounted. (Phase 5 of the RFC deletes the
- * object form; this union then narrows to the chain form.)
- */
-export type MountedFeature = AnyFeature | AnyDefinedFeature;
-
-/**
- * The declarations a mounted feature hands its adapters: a chain feature's
- * `entrypoints`, or an object-form feature's `use` slices. Same protocol
- * (`key`, `actions`, `resolve`), so an adapter reads one list either way.
- */
-export function entrypointsOf(f: MountedFeature): readonly AnyFeatureSlice[] {
-  return 'entrypoints' in f ? f.entrypoints : f.use;
-}
-
-/**
- * Declare a feature. Pure data capture — nothing executes here; the app
- * builder's `.features()` turns it into a unit.
- */
-type FeatureConfig<
-  TNeeds extends NeedsShape,
-  TProvides extends ServiceRecord,
-  TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[],
-  TRouter extends RouterFragments,
-  TRepos extends RepoFactories,
-  TBoot,
-  TReturns extends HookReturns,
-> = PhaseHooks<CtxOf<TNeeds> & ProvidedValues<NoInfer<TProvides>> & KernelCtx, TReturns> & {
-  /** oRPC router fragment(s), keyed by mount name. */
-  readonly router?: TRouter;
-  /** Repository factories, keyed by their `ctx.repo` name. */
-  readonly repos?: TRepos;
-  /** Boot-time slice contracts (`jobs(...)`, `schedules(...)`, `endpoints(...)`). */
-  readonly use?: TUse;
-  /** Extra static manifest actions (e.g. route contracts). */
-  readonly actions?: readonly ActionSource[];
-  readonly needs?: TNeeds;
-  /** One factory per capability. Each gets the feature's needs. Keys are the wire keys. */
-  readonly provides?: ProvidesFactories<TNeeds, TProvides>;
-  /** Runs after providers; may return a typed private ownership plan or failure. */
-  readonly boot?: (services: CtxOf<TNeeds> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
-};
-
-export function feature<
-  const TName extends string,
-  TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
-  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-  const TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[] = readonly [],
-  const TRouter extends RouterFragments = EmptyShape,
-  const TRepos extends RepoFactories = EmptyShape,
-  TBoot extends undefined = undefined,
->(
-  name: TName,
-  config: FeatureConfig<TNeeds, TProvides, TUse, TRouter, TRepos, undefined, EmptyHookReturns>,
-  ..._guard: BootGuard<NoInfer<TBoot>>
-): Feature<TName, TNeeds, NoInfer<TProvides>, TUse, TRouter, TRepos, NoInfer<TBoot>, EmptyHookReturns>;
-export function feature<
-  const TName extends string,
-  TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
-  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-  const TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[] = readonly [],
-  const TRouter extends RouterFragments = EmptyShape,
-  const TRepos extends RepoFactories = EmptyShape,
-  TBoot extends undefined | ScopePlan | Failure = undefined,
-  TConfigure extends undefined | Failure = undefined,
-  TStart extends undefined | Failure = undefined,
-  TStop extends undefined | Failure = undefined,
-  TDispose extends undefined | Failure = undefined,
->(
-  name: TName,
-  config: FeatureConfig<
-    TNeeds,
-    TProvides,
-    TUse,
-    TRouter,
-    TRepos,
-    TBoot,
-    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }
-  >,
-  ..._guard: BootGuard<NoInfer<TBoot>>
-): Feature<
-  TName,
-  TNeeds,
-  NoInfer<TProvides>,
-  TUse,
-  TRouter,
-  TRepos,
-  NoInfer<TBoot>,
-  { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }
->;
-export function feature<
-  const TName extends string,
-  TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
-  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
-  const TUse extends readonly FeatureSlice<string, unknown, CtxOf<TNeeds> & KernelCtx>[] = readonly [],
-  const TRouter extends RouterFragments = EmptyShape,
-  const TRepos extends RepoFactories = EmptyShape,
-  TBoot extends undefined | ScopePlan | Failure = undefined,
-  TConfigure extends undefined | Failure = undefined,
-  TStart extends undefined | Failure = undefined,
-  TStop extends undefined | Failure = undefined,
-  TDispose extends undefined | Failure = undefined,
->(
-  name: TName,
-  config: FeatureConfig<
-    TNeeds,
-    TProvides,
-    TUse,
-    TRouter,
-    TRepos,
-    TBoot,
-    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }
-  >,
-  ..._guard: BootGuard<NoInfer<TBoot>>
-): Feature<
-  TName,
-  TNeeds,
-  NoInfer<TProvides>,
-  TUse,
-  TRouter,
-  TRepos,
-  NoInfer<TBoot>,
-  { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose }
-> {
-  const sliceKeys = new Set<string>();
-  for (const slice of config.use ?? []) {
-    // A second slice under one key would silently replace the first once the
-    // feature is mounted (the payload record is keyed by slice key).
-    if (sliceKeys.has(slice.key)) {
-      throw new FeatureError({
-        code: FEATURE_ERROR_CODES.duplicateSliceKey,
-        message: `[feature] feature "${name}" declares two "${slice.key}" slices in \`use\`; the second would silently replace the first.`,
-        remediation: `Move one of the "${slice.key}" slices into its own feature, or merge them into one slice.`,
-      });
-    }
-    sliceKeys.add(slice.key);
-  }
-  const factories = config.provides ?? ({} as ProvidesFactories<TNeeds, TProvides>);
-  const handles: Record<string, AnyHandle> = {};
-  for (const key of Object.keys(factories)) {
-    handles[key] = handleOf(key, name);
-  }
-  const runtime = createUnitRuntime();
-  return {
-    runtime,
-    name,
-    router: (config.router ?? {}) as TRouter,
-    repos: (config.repos ?? {}) as TRepos,
-    use: (config.use ?? []) as unknown as TUse,
-    actions: config.actions ?? [],
-    needs: (config.needs ?? {}) as TNeeds,
-    factories,
-    boot: config.boot,
-    ...(config.configure === undefined ? {} : { configure: config.configure }),
-    ...(config.start === undefined ? {} : { start: config.start }),
-    ...(config.stop === undefined ? {} : { stop: config.stop }),
-    ...(config.dispose === undefined ? {} : { dispose: config.dispose }),
-    // Erasure seam: the record is built by key at runtime; its type comes
-    // from the factory returns that `feature()` inferred.
-    provides: handles as Handles<ProvidedValues<TProvides>, TName>,
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* Static folds                                                        */
-/* ------------------------------------------------------------------ */
-
-/** The keys a record names one by one. An index signature (`Record<string, X>`) names none. */
-type LiteralKeys<R> = keyof {
-  [K in keyof R as string extends K ? never : number extends K ? never : symbol extends K ? never : K]: R[K];
-};
-
-/** Keys that more than one record in the tuple names. `never` when every key is unique. */
-type DuplicateKeys<TRecords extends readonly unknown[], TSeen extends PropertyKey = never> = TRecords extends readonly [
-  infer Head,
-  ...infer Tail,
-]
-  ? (LiteralKeys<Head> & TSeen) | DuplicateKeys<Tail, TSeen | LiteralKeys<Head>>
-  : never;
-
-type RoutersOf<T extends readonly AnyFeature[]> = {
-  readonly [I in keyof T]: T[I] extends AnyFeature ? T[I]['router'] : never;
-};
-
-type ReposOf<T extends readonly AnyFeature[]> = {
-  readonly [I in keyof T]: T[I] extends AnyFeature ? T[I]['repos'] : never;
-};
-
-/**
- * `unknown` when no key repeats. Otherwise a property the feature list
- * cannot have, so the call does not compile and the error names the keys.
- */
-type Distinct<TKeys extends PropertyKey, TLabel extends string> = [TKeys] extends [never]
-  ? unknown
-  : Readonly<Record<TLabel, TKeys>>;
-
-export type ComposedRouter<T extends readonly AnyFeature[]> = UnionToIntersection<T[number]['router']>;
-
-/**
- * Fold the features' router fragments into one router — value AND type
- * from the single list. A mount key claimed by two features is a compile
- * error, and throws `FeatureError` at module load for code that skips types.
- */
-export function composeRouter<const T extends readonly AnyFeature[]>(
-  features: T & NoInfer<Distinct<DuplicateKeys<RoutersOf<T>>, 'ARKI_FEATURE: duplicate router mount keys'>>,
-): ComposedRouter<T> {
-  const merged: Record<string, unknown> = {};
-  for (const f of features) {
-    for (const [key, fragment] of Object.entries(f.router)) {
-      if (key in merged) {
-        throw new FeatureError({
-          code: FEATURE_ERROR_CODES.duplicateRouterKey,
-          message: `[feature] router mount key "${key}" is contributed by more than one feature.`,
-          remediation: 'Give each feature its own router mount key, or merge the two fragments in one feature.',
-        });
-      }
-      merged[key] = fragment;
-    }
-  }
-  return merged as ComposedRouter<T>;
-}
-
-type MergedRepoFactories<T extends readonly AnyFeature[]> = UnionToIntersection<T[number]['repos']>;
-
-/**
- * The repo record a feature tuple composes. An app's `AppRepo` should
- * be pinned to this in a type test one module away from its `Context`
- * (referencing it directly from `Context` closes a circular type loop
- * through the router fragments).
- */
-export type ComposedRepos<T extends readonly AnyFeature[]> = {
-  readonly [K in keyof MergedRepoFactories<T>]: MergedRepoFactories<T>[K] extends (database: never) => infer R
-    ? R
-    : never;
-};
-
-type RepoFactoryOf<F extends AnyFeature> = F['repos'][keyof F['repos']];
-
-type RepoDbParamOf<F extends AnyFeature> = [RepoFactoryOf<F>] extends [never]
-  ? unknown
-  : RepoFactoryOf<F> extends (database: infer D) => unknown
-    ? D
-    : unknown;
-
-/**
- * The db handle type every repo factory in the tuple accepts —
- * intersected ACROSS features via signature-parameter inference rather
- * than a distributive UnionToIntersection, so a factory whose param is
- * itself a union (`Db | Transaction`) keeps it intact instead of
- * collapsing to `Db & Transaction`. Repo-less features contribute
- * `unknown` (the intersection identity).
- */
-export type RepoDatabaseOf<T extends readonly AnyFeature[]> = {
-  [I in keyof T]: (database: RepoDbParamOf<T[I]>) => void;
-}[number] extends (database: infer TDb) => void
-  ? TDb
-  : never;
-
-/**
- * Fold the features' repo factories over one db handle. A repo key claimed
- * by two features is a compile error, and throws `FeatureError` for code
- * that skips types.
- */
-export function composeRepos<const T extends readonly AnyFeature[]>(
-  features: T & NoInfer<Distinct<DuplicateKeys<ReposOf<T>>, 'ARKI_FEATURE: duplicate repo keys'>>,
-  database: RepoDatabaseOf<T>,
-): ComposedRepos<T> {
-  const repos: Record<string, unknown> = {};
-  for (const f of features) {
-    for (const [key, factory] of Object.entries(f.repos)) {
-      if (key in repos) {
-        throw new FeatureError({
-          code: FEATURE_ERROR_CODES.duplicateRepoKey,
-          message: `[feature] repo key "${key}" is contributed by more than one feature.`,
-          remediation: 'Give each feature its own repo key, or move both factories into one feature.',
-        });
-      }
-      repos[key] = (factory as (db: RepoDatabaseOf<T>) => unknown)(database);
-    }
-  }
-  return repos as ComposedRepos<T>;
-}
-
-/* ------------------------------------------------------------------ */
-/* Kernel projection                                                   */
-/* ------------------------------------------------------------------ */
-
-export type FeatureTokenOf<F extends AnyFeature> = Token<SlicePayloads<F['use']>, `feature.${F['name']}`>;
-
 /**
  * The service values a feature provides, keyed by wire key — each handle
  * unwrapped to its value type. Distributive over `F`, so a union of
@@ -520,80 +138,6 @@ export type FeatureTokenOf<F extends AnyFeature> = Token<SlicePayloads<F['use']>
 export type ProvidedOf<F extends HasProvides> = F extends HasProvides
   ? { [K in keyof F['provides']]: F['provides'][K] extends Service<infer T> ? T : never }
   : never;
-
-/**
- * The unit a feature becomes inside `.features()`. `WireNeeds` unwraps
- * the witness record to value types — the builder guard compares
- * availability against values, exactly as `infra()` returns.
- */
-type FeatureOwnership<F extends AnyFeature> =
-  F['runtime'] extends UnitRuntime<infer Open, infer Close> ? { readonly open: Open; readonly close: Close } : never;
-
-export type UnitOf<F extends AnyFeature> = Omit<
-  Unit<
-    WireNeeds<F['needs']>,
-    ProvidedOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>,
-    NeedsShape,
-    string,
-    FeatureOwnership<F>,
-    UnitPhaseFailures<{ readonly hooks: F }>
-  >,
-  'runtime' | 'hooks' | 'factories'
-> &
-  Pick<F, 'runtime' | 'factories'> &
-  FactoryContractOf<F> & { readonly hooks: Pick<F, 'configure' | 'boot' | 'start' | 'stop' | 'dispose'> };
-
-/** Tuple map from features to the units `.features()` mounts. */
-export type MountedUnitsOf<T extends readonly AnyFeature[]> = {
-  readonly [I in keyof T]: T[I] extends AnyFeature ? UnitOf<T[I]> : never;
-};
-
-/**
- * The slice token a feature publishes. Driving adapters list these as
- * runtime needs so the kernel hands them each feature's slice record.
- */
-export function tokenOf<F extends AnyFeature>(f: F): FeatureTokenOf<F> {
-  return token<SlicePayloads<F['use']>>()(`feature.${f.name}` as `feature.${F['name']}`);
-}
-
-/**
- * Compile one feature into the kernel unit the app mounts. Called by
- * `.features()`. The feature's factories run as the unit's factories, and
- * its slice record is one more provides entry under `feature.<name>`, so
- * `boot` retains its private ownership plan. The feature's own handles pass through
- * unchanged: `billing.provides.x === plug(billing).provides.x`.
- */
-export function plug<F extends AnyFeature>(f: F): UnitOf<F> {
-  const sliceKey = tokenOf(f).key;
-  const actions: ActionSource[] = [
-    ...f.actions,
-    ...f.use.flatMap(slice => [...slice.actions, ...(slice.actionsOf?.(f.name, []) ?? [])]),
-  ];
-  const slices = (ctx: never): Readonly<Record<string, unknown>> => {
-    const payloads: Record<string, unknown> = {};
-    for (const slice of f.use) payloads[slice.key] = slice.resolve(ctx);
-    return payloads;
-  };
-  const factories = { ...f.factories, [sliceKey]: slices };
-
-  return {
-    name: f.name,
-    actions,
-    needs: f.needs,
-    renames: {},
-    factories,
-    hooks: {
-      configure: f.configure,
-      boot: f.boot,
-      start: f.start,
-      stop: f.stop,
-      dispose: f.dispose,
-    },
-    // Dynamic slice keys share the same handle-record seam as infra().
-    provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } as UnitOf<F>['provides'],
-    runtime: f.runtime,
-  };
-}
 
 /* ------------------------------------------------------------------ */
 /* Capabilities in the request context                                 */
@@ -650,7 +194,7 @@ function missingCapability(alias: string, handle: AnyHandle, where: string, reme
 }
 
 /**
- * Read every capability the units (features, `defineFeature` features or units) provide out of a hook context whose
+ * Read every capability the units (features or units) provide out of a hook context whose
  * `needs` spread {@link providesOf} — the bag a gateway passes to its
  * request context.
  */
@@ -711,13 +255,13 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
 export { entrypoint, infra, unit } from './unit-contract.js';
 export type { EntrypointBinder, InfraBinder, UnitBinder } from './unit-contract.js';
 
-/** Where a feature publishes its slice record — the same key for both feature forms. */
-function sliceKeyOf(f: MountedFeature): `feature.${string}` {
+/** Where a feature publishes its slice record. */
+function sliceKeyOf(f: AnyDefinedFeature): `feature.${string}` {
   return `feature.${f.name}`;
 }
 
 /** The slice record's token. Untyped on purpose: the adapter that minted each slice checks its payload. */
-function sliceTokenOf(f: MountedFeature): Token<Readonly<Record<string, unknown>>, string> {
+function sliceTokenOf(f: AnyDefinedFeature): Token<Readonly<Record<string, unknown>>, string> {
   return token<Readonly<Record<string, unknown>>>()(sliceKeyOf(f));
 }
 
@@ -728,7 +272,7 @@ function sliceTokenOf(f: MountedFeature): Token<Readonly<Record<string, unknown>
  */
 export function bindEntrypoint<const Unit extends AnyUnit>(
   adapter: UnitBinder<'infra' | 'entrypoint', Unit>,
-  features: readonly MountedFeature[],
+  features: readonly AnyDefinedFeature[],
 ) {
   const bound = adapter.bind(features);
   const sliceNeeds = Object.fromEntries(features.map(f => [sliceKeyOf(f), sliceTokenOf(f)]));
@@ -740,7 +284,7 @@ export function bindEntrypoint<const Unit extends AnyUnit>(
  * hooks. Values are untyped on purpose: the adapter that minted the slice
  * checks its own payload shape (`jobs()`, `schedules()`, `endpoints()`).
  */
-export function sliceOf(ctx: object, f: MountedFeature): Readonly<Record<string, unknown>> {
+export function sliceOf(ctx: object, f: AnyDefinedFeature): Readonly<Record<string, unknown>> {
   const key = sliceKeyOf(f);
   const record: unknown = (ctx as Readonly<Record<string, unknown>>)[key];
   if (typeof record !== 'object' || record === null) {

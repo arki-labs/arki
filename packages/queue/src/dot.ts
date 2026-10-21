@@ -3,7 +3,7 @@
  *
  *   defineApp('shop')
  *     .infra(queue({ connection }))          // infra: the client features enqueue with
- *     .features([orders])                  // orders declares `use: [jobs(orderJobs)]`
+ *     .features([orders])                  // orders lists `jobs(orderJobs)` in `.entrypoints(...)`
  *     .entrypoints(queueWorker({ q, context }))  // entrypoint: runs the mounted features' jobs
  *
  * `queue()` provides the `queue` service. `queueWorker()` is bound to the
@@ -12,11 +12,11 @@
  * `outboxPlugin()` provides `schedule` (transactional scheduling, `@arki/queue/outbox`), and
  * `outboxJobs()` lets `journalWorker({ jobs })` run the same `jobs(...)` slices from Postgres.
  */
-import type { AnyFeatureSlice, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureSlice, EntrypointBinder } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
-import { entrypoint, entrypointsOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { entrypoint, instanceOf, sliceOf, unit } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -193,7 +193,7 @@ export type FeatureJobs<TRegistry extends QueueRegistry = QueueRegistry> = {
  * the worker, which exists only in the process that runs the jobs.
  */
 export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
-  /** Lets a `defineFeature` feature list it in `.entrypoints(...)`; object-form features ignore it. */
+  /** Lets a `defineFeature` feature list it in `.entrypoints(...)`. */
   readonly kind: 'queue';
   readonly key: 'queue';
   /** Empty: the producer ids need the feature's name, so they come from `actionsOf`. */
@@ -211,8 +211,7 @@ function jobServicesOf(services: unknown): object {
 }
 
 /**
- * Declare a feature's jobs: `defineFeature('orders')….entrypoints(jobs(orderJobs))`,
- * or `feature('orders', { use: [jobs(orderJobs)] })` in the object form.
+ * Declare a feature's jobs: `defineFeature('orders')….entrypoints(jobs(orderJobs))`.
  * Each mounted copy of the feature runs them with its own services ({@link FeatureJobContext}).
  */
 export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry): QueueFeatureSlice<TRegistry> {
@@ -318,10 +317,10 @@ function featureRegistry(featureName: string, registry: QueueRegistry): QueueReg
 }
 
 /** The jobs every feature declared, keyed by feature name — known before boot, for the manifest. */
-function declaredRegistry(features: readonly MountedFeature[]): QueueRegistry {
+function declaredRegistry(features: readonly AnyDefinedFeature[]): QueueRegistry {
   const registry: QueueRegistry = {};
   for (const f of features) {
-    const slice = entrypointsOf(f).find(candidate => isJobsSlice(candidate));
+    const slice = f.entrypoints.find(candidate => isJobsSlice(candidate));
     if (slice !== undefined) registry[f.name] = featureRegistry(f.name, slice.registry);
   }
   return registry;
@@ -330,7 +329,7 @@ function declaredRegistry(features: readonly MountedFeature[]): QueueRegistry {
 /** The jobs every booted feature published, read from its slice record, and the services each feature's jobs run with. */
 function bootedJobs(
   ctx: object,
-  features: readonly MountedFeature[],
+  features: readonly AnyDefinedFeature[],
 ): { readonly registry: QueueRegistry; readonly services: Readonly<Record<string, object>> } {
   const registry: QueueRegistry = {};
   const services: Record<string, object> = {};

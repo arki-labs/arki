@@ -14,7 +14,7 @@ import type { Router } from '@orpc/server';
 import { oc } from '@orpc/contract';
 import { ORPCError } from '@orpc/server';
 
-import type { MountedFeature } from '@arki/dot/feature';
+import type { AnyDefinedFeature } from '@arki/dot/feature';
 import { UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleNameOf, ScheduleOutcome, ScheduleValueOf } from './dot.js';
@@ -144,17 +144,17 @@ export type OutcomePolicy = {
 };
 
 /** Supervision defects use the failure policy; domain refusals keep their explicit responder. */
-type CronValue<F extends readonly MountedFeature[], K extends string> = Exclude<
+type CronValue<F extends readonly AnyDefinedFeature[], K extends string> = Exclude<
   ScheduleValueOf<F, K>,
   ReturnType<typeof UnexpectedDefect>
 >;
 
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** Crons whose schedule value is not exactly the body schema: they MUST say how the value maps. */
-type NeedsRespond<B extends CronSpecs, F extends readonly MountedFeature[]> = {
+type NeedsRespond<B extends CronSpecs, F extends readonly AnyDefinedFeature[]> = {
   [K in keyof B & string]: Exact<CronValue<F, K>, CronBody<B[K]>> extends true ? never : K;
 }[keyof B & string];
-type Respond<B extends CronSpecs, F extends readonly MountedFeature[], K extends keyof B & string> = (
+type Respond<B extends CronSpecs, F extends readonly AnyDefinedFeature[], K extends keyof B & string> = (
   value: CronValue<F, K>,
 ) => Reply<CronBody<B[K]>>;
 
@@ -164,13 +164,13 @@ type Respond<B extends CronSpecs, F extends readonly MountedFeature[], K extends
  * so a schema that drops or invents a key is a compile error ("property X is
  * missing in respond"), and the mapping that makes it exact is written there.
  */
-export type CronPolicy<B extends CronSpecs, F extends readonly MountedFeature[]> = OutcomePolicy & {
+export type CronPolicy<B extends CronSpecs, F extends readonly AnyDefinedFeature[]> = OutcomePolicy & {
   readonly respond: { readonly [K in NeedsRespond<B, F>]: Respond<B, F, K> } & {
     readonly [K in Exclude<keyof B & string, NeedsRespond<B, F>>]?: Respond<B, F, K>;
   };
 };
 
-type Undeclared<B, F extends readonly MountedFeature[]> = Exclude<keyof B & string, ScheduleNameOf<F>>;
+type Undeclared<B, F extends readonly AnyDefinedFeature[]> = Exclude<keyof B & string, ScheduleNameOf<F>>;
 
 /* ---------------- router ---------------- */
 
@@ -190,7 +190,7 @@ type Builders = Record<string, { handler(fn: (o: { context: CronContext }) => Pr
  * export const cronRouter = cronRouterFor(cronImplementer, cronContract, features, policy);
  * ```
  */
-export function cronRouterFor<const B extends CronSpecs, const F extends readonly MountedFeature[]>(
+export function cronRouterFor<const B extends CronSpecs, const F extends readonly AnyDefinedFeature[]>(
   os: unknown,
   contract: CronContract<B>,
   features: F &

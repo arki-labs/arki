@@ -1169,11 +1169,8 @@ export function entrypointOnly<H extends AnyHandle & { readonly lazy: object }>(
 }
 
 /** A feature and every descendant, depth-first in declaration order — what drivers and `dot explain` walk. Each node once. */
-export function allFeatures<F extends { readonly name: string }>(features: readonly F[]): readonly F[] {
-  // An object-form feature has no `features`; a chain feature lists its children there.
-  const childrenOf = (f: F): readonly F[] =>
-    'features' in f && Array.isArray(f.features) ? (f.features as readonly F[]) : [];
-  return features.flatMap(f => [f, ...allFeatures(childrenOf(f))]);
+export function allFeatures(features: readonly AnyDefinedFeature[]): readonly AnyDefinedFeature[] {
+  return features.flatMap(f => [f, ...allFeatures(f.features)]);
 }
 
 /** A node's OWN kernel units — its qualified infra and its feature unit — never a descendant's. Adapters read declarations from these. */

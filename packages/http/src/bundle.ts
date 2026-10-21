@@ -424,22 +424,3 @@ function makeBuilder(state: BundleState): unknown {
 export function routes(): RouteBundleBuilder {
   return makeBuilder({ derivers: [], bindings: [], mounts: [], rpcs: [] });
 }
-
-/** The `@arki/dot/feature` slice contract an `endpoints(...)` declaration produces. */
-export type EndpointsFeatureSlice<TServices> = {
-  readonly key: 'routes';
-  readonly actions: readonly never[];
-  readonly resolve: (services: TServices) => RouteBundle;
-};
-
-/**
- * Declare a feature's HTTP surface as a boot-time slice
- * (`feature(..., { use: [endpoints(build)] })`). The builder runs
- * once at boot with the feature's needed services; the bundle lands
- * under `routes` in the feature's slice record — where the
- * `.entrypoints(http(...))` entrypoint collects it. Route contracts stay in the
- * feature's `actions` list.
- */
-export function endpoints<TServices>(build: (services: TServices) => RouteBundle): EndpointsFeatureSlice<TServices> {
-  return { key: 'routes', actions: [], resolve: build };
-}

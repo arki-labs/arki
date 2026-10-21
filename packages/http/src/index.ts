@@ -36,9 +36,8 @@ export type { Codec, Field, Fields, FieldsOf, Optional, Reversible, ValueOf, Wir
 export { raw } from './raw.js';
 export type { RawOutput } from './raw.js';
 
-export { endpoints, reply, routes, rpcMount } from './bundle.js';
+export { reply, routes, rpcMount } from './bundle.js';
 export type {
-  EndpointsFeatureSlice,
   HandlerResult,
   MountBinding,
   MountMeta,

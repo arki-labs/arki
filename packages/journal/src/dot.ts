@@ -25,10 +25,10 @@
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
-import type { AnyFeatureCore, DepsOf, InfraBinder, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder, InfraBinder } from '@arki/dot/feature';
 import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
-import { entrypoint, entrypointsOf, instanceOf, ownUnits, sliceOf, unit } from '@arki/dot/feature';
+import { entrypoint, instanceOf, ownUnits, sliceOf, unit } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import type { Journal, JournalDefinitions } from './api.js';
@@ -144,7 +144,7 @@ function workflowAction(def: WorkflowDef): JournalDotAction {
 
 /**
  * Declare a feature's projections, effects, taps and workflows
- * (`feature('orders', { use: [journalHandlers({ projections, effects })] })`).
+ * (`defineFeature('orders')….entrypoints(journalHandlers({ projections, effects }))`).
  * `journal({ j })` reads them from the feature value and composes the journal.
  *
  * An effect with needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`) gets
@@ -397,7 +397,7 @@ function isJournalDeclarations(value: unknown): value is JournalDeclarations {
   );
 }
 
-function badSlice(feature: MountedFeature, what: string): DotUnitError {
+function badSlice(feature: AnyDefinedFeature, what: string): DotUnitError {
   return new DotUnitError({
     code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
     message: `[journal] feature "${feature.name}" has a \`journal\` slice whose ${what}.`,
@@ -414,9 +414,9 @@ function badSlice(feature: MountedFeature, what: string): DotUnitError {
  */
 function claimName(
   kind: 'effect' | 'projection' | 'tap' | 'workflow',
-  owners: Map<string, MountedFeature>,
+  owners: Map<string, AnyDefinedFeature>,
   name: string,
-  feature: MountedFeature,
+  feature: AnyDefinedFeature,
 ): void {
   const owner = owners.get(`${kind}:${name}`);
   if (owner !== undefined) {
@@ -427,27 +427,25 @@ function claimName(
   owners.set(`${kind}:${name}`, feature);
 }
 
-/** A `journalProjections(...)` unit among a chain feature's kernel units (its `kind` survives the feature's renaming). */
+/** A `journalProjections(...)` unit among a feature's kernel units (its `kind` survives the feature's renaming). */
 function isProjectionsUnit(unit: object): unit is { readonly handlers: unknown } {
   return 'kind' in unit && unit.kind === JOURNAL_PROJECTIONS_KIND && 'handlers' in unit;
 }
 
 /**
  * Everything one feature hands the journal, wherever it was declared: the
- * `journal` slice (`journalHandlers` in `use`, or `journalEffects` in
- * `.entrypoints`) and any `journalProjections` unit in a chain feature's
- * `.infra`. Read from the feature value, so it works before anything boots.
+ * `journal` slice (`journalHandlers` or `journalEffects` in `.entrypoints`)
+ * and any `journalProjections` unit in the feature's `.infra`. Read from the
+ * feature value, so it works before anything boots.
  * Only the feature's OWN units: the app mounts every nested child as its own
  * node, so reading a parent's `plugins()` (which lists the children's units
  * too) would register each child projection twice.
  */
-function declaredBy(feature: MountedFeature): readonly unknown[] {
+function declaredBy(feature: AnyDefinedFeature): readonly unknown[] {
   const declared: unknown[] = [];
-  const slice = entrypointsOf(feature).find(item => item.key === 'journal');
+  const slice = feature.entrypoints.find(item => item.key === 'journal');
   if (slice !== undefined) declared.push('handlers' in slice ? slice.handlers : undefined);
-  if ('units' in feature) {
-    for (const unit of ownUnits(feature)) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
-  }
+  for (const unit of ownUnits(feature)) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
   return declared;
 }
 
@@ -456,15 +454,15 @@ function declaredBy(feature: MountedFeature): readonly unknown[] {
  * one list per kind. Refuses a name that is listed twice. `owners` maps
  * `effect:<name>` and `tap:<name>` (and `projection:<name>`) to the feature that lists it.
  */
-function readDeclarations(features: readonly MountedFeature[]): {
+function readDeclarations(features: readonly AnyDefinedFeature[]): {
   readonly declarations: JournalDeclarations;
-  readonly owners: ReadonlyMap<string, MountedFeature>;
+  readonly owners: ReadonlyMap<string, AnyDefinedFeature>;
 } {
   const projections: Projection[] = [];
   const effects: Effect<unknown, RootDb, unknown, Needs>[] = [];
   const taps: Tap<unknown, RootDb, Needs>[] = [];
   const workflows: WorkflowDef[] = [];
-  const owners = new Map<string, MountedFeature>();
+  const owners = new Map<string, AnyDefinedFeature>();
   for (const feature of features) {
     const qualify = qualifyBy(feature.name);
     const all = declaredBy(feature);
@@ -592,16 +590,16 @@ export type JobsSource<TNeeds extends NeedsShape> = {
   /** Merged into the worker's needs: a missing one fails boot, not the first job. */
   readonly needs: TNeeds;
   /** The consumer actions the runner adds to the worker's manifest (e.g. `<job>.consume`). */
-  readonly actions?: (features: readonly MountedFeature[]) => readonly ActionSource[];
+  readonly actions?: (features: readonly AnyDefinedFeature[]) => readonly ActionSource[];
   /** `services` is the worker's boot context: its needs, `db`, and the features' slice records. */
   build(
-    features: readonly MountedFeature[],
+    features: readonly AnyDefinedFeature[],
     services: CtxOf<TNeeds> & { readonly db: RootDb },
   ): JobRunner | Promise<JobRunner>;
 };
 
 /** The services a feature's `journal` slice published at its boot. */
-function sliceServices(ctx: object, feature: MountedFeature): Services {
+function sliceServices(ctx: object, feature: AnyDefinedFeature): Services {
   const payload = sliceOf(ctx, feature).journal;
   if (typeof payload !== 'object' || payload === null || !('services' in payload) || !isServices(payload.services))
     throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers or journalEffects');
@@ -634,7 +632,7 @@ export function journalWorker(
       actions: source?.actions?.(features),
       async boot(ctx) {
         const { owners } = readDeclarations(features);
-        const byFeature = new Map<MountedFeature, Services>();
+        const byFeature = new Map<AnyDefinedFeature, Services>();
         // An effect or tap came from a `journal` slice, so its owner has a slice record. A
         // projection may come from an infra unit instead, and needs no services anyway.
         for (const [handler, feature] of owners) {

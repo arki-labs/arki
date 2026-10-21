@@ -26,7 +26,7 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { AnyDefinedFeature } from './define-feature.js';
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
-import type { AnyFeature, EntrypointBinder, InfraBinder, MountedFeature, UnitOf } from './feature.js';
+import type { EntrypointBinder, InfraBinder } from './feature.js';
 import type {
   DotBootOutcome,
   DotConfigureOutcome,
@@ -56,7 +56,7 @@ import type {
 } from './unit-contract.js';
 import type { MaxIndex, NextIndex } from './tuple-index.js';
 import { allFeatures, mountFeatures } from './define-feature.js';
-import { bindEntrypoint, plug } from './feature.js';
+import { bindEntrypoint } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
 
@@ -260,12 +260,8 @@ type AsUnits<TUnits extends readonly unknown[]> = {
     : TUnits[K];
 };
 
-/** The kernel units one feature mounts: a `defineFeature` feature's `units()`, or the object-form feature's unit. */
-type UnitsOfFeature<TFeature> = TFeature extends { units(): infer TUnits extends readonly AnyUnit[] }
-  ? TUnits
-  : TFeature extends AnyFeature
-    ? readonly [UnitOf<TFeature>]
-    : never;
+/** The kernel units one feature mounts: its `units()`. */
+type UnitsOfFeature<TFeature> = TFeature extends { units(): infer TUnits extends readonly AnyUnit[] } ? TUnits : never;
 
 /** Index walk (see `NextIndex` / `UseAllState`): `[infer Head, ...infer Tail]` would re-slice the list at every feature. */
 type FlattenUnits<TFeatures extends readonly unknown[]> = TFeatures extends readonly [
@@ -288,8 +284,9 @@ type FlattenWalk<
  * `.features()` checks with the `UseAllGuard`. A non-tuple list stays an
  * array, so the guard asks for a tuple.
  */
-export type FeatureUnits<TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]> =
-  number extends TFeatures['length'] ? readonly AnyUnit[] : FlattenUnits<TFeatures>;
+export type FeatureUnits<TFeatures extends readonly AnyDefinedFeature[]> = number extends TFeatures['length']
+  ? readonly AnyUnit[]
+  : FlattenUnits<TFeatures>;
 
 /* ------------------------------------------------------------------ */
 /* Public app surface                                                  */
@@ -424,7 +421,7 @@ type BuilderState<
     | InfraBinder<ServiceRecord, ServiceRecord, { open: TOpen; close: TClose }, TPhases>
   )[];
   /** The features mounted by `.features()`, as written — what entrypoints are bound to. */
-  features: readonly MountedFeature[];
+  features: readonly AnyDefinedFeature[];
   /** Units mounted on the wrong side, in an erased graph the types could not check. `configure()` refuses the app. */
   misplaced: readonly MisplacedUnit[];
   config?: Readonly<Record<string, unknown>>;
@@ -510,11 +507,7 @@ function buildImpl<TOpen extends Failure, TClose extends Failure, TPhases extend
   });
 }
 
-function isDefinedFeature(f: AnyFeature | AnyDefinedFeature): f is AnyDefinedFeature {
-  return 'units' in f && typeof f.units === 'function';
-}
-
-function bindAdapter(adapter: AnyUnit | EntrypointBinder, features: readonly MountedFeature[]): AnyUnit {
+function bindAdapter(adapter: AnyUnit | EntrypointBinder, features: readonly AnyDefinedFeature[]): AnyUnit {
   // A unit built by `fromFeatures` takes its binder's role, so an `infra.fromFeatures` here is caught as misplaced.
   return 'bind' in adapter ? { ...bindEntrypoint(adapter, features), role: adapter.role } : onSide(adapter, 'entrypoint');
 }
@@ -558,20 +551,20 @@ function runtimeUnits<const Units extends readonly (AnyUnit | InfraBinder)[]>(
 function runtimeUnits(units: readonly (AnyUnit | InfraBinder)[]): readonly (AnyUnit | InfraBinder)[] {
   return units;
 }
-function featureRuntime<const Features extends readonly (AnyFeature | AnyDefinedFeature)[]>(
+function featureRuntime<const Features extends readonly AnyDefinedFeature[]>(
   features: Features,
 ): readonly RuntimeUnit<
   UnitOpenFailure<FeatureUnits<Features>[number]>,
   UnitCloseFailure<FeatureUnits<Features>[number]>,
   UnitPhaseFailures<FeatureUnits<Features>[number]>
 >[];
-function featureRuntime(features: readonly (AnyFeature | AnyDefinedFeature)[]): readonly AnyUnit[] {
-  mountFeatures(features.filter(f => isDefinedFeature(f)));
-  return features.flatMap(f => (isDefinedFeature(f) ? f.units() : [{ ...plug(f), role: 'feature' as const }]));
+function featureRuntime(features: readonly AnyDefinedFeature[]): readonly AnyUnit[] {
+  mountFeatures(features);
+  return features.flatMap(f => f.units());
 }
 function drivingRuntime<const Adapters extends readonly (AnyUnit | EntrypointBinder)[]>(
   adapters: Adapters,
-  features: readonly MountedFeature[],
+  features: readonly AnyDefinedFeature[],
 ): readonly RuntimeUnit<
   UnitOpenFailure<AsUnits<Adapters>[number]>,
   UnitCloseFailure<AsUnits<Adapters>[number]>,
@@ -579,7 +572,7 @@ function drivingRuntime<const Adapters extends readonly (AnyUnit | EntrypointBin
 >[];
 function drivingRuntime(
   adapters: readonly (AnyUnit | EntrypointBinder)[],
-  features: readonly MountedFeature[],
+  features: readonly AnyDefinedFeature[],
 ): readonly AnyUnit[] {
   return adapters.map(adapter => bindAdapter(adapter, features));
 }
@@ -670,7 +663,7 @@ class Builder<
   }
 
   /** Mount the domain; later steps can register only driving adapters. */
-  features<const Features extends readonly (AnyFeature | AnyDefinedFeature)[]>(
+  features<const Features extends readonly AnyDefinedFeature[]>(
     features: Features & ListGuard<UseAllGuard<TAvail, Extract<FeatureUnits<Features>, readonly AnyUnit[]>>>,
   ): DotServeBuilder<
     UseAllAvail<TAvail, Extract<FeatureUnits<Features>, readonly AnyUnit[]>>,
