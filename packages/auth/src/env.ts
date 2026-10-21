@@ -37,7 +37,7 @@ export const env = defineEnv({
 
     // Email Configuration
     RESEND_API_KEY: z.string().optional(),
-    EMAIL_FROM: z.email().default('noreply@furculita.net'),
+    EMAIL_FROM: z.email().default('noreply@example.com'),
 
     // OAuth Providers - Google
     GOOGLE_CLIENT_ID: optionalCredential,

@@ -571,14 +571,14 @@ readWrite  1rw:<len>:<namespace>:<len>:<name>
 | mutex     | `a`          | `b`                    | `1:1:a:1:b`                               | `27e5fb35a8202ebd` | 669383477   | -1474285891 |
 | mutex     | `a:b`        | `c`                    | `1:3:a:b:1:c`                             | `740048a6956bced8` | 1946175654  | -1788096808 |
 | mutex     | `a`          | `b:c`                  | `1:1:a:3:b:c`                             | `97e26ae3cf85e34c` | -1746769181 | -813309108  |
-| mutex     | `avocabo`    | `send-digest`          | `1:7:avocabo:11:send-digest`              | `2f5bc307f17b9f09` | 794542855   | -243556599  |
+| mutex     | `mailing`    | `send-digest`          | `1:7:mailing:11:send-digest`              | `48e569b582cd78df` | 1222994357  | -2100463393 |
 | mutex     | `kapodopera` | `tracking:usr_1:cnt_2` | `1:10:kapodopera:20:tracking:usr_1:cnt_2` | `659787ce2c15fbf2` | 1704429518  | 739638258   |
 | mutex     | `ns`         | `héllo wörld`          | `1:2:ns:13:héllo wörld`                   | `eaac57ef151cc82e` | -357804049  | 354207790   |
 | mutex     | `ns`         | `日本語🔒`             | `1:2:ns:13:日本語🔒`                      | `3df2654d8d0ea9f0` | 1039295821  | -1928418832 |
 | semaphore | `a`          | `b`                    | `1s:1:a:1:b`                              | `cf03467b858898fc` | -821868933  | -2054645508 |
-| semaphore | `avocabo`    | `send-digest`          | `1s:7:avocabo:11:send-digest`             | `b2f5d6d605248d52` | -1292511530 | 86281554    |
+| semaphore | `mailing`    | `send-digest`          | `1s:7:mailing:11:send-digest`             | `0726b03eccef97fc` | 119975998   | -856713220  |
 | readWrite | `a`          | `b`                    | `1rw:1:a:1:b`                             | `fd3d1d9f7a5ca1b2` | -46326369   | 2052891058  |
-| readWrite | `avocabo`    | `send-digest`          | `1rw:7:avocabo:11:send-digest`            | `74be357e07e03548` | 1958622590  | 132134216   |
+| readWrite | `mailing`    | `send-digest`          | `1rw:7:mailing:11:send-digest`            | `e5ca6401ca9c0e16` | -439720959  | -895742442  |
 
 Redis uses the encoded text inside a hash tag, as `{1:1:a:1:b}`. `fileStore` names its lock directory from a readable part of the name plus a SHA-256 of the encoded key.
 

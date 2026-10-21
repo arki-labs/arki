@@ -40,8 +40,8 @@ export type WorkspaceResourceConfig = {
   shareRole?: WorkspaceRole;
   /**
    * Cascade run inside the same transaction after a row's scope changes
-   * (D-WS-009). avocabo uses this to re-scope a source's ContentItems and flag
-   * them for re-clustering.
+   * (D-WS-009). For example, an app can re-scope the rows that belong to the
+   * moved row in the same transaction.
    */
   onReassign?: (ctx: WorkspaceContext, rowId: string, target: Scope) => Promise<void>;
 };

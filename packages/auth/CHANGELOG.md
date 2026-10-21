@@ -4,6 +4,8 @@
 
 ### Minor Changes
 
+- `EMAIL_FROM` in `@arki/auth/env` now defaults to `noreply@example.com`. Set `EMAIL_FROM` in every app that sends auth mail.
+
 - a531063: Authorization as plain functions. `definePolicies<{ order: Order }>()({ order: { view, refund } })` (from `@arki/auth`) groups policies by subject; each policy reads `{ principal, order }` and returns a boolean, and names like `order.refund` are read from the tree, so a typo does not compile. The optional `view` policy decides whether the principal may know the subject exists.
 
   - `@arki/auth/orpc`: `guards<C>()` now also returns `can`. `can(policies)('order.refund', load)` signs in, loads the subject by the procedure's input, runs the policy and puts the subject on the context (`context.order`). A guest is `UNAUTHORIZED` (E401) and the loader never runs; a missing subject or `view` false is `NOT_FOUND` with no auth code (it looks missing); the policy false is `FORBIDDEN` (E403).

@@ -32,13 +32,13 @@ const MUTATED_ENV_KEYS = [
  * - Bridges DB_URL → DATABASE_URL (`@arki/testing` global setup sets DB_URL; app
  *   env schemas read DATABASE_URL — only strict production validation exposes it).
  * - Stubs CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_EMAIL_API_TOKEN so app env
- *   schemas that require them at import validate (avocabo, D-ING-021). The
+ *   schemas that require them at import validate (D-ING-021). The
  *   former RESEND_API_KEY stub was removed 2026-07-13 — no app env requires
  *   it anymore.
  * - Stubs DB_URL + AUTH_SECRET for apps WITHOUT a testcontainer (D-09). Flipping to
  *   production re-enables strict `@arki/db/env` (DB_URL) + `@arki/auth/env`
  *   (AUTH_SECRET) validation that `NODE_ENV==='test'` was skipping; testcontainer
- *   apps (novelette) set a real DB_URL that wins via `??=`. The fake DB_URL never
+ *   apps set a real DB_URL that wins via `??=`. The fake DB_URL never
  *   dials — pg-pool connects lazily on first query, and booting auth runs none.
  *
  * Restoring env AFTER the dynamic import is safe: the auth module is constructed

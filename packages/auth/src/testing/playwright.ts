@@ -147,7 +147,7 @@ export type CreateTwoAccountGlobalSetupOptions = Omit<CreateAuthGlobalSetupOptio
  *
  * export default createTwoAccountGlobalSetup({
  *   baseUrl: 'http://localhost:5197',
- *   emails: { a: 'a@novelette.test', b: 'b@novelette.test' },
+ *   emails: { a: 'a@example.test', b: 'b@example.test' },
  *   authStatePaths: {
  *     a: resolveAuthStatePath(import.meta.url, '.auth', 'account-a.json'),
  *     b: resolveAuthStatePath(import.meta.url, '.auth', 'account-b.json'),
