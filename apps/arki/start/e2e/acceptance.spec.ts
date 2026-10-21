@@ -135,9 +135,10 @@ test.describe('site acceptance', () => {
     test(`a phone reader on ${path} can reach /docs and /packages`, async ({ page }) => {
       await page.setViewportSize({ width: 375, height: 740 });
       await page.goto(path);
+      await page.locator('header summary').click();
       for (const href of ['/docs', '/packages']) {
         const link = topNavLinks(page).and(page.locator(`a[href="${href}"]`)).first();
-        await expect(link, `a visible header link to ${href}`).toBeVisible();
+        await expect(link, `a visible header link to ${href} (in the menu)`).toBeVisible();
         const box = await link.boundingBox();
         expect((box?.x ?? 0) + (box?.width ?? 0), `the ${href} link is on screen`).toBeLessThanOrEqual(375);
       }

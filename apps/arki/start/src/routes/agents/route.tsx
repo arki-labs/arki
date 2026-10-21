@@ -1,7 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { SiteSectionLayout } from '~/shared/site-nav';
+import { siteHead, SiteSectionLayout } from '~/shared/site-chrome';
 
 export const Route = createFileRoute('/agents')({
+  head: siteHead,
   component: SiteSectionLayout,
 });
