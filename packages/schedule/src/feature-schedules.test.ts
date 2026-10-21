@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { ScheduleClock, ScheduleService } from './dot.js';
@@ -57,10 +57,10 @@ async function bootApp(clock: ScheduleClock) {
   };
   const app = await orThrow(
     defineApp('digest-app')
-      .use(plugin({ name: 'mailer', provides: { mailer: () => mailer } }))
-      .use(plugin({ name: 'ledger', provides: { ledger: () => ledger } }))
+      .infra(infra({ name: 'mailer', provides: { mailer: () => mailer } }))
+      .infra(infra({ name: 'ledger', provides: { ledger: () => ledger } }))
       .features([digest, billing])
-      .serve(schedule({ clock }))
+      .entrypoints(schedule({ clock }))
       .boot(),
   );
   return { app, calls };
@@ -193,7 +193,7 @@ describe("schedule({ clock: 'host' })", () => {
 
     await expect(
       defineApp('host-durable')
-        .serve(schedule({ clock: 'host', schedules: [nightly] }))
+        .entrypoints(schedule({ clock: 'host', schedules: [nightly] }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -202,15 +202,15 @@ describe("schedule({ clock: 'host' })", () => {
   });
 
   it('fails boot with a coded error for a durable backend', async () => {
-    const backend = plugin({
+    const backend = infra({
       name: 'durable-backend',
       provides: { [DurableSchedules.key]: () => ({ start: () => Promise.resolve(), stop: () => Promise.resolve() }) },
     });
 
     await expect(
       defineApp('host-backend')
-        .use(backend)
-        .serve(schedule({ clock: 'host', durable: DurableSchedules }))
+        .infra(backend)
+        .entrypoints(schedule({ clock: 'host', durable: DurableSchedules }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -258,7 +258,7 @@ describe('the scheduler service', () => {
     const app = await orThrow(
       defineApp('failing-app')
         .features([failing])
-        .serve(schedule({ clock: 'host' }))
+        .entrypoints(schedule({ clock: 'host' }))
         .boot(),
     );
 
@@ -380,7 +380,7 @@ describe('composeSchedules', () => {
   it('throws a coded error when the scheduler does not run a declared schedule', async () => {
     const app = await orThrow(
       defineApp('no-features')
-        .serve(schedule({ clock: 'host' }))
+        .entrypoints(schedule({ clock: 'host' }))
         .boot(),
     );
 

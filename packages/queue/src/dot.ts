@@ -2,9 +2,9 @@
  * `@arki/queue` in a Dot app: the queue client, the worker, and the job slices. They split along the hexagon:
  *
  *   defineApp('shop')
- *     .use(queue({ connection }))          // driven: the client features enqueue with
+ *     .infra(queue({ connection }))          // infra: the client features enqueue with
  *     .features([orders])                  // orders declares `use: [jobs(orderJobs)]`
- *     .serve(queueWorker({ q, context }))  // driving: runs the mounted features' jobs
+ *     .entrypoints(queueWorker({ q, context }))  // entrypoint: runs the mounted features' jobs
  *
  * `queue()` provides the `queue` service. `queueWorker()` is bound to the
  * features the app mounted, so the app never lists them a second time.
@@ -12,12 +12,12 @@
  * `outboxPlugin()` provides `schedule` (transactional scheduling, `@arki/queue/outbox`), and
  * `outboxJobs()` lets `journalWorker({ jobs })` run the same `jobs(...)` slices from Postgres.
  */
-import type { AnyFeatureSlice, Driver, MountedFeature } from '@arki/dot/feature';
-import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/plugin';
+import type { AnyFeatureSlice, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
-import { driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
-import { DotPluginError, plugin, service } from '@arki/dot/plugin';
+import { entrypoint, entrypointsOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
 import type { DurableSchedulerOptions } from './durable-scheduler.ts';
@@ -204,7 +204,7 @@ export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
   readonly resolve: (services: unknown) => FeatureJobs<TRegistry>;
 };
 
-/** A feature's services as its jobs see them: the kernel's `$` keys ($app, $plugin, …) belong to the unit. */
+/** A feature's services as its jobs see them: the kernel's `$` keys ($app, $unit, …) belong to the unit. */
 function jobServicesOf(services: unknown): object {
   if (typeof services !== 'object' || services === null) return {};
   return Object.fromEntries(Object.entries(services).filter(([key]) => !key.startsWith('$')));
@@ -356,8 +356,8 @@ function queuePluginError(args: {
   message: string;
   remediation: string;
   docsSlug: string;
-}): DotPluginError {
-  return new DotPluginError({
+}): DotUnitError {
+  return new DotUnitError({
     code: args.code,
     message: args.message,
     remediation: args.remediation,
@@ -409,7 +409,7 @@ export function durableScheduler(options: DurableSchedulerPluginOptions) {
 }
 
 function createDurableSchedulerPlugin<const Name extends string>(name: Name, options: DurableSchedulerOptions) {
-  return plugin({
+  return infra({
     name,
     configure(ctx) {
       ctx.declareProvides('durable-scheduler');
@@ -431,7 +431,7 @@ export type QueuePluginOptions = QueueClientOptions & {
 };
 
 /**
- * Provide the `queue` client features enqueue with. Mount it with `.use()`,
+ * Provide the `queue` client features enqueue with. Mount it with `.infra()`,
  * before `.features()`. Its factory opens no connection: each job's BullMQ
  * queue opens on its first `enqueue`. Stop closes them.
  */
@@ -445,7 +445,7 @@ export function queue(options: QueuePluginOptions) {
 
 function createQueuePlugin<const Name extends string>(name: Name, options: QueueClientOptions) {
   let handle: QueueClientHandle | undefined;
-  return plugin({
+  return infra({
     name,
     configure(ctx) {
       ctx.registerProjection({
@@ -493,7 +493,7 @@ function queueClientOf(ctx: object, pluginName: string): QueueClient {
   throw queuePluginError({
     code: QUEUE_PLUGIN_ERROR_CODES.clientMissing,
     message: `[queue] worker "${pluginName}" found no queue client under "queue".`,
-    remediation: 'Mount queue({ connection }) with .use(...) before .features(...) and .serve(queueWorker(...)).',
+    remediation: 'Mount queue({ connection }) with .infra(...) before .features(...) and .entrypoints(queueWorker(...)).',
     docsSlug: 'arki-queue-e019',
   });
 }
@@ -520,20 +520,20 @@ export type QueueWorkerOptions<TNeeds extends NeedsShape & NoReservedKeys, TCont
 };
 
 /**
- * Run the jobs of every feature the app mounted. Mount it with `.serve()`:
+ * Run the jobs of every feature the app mounted. Mount it with `.entrypoints()`:
  * it is bound to the app's features (each `jobs(...)` slice), uses the
  * `queue` client's connection and key prefix, and owns the consumer side of
  * the manifest (`<job>.consume`, `<schedule>.fire`).
  */
 export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys>(
   options: QueueWorkerOptions<TNeeds, TContext>,
-): Driver<WireNeeds<WorkerShape<TNeeds>>, EmptyShape> {
+): EntrypointBinder<WireNeeds<WorkerShape<TNeeds>>, EmptyShape> {
   const pluginName = options.name ?? 'queue-worker';
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
   const blocking = options.blocking ?? false;
   const needs: WorkerShape<TNeeds> = { ...options.needs, queue: service<QueueClient>() };
 
-  return driver(features => {
+  return entrypoint.fromFeatures(features => {
     let started = false;
     let handle: QueueInstance | undefined;
     let startup: Promise<QueueInstance | void> | undefined;
@@ -558,7 +558,7 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
       return runtime;
     };
 
-    return plugin<WorkerShape<TNeeds>, EmptyShape>({
+    return unit<WorkerShape<TNeeds>, EmptyShape>({
       name: pluginName,
       needs,
       actions: queueConsumerActions(declaredRegistry(features)),
@@ -633,7 +633,7 @@ export type OutboxPluginOptions = OutboxOptions & {
 
 /**
  * Provide the `schedule` service (`@arki/queue/outbox`): `schedule.runAfter(tx, job, args)` writes
- * the job row in the caller's transaction. Opens nothing and needs nothing; mount it with `.use()`
+ * the job row in the caller's transaction. Opens nothing and needs nothing; mount it with `.infra()`
  * in every process that schedules, and run the rows with `journalWorker({ jobs: outboxJobs(...) })`.
  */
 export function outboxPlugin(options: OutboxOptions): ReturnType<typeof createOutboxPlugin<'outbox'>>;
@@ -645,7 +645,7 @@ export function outboxPlugin(options: OutboxPluginOptions) {
 }
 
 function createOutboxPlugin<const Name extends string>(name: Name, options: OutboxOptions) {
-  return plugin({
+  return infra({
     name,
     configure(ctx) {
       ctx.declareProvides('outbox');
@@ -663,7 +663,7 @@ export type OutboxJobsOptions<TNeeds extends NeedsShape, TContext> = {
 
 /**
  * Run every mounted feature's `jobs(...)` slice from the journal's jobs table:
- * `.serve(journalWorker({ listen, jobs: outboxJobs({ needs, context }) }))`. The same slice
+ * `.entrypoints(journalWorker({ listen, jobs: outboxJobs({ needs, context }) }))`. The same slice
  * feeds Redis workers (`queueWorker`) and this runner; the worker's manifest lists `<job>.consume`.
  */
 export function outboxJobs<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
@@ -734,13 +734,13 @@ function producersOf<TProducer>(
  * to `send-mail`, exactly as `queue.enqueue(sendMail, data)`.
  */
 export function jobProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
-  return plugin({
+  return infra({
     name: 'job-producers',
     needs: { queue: service<QueueClient>() },
     provides: {
-      jobs: ({ queue: client, $plugin }): JobProducers<TJobs> =>
+      jobs: ({ queue: client, $unit }): JobProducers<TJobs> =>
         // Erasure seam: each producer takes its own job's input; `producersOf` walks them untyped.
-        producersOf(jobsToProduce, $plugin, job => ({
+        producersOf(jobsToProduce, $unit, job => ({
           enqueue: (data: unknown, options?: TriggerOptions) => client.enqueue(job, data, options),
         })) as JobProducers<TJobs>,
     },
@@ -755,13 +755,13 @@ export function jobProducers<const TJobs extends JobsRecord>(jobsToProduce: TJob
  * `jobProducers` and `outboxProducers`: both provide `jobs`.
  */
 export function outboxProducers<const TJobs extends JobsRecord>(jobsToProduce: TJobs) {
-  return plugin({
+  return infra({
     name: 'outbox-producers',
     needs: { schedule: service<Outbox>() },
     provides: {
-      jobs: ({ schedule, $plugin }): OutboxProducers<TJobs> =>
+      jobs: ({ schedule, $unit }): OutboxProducers<TJobs> =>
         // Erasure seam: each producer takes its own job's input; `producersOf` walks them untyped.
-        producersOf(jobsToProduce, $plugin, job => ({
+        producersOf(jobsToProduce, $unit, job => ({
           runAfter: (tx: OutboxTx, args: unknown, options?: ScheduleOptions) =>
             schedule.runAfter(tx, job, args, options),
           runAt: (tx: OutboxTx, args: unknown, at: Date, options?: Omit<ScheduleOptions, 'delayMs'>) =>

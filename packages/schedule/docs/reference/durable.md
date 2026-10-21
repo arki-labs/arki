@@ -30,8 +30,8 @@ const nightly = defineSchedule({
 });
 
 defineApp('billing')
-  .use(durableScheduler({ connection: env.REDIS_URL, keyPrefix: 'billing:' }))
-  .serve(schedule({ schedules: [nightly], durable: DurableSchedules }));
+  .infra(durableScheduler({ connection: env.REDIS_URL, keyPrefix: 'billing:' }))
+  .entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }));
 ```
 
 Declaring a durable schedule reads nothing from the world. Boot only builds
@@ -44,7 +44,7 @@ Where each mistake is caught:
 
 | Mistake                                                                    | Caught                                                            |
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.serve(...)`                                       |
+| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.entrypoints(...)`                                   |
 | `durable` given anything but the `DurableSchedules` token                  | Type error                                                        |
 | A durable name that contains `:` (BullMQ forbids it in queue names)        | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule`        |
 | A `durable: true` schedule but no `durable` option on `schedule()`         | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |

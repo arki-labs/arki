@@ -14,7 +14,7 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
-import { defineApp, rename } from '@arki/dot/plugin';
+import { defineApp, rename } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { db, DB_PLUGIN_ERROR_CODES } from './dot.js';
@@ -29,18 +29,18 @@ const relations = defineRelations(schema);
 
 // The env module validates DB_URL once and keeps the result, so deleting it from process.env
 // later changes nothing. A fresh module graph with the env mocked simulates a missing DB_URL;
-// DotPluginError comes from the same graph so `instanceof` still holds.
+// DotUnitError comes from the same graph so `instanceof` still holds.
 async function importDotWithoutDbUrl(): Promise<{
   db: (typeof import('./dot.js'))['db'];
-  DotPluginError: (typeof import('@arki/dot/plugin'))['DotPluginError'];
+  DotUnitError: (typeof import('@arki/dot/unit'))['DotUnitError'];
 }> {
   vi.resetModules();
   vi.doMock('./env.js', () => ({ env: { DB_URL: undefined } }));
-  const [{ db: freshDb }, { DotPluginError: FreshDotPluginError }] = await Promise.all([
+  const [{ db: freshDb }, { DotUnitError: FreshDotPluginError }] = await Promise.all([
     import('./dot.js'),
-    import('@arki/dot/plugin'),
+    import('@arki/dot/unit'),
   ]);
-  return { db: freshDb, DotPluginError: FreshDotPluginError };
+  return { db: freshDb, DotUnitError: FreshDotPluginError };
 }
 
 describe('@arki/db/dot', () => {
@@ -53,7 +53,7 @@ describe('@arki/db/dot', () => {
   it('returns entropy refusal from the PGlite provider before opening a file database', async () => {
     vi.stubGlobal('crypto', {});
     const result = await defineApp('db-no-entropy')
-      .use(db({ driver: 'pglite', dataDir: './must-not-open-without-entropy', relations }))
+      .infra(db({ driver: 'pglite', dataDir: './must-not-open-without-entropy', relations }))
       .boot();
     expect(RandomSourceUnavailable.is(result)).toBe(true);
   });
@@ -61,7 +61,7 @@ describe('@arki/db/dot', () => {
   it('contributes a db-kind service to the manifest', () => {
     const configured = orThrow(
       defineApp('db-manifest-test')
-        .use(db({ driver: 'pglite', memory: true, relations }))
+        .infra(db({ driver: 'pglite', memory: true, relations }))
         .configure(),
     );
     expect(configured.manifest.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
@@ -71,7 +71,7 @@ describe('@arki/db/dot', () => {
   it('boots a PGlite-backed Drizzle handle and disposes cleanly', async () => {
     const app = await orThrow(
       defineApp('db-lifecycle-test')
-        .use(db({ driver: 'pglite', memory: true, relations }))
+        .infra(db({ driver: 'pglite', memory: true, relations }))
         .boot(),
     );
     try {
@@ -88,7 +88,7 @@ describe('@arki/db/dot', () => {
   it('can execute a round-trip query via the booted handle', async () => {
     const app = await orThrow(
       defineApp('db-query-test')
-        .use(db({ driver: 'pglite', memory: true, relations }))
+        .infra(db({ driver: 'pglite', memory: true, relations }))
         .boot(),
     );
     try {
@@ -103,15 +103,15 @@ describe('@arki/db/dot', () => {
     }
   });
 
-  it('returns a defect preserving the coded DotPluginError when DB_URL is not configured (pg driver)', async () => {
+  it('returns a defect preserving the coded DotUnitError when DB_URL is not configured (pg driver)', async () => {
     // Legacy plugin throws return a defect with the original coded cause.
-    const { db: dbWithoutUrl, DotPluginError: FreshDotPluginError } = await importDotWithoutDbUrl();
+    const { db: dbWithoutUrl, DotUnitError: FreshDotPluginError } = await importDotWithoutDbUrl();
     {
-      const caught = await defineApp('db-missing-url').use(dbWithoutUrl({ relations })).boot();
+      const caught = await defineApp('db-missing-url').infra(dbWithoutUrl({ relations })).boot();
       if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
       const cause = caught.cause;
       expect(cause).toBeInstanceOf(FreshDotPluginError);
-      if (!(cause instanceof FreshDotPluginError)) throw new Error('cause should be a DotPluginError');
+      if (!(cause instanceof FreshDotPluginError)) throw new Error('cause should be a DotUnitError');
       const pluginErr = cause;
       expect(pluginErr.code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
       expect(pluginErr.code).toBe('ARKI_DB_PLUGIN_E001');
@@ -126,7 +126,7 @@ describe('@arki/db/dot', () => {
     // at top level and features name `database.provides.db`. Importing that
     // module must not read env or open a pool.
     let reads = 0;
-    const { db: dbWithoutUrl, DotPluginError: FreshDotPluginError } = await importDotWithoutDbUrl();
+    const { db: dbWithoutUrl, DotUnitError: FreshDotPluginError } = await importDotWithoutDbUrl();
     const database = dbWithoutUrl({
       relations,
       url: () => {
@@ -135,22 +135,22 @@ describe('@arki/db/dot', () => {
       },
     });
     expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });
-    const builder = defineApp('db-url-thunk').use(database);
+    const builder = defineApp('db-url-thunk').infra(database);
     orThrow(builder.configure());
     expect(reads).toBe(0);
 
     const caught = await builder.boot();
     expect(reads).toBe(1);
     if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
-    if (!(caught.cause instanceof FreshDotPluginError)) throw new Error('cause should be a DotPluginError');
+    if (!(caught.cause instanceof FreshDotPluginError)) throw new Error('cause should be a DotUnitError');
     expect(caught.cause.code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
   });
 
   it('mounts a second db scope via rename()', async () => {
     const app = await orThrow(
       defineApp('db-named-test')
-        .use(db({ driver: 'pglite', memory: true, relations }))
-        .use(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
+        .infra(db({ driver: 'pglite', memory: true, relations }))
+        .infra(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
         .boot(),
     );
     try {

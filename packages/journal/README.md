@@ -22,7 +22,7 @@ Reads are plain Drizzle queries. Replay exists for checks and repair, not for re
 | Find out why a write failed                                                                   | [Find out why](docs/agent-guide.md#find-out-why-a-write-failed), [Errors](docs/agent-guide.md#errors)                      |
 | Check or repair a row, rebuild a read model                                                   | [Recovery verbs](docs/agent-guide.md#recovery-verbs)                                                                       |
 | Wire it in a Dot app, or ship journal pieces from a package                                   | [Dot](docs/agent-guide.md#dot), [Shared packages](docs/agent-guide.md#shared-packages)                                     |
-| Watch or stop every command or effect run from a plugin (tracing, logging, a circuit breaker) | [Hooks](#hooks): `journal.hooks.command.around`, `journal.hooks.effect.around`                                             |
+| Watch or stop every command or effect run from a unit (tracing, logging, a circuit breaker) | [Hooks](#hooks): `journal.hooks.command.around`, `journal.hooks.effect.around`                                             |
 | Change code inside this package                                                               | [Rules that bite](docs/agent-guide.md#rules-that-bite), [Do not clean these up](docs/agent-guide.md#do-not-clean-these-up) |
 
 ## Install
@@ -505,7 +505,7 @@ The rules, all enforced:
 - A rejection of `next` is the hook's rejection too. A hook that catches it and returns still fails, with the original error: a rolled-back command cannot look like a success to the caller.
 - The context is frozen, and the result is the handler's own. A hook cannot change the input or the result.
 - Hooks run in registration order, the first one outermost. Command hooks run inside the transaction, around the handler, so a throw rolls the command back cleanly; a child run is wrapped again, with its own `commandId` and the same `correlationId`. Effect hooks run inside the lease, around the handler, so a throw fails the job like a handler failure: it is retried with backoff and recorded on the job row.
-- Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. In a Dot app, a plugin that needs the journal attaches in `boot`, which runs before the worker starts.
+- Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. In a Dot app, a unit that needs the journal attaches in `boot`, which runs before the worker starts.
 
 ## Operating the jobs
 
@@ -1128,7 +1128,7 @@ import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin, service } from '@arki/dot/plugin';
+import { infra, service } from '@arki/dot/unit';
 import { initJournal, need } from '@arki/journal';
 import { journal, journalHandlers, journalWorker, journalWorkflows } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
@@ -1149,7 +1149,7 @@ const refund = j
   .finish();
 
 const { db } = await openJournalDb(tables); // the app's root database
-const stripe = plugin({
+const stripe = infra({
   name: 'stripe',
   provides: {
     payments: (): Payments => ({ refund: async (paymentId, key) => ({ refundId: `re_${paymentId}_${key}` }) }),
@@ -1167,11 +1167,11 @@ const core = defineFeature('refunds-chain').needs({ payments: stripe.provides.pa
 export const refundsChain = core.entrypoints(journalWorkflows(core, [refund]));
 
 export const app = defineApp('shop')
-  .use(plugin({ name: 'db', provides: { db: () => db } }))
-  .use(stripe)
-  .use(journal({ j, workflowMeta: { actorId: 'system:workflow' } }))
+  .infra(infra({ name: 'db', provides: { db: () => db } }))
+  .infra(stripe)
+  .infra(journal({ j, workflowMeta: { actorId: 'system:workflow' } }))
   .features([refunds])
-  .serve(journalWorker());
+  .entrypoints(journalWorker());
 ```
 
 `journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` entrypoint, so a `defineFeature` feature with both effects and workflows lists them together with `journalHandlers`.
@@ -1268,8 +1268,8 @@ The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each wit
 
 `@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters and one feature slice. `@arki/dot` is an optional peer. The core entry never imports it.
 
-- `journal(...)`: the driven part, for `.use()`. It publishes `services.journal`, so features can write through it.
-- `journalWorker(...)`: the driving part, for `.serve()`. It runs effects, taps and async projections between `start` and `stop`. With `jobs` it also runs queue rows.
+- `journal(...)`: the infra part, for `.infra()`. It publishes `services.journal`, so features can write through it.
+- `journalWorker(...)`: the entrypoint part, for `.entrypoints()`. It runs effects, taps and async projections between `start` and `stop`. With `jobs` it also runs queue rows.
 - `journalHandlers(...)`: the feature slice. A feature lists its projections, effects and taps with it.
 
 **Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
@@ -1290,17 +1290,17 @@ await worker.stop();
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/features/orders/feature.ts
 export const orders = feature('orders', {
-  needs: { mailer: mailerPlugin.provides.mailer }, // typed handle; service<Mailer>() also works
+  needs: { mailer: mailerInfra.provides.mailer }, // typed handle; service<Mailer>() also works
   use: [journalHandlers({ projections: [customerStats], effects: [orderMail] })],
 });
 
 // src/app.ts
 export const app = defineApp('shop')
-  .use(db())
-  .use(mailer())
-  .use(journal({ j }))
+  .infra(db())
+  .infra(mailer())
+  .infra(journal({ j }))
   .features([orders, billing])
-  .serve(journalWorker());
+  .entrypoints(journalWorker());
 
 // The gateway binds the door once per request, in its context factory. A procedure calls `context.run`.
 const run = services.journal.bind(services.db, { actorId: user.id });
@@ -1310,7 +1310,7 @@ await run(payOrder, input);
 - `journal(...)` boots before the features. It reads their `journalHandlers` declarations, not their booted services, so a feature can `need` the journal and write through it, even in its own `boot`.
 - This works because a write never needs an effect's services. A write runs the inline projections, which get only the transaction, and queues each effect's job. The journal is composed with `services: 'worker'`. `journalWorker()` gives each effect and tap its services when it runs it.
 - `journal(...)` needs the root database under the `db` key. A transaction there is a compile error.
-- `journalWorker()` starts one worker on `start` and stops it on `stop`. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`, `jobs`. `jobs` is a `JobsSource`: it names the services the runner needs and builds a `JobRunner` once the features have booted. `@arki/queue/dot` ships one, `outboxJobs({ needs, context })`. A `jobs` source adds a `<job>.consume` action per job to the worker's manifest, under the plugin `journal-worker`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
+- `journalWorker()` starts one worker on `start` and stops it on `stop`. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`, `jobs`. `jobs` is a `JobsSource`: it names the services the runner needs and builds a `JobRunner` once the features have booted. `@arki/queue/dot` ships one, `outboxJobs({ needs, context })`. A `jobs` source adds a `<job>.consume` action per job to the worker's manifest, under the unit `journal-worker`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
 - An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile. A missing service fails that feature's boot.
 - Two features may use the same need name for two different services. Each effect gets the service of its own feature.
 - Every effect is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Projections are never listed: they run inside the write.
@@ -1336,7 +1336,7 @@ export const orders = core.entrypoints(rpc(ordersContract, os, { place: placePro
 export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail], taps: [] });
 ```
 
-- `journalProjections(...projections)` is an infra plugin that boots nothing; its unit is `<feature>/journal-projections`.
+- `journalProjections(...projections)` is an infra unit that boots nothing; its unit is `<feature>/journal-projections`.
 - `journalEffects(core, { effects, taps })` is an entrypoint. An effect's needs come from the feature by name: a need alias, an infra service (the feature's private `mailer` above) or `usecases`. A missing one is a compile error at this call, and a boot error for callers that skip the types.
 - Duplicate names are refused across both forms, naming both features.
 - `dot explain --as journal-flow` lists which event starts which effect (`OrderPaid → order-mail`, owned by `orders`). It reads the effects' manifest actions; nothing extra is collected. It is the only way to see that paying an order sends a mail, short of reading every file.
@@ -1497,7 +1497,7 @@ An entity table needs a string key column that is primary or unique (`id` by def
 | `@arki/journal`               | the portable core: `initJournal`, `need`, `jobId`, the command failures                                           |
 | `@arki/journal/pg`            | `journalTables()`, the table definitions                                                                          |
 | `@arki/journal/errors`        | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
-| `@arki/journal/dot`           | the optional `@arki/dot` plugin and feature slice (see Dot)                                                       |
+| `@arki/journal/dot`           | the optional `@arki/dot` unit and feature slice (see Dot)                                                       |
 | `@arki/journal/orpc`          | the optional oRPC error mapping (see Rejected rules)                                                              |
 | `@arki/journal/http`          | `responseCache`, the Postgres cache for HTTP idempotency                                                          |
 | `@arki/journal/http/webhooks` | outgoing webhooks on the job table                                                                                |

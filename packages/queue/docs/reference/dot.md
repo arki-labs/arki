@@ -3,8 +3,8 @@
 Reference for `@arki/queue/dot`: `queue()`, `queueWorker()`, `jobs()`.
 
 `@arki/queue/dot` splits the queue along the app hexagon. Features declare
-their jobs with `jobs(...)`. The app mounts the client with `.use()` and the
-worker with `.serve()`:
+their jobs with `jobs(...)`. The app mounts the client with `.infra()` and the
+worker with `.entrypoints()`:
 
 ```ts skip="excerpt: it uses names this page does not define"
 import type { QueueClient } from '@arki/queue/dot';
@@ -21,15 +21,15 @@ const orders = feature('orders', {
 
 // API process: enqueues only.
 defineApp('shop-api')
-  .use(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
+  .infra(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
   .features([orders]);
 
 // Worker process: same features, plus the worker that runs their jobs.
 defineApp('shop-worker')
-  .use(db({ relations }))
-  .use(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
+  .infra(db({ relations }))
+  .infra(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
   .features([orders])
-  .serve(queueWorker({ q, needs: { db: Db }, context: ({ db }) => ({ db }) }));
+  .entrypoints(queueWorker({ q, needs: { db: Db }, context: ({ db }) => ({ db }) }));
 ```
 
 - `queue({ connection, keyPrefix?, name? })` provides the `queue` service:

@@ -3,7 +3,7 @@
  * tanstackStart / startServer / mounts tests. Each call builds fresh plugins
  * with their own call counters, so tests never share state.
  */
-import { plugin } from '@arki/dot';
+import { infra } from '@arki/dot';
 
 export type Principal = { readonly user: { readonly id: string } };
 
@@ -15,7 +15,7 @@ function principalOf(headers: Headers): Principal | null {
 
 export function makeAuthn() {
   const calls = { principal: 0, handler: 0 };
-  const authn = plugin({
+  const authn = infra({
     name: 'authn',
     provides: {
       auth: () => ({
@@ -39,7 +39,7 @@ export function makeAuthn() {
  * `<prefix>/ping`, misses everything else, and throws on `<prefix>/boom`.
  */
 export function makeGateway() {
-  const gateway = plugin({
+  const gateway = infra({
     name: 'gateway',
     provides: {
       api: () => ({

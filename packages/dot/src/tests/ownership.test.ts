@@ -5,7 +5,7 @@ import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure, orThrow } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
-import { lazy, LazyClosed, plugin } from '../plugin-contract.js';
+import { entrypoint, infra, lazy, LazyClosed } from '../unit-contract.js';
 
 const Refused = defineFailure('test.ownership_refused');
 const CloseRefused = defineFailure('test.ownership_close_refused');
@@ -20,15 +20,12 @@ function gate() {
   return { promise, release };
 }
 
-describe('plugin ownership', () => {
+describe('unit ownership', () => {
   it('preserves detached builder callbacks through every composition phase', async () => {
-    const { infra } = defineApp('detached');
-    const { use } = infra();
-    const { useAll } = use(plugin({ name: 'value', provides: { value: () => 42 } }));
-    const { features } = useAll([]);
-    const { serve } = features([]);
-    const { entrypoints } = serve(plugin({ name: 'driver' }));
-    const { configure, boot, start } = entrypoints();
+    const { infra: infraStep } = defineApp('detached');
+    const { features } = infraStep(infra({ name: 'value', provides: { value: () => 42 } }));
+    const { entrypoints } = features([]);
+    const { configure, boot, start } = entrypoints(entrypoint({ name: 'driver' }));
     const apps = [orThrow(await orThrow(configure()).boot()), orThrow(await boot()), orThrow(await start())];
     for (const app of apps) {
       expect(app.services.value).toBe(42);
@@ -41,8 +38,8 @@ describe('plugin ownership', () => {
     const started = gate();
     const app = orThrow(
       await defineApp('child-cancellation')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'worker',
             boot: () => ({
               worker: child(async signal => {
@@ -70,8 +67,8 @@ describe('plugin ownership', () => {
     });
     expect(await handle.get()).toBe(42);
     const booting = defineApp('late-lazy', { clock, hookTimeoutMs: 10 })
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'provider',
           provides: {
             value: async () => {
@@ -103,8 +100,8 @@ describe('plugin ownership', () => {
     });
     const app = orThrow(
       await defineApp('explicit-lazy')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'provider',
             provides: {
               value: () =>
@@ -122,9 +119,9 @@ describe('plugin ownership', () => {
     expect(finalizations).toBe(1);
   });
 
-  it('closes partial acquisitions before unwinding previously constructed plugins', async () => {
+  it('closes partial acquisitions before unwinding previously constructed units', async () => {
     const events: string[] = [];
-    const earlier = plugin({
+    const earlier = infra({
       name: 'earlier',
       provides: {
         earlier: () =>
@@ -136,7 +133,7 @@ describe('plugin ownership', () => {
           ),
       },
     });
-    const failed = plugin({
+    const failed = infra({
       name: 'failed',
       provides: {
         first: () =>
@@ -155,7 +152,7 @@ describe('plugin ownership', () => {
           ),
       },
     });
-    const refusal = await defineApp('partial').use(earlier).use(failed).boot();
+    const refusal = await defineApp('partial').infra(earlier).infra(failed).boot();
     expect(Refused.is(refusal)).toBe(true);
     expect(events).toEqual(['partial', 'earlier']);
   });
@@ -165,8 +162,8 @@ describe('plugin ownership', () => {
     let live = true;
     const app = orThrow(
       await defineApp('transfer')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'owned',
             provides: {
               db: () =>
@@ -211,8 +208,8 @@ describe('plugin ownership', () => {
     const refusal = CloseRefused();
     const app = orThrow(
       await defineApp('close')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'owned',
             provides: {
               db: () =>
@@ -235,11 +232,11 @@ describe('plugin ownership', () => {
     expect(calls).toBe(1);
   });
 
-  it('retains lazy cleanup failures without an explicit plugin dispose hook', async () => {
+  it('retains lazy cleanup failures without an explicit unit dispose hook', async () => {
     const refusal = CloseRefused();
     const app = orThrow(
       await defineApp('lazy')
-        .use(plugin({ name: 'owned', provides: { db: () => lazy(() => 42, { dispose: () => refusal }) } }))
+        .infra(infra({ name: 'owned', provides: { db: () => lazy(() => 42, { dispose: () => refusal }) } }))
         .boot(),
     );
     expect(orThrow(await app.services.db.get())).toBe(42);
@@ -252,8 +249,8 @@ describe('plugin ownership', () => {
     const second = CloseRefused();
     const events: string[] = [];
     const result = await defineApp('aggregate')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'owned',
           provides: {
             first: () =>
@@ -292,8 +289,8 @@ describe('plugin ownership', () => {
   it('unwinds owned resource closures when a later factory throws', async () => {
     let closes = 0;
     const result = await defineApp('defect')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'owned',
           provides: {
             first: () =>
@@ -320,8 +317,8 @@ describe('plugin ownership', () => {
     const started = gate();
     let finalizations = 0;
     const booting = defineApp('deadline', { clock, hookTimeoutMs: 10 })
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'late',
           provides: {
             db: () =>

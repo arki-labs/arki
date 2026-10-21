@@ -14,7 +14,7 @@ bun run build       # production build; catches server-bundle problems
 
 ```text
 src/
-  app.ts                  The DOT app: plugins in boot order. `dot explain` reads it; `dot dev` runs its `dev` export (PGlite).
+  app.ts                  The DOT app: units in boot order. `dot explain` reads it; `dot dev` runs its `dev` export (PGlite).
   env.ts                  Env schema (zod). Add new env vars here.
   testing.ts              bootTestApp(): the real app on in-memory PGlite.
   server/
@@ -58,5 +58,5 @@ Projections (same-transaction read models) and effects (after-commit jobs) are l
 
 ## Inspect the app
 
-- `bun run dot:explain` prints plugins, services and boot order without connecting to anything.
-- `bun run dot:doctor` boots the app (needs `DB_URL`) and reports every plugin's health. Add `--json` for machine-readable output.
+- `bun run dot:explain` prints units, services and boot order without connecting to anything.
+- `bun run dot:doctor` boots the app (needs `DB_URL`) and reports every unit's health. Add `--json` for machine-readable output.

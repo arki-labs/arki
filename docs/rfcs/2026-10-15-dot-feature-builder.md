@@ -27,6 +27,51 @@
 
 **Why.** Small files are easy to read, review and test: a usecase test passes two fakes for its `Pick` and boots nothing. One procedure tree in one file means no import alias per procedure in `feature.ts` and no `Procedure` suffix (the reason a `core.ts` split was proposed and turned down). `DepsOf` on the stage before `.usecases()` was fixed to leave out `usecases`, so `Deps` is exactly what a usecase may ask for.
 
+## Amendment (founder, 2026-10-21) — `unit`, `infra`, `entrypoint`: the kernel atom and its three roles
+
+**Problem.** `plugin()` names the kernel's atom (a typed box of `needs`, `provides` and five lifecycle hooks), yet the word promises the one thing Dot refuses: something optional, third-party, loaded at runtime into a host. Dot loads nothing from disk or config; wiring is static and compile-checked; the atoms are the app. Every authored call site in the fleet (151 files) is infrastructure — a database, cache, authn, mailer, store, limiter, LLM or analytics client — and lives in a folder already named `infra/`, mounted by a step already named `.infra()`. Only the constructor still said `plugin`. The word also collides with the Vite plugin in `packages/dot/src/vite.ts`. Finally, the driving side was written twice: `driver(features => plugin({...}))` marks the side on a wrapper (`side: 'driving'`) and the role on the unit (`role: 'feature' | 'driving'`), with infra as the unlabelled default.
+
+**Decision.** One noun for the atom, three constructors for its roles. "Feature" is not an enhanced plugin: it is a compound that compiles to several units ([define-feature.ts:25-27](../../packages/dot/src/define-feature.ts#L25-L27)); the kernel never sees a feature.
+
+| Level | Name | Where the reader meets it |
+| --- | --- | --- |
+| kernel atom | `unit` | `manifest.units`, `diagnostics.units`, `$unit`, `dot explain` (`unit http (entrypoint) \| needs: …`), error text ("unit X threw"), `DependencyEdge` |
+| driven role | `infra(definition)` / `infra.fromFeatures(features => unit(definition))` | `.infra(...)` on the app and on a feature; folder `infra/`; replaces `plugin()` and `driven()` |
+| domain role | `defineFeature(name)…` | `.features(...)`; unchanged |
+| driving role | `entrypoint(definition)` / `entrypoint.fromFeatures(features => unit(definition))` | `.entrypoints(...)` on the app; replaces `driver(features => plugin(...))` |
+| no role | `unit(definition)` | only inside `fromFeatures`; `@arki/dot/unit` and `@arki/dot/feature`, not the root; a bare `unit()` on a builder step does not compile |
+
+`UnitRole = 'infra' | 'feature' | 'entrypoint'` replaces `DotPluginRole = 'feature' | 'driving'`; the role is set by the constructor and recorded on the unit, so the `side` wrapper goes away. The function form keeps the closure that `bind` provides. A kernel-context `$features` cannot replace it: queue and journal derive their static manifest `actions` from the feature list when the app is built, before anything boots. The http erasure cast stays, with its comment: it marks runtime-only bundle keys, not wrapper noise.
+
+**As built (2026-10-21).** Two points changed from the sketch above, both forced by TypeScript:
+
+- *The function form is `fromFeatures`, not an overload.* A probe showed a callback's returned object does not pass its `needs` into its own hooks' context, so `entrypoint(features => ({ ...definition }))` loses hook typing; the callback returns a unit built with the role-less `unit({...})`, which types the hooks itself. And an overload that takes a function must not sit on `infra` / `entrypoint`: listed first, TypeScript types a definition's hooks against it and keeps that type (`start: () => {}` stops compiling); listed last, every mistake in a definition is reported against the function overload. So the function form is a separate name on the constructor, like `service.lazy`: `infra.fromFeatures(...)` / `entrypoint.fromFeatures(...)`. A unit built that way takes its binder's role. The founder confirmed the name `fromFeatures` on 2026-10-21.
+- *Data keys move in a second step.* Other sessions' uncommitted files read `manifest.plugins`, a projection's `plugin` and `registeringPlugin`, and import `plugin` from `@arki/dot/plugin`. So the manifest / diagnostics JSON keys keep their names for now, and `src/plugin.ts` / `src/plugin-contract.ts` re-export the new names under the old ones. The last step (`.work/codemods/dot-unit-rename.py --write --data-keys --include-dirty`, then delete the two shims) runs once those files are committed. Everything else, `$unit` and the `dot.unit.*` OpenTelemetry attributes included, is renamed now.
+
+Two more founder decisions on 2026-10-21, after the rename:
+
+- *The old steps are removed in the same breaking change.* `.use()`, `.useAll()` and `.serve()` are gone. `.infra(...list)` replaces `.useAll(list)`, and `.entrypoints(...)` replaces `.serve(...)`. The CLI finds an app by its `.infra` method.
+- *Domain logic is a feature, even when it is small.* `defineFeature('orders').needs({...}).provides({...}).entrypoints()` is the smallest feature; the empty `.entrypoints()` finishes it. No `domainUnit` constructor. Docs examples and the quickstart use this shape. Kernel reference pages that teach unit hooks keep `infra(...)` with real infrastructure names.
+
+The type-check budget for 50 chained features moved from 400k to 410k instantiations: 399,950 before the roles, 402,850 after (+0.7%, the role types and `SideGuard`).
+
+**Builder guards.** The side check moves from the wrapper to the unit's role, through the existing `UseGuard`: `.infra()` refuses an `entrypoint` unit (infrastructure never depends on the domain, § App `.infra` vs feature `.infra`); `.entrypoints()` refuses an `infra` unit (it would boot after the features it should serve); `.features()` keeps accepting only `defineFeature` values. The manifest gains the role for free.
+
+**Names checked and rejected.** `service` (the `service<T>()` witness); `provider` (`@arki/ai` providers, and a unit may provide nothing — a boot-only migration); `adapter` (the docs use it for the package `@arki/db/dot`, not the value); `layer` (the model · usecases · infra · entrypoints layers and the `arki-layers` lint); `module`, `component` (ES module, React).
+
+**Touched surfaces** (one breaking MINOR changeset, decision 8; no alias period):
+
+- `packages/dot/src/plugin-contract.ts` → `unit-contract.ts`: `createPlugin` → `createUnit`, `Plugin` → `Unit`, `AnyPlugin` → `AnyUnit`, `PluginNeeds`/`PluginProvides`/`PluginOwnership`/`PluginPhases`/`PluginManifest`/`PluginDiagnostic`/`DotPluginError`/`DotLifecyclePluginFailure` and the rest of the `Plugin*` family → `Unit*`; `KernelCtx.$plugin` → `$unit`.
+- `packages/dot/src/plugin.ts` → `unit.ts`; the `./plugin` subpath → `./unit` (`@arki/dot/unit`); exports `unit`-level types plus `infra` and `entrypoint`. `@arki/dot` root exports `infra`, `entrypoint`, no `plugin`.
+- `packages/dot/src/feature.ts`: `driver`, `driven`, `Driver`, `Driven`, `side` removed; `.entrypoints()` and `.infra()` take units by role. `define-feature.ts`: `.infra(...)` takes `infra` units, `plugins()` → `units()`, `role: 'feature'` kept.
+- `init-plugins.ts` → `init-units.ts` (`initPlugins` → `initUnits`, `InitPluginsFactory` → `InitUnitsFactory`); `log.ts` builds with `infra`; `test-harness.ts`: `testPlugin` → `testUnit`.
+- `manifest.ts`, `diagnostics.ts`, `lifecycle*.ts`, `timeline.ts`, `cli/` (`dot explain`, `dot doctor` JSON: `plugins` → `units`, `plugin` → `unit` on services, lifecycle, issues); error messages and the `ARKI_DOT_E*` table in `README.md` reword "plugin" → "unit" (codes unchanged, never renumbered).
+- Adapters (`@arki/db`, `kv`, `auth`, `ai`, `http`, `journal`, `queue`, `schedule`, `env`, `lock`, `mail`, `fs` `./dot` entries, 5 `driver`/`driven` sites, 6 `manifest.plugins`/`$plugin` readers): constructors renamed by role; `docs/adapter-authoring.md` says "expose your package as a `./dot` unit".
+- Apps and template: 151 `plugin({` files → `infra({`; `turbo/generators/templates/application` in the same commit (Template Sync Rule); Avocabo's lint preset for `infra/` keys on the `infra` import.
+- Docs: 27 files under `packages/dot/docs`, the README, `docs/agent-guide.md` glossary line 1 ("A DOT app is a list of units"), this RFC's older sections keep their wording (see § Naming).
+
+**Why.** The name at the author's hand says what the thing is for (Rule 6: `export const mailer = infra({…})` is obvious at the definition line) and matches the folder and the step one to one (decision 1: one name per slot, no aliases). The kernel keeps one neutral noun because a feature, an infra and an entrypoint are all units to it, as the probe output already said (`unit digest/store | needs: db | provides: digest.store`). The role enum loses its unlabelled default. This completes the split `.serve()` → `.entrypoints()` began: the kernel stays dumb, the vocabulary at the edge says the role.
+
 ## Naming (Rule 6)
 
 Names may be short but never vague: obvious at the definition. Founder-approved 2026-10-15. Older sections below keep the names they were written with.
@@ -38,6 +83,10 @@ Names may be short but never vague: obvious at the definition. Founder-approved 
 | stage after `.infra()`: `base` | `<feature>Deps` | It is what usecases may ask for; `base` says nothing. |
 | stage after `.usecases()`: `core` | `<feature>Logic` | It is the feature with its usecases; `core` clashed with `core/orpc.ts`. |
 | `os` (contract-bound builder) | `rpcImplementer` | `os` is oRPC's own name for something else. Leaves take `(impl: typeof rpcImplementer)`. |
+| `plugin()` / `Plugin` / `$plugin` / `manifest.plugins` | `unit` / `Unit` / `$unit` / `manifest.units` | The kernel atom; a feature, an infra and an entrypoint are all units to it (amendment 2026-10-21). |
+| `plugin({…})` authored in `infra/`; `driven(bind)` | `infra({…})` / `infra.fromFeatures(features => unit({…}))` | Every authored atom is infrastructure; the constructor now matches the folder and the step. |
+| `driver(features => plugin({…}))` | `entrypoint.fromFeatures(features => unit({…}))` | The driving role is set by the constructor, not by a wrapper and a role flag. |
+| `DotPluginRole = 'feature' \| 'driving'` | `UnitRole = 'infra' \| 'feature' \| 'entrypoint'` | No unlabelled default role. |
 | `backend/src/contract.ts` / `appContract` / `@avocabo/backend/contract` | `backend/src/rpc.ts` / `rpcContract` / `@avocabo/backend/rpc` | Pairs with the feature `rpc.ts`; `routerFor(rpcContract, features)`. |
 | `backend/src/cron.ts` | unchanged (`cronContract`, `cronRouter`), builder is `cronImplementer` | Same idea as `rpcImplementer`. |
 | `@arki/schedule/orpc`: `cronContract()`, `cronRouter()`, `validated()` | `defineCronContract()`, `cronRouterFor()`, `checkOnly()` | A library function must not share a name with the app's value; `checkOnly` validates and returns the ORIGINAL value (key order kept for byte parity). |

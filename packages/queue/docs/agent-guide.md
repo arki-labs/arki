@@ -67,7 +67,7 @@ Follow [Recover jobs](recipes/recover-jobs.md). It names the setting that decide
 ```ts skip="excerpt: it uses names this page does not define"
 import { jobs, outboxJobs, outboxPlugin } from '@arki/queue/dot';
 
-// Process that schedules: mount the plugin, which provides the `schedule` service.
+// Process that schedules: mount the unit, which provides the `schedule` service.
 defineApp('signup-api').infra(database, scheduling).features([signup]);
 
 // Worker process: the same features, plus the journal worker.
@@ -77,7 +77,7 @@ defineApp('signup-worker')
   .entrypoints(journalWorker({ listen, jobs: outboxJobs({ needs: {}, context: ({ db }) => ({ db }) }) }));
 ```
 
-Here `scheduling` is `outboxPlugin({ tables })`. A feature lists its jobs with `jobs(q.registry({ welcome }))` in `.entrypoints(...)`. The worker manifest lists `<job>.consume` under the plugin `journal-worker`. For the Redis lane use `queue(...)` and `queueWorker(...)` from the same entry.
+Here `scheduling` is `outboxPlugin({ tables })`. A feature lists its jobs with `jobs(q.registry({ welcome }))` in `.entrypoints(...)`. The worker manifest lists `<job>.consume` under the unit `journal-worker`. For the Redis lane use `queue(...)` and `queueWorker(...)` from the same entry.
 
 ## Rules that bite
 

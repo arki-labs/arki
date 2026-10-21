@@ -41,11 +41,11 @@ import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { z } from 'zod';
 
 import type { CtxOf, NeedsShape, NoReservedKeys } from '@arki/dot';
-import type { ActionDeclaration } from '@arki/dot/plugin';
+import type { ActionDeclaration } from '@arki/dot/unit';
 import type { SchemaFailure } from '@arki/failure';
 import type { CronContext } from '@arki/schedule/orpc';
-import { plugin } from '@arki/dot';
-import { DotPluginError } from '@arki/dot/plugin';
+import { entrypoint } from '@arki/dot';
+import { DotUnitError } from '@arki/dot/unit';
 import { InvalidInput, isFailure } from '@arki/failure';
 import { cronErrorBody } from '@arki/schedule/orpc';
 import { formatIssues, parse } from '@arki/schema';
@@ -101,9 +101,9 @@ export const TANSTACK_START_PLUGIN_ERROR_CODES = {
 function bootError(
   failure: SchemaFailure,
   error: { readonly code: string; readonly what: string; readonly remediation: string },
-): DotPluginError {
+): DotUnitError {
   const reason = InvalidInput.is(failure) ? formatIssues(failure.data.issues) : failure.message;
-  return new DotPluginError({
+  return new DotUnitError({
     code: error.code,
     message: `[tanstack-start] ${error.what}: ${reason}`,
     remediation: error.remediation,
@@ -290,7 +290,7 @@ function mountHandles<Needs>(mounts: MountOptions<Needs> | undefined, needs: Nee
  * Declares one manifest action per declared mount, at its `at`, so
  * `dot explain` lists them. `configure` rejects a bad or repeated mount
  * path (no I/O). Booting reads the cron secret and the CORS options, and
- * throws a coded `DotPluginError` when either is bad.
+ * throws a coded `DotUnitError` when either is bad.
  *
  * @example
  * defineApp('shop')
@@ -311,7 +311,7 @@ export function tanstackStart<
   Declared extends MountName = never,
 >(options: TanstackStartOptions<Needs, RpcResult, SessionResult, Declared>) {
   const mounts: MountOptions<CtxOf<Needs>> | undefined = options.mounts;
-  return plugin({
+  return entrypoint({
     name: 'tanstack-start',
     needs: options.needs,
     actions: mountActions(mounts),

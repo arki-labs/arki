@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { Provided } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
 import type { KV } from '@arki/kv';
 
 import type { embeddings } from './dot/index.js';
@@ -108,7 +108,7 @@ describe('public types of the root entry', () => {
     expectTypeOf<KV>().toMatchTypeOf<Parameters<typeof kvCacheStore>[0]>();
   });
 
-  it('the Dot plugin publishes Embedder | null, so a feature must handle an app with no model', () => {
+  it('the Dot unit publishes Embedder | null, so a feature must handle an app with no model', () => {
     expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder | null>();
   });
 

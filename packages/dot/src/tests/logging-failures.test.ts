@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { defineFailure, orThrow } from '@arki/failure';
 
-import type { EmptyShape } from '../plugin-contract.js';
+import type { EmptyShape } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { initPlugins } from '../init-plugins.js';
-import { createPlugin, plugin } from '../plugin-contract.js';
+import { initUnits } from '../init-units.js';
+import { createUnit, infra } from '../unit-contract.js';
 
 const Open = defineFailure('test.logging_failures.open');
 const Close = defineFailure('test.logging_failures.close');
@@ -16,7 +16,7 @@ describe('logging failures', () => {
     '%s checks activation before providers run',
     async form => {
       const failure = Open();
-      const factory = initPlugins.context<EmptyShape>().create();
+      const factory = initUnits.context<EmptyShape>().create();
       let activated = 0;
       let provided = 0;
       const definition = {
@@ -29,13 +29,13 @@ describe('logging failures', () => {
       };
       const logger =
         form === 'keys'
-          ? factory.plugin(definition)
+          ? factory.infra(definition)
           : form === 'witness'
-            ? factory.plugin({ ...definition, needs: {} })
+            ? factory.infra({ ...definition, needs: {} })
             : form === 'constructor'
-              ? createPlugin(definition)
-              : plugin(definition);
-      const configured = orThrow(defineApp('activation').use(logger).configure());
+              ? createUnit(definition)
+              : infra(definition);
+      const configured = orThrow(defineApp('activation').infra(logger).configure());
       expect(activated).toBe(0);
       expect(await configured.boot()).toBe(failure);
       expect(activated).toBe(1);
@@ -52,8 +52,8 @@ describe('logging failures', () => {
     try {
       const app = orThrow(
         await defineApp('close')
-          .use(
-            plugin({
+          .infra(
+            infra({
               name: 'logger',
               logging: () => ({
                 close: () => {
@@ -74,7 +74,7 @@ describe('logging failures', () => {
     }
   });
 
-  it('keeps logging cleanup last behind earlier plugin cleanup during failed startup', async () => {
+  it('keeps logging cleanup last behind earlier unit cleanup during failed startup', async () => {
     const primary = Open();
     const earlier = Dispose();
     const logging = Close();
@@ -84,8 +84,8 @@ describe('logging failures', () => {
     });
     try {
       const outcome = await defineApp('rollback')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'logger',
             logging: () => ({
               close: () => {
@@ -95,8 +95,8 @@ describe('logging failures', () => {
             }),
           }),
         )
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'earlier',
             dispose: () => {
               events.push('earlier');
@@ -104,7 +104,7 @@ describe('logging failures', () => {
             },
           }),
         )
-        .use(plugin({ name: 'failed', boot: () => primary }))
+        .infra(infra({ name: 'failed', boot: () => primary }))
         .boot();
       expect(outcome).toMatchObject({
         code: 'async.scope_failed',
@@ -123,7 +123,7 @@ describe('logging failures', () => {
 
   it('executes the replacement logging factory instead of the original', async () => {
     const failure = Open();
-    const original = plugin({
+    const original = infra({
       name: 'logger',
       logging: () => ({
         close() {
@@ -132,6 +132,6 @@ describe('logging failures', () => {
       }),
     });
     const replacement = { ...original, logging: () => failure };
-    expect(await defineApp('replacement').use(replacement).boot()).toBe(failure);
+    expect(await defineApp('replacement').infra(replacement).boot()).toBe(failure);
   });
 });

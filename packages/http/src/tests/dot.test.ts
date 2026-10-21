@@ -1,5 +1,5 @@
 /**
- * The `http()` driving adapter inside a real DOT app: routes from the
+ * The `http()` entrypoint inside a real DOT app: routes from the
  * app's mounted features and from token bundles, the socketless fetch seam, manifest registration with schemas, real
  * listening on an ephemeral port, drain-on-stop semantics, and the E005
  * drain-timeout watchdog.
@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, DotLifecycleErrorCode, plugin, rename, service, token } from '@arki/dot/plugin';
+import { defineApp, DotLifecycleErrorCode, infra, rename, service, token } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { RouteBundle } from '../bundle.js';
@@ -53,12 +53,12 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   return { promise, resolve: resolvePromise };
 }
 
-const ordersDbPlugin = plugin({
+const ordersDbPlugin = infra({
   name: 'orders-db',
   provides: { ordersDb: () => ({ list: () => [{ id: 'o1' }] }) satisfies OrdersDb },
 });
 
-const ordersPlugin = plugin({
+const ordersPlugin = infra({
   name: 'orders',
   needs: { ordersDb: service<OrdersDb>() },
   configure(ctx) {
@@ -78,9 +78,9 @@ describe('http() plugin', () => {
   it('collects bundles, serves via the socketless fetch seam, and registers manifest actions', async () => {
     const app = await orThrow(
       defineApp('http-test')
-        .use(ordersDbPlugin)
-        .use(ordersPlugin)
-        .serve(http({ port: 0, bundles: [OrdersRoutes] }))
+        .infra(ordersDbPlugin)
+        .infra(ordersPlugin)
+        .entrypoints(http({ port: 0, bundles: [OrdersRoutes] }))
         .boot(),
     );
 
@@ -105,8 +105,8 @@ describe('http() plugin', () => {
     await orThrow(app.dispose());
   });
 
-  // The point of a driver: the app lists its features once, in
-  // `.features()`, and `.serve(http())` serves their routes. A second list
+  // The point of an entrypoint: the app lists its features once, in
+  // `.features()`, and `.entrypoints(http())` serves their routes. A second list
   // inside http() would drift from the first.
   it('serves the routes of every mounted feature without the app listing them again', async () => {
     const orders = feature('orders', {
@@ -121,15 +121,15 @@ describe('http() plugin', () => {
 
     const app = await orThrow(
       defineApp('http-feature-test')
-        .use(ordersDbPlugin)
+        .infra(ordersDbPlugin)
         .features([orders, quiet])
-        .serve(http({ port: 0 }))
+        .entrypoints(http({ port: 0 }))
         .boot(),
     );
 
     const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
-    // Route contracts belong to the feature; the driver declares none of its own.
+    // Route contracts belong to the feature; the entrypoint declares none of its own.
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders:orders.list']);
 
     await orThrow(app.dispose());
@@ -138,7 +138,7 @@ describe('http() plugin', () => {
   it("serves a defineFeature feature's endpoints(core, build) next to an object-form feature", async () => {
     // Why: during the migration an app mounts both forms behind one route
     // table, and the chain form's handlers reach private infra through usecases.
-    const store = plugin({
+    const store = infra({
       name: 'store',
       needs: { ordersDb: service<OrdersDb>() },
       provides: { store: ({ ordersDb }) => ({ all: () => ordersDb.list() }) },
@@ -190,10 +190,10 @@ describe('http() plugin', () => {
     expect(true).toBe(true);
   });
 
-  // Why http() belongs in `.serve()`: under `.use()` it would boot before
+  // Why http() belongs in `.entrypoints()`: under `.infra()` it would boot before
   // the features, when their routes do not exist yet. The builder rejects
   // it at compile time, so an app never serves a silently empty route table.
-  it('cannot be mounted with .use() ahead of the features it serves', () => {
+  it('cannot be mounted with .infra() ahead of the features it serves', () => {
     const orders = feature('orders', {
       actions: [listOrders],
       use: [endpoints(() => routes().bind(listOrders, () => []))],
@@ -201,8 +201,8 @@ describe('http() plugin', () => {
 
     const tooEarly = () =>
       defineApp('http-too-early')
-        // @ts-expect-error — http() is a driving adapter: it belongs in .serve(), after .features()
-        .use(http({ port: 0 }))
+        // @ts-expect-error — http() is an entrypoint: it belongs in .entrypoints(), after .features()
+        .infra(http({ port: 0 }))
         .features([orders]);
     expect(tooEarly).toBeTypeOf('function');
   });
@@ -215,10 +215,10 @@ describe('http() plugin', () => {
 
     const app = await orThrow(
       defineApp('http-mixed-test')
-        .use(ordersDbPlugin)
-        .use(ordersPlugin)
+        .infra(ordersDbPlugin)
+        .infra(ordersPlugin)
         .features([status])
-        .serve(http({ port: 0, bundles: [OrdersRoutes] }))
+        .entrypoints(http({ port: 0, bundles: [OrdersRoutes] }))
         .boot(),
     );
 
@@ -239,7 +239,7 @@ describe('http() plugin', () => {
     await expect(
       defineApp('http-broken-slice')
         .features([broken])
-        .serve(http({ port: 0 }))
+        .entrypoints(http({ port: 0 }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -252,7 +252,7 @@ describe('http() plugin', () => {
     const entered = deferred();
     const slow = route.get('/slow', { id: 'slow', output: z.object({ done: z.boolean() }) });
     const SlowRoutes = token<RouteBundle>()('slow.routes');
-    const slowPlugin = plugin({
+    const slowPlugin = infra({
       name: 'slow',
       provides: {
         [SlowRoutes.key]: () =>
@@ -266,8 +266,8 @@ describe('http() plugin', () => {
 
     const app = await orThrow(
       defineApp('http-drain')
-        .use(slowPlugin)
-        .serve(http({ port: 0, bundles: [SlowRoutes] }))
+        .infra(slowPlugin)
+        .entrypoints(http({ port: 0, bundles: [SlowRoutes] }))
         .start(),
     );
 
@@ -296,7 +296,7 @@ describe('http() plugin', () => {
   it('returns the E005 drain watchdog when handlers outlive the budget', async () => {
     const hang = route.get('/hang', { id: 'hang', output: z.object({ done: z.boolean() }) });
     const HangRoutes = token<RouteBundle>()('hang.routes');
-    const hangPlugin = plugin({
+    const hangPlugin = infra({
       name: 'hang',
       provides: {
         [HangRoutes.key]: () =>
@@ -311,8 +311,8 @@ describe('http() plugin', () => {
 
     const app = await orThrow(
       defineApp('http-hang')
-        .use(hangPlugin)
-        .serve(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
+        .infra(hangPlugin)
+        .entrypoints(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
         .start(),
     );
 
@@ -340,7 +340,7 @@ describe('http() plugin', () => {
   it('enforces bundle provision in the type system', () => {
     const Ghost = token<RouteBundle>()('ghost.routes');
     // @ts-expect-error — nothing provides ghost.routes, so the wiring guard rejects the composition
-    void defineApp('http-guard').serve(http({ port: 0, bundles: [Ghost] }));
+    void defineApp('http-guard').entrypoints(http({ port: 0, bundles: [Ghost] }));
   });
 
   it('rejects the same bundle token listed twice', () => {
@@ -357,7 +357,7 @@ describe('http() with feature instances', () => {
   // Why: a route contract is written once in the feature, so two copies of one
   // feature would claim the same `GET /reports`. Each copy is served under its
   // instance name instead, and each copy answers from its own database.
-  const regionDb = (region: string) => plugin({ name: 'database', provides: { db: () => ({ region }) } });
+  const regionDb = (region: string) => infra({ name: 'database', provides: { db: () => ({ region }) } });
   const database = regionDb('us');
   const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
   const listReports = route.get('/reports', { id: 'reports.list', output: z.object({ region: z.string() }) });

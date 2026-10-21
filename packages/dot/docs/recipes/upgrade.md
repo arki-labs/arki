@@ -27,7 +27,7 @@ the app.
 
    List every `@arki/*` package your app uses, not only these three.
 
-3. **Typecheck.** Wiring is checked at `.use()`, so a changed contract shows
+3. **Typecheck.** Wiring is checked where each unit is mounted, so a changed contract shows
    up as compile errors at the lines you need to touch:
 
    ```sh

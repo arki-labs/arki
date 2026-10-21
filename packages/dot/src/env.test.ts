@@ -15,11 +15,11 @@ import { z } from 'zod';
 
 import type { StandardSchemaV1 } from '@arki/schema';
 import { program } from './cli/index.js';
-import { defineApp, DotPluginError, rename } from './plugin.js';
+import { defineApp, DotUnitError, rename } from './unit.js';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { EnvServices } from './env.js';
-import { env, ENV_PLUGIN_ERROR_CODES } from './env.js';
+import { env, ENV_UNIT_ERROR_CODES } from './env.js';
 
 describe('@arki/dot/env', () => {
   it('boots and exposes the validated env service', async () => {
@@ -27,7 +27,7 @@ describe('@arki/dot/env', () => {
     process.env['ADAPTER_TEST_PORT'] = '4242';
     const app = await orThrow(
       defineApp('env-test')
-        .use(
+        .infra(
           env({
             schema: {
               ADAPTER_TEST_PORT: z.coerce.number(),
@@ -49,7 +49,7 @@ describe('@arki/dot/env', () => {
   it('contributes a service manifest entry of kind=env', async () => {
     const app = await orThrow(
       defineApp('env-manifest-test')
-        .use(
+        .infra(
           env({
             schema: {
               DUMMY: z.string().default('x'),
@@ -70,13 +70,13 @@ describe('@arki/dot/env', () => {
   it('mounts a second env scope via rename()', async () => {
     const app = await orThrow(
       defineApp('env-named-test')
-        .use(
+        .infra(
           env({
             schema: { FLAG: z.string().default('on') },
             skipValidation: false,
           }),
         )
-        .use(
+        .infra(
           rename(
             env({
               schema: { PUBLIC_FLAG: z.string().default('off') },
@@ -99,7 +99,7 @@ describe('@arki/dot/env', () => {
 });
 
 describe('@arki/dot/env validation at boot', () => {
-  const schema = { ENV_PLUGIN_T1_A: z.string(), ENV_PLUGIN_T1_B: z.url() };
+  const schema = { ENV_UNIT_T1_A: z.string(), ENV_UNIT_T1_B: z.url() };
 
   beforeEach(() => {
     vi.stubEnv('SKIP_ENV_VALIDATION', '');
@@ -113,30 +113,30 @@ describe('@arki/dot/env validation at boot', () => {
 
   it('fails boot with the bad keys named, even when CI is set', async () => {
     // WHY: a bad config must stop the app at boot, never at the first request.
-    const app = defineApp('env-bad').use(env({ schema }));
+    const app = defineApp('env-bad').infra(env({ schema }));
     const error: unknown = await app.boot();
     if (!UnexpectedDefect.is(error)) throw new Error('boot should return UnexpectedDefect');
     const cause = error.cause;
-    if (!(cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
-    expect(cause.code).toBe(ENV_PLUGIN_ERROR_CODES.invalidEnv);
-    expect(cause.message).toContain('ENV_PLUGIN_T1_A');
-    expect(cause.message).toContain('ENV_PLUGIN_T1_B');
+    if (!(cause instanceof DotUnitError)) throw new Error('cause should be a DotUnitError');
+    expect(cause.code).toBe(ENV_UNIT_ERROR_CODES.invalidEnv);
+    expect(cause.message).toContain('ENV_UNIT_T1_A');
+    expect(cause.message).toContain('ENV_UNIT_T1_B');
   });
 
   it('the env factory throws synchronously, so boot never depends on awaiting the proxy', () => {
     // WHY: validation was once an accident of `await` reading `.then` on the proxy. Calling the
-    // factory without awaiting proves the plugin itself forces validation.
-    const plugin = env({ schema });
-    const factory = plugin.factories['env'];
-    if (factory === undefined) throw new Error('env plugin has no env factory');
-    expect(() => Reflect.apply(factory, undefined, [])).toThrow('ENV_PLUGIN_T1_A');
+    // factory without awaiting proves the unit itself forces validation.
+    const unit = env({ schema });
+    const factory = unit.factories['env'];
+    if (factory === undefined) throw new Error('env unit has no env factory');
+    expect(() => Reflect.apply(factory, undefined, [])).toThrow('ENV_UNIT_T1_A');
   });
 
   it('skipValidation: true boots with missing keys', async () => {
-    // WHY: the explicit opt-out must reach the plugin.
+    // WHY: the explicit opt-out must reach the unit.
     const app = await orThrow(
       defineApp('env-skip')
-        .use(env({ schema, skipValidation: true }))
+        .infra(env({ schema, skipValidation: true }))
         .boot(),
     );
     await orThrow(app.dispose());
@@ -145,7 +145,7 @@ describe('@arki/dot/env validation at boot', () => {
   it('SKIP_ENV_VALIDATION=1 boots with missing keys', async () => {
     // WHY: Docker build stages that prerender without secrets rely on this opt-out.
     vi.stubEnv('SKIP_ENV_VALIDATION', '1');
-    const app = await orThrow(defineApp('env-skip-var').use(env({ schema })).boot());
+    const app = await orThrow(defineApp('env-skip-var').infra(env({ schema })).boot());
     await orThrow(app.dispose());
   });
 
@@ -161,10 +161,10 @@ describe('@arki/dot/env validation at boot', () => {
       await writeFile(
         appFile,
         [
-          "import { defineApp } from '@arki/dot/plugin';",
+          "import { defineApp } from '@arki/dot/unit';",
           "import { z } from 'zod';",
           `import { env } from ${envModule};`,
-          "export default defineApp('env-explain').use(env({ schema: { ENV_PLUGIN_T1_A: z.string(), ENV_PLUGIN_T1_B: z.url() } }));",
+          "export default defineApp('env-explain').infra(env({ schema: { ENV_UNIT_T1_A: z.string(), ENV_UNIT_T1_B: z.url() } }));",
           '',
         ].join('\n'),
       );
@@ -176,7 +176,7 @@ describe('@arki/dot/env validation at boot', () => {
       });
       const envelope = JSON.parse(stdout) as { ok: boolean; data: { plugins: { name: string }[] } | null };
       expect({ code, ok: envelope.ok }).toEqual({ code: 0, ok: true });
-      expect(envelope.data?.plugins.map(plugin => plugin.name)).toContain('env');
+      expect(envelope.data?.plugins.map(unit => unit.name)).toContain('env');
     } finally {
       await rm(appDir, { recursive: true, force: true });
     }

@@ -18,7 +18,7 @@ import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin, rename, service } from '@arki/dot/plugin';
+import { infra, rename, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { JobsSource } from './dot.js';
@@ -58,7 +58,7 @@ function track<App extends { stop(): Promise<unknown>; dispose(): Promise<unknow
   return app;
 }
 
-const dbPlugin = () => plugin({ name: 'db', provides: { db: () => db } });
+const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
 
 const placeOrder = j.command(
   'placeOrder',
@@ -91,7 +91,7 @@ const mail = (name: string) =>
 
 /** The chain feature: its mailer is private infra; its projection sits in infra, its effect in entrypoints. */
 function ordersFeature(sent: OrderId[], done?: (id: OrderId) => void) {
-  const mailer = plugin({
+  const mailer = infra({
     name: 'mailer',
     provides: {
       mailer: (): Mailer => ({
@@ -233,7 +233,7 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
   // the mounted features. Its needs must be checked with the worker's own, at boot, not at
   // the first job; here a hand-made source stands in for it.
   const mailerPlugin = (sent: string[], done: () => void) =>
-    plugin({
+    infra({
       name: 'jobs-mailer',
       provides: { mailer: (): Mailer => ({ send: id => (sent.push(id), done()) }) },
     });
@@ -317,7 +317,7 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
   // keys jobs, services and dispatch by effect name, so an instance's names carry `#<instance>`
   // while a plain feature's stay exactly as stored.
   const mailerFor = (label: string, sent: string[]) =>
-    plugin({ name: 'mailer', provides: { mailer: (): Mailer => ({ send: id => void sent.push(`${label}:${id}`) }) } });
+    infra({ name: 'mailer', provides: { mailer: (): Mailer => ({ send: id => void sent.push(`${label}:${id}`) }) } });
 
   function reportsFeature(sent: string[]) {
     const us = mailerFor('us', sent);

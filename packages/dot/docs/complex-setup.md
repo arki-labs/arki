@@ -7,21 +7,25 @@ this page assumes needs, `provides`, tokens and `rename`.
 
 ```text
 boot / start ──────────────────────────────────────────────────────────▶
- env → telemetry → database → reports-db → cache → searchCluster → bus
-     → catalog → checkout → reporting → outboxWorker → http
+ infra        env → telemetry → database → reports-db → cache → searchCluster → bus
+ features     catalog → checkout → reporting
+ entrypoints  outboxWorker → http
 ◀────────────────────────────────────────────────────────── stop / dispose
 ```
 
-Why this order: each line needs only what sits above it. The HTTP server is
+Why this order: each line needs only what sits above it. Infra is what the
+domain talks to, features are the domain, and entrypoints drive it from
+outside. The HTTP server is
 last on the way up, so it takes no request before its services exist. It is
 first on the way down, so it stops taking requests before they go away.
 
 A distilled commerce platform showing everything above working together.
-(The package's stress-test suite boots a 28-plugin version of this and asserts
+(The package's stress-test suite boots a 28-unit version of this and asserts
 exact boot/teardown ordering.)
 
 ```ts
-import { defineApp, lazy, plugin, rename, service, token } from '@arki/dot';
+import { defineApp, entrypoint, infra, lazy, rename, service, token } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
 // ── stand-ins for your own modules ──────────────────────────────────────
@@ -55,13 +59,13 @@ export const ReportsDb = Db.instance('reports');
 export const Cache = token<CacheHandle>()('shop.cache');
 export const Bus = token<MessageBus>()('shop.bus');
 
-// ── infrastructure plugins ───────────────────────────────────────────────
-const env = plugin({
+// ── infrastructure units ───────────────────────────────────────────────
+const env = infra({
   name: 'env',
   provides: { [Env.key]: ({ $config }) => parseEnv($config) },
 });
 
-const telemetry = plugin({
+const telemetry = infra({
   name: 'telemetry',
   needs: { env: Env },
   provides: { metrics: ({ env }) => makeMetrics(env.OTEL_ENDPOINT) },
@@ -72,7 +76,7 @@ const telemetry = plugin({
 });
 
 const database = (url: string) =>
-  plugin({
+  infra({
     name: 'database',
     needs: { metrics: service<Metrics>() },
     provides: { [Db.key]: ({ metrics }) => connectPg(url, { metrics }) },
@@ -81,7 +85,7 @@ const database = (url: string) =>
     },
   });
 
-const cache = plugin({
+const cache = infra({
   name: 'cache',
   needs: { env: Env },
   provides: { [Cache.key]: ({ env }) => connectRedis(env.REDIS_URL) },
@@ -91,7 +95,7 @@ const cache = plugin({
   },
 });
 
-const searchCluster = plugin({
+const searchCluster = infra({
   name: 'search-cluster',
   needs: { env: Env },
   provides: {
@@ -103,40 +107,37 @@ const searchCluster = plugin({
   },
 });
 
-const bus = plugin({
+const bus = infra({
   name: 'bus',
   provides: { [Bus.key]: () => makeInMemoryBus() },
 });
 
-// ── domain plugins ───────────────────────────────────────────────────────
-const catalog = plugin({
-  name: 'catalog',
-  needs: {
+// ── features — the domain ─────────────────────────────────────────────
+const catalog = defineFeature('catalog')
+  .needs({
     db: Db,
     cache: Cache,
     search: service.lazy<SearchClient>(), // eager or lazy provider — same code
-  },
-  provides: {
+  })
+  .provides({
     catalog: ({ db, cache, search }) => makeCatalog({ db, cache, search }),
-  },
-});
+  })
+  .entrypoints();
 
-const checkout = plugin({
-  name: 'checkout',
-  needs: { db: Db, bus: Bus, catalog: service<Catalog>() },
-  provides: {
+const checkout = defineFeature('checkout')
+  .needs({ db: Db, bus: Bus, catalog: service<Catalog>() })
+  .provides({
     checkout: ({ db, bus, catalog }) => makeCheckout({ db, bus, catalog }),
-  },
-});
+  })
+  .entrypoints();
 
-const reporting = plugin({
-  name: 'reporting',
-  needs: { replica: ReportsDb, catalog: service<Catalog>() },
-  provides: { reporting: ({ replica, catalog }) => makeReporting(replica, catalog) },
-});
+const reporting = defineFeature('reporting')
+  .needs({ replica: ReportsDb, catalog: service<Catalog>() })
+  .provides({ reporting: ({ replica, catalog }) => makeReporting(replica, catalog) })
+  .entrypoints();
 
-// ── process plugins — real work happens in start/stop ───────────────────
-const outboxWorker = plugin({
+// ── entrypoints — real work happens in start/stop ─────────────────────
+const outboxWorker = entrypoint({
   name: 'outbox-worker',
   needs: { db: Db, bus: Bus },
   provides: { outbox: ({ db, bus }) => makeOutbox(db, bus) },
@@ -150,7 +151,7 @@ const outboxWorker = plugin({
   }, // stop processing, keep resources
 });
 
-const http = plugin({
+const http = entrypoint({
   name: 'http',
   needs: {
     env: Env,
@@ -173,18 +174,17 @@ const http = plugin({
 
 // ── composition — the order IS the architecture ──────────────────────
 const app = await defineApp('shop', { config: process.env })
-  .use(env)
-  .use(telemetry)
-  .use(database(PRIMARY_URL))
-  .use(rename(database(REPLICA_URL), { 'shop.db': ReportsDb.key }, 'reports-db'))
-  .use(cache)
-  .use(searchCluster)
-  .use(bus)
-  .use(catalog)
-  .use(checkout)
-  .use(reporting)
-  .use(outboxWorker)
-  .use(http)
+  .infra(
+    env,
+    telemetry,
+    database(PRIMARY_URL),
+    rename(database(REPLICA_URL), { 'shop.db': ReportsDb.key }, 'reports-db'),
+    cache,
+    searchCluster,
+    bus,
+  )
+  .features([catalog, checkout, reporting])
+  .entrypoints(outboxWorker, http)
   .start();
 if (isFailure(app)) throw new Error(app.code);
 
@@ -197,11 +197,11 @@ process.on('SIGTERM', () => void app.dispose());
 
 What the type checker is holding for you in that chain:
 
-- move `.use(catalog)` above `.use(cache)` → compile error at that line;
-- delete `.use(bus)` → compile errors at `checkout` and `outboxWorker`;
+- list `checkout` before `catalog` → compile error at `.features(...)`;
+- delete `bus` → compile errors at `.features(...)` (for `checkout`) and `.entrypoints(...)` (for `outboxWorker`);
 - mount the second `database(...)` without `rename` → collision error;
 - change `makeCatalog` to return something that isn't a `Catalog` →
-  every consumer's `.use()` flags the mismatch.
+  every consumer's step flags the mismatch.
 
 Concurrent lifecycle calls are safe: transitions are serialized on one
 queue, same-phase calls coalesce onto one in-flight promise, and a
@@ -210,7 +210,7 @@ queue, same-phase calls coalesce onto one in-flight promise, and a
 
 ## Where the adapters live
 
-`@arki/dot` is intentionally small: it defines the contracts (plugin shape,
+`@arki/dot` is intentionally small: it defines the contracts (unit shape,
 lifecycle hooks, manifest schema, diagnostics envelope) and runs them. Adapters
 that bridge databases, queues, auth providers, and HTTP routers live in their
 own packages and consume `@arki/dot` as a peer dependency:

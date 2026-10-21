@@ -6,9 +6,9 @@
  * single logger service is enough to exercise the 5-array manifest contract.
  */
 
-import { defineApp, plugin } from '../../../index.js';
+import { defineApp, infra } from '../../../index.js';
 
-const logger = plugin({
+const logger = infra({
   name: 'logger',
   configure: ctx => {
     ctx.registerService('logger', 'logger');
@@ -24,4 +24,4 @@ const logger = plugin({
   },
 });
 
-export default defineApp('sample').use(logger);
+export default defineApp('sample').infra(logger);

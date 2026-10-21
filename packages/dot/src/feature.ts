@@ -22,12 +22,12 @@
  * The app mounts features in the middle phase of the hexagon:
  *
  *   defineApp(name)
- *     .use(...)        driven adapters: what features need (db, kv, queue client)
+ *     .infra(...)       what features need (db, kv, queue client)
  *     .features([...]) the domain core
- *     .serve(...)      driving adapters: what calls the features (http, workers)
+ *     .entrypoints(...) what calls the features (http, workers)
  *
- * `.features()` turns each feature into a plugin; driving adapters are
- * `driver(...)` values that `.serve()` binds to the mounted feature list.
+ * `.features()` turns each feature into a unit; driving adapters are
+ * `entrypoint(...)` values that `.entrypoints()` binds to the mounted feature list.
  */
 import type { ScopePlan } from '@arki/async';
 import type { Failure } from '@arki/failure';
@@ -36,7 +36,7 @@ import type { AnyDefinedFeature } from './define-feature.js';
 import type {
   ActionSource,
   AnyHandle,
-  AnyPlugin,
+  AnyUnit,
   BootGuard,
   CtxOf,
   EmptyHookReturns,
@@ -49,20 +49,19 @@ import type {
   NeedsShape,
   NoReservedKeys,
   PhaseHooks,
-  Plugin,
-  PluginOwnership,
-  PluginPhaseFailures,
-  PluginPhases,
-  PluginRuntime,
+  Unit,
+  UnitBinder,
+  UnitPhaseFailures,
+  UnitRuntime,
   ProvidedValues,
   ProvidesFactories,
   Service,
   ServiceRecord,
   Token,
   WireNeeds,
-} from './plugin-contract.js';
+} from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
-import { createPluginRuntime, handleOf, isLazy, isLazyWitness, lazyOf, token } from './plugin-contract.js';
+import { createUnitRuntime, handleOf, isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
 
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 export type { FeatureErrorCode } from './feature-error.js';
@@ -111,7 +110,7 @@ export type {
   NeedsStage,
   ProvidesStage,
   QualifiedInfra,
-  QualifiedPlugin,
+  QualifiedUnit,
   RebindNeeds,
   RebindOf,
   ReservedAlias,
@@ -129,7 +128,7 @@ export type {
   UsecasesStage,
 } from './define-feature.js';
 
-export type { Handle, Handles, LazyHandle, Provided, ProvidesFactories } from './plugin-contract.js';
+export type { Handle, Handles, LazyHandle, Provided, ProvidesFactories } from './unit-contract.js';
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -178,7 +177,7 @@ export type Feature<
   TReturns extends HookReturns = EmptyHookReturns,
 > = PhaseHooks<CtxOf<TNeeds> & ProvidedValues<TProvides> & KernelCtx, TReturns> &
   FactoryContract<ProvidedValues<TProvides>> & {
-    readonly runtime: PluginRuntime<never, never>;
+    readonly runtime: UnitRuntime<never, never>;
     readonly name: TName;
     /** Compile-time fragments, folded by `composeRouter` / `composeRepos`. */
     readonly router: TRouter;
@@ -186,7 +185,7 @@ export type Feature<
     /** Boot-time slice contracts + static manifest actions. */
     readonly use: TUse;
     readonly actions: readonly ActionSource[];
-    /** Runtime escape hatch — becomes the plugin lifecycle in `.features()`. */
+    /** Runtime escape hatch — becomes the unit lifecycle in `.features()`. */
     readonly needs: TNeeds;
     /** One factory per capability, run in key order when the feature boots. */
     readonly factories: ProvidesFactories<TNeeds, TProvides>;
@@ -217,7 +216,7 @@ export type AnyFeature = {
   readonly needs: NeedsShape;
   readonly factories: Readonly<Record<string, (services: never) => unknown>>;
   readonly boot?: (services: never) => unknown;
-  readonly runtime: PluginRuntime<Failure, Failure>;
+  readonly runtime: UnitRuntime<Failure, Failure>;
   readonly provides: Readonly<Record<string, AnyHandle>>;
 } & PhaseHooks<never, HookReturns>;
 
@@ -240,7 +239,7 @@ export function entrypointsOf(f: MountedFeature): readonly AnyFeatureSlice[] {
 
 /**
  * Declare a feature. Pure data capture — nothing executes here; the app
- * builder's `.features()` turns it into a plugin.
+ * builder's `.features()` turns it into a unit.
  */
 type FeatureConfig<
   TNeeds extends NeedsShape,
@@ -365,7 +364,7 @@ export function feature<
   for (const key of Object.keys(factories)) {
     handles[key] = handleOf(key, name);
   }
-  const runtime = createPluginRuntime();
+  const runtime = createUnitRuntime();
   return {
     runtime,
     name,
@@ -523,30 +522,30 @@ export type ProvidedOf<F extends HasProvides> = F extends HasProvides
   : never;
 
 /**
- * The plugin a feature becomes inside `.features()`. `WireNeeds` unwraps
+ * The unit a feature becomes inside `.features()`. `WireNeeds` unwraps
  * the witness record to value types — the builder guard compares
- * availability against values, exactly as `plugin()` returns.
+ * availability against values, exactly as `infra()` returns.
  */
 type FeatureOwnership<F extends AnyFeature> =
-  F['runtime'] extends PluginRuntime<infer Open, infer Close> ? { readonly open: Open; readonly close: Close } : never;
+  F['runtime'] extends UnitRuntime<infer Open, infer Close> ? { readonly open: Open; readonly close: Close } : never;
 
-export type PluginOf<F extends AnyFeature> = Omit<
-  Plugin<
+export type UnitOf<F extends AnyFeature> = Omit<
+  Unit<
     WireNeeds<F['needs']>,
     ProvidedOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>,
     NeedsShape,
     string,
     FeatureOwnership<F>,
-    PluginPhaseFailures<{ readonly hooks: F }>
+    UnitPhaseFailures<{ readonly hooks: F }>
   >,
   'runtime' | 'hooks' | 'factories'
 > &
   Pick<F, 'runtime' | 'factories'> &
   FactoryContractOf<F> & { readonly hooks: Pick<F, 'configure' | 'boot' | 'start' | 'stop' | 'dispose'> };
 
-/** Tuple map from features to the plugins `.features()` mounts. */
-export type PluginsOf<T extends readonly AnyFeature[]> = {
-  readonly [I in keyof T]: T[I] extends AnyFeature ? PluginOf<T[I]> : never;
+/** Tuple map from features to the units `.features()` mounts. */
+export type MountedUnitsOf<T extends readonly AnyFeature[]> = {
+  readonly [I in keyof T]: T[I] extends AnyFeature ? UnitOf<T[I]> : never;
 };
 
 /**
@@ -559,12 +558,12 @@ export function tokenOf<F extends AnyFeature>(f: F): FeatureTokenOf<F> {
 
 /**
  * Compile one feature into the kernel unit the app mounts. Called by
- * `.features()`. The feature's factories run as the plugin's factories, and
+ * `.features()`. The feature's factories run as the unit's factories, and
  * its slice record is one more provides entry under `feature.<name>`, so
  * `boot` retains its private ownership plan. The feature's own handles pass through
  * unchanged: `billing.provides.x === plug(billing).provides.x`.
  */
-export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
+export function plug<F extends AnyFeature>(f: F): UnitOf<F> {
   const sliceKey = tokenOf(f).key;
   const actions: ActionSource[] = [
     ...f.actions,
@@ -590,8 +589,8 @@ export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
       stop: f.stop,
       dispose: f.dispose,
     },
-    // Dynamic slice keys share the same handle-record seam as plugin().
-    provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } as PluginOf<F>['provides'],
+    // Dynamic slice keys share the same handle-record seam as infra().
+    provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } as UnitOf<F>['provides'],
     runtime: f.runtime,
   };
 }
@@ -608,13 +607,13 @@ export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
  */
 export type ServicesBag = Readonly<Record<string, unknown>>;
 
-/** Anything with static handles — a feature or a plugin. */
+/** Anything with static handles — a feature or a unit. */
 export type HasProvides = { readonly provides: Readonly<Record<string, AnyHandle>> };
 
 /** Every handle the units in the tuple provide, merged into one record. */
 export type HandlesIn<T extends readonly HasProvides[]> = UnionToIntersection<T[number]['provides']>;
 
-/** Every service value the units (features or plugins) in the tuple provide, keyed by wire key. */
+/** Every service value the units (features or units) in the tuple provide, keyed by wire key. */
 export type ServicesOf<T extends readonly HasProvides[]> = UnionToIntersection<ProvidedOf<T[number]>>;
 
 /** The entries of a needs shape that are capability handles (driven services like `db` drop out). */
@@ -629,7 +628,7 @@ function isHandle(witness: object): witness is AnyHandle {
 }
 
 /**
- * Every handle the features (and plugins) provide, merged — spread it into
+ * Every handle the features (and units) provide, merged — spread it into
  * a gateway feature's `needs` and the kernel hands it every capability:
  * `providesOf([database, cache, ...features])`. The builder guard then
  * proves the gateway is mounted after every provider.
@@ -651,7 +650,7 @@ function missingCapability(alias: string, handle: AnyHandle, where: string, reme
 }
 
 /**
- * Read every capability the units (features, `defineFeature` features or plugins) provide out of a hook context whose
+ * Read every capability the units (features, `defineFeature` features or units) provide out of a hook context whose
  * `needs` spread {@link providesOf} — the bag a gateway passes to its
  * request context.
  */
@@ -679,7 +678,7 @@ export function servicesOf<const T extends readonly HasProvides[]>(ctx: object, 
 /**
  * Narrow a request context's services bag with a feature's own `needs`:
  * each capability handle resolves to its value under the local alias.
- * Driven services (`db`) are not in the bag and drop out of the result.
+ * Infra services (`db`) are not in the bag and drop out of the result.
  *
  * @throws {FeatureError} `ARKI_DOT_E026` when a handle's key is not in the bag.
  */
@@ -704,65 +703,13 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
 }
 
 /* ------------------------------------------------------------------ */
-/* Driving adapters                                                    */
+/* Units built from the mounted features                               */
 /* ------------------------------------------------------------------ */
 
-/**
- * A driving adapter: something that calls INTO the features (an HTTP
- * server, a job worker, a scheduler). `.serve()` binds it to the features
- * the app mounted, so app code never lists them twice.
- *
- * `TNeeds` / `TProvides` are the adapter's own wiring, checked by the
- * builder guard like any plugin. `.serve()` adds each feature's slice
- * token to the bound plugin's runtime needs — always satisfied, because
- * `.serve()` only exists after `.features()` — and the adapter reads the
- * records with {@link sliceOf}.
- */
-export type Driver<
-  TNeeds extends ServiceRecord = ServiceRecord,
-  TProvides extends ServiceRecord = ServiceRecord,
-  TOwnership extends PluginOwnership = PluginOwnership,
-  TPhases extends PluginPhases = PluginPhases,
-> = {
-  readonly side: 'driving';
-  readonly bind: (
-    features: readonly MountedFeature[],
-  ) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership, TPhases>;
-};
-
-/** Author a driving adapter. `bind` receives the app's mounted features, in order. */
-export function driver<const Unit extends AnyPlugin>(
-  bind: (features: readonly MountedFeature[]) => Unit,
-): { readonly side: 'driving'; readonly bind: typeof bind } {
-  return { side: 'driving', bind };
-}
-
-/**
- * A driven adapter that reads the features' static declarations — e.g. the
- * journal composing every feature's `journalHandlers` slice so features can
- * write through it. `.use()` binds it when the app is built, to the final
- * feature list, and it boots BEFORE the features: it sees only their
- * declarations ({@link entrypointsOf}, and a chain feature's `plugins()`),
- * never slice records — {@link sliceOf} throws there.
- */
-export type Driven<
-  TNeeds extends ServiceRecord = ServiceRecord,
-  TProvides extends ServiceRecord = ServiceRecord,
-  TOwnership extends PluginOwnership = PluginOwnership,
-  TPhases extends PluginPhases = PluginPhases,
-> = {
-  readonly side: 'driven';
-  readonly bind: (
-    features: readonly MountedFeature[],
-  ) => Plugin<TNeeds, TProvides, NeedsShape, string, TOwnership, TPhases>;
-};
-
-/** Author a driven adapter that reads the features' declarations. */
-export function driven<const Unit extends AnyPlugin>(
-  bind: (features: readonly MountedFeature[]) => Unit,
-): { readonly side: 'driven'; readonly bind: typeof bind } {
-  return { side: 'driven', bind };
-}
+// `infra.fromFeatures` / `entrypoint.fromFeatures` replace `driven` / `driver`.
+// They live with the unit constructors; this entry re-exports them for adapters.
+export { entrypoint, infra, unit } from './unit-contract.js';
+export type { EntrypointBinder, InfraBinder, UnitBinder } from './unit-contract.js';
 
 /** Where a feature publishes its slice record — the same key for both feature forms. */
 function sliceKeyOf(f: MountedFeature): `feature.${string}` {
@@ -777,10 +724,10 @@ function sliceTokenOf(f: MountedFeature): Token<Readonly<Record<string, unknown>
 /**
  * Bind a driver and add the features' slice tokens to its runtime needs,
  * so the kernel hands it every slice record and `dot explain` draws the
- * feature → driver edges. Called by `.serve()`.
+ * feature → driver edges. Called by `.entrypoints()`.
  */
-export function bindDriver<const Unit extends AnyPlugin>(
-  adapter: ReturnType<typeof driver<Unit>>,
+export function bindEntrypoint<const Unit extends AnyUnit>(
+  adapter: UnitBinder<'infra' | 'entrypoint', Unit>,
   features: readonly MountedFeature[],
 ) {
   const bound = adapter.bind(features);
@@ -800,7 +747,7 @@ export function sliceOf(ctx: object, f: MountedFeature): Readonly<Record<string,
     throw new FeatureError({
       code: FEATURE_ERROR_CODES.missingSlices,
       message: `[feature] the slice record of feature "${f.name}" is not in this hook's context.`,
-      remediation: 'Mount the adapter with `.serve(adapter)` after `.features([...])`, so it is bound to the features.',
+      remediation: 'Mount the adapter with `.entrypoints(adapter)` after `.features([...])`, so it is bound to the features.',
     });
   }
   return record as Readonly<Record<string, unknown>>;

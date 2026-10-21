@@ -19,7 +19,7 @@ import type {
   DiagnosticIssue,
   DotDiagnosticsSnapshot,
   LifecycleDiagnostic,
-  PluginDiagnostic,
+  UnitDiagnostic,
   ServiceDiagnostic,
 } from '../diagnostics.js';
 import type { DotLifecycleEvent, DotLifecycleObserver } from '../lifecycle-observer.js';
@@ -30,29 +30,29 @@ import type {
   DotAppManifest,
   JsonObject,
   LifecycleManifest,
-  PluginManifest,
+  UnitManifest,
   ProjectionManifest,
   ServiceManifest,
 } from '../manifest.js';
 import type {
-  AnyPlugin,
+  AnyUnit,
   DotConfigureContext,
   DotLoggingHandle,
   EmptyPhases,
   Lazy,
-  PluginBootOutcome,
-  PluginCloseOutcome,
-  PluginConstruction,
-  PluginPhases,
-  RuntimePlugin,
+  UnitBootOutcome,
+  UnitCloseOutcome,
+  UnitConstruction,
+  UnitPhases,
+  RuntimeUnit,
   ServiceRecord,
-} from '../plugin-contract.js';
+} from '../unit-contract.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
-import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
+import { isLazy, isLazyWitness, lazyOf } from '../unit-contract.js';
 import { telemetryFor } from '../telemetry.js';
 import { nowMs } from './now.js';
-import { withPhaseSpan, withPluginHookSpan } from './otel.js';
+import { withPhaseSpan, withUnitHookSpan } from './otel.js';
 
 const kernelLog = getLogger('arki:dot:kernel');
 
@@ -74,9 +74,9 @@ const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 function failed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
 }
-type CloseMember<Close extends Failure> = Exclude<PluginCloseOutcome<Close>, void>;
-type DisposeMember<Close extends Failure, Phases extends PluginPhases> = CloseMember<Close> | Phases['dispose'];
-type CleanupMember<Close extends Failure, Phases extends PluginPhases> = DisposeMember<Close, Phases> | Phases['stop'];
+type CloseMember<Close extends Failure> = Exclude<UnitCloseOutcome<Close>, void>;
+type DisposeMember<Close extends Failure, Phases extends UnitPhases> = CloseMember<Close> | Phases['dispose'];
+type CleanupMember<Close extends Failure, Phases extends UnitPhases> = DisposeMember<Close, Phases> | Phases['stop'];
 function closeOutcome<Close extends Failure>(failures: readonly Close[]) {
   if (failures.length === 1) return failures[0];
   if (failures.length > 1) return scopeAggregate([], failures);
@@ -88,29 +88,29 @@ function startupOutcome<Primary extends Failure, Cleanup extends Failure>(
 ) {
   return cleanup.length === 0 ? primary : scopeAggregate([primary], cleanup);
 }
-export type DotConfigureOutcome<Phases extends PluginPhases = EmptyPhases> =
+export type DotConfigureOutcome<Phases extends UnitPhases = EmptyPhases> =
   void | Phases['configure'] | ReturnType<typeof UnexpectedDefect>;
-export type DotStopOutcome<Phases extends PluginPhases = EmptyPhases> = ReturnType<
+export type DotStopOutcome<Phases extends UnitPhases = EmptyPhases> = ReturnType<
   typeof closeOutcome<Phases['stop'] | SupervisorFailure>
 >;
-export type DotDisposeOutcome<Close extends Failure, Phases extends PluginPhases = EmptyPhases> = ReturnType<
+export type DotDisposeOutcome<Close extends Failure, Phases extends UnitPhases = EmptyPhases> = ReturnType<
   typeof closeOutcome<CleanupMember<Close, Phases>>
 >;
-export type DotBootOutcome<Open extends Failure, Close extends Failure, Phases extends PluginPhases = EmptyPhases> =
+export type DotBootOutcome<Open extends Failure, Close extends Failure, Phases extends UnitPhases = EmptyPhases> =
   | void
-  | Exclude<PluginBootOutcome<Open, Close>, void>
-  | ScopeAggregate<Exclude<PluginBootOutcome<Open, Close>, void>, DisposeMember<Close, Phases>>;
-export type DotStartedOutcome<Close extends Failure, Phases extends PluginPhases = EmptyPhases> =
+  | Exclude<UnitBootOutcome<Open, Close>, void>
+  | ScopeAggregate<Exclude<UnitBootOutcome<Open, Close>, void>, DisposeMember<Close, Phases>>;
+export type DotStartedOutcome<Close extends Failure, Phases extends UnitPhases = EmptyPhases> =
   | void
   | Phases['start']
   | SupervisorFailure
   | ScopeAggregate<Phases['start'] | SupervisorFailure, CleanupMember<Close, Phases>>;
-export type DotStartOutcome<Open extends Failure, Close extends Failure, Phases extends PluginPhases = EmptyPhases> =
+export type DotStartOutcome<Open extends Failure, Close extends Failure, Phases extends UnitPhases = EmptyPhases> =
   DotBootOutcome<Open, Close, Phases> | DotStartedOutcome<Close, Phases>;
 
 function constructed<Open extends Failure, Close extends Failure>(
-  value: PluginConstruction<Close> | Exclude<PluginBootOutcome<Open, Close>, void>,
-): value is PluginConstruction<Close> {
+  value: UnitConstruction<Close> | Exclude<UnitBootOutcome<Open, Close>, void>,
+): value is UnitConstruction<Close> {
   return !isFailure<unknown>(value);
 }
 function loggingHandle<Open extends Failure, Close extends undefined | Failure>(
@@ -118,10 +118,10 @@ function loggingHandle<Open extends Failure, Close extends undefined | Failure>(
 ): value is DotLoggingHandle<Close> {
   return !isFailure<unknown>(value);
 }
-/** Per-plugin mutable bookkeeping. */
-type PluginRecord<Open extends Failure, Close extends Failure, Phases extends PluginPhases> = {
-  plugin: RuntimePlugin<Open, Close, Phases>;
-  lifetime?: PluginConstruction<Close>;
+/** Per-unit mutable bookkeeping. */
+type UnitRecord<Open extends Failure, Close extends Failure, Phases extends UnitPhases> = {
+  plugin: RuntimeUnit<Open, Close, Phases>;
+  lifetime?: UnitConstruction<Close>;
   order: number;
   actions: ActionManifest[];
   projections: ProjectionManifest[];
@@ -164,11 +164,11 @@ function makeIssue(args: {
 export type DotAppInternalConfig<
   Open extends Failure,
   Close extends Failure,
-  Phases extends PluginPhases = EmptyPhases,
+  Phases extends UnitPhases = EmptyPhases,
 > = {
   appName: string;
   appVersion?: string;
-  plugins: readonly RuntimePlugin<Open, Close, Phases>[];
+  plugins: readonly RuntimeUnit<Open, Close, Phases>[];
   /** Runtime config bag passed to every `boot` hook. */
   config?: Readonly<Record<string, unknown>>;
   /**
@@ -189,15 +189,15 @@ export type DotAppInternalConfig<
 export class DotAppImpl<
   TOpen extends Failure = never,
   TClose extends Failure = never,
-  TPhases extends PluginPhases = EmptyPhases,
+  TPhases extends UnitPhases = EmptyPhases,
 > {
   readonly #appName: string;
   readonly #appVersion: string | undefined;
   readonly #config: Readonly<Record<string, unknown>>;
 
-  /** Plugins in declaration order — v2 boot order IS declaration order. */
-  readonly #ordered: readonly RuntimePlugin<TOpen, TClose, TPhases>[];
-  readonly #records: Map<string, PluginRecord<TOpen, TClose, TPhases>>;
+  /** Units in declaration order — v2 boot order IS declaration order. */
+  readonly #ordered: readonly RuntimeUnit<TOpen, TClose, TPhases>[];
+  readonly #records: Map<string, UnitRecord<TOpen, TClose, TPhases>>;
 
   /** Macro-state of the app. */
   #state: DotLifecycleState = 'defined';
@@ -210,10 +210,10 @@ export class DotAppImpl<
   /** Manifest finalised after `configure`. */
   #manifest: DotAppManifest;
 
-  /** Wire-keyed services map — populated as plugins boot. */
+  /** Wire-keyed services map — populated as units boot. */
   readonly #serviceMap = new Map<string, unknown>();
 
-  /** Which plugin provided each wire key — feeds dependency edges + collisions. */
+  /** Which unit provided each wire key — feeds dependency edges + collisions. */
   readonly #providerByWireKey = new Map<string, string>();
 
   /** Dependency edges observed during boot (consumer → provider). */
@@ -251,15 +251,15 @@ export class DotAppImpl<
    * Structured lifecycle logger. One per app instance; named so consumers
    * can elevate it to DEBUG via `DEBUG=arki:dot:lifecycle` without
    * touching unrelated namespaces. Every line carries the app name plus
-   * any phase/plugin attributes from the call site. The span helpers
+   * any phase/unit attributes from the call site. The span helpers
    * (see `./otel.ts`) thread the active span's `traceId`+`spanId` onto
    * forked instances of this logger, so every log record is groupable
    * with its trace in any OTel-compatible backend.
    */
   readonly #logger: Logger;
 
-  /** The plugin that fills the logging slot, found when the app is assembled. */
-  readonly #loggingPlugin: RuntimePlugin<TOpen, TClose, TPhases> | undefined;
+  /** The unit that fills the logging slot, found when the app is assembled. */
+  readonly #loggingUnit: RuntimeUnit<TOpen, TClose, TPhases> | undefined;
   /** The active logging handle, between activation and close. */
   #logging: DotLoggingHandle<undefined | TClose> | undefined;
   /** Set once logging is closed; later closes return the same promise. */
@@ -287,57 +287,57 @@ export class DotAppImpl<
     this.#ordered = [...config.plugins];
 
     // The logging slot is discovered without I/O and activated only during boot.
-    const loggingPlugins = this.#ordered.filter(plugin => plugin.logging !== undefined);
-    if (loggingPlugins.length > 1) {
-      const names = loggingPlugins.map(plugin => `"${plugin.name}"`).join(', ');
+    const loggingUnits = this.#ordered.filter(unit => unit.logging !== undefined);
+    if (loggingUnits.length > 1) {
+      const names = loggingUnits.map(unit => `"${unit.name}"`).join(', ');
       throw new DotLifecycleError({
         code: DotLifecycleErrorCode.DuplicateLogging,
         phase: 'configure',
-        plugin: loggingPlugins[1]?.name,
-        message: `Plugins ${names} all fill the logging slot — an app has at most one logging plugin. Keep one.`,
+        plugin: loggingUnits[1]?.name,
+        message: `Units ${names} all fill the logging slot — an app has at most one logging unit. Keep one.`,
       });
     }
-    this.#loggingPlugin = loggingPlugins[0];
+    this.#loggingUnit = loggingUnits[0];
 
     this.#records = new Map();
-    for (const [order, plugin] of this.#ordered.entries()) {
-      if (this.#records.has(plugin.name)) {
+    for (const [order, unit] of this.#ordered.entries()) {
+      if (this.#records.has(unit.name)) {
         throw new DotLifecycleError({
-          code: DotLifecycleErrorCode.DuplicatePlugin,
+          code: DotLifecycleErrorCode.DuplicateUnit,
           phase: 'configure',
-          plugin: plugin.name,
-          message: `Plugin "${plugin.name}" is registered twice`,
+          plugin: unit.name,
+          message: `Unit "${unit.name}" is registered twice`,
         });
       }
-      // `$` is the kernel context namespace ($app/$plugin/$config). The plugin()
+      // `$` is the kernel context namespace ($app/$unit/$config). The infra()
       // constraint bans these at compile time; this is the runtime backstop
-      // for erased plugins and rename() targets, which types cannot see.
-      for (const alias of Object.keys(plugin.needs)) {
+      // for erased units and rename() targets, which types cannot see.
+      for (const alias of Object.keys(unit.needs)) {
         if (alias.startsWith('$')) {
           throw new DotLifecycleError({
             code: DotLifecycleErrorCode.ReservedServiceKey,
             phase: 'configure',
-            plugin: plugin.name,
+            plugin: unit.name,
             message:
-              `Plugin "${plugin.name}" declares needs alias "${alias}" — the "$" prefix is reserved ` +
-              `for kernel context keys ($app, $plugin, $config). Rename the alias.`,
+              `Unit "${unit.name}" declares needs alias "${alias}" — the "$" prefix is reserved ` +
+              `for kernel context keys ($app, $unit, $config). Rename the alias.`,
           });
         }
       }
-      for (const [localKey, wireKey] of Object.entries(plugin.renames)) {
+      for (const [localKey, wireKey] of Object.entries(unit.renames)) {
         if (wireKey.startsWith('$')) {
           throw new DotLifecycleError({
             code: DotLifecycleErrorCode.ReservedServiceKey,
             phase: 'configure',
-            plugin: plugin.name,
+            plugin: unit.name,
             message:
-              `Plugin "${plugin.name}" renames "${localKey}" to "${wireKey}" — the "$" prefix is ` +
-              `reserved for kernel context keys ($app, $plugin, $config). Pick a different wire key.`,
+              `Unit "${unit.name}" renames "${localKey}" to "${wireKey}" — the "$" prefix is ` +
+              `reserved for kernel context keys ($app, $unit, $config). Pick a different wire key.`,
           });
         }
       }
-      this.#records.set(plugin.name, {
-        plugin,
+      this.#records.set(unit.name, {
+        plugin: unit,
         order,
         actions: [],
         projections: [],
@@ -359,16 +359,16 @@ export class DotAppImpl<
   }
 
   /**
-   * Walk every plugin's needs against the static `provides` handles of
-   * every plugin (features and adapters alike). A provider mounted later is
+   * Walk every unit's needs against the static `provides` handles of
+   * every unit (features and adapters alike). A provider mounted later is
    * a ring when its own needs lead back to the consumer (E019), otherwise an
    * order error (E020). Satisfied needs become `dot explain`'s capability
    * edges and the providers' manifest `provides`, without booting. Only
-   * needs no plugin declares (erased graphs, dynamic bundle tokens) are
+   * needs no unit declares (erased graphs, dynamic bundle tokens) are
    * left to E012 at boot.
    */
   #checkStaticCapabilities(): void {
-    const providerByKey = new Map<string, PluginRecord<TOpen, TClose, TPhases>>();
+    const providerByKey = new Map<string, UnitRecord<TOpen, TClose, TPhases>>();
     for (const record of this.#records.values()) {
       // The handles are wire-keyed already: rename() rebuilds them on the new keys.
       for (const wireKey of Object.keys(record.plugin.provides)) {
@@ -379,8 +379,8 @@ export class DotAppImpl<
     if (providerByKey.size === 0) return;
 
     const staticNeeds = (
-      record: PluginRecord<TOpen, TClose, TPhases>,
-    ): { key: string; provider: PluginRecord<TOpen, TClose, TPhases> }[] =>
+      record: UnitRecord<TOpen, TClose, TPhases>,
+    ): { key: string; provider: UnitRecord<TOpen, TClose, TPhases> }[] =>
       Object.entries(record.plugin.needs).flatMap(([alias, witness]) => {
         const key = wireKeyOf(witness, alias);
         const provider = providerByKey.get(key);
@@ -389,8 +389,8 @@ export class DotAppImpl<
 
     /** The ring `start needs k1 ← p1 needs k2 ← … ← start`, or undefined when `from` never leads back. */
     const ringBack = (
-      start: PluginRecord<TOpen, TClose, TPhases>,
-      from: PluginRecord<TOpen, TClose, TPhases>,
+      start: UnitRecord<TOpen, TClose, TPhases>,
+      from: UnitRecord<TOpen, TClose, TPhases>,
       seen: Set<string>,
     ): string[] | undefined => {
       if (from === start) return [start.plugin.name];
@@ -404,7 +404,7 @@ export class DotAppImpl<
     };
 
     for (const record of this.#records.values()) {
-      const label = record.plugin.role === 'feature' ? 'Feature' : 'Plugin';
+      const label = record.plugin.role === 'feature' ? 'Feature' : 'Unit';
       for (const { key, provider } of staticNeeds(record)) {
         if (provider.order < record.order) {
           if (
@@ -438,7 +438,7 @@ export class DotAppImpl<
             `"${record.plugin.name}" is ${(record.order + 1).toString()}).\n` +
             (provider.plugin.role === 'feature'
               ? `Move "${provider.plugin.name}" before "${record.plugin.name}" in .features([...]).`
-              : `Mount "${provider.plugin.name}" with .use() before "${record.plugin.name}".`),
+              : `Mount "${provider.plugin.name}" with .infra() before "${record.plugin.name}".`),
         });
       }
     }
@@ -498,16 +498,16 @@ export class DotAppImpl<
    */
   #emitHook(
     phase: DotLifecycleHook,
-    plugin: string,
+    unit: string,
     order: number,
     status: 'starting' | 'completed' | 'failed',
     opts?: { durationMs?: number; error?: unknown },
   ): void {
     if (this.#observers.size === 0) return;
     const event = {
-      kind: 'plugin-hook' as const,
+      kind: 'unit-hook' as const,
       phase,
-      plugin,
+      plugin: unit,
       order,
       status,
       appName: this.#appName,
@@ -518,7 +518,7 @@ export class DotAppImpl<
     this.#emit(event);
   }
 
-  #registerAction(record: PluginRecord<TOpen, TClose, TPhases>, action: Omit<ActionManifest, 'plugin'>): void {
+  #registerAction(record: UnitRecord<TOpen, TClose, TPhases>, action: Omit<ActionManifest, 'plugin'>): void {
     let meta: Readonly<JsonObject> | undefined;
     if (action.meta !== undefined) {
       try {
@@ -562,7 +562,7 @@ export class DotAppImpl<
         remediation:
           'Action ids must be unique within a binding. Rename one action or move one of them to a different binding.',
         docsAnchor: 'duplicate-action',
-        metadata: { binding: stamped.binding, id: stamped.id, firstPlugin: duplicate.plugin },
+        metadata: { binding: stamped.binding, id: stamped.id, firstUnit: duplicate.plugin },
       });
       record.issues.push(issue);
       break;
@@ -573,7 +573,7 @@ export class DotAppImpl<
 
   /** Replace an action with a copy carrying the new summary, so manifests taken earlier keep the old one. */
   #describeAction(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     phase: DotLifecycleHook,
     actionId: string,
     patch: { readonly summary: string },
@@ -592,19 +592,19 @@ export class DotAppImpl<
       code: DotLifecycleErrorCode.ActionNotAmendable,
       phase,
       plugin: record.plugin.name,
-      message: `Plugin "${record.plugin.name}" cannot describe action "${actionId}": it is not one of its own actions, nor in a binding it registered a projection for. Call $describeAction only for actions the plugin declared or whose binding it owns.`,
+      message: `Unit "${record.plugin.name}" cannot describe action "${actionId}": it is not one of its own actions, nor in a binding it registered a projection for. Call $describeAction only for actions the unit declared or whose binding it owns.`,
     });
   }
 
   #registerProjection(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     projection: Omit<ProjectionManifest, 'plugin'>,
   ): void {
     record.projections.push({ ...projection, plugin: record.plugin.name });
   }
 
   #registerRouteShim(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     route: Parameters<DotConfigureContext['registerRoute']>[0],
   ): void {
     const meta: JsonObject = {};
@@ -629,7 +629,7 @@ export class DotAppImpl<
     });
   }
 
-  #actionFromSource(source: AnyPlugin['actions'][number]): Omit<ActionManifest, 'plugin'> {
+  #actionFromSource(source: AnyUnit['actions'][number]): Omit<ActionManifest, 'plugin'> {
     if (hasToDotAction(source)) {
       return source.toDotAction();
     }
@@ -754,13 +754,13 @@ export class DotAppImpl<
       return this.#reuseDefect('configure');
     }
 
-    kernelLog.debug('[{dot.app.name}] registering {dot.app.plugin.count} plugin(s) in declaration order', {
+    kernelLog.debug('[{dot.app.name}] registering {dot.app.unit.count} unit(s) in declaration order', {
       'dot.app.name': this.#appName,
-      'dot.app.plugin.count': this.#ordered.length,
+      'dot.app.unit.count': this.#ordered.length,
     });
 
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'configure' });
-    phaseLogger.debug('configure: starting', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('configure: starting', { 'dot.app.unit.count': this.#ordered.length });
 
     try {
       return this.#withPhaseEmit('configure', () => {
@@ -768,7 +768,7 @@ export class DotAppImpl<
           {
             appName: this.#appName,
             phase: 'configure',
-            pluginCount: this.#ordered.length,
+            unitCount: this.#ordered.length,
           },
           span => this.#runConfigureInner(phaseLogger.withTrace(span.spanContext())),
         );
@@ -784,7 +784,7 @@ export class DotAppImpl<
    * factory that throws fails the app in `boot`.
    */
   #activateLogging(): undefined | TOpen | ReturnType<typeof UnexpectedDefect> {
-    const owner = this.#loggingPlugin;
+    const owner = this.#loggingUnit;
     if (owner?.logging === undefined || this.#logging !== undefined || this.#loggingClosed !== undefined) return;
     try {
       const result = owner.logging({ appName: this.#appName });
@@ -803,7 +803,7 @@ export class DotAppImpl<
           code: DotLifecycleErrorCode.BootFailed,
           phase: 'boot',
           plugin: owner.name,
-          message: `logging slot of plugin "${owner.name}" threw: ${stringifyError(error)}`,
+          message: `logging slot of unit "${owner.name}" threw: ${stringifyError(error)}`,
           cause: error,
         }),
       });
@@ -826,7 +826,7 @@ export class DotAppImpl<
                 const result = await handle.close();
                 if (failed(result)) {
                   const record =
-                    this.#loggingPlugin === undefined ? undefined : this.#records.get(this.#loggingPlugin.name);
+                    this.#loggingUnit === undefined ? undefined : this.#records.get(this.#loggingUnit.name);
                   if (record !== undefined) this.#recordHookFailure(record, 'dispose', result, 0);
                   reportLoggingCloseFailure(result);
                   return result;
@@ -836,13 +836,13 @@ export class DotAppImpl<
                   cause: new DotLifecycleError({
                     code: DotLifecycleErrorCode.DisposeFailed,
                     phase: 'dispose',
-                    plugin: this.#loggingPlugin?.name,
+                    plugin: this.#loggingUnit?.name,
                     message: 'The logging slot failed to close.',
                     cause: error,
                   }),
                 });
                 const record =
-                  this.#loggingPlugin === undefined ? undefined : this.#records.get(this.#loggingPlugin.name);
+                  this.#loggingUnit === undefined ? undefined : this.#records.get(this.#loggingUnit.name);
                 if (record !== undefined) this.#recordHookFailure(record, 'dispose', failure, 0);
                 reportLoggingCloseFailure(error);
                 return failure;
@@ -859,54 +859,54 @@ export class DotAppImpl<
    * intricate error-handling readable.
    */
   #runConfigureInner(phaseLogger: Logger): void | TPhases['configure'] {
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      let unitLogger = phaseLogger.with({ 'dot.unit.name': unit.name });
       const declaredStarted = nowMs();
       try {
-        for (const source of plugin.actions) this.#registerAction(record, this.#actionFromSource(source));
+        for (const source of unit.actions) this.#registerAction(record, this.#actionFromSource(source));
       } catch (error) {
         const durationMs = nowMs() - declaredStarted;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,
-          plugin: plugin.name,
-          message: `action declaration threw for plugin "${plugin.name}": ${stringifyError(error)}`,
-          remediation: `Fix the action declarations of "${plugin.name}". Declarative actions must be static and synchronous.`,
+          plugin: unit.name,
+          message: `action declaration threw for unit "${unit.name}": ${stringifyError(error)}`,
+          remediation: `Fix the action declarations of "${unit.name}". Declarative actions must be static and synchronous.`,
           docsAnchor: 'configure-failed',
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({
-          plugin: plugin.name,
+          plugin: unit.name,
           hook: 'configure',
           state: 'failed',
           order: record.order,
           durationMs,
           issues: [issue],
         });
-        this.#emitHook('configure', plugin.name, record.order, 'failed', { durationMs, error });
+        this.#emitHook('configure', unit.name, record.order, 'failed', { durationMs, error });
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
         throw new DotLifecycleError({
           code: DotLifecycleErrorCode.ConfigureFailed,
           phase: 'configure',
-          plugin: plugin.name,
+          plugin: unit.name,
           message: issue.message,
           cause: error,
         });
       }
 
-      if (!plugin.hooks.configure) {
-        pluginLogger.debug('configure: skipped (no hook)');
+      if (!unit.hooks.configure) {
+        unitLogger.debug('configure: skipped (no hook)');
         continue;
       }
       record.hooks.add('configure');
 
       const ctx: DotConfigureContext = {
-        $telemetry: telemetryFor(plugin),
-        pluginName: plugin.name,
+        $telemetry: telemetryFor(unit),
+        unitName: unit.name,
         appName: this.#appName,
         registerService: (name, kind) => {
-          record.services.push({ name, plugin: plugin.name, kind });
+          record.services.push({ name, plugin: unit.name, kind });
         },
         registerAction: action => this.#registerAction(record, action),
         registerProjection: projection => this.#registerProjection(record, projection),
@@ -921,20 +921,20 @@ export class DotAppImpl<
       };
 
       const started = nowMs();
-      this.#emitHook('configure', plugin.name, record.order, 'starting');
+      this.#emitHook('configure', unit.name, record.order, 'starting');
       let returned: void | TPhases['configure'];
       try {
-        returned = withPluginHookSpan(
+        returned = withUnitHookSpan(
           {
             appName: this.#appName,
-            pluginName: plugin.name,
+            unitName: unit.name,
             hook: 'configure',
             order: record.order,
           },
           span => {
-            // Later records of this plugin's hook carry its span too.
-            pluginLogger = pluginLogger.withTrace(span.spanContext());
-            return plugin.hooks.configure?.(ctx);
+            // Later records of this unit's hook carry its span too.
+            unitLogger = unitLogger.withTrace(span.spanContext());
+            return unit.hooks.configure?.(ctx);
           },
         );
         if (returned !== undefined && !failed(returned) && !isThenable(returned)) {
@@ -944,27 +944,27 @@ export class DotAppImpl<
         const durationMs = nowMs() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,
-          plugin: plugin.name,
-          message: `configure hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
-          remediation: `Fix the error in the configure() hook of "${plugin.name}". configure() is for synchronous registration only — avoid throwing on declarative work.`,
+          plugin: unit.name,
+          message: `configure hook threw for unit "${unit.name}": ${stringifyError(error)}`,
+          remediation: `Fix the error in the configure() hook of "${unit.name}". configure() is for synchronous registration only — avoid throwing on declarative work.`,
           docsAnchor: 'configure-failed',
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({
-          plugin: plugin.name,
+          plugin: unit.name,
           hook: 'configure',
           state: 'failed',
           order: record.order,
           durationMs,
           issues: [issue],
         });
-        this.#emitHook('configure', plugin.name, record.order, 'failed', { durationMs, error });
+        this.#emitHook('configure', unit.name, record.order, 'failed', { durationMs, error });
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
         throw new DotLifecycleError({
           code: DotLifecycleErrorCode.ConfigureFailed,
           phase: 'configure',
-          plugin: plugin.name,
+          plugin: unit.name,
           message: issue.message,
           cause: error,
         });
@@ -978,21 +978,21 @@ export class DotAppImpl<
         const durationMs = nowMs() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureAsync,
-          plugin: plugin.name,
-          message: `configure hook of plugin "${plugin.name}" returned a Promise. configure must be synchronous.`,
+          plugin: unit.name,
+          message: `configure hook of unit "${unit.name}" returned a Promise. configure must be synchronous.`,
           remediation: 'Move async work to the boot() hook. configure() is for synchronous registration only.',
           docsAnchor: 'configure-async',
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({
-          plugin: plugin.name,
+          plugin: unit.name,
           hook: 'configure',
           state: 'failed',
           order: record.order,
           durationMs,
           issues: [issue],
         });
-        this.#emitHook('configure', plugin.name, record.order, 'failed', {
+        this.#emitHook('configure', unit.name, record.order, 'failed', {
           durationMs,
           error: new Error(issue.message),
         });
@@ -1001,7 +1001,7 @@ export class DotAppImpl<
         throw new DotLifecycleError({
           code: DotLifecycleErrorCode.ConfigureAsync,
           phase: 'configure',
-          plugin: plugin.name,
+          plugin: unit.name,
           message: issue.message,
         });
       }
@@ -1015,31 +1015,31 @@ export class DotAppImpl<
 
       const durationMs = nowMs() - started;
       record.lifecycleDiagnostics.push({
-        plugin: plugin.name,
+        plugin: unit.name,
         hook: 'configure',
         state: 'configured',
         order: record.order,
         durationMs,
         issues: [],
       });
-      this.#emitHook('configure', plugin.name, record.order, 'completed', { durationMs });
-      pluginLogger.debug('configure: done', { 'dot.plugin.duration.ms': durationMs });
+      this.#emitHook('configure', unit.name, record.order, 'completed', { durationMs });
+      unitLogger.debug('configure: done', { 'dot.unit.duration.ms': durationMs });
     }
 
     // Also declare lifecycle-hook participation for non-configure hooks present
-    // on the plugin object, so the manifest reflects them.
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      if (plugin.hooks.boot || Object.keys(plugin.factories).length > 0) record.hooks.add('boot');
-      if (plugin.hooks.start) record.hooks.add('start');
-      if (plugin.hooks.stop) record.hooks.add('stop');
-      if (plugin.hooks.dispose) record.hooks.add('dispose');
+    // on the unit object, so the manifest reflects them.
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      if (unit.hooks.boot || Object.keys(unit.factories).length > 0) record.hooks.add('boot');
+      if (unit.hooks.start) record.hooks.add('start');
+      if (unit.hooks.stop) record.hooks.add('stop');
+      if (unit.hooks.dispose) record.hooks.add('dispose');
     }
 
     this.#configured = true;
     this.#state = 'configured';
     this.#manifest = this.#buildManifest();
-    phaseLogger.debug('configure: complete', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('configure: complete', { 'dot.app.unit.count': this.#ordered.length });
   }
 
   /**
@@ -1099,14 +1099,14 @@ export class DotAppImpl<
       return UnexpectedDefect({ cause: error });
     }
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'boot' });
-    phaseLogger.debug('boot: starting', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('boot: starting', { 'dot.app.unit.count': this.#ordered.length });
 
     return this.#withPhaseEmitAsync('boot', () =>
       withPhaseSpan(
         {
           appName: this.#appName,
           phase: 'boot',
-          pluginCount: this.#ordered.length,
+          unitCount: this.#ordered.length,
         },
         span => this.#runBootInner(phaseLogger.withTrace(span.spanContext())),
       ),
@@ -1114,24 +1114,24 @@ export class DotAppImpl<
   }
 
   /**
-   * Resolve a plugin's needs into a hook context (alias-keyed), joined with
-   * the `$`-prefixed kernel keys and — for post-boot hooks — the plugin's own
+   * Resolve a unit's needs into a hook context (alias-keyed), joined with
+   * the `$`-prefixed kernel keys and — for post-boot hooks — the unit's own
    * published services (local keys).
    *
    * @throws {DotLifecycleError} `ARKI_DOT_E012` when a need has no
-   *   provider among earlier-booted plugins. Teardown hooks can never hit
+   *   provider among earlier-booted units. Teardown hooks can never hit
    *   this: the service map only grows, and reverse-order teardown keeps
    *   providers alive until their consumers are done.
    */
   #buildHookCtx(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     phase: DotLifecycleHook,
     includeOwnProvides: boolean,
     signal: AbortSignal,
   ): Record<string, unknown> {
     const ctx: Record<string, unknown> = {
       $app: this.#appName,
-      $plugin: record.plugin.name,
+      $unit: record.plugin.name,
       $telemetry: telemetryFor(record.plugin),
       $config: this.#config,
       $signal: signal,
@@ -1146,11 +1146,11 @@ export class DotAppImpl<
           phase,
           plugin: record.plugin.name,
           message:
-            `Plugin "${record.plugin.name}" needs service "${wireKey}" but no earlier plugin provides it. ` +
-            `Register a provider with .use() before this plugin. Services flow strictly forward — ` +
-            `if a later plugin provides "${wireKey}", move that provider earlier; if two plugins need ` +
+            `Unit "${record.plugin.name}" needs service "${wireKey}" but no earlier unit provides it. ` +
+            `Register a provider with .infra() before this unit. Services flow strictly forward — ` +
+            `if a later unit provides "${wireKey}", move that provider earlier; if two units need ` +
             `each other's services, that is a cycle: merge them or extract the shared piece into ` +
-            `a third plugin both consume.`,
+            `a third unit both consume.`,
         });
       }
       const value = this.#serviceMap.get(wireKey);
@@ -1178,7 +1178,7 @@ export class DotAppImpl<
    * legacy hooks retain the lifecycle timeout diagnostic after they settle.
    */
   async #withHookBudget<T>(
-    pluginName: string,
+    unitName: string,
     hook: DotLifecycleHook,
     hookAbort: AbortController,
     run: () => Promise<T> | T,
@@ -1190,8 +1190,8 @@ export class DotAppImpl<
       timeout = new DotLifecycleError({
         code: DotLifecycleErrorCode.HookTimeout,
         phase: hook,
-        plugin: pluginName,
-        message: `${hook} hook of plugin "${pluginName}" exceeded its ${budget}ms budget; cancellation was requested and owned work must settle before cleanup.`,
+        plugin: unitName,
+        message: `${hook} hook of unit "${unitName}" exceeded its ${budget}ms budget; cancellation was requested and owned work must settle before cleanup.`,
       });
       hookAbort.abort(timeout);
     }, budget);
@@ -1211,11 +1211,11 @@ export class DotAppImpl<
    * partial failure — stays unindented.
    */
   async #runBootInner(phaseLogger: Logger): Promise<DotBootOutcome<TOpen, TClose, TPhases>> {
-    const bootedRecords: PluginRecord<TOpen, TClose, TPhases>[] = [];
+    const bootedRecords: UnitRecord<TOpen, TClose, TPhases>[] = [];
 
     /** Shared failure path: mark diagnostics, roll back, throw. */
     const fail = async (args: {
-      record: PluginRecord<TOpen, TClose, TPhases>;
+      record: UnitRecord<TOpen, TClose, TPhases>;
       code: (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
       message: string;
       remediation: string;
@@ -1223,7 +1223,7 @@ export class DotAppImpl<
       durationMs: number;
       cause?: unknown;
       /** Records to dispose (reverse order applied here). */
-      rollback: readonly PluginRecord<TOpen, TClose, TPhases>[];
+      rollback: readonly UnitRecord<TOpen, TClose, TPhases>[];
     }): Promise<DotBootOutcome<TOpen, TClose, TPhases>> => {
       const issue = makeIssue({
         code: args.code,
@@ -1245,8 +1245,8 @@ export class DotAppImpl<
         durationMs: args.durationMs,
         error: args.cause ?? new Error(args.message),
       });
-      phaseLogger.error('boot: FAILED — rolling back already-booted plugins', {
-        'dot.plugin.name': args.record.plugin.name,
+      phaseLogger.error('boot: FAILED — rolling back already-booted units', {
+        'dot.unit.name': args.record.plugin.name,
         'dot.app.rollback.count': args.rollback.length,
       });
       const disposeFailures = await this.#runDisposeForRecords(reverseRecords(args.rollback), phaseLogger);
@@ -1268,12 +1268,12 @@ export class DotAppImpl<
       );
     };
 
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      let unitLogger = phaseLogger.with({ 'dot.unit.name': unit.name });
       const started = nowMs();
 
-      // Resolve needs BEFORE invoking the hook — a plugin with needs but no
+      // Resolve needs BEFORE invoking the hook — a unit with needs but no
       // boot hook still fails fast when its wiring is unsatisfied.
       let ctx: Record<string, unknown>;
       const hookAbort = new AbortController();
@@ -1286,36 +1286,36 @@ export class DotAppImpl<
           code: DotLifecycleErrorCode.UnsatisfiedNeed,
           message,
           remediation:
-            `Add a provider for the missing service with .use() before "${plugin.name}", or rename an ` +
-            `existing provider's keys to match. If a later plugin provides it, reorder — services flow ` +
-            `strictly forward. Mutual needs between two plugins are a cycle: merge them or extract the ` +
-            `shared piece into a third plugin both consume.`,
+            `Add a provider for the missing service with .infra() before "${unit.name}", or rename an ` +
+            `existing provider's keys to match. If a later unit provides it, reorder — services flow ` +
+            `strictly forward. Mutual needs between two units are a cycle: merge them or extract the ` +
+            `shared piece into a third unit both consume.`,
           docsAnchor: 'unsatisfied-need',
           durationMs: nowMs() - started,
           rollback: bootedRecords,
         });
       }
 
-      const bootHook = plugin.hooks.boot;
-      const factories = Object.entries(plugin.factories);
+      const bootHook = unit.hooks.boot;
+      const factories = Object.entries(unit.factories);
       if (!bootHook && factories.length === 0) {
         record.booted = true;
         bootedRecords.push(record);
-        pluginLogger.debug('boot: skipped (no hook)');
+        unitLogger.debug('boot: skipped (no hook)');
         continue;
       }
       record.hooks.add('boot');
 
-      this.#emitHook('boot', plugin.name, record.order, 'starting');
-      let construction: Awaited<ReturnType<typeof plugin.runtime.construct>>;
+      this.#emitHook('boot', unit.name, record.order, 'starting');
+      let construction: Awaited<ReturnType<typeof unit.runtime.construct>>;
       try {
-        construction = await this.#withHookBudget(plugin.name, 'boot', hookAbort, () =>
-          withPluginHookSpan(
-            { appName: this.#appName, pluginName: plugin.name, hook: 'boot', order: record.order },
+        construction = await this.#withHookBudget(unit.name, 'boot', hookAbort, () =>
+          withUnitHookSpan(
+            { appName: this.#appName, unitName: unit.name, hook: 'boot', order: record.order },
             span => {
-              pluginLogger = pluginLogger.withTrace(span.spanContext());
-              return plugin.runtime.construct(
-                plugin.factories,
+              unitLogger = unitLogger.withTrace(span.spanContext());
+              return unit.runtime.construct(
+                unit.factories,
                 bootHook,
                 ctx as never,
                 { deadline: hookAbort.signal },
@@ -1329,30 +1329,30 @@ export class DotAppImpl<
           ),
         );
       } catch (error) {
-        construction = this.#hookDefect('boot', plugin.name, error);
+        construction = this.#hookDefect('boot', unit.name, error);
       }
       if (!constructed<TOpen, TClose>(construction)) {
         const timedOut = Deadline.is(construction);
         const durationMs = nowMs() - started;
         const issue = makeIssue({
           code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
-          plugin: plugin.name,
-          message: `Plugin "${plugin.name}" construction failed: ${construction.message}`,
-          remediation: construction.remediation ?? 'Inspect the plugin failure and its owned cleanup outcomes.',
+          plugin: unit.name,
+          message: `Unit "${unit.name}" construction failed: ${construction.message}`,
+          remediation: construction.remediation ?? 'Inspect the unit failure and its owned cleanup outcomes.',
           docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
-          metadata: { phase: 'boot', owner: plugin.name, failureCode: construction.code },
+          metadata: { phase: 'boot', owner: unit.name, failureCode: construction.code },
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({
-          plugin: plugin.name,
+          plugin: unit.name,
           hook: 'boot',
           state: 'failed',
           order: record.order,
           durationMs,
           issues: [issue],
         });
-        this.#emitHook('boot', plugin.name, record.order, 'failed', { durationMs, error: construction });
-        pluginLogger.error('boot: FAILED — closing owned scopes', { 'dot.plugin.name': plugin.name });
+        this.#emitHook('boot', unit.name, record.order, 'failed', { durationMs, error: construction });
+        unitLogger.error('boot: FAILED — closing owned scopes', { 'dot.unit.name': unit.name });
         const cleanup = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
         const logging = await this.#closeLogging();
         if (failed(logging)) cleanup.failures.push(logging);
@@ -1368,18 +1368,18 @@ export class DotAppImpl<
       record.booted = true;
 
       for (const localKey of Object.keys(publishedServices)) {
-        const wireKey = plugin.renames[localKey] ?? localKey;
+        const wireKey = unit.renames[localKey] ?? localKey;
         if (localKey.startsWith('$') || wireKey.startsWith('$')) {
-          // The plugin() constraint bans this at compile time; erased plugins can
-          // still reach here. A `$` publish would shadow $app/$plugin/$config
-          // in the plugin's own post-boot hook contexts.
+          // The infra() constraint bans this at compile time; erased units can
+          // still reach here. A `$` publish would shadow $app/$unit/$config
+          // in the unit's own post-boot hook contexts.
           return fail({
             record,
             code: DotLifecycleErrorCode.ReservedServiceKey,
             message:
-              `Plugin "${plugin.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
-              `for kernel context keys ($app, $plugin, $config).`,
-            remediation: `Rename the "${wireKey}" provides key of "${plugin.name}" — "$"-prefixed keys would shadow the kernel context.`,
+              `Unit "${unit.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
+              `for kernel context keys ($app, $unit, $config).`,
+            remediation: `Rename the "${wireKey}" provides key of "${unit.name}" — "$"-prefixed keys would shadow the kernel context.`,
             docsAnchor: 'reserved-service-key',
             durationMs: nowMs() - started,
             rollback: [...bootedRecords, record],
@@ -1387,12 +1387,12 @@ export class DotAppImpl<
         }
         if (this.#serviceMap.has(wireKey)) {
           const owner = this.#providerByWireKey.get(wireKey) ?? 'unknown';
-          // The current plugin HAS booted — include it in the rollback.
+          // The current unit HAS booted — include it in the rollback.
           return fail({
             record,
             code: DotLifecycleErrorCode.ServiceCollision,
-            message: `Plugin "${plugin.name}" publishes service "${wireKey}" which plugin "${owner}" already provides.`,
-            remediation: `Mount one of the two with rename(plugin, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
+            message: `Unit "${unit.name}" publishes service "${wireKey}" which unit "${owner}" already provides.`,
+            remediation: `Mount one of the two with rename(unit, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
             docsAnchor: 'service-collision',
             durationMs: nowMs() - started,
             rollback: [...bootedRecords, record],
@@ -1400,9 +1400,9 @@ export class DotAppImpl<
         }
       }
       for (const [localKey, value] of Object.entries(publishedServices)) {
-        const wireKey = plugin.renames[localKey] ?? localKey;
+        const wireKey = unit.renames[localKey] ?? localKey;
         this.#serviceMap.set(wireKey, value);
-        this.#providerByWireKey.set(wireKey, plugin.name);
+        this.#providerByWireKey.set(wireKey, unit.name);
         this.#aggregatedServices[wireKey] = value;
         record.provides.add(wireKey);
       }
@@ -1410,23 +1410,23 @@ export class DotAppImpl<
 
       const durationMs = nowMs() - started;
       record.lifecycleDiagnostics.push({
-        plugin: plugin.name,
+        plugin: unit.name,
         hook: 'boot',
         state: 'booted',
         order: record.order,
         durationMs,
         issues: [],
       });
-      this.#emitHook('boot', plugin.name, record.order, 'completed', { durationMs });
-      pluginLogger.debug('boot: done', {
-        'dot.plugin.duration.ms': durationMs,
-        'dot.plugin.services.published': Object.keys(publishedServices).length,
+      this.#emitHook('boot', unit.name, record.order, 'completed', { durationMs });
+      unitLogger.debug('boot: done', {
+        'dot.unit.duration.ms': durationMs,
+        'dot.unit.services.published': Object.keys(publishedServices).length,
       });
     }
 
     this.#state = 'booted';
     this.#manifest = this.#buildManifest();
-    phaseLogger.debug('boot: complete', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('boot: complete', { 'dot.app.unit.count': this.#ordered.length });
   }
 
   /** Public start(). Boots first if needed. Idempotent + concurrent-safe. */
@@ -1481,14 +1481,14 @@ export class DotAppImpl<
     if (this.#state === 'started') return;
     // From booted or stopped, run start hooks.
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'start' });
-    phaseLogger.debug('start: starting', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('start: starting', { 'dot.app.unit.count': this.#ordered.length });
 
     return this.#withPhaseEmitAsync('start', () =>
       withPhaseSpan(
         {
           appName: this.#appName,
           phase: 'start',
-          pluginCount: this.#ordered.length,
+          unitCount: this.#ordered.length,
         },
         span => this.#runStartInner(phaseLogger.withTrace(span.spanContext())),
       ),
@@ -1500,21 +1500,21 @@ export class DotAppImpl<
    * stays thin and the rollback-cascade error path stays readable.
    */
   async #runStartInner(phaseLogger: Logger): Promise<DotStartedOutcome<TClose, TPhases>> {
-    const startedRecords: PluginRecord<TOpen, TClose, TPhases>[] = [];
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      const pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
-      if (!plugin.hooks.start) {
+    const startedRecords: UnitRecord<TOpen, TClose, TPhases>[] = [];
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      const unitLogger = phaseLogger.with({ 'dot.unit.name': unit.name });
+      if (!unit.hooks.start) {
         record.started = true;
         startedRecords.push(record);
-        pluginLogger.debug('start: skipped (no hook)');
+        unitLogger.debug('start: skipped (no hook)');
         continue;
       }
       record.hooks.add('start');
 
-      const result = await this.#runHook(record, 'start', pluginLogger);
+      const result = await this.#runHook(record, 'start', unitLogger);
       if (failed(result)) {
-        pluginLogger.error('start: FAILED — rolling back', { 'dot.app.rollback.started.count': startedRecords.length });
+        unitLogger.error('start: FAILED — rolling back', { 'dot.app.rollback.started.count': startedRecords.length });
         const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
         const bootedForDispose = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.booted);
         const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedForDispose), phaseLogger);
@@ -1531,7 +1531,7 @@ export class DotAppImpl<
 
     this.#state = 'started';
     this.#manifest = this.#buildManifest();
-    phaseLogger.debug('start: complete', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('start: complete', { 'dot.app.unit.count': this.#ordered.length });
   }
 
   /** Public stop(). Idempotent + concurrent-safe. */
@@ -1560,14 +1560,14 @@ export class DotAppImpl<
 
   async #runStop(): Promise<DotStopOutcome<TPhases>> {
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'stop' });
-    phaseLogger.debug('stop: starting', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('stop: starting', { 'dot.app.unit.count': this.#ordered.length });
 
     return this.#withPhaseEmitAsync('stop', () =>
       withPhaseSpan(
         {
           appName: this.#appName,
           phase: 'stop',
-          pluginCount: this.#ordered.length,
+          unitCount: this.#ordered.length,
         },
         async span => {
           const tracedLogger = phaseLogger.withTrace(span.spanContext());
@@ -1579,7 +1579,7 @@ export class DotAppImpl<
             tracedLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
             return closeOutcome(failures);
           }
-          tracedLogger.debug('stop: complete', { 'dot.app.plugin.count': this.#ordered.length });
+          tracedLogger.debug('stop: complete', { 'dot.app.unit.count': this.#ordered.length });
           return;
         },
       ),
@@ -1587,13 +1587,13 @@ export class DotAppImpl<
   }
 
   async #runStopForRecords(
-    records: readonly PluginRecord<TOpen, TClose, TPhases>[],
+    records: readonly UnitRecord<TOpen, TClose, TPhases>[],
     phaseLogger: Logger,
   ): Promise<(TPhases['stop'] | SupervisorFailure)[]> {
     const failures: (TPhases['stop'] | SupervisorFailure)[] = [];
     for (const record of records) {
       if (record.plugin.hooks.stop) {
-        const result = await this.#runHook(record, 'stop', phaseLogger.with({ 'dot.plugin.name': record.plugin.name }));
+        const result = await this.#runHook(record, 'stop', phaseLogger.with({ 'dot.unit.name': record.plugin.name }));
         if (failed(result)) failures.push(result);
       }
       record.started = false;
@@ -1616,14 +1616,14 @@ export class DotAppImpl<
 
   async #runDispose(): Promise<DotDisposeOutcome<TClose, TPhases>> {
     const phaseLogger = this.#logger.with({ 'dot.app.phase': 'dispose' });
-    phaseLogger.debug('dispose: starting', { 'dot.app.plugin.count': this.#ordered.length });
+    phaseLogger.debug('dispose: starting', { 'dot.app.unit.count': this.#ordered.length });
 
     return this.#withPhaseEmitAsync('dispose', () =>
       withPhaseSpan(
         {
           appName: this.#appName,
           phase: 'dispose',
-          pluginCount: this.#ordered.length,
+          unitCount: this.#ordered.length,
         },
         span => this.#runDisposeInner(phaseLogger.withTrace(span.spanContext())),
       ),
@@ -1660,7 +1660,7 @@ export class DotAppImpl<
   }
 
   async #runDisposeForRecords(
-    records: readonly PluginRecord<TOpen, TClose, TPhases>[],
+    records: readonly UnitRecord<TOpen, TClose, TPhases>[],
     phaseLogger: Logger,
   ): Promise<{ readonly failures: DisposeMember<TClose, TPhases>[] }> {
     const failures: DisposeMember<TClose, TPhases>[] = [];
@@ -1682,7 +1682,7 @@ export class DotAppImpl<
         const result = await this.#runHook(
           record,
           'dispose',
-          phaseLogger.with({ 'dot.plugin.name': record.plugin.name }),
+          phaseLogger.with({ 'dot.unit.name': record.plugin.name }),
         );
         if (failed(result)) failures.push(result);
       }
@@ -1707,7 +1707,7 @@ export class DotAppImpl<
     return { failures };
   }
 
-  #hookDefect(phase: DotLifecycleHook, plugin: string, error: unknown): SupervisorFailure {
+  #hookDefect(phase: DotLifecycleHook, unit: string, error: unknown): SupervisorFailure {
     const code =
       phase === 'boot'
         ? DotLifecycleErrorCode.BootFailed
@@ -1722,8 +1722,8 @@ export class DotAppImpl<
         : new DotLifecycleError({
             code,
             phase,
-            plugin,
-            message: `${phase} hook threw for plugin "${plugin}": ${stringifyError(error)}`,
+            plugin: unit,
+            message: `${phase} hook threw for unit "${unit}": ${stringifyError(error)}`,
             cause: error,
           });
     return diagnostic.code === DotLifecycleErrorCode.HookTimeout
@@ -1732,7 +1732,7 @@ export class DotAppImpl<
   }
 
   #recordHookFailure(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     phase: DotLifecycleHook,
     failure: Failure,
     durationMs: number,
@@ -1751,8 +1751,8 @@ export class DotAppImpl<
     const issue = makeIssue({
       code,
       plugin: record.plugin.name,
-      message: `${phase} failed for plugin "${record.plugin.name}": ${failure.message}`,
-      remediation: failure.remediation ?? 'Inspect the returned failure and the plugin hook.',
+      message: `${phase} failed for unit "${record.plugin.name}": ${failure.message}`,
+      remediation: failure.remediation ?? 'Inspect the returned failure and the unit hook.',
       docsAnchor: phase + '-failed',
       metadata: { phase, owner: record.plugin.name, failureCode: failure.code },
     });
@@ -1769,7 +1769,7 @@ export class DotAppImpl<
   }
 
   async #runHook<Phase extends 'start' | 'stop' | 'dispose'>(
-    record: PluginRecord<TOpen, TClose, TPhases>,
+    record: UnitRecord<TOpen, TClose, TPhases>,
     phase: Phase,
     logger: Logger,
   ): Promise<void | TPhases[Phase] | SupervisorFailure> {
@@ -1781,8 +1781,8 @@ export class DotAppImpl<
     try {
       const ctx = this.#buildHookCtx(record, phase, true, hookAbort.signal);
       result = await this.#withHookBudget(record.plugin.name, phase, hookAbort, async () =>
-        withPluginHookSpan(
-          { appName: this.#appName, pluginName: record.plugin.name, hook: phase, order: record.order },
+        withUnitHookSpan(
+          { appName: this.#appName, unitName: record.plugin.name, hook: phase, order: record.order },
           span => {
             logger = logger.withTrace(span.spanContext());
             return record.plugin.hooks[phase]?.(ctx as never);
@@ -1798,7 +1798,7 @@ export class DotAppImpl<
     const durationMs = nowMs() - startedAt;
     if (failed(result)) {
       this.#recordHookFailure(record, phase, result, durationMs);
-      logger.error(phase + ': failed', { 'dot.plugin.failure.code': result.code });
+      logger.error(phase + ': failed', { 'dot.unit.failure.code': result.code });
     } else {
       record.lifecycleDiagnostics.push({
         plugin: record.plugin.name,
@@ -1809,7 +1809,7 @@ export class DotAppImpl<
         issues: [],
       });
       this.#emitHook(phase, record.plugin.name, record.order, 'completed', { durationMs });
-      logger.debug(phase + ': done', { 'dot.plugin.duration.ms': durationMs });
+      logger.debug(phase + ': done', { 'dot.unit.duration.ms': durationMs });
     }
     return result;
   }
@@ -1830,23 +1830,23 @@ export class DotAppImpl<
   }
 
   #buildManifest(): DotAppManifest {
-    const plugins: PluginManifest[] = [];
+    const units: UnitManifest[] = [];
     const actions: ActionManifest[] = [];
     const services: ServiceManifest[] = [];
     const lifecycle: LifecycleManifest[] = [];
     const projections: ProjectionManifest[] = [];
     // Capability edges between features are derived at construction from
     // static `provides` (keyed); the rest are observed at boot time: consumer
-    // plugin → the plugin whose published wire key satisfied its need. The
-    // per-plugin `dependencies` array (wire-key strings) is the declarative view.
+    // unit → the unit whose published wire key satisfied its need. The
+    // per-unit `dependencies` array (wire-key strings) is the declarative view.
     const dependencies: DependencyEdge[] = this.#wiringEdges.map(e => ({ ...e }));
 
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      const needWireKeys = Object.entries(plugin.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
-      plugins.push({
-        name: plugin.name,
-        ...(plugin.role === undefined ? {} : { role: plugin.role }),
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      const needWireKeys = Object.entries(unit.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
+      units.push({
+        name: unit.name,
+        ...(unit.role === undefined ? {} : { role: unit.role }),
         dependencies: needWireKeys,
         provides: [...record.provides],
       });
@@ -1854,7 +1854,7 @@ export class DotAppImpl<
       services.push(...record.services);
       projections.push(...record.projections);
       lifecycle.push({
-        plugin: plugin.name,
+        plugin: unit.name,
         hooks: [...record.hooks],
       });
     }
@@ -1865,7 +1865,7 @@ export class DotAppImpl<
         name: this.#appName,
         version: this.#appVersion,
       },
-      plugins,
+      plugins: units,
       actions,
       services,
       lifecycle,
@@ -1875,19 +1875,19 @@ export class DotAppImpl<
   }
 
   #buildDiagnostics(): DotDiagnosticsSnapshot {
-    const pluginDiagnostics: PluginDiagnostic[] = [];
+    const unitDiagnostics: UnitDiagnostic[] = [];
     const actionDiagnostics: ActionDiagnostic[] = [];
     const serviceDiagnostics: ServiceDiagnostic[] = [];
     const lifecycleDiagnostics: LifecycleDiagnostic[] = [];
     const issues: DiagnosticIssue[] = [];
 
-    for (const plugin of this.#ordered) {
-      const record = this.#records.get(plugin.name)!;
-      // Per-plugin status: failed if any issue with severity error exists, ok otherwise.
+    for (const unit of this.#ordered) {
+      const record = this.#records.get(unit.name)!;
+      // Per-unit status: failed if any issue with severity error exists, ok otherwise.
       const hasError = record.issues.some(i => i.severity === 'error');
-      const status: PluginDiagnostic['status'] = hasError ? 'failed' : 'ok';
-      pluginDiagnostics.push({
-        plugin: plugin.name,
+      const status: UnitDiagnostic['status'] = hasError ? 'failed' : 'ok';
+      unitDiagnostics.push({
+        plugin: unit.name,
         status,
         issues: [...record.issues],
       });
@@ -1895,7 +1895,7 @@ export class DotAppImpl<
       for (const action of record.actions) {
         actionDiagnostics.push({
           id: action.id,
-          plugin: plugin.name,
+          plugin: unit.name,
           binding: action.binding,
           ...(action.summary === undefined ? {} : { summary: action.summary }),
           status: hasError ? 'failed' : 'ok',
@@ -1905,7 +1905,7 @@ export class DotAppImpl<
       for (const svc of record.services) {
         serviceDiagnostics.push({
           service: svc.name,
-          plugin: plugin.name,
+          plugin: unit.name,
           status: hasError
             ? 'failed'
             : record.booted || this.#state === 'defined' || this.#state === 'configured'
@@ -1925,7 +1925,7 @@ export class DotAppImpl<
         name: this.#appName,
         state: this.#state,
       },
-      plugins: pluginDiagnostics,
+      plugins: unitDiagnostics,
       actions: actionDiagnostics,
       services: serviceDiagnostics,
       lifecycle: lifecycleDiagnostics,
@@ -1953,14 +1953,14 @@ function stringifyError(error: unknown): string {
   }
 }
 
-function reverseRecords<Open extends Failure, Close extends Failure, Phases extends PluginPhases>(
-  records: readonly PluginRecord<Open, Close, Phases>[],
-): readonly PluginRecord<Open, Close, Phases>[] {
+function reverseRecords<Open extends Failure, Close extends Failure, Phases extends UnitPhases>(
+  records: readonly UnitRecord<Open, Close, Phases>[],
+): readonly UnitRecord<Open, Close, Phases>[] {
   return [...records].reverse();
 }
 
 function hasToDotAction(
-  source: AnyPlugin['actions'][number],
+  source: AnyUnit['actions'][number],
 ): source is { toDotAction(): Omit<ActionManifest, 'plugin'> } {
   return (
     typeof source === 'object' && source !== null && 'toDotAction' in source && typeof source.toDotAction === 'function'
@@ -1970,4 +1970,4 @@ function hasToDotAction(
 /** Re-export `ServiceKind` for the kernel's internal use. */
 
 export { type ServiceKind } from '../manifest.js';
-export { type Plugin } from '../plugin-contract.js';
+export { type Unit } from '../unit-contract.js';

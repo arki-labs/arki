@@ -18,7 +18,7 @@
    execution does not retry. Update HTTP client callers for typed failure values,
    including unknown-code and invalid-payload protocol refusals.
 8. Register an OTel SDK and context manager once at app entry if exporting
-   telemetry. Use `$telemetry` in plugin contexts or `telemetryFor(feature)`;
+   telemetry. Use `$telemetry` in unit contexts or `telemetryFor(feature)`;
    avoid wrapping an already instrumented transport/provider operation again.
 
 For executable authoring and exact source fixtures, see [actions](./actions.md).

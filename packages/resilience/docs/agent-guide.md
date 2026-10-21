@@ -65,7 +65,7 @@ const answer = await withResilience(() => callBilling(), externalApiPolicy);
 | `ARKI_RESILIENCE_E004`        | `BulkheadRejectedError` | Retry later, raise the limits, or shed load           |
 | `ARKI_RESILIENCE_E005`        | `RetriesExhaustedError` | Read `lastError`. Exported for hosts                  |
 | `ARKI_RESILIENCE_E006`        | `InvalidBackoffError`   | Pass finite, non-negative numbers                     |
-| `ARKI_RESILIENCE_PLUGIN_E001` | Dot plugin error        | Use a name from `definePresets`                       |
+| `ARKI_RESILIENCE_PLUGIN_E001` | Dot unit error          | Use a name from `definePresets`                       |
 
 ## Verify
 
@@ -75,7 +75,7 @@ bun run typecheck
 bun run test
 ```
 
-In an app that uses the `@arki/resilience/dot` plugin, check the wiring. `dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it, so it runs the plugin's setup.
+In an app that uses the `@arki/resilience/dot` unit, check the wiring. `dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it, so it runs the unit's setup.
 
 ```sh
 dot explain --json | jq '.data.plugins'

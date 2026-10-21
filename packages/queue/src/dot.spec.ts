@@ -1,8 +1,8 @@
 /**
- * The queue's DOT adapters follow the hexagon: `queue()` is the driven client
- * features enqueue with (mounted with `.use`, before the features), and
- * `queueWorker()` is the driving adapter that runs the features' jobs (mounted
- * with `.serve`, bound to the features the app already mounted). These tests
+ * The queue's DOT adapters follow the hexagon: `queue()` is the infra client
+ * features enqueue with (mounted with `.infra`, before the features), and
+ * `queueWorker()` is the entrypoint that runs the features' jobs (mounted
+ * with `.entrypoints`, bound to the features the app already mounted). These tests
  * break if the app has to list its features twice, if a feature cannot reach
  * the client, or if the manifest claims a process consumes queues it does not.
  *
@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { DotLifecycleErrorCode, plugin, service } from '@arki/dot/plugin';
+import { DotLifecycleErrorCode, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { QueueClient } from './dot.ts';
@@ -38,7 +38,7 @@ const q = initQueue.create();
 // Never contacted: boot opens no connection and these tests run no real worker.
 const REDIS_URL = 'redis://127.0.0.1:1';
 
-// The constructors derive their exact factories and lifecycle callbacks from plugin().
+// The constructors derive their exact factories and lifecycle callbacks from infra().
 const _queuePlugin = queue({ connection: REDIS_URL });
 const _namedQueuePlugin = queue({ connection: REDIS_URL, name: 'mail-queue' });
 const _schedulerPlugin = durableScheduler({ connection: REDIS_URL });
@@ -88,7 +88,7 @@ type Dependency = {
   readonly name: string;
 };
 
-const dependency = plugin({
+const dependency = infra({
   name: 'dependency',
   provides: { dependency: () => ({ name: 'test-dependency' }) satisfies Dependency },
 });
@@ -195,10 +195,10 @@ describe('queue DOT topology actions', () => {
   });
 });
 
-describe('queue() — the driven client', () => {
+describe('queue() — the infra client', () => {
   it('lets a feature need the queue client, and registers the topology projection', async () => {
     // Why: features enqueue through a service they declare, so the client
-    // must be a `.use()` adapter mounted BEFORE `.features()`.
+    // must be a `.infra()` adapter mounted BEFORE `.features()`.
     let seen: QueueClient | undefined;
     const checkout = feature('checkout', {
       needs: { queue: service<QueueClient>() },
@@ -209,7 +209,7 @@ describe('queue() — the driven client', () => {
 
     const app = await orThrow(
       defineApp('api')
-        .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
+        .infra(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
         .features([checkout])
         .start(),
     );
@@ -236,7 +236,7 @@ describe('queue() — the driven client', () => {
     // the process running queueWorker() consumes, so only it may say so.
     const app = orThrow(
       defineApp('api')
-        .use(queue({ connection: REDIS_URL }))
+        .infra(queue({ connection: REDIS_URL }))
         .features([orders])
         .configure(),
     );
@@ -248,7 +248,7 @@ describe('queue() — the driven client', () => {
   });
 });
 
-describe('queueWorker() — the driving adapter', () => {
+describe('queueWorker() — the entrypoint', () => {
   it('binds to the mounted features: the app lists them once', async () => {
     let registered: Record<string, unknown> | undefined;
     let started = 0;
@@ -271,10 +271,10 @@ describe('queueWorker() — the driving adapter', () => {
 
     const app = await orThrow(
       defineApp('worker')
-        .use(dependency)
-        .use(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
+        .infra(dependency)
+        .infra(queue({ connection: REDIS_URL, keyPrefix: 'shop:' }))
         .features([orders, billing])
-        .serve(
+        .entrypoints(
           queueWorker({
             q: fakeQ,
             needs: { dependency: service<Dependency>() },
@@ -349,8 +349,8 @@ describe('queueWorker() — the driving adapter', () => {
   it('does not compile without the queue client it shares connection with', () => {
     const { fakeQ } = fakeBuilder(idleInstance());
     const worker = queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) });
-    // @ts-expect-error — queueWorker needs `queue`; mount queue() with .use first
-    defineApp('worker').features([orders]).serve(worker);
+    // @ts-expect-error — queueWorker needs `queue`; mount queue() with .infra first
+    defineApp('worker').features([orders]).entrypoints(worker);
     expect(true).toBe(true);
   });
 
@@ -371,9 +371,9 @@ describe('queueWorker() — the driving adapter', () => {
 
     const app = await orThrow(
       defineApp('worker')
-        .use(queue({ connection: REDIS_URL }))
+        .infra(queue({ connection: REDIS_URL }))
         .features([orders])
-        .serve(queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) }))
+        .entrypoints(queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) }))
         .start(),
     );
 
@@ -388,9 +388,9 @@ describe('queueWorker() — the driving adapter', () => {
     const { fakeQ } = fakeBuilder({ ...idleInstance(), start: hang });
 
     const starting = defineApp('worker')
-      .use(queue({ connection: REDIS_URL }))
+      .infra(queue({ connection: REDIS_URL }))
       .features([orders])
-      .serve(
+      .entrypoints(
         queueWorker({
           q: fakeQ,
           needs: {},
@@ -418,9 +418,9 @@ describe('queueWorker() — the driving adapter', () => {
 
     const app = await orThrow(
       defineApp('worker')
-        .use(queue({ connection: REDIS_URL }))
+        .infra(queue({ connection: REDIS_URL }))
         .features([orders])
-        .serve(queueWorker({ q: fakeQ, needs: {}, startupTimeoutMs: 1, context: () => ({ dependencyName: 'x' }) }))
+        .entrypoints(queueWorker({ q: fakeQ, needs: {}, startupTimeoutMs: 1, context: () => ({ dependencyName: 'x' }) }))
         .start(),
     );
 

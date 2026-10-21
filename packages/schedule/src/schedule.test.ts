@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { DurableScheduler, DurableScheduleRegistration } from './runtime.js';
@@ -69,7 +69,7 @@ describe('schedule DOT projection', () => {
     });
     const app = orThrow(
       defineApp('schedule-app')
-        .serve(schedule({ schedules: [daily] }))
+        .entrypoints(schedule({ schedules: [daily] }))
         .configure(),
     );
 
@@ -103,7 +103,7 @@ describe('schedule DOT projection', () => {
   });
 
   // The point of a driver: the app lists its features once, in
-  // `.features()`, and `.serve(schedule())` runs their schedules. A second
+  // `.features()`, and `.entrypoints(schedule())` runs their schedules. A second
   // list inside schedule() would drift from the first.
   it('runs the schedules of every mounted feature with the app context, without listing them again', async () => {
     type ScheduleCtx = { readonly dependencyName: string };
@@ -122,15 +122,15 @@ describe('schedule DOT projection', () => {
     // A feature with no schedules is skipped, not an error.
     const quiet = feature('quiet', {});
     const fake = fakeDurableScheduler();
-    const dependency = plugin({ name: 'dependency', provides: { dependency: () => ({ name: 'dep' }) } });
-    const backend = plugin({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
+    const dependency = infra({ name: 'dependency', provides: { dependency: () => ({ name: 'dep' }) } });
+    const backend = infra({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
 
     const app = await orThrow(
       defineApp('schedule-feature')
-        .use(dependency)
-        .use(backend)
+        .infra(dependency)
+        .infra(backend)
         .features([reports, quiet])
-        .serve(
+        .entrypoints(
           schedule({
             needs: { dependency: service<{ readonly name: string }>() },
             context: ({ dependency: dep }) => ({ dependencyName: dep.name }),
@@ -156,7 +156,7 @@ describe('schedule DOT projection', () => {
     await expect(
       defineApp('schedule-clash')
         .features([owner])
-        .serve(schedule({ schedules: [plain] }))
+        .entrypoints(schedule({ schedules: [plain] }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -167,7 +167,7 @@ describe('schedule DOT projection', () => {
   it('fails boot with a coded error when a feature publishes a schedules slice that is not a schedule list', async () => {
     const broken = feature('broken', { use: [{ key: 'schedules', actions: [], resolve: () => ({ not: 'a list' }) }] });
 
-    await expect(defineApp('schedule-broken').features([broken]).serve(schedule({})).boot()).resolves.toMatchObject({
+    await expect(defineApp('schedule-broken').features([broken]).entrypoints(schedule({})).boot()).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: { code: SCHEDULE_ERROR_CODES.invalidDefinition },
     });
@@ -417,12 +417,12 @@ describe('durable schedules', () => {
     }
   });
 
-  it('the Dot plugin fails boot with a coded error when a durable schedule has no backend', async () => {
+  it('the Dot unit fails boot with a coded error when a durable schedule has no backend', async () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
 
     await expect(
       defineApp('durable-missing')
-        .serve(schedule({ schedules: [nightly] }))
+        .entrypoints(schedule({ schedules: [nightly] }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -430,12 +430,12 @@ describe('durable schedules', () => {
     });
   });
 
-  it('the Dot plugin fails boot for a durable feature schedule too, naming the schedule', async () => {
+  it('the Dot unit fails boot for a durable feature schedule too, naming the schedule', async () => {
     const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: async () => {} });
     const durableFeature = feature('durable-feature', { use: [schedules([nightly])] });
 
     await expect(
-      defineApp('durable-missing-feature').features([durableFeature]).serve(schedule({})).boot(),
+      defineApp('durable-missing-feature').features([durableFeature]).entrypoints(schedule({})).boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: {
@@ -445,9 +445,9 @@ describe('durable schedules', () => {
     });
   });
 
-  it('the Dot plugin takes the backend as a typed need and hands it the durable schedules at start', async () => {
+  it('the Dot unit takes the backend as a typed need and hands it the durable schedules at start', async () => {
     const fake = fakeDurableScheduler();
-    const backend = plugin({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
+    const backend = infra({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
     const calls: string[] = [];
     const nightly = defineSchedule({
       name: 'nightly',
@@ -459,8 +459,8 @@ describe('durable schedules', () => {
     });
     const app = await orThrow(
       defineApp('durable-app')
-        .use(backend)
-        .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
+        .infra(backend)
+        .entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }))
         .boot(),
     );
 
@@ -476,8 +476,8 @@ describe('durable schedules', () => {
   it('requires a mounted backend at the type level once durable is passed', () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
 
-    // @ts-expect-error schedule({ durable: DurableSchedules }) needs a plugin that provides DurableSchedules.
-    defineApp('durable-no-backend').serve(schedule({ schedules: [nightly], durable: DurableSchedules }));
+    // @ts-expect-error schedule({ durable: DurableSchedules }) needs an infra unit that provides DurableSchedules.
+    defineApp('durable-no-backend').entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }));
     // @ts-expect-error durable takes the DurableSchedules token, not a boolean.
     schedule({ schedules: [nightly], durable: true });
   });

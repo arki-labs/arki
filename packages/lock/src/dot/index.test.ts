@@ -1,12 +1,12 @@
 /**
- * The `locks` Dot plugin: a feature gets a working lock handle, the store is
+ * The `locks` Dot unit: a feature gets a working lock handle, the store is
  * closed with the app, a process-scope store is refused in production unless
  * the app says it runs one replica, and `describeLocks` tells what the store
  * promises.
  */
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { MemoryGuarantees } from '../memory.js';
@@ -37,7 +37,7 @@ describe('locks()', () => {
   it('hands a feature a working handle: a second concurrent tryRun is refused while the first holds', async () => {
     const app = await orThrow(
       defineApp('locks-works')
-        .use(locks({ namespace: 'test', store: () => memoryStore() }))
+        .infra(locks({ namespace: 'test', store: () => memoryStore() }))
         .boot(),
     );
     const handle = app.services.locks;
@@ -55,7 +55,7 @@ describe('locks()', () => {
     const { store, calls } = trackedStore();
     const app = await orThrow(
       defineApp('locks-dispose')
-        .use(locks({ namespace: 'test', store: () => store }))
+        .infra(locks({ namespace: 'test', store: () => store }))
         .boot(),
     );
     expect(app.services.locks).toBeDefined();
@@ -66,11 +66,11 @@ describe('locks()', () => {
 
   it('builds the store from the services named in needs, so a store can use the app database', async () => {
     const seen: string[] = [];
-    const config = plugin({ name: 'config', provides: { dsn: () => 'postgres://x' } });
+    const config = infra({ name: 'config', provides: { dsn: () => 'postgres://x' } });
     const app = await orThrow(
       defineApp('locks-needs')
-        .use(config)
-        .use(
+        .infra(config)
+        .infra(
           locks({
             namespace: 'test',
             needs: { dsn: service<string>() },
@@ -90,7 +90,7 @@ describe('locks()', () => {
   it('refuses to boot with a process-scope store in production, because every replica would run the job', async () => {
     process.env['NODE_ENV'] = 'production';
     const failure: unknown = await defineApp('locks-prod')
-      .use(locks({ namespace: 'test', store: () => memoryStore() }))
+      .infra(locks({ namespace: 'test', store: () => memoryStore() }))
       .start();
     // Dot wraps the plugin's error; the LockError rides along as the cause.
     expect(UnexpectedDefect.is(failure)).toBe(true);
@@ -102,7 +102,7 @@ describe('locks()', () => {
     process.env['NODE_ENV'] = 'production';
     const app = await orThrow(
       defineApp('locks-prod-ok')
-        .use(locks({ namespace: 'test', store: () => memoryStore(), allowProcessScope: true }))
+        .infra(locks({ namespace: 'test', store: () => memoryStore(), allowProcessScope: true }))
         .boot(),
     );
     expect(app.services.locks).toBeDefined();
@@ -113,7 +113,7 @@ describe('locks()', () => {
     process.env['NODE_ENV'] = 'development';
     const app = await orThrow(
       defineApp('locks-dev')
-        .use(locks({ namespace: 'test', store: () => memoryStore() }))
+        .infra(locks({ namespace: 'test', store: () => memoryStore() }))
         .boot(),
     );
     expect(app.services.locks).toBeDefined();
@@ -123,7 +123,7 @@ describe('locks()', () => {
   it('types the handle by the store guarantees, so a memory store gives LocksFor<MemoryGuarantees> with no lead', async () => {
     const app = await orThrow(
       defineApp('locks-types')
-        .use(locks({ namespace: 'test', store: () => memoryStore() }))
+        .infra(locks({ namespace: 'test', store: () => memoryStore() }))
         .boot(),
     );
     expectTypeOf(app.services.locks).toEqualTypeOf<LocksFor<MemoryGuarantees>>();
@@ -138,7 +138,7 @@ describe('describeLocks()', () => {
     const store = memoryStore();
     const app = await orThrow(
       defineApp('locks-describe')
-        .use(locks({ namespace: 'test', store: () => store }))
+        .infra(locks({ namespace: 'test', store: () => store }))
         .boot(),
     );
     const handle = app.services.locks;

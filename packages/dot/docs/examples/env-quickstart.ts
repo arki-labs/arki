@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { env } from '@arki/dot/env';
 
-export default defineApp('my-app').use(
+export default defineApp('my-app').infra(
   env({
     schema: {
       PORT: z.coerce.number().default(3000),

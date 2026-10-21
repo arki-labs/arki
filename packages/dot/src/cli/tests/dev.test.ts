@@ -19,7 +19,7 @@ import { freePort, isAlive, recordingUi, tempProject, waitFor } from './dev-help
 const FIXTURE_APP = path.resolve(__dirname, 'fixtures', 'dev-app', 'dot.config.ts');
 const CLI_ENTRY = ['bun', path.resolve(__dirname, '..', 'index.ts')] as const;
 const DEFINE_APP_PATH = path.resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const UNIT_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'unit-contract.ts');
 
 let workDir: string;
 
@@ -86,9 +86,9 @@ describe('runDev', () => {
     await writeFile(
       appFile,
       `import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const broken = plugin({ name: 'broken', boot: () => { throw new Error('boot failed on purpose'); } });
-export const dev = defineApp('broken').use(broken);
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const broken = infra({ name: 'broken', boot: () => { throw new Error('boot failed on purpose'); } });
+export const dev = defineApp('broken').infra(broken);
 `,
     );
     const { result, events } = await session({ app: appFile, run: 'echo started > runner-ran' });
@@ -105,12 +105,12 @@ export const dev = defineApp('broken').use(broken);
     await writeFile(
       appFile,
       `import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
+import { infra } from '${UNIT_CONTRACT_PATH}';
 const seenAtImport = process.env['DB_URL'];
-const guard = plugin({ name: 'guard', boot: () => {
+const guard = infra({ name: 'guard', boot: () => {
   if (seenAtImport !== undefined || process.env['DB_URL'] !== undefined) throw new Error('saw a database URL');
 } });
-export const dev = defineApp('reads-env').use(guard);
+export const dev = defineApp('reads-env').infra(guard);
 `,
     );
     const { result } = await session({
@@ -130,9 +130,9 @@ export const dev = defineApp('reads-env').use(guard);
     await writeFile(
       appFile,
       `import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const migrations = plugin({ name: 'db-migrations', provides: { migrations: () => ({ pending: ['0003_orders', '0004_invoices'] }) } });
-export const dev = defineApp('migrates').use(migrations);
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const migrations = infra({ name: 'db-migrations', provides: { migrations: () => ({ pending: ['0003_orders', '0004_invoices'] }) } });
+export const dev = defineApp('migrates').infra(migrations);
 `,
     );
     const { result, lines } = await session({ app: appFile, once: true, mode: 'text' });

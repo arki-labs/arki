@@ -2,7 +2,7 @@
  * Manifest types for the DOT kernel.
  *
  * A `DotAppManifest` is the static, declarative description of an app: which
- * plugins are registered, what actions/services/projections they contribute, and how they
+ * units are registered, what actions/services/projections they contribute, and how they
  * depend on each other. It is built up during the `configure` phase from
  * registration calls and finalised once `configure` completes.
  *
@@ -15,7 +15,7 @@
 import { is, plainObjectSchema } from '@arki/schema';
 
 import type { DotLifecycleHook } from './lifecycle.js';
-import type { DotPluginRole } from './plugin-contract.js';
+import type { UnitRole } from './unit-contract.js';
 import { dotErrorDocsUrl } from './lifecycle.js';
 
 /** JSON-serializable value — the manifest's currency. */
@@ -101,16 +101,16 @@ export function toJsonObject(value: unknown): JsonObject {
 }
 
 /**
- * Kind of service that a plugin can publish.
+ * Kind of service that a unit can publish.
  *
  * Well-known kinds map 1:1 to the canonical `@arki/*` adapters. `custom`
- * is the escape hatch for plugin-defined service kinds — use it whenever a
- * plugin publishes something that does not fit a reserved shape.
+ * is the escape hatch for unit-defined service kinds — use it whenever a
+ * unit publishes something that does not fit a reserved shape.
  */
 export type ServiceKind =
   'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'event-store' | 'message-bus' | 'custom';
 
-/** Kind of dependency edge between two plugins. */
+/** Kind of dependency edge between two units. */
 export type DependencyEdgeKind = 'requires' | 'provides' | 'uses';
 
 /** Direction of a boundary interaction, viewed from the app. */
@@ -143,7 +143,7 @@ export type ProjectionManifest = {
   binding: string;
   /** Import specifier for the projection module. */
   module: string;
-  /** Plugin that registered this projection. */
+  /** Unit that registered this projection. */
   plugin: string;
 };
 
@@ -159,7 +159,7 @@ export type DotAppManifest = {
     name: string;
     version?: string;
   };
-  plugins: PluginManifest[];
+  plugins: UnitManifest[];
   actions: ActionManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
@@ -167,29 +167,29 @@ export type DotAppManifest = {
   projections: ProjectionManifest[];
 };
 
-/** Single plugin's declarative metadata. */
-export type PluginManifest = {
+/** Single unit's declarative metadata. */
+export type UnitManifest = {
   name: string;
-  /** Hexagon role from the app builder — see `Plugin.role`. */
-  role?: DotPluginRole;
+  /** Hexagon role from the app builder — see `Unit.role`. */
+  role?: UnitRole;
   dependencies: readonly string[];
   provides: readonly string[];
 };
 
-/** Single service published by a plugin. */
+/** Single service published by a unit. */
 export type ServiceManifest = {
   name: string;
   plugin: string;
   kind: ServiceKind;
 };
 
-/** Which lifecycle hooks a plugin participates in. */
+/** Which lifecycle hooks a unit participates in. */
 export type LifecycleManifest = {
   plugin: string;
   hooks: readonly DotLifecycleHook[];
 };
 
-/** Directed edge in the plugin dependency graph. */
+/** Directed edge in the unit dependency graph. */
 export type DependencyEdge = {
   from: string;
   to: string;

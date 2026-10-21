@@ -40,7 +40,7 @@ const widgets = pgTable('widgets', {
 const relations = defineRelations({ widgets });
 
 export const app = await defineApp('arki-dot-fixture')
-  .use(
+  .infra(
     env({
       schema: {
         FIXTURE_GREETING: z.string().default('hello'),
@@ -48,13 +48,13 @@ export const app = await defineApp('arki-dot-fixture')
       skipValidation: true,
     }),
   )
-  .use(
+  .infra(
     kv({
       url: 'redis://127.0.0.1:1', // unreachable, never queried by the fixture
       namespace: 'arki-dot-fixture',
     }),
   )
-  .use(
+  .infra(
     db({
       driver: 'pglite',
       memory: true,

@@ -1,16 +1,16 @@
 /**
- * DOT adapter for `@arki/schedule` — the `schedule()` driving adapter.
+ * DOT adapter for `@arki/schedule` — the `schedule()` entrypoint.
  *
- * `schedule()` is a driver: `.serve(schedule(...))` binds it to the
+ * `schedule()` is an entrypoint: `.entrypoints(schedule(...))` binds it to the
  * features the app mounted and runs every feature's `schedules(...)` slice,
  * plus any app-level `schedules` passed here. The app lists its features
  * once:
  *
  * ```ts
  * defineApp('shop')
- *   .use(db({ url }))
+ *   .infra(db({ url }))
  *   .features([billing, reports])           // each declares `use: [schedules(...)]`
- *   .serve(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
+ *   .entrypoints(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
  * ```
  *
  * A feature declares its schedules in one of two forms:
@@ -33,11 +33,11 @@
  * declarations.
  */
 
-import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
-import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot/plugin';
+import type { AnyFeatureCore, AnyFeatureSlice, DepsOf, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { CtxOf, EmptyShape, NeedsShape, Unit, WireNeeds } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
-import { allFeatures, driver, entrypointsOf, instanceOf, sliceOf } from '@arki/dot/feature';
-import { plugin, token } from '@arki/dot/plugin';
+import { allFeatures, entrypoint, entrypointsOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { token } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
 import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
@@ -425,7 +425,7 @@ function isScheduleDefList<TContext>(
  * Declare a feature's in-process schedules as a boot-time slice
  * (`feature(..., { use: [schedules(...)] })`). The payload lands
  * under `schedules` in the feature's slice record — where the
- * `.serve(schedule(...))` driver collects it — and the derived actions
+ * `.entrypoints(schedule(...))` entrypoint collects it — and the derived actions
  * join the feature's manifest.
  *
  * - `schedules(defs)`: `defineSchedule(...)` results; handlers receive the
@@ -560,24 +560,24 @@ function schedulerService(clock: ScheduleClock, names: readonly string[], runtim
 }
 
 /**
- * The scheduler driving adapter. See the module docs for the wiring. It
+ * The scheduler entrypoint. See the module docs for the wiring. It
  * provides `scheduler` ({@link ScheduleService}) to the app.
  */
 export function schedule<TDurable extends DurableSchedulesToken | undefined = undefined>(
   options: ScheduleNoContextOptions<TDurable>,
-): Driver<DurableNeeds<TDurable>, SchedulerProvides>;
+): EntrypointBinder<DurableNeeds<TDurable>, SchedulerProvides>;
 export function schedule<
   TContext,
   TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
   TDurable extends DurableSchedulesToken | undefined = undefined,
 >(
   options: ScheduleOptions<TNeeds, TContext, TDurable>,
-): Driver<WireNeeds<TNeeds> & DurableNeeds<TDurable>, SchedulerProvides>;
+): EntrypointBinder<WireNeeds<TNeeds> & DurableNeeds<TDurable>, SchedulerProvides>;
 export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
   options: Omit<ScheduleOptions<TNeeds, TContext, DurableSchedulesToken | undefined>, 'context'> & {
     readonly context?: ScheduleOptions<TNeeds, TContext>['context'];
   },
-): Driver<WireNeeds<TNeeds>, SchedulerProvides> {
+): EntrypointBinder<WireNeeds<TNeeds>, SchedulerProvides> {
   const own = options.schedules ?? [];
   const clock = options.clock ?? 'internal';
   const needs: NeedsShape & NoReservedKeys = {
@@ -586,9 +586,9 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
   };
   const actions = scheduleActions(own, clock);
 
-  return driver(features => {
+  return entrypoint.fromFeatures(features => {
     let runtime: ScheduleRuntime | undefined;
-    return plugin({
+    return unit({
       name: 'schedule',
       needs,
       // App-level schedules only: feature schedules already joined each
@@ -671,7 +671,7 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
       },
       // Erasure seam: the needs record is runtime-built (own needs + the
       // optional durable alias); the overloads carry the precise shape.
-    }) as unknown as Plugin<WireNeeds<TNeeds>, SchedulerProvides>;
+    }) as unknown as Unit<WireNeeds<TNeeds>, SchedulerProvides>;
   });
 }
 

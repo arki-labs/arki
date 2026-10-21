@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const ENTRIES = ['./index.ts', './log.ts', './plugin.ts'].map(entry => fileURLToPath(new URL(entry, import.meta.url)));
+const ENTRIES = ['./index.ts', './log.ts', './unit.ts'].map(entry => fileURLToPath(new URL(entry, import.meta.url)));
 
 const SENTINEL = '__dot_import_purity__';
 
@@ -69,7 +69,7 @@ function probe(entries: readonly string[]): unknown {
 }
 
 describe('import purity', () => {
-  it('importing @arki/dot, @arki/dot/log and @arki/dot/plugin reads no env, writes nothing and registers no listener', () => {
+  it('importing @arki/dot, @arki/dot/log and @arki/dot/unit reads no env, writes nothing and registers no listener', () => {
     expect(probe(ENTRIES)).toEqual({ envReads: [], listeners: [], writes: 0 });
   });
 

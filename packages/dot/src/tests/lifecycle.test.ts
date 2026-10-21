@@ -4,8 +4,8 @@
  * Tests enter through public boundaries only — `defineApp`, `plugin`, and the
  * `DotApp` lifecycle methods. The internal scheduler is not tested directly.
  *
- * v2 note: declaration order IS boot order. Ordering across plugins is
- * asserted via `.use()` order; the old name-based `dependencies` array no
+ * v2 note: declaration order IS boot order. Ordering across units is
+ * asserted via `.infra()` order; the old name-based `dependencies` array no
  * longer exists.
  */
 
@@ -17,16 +17,16 @@ import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failu
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { plugin, rename, service } from '../plugin-contract.js';
+import { infra, rename, service } from '../unit-contract.js';
 
 type CallLog = {
   hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
   plugin: string;
 };
 
-/** Build a plugin that logs every hook invocation. */
-function loggingPlugin(name: string, calls: CallLog[], overrides: { failIn?: 'boot' | 'start' | 'stop' } = {}) {
-  return plugin({
+/** Build a unit that logs every hook invocation. */
+function loggingUnit(name: string, calls: CallLog[], overrides: { failIn?: 'boot' | 'start' | 'stop' } = {}) {
+  return infra({
     name,
     configure: () => {
       calls.push({ hook: 'configure', plugin: name });
@@ -52,10 +52,10 @@ function loggingPlugin(name: string, calls: CallLog[], overrides: { failIn?: 'bo
 describe('DOT lifecycle', () => {
   it('runs all 5 hooks in declaration order; stop/dispose run in reverse', async () => {
     const calls: CallLog[] = [];
-    const a = loggingPlugin('a', calls);
-    const b = loggingPlugin('b', calls);
+    const a = loggingUnit('a', calls);
+    const b = loggingUnit('b', calls);
 
-    const app = orThrow(await defineApp('test').use(a).use(b).start());
+    const app = orThrow(await defineApp('test').infra(a).infra(b).start());
     orThrow(await app.dispose());
 
     expect(calls).toEqual([
@@ -73,13 +73,13 @@ describe('DOT lifecycle', () => {
   });
 
   it('returns a supervised defect for an async configure hook', async () => {
-    const bad = plugin({
+    const bad = infra({
       name: 'bad',
       // @ts-expect-error Deliberately bypass authoring to test the runtime protocol check.
       configure: () => Promise.resolve(),
     });
 
-    await expect(defineApp('test').use(bad).boot()).resolves.toMatchObject({
+    await expect(defineApp('test').infra(bad).boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
         code: DotLifecycleErrorCode.ConfigureAsync,
@@ -91,8 +91,8 @@ describe('DOT lifecycle', () => {
 
   it('supervises malformed JavaScript hook returns and still completes teardown', async () => {
     const configured = defineApp('invalid-configure')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'invalid',
           // @ts-expect-error JavaScript authors can return an invalid phase result.
           configure: () => 42,
@@ -104,16 +104,16 @@ describe('DOT lifecycle', () => {
     const calls: string[] = [];
     const app = orThrow(
       await defineApp('invalid-dispose')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'first',
             dispose() {
               calls.push('first');
             },
           }),
         )
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'invalid',
             // @ts-expect-error An invalid result must never turn disposal into success.
             dispose: () => 42,
@@ -126,16 +126,16 @@ describe('DOT lifecycle', () => {
     expect(calls).toEqual(['first']);
   });
 
-  it('disposes already-booted plugins in reverse order when a later boot fails', async () => {
+  it('disposes already-booted units in reverse order when a later boot fails', async () => {
     const calls: CallLog[] = [];
-    const a = loggingPlugin('a', calls);
-    const b = loggingPlugin('b', calls, { failIn: 'boot' });
+    const a = loggingUnit('a', calls);
+    const b = loggingUnit('b', calls, { failIn: 'boot' });
 
-    const outcome = await defineApp('test').use(a).use(b).boot();
+    const outcome = await defineApp('test').infra(a).infra(b).boot();
     expect(UnexpectedDefect.is(outcome)).toBe(true);
     expect(outcome).toMatchObject({ cause: new Error('boom-b') });
 
-    // Plugin a booted, then b threw — a's dispose runs, b's dispose does NOT
+    // Unit a booted, then b threw — a's dispose runs, b's dispose does NOT
     // (its boot never completed).
     expect(calls.filter(c => c.hook !== 'configure')).toEqual([
       { hook: 'boot', plugin: 'a' },
@@ -144,25 +144,25 @@ describe('DOT lifecycle', () => {
     ]);
   });
 
-  it('does not call dispose for a plugin whose boot threw with partial resources', async () => {
+  it('does not call dispose for a unit whose boot threw with partial resources', async () => {
     const calls: CallLog[] = [];
     let partialCleanup = false;
-    const a = loggingPlugin('a', calls);
-    const partial = plugin({
+    const a = loggingUnit('a', calls);
+    const partial = infra({
       name: 'partial',
       boot: () => {
         calls.push({ hook: 'boot', plugin: 'partial' });
-        // simulate partial resource setup, then failure — the plugin cleans up itself
+        // simulate partial resource setup, then failure — the unit cleans up itself
         partialCleanup = true;
         throw new Error('partial-failed');
       },
-      // dispose would never be called for partial — DOT only disposes booted plugins
+      // dispose would never be called for partial — DOT only disposes booted units
       dispose: () => {
         calls.push({ hook: 'dispose', plugin: 'partial' });
       },
     });
 
-    const outcome = await defineApp('test').use(a).use(partial).boot();
+    const outcome = await defineApp('test').infra(a).infra(partial).boot();
     expect(UnexpectedDefect.is(outcome)).toBe(true);
     expect(outcome).toMatchObject({ cause: new Error('partial-failed') });
     expect(partialCleanup).toBe(true);
@@ -170,12 +170,12 @@ describe('DOT lifecycle', () => {
     expect(calls.filter(c => c.plugin === 'a' && c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'a' }]);
   });
 
-  it('on start failure stops started plugins and disposes all booted plugins (reverse order)', async () => {
+  it('on start failure stops started units and disposes all booted units (reverse order)', async () => {
     const calls: CallLog[] = [];
-    const a = loggingPlugin('a', calls);
-    const b = loggingPlugin('b', calls, { failIn: 'start' });
+    const a = loggingUnit('a', calls);
+    const b = loggingUnit('b', calls, { failIn: 'start' });
 
-    await expect(defineApp('test').use(a).use(b).start()).resolves.toMatchObject({
+    await expect(defineApp('test').infra(a).infra(b).start()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
         code: DotLifecycleErrorCode.StartFailed,
@@ -195,13 +195,13 @@ describe('DOT lifecycle', () => {
     ]);
   });
 
-  it('stop continues through individual plugin failures with aggregate error', async () => {
+  it('stop continues through individual unit failures with aggregate error', async () => {
     const calls: CallLog[] = [];
-    const a = loggingPlugin('a', calls);
-    const b = loggingPlugin('b', calls, { failIn: 'stop' });
-    const c = loggingPlugin('c', calls);
+    const a = loggingUnit('a', calls);
+    const b = loggingUnit('b', calls, { failIn: 'stop' });
+    const c = loggingUnit('c', calls);
 
-    const app = orThrow(await defineApp('test').use(a).use(b).use(c).start());
+    const app = orThrow(await defineApp('test').infra(a).infra(b).infra(c).start());
     await expect(app.stop()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -218,13 +218,13 @@ describe('DOT lifecycle', () => {
 
   it('boot() is idempotent while app is booted', async () => {
     let bootCalls = 0;
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         bootCalls += 1;
       },
     });
-    const app = orThrow(await defineApp('test').use(p).boot());
+    const app = orThrow(await defineApp('test').infra(p).boot());
     expect(bootCalls).toBe(1);
     orThrow(await app.start());
     expect(bootCalls).toBe(1);
@@ -241,7 +241,7 @@ describe('DOT lifecycle', () => {
       resolveBoot = r;
     });
 
-    const slow = plugin({
+    const slow = infra({
       name: 'slow',
       boot: async () => {
         bootCalls += 1;
@@ -249,7 +249,7 @@ describe('DOT lifecycle', () => {
       },
     });
 
-    const builder = defineApp('test').use(slow);
+    const builder = defineApp('test').infra(slow);
     // Drive boot through two concurrent start() calls on the same DotApp.
     // To do this we configure, then call boot() twice from a wrapped app.
     const configured = orThrow(builder.configure());
@@ -270,8 +270,8 @@ describe('DOT lifecycle', () => {
 
   it('start() from defined runs configure + boot first', async () => {
     const calls: CallLog[] = [];
-    const p = loggingPlugin('p', calls);
-    const app = orThrow(await defineApp('test').use(p).start());
+    const p = loggingUnit('p', calls);
+    const app = orThrow(await defineApp('test').infra(p).start());
     expect(calls.map(c => c.hook)).toEqual(['configure', 'boot', 'start']);
     expect(app.state).toBe('started');
     orThrow(await app.dispose());
@@ -279,7 +279,7 @@ describe('DOT lifecycle', () => {
 
   it('stop() on a booted-but-never-started app is a no-op', async () => {
     let stopCalls = 0;
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         /* side effects only */
@@ -288,7 +288,7 @@ describe('DOT lifecycle', () => {
         stopCalls += 1;
       },
     });
-    const app = orThrow(await defineApp('test').use(p).boot());
+    const app = orThrow(await defineApp('test').infra(p).boot());
     expect(await app.stop()).toBeUndefined();
     expect(stopCalls).toBe(0);
     expect(app.state).toBe('stopped');
@@ -297,7 +297,7 @@ describe('DOT lifecycle', () => {
 
   it('dispose() from started runs stop then dispose', async () => {
     const calls: CallLog[] = [];
-    const p = plugin({
+    const p = infra({
       name: 'p',
       start: () => {
         calls.push({ hook: 'start', plugin: 'p' });
@@ -309,20 +309,20 @@ describe('DOT lifecycle', () => {
         calls.push({ hook: 'dispose', plugin: 'p' });
       },
     });
-    const app = orThrow(await defineApp('test').use(p).start());
+    const app = orThrow(await defineApp('test').infra(p).start());
     orThrow(await app.dispose());
     expect(calls.map(c => c.hook)).toEqual(['start', 'stop', 'dispose']);
     expect(app.state).toBe('disposed');
   });
 
   it('start() after dispose returns a defect with ReuseAfterDispose diagnostics', async () => {
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         /* side effects only */
       },
     });
-    const app = orThrow(await defineApp('test').use(p).boot());
+    const app = orThrow(await defineApp('test').infra(p).boot());
     orThrow(await app.dispose());
     await expect(app.start()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
@@ -332,10 +332,10 @@ describe('DOT lifecycle', () => {
     });
   });
 
-  it('unsatisfied need fails boot with UnsatisfiedNeed and rolls back booted plugins', async () => {
+  it('unsatisfied need fails boot with UnsatisfiedNeed and rolls back booted units', async () => {
     const calls: CallLog[] = [];
-    const a = loggingPlugin('a', calls);
-    const consumer = plugin({
+    const a = loggingUnit('a', calls);
+    const consumer = infra({
       name: 'consumer',
       needs: { db: service<{ query(): void }>() },
       boot: ({ db }) => {
@@ -346,7 +346,7 @@ describe('DOT lifecycle', () => {
     // The compile-time guard forbids this chain; the erased seam simulates
     // dynamic composition, which the kernel must still validate.
     // @ts-expect-error — `db` has no provider; intentionally invalid wiring
-    const builder = defineApp('test').use(a).use(consumer);
+    const builder = defineApp('test').infra(a).infra(consumer);
     await expect(builder.boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -355,27 +355,27 @@ describe('DOT lifecycle', () => {
         plugin: 'consumer',
       },
     });
-    // Plugin a booted before the failure — it must be rolled back.
+    // Unit a booted before the failure — it must be rolled back.
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'a' }]);
   });
 
-  it('mutual needs between two plugins are a ring (E019) at configure, before anything boots', async () => {
-    const a = plugin({
+  it('mutual needs between two units are a ring (E019) at configure, before anything boots', async () => {
+    const a = infra({
       name: 'a',
       needs: { beta: service<number>() },
       provides: { alpha: ({ beta }) => beta + 1 },
     });
-    const b = plugin({
+    const b = infra({
       name: 'b',
       needs: { alpha: service<number>() },
       provides: { beta: ({ alpha }) => alpha + 1 },
     });
 
-    // No ordering of these two plugins typechecks — the cycle is unrepresentable
+    // No ordering of these two units typechecks — the cycle is unrepresentable
     // at the type level. The erased seam simulates dynamic composition, which
     // the kernel must still reject with actionable guidance.
     // @ts-expect-error — a's need has no provider; intentionally cyclic wiring
-    const builder = defineApp('test').use(a).use(b);
+    const builder = defineApp('test').infra(a).infra(b);
     const outcome = await builder.boot();
     expect(outcome).toMatchObject({
       code: UnexpectedDefect.code,
@@ -387,9 +387,9 @@ describe('DOT lifecycle', () => {
     }
   });
 
-  it('service collision fails boot with ServiceCollision and rolls back (incl. the colliding plugin)', async () => {
+  it('service collision fails boot with ServiceCollision and rolls back (incl. the colliding unit)', async () => {
     const calls: CallLog[] = [];
-    const first = plugin({
+    const first = infra({
       name: 'first',
       provides: {
         db: () => {
@@ -401,7 +401,7 @@ describe('DOT lifecycle', () => {
         calls.push({ hook: 'dispose', plugin: 'first' });
       },
     });
-    const second = plugin({
+    const second = infra({
       name: 'second',
       provides: {
         db: () => {
@@ -415,7 +415,7 @@ describe('DOT lifecycle', () => {
     });
 
     // @ts-expect-error — both provide wire key `db`; intentionally invalid wiring
-    const builder = defineApp('test').use(first).use(second);
+    const builder = defineApp('test').infra(first).infra(second);
     await expect(builder.boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -424,7 +424,7 @@ describe('DOT lifecycle', () => {
         plugin: 'second',
       },
     });
-    // Both plugins completed boot before the collision surfaced — both roll back,
+    // Both units completed boot before the collision surfaced — both roll back,
     // in reverse order.
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([
       { hook: 'dispose', plugin: 'second' },
@@ -432,12 +432,12 @@ describe('DOT lifecycle', () => {
     ]);
   });
 
-  it('reports duplicate plugin registration as a managed configure defect', () => {
-    const a = plugin({ name: 'a' });
-    const outcome = defineApp('test').use(a).use(a).configure();
+  it('reports duplicate unit registration as a managed configure defect', () => {
+    const a = infra({ name: 'a' });
+    const outcome = defineApp('test').infra(a).infra(a).configure();
     expect(outcome).toMatchObject({
       code: UnexpectedDefect.code,
-      cause: { code: DotLifecycleErrorCode.DuplicatePlugin },
+      cause: { code: DotLifecycleErrorCode.DuplicateUnit },
     });
   });
 });
@@ -455,7 +455,7 @@ describe('lifecycle transition serialization', () => {
     const order: string[] = [];
     const entered = deferred();
     const gate = deferred();
-    const slow = plugin({
+    const slow = infra({
       name: 'slow',
       boot: () => {
         order.push('boot');
@@ -470,7 +470,7 @@ describe('lifecycle transition serialization', () => {
       dispose: () => void order.push('dispose'),
     });
 
-    const app = orThrow(await defineApp('race-start-dispose').use(slow).boot());
+    const app = orThrow(await defineApp('race-start-dispose').infra(slow).boot());
     const starting = app.start();
     await entered.promise; // start hook is mid-flight at its await point
     const disposing = app.dispose();
@@ -487,7 +487,7 @@ describe('lifecycle transition serialization', () => {
   it('concurrent start() calls coalesce onto one in-flight transition', async () => {
     let startRuns = 0;
     const gate = deferred();
-    const p = plugin({
+    const p = infra({
       name: 'once',
       start: async () => {
         startRuns += 1;
@@ -495,7 +495,7 @@ describe('lifecycle transition serialization', () => {
       },
     });
 
-    const app = orThrow(await defineApp('race-double-start').use(p).boot());
+    const app = orThrow(await defineApp('race-double-start').infra(p).boot());
     const first = app.start();
     const second = app.start();
     gate.resolve();
@@ -507,7 +507,7 @@ describe('lifecycle transition serialization', () => {
   it('start() issued while dispose() is in flight fails — a disposed app cannot restart', async () => {
     const entered = deferred();
     const gate = deferred();
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         /* side effects only */
@@ -518,7 +518,7 @@ describe('lifecycle transition serialization', () => {
       },
     });
 
-    const app = orThrow(await defineApp('race-dispose-start').use(p).boot());
+    const app = orThrow(await defineApp('race-dispose-start').infra(p).boot());
     const disposing = app.dispose();
     await entered.promise; // dispose hook is mid-flight
     const starting = app.start();
@@ -535,11 +535,11 @@ describe('lifecycle transition serialization', () => {
 });
 
 describe('hookTimeoutMs watchdog (E015)', () => {
-  it('a boot deadline joins owned work before rolling back earlier plugins', async () => {
+  it('a boot deadline joins owned work before rolling back earlier units', async () => {
     const calls: CallLog[] = [];
     const cancelled = deferred();
     const gate = deferred();
-    const hung = plugin({
+    const hung = infra({
       name: 'hung',
       boot: async ({ $signal }) => {
         $signal.addEventListener('abort', cancelled.resolve, { once: true });
@@ -547,8 +547,8 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       },
     });
     const pending = defineApp('watchdog-boot', { hookTimeoutMs: 30 })
-      .use(loggingPlugin('good', calls))
-      .use(hung)
+      .infra(loggingUnit('good', calls))
+      .infra(hung)
       .boot();
     let settled = false;
     void pending.then(
@@ -572,7 +572,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     const calls: CallLog[] = [];
     const cancelled = deferred();
     const gate = deferred();
-    const hung = plugin({
+    const hung = infra({
       name: 'hung-start',
       start: async ({ $signal }) => {
         $signal.addEventListener('abort', cancelled.resolve, { once: true });
@@ -580,8 +580,8 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       },
     });
     const pending = defineApp('watchdog-start', { hookTimeoutMs: 30 })
-      .use(loggingPlugin('good', calls))
-      .use(hung)
+      .infra(loggingUnit('good', calls))
+      .infra(hung)
       .start();
     let settled = false;
     void pending.then(
@@ -605,19 +605,19 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'good' }]);
   });
 
-  it('a dispose deadline joins cleanup before disposing earlier plugins', async () => {
+  it('a dispose deadline joins cleanup before disposing earlier units', async () => {
     const order: string[] = [];
     const cancelled = deferred();
     const gate = deferred();
-    const hung = plugin({
+    const hung = infra({
       name: 'hung-dispose',
       dispose: async ({ $signal }) => {
         $signal.addEventListener('abort', cancelled.resolve, { once: true });
         await gate.promise;
       },
     });
-    const tidy = plugin({ name: 'tidy', dispose: () => void order.push('tidy') });
-    const app = orThrow(await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).use(tidy).use(hung).boot());
+    const tidy = infra({ name: 'tidy', dispose: () => void order.push('tidy') });
+    const app = orThrow(await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).infra(tidy).infra(hung).boot());
     const pending = app.dispose();
     let settled = false;
     void pending.then(
@@ -644,7 +644,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
   it("aborts an owned boot hook's signal and reports Deadline after it stops", async () => {
     let seen: AbortSignal | undefined;
     let stopped = false;
-    const hung = plugin({
+    const hung = infra({
       name: 'hung-io',
       boot: ({ $signal }) => {
         seen = $signal;
@@ -661,7 +661,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
         });
       },
     });
-    expect(await defineApp('watchdog-signal', { hookTimeoutMs: 30 }).use(hung).boot()).toMatchObject({
+    expect(await defineApp('watchdog-signal', { hookTimeoutMs: 30 }).infra(hung).boot()).toMatchObject({
       code: 'async.deadline',
     });
     expect(stopped).toBe(true);
@@ -670,12 +670,12 @@ describe('hookTimeoutMs watchdog (E015)', () => {
 
   it('gives each hook call its own signal, not aborted when the hook finishes in time', async () => {
     const signals: AbortSignal[] = [];
-    const quick = plugin({
+    const quick = infra({
       name: 'quick-signal',
       boot: ({ $signal }) => void signals.push($signal),
       start: ({ $signal }) => void signals.push($signal),
     });
-    const app = orThrow(await defineApp('watchdog-signal-ok', { hookTimeoutMs: 1000 }).use(quick).start());
+    const app = orThrow(await defineApp('watchdog-signal-ok', { hookTimeoutMs: 1000 }).infra(quick).start());
     expect(signals).toHaveLength(2);
     expect(signals[0]).not.toBe(signals[1]);
     expect(signals.some(signal => signal.aborted)).toBe(false);
@@ -684,7 +684,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
   });
 
   it('hooks under budget are untouched by the watchdog', async () => {
-    const quick = plugin({
+    const quick = infra({
       name: 'quick',
       provides: {
         ok: async () => {
@@ -693,7 +693,7 @@ describe('hookTimeoutMs watchdog (E015)', () => {
         },
       },
     });
-    const app = orThrow(await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).use(quick).boot());
+    const app = orThrow(await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).infra(quick).boot());
     expect(app.services.ok).toBe(true);
     orThrow(await app.dispose());
   });
@@ -702,31 +702,31 @@ describe('hookTimeoutMs watchdog (E015)', () => {
 describe('reserved $ keys (E014)', () => {
   it('a boot hook publishing a $-prefixed key fails with ReservedServiceKey and rolls back', async () => {
     const calls: CallLog[] = [];
-    const good = loggingPlugin('good', calls);
-    const bad = plugin({
+    const good = loggingUnit('good', calls);
+    const bad = infra({
       name: 'bad',
       // @ts-expect-error — $-prefixed provide keys are reserved for kernel context
       provides: { $app: () => 42 },
     });
 
-    await expect(defineApp('reserved-publish').use(good).use(bad).boot()).resolves.toMatchObject({
+    await expect(defineApp('reserved-publish').infra(good).infra(bad).boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
         code: DotLifecycleErrorCode.ReservedServiceKey,
       },
     });
-    // The earlier plugin had booted — it must roll back.
+    // The earlier unit had booted — it must roll back.
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'good' }]);
   });
 
   it('a $-prefixed needs alias returns a defect with ReservedServiceKey diagnostics', () => {
-    const bad = plugin({
+    const bad = infra({
       name: 'bad-needs',
       // @ts-expect-error — $-prefixed needs aliases are reserved for kernel context
       needs: { $db: service<number>() },
     });
 
-    const outcome = defineApp('reserved-needs').use(bad).configure();
+    const outcome = defineApp('reserved-needs').infra(bad).configure();
     expect(outcome).toMatchObject({
       code: UnexpectedDefect.code,
       cause: { code: DotLifecycleErrorCode.ReservedServiceKey },
@@ -734,10 +734,10 @@ describe('reserved $ keys (E014)', () => {
   });
 
   it('rename() to a $-prefixed wire key returns a defect with ReservedServiceKey diagnostics', () => {
-    const provider = plugin({ name: 'db', provides: { db: () => 1 } });
+    const provider = infra({ name: 'db', provides: { db: () => 1 } });
     const renamed = rename(provider, { db: '$db' });
 
-    const outcome = defineApp('reserved-rename').use(renamed).configure();
+    const outcome = defineApp('reserved-rename').infra(renamed).configure();
     expect(outcome).toMatchObject({
       code: UnexpectedDefect.code,
       cause: { code: DotLifecycleErrorCode.ReservedServiceKey },
@@ -756,9 +756,9 @@ describe('typed lifecycle outcomes', () => {
     const failure = ConfigureFailed();
     const calls: string[] = [];
     const result = await defineApp('configure-known')
-      .use(plugin({ name: 'failed', configure: () => failure, boot: () => void calls.push('failed-boot') }))
-      .use(
-        plugin({
+      .infra(infra({ name: 'failed', configure: () => failure, boot: () => void calls.push('failed-boot') }))
+      .infra(
+        infra({
           name: 'consumer',
           configure: () => void calls.push('consumer-configure'),
           boot: () => void calls.push('consumer-boot'),
@@ -773,15 +773,15 @@ describe('typed lifecycle outcomes', () => {
     const failure = StartFailed();
     const calls: string[] = [];
     const result = await defineApp('start-known')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'ready',
           start: () => void calls.push('start'),
           stop: () => void calls.push('stop'),
           dispose: () => void calls.push('ready-dispose'),
         }),
       )
-      .use(plugin({ name: 'failed', start: () => failure, dispose: () => void calls.push('failed-dispose') }))
+      .infra(infra({ name: 'failed', start: () => failure, dispose: () => void calls.push('failed-dispose') }))
       .start();
     expect(result).toBe(failure);
     expect(calls).toEqual(['start', 'stop', 'failed-dispose', 'ready-dispose']);
@@ -792,9 +792,9 @@ describe('typed lifecycle outcomes', () => {
     const later = DisposeFailed();
     const earlier = DisposeFailed();
     const result = await defineApp('boot-cleanup-known')
-      .use(plugin({ name: 'earlier', dispose: () => earlier }))
-      .use(plugin({ name: 'later', dispose: () => later }))
-      .use(plugin({ name: 'failed', boot: () => primary }))
+      .infra(infra({ name: 'earlier', dispose: () => earlier }))
+      .infra(infra({ name: 'later', dispose: () => later }))
+      .infra(infra({ name: 'failed', boot: () => primary }))
       .boot();
     expect(result).toMatchObject({
       code: 'async.scope_failed',
@@ -813,8 +813,8 @@ describe('typed lifecycle outcomes', () => {
     const later = DisposeFailed();
     const earlier = DisposeFailed();
     const result = await defineApp('start-cleanup-known')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'earlier',
           start: () => {
             /* Registers active work for stop participation. */
@@ -823,7 +823,7 @@ describe('typed lifecycle outcomes', () => {
           dispose: () => earlier,
         }),
       )
-      .use(plugin({ name: 'failed', start: () => primary, dispose: () => later }))
+      .infra(infra({ name: 'failed', start: () => primary, dispose: () => later }))
       .start();
     expect(result).toMatchObject({
       code: 'async.scope_failed',
@@ -841,8 +841,8 @@ describe('typed lifecycle outcomes', () => {
     const calls: string[] = [];
     const app = orThrow(
       await defineApp('stop-known')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'earlier',
             start: () => {
               /* Registers active work for stop participation. */
@@ -854,8 +854,8 @@ describe('typed lifecycle outcomes', () => {
             dispose: () => void calls.push('earlier-dispose'),
           }),
         )
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'later',
             start: () => {
               /* Registers active work for stop participation. */
@@ -883,8 +883,8 @@ describe('typed lifecycle outcomes', () => {
     const calls: string[] = [];
     const app = orThrow(
       await defineApp('dispose-known')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'earlier',
             start: () => {
               /* Registers active work for stop participation. */
@@ -896,8 +896,8 @@ describe('typed lifecycle outcomes', () => {
             },
           }),
         )
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'later',
             dispose: () => {
               calls.push('later');
@@ -919,14 +919,14 @@ describe('typed lifecycle outcomes', () => {
   });
 });
 
-it('runs a stop-only plugin after its app starts, including startup rollback', async () => {
+it('runs a stop-only unit after its app starts, including startup rollback', async () => {
   const StopFailed = defineFailure('test.dot.stop_only');
   const failure = StopFailed();
   const calls: string[] = [];
   const app = orThrow(
     await defineApp('stop-only')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'stop-only',
           stop: () => {
             calls.push('stop');
@@ -943,8 +943,8 @@ it('runs a stop-only plugin after its app starts, including startup rollback', a
   const StartFailed = defineFailure('test.dot.rollback_start');
   const primary = StartFailed();
   const outcome = await defineApp('stop-only-rollback')
-    .use(plugin({ name: 'stop-only', stop: () => failure }))
-    .use(plugin({ name: 'failed', start: () => primary }))
+    .infra(infra({ name: 'stop-only', stop: () => failure }))
+    .infra(infra({ name: 'failed', start: () => primary }))
     .start();
   expect(outcome).toMatchObject({ code: 'async.scope_failed', cause: { primary: [primary], cleanup: [failure] } });
 });
@@ -955,8 +955,8 @@ it('keeps failures limited to the phases reached from each public entry point', 
   const StartFailed = defineFailure('test.phase.start');
   const StopFailed = defineFailure('test.phase.stop');
   const DisposeFailed = defineFailure('test.phase.dispose');
-  const _phaseBuilder = defineApp('phase-types').use(
-    plugin({
+  const _phaseBuilder = defineApp('phase-types').infra(
+    infra({
       name: 'phases',
       configure: () => ConfigureFailed(),
       boot: () => BootFailed(),
@@ -1001,8 +1001,8 @@ it('coalesces failed boot and start calls through each narrowed phase entry poin
   let starts = 0;
   const configuredBoot = orThrow(
     defineApp('coalesced-boot')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'failed',
           boot: () => {
             boots += 1;
@@ -1016,19 +1016,19 @@ it('coalesces failed boot and start calls through each narrowed phase entry poin
   expect(firstBoot).toBe(bootFailure);
   expect(secondBoot).toBe(bootFailure);
   expect(boots).toBe(1);
-  const failed = plugin({
+  const failed = infra({
     name: 'failed',
     start: () => {
       starts += 1;
       return startFailure;
     },
   });
-  const configuredStart = orThrow(defineApp('coalesced-configured-start').use(failed).configure());
+  const configuredStart = orThrow(defineApp('coalesced-configured-start').infra(failed).configure());
   const [firstStart, secondStart] = await Promise.all([configuredStart.start(), configuredStart.start()]);
   expect(firstStart).toBe(startFailure);
   expect(secondStart).toBe(startFailure);
   expect(starts).toBe(1);
-  const booted = orThrow(await defineApp('coalesced-booted-start').use(failed).boot());
+  const booted = orThrow(await defineApp('coalesced-booted-start').infra(failed).boot());
   const [firstRestart, secondRestart] = await Promise.all([booted.start(), booted.start()]);
   expect(firstRestart).toBe(startFailure);
   expect(secondRestart).toBe(startFailure);

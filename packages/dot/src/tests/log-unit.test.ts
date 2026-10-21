@@ -1,5 +1,5 @@
 /**
- * `log()` from `@arki/dot/log`: one `.use(...)` switches logging on for the
+ * `log()` from `@arki/dot/log`: one `.infra(...)` switches logging on for the
  * whole life of a Dot app, so its boot and shutdown records are never lost.
  */
 
@@ -11,7 +11,7 @@ import { getLogger, memorySink } from '@arki/log';
 
 import { defineApp } from '../define-app.js';
 import { log } from '../log.js';
-import { plugin, service } from '../plugin-contract.js';
+import { infra, service } from '../unit-contract.js';
 
 describe('log()', () => {
   it('writes the lifecycle to its channels and closes after dispose: complete', async () => {
@@ -21,7 +21,7 @@ describe('log()', () => {
 
     const app = orThrow(
       await defineApp('checkout')
-        .use(log(() => ({ channels: { mem: closing }, default: { level: 'debug', channels: ['mem'] } })))
+        .infra(log(() => ({ channels: { mem: closing }, default: { level: 'debug', channels: ['mem'] } })))
         .boot(),
     );
     orThrow(await app.dispose());
@@ -36,7 +36,7 @@ describe('log()', () => {
     const sink = memorySink();
     const app = orThrow(
       await defineApp('checkout')
-        .use(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
+        .infra(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
         .boot(),
     );
     getLogger('app').info('ready');
@@ -46,7 +46,7 @@ describe('log()', () => {
     const named = memorySink();
     const second = orThrow(
       await defineApp('checkout')
-        .use(
+        .infra(
           log(() => ({
             channels: { mem: named },
             default: { level: 'info', channels: ['mem'] },
@@ -65,9 +65,9 @@ describe('log()', () => {
     let flushedInBoot = false;
     const app = orThrow(
       await defineApp('checkout')
-        .use(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
-        .use(
-          plugin({
+        .infra(log(() => ({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] } })))
+        .infra(
+          infra({
             name: 'flush-on-boot',
             needs: { logging: service<Configured<'mem'>>() },
             boot: async ({ logging }) => {

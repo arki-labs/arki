@@ -43,8 +43,8 @@ export const FEATURE_ERROR_CODES = {
    */
   keyCollision: 'ARKI_DOT_E027',
   /**
-   * `override()` named a key that no infra plugin of the feature provides.
-   * @fix Override a key that one of the feature's infra plugins provides.
+   * `override()` named a key that no infra unit of the feature provides.
+   * @fix Override a key that one of the feature's infra units provides.
    * @verify dot explain --json | jq -e .ok
    */
   unknownOverride: 'ARKI_DOT_E028',

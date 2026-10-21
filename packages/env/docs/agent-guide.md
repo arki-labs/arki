@@ -75,7 +75,7 @@ import { defineApp } from '@arki/dot';
 import { env } from '@arki/dot/env';
 
 const app = await defineApp('my-app')
-  .use(env({ schema: { PORT: z.coerce.number().default(3000) } }))
+  .infra(env({ schema: { PORT: z.coerce.number().default(3000) } }))
   .build();
 ```
 

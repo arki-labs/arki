@@ -12,10 +12,10 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DepsOf } from '@arki/dot/feature';
-import type { Provided } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
 import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import { plugin, rename } from '@arki/dot/plugin';
+import { infra, rename } from '@arki/dot/unit';
 import { defineFailure, orThrow } from '@arki/failure';
 
 import type { OpenTransaction, TxOf } from './dot.js';
@@ -132,7 +132,7 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
         () =>
           db,
     });
-    const plain = plugin({ name: 'plain', provides: { thing: () => ({ query: () => 0 }) } });
+    const plain = infra({ name: 'plain', provides: { thing: () => ({ query: () => 0 }) } });
     // @ts-expect-error a handle to a plain object is not a database handle: the service has no `transaction(fn)`
     transactions(plain.provides.thing);
     // Another database's handle (a second instance, renamed as the kernel requires) is refused where the feature binds it.

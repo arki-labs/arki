@@ -13,8 +13,8 @@
 
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import type { Provided } from '@arki/dot/plugin';
-import { defineApp, DotPluginError, rename } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
+import { defineApp, DotUnitError, rename } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type * as KvModule from './index.js';
@@ -48,7 +48,7 @@ async function withoutKvUrl(body: () => Promise<void>): Promise<void> {
 
 describe('@arki/kv/dot', () => {
   it('contributes a kv-kind service to the manifest', () => {
-    const builder = defineApp('kv-manifest-test').use(
+    const builder = defineApp('kv-manifest-test').infra(
       kv({ url: 'redis://localhost:6379', namespace: 'manifest-test' }),
     );
     const configured = orThrow(builder.configure());
@@ -56,16 +56,16 @@ describe('@arki/kv/dot', () => {
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
   });
 
-  it('returns a defect preserving the coded DotPluginError when no URL is configured', async () => {
+  it('returns a defect preserving the coded DotUnitError when no URL is configured', async () => {
     // Legacy plugin throws return a defect with the original coded cause.
     const previous = process.env['KV_URL'];
     delete process.env['KV_URL'];
     try {
-      const caught = await defineApp('kv-missing-url').use(kv()).boot();
+      const caught = await defineApp('kv-missing-url').infra(kv()).boot();
       if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
       const cause = caught.cause;
-      expect(cause).toBeInstanceOf(DotPluginError);
-      if (!(cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+      expect(cause).toBeInstanceOf(DotUnitError);
+      if (!(cause instanceof DotUnitError)) throw new Error('cause should be a DotUnitError');
       const pluginErr = cause;
       expect(pluginErr.code).toBe(KV_PLUGIN_ERROR_CODES.urlNotConfigured);
       expect(pluginErr.code).toBe('ARKI_KV_PLUGIN_E001');
@@ -80,7 +80,7 @@ describe('@arki/kv/dot', () => {
   it('boots and exposes a KV instance, then disposes', async () => {
     const app = await orThrow(
       defineApp('kv-lifecycle-test')
-        .use(
+        .infra(
           kv({
             url: 'redis://127.0.0.1:1', // unreachable but well-formed URL
             namespace: 'lifecycle-test',
@@ -98,8 +98,8 @@ describe('@arki/kv/dot', () => {
   it('mounts a second KV scope via rename()', async () => {
     const app = await orThrow(
       defineApp('kv-named-test')
-        .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'app' }))
-        .use(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
+        .infra(kv({ url: 'redis://127.0.0.1:1', namespace: 'app' }))
+        .infra(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
         .boot(),
     );
     try {
@@ -115,12 +115,12 @@ describe('@arki/kv/dot', () => {
   it('probe: true fails boot with a coded error when Redis is unreachable', async () => {
     // A bad URL must stop the app at boot, not at the first request.
     const caught = await defineApp('kv-probe-fails')
-      .use(kv({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
+      .infra(kv({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
       .boot();
     if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
     const cause = caught.cause;
-    expect(cause).toBeInstanceOf(DotPluginError);
-    if (!(cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+    expect(cause).toBeInstanceOf(DotUnitError);
+    if (!(cause instanceof DotUnitError)) throw new Error('cause should be a DotUnitError');
     expect(cause.code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
   });
 });
@@ -142,7 +142,7 @@ describe('@arki/kv/dot kv.optional', () => {
   it('publishes null and opens no client when no URL is configured', async () => {
     // Dev and tests run without Redis: boot must succeed and nothing may connect.
     await withoutKvUrl(async () => {
-      const app = await orThrow(defineApp('kv-optional-null').use(kv.optional()).boot());
+      const app = await orThrow(defineApp('kv-optional-null').infra(kv.optional()).boot());
       try {
         expect(app.services.kv).toBeNull();
         expect(constructed.count).toBe(0);
@@ -155,7 +155,7 @@ describe('@arki/kv/dot kv.optional', () => {
   it('treats an empty URL (an empty env var) as unset', async () => {
     const app = await orThrow(
       defineApp('kv-optional-empty')
-        .use(kv.optional(() => ({ url: '' })))
+        .infra(kv.optional(() => ({ url: '' })))
         .boot(),
     );
     try {
@@ -169,7 +169,7 @@ describe('@arki/kv/dot kv.optional', () => {
     const close = vi.spyOn(KV.prototype, 'close');
     const app = await orThrow(
       defineApp('kv-optional-url')
-        .use(kv.optional({ url: 'redis://127.0.0.1:1', namespace: 'optional-test' }))
+        .infra(kv.optional({ url: 'redis://127.0.0.1:1', namespace: 'optional-test' }))
         .boot(),
     );
     expect(app.services.kv).toBeInstanceOf(KV);
@@ -180,10 +180,10 @@ describe('@arki/kv/dot kv.optional', () => {
 
   it('probe: true still fails boot on a bad URL — optional means "no URL", not "ignore errors"', async () => {
     const caught = await defineApp('kv-optional-probe-fails')
-      .use(kv.optional({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
+      .infra(kv.optional({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
       .boot();
     if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
-    if (!(caught.cause instanceof DotPluginError)) throw new Error('cause should be a DotPluginError');
+    if (!(caught.cause instanceof DotUnitError)) throw new Error('cause should be a DotUnitError');
     expect(caught.cause.code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
   });
 
@@ -191,7 +191,7 @@ describe('@arki/kv/dot kv.optional', () => {
   it.runIf(process.env['KV_TEST_URL'])('passes the probe and round-trips a value against a real Redis', async () => {
     const app = await orThrow(
       defineApp('kv-optional-real')
-        .use(kv.optional({ url: process.env['KV_TEST_URL'], namespace: 'arki-kv-dot-test', probe: true }))
+        .infra(kv.optional({ url: process.env['KV_TEST_URL'], namespace: 'arki-kv-dot-test', probe: true }))
         .boot(),
     );
     try {

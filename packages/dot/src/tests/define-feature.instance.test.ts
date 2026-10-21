@@ -17,15 +17,15 @@ import { defineFeature, instanceOf, mountFeatures, routerFor } from '../feature.
 import { defineApp } from '../index.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { rpc } from '../orpc.js';
-import { plugin, rename, service } from '../plugin-contract.js';
+import { infra, rename, service } from '../unit-contract.js';
 
 type Region = { readonly region: string; readonly rows: string[] };
 const regionDb = (region: string) =>
-  plugin({ name: 'database', provides: { db: (): Region => ({ region, rows: [] }) } });
+  infra({ name: 'database', provides: { db: (): Region => ({ region, rows: [] }) } });
 const database = regionDb('us');
 const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
 
-const store = plugin({
+const store = infra({
   name: 'store',
   needs: { db: service<Region>() },
   provides: { repos: ({ db }) => ({ region: () => db.region }) },
@@ -50,9 +50,9 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     expectTypeOf(eu.name).toEqualTypeOf<'reports#eu'>();
     expectTypeOf(eu.provides.summary.key).toEqualTypeOf<'reports#eu.summary'>();
     expectTypeOf(eu.handles.db.key).toEqualTypeOf<'dbEu'>();
-    expect(eu.plugins().map(u => u.name)).toEqual(['reports#eu/store', 'reports#eu']);
+    expect(eu.units().map(u => u.name)).toEqual(['reports#eu/store', 'reports#eu']);
 
-    const app = orThrow(await defineApp('t').use(database).use(databaseEu).features([eu, us]).boot());
+    const app = orThrow(await defineApp('t').infra(database).infra(databaseEu).features([eu, us]).boot());
     try {
       expect(app.services['reports#eu.summary']).toEqual({ region: 'eu' });
       expect(app.services['reports#us.summary']).toEqual({ region: 'us' });
@@ -64,17 +64,17 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
   it('mounts the original next to a copy; the original twice is still refused', async () => {
     const eu = reports.instance('eu', { db: databaseEu.provides.dbEu });
     expect(() => mountFeatures([reports, eu])).not.toThrow();
-    const app = orThrow(await defineApp('t').use(database).use(databaseEu).features([reports, eu]).boot());
+    const app = orThrow(await defineApp('t').infra(database).infra(databaseEu).features([reports, eu]).boot());
     try {
       expect(app.services.summary).toEqual({ region: 'us' });
       expect(app.services['reports#eu.summary']).toEqual({ region: 'eu' });
     } finally {
       orThrow(await app.dispose());
     }
-    // @ts-expect-error -- the same feature twice: one plugin name, one `summary` wire key
-    await expect(defineApp('t').use(database).features([reports, reports]).boot()).resolves.toMatchObject({
+    // @ts-expect-error -- the same feature twice: one unit name, one `summary` wire key
+    await expect(defineApp('t').infra(database).features([reports, reports]).boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
-      cause: { code: DotLifecycleErrorCode.DuplicatePlugin },
+      cause: { code: DotLifecycleErrorCode.DuplicateUnit },
     });
   });
 
@@ -101,12 +101,12 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     expectTypeOf(eu.features[0].name).toEqualTypeOf<'reports#eu.audit'>();
     expectTypeOf(eu.features[0].handles.db.key).toEqualTypeOf<'dbEu'>();
     const childNeeds = eu
-      .plugins()
+      .units()
       .filter(u => u.name === 'reports#eu.audit')
       .flatMap(u => Object.values(u.needs).map(w => ('key' in w ? w.key : undefined)));
     expect(childNeeds).toEqual(['dbEu']);
 
-    const app = orThrow(await defineApp('t').use(databaseEu).features([eu]).boot());
+    const app = orThrow(await defineApp('t').infra(databaseEu).features([eu]).boot());
     try {
       expect(app.services['reports#eu.audit.trail']).toBe('eu');
     } finally {
@@ -133,7 +133,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
       .entrypoints();
     const eu = parent.instance('eu', { db: databaseEu.provides.dbEu });
     expectTypeOf(eu.features[0].handles.db).toEqualTypeOf<typeof databaseEu.provides.dbEu.lazy>();
-    const app = orThrow(await defineApp('t').use(databaseEu).features([eu]).boot());
+    const app = orThrow(await defineApp('t').infra(databaseEu).features([eu]).boot());
     try {
       // The kernel awaits a provides factory, so the resolved trail is the EU region string.
       expect(app.services['reports#eu.audit.trail']).toBe('eu');
@@ -156,7 +156,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     const eu = reports.instance('eu', { db: databaseEu.provides.dbEu });
     const us = reports.instance('us').override({ repos: { region: () => 'faked' } });
     expect(us.name).toBe('reports#us');
-    const configured = orThrow(defineApp('t').use(database).use(databaseEu).features([eu, us]).configure());
+    const configured = orThrow(defineApp('t').infra(database).infra(databaseEu).features([eu, us]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
     const text = explained.text();
@@ -179,7 +179,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
   it('refuses a rebind of a non-need, another service type, a bad instance name and `#` in a declared name', () => {
     // @ts-expect-error -- `x` is not a need of `reports`
     expect(() => reports.instance('eu', { x: databaseEu.provides.dbEu })).toThrow(/not a need/);
-    const other = plugin({ name: 'other', provides: { n: () => 1 } });
+    const other = infra({ name: 'other', provides: { n: () => 1 } });
     // @ts-expect-error -- `n` carries a number; `db` carries a Region
     reports.instance('eu', { db: other.provides.n });
     // @ts-expect-error -- one plain segment: "." nests

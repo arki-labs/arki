@@ -23,11 +23,12 @@ These are the **stable contracts** as of `0.1`:
 | Surface                           | Stability |
 | --------------------------------- | --------- |
 | `defineApp(name, options?)`       | stable    |
-| `.use(plugin)` typed builder      | stable    |
-| `plugin(config)`                  | stable    |
+| `.infra(unit)` typed builder      | stable    |
+| `.entrypoints(unit)`              | stable    |
+| `infra(config)`                   | stable    |
 | `service<T>()` / `token<T>()`     | stable    |
-| `rename(plugin, map, name?)`      | stable    |
-| `Plugin` shape (5 hooks)          | stable    |
+| `rename(unit, map, name?)`        | stable    |
+| `Unit` shape (5 hooks)            | stable    |
 | `DotLifecycleHook` enum           | stable    |
 | `DotLifecycleState` enum          | stable    |
 | `DotLifecycleError` shape         | stable    |
@@ -46,8 +47,8 @@ These are **experimental** in `0.x` and may change without a major bump:
 The pre-0.1 legacy surface (`createDot`, `definePlugin`, the
 `@arki/dot/legacy/*`, `@arki/dot/event-sourcing`, and
 `@arki/dot/presets/runtime-local` subpaths) has been **removed**. Use
-`defineApp`/`plugin` for composition and `@arki/journal` for
-event-sourced writes (its `@arki/journal/dot` plugin connects it to a Dot app).
+`defineApp`/`unit` for composition and `@arki/journal` for
+event-sourced writes (its `@arki/journal/dot` unit connects it to a Dot app).
 
 ## Breaking changes below 1.0
 
@@ -60,7 +61,7 @@ It updates every caller in the same change. It adds an entry to
 | Import path              | Status                                                     |
 | ------------------------ | ---------------------------------------------------------- |
 | `@arki/dot`              | stable                                                     |
-| `@arki/dot/plugin`       | stable                                                     |
+| `@arki/dot/unit`         | stable                                                     |
 | `@arki/dot/test-harness` | stable                                                     |
 | `@arki/dot/cli`          | experimental — wraps the binary; use the `dot` CLI instead |
 | `@arki/dot/kernel/*`     | experimental — do not import directly                      |

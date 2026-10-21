@@ -25,7 +25,7 @@ import type { Failure } from '@arki/failure';
  *
  * The builder accumulates deriver-added context keys in its type — a
  * handler bound after `.derive('principal', …)` sees `ctx.principal`
- * typed. Same accumulation idiom as `defineApp().use()`.
+ * typed. Same accumulation idiom as `defineApp().infra()`.
  */
 
 import type {
@@ -245,7 +245,7 @@ export function rpcMount(path: MountPath, options: RpcMountOptions): RpcMountCon
 
 /**
  * A plain value: derivers + bound contracts + mounts. Published as an
- * ordinary DOT service under a token and collected by the `http()` driver —
+ * ordinary DOT service under a token and collected by the `http()` entrypoint —
  * no new kernel concept.
  */
 export type RouteBundle = {
@@ -437,7 +437,7 @@ export type EndpointsFeatureSlice<TServices> = {
  * (`feature(..., { use: [endpoints(build)] })`). The builder runs
  * once at boot with the feature's needed services; the bundle lands
  * under `routes` in the feature's slice record — where the
- * `.serve(http(...))` driver collects it. Route contracts stay in the
+ * `.entrypoints(http(...))` entrypoint collects it. Route contracts stay in the
  * feature's `actions` list.
  */
 export function endpoints<TServices>(build: (services: TServices) => RouteBundle): EndpointsFeatureSlice<TServices> {

@@ -18,7 +18,7 @@ import type { PgSessionGuarantees, pgTransaction } from '@arki/lock/pg';
 import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from '@arki/lock/pg/lease';
 import type { RedisStore } from '@arki/lock/redis';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks, LockError, LockHeld } from '@arki/lock';
 import { locks } from '@arki/lock/dot';
@@ -45,7 +45,7 @@ function buildApp(lockService: Locker) {
   let calls = 0;
   const seen: { signal?: AbortSignal; fence?: bigint | undefined } = {};
   const core = defineFeature('clustering')
-    .infra(plugin({ name: 'locks', provides: { locks: () => lockService } }))
+    .infra(infra({ name: 'locks', provides: { locks: () => lockService } }))
     .usecases({
       assign: () => () => {
         calls += 1;
@@ -279,7 +279,7 @@ describe('schedules(core, [{ lock }])', () => {
     });
     const started = await orThrow(
       defineApp('plugin-app')
-        .use(locks({ namespace: 'billing', store: () => memoryStore() }))
+        .infra(locks({ namespace: 'billing', store: () => memoryStore() }))
         .features([billing])
         .entrypoints(schedule({ clock: 'host' }))
         .start(),
@@ -445,7 +445,7 @@ describe('booted lock summary', () => {
     });
     const configured = orThrow(
       defineApp('boot-summary')
-        .use(locks({ namespace: 'ns', store: () => memoryStore() }))
+        .infra(locks({ namespace: 'ns', store: () => memoryStore() }))
         .features([billing])
         .entrypoints(schedule({ clock: 'host' }))
         .configure(),

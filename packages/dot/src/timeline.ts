@@ -1,7 +1,7 @@
 /**
  * ASCII waterfall renderer for DOT lifecycle diagnostics.
  *
- * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-plugin
+ * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-unit
  * duration chart suitable for printing in a terminal or embedding in a
  * `dot doctor` text report. No colour, no Unicode beyond `█` so the
  * output stays clean in log aggregators and CI.
@@ -38,7 +38,7 @@ export type RenderTimelineOptions = {
   /** Maximum bar width in characters (default `50`). */
   readonly barWidth?: number;
   /**
-   * When `true`, also emit any plugin's diagnostic `issues[]` underneath
+   * When `true`, also emit any unit's diagnostic `issues[]` underneath
    * the bar so failure reasons are visible in the timeline view.
    * Default `true`.
    */
@@ -77,8 +77,8 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
   const title = `Timeline: ${snapshot.app.name} (state=${snapshot.app.state})`;
   lines.push(title, '─'.repeat(title.length));
 
-  // Layout: 2-space indent, 10-char plugin column, 8-char duration column, then bar.
-  const PLUGIN_COL = 12;
+  // Layout: 2-space indent, 10-char unit column, 8-char duration column, then bar.
+  const UNIT_COL = 12;
   const DUR_COL = 8;
   const indent = '  ';
 
@@ -93,9 +93,9 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
       const durationMs = entry.durationMs ?? 0;
       const bar = makeBar(durationMs, maxDuration, barWidth);
       const failedMark = entry.state === 'failed' ? ' ✗' : '';
-      const pluginCol = entry.plugin.padEnd(PLUGIN_COL);
+      const unitCol = entry.plugin.padEnd(UNIT_COL);
       const durCol = formatDuration(durationMs).padStart(DUR_COL);
-      lines.push(`${indent}${pluginCol}${durCol}  ${bar}${failedMark}`);
+      lines.push(`${indent}${unitCol}${durCol}  ${bar}${failedMark}`);
       if (showIssues && entry.issues.length > 0) {
         for (const issue of entry.issues) {
           lines.push(`${indent}  └─ ${issue.code}: ${issue.message}`);

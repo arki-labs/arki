@@ -9,7 +9,7 @@ import type { AwilixContainer } from 'awilix';
 import { asFunction, createContainer, InjectionMode } from 'awilix';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
-import { defineApp, plugin, service } from '@arki/dot';
+import { defineApp, infra, service } from '@arki/dot';
 
 const COUNT = 20;
 const LAST: Key = `s${COUNT - 1}`;
@@ -23,8 +23,8 @@ type Services = Record<Key, Service>;
 const depsOf = (index: number): Key[] => [index - 1, index - 2].filter(j => j >= 0).map((j): Key => `s${j}`);
 const make = (index: number, deps: Record<string, unknown>): Service => ({ id: index, deps: Object.keys(deps).length });
 
-// ---- @arki/dot: 20 plugins, declaration order is boot order.
-const plugins = Array.from({ length: COUNT }, (_, index) => {
+// ---- @arki/dot: 20 units, declaration order is boot order.
+const units = Array.from({ length: COUNT }, (_, index) => {
   const needs: Record<Key, ReturnType<typeof service<Service>>> = {};
   for (const key of depsOf(index)) needs[key] = service<Service>();
   const provides: Record<Key, (ctx: Record<Key, Service>) => Service> = {
@@ -34,12 +34,12 @@ const plugins = Array.from({ length: COUNT }, (_, index) => {
       return make(index, deps);
     },
   };
-  return plugin({ name: `p${index}`, needs, provides });
+  return infra({ name: `p${index}`, needs, provides });
 });
 
 async function bootDot() {
   let builder = defineApp('bench');
-  for (const each of plugins) builder = builder.use(each);
+  for (const each of units) builder = builder.infra(each);
   return builder.boot();
 }
 
@@ -91,17 +91,17 @@ const marker = (found: Service, held: unknown): string =>
 export default defineSuite({
   id: '@arki/dot',
   intro:
-    'A 20-service graph where each service depends on the two before it, built with `@arki/dot` plugins and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.',
+    'A 20-service graph where each service depends on the two before it, built with `@arki/dot` units and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.',
   notes: [
-    '`@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders plugins by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every plugin.',
-    'So bringing the graph up is shown as a scenario, without ratios: the rows show what each approach costs, not that they are interchangeable. Boot is async in dot (plugin hooks may await); awilix resolves synchronously.',
+    '`@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders units by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every unit.',
+    'So bringing the graph up is shown as a scenario, without ratios: the rows show what each approach costs, not that they are interchangeable. Boot is async in dot (unit hooks may await); awilix resolves synchronously.',
     'Looking up a service after boot is the same work everywhere and is ranked. The check confirms each row returns the instance its booted graph holds, not a fresh build.',
   ],
   groups: [
     scenario({
       id: 'bring-up',
       title: 'Build the graph and bring it up (20 services)',
-      note: 'Different work per row; compare each row with its own history. dot: declare 20 plugins, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.',
+      note: 'Different work per row; compare each row with its own history. dot: declare 20 units, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.',
       mode: 'async',
       cases: {
         dot: {

@@ -6,7 +6,7 @@
  * `db` at `.infra()`.
  */
 import type { Db, Digest, Tx } from '../../db.js';
-import { plugin, service } from '../../../../../plugin-contract.js';
+import { infra, service } from '../../../../../unit-contract.js';
 import { assertOpen } from '../../db.js';
 
 /** Repositories bound to one transaction. Exported so a test can build a second, unrelated `Repos` provider. */
@@ -38,7 +38,7 @@ export const bindRepos = (tx: Tx) => ({
 export type RepoSet = ReturnType<typeof bindRepos>;
 export type Repos = { withTx(tx: Tx): RepoSet };
 
-export const store = plugin({
+export const store = infra({
   name: 'store',
   needs: { db: service<Db>() },
   provides: { repos: (): Repos => ({ withTx: tx => bindRepos(tx) }) },

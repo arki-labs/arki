@@ -12,11 +12,11 @@ before, you can skim straight to the [attribute table](#attribute-conventions).
 
 Every `DotApp` emits three signals across its 5-hook lifecycle:
 
-| Signal      | Carrier                                       | When                                                                                                      |
-| ----------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Spans**   | `@opentelemetry/api` tracer named `@arki/dot` | Every `configure()` / `boot()` / `start()` / `stop()` / `dispose()` call + every plugin hook within them  |
-| **Metrics** | `@opentelemetry/api` meter named `@arki/dot`  | Two histograms: `dot.app.phase.duration` (per phase) and `dot.plugin.hook.duration` (per plugin per hook) |
-| **Logs**    | `@arki/log` logger named `arki:dot:lifecycle` | Every phase boundary; DEBUG by default, ERROR/WARN on failure paths                                       |
+| Signal      | Carrier                                       | When                                                                                                   |
+| ----------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Spans**   | `@opentelemetry/api` tracer named `@arki/dot` | Every `configure()` / `boot()` / `start()` / `stop()` / `dispose()` call + every unit hook within them |
+| **Metrics** | `@opentelemetry/api` meter named `@arki/dot`  | Two histograms: `dot.app.phase.duration` (per phase) and `dot.unit.hook.duration` (per unit per hook)  |
+| **Logs**    | `@arki/log` logger named `arki:dot:lifecycle` | Every phase boundary; DEBUG by default, ERROR/WARN on failure paths                                    |
 
 All three are correlated. When an SDK is registered, the kernel threads
 each span's `traceId` + `spanId` onto the matching log record. One trace
@@ -58,7 +58,7 @@ sdk.start();
 ```
 
 The `AsyncLocalStorageContextManager` is **required** for parent-child
-linkage across `await` boundaries — without it, plugin-hook spans become
+linkage across `await` boundaries — without it, unit-hook spans become
 root spans rather than children of their phase span. The DOT kernel
 deliberately does not pull this in; you decide what context manager
 fits your runtime.
@@ -67,7 +67,7 @@ fits your runtime.
 
 ## Spans
 
-Two span shapes. One per public phase, one per plugin hook.
+Two span shapes. One per public phase, one per unit hook.
 
 ### Phase span — `dot.app.<phase>`
 
@@ -75,24 +75,24 @@ Emitted by `configure()` / `boot()` / `start()` / `stop()` / `dispose()`.
 Becomes the _active_ span (via `tracer.startActiveSpan`), so children
 created during the phase auto-parent to it.
 
-### Plugin span — `dot.plugin.<hook>`
+### Unit span — `dot.unit.<hook>`
 
-One per plugin per hook execution. The plugin name lives on the
-`dot.plugin.name` attribute, not in the span name — that lets backends
-aggregate by hook across plugins. Aggregating "how slow is boot on
-average?" needs all plugins' `dot.plugin.boot` spans to share a name.
+One per unit per hook execution. The unit name lives on the
+`dot.unit.name` attribute, not in the span name — that lets backends
+aggregate by hook across units. Aggregating "how slow is boot on
+average?" needs all units' `dot.unit.boot` spans to share a name.
 
 ### Attribute conventions
 
-| Attribute              | On     | Type   | Meaning                                     |
-| ---------------------- | ------ | ------ | ------------------------------------------- |
-| `dot.app.name`         | both   | string | The app name from `defineApp(name)`         |
-| `dot.app.version`      | phase  | string | The app version (when set)                  |
-| `dot.app.phase`        | phase  | string | `configure`/`boot`/`start`/`stop`/`dispose` |
-| `dot.app.plugin.count` | phase  | int    | How many plugins this app composes          |
-| `dot.plugin.name`      | plugin | string | The plugin's `name`                         |
-| `dot.hook`             | plugin | string | Which hook (same set as `dot.app.phase`)    |
-| `dot.plugin.order`     | plugin | int    | Topological order (0-based, deterministic)  |
+| Attribute            | On    | Type   | Meaning                                     |
+| -------------------- | ----- | ------ | ------------------------------------------- |
+| `dot.app.name`       | both  | string | The app name from `defineApp(name)`         |
+| `dot.app.version`    | phase | string | The app version (when set)                  |
+| `dot.app.phase`      | phase | string | `configure`/`boot`/`start`/`stop`/`dispose` |
+| `dot.app.unit.count` | phase | int    | How many units this app composes            |
+| `dot.unit.name`      | unit  | string | The unit's `name`                           |
+| `dot.hook`           | unit  | string | Which hook (same set as `dot.app.phase`)    |
+| `dot.unit.order`     | unit  | int    | Topological order (0-based, deterministic)  |
 
 Typed failures mark the span as failed with canonical failure attributes.
 Unexpected exceptions are classified as defects; private failure payloads are not
@@ -107,11 +107,11 @@ attribute (`ok` or `failed`) so you can split SLOs by outcome.
 
 ```text
 dot.app.phase.duration   { dot.app.name, dot.app.phase, dot.status }
-dot.plugin.hook.duration    { dot.app.name, dot.plugin.name, dot.hook, dot.status }
+dot.unit.hook.duration    { dot.app.name, dot.unit.name, dot.hook, dot.status }
 ```
 
 Wire a `MeterProvider` (typically via `NodeSDK`) and you get p50 / p95 /
-p99 boot times per app, per plugin, per hook — no extra code.
+p99 boot times per app, per unit, per hook — no extra code.
 
 ---
 
@@ -119,18 +119,18 @@ p99 boot times per app, per plugin, per hook — no extra code.
 
 The kernel uses `@arki/log` exclusively. The logger is named
 `arki:dot:lifecycle` and ships with the `dot.app.name` attribute baked
-in. Forks add `dot.app.phase` and `dot.plugin.name` as the call descends
-into plugins.
+in. Forks add `dot.app.phase` and `dot.unit.name` as the call descends
+into units.
 
 ### Severity model
 
 Quiet by default. Loud when something breaks.
 
 - **DEBUG** — phase boundaries (`starting`, `done`, `complete`),
-  per-plugin hook completions. Silent unless explicitly elevated.
-- **WARN** — phase completed _with_ per-plugin failures (`stop`/`dispose`
+  per-unit hook completions. Silent unless explicitly elevated.
+- **WARN** — phase completed _with_ per-unit failures (`stop`/`dispose`
   continue through individual errors and report aggregates).
-- **ERROR** — a plugin's hook threw; the kernel logs the failure and the
+- **ERROR** — a unit's hook threw; the kernel logs the failure and the
   rollback summary before the cascading `DotLifecycleError` propagates.
 
 ### Turning it on
@@ -141,7 +141,7 @@ Two ways. Pick the one that matches how you operate the app.
 
 ```sh
 DEBUG=arki:dot:lifecycle bun run app.ts
-# every phase boundary + every plugin hook timing → stdout as JSON
+# every phase boundary + every unit hook timing → stdout as JSON
 ```
 
 `@arki/log` reads the `DEBUG` env at boot and elevates matching loggers
@@ -164,11 +164,11 @@ span's `traceId` and `spanId` automatically:
 ```json
 {
   "name": "arki:dot:lifecycle",
-  "body": "boot: FAILED — rolling back already-booted plugins",
+  "body": "boot: FAILED — rolling back already-booted units",
   "attributes": {
     "dot.app.name": "my-app",
     "dot.app.phase": "boot",
-    "dot.plugin.name": "db",
+    "dot.unit.name": "db",
     "dot.app.rollback.count": 2
   },
   "severityText": "ERROR",
@@ -193,7 +193,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 // 2. Build and boot your app. Nothing else to wire.
 import { defineApp } from '@arki/dot';
 
-import { dbPlugin, envPlugin } from './plugins';
+import { dbInfra, envInfra } from './units';
 
 new NodeSDK({
   serviceName: 'my-app',
@@ -201,7 +201,7 @@ new NodeSDK({
   // traceExporter, metricReader, logRecordProcessor — your choice
 }).start();
 
-await defineApp('my-app').use(envPlugin).use(dbPlugin).start();
+await defineApp('my-app').infra(envInfra, dbInfra).start();
 
 // 3. Optionally turn on lifecycle logs at the env layer:
 //    DEBUG=arki:dot:lifecycle bun run app.ts
@@ -239,7 +239,7 @@ $ dot doctor --observability --json
 ```
 
 The probe issue is severity `warning` — lack of an SDK is a deployment
-choice, not a bug. Doctor will not exit non-zero on this alone (per-plugin
+choice, not a bug. Doctor will not exit non-zero on this alone (per-unit
 errors still take precedence: doctor then returns `dot.doctor_failed`, exit 3).
 
 The flag is **opt-in**: standard `dot doctor` doesn't run the probe, so
@@ -256,7 +256,7 @@ agents that don't care about observability won't see the issue.
 - **No auto-instrumentation.** DOT instruments its own lifecycle, usecases and action execution.
   HTTP, database, and queue spans come from each adapter or from
   `@opentelemetry/auto-instrumentations-node`. The kernel does not
-  reach into your plugins.
+  reach into your units.
 - **No structured-log-to-span bridge in the kernel.** Logs and spans
   share trace IDs; they are not the same signal. If you want logs
   attached as span events, register a `LogRecordProcessor` that does so
@@ -276,24 +276,24 @@ signals are peers; neither layers under the other.
 
 ```ts run expect
 import type { DotLifecycleEvent } from '@arki/dot';
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 import { isFailure } from '@arki/failure';
 
-const envPlugin = plugin({ name: 'env', provides: { env: () => ({ mode: 'test' }) } });
-const dbPlugin = plugin({ name: 'db', provides: { db: () => ({ ready: true }) } });
+const envInfra = infra({ name: 'env', provides: { env: () => ({ mode: 'test' }) } });
+const dbInfra = infra({ name: 'db', provides: { db: () => ({ ready: true }) } });
 
 const events: DotLifecycleEvent[] = [];
 
 const app = await defineApp('my-app', {
   observers: [event => events.push(event)],
 })
-  .use(envPlugin)
-  .use(dbPlugin)
+  .infra(envInfra)
+  .infra(dbInfra)
   .boot();
 if (isFailure(app)) throw new Error(app.code);
 
 for (const event of events) {
-  const who = event.kind === 'plugin-hook' ? ` ${event.plugin}` : '';
+  const who = event.kind === 'unit-hook' ? ` ${event.plugin}` : '';
   console.log(`${event.kind} ${event.phase} ${event.status}${who}`);
 }
 await app.dispose();
@@ -303,20 +303,20 @@ await app.dispose();
 phase configure starting
 phase configure completed
 phase boot starting
-plugin-hook boot starting env
-plugin-hook boot completed env
-plugin-hook boot starting db
-plugin-hook boot completed db
+unit-hook boot starting env
+unit-hook boot completed env
+unit-hook boot starting db
+unit-hook boot completed db
 phase boot completed
 ```
 
 Every phase emits a `starting` and a `completed` (or `failed`) event. Every
-plugin that defines the hook emits the same pair for it. The two plugins above
+unit that defines the hook emits the same pair for it. The two units above
 publish services through `provides` and define no `boot` or `configure` hook
 of their own, yet they appear under `boot`, because their factories run
 inside it.
 
-Each event carries `kind` (`'phase'` or `'plugin-hook'`), `phase`, `status`
+Each event carries `kind` (`'phase'` or `'unit-hook'`), `phase`, `status`
 (`'starting'` / `'completed'` / `'failed'`), `appName`, `timestamp` (ms
 since epoch), and on completion `durationMs`. Failed events also carry
 `error`.
@@ -326,7 +326,7 @@ Observers may also be added post-hoc:
 ```ts continue
 const alerts: string[] = [];
 const unsubscribe = app.subscribe(event => {
-  if (event.kind === 'plugin-hook' && event.status === 'failed') {
+  if (event.kind === 'unit-hook' && event.status === 'failed') {
     alerts.push(`${event.plugin} failed in ${event.phase}`); // or notify ops
   }
 });
@@ -353,7 +353,7 @@ subscription — to catch `configure`-phase events, pass them through
 
 ## ASCII timeline
 
-`app.timeline()` returns a per-phase, per-plugin duration chart suitable
+`app.timeline()` returns a per-phase, per-unit duration chart suitable
 for terminal output:
 
 ```text
@@ -395,7 +395,7 @@ serialised app state from another process).
 ## Custom instrumentation
 
 The application owns SDK registration, exporters and the context manager.
-`$telemetry` in plugin configure/hook contexts uses the existing plugin identity;
+`$telemetry` in unit configure/hook contexts uses the existing unit identity;
 `telemetryFor(feature)` also accepts a feature or `{ name }` identity. Both retain
 active context across custom work when the app has registered a context manager.
 

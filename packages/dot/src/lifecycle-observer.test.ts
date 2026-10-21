@@ -4,7 +4,7 @@
  * Verifies:
  *   - Configure-time events fire when observers are passed through
  *     `defineApp(name, { observers })` at construction.
- *   - Boot/start/stop/dispose phase + per-plugin hook events fire in
+ *   - Boot/start/stop/dispose phase + per-unit hook events fire in
  *     order, with correct `status`/`durationMs`/`error` fields.
  *   - `subscribe()` returns an unsubscribe function that actually works.
  *   - Observer exceptions are caught and don't break the lifecycle.
@@ -18,27 +18,27 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotLifecycleEvent, DotLifecycleObserver } from './lifecycle-observer.js';
 import { defineApp } from './define-app.js';
-import { plugin } from './plugin-contract.js';
+import { infra } from './unit-contract.js';
 
 describe('DotLifecycleObserver — happy path', () => {
   it('emits configure phase + hook events when observer is passed at construction', () => {
     const events: DotLifecycleEvent[] = [];
     const observer: DotLifecycleObserver = e => events.push(e);
 
-    const pluginA = plugin({
+    const unitA = infra({
       name: 'a',
       configure() {
         /* sync */
       },
     });
 
-    orThrow(defineApp('configure-events', { observers: [observer] }).use(pluginA).configure());
+    orThrow(defineApp('configure-events', { observers: [observer] }).infra(unitA).configure());
 
     // Expected sequence: phase-starting -> hook-starting -> hook-completed -> phase-completed
     expect(events.map(e => `${e.kind}:${e.status}`)).toEqual([
       'phase:starting',
-      'plugin-hook:starting',
-      'plugin-hook:completed',
+      'unit-hook:starting',
+      'unit-hook:completed',
       'phase:completed',
     ]);
 
@@ -52,8 +52,8 @@ describe('DotLifecycleObserver — happy path', () => {
     expect(phaseStart.timestamp).toBeGreaterThan(0);
 
     const hookComplete = events[2]!;
-    expect(hookComplete.kind).toBe('plugin-hook');
-    if (hookComplete.kind === 'plugin-hook') {
+    expect(hookComplete.kind).toBe('unit-hook');
+    if (hookComplete.kind === 'unit-hook') {
       expect(hookComplete.plugin).toBe('a');
       expect(hookComplete.phase).toBe('configure');
       expect(hookComplete.order).toBe(0);
@@ -68,7 +68,7 @@ describe('DotLifecycleObserver — happy path', () => {
   it('emits the full configure→boot→dispose event stream on a healthy app', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const pluginA = plugin({
+    const unitA = infra({
       name: 'a',
       configure() {
         /* sync */
@@ -82,7 +82,7 @@ describe('DotLifecycleObserver — happy path', () => {
     });
 
     const app = orThrow(await defineApp('full-lifecycle', { observers: [e => events.push(e)] })
-      .use(pluginA)
+      .infra(unitA)
       .boot());
 
     orThrow(await app.dispose());
@@ -93,16 +93,16 @@ describe('DotLifecycleObserver — happy path', () => {
     const tags = events.map(e => `${e.kind}:${e.status}`);
     expect(tags).toEqual([
       'phase:starting',
-      'plugin-hook:starting',
-      'plugin-hook:completed',
+      'unit-hook:starting',
+      'unit-hook:completed',
       'phase:completed',
       'phase:starting',
-      'plugin-hook:starting',
-      'plugin-hook:completed',
+      'unit-hook:starting',
+      'unit-hook:completed',
       'phase:completed',
       'phase:starting',
-      'plugin-hook:starting',
-      'plugin-hook:completed',
+      'unit-hook:starting',
+      'unit-hook:completed',
       'phase:completed',
     ]);
 
@@ -116,20 +116,20 @@ describe('DotLifecycleObserver — failure path', () => {
   it('emits hook-failed + phase-failed when a boot hook throws', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const badPlugin = plugin({
+    const badUnit = infra({
       name: 'bad',
       boot() {
         throw new Error('boot-broken');
       },
     });
 
-    const failure = await defineApp('boot-fail', { observers: [e => events.push(e)] }).use(badPlugin).boot();
+    const failure = await defineApp('boot-fail', { observers: [e => events.push(e)] }).infra(badUnit).boot();
     expect(failure).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-broken') });
 
     // Find the boot-phase hook-failed event.
     const hookFailed = events.find(
-      (e): e is Extract<DotLifecycleEvent, { kind: 'plugin-hook' }> =>
-        e.kind === 'plugin-hook' && e.phase === 'boot' && e.status === 'failed',
+      (e): e is Extract<DotLifecycleEvent, { kind: 'unit-hook' }> =>
+        e.kind === 'unit-hook' && e.phase === 'boot' && e.status === 'failed',
     );
     expect(hookFailed).toBeDefined();
     expect(hookFailed?.plugin).toBe('bad');
@@ -150,7 +150,7 @@ describe('DotLifecycleObserver — failure path', () => {
 describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
   it('subscribe() on a booted app sees subsequent events; unsubscribe stops the stream', async () => {
     const events: DotLifecycleEvent[] = [];
-    const pluginA = plugin({
+    const unitA = infra({
       name: 'a',
       boot() {
         /* noop */
@@ -163,7 +163,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
       },
     });
 
-    const app = orThrow(await defineApp('subscribe-test').use(pluginA).start());
+    const app = orThrow(await defineApp('subscribe-test').infra(unitA).start());
 
     // No observer was registered at construction — so events is empty so far.
     expect(events).toEqual([]);
@@ -190,7 +190,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
       throw new Error('observer-misbehaved');
     };
 
-    const pluginA = plugin({
+    const unitA = infra({
       name: 'a',
       boot() {
         /* noop */
@@ -200,7 +200,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
     // Bad observer registered FIRST — if it could break the chain, the
     // good observer would see zero events.
     orThrow(await defineApp('isolated-observers', { observers: [badObserver, goodObserver] })
-      .use(pluginA)
+      .infra(unitA)
       .boot());
 
     // The good observer must still have received the full event stream.
@@ -211,7 +211,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
 
 describe('renderTimeline integration', () => {
   it('app.timeline() returns a non-empty ASCII waterfall after boot', async () => {
-    const pluginA = plugin({
+    const unitA = infra({
       name: 'a',
       configure() {
         /* */
@@ -220,7 +220,7 @@ describe('renderTimeline integration', () => {
         /* noop */
       },
     });
-    const pluginB = plugin({
+    const unitB = infra({
       name: 'b',
       configure() {
         /* */
@@ -230,7 +230,7 @@ describe('renderTimeline integration', () => {
       },
     });
 
-    const app = orThrow(await defineApp('timeline-test').use(pluginA).use(pluginB).boot());
+    const app = orThrow(await defineApp('timeline-test').infra(unitA).infra(unitB).boot());
     try {
       const timeline = app.timeline();
       // Header line is present
@@ -238,7 +238,7 @@ describe('renderTimeline integration', () => {
       // Both phases that ran are present
       expect(timeline).toContain('configure');
       expect(timeline).toContain('boot');
-      // Both plugins are present
+      // Both units are present
       expect(timeline).toContain('a');
       expect(timeline).toContain('b');
       // At least one bar character is rendered

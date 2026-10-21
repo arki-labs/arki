@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
 import { feature } from '../../feature.js';
-import { plugin, service } from '../../plugin-contract.js';
+import { entrypoint, infra, service } from '../../unit-contract.js';
 import { buildMermaidGraph, renderGraph } from '../render-graph.js';
 
 function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
@@ -52,7 +52,7 @@ describe('buildMermaidGraph', () => {
     );
   });
 
-  it('escapes double quotes in plugin names and skips edges to unknown plugins', () => {
+  it('escapes double quotes in unit names and skips edges to unknown units', () => {
     const manifest = manifestOf({
       plugins: [{ name: 'we"ird', dependencies: [], provides: [] }],
       dependencies: [{ from: 'we"ird', to: 'ghost', kind: 'requires' }],
@@ -77,14 +77,14 @@ describe('renderGraph', () => {
   });
 
   it('a booted app renders its OBSERVED wiring edges', async () => {
-    const provider = plugin({ name: 'db', provides: { db: () => ({ ok: true }) } });
-    const consumer = plugin({
+    const provider = infra({ name: 'db', provides: { db: () => ({ ok: true }) } });
+    const consumer = infra({
       name: 'billing',
       needs: { db: service<{ ok: boolean }>() },
       provides: { billing: ({ db }) => db.ok },
     });
 
-    const app = orThrow(await defineApp('graph-int').use(provider).use(consumer).boot());
+    const app = orThrow(await defineApp('graph-int').infra(provider).infra(consumer).boot());
     const source = buildMermaidGraph(app.manifest);
     expect(source).toContain('p0["1 · db"]');
     expect(source).toContain('p1["2 · billing"]');
@@ -92,23 +92,23 @@ describe('renderGraph', () => {
     orThrow(await app.dispose());
   });
 
-  it('draws a .features()/.serve() app as the hexagon: driven → features → driving, numbered in boot order', async () => {
-    const db = plugin({ name: 'db', provides: { db: () => ({ ok: true }) } });
+  it('draws a .features()/.entrypoints() app as the hexagon: infra → features → entrypoints, numbered in boot order', async () => {
+    const db = infra({ name: 'db', provides: { db: () => ({ ok: true }) } });
     const orders = feature('orders', { needs: { db: service<{ ok: boolean }>() } });
-    const health = plugin({
+    const health = entrypoint({
       name: 'health',
       needs: { db: service<{ ok: boolean }>() },
       provides: { health: ({ db: handle }) => handle.ok },
     });
 
-    const app = orThrow(await defineApp('hexagon').use(db).features([orders]).serve(health).boot());
+    const app = orThrow(await defineApp('hexagon').infra(db).features([orders]).entrypoints(health).boot());
     const source = buildMermaidGraph(app.manifest);
     const groups = source.split('\n').filter(line => line.trim().startsWith('subgraph'));
     // The groups appear in boot order, so the drawing reads like the builder chain.
     expect(groups).toEqual([
-      '  subgraph driven["driven · what features need"]',
+      '  subgraph infra["infra · what features need"]',
       '  subgraph features["features · the domain"]',
-      '  subgraph driving["driving · what calls the features"]',
+      '  subgraph entrypoints["entrypoints · what calls the features"]',
     ]);
     expect(source).toContain('    p1["2 · orders"]');
     expect(source).toContain('p1 -->|db| p0');

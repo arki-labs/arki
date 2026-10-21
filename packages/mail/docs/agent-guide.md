@@ -64,9 +64,9 @@ The row holds the rendered message. Each retry passes the job id as the idempote
 
 ```ts skip="needs a Dot app with a journal"
 defineApp('shop')
-  .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
-  .use(mailOutboxPlugin({ tables }))
-  .serve(journalWorker({ jobs: mailJobs() }));
+  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
+  .infra(mailOutboxPlugin({ tables }))
+  .entrypoints(journalWorker({ jobs: mailJobs() }));
 ```
 
 ### Test code that sends mail

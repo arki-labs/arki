@@ -5,9 +5,9 @@
  */
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { Provided } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
 import { fake } from '@arki/dot';
-import { service } from '@arki/dot/plugin';
+import { service } from '@arki/dot/unit';
 
 import type { MemoryGuarantees, MemoryStore } from '../memory.js';
 import type { LockableDb, PgSessionGuarantees } from '../pg/index.js';

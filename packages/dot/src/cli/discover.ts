@@ -118,7 +118,7 @@ function isDotAppBuilder(
 ): value is DotAppBuilder<Record<string, unknown>, Failure, Failure, PluginPhases> {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.use === 'function' && typeof v.configure === 'function' && typeof v.boot === 'function';
+  return typeof v.infra === 'function' && typeof v.configure === 'function' && typeof v.boot === 'function';
 }
 
 function isDotAppConfigured(
@@ -131,7 +131,7 @@ function isDotAppConfigured(
     typeof v.boot === 'function' &&
     'manifest' in v &&
     'diagnostics' in v &&
-    typeof v.use !== 'function'
+    typeof v.infra !== 'function'
   );
 }
 

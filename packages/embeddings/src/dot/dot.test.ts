@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { Provided } from '@arki/dot/plugin';
-import { defineApp } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
+import { defineApp } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
@@ -15,7 +15,7 @@ describe('embeddings()', () => {
     const fake = fakeEmbedder({ dimensions: 8 });
     const app = await orThrow(
       defineApp('emb-fake')
-        .use(embeddings({ model: fake.model, cache: true }))
+        .infra(embeddings({ model: fake.model, cache: true }))
         .boot(),
     );
 
@@ -31,7 +31,7 @@ describe('embeddings()', () => {
     using log = fakeLog();
     const app = await orThrow(
       defineApp('emb-none')
-        .use(embeddings({ env: () => ({}) }))
+        .infra(embeddings({ env: () => ({}) }))
         .boot(),
     );
 
@@ -47,12 +47,12 @@ describe('embeddings()', () => {
     using _log = fakeLog();
     const built = await orThrow(
       defineApp('emb-factory')
-        .use(embeddings({ model: () => fakeEmbedder({ dimensions: 4 }) }))
+        .infra(embeddings({ model: () => fakeEmbedder({ dimensions: 4 }) }))
         .boot(),
     );
     const refused = await orThrow(
       defineApp('emb-refused')
-        .use(embeddings({ model: () => ConfigurationFailure({ message: 'no key' }) }))
+        .infra(embeddings({ model: () => ConfigurationFailure({ message: 'no key' }) }))
         .boot(),
     );
 
@@ -71,7 +71,7 @@ describe('embeddings()', () => {
     });
     expect(reads).toBe(0);
 
-    const app = await orThrow(defineApp('emb-ref').use(plugin).boot());
+    const app = await orThrow(defineApp('emb-ref').infra(plugin).boot());
 
     expect(reads).toBe(1);
     expect(app.services.embedder?.space).toMatchObject({ provider: 'ollama', model: 'nomic-embed-text' });

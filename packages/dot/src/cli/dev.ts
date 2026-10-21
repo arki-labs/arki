@@ -333,7 +333,7 @@ async function preflightProcess(options: {
 function describeEvent(event: DevEvent): string {
   switch (event.kind) {
     case 'app': {
-      return `app (${event.file}, export ${event.exportName})  graph: ${String(event.plugins)} plugins, ${String(event.features)} features`;
+      return `app (${event.file}, export ${event.exportName})  graph: ${String(event.plugins)} units, ${String(event.features)} features`;
     }
     case 'db': {
       return event.driver === 'pglite'

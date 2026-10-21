@@ -31,11 +31,11 @@ defined ──configure()──▶ configured ──boot()──▶ booted ─�
 ```
 
 - `defined` — `defineApp(name)` was called; no hooks have run.
-- `configured` — every plugin's `configure` hook ran successfully.
-- `booted` — every plugin's `boot` hook ran; `app.services` is populated.
-- `started` — every plugin's `start` hook ran; active work is in flight.
-- `stopped` — every started plugin's `stop` hook ran; resources still open.
-- `disposed` — every booted plugin's `dispose` hook ran. **Terminal.**
+- `configured` — every unit's `configure` hook ran successfully.
+- `booted` — every unit's `boot` hook ran; `app.services` is populated.
+- `started` — every unit's `start` hook ran; active work is in flight.
+- `stopped` — every started unit's `stop` hook ran; resources still open.
+- `disposed` — every booted unit's `dispose` hook ran. **Terminal.**
 - `failed` — a hook failed irrecoverably. **Terminal.**
 
 Terminal states require a fresh `defineApp(...)` to retry.
@@ -55,20 +55,20 @@ Terminal states require a fresh `defineApp(...)` to retry.
 
 ### `boot` — async side effects
 
-- Runs **async** in declaration order, after the plugin's `provides`
+- Runs **async** in declaration order, after the unit's `provides`
   factories (one per key, awaited in key order).
 - Side effects only: seed, warm up, validate required runtime
   configuration. It returns nothing, a typed refusal, or a descriptor plan
   owning private resources, cleanup and children.
-- Completed plugin services are published atomically into `app.services`.
-  `boot` sees the needs plus the plugin's own provided values.
-- Downstream plugins receive them destructured in their hook context,
+- Completed unit services are published atomically into `app.services`.
+  `boot` sees the needs plus the unit's own provided values.
+- Downstream units receive them destructured in their hook context,
   under the local aliases declared in `needs`.
 
 ### `start` — async activate
 
 - Runs **async** in declaration order.
-- Begins active work after every plugin has booted: workers, schedulers,
+- Begins active work after every unit has booted: workers, schedulers,
   subscribers, listeners, long-running processes.
 
 ### `stop` — async halt
@@ -96,8 +96,8 @@ DOT cleans up exactly what was opened — no more, no less.
 
 ### `boot` failure
 
-- The constructing plugin closes its partially acquired descriptors first.
-- Previously booted plugins dispose in reverse declaration order.
+- The constructing unit closes its partially acquired descriptors first.
+- Previously booted units dispose in reverse declaration order.
 - App transitions to `failed`; no failed provider publishes a service.
 - The original refusal is returned when cleanup succeeds; unknown throws become
   `UnexpectedDefect`. Failed rollback returns an inferred `ScopeAggregate`
@@ -105,12 +105,12 @@ DOT cleans up exactly what was opened — no more, no less.
 
 Use `resource(open, close)` in providers or return a private descriptor plan
 from `boot`; see [Ownership](ownership.md). The legacy `dispose` hook runs only
-for plugins whose boot completed. Descriptor cleanup also covers partial boot.
+for units whose boot completed. Descriptor cleanup also covers partial boot.
 
 ### `start` failure
 
-- Every started plugin's `stop` runs in reverse declaration order.
-- Then every booted plugin's `dispose` runs in reverse declaration order.
+- Every started unit's `stop` runs in reverse declaration order.
+- Then every booted unit's `dispose` runs in reverse declaration order.
 - App transitions to `failed`.
 - Returns the primary failure unchanged if cleanup succeeds; otherwise
   returns a `ScopeAggregate` retaining the primary and ordered cleanup failures.
@@ -153,27 +153,27 @@ canonical `UnexpectedDefect`; kernel-generated defects retain legacy metadata
 in their private cause. Owned provider/boot task defects retain the original
 cause, while diagnostics record the phase, owner and legacy ID:
 
-| Code            | Meaning                                                                                                                                                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ARKI_DOT_E001` | `configure` returned a Promise (async configure forbidden).                                                                                                                                                    |
-| `ARKI_DOT_E002` | `configure` hook threw.                                                                                                                                                                                        |
-| `ARKI_DOT_E003` | `boot` hook threw.                                                                                                                                                                                             |
-| `ARKI_DOT_E004` | `start` hook threw.                                                                                                                                                                                            |
-| `ARKI_DOT_E005` | One or more `stop` hooks threw (aggregate).                                                                                                                                                                    |
-| `ARKI_DOT_E006` | One or more `dispose` hooks threw (aggregate).                                                                                                                                                                 |
-| `ARKI_DOT_E007` | Reuse after `dispose()`.                                                                                                                                                                                       |
-| `ARKI_DOT_E008` | Reuse after a failed lifecycle.                                                                                                                                                                                |
-| `ARKI_DOT_E011` | Plugin registered twice.                                                                                                                                                                                       |
-| `ARKI_DOT_E012` | A `needs` entry no plugin declares (erased or JS graphs, dynamic http bundle tokens) — at boot.                                                                                                                |
-| `ARKI_DOT_E013` | A published wire key collides with an earlier provider.                                                                                                                                                        |
-| `ARKI_DOT_E014` | A service key uses the reserved `$` (kernel) prefix.                                                                                                                                                           |
-| `ARKI_DOT_E015` | A hook exceeded the `hookTimeoutMs` watchdog budget.                                                                                                                                                           |
-| `ARKI_DOT_E016` | Two actions in the same binding use the same id.                                                                                                                                                               |
-| `ARKI_DOT_E017` | Action `meta` is not plain JSON (a function, Date, Map or cycle).                                                                                                                                              |
-| `ARKI_DOT_E018` | More than one plugin fills the logging slot.                                                                                                                                                                   |
-| `ARKI_DOT_E019` | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`.                                                                                                               |
-| `ARKI_DOT_E020` | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
-| `ARKI_DOT_E021` | `$describeAction` named an action the plugin may not amend (unknown id, or neither its own nor in a binding it owns).                                                                                          |
+| Code            | Meaning                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ARKI_DOT_E001` | `configure` returned a Promise (async configure forbidden).                                                                                                                                                  |
+| `ARKI_DOT_E002` | `configure` hook threw.                                                                                                                                                                                      |
+| `ARKI_DOT_E003` | `boot` hook threw.                                                                                                                                                                                           |
+| `ARKI_DOT_E004` | `start` hook threw.                                                                                                                                                                                          |
+| `ARKI_DOT_E005` | One or more `stop` hooks threw (aggregate).                                                                                                                                                                  |
+| `ARKI_DOT_E006` | One or more `dispose` hooks threw (aggregate).                                                                                                                                                               |
+| `ARKI_DOT_E007` | Reuse after `dispose()`.                                                                                                                                                                                     |
+| `ARKI_DOT_E008` | Reuse after a failed lifecycle.                                                                                                                                                                              |
+| `ARKI_DOT_E011` | Unit registered twice.                                                                                                                                                                                       |
+| `ARKI_DOT_E012` | A `needs` entry no unit declares (erased or JS graphs, dynamic http bundle tokens) — at boot.                                                                                                                |
+| `ARKI_DOT_E013` | A published wire key collides with an earlier provider.                                                                                                                                                      |
+| `ARKI_DOT_E014` | A service key uses the reserved `$` (kernel) prefix.                                                                                                                                                         |
+| `ARKI_DOT_E015` | A hook exceeded the `hookTimeoutMs` watchdog budget.                                                                                                                                                         |
+| `ARKI_DOT_E016` | Two actions in the same binding use the same id.                                                                                                                                                             |
+| `ARKI_DOT_E017` | Action `meta` is not plain JSON (a function, Date, Map or cycle).                                                                                                                                            |
+| `ARKI_DOT_E018` | More than one unit fills the logging slot.                                                                                                                                                                   |
+| `ARKI_DOT_E019` | Unit needs and provides form a ring through any units (printed in order) — at `configure()`.                                                                                                                 |
+| `ARKI_DOT_E020` | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .infra() before Y." for any other unit. |
+| `ARKI_DOT_E021` | `$describeAction` named an action the unit may not amend (unknown id, or neither its own nor in a binding it owns).                                                                                          |
 
 `TS7022` ("implicitly has type 'any' because it … is referenced directly or
 indirectly in its own initializer") on a `feature()` const is the compile-time
@@ -193,17 +193,17 @@ remediation guidance.
 ### Checking a boot defect
 
 ```ts run
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 import { UnexpectedDefect } from '@arki/failure';
 
-const flaky = plugin({
+const flaky = infra({
   name: 'flaky',
   boot() {
     throw new Error('no network');
   },
 });
 
-const outcome = await defineApp('my-app').use(flaky).boot();
+const outcome = await defineApp('my-app').infra(flaky).boot();
 if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');
 if (!(outcome.cause instanceof Error) || outcome.cause.message !== 'no network') {
   throw new Error('original cause was lost');
@@ -213,10 +213,10 @@ if (!(outcome.cause instanceof Error) || outcome.cause.message !== 'no network')
 Disposal also returns managed defects and continues the remaining finalizers:
 
 ```ts run
-import { defineApp, DotLifecycleError, plugin } from '@arki/dot';
+import { defineApp, DotLifecycleError, infra } from '@arki/dot';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-const stuck = plugin({
+const stuck = infra({
   name: 'stuck',
   provides: { socket: () => 1 },
   dispose() {
@@ -224,7 +224,7 @@ const stuck = plugin({
   },
 });
 
-const app = await defineApp('my-app').use(stuck).boot();
+const app = await defineApp('my-app').infra(stuck).boot();
 if (isFailure(app)) throw new Error(app.code);
 const outcome = await app.dispose();
 if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');
@@ -260,5 +260,5 @@ always runs after it and leaves the app `disposed`.
 
 ## See also
 
-- [Plugin authoring](./plugin-authoring.md) — writing a `DotPlugin`.
+- [Unit authoring](./unit-authoring.md) — writing an `infra` or `entrypoint` unit.
 - [Diagnostics](./diagnostics.md) — observing lifecycle state at runtime.

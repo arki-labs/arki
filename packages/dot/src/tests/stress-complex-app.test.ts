@@ -1,7 +1,7 @@
 /**
- * Stress test: a large, realistic plugin composition.
+ * Stress test: a large, realistic unit composition.
  *
- * 28 plugins across 4 layers (infra → connections → domain → workers), wired
+ * 28 units across 4 layers (infra → connections → domain → workers), wired
  * with every v2 mechanism at once:
  *
  *   - deep needs chains (api ← admin ← reporting ← orders ← cart ← …)
@@ -13,7 +13,7 @@
  *
  * Assertions pin the exact boot order (= declaration order), start order,
  * reverse stop order, and the exact interleaving of dispose hooks with
- * kernel-driven lazy cleanup. The 28-deep `.use()` chain itself is the
+ * kernel-driven lazy cleanup. The 28-deep `.infra()` chain itself is the
  * type-level proof: this file compiling under strict mode means the
  * builder's accumulated generics survive real-world depth.
  */
@@ -23,9 +23,9 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { orThrow } from '@arki/failure';
 
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
-import type { Lazy } from '../plugin-contract.js';
+import type { Lazy } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { lazy, plugin, rename, service, token } from '../plugin-contract.js';
+import { lazy, infra, rename, service, token } from '../unit-contract.js';
 
 /* ------------------------------------------------------------------ */
 /* Domain types                                                        */
@@ -90,7 +90,7 @@ const mkKv = (ns: string): KvClient => ({
 /* Layer 0 — infra                                                     */
 /* ------------------------------------------------------------------ */
 
-const envPlugin = plugin({
+const envUnit = infra({
   name: 'env',
   provides: {
     env: ({ $config }): Env => {
@@ -101,7 +101,7 @@ const envPlugin = plugin({
   },
 });
 
-const clockPlugin = plugin({
+const clockUnit = infra({
   name: 'clock',
   provides: {
     clock: (): Clock => {
@@ -111,7 +111,7 @@ const clockPlugin = plugin({
   },
 });
 
-const loggerPlugin = plugin({
+const loggerUnit = infra({
   name: 'logger',
   needs: { env: service<Env>() },
   provides: {
@@ -123,7 +123,7 @@ const loggerPlugin = plugin({
   },
 });
 
-const metricsPlugin = plugin({
+const metricsUnit = infra({
   name: 'metrics',
   needs: { env: service<Env>(), clock: service<Clock>() },
   provides: {
@@ -140,45 +140,45 @@ const metricsPlugin = plugin({
 /* Layer 1 — connections (renames, tokens, lazies)                     */
 /* ------------------------------------------------------------------ */
 
-const dbPluginFactory = (instance: string) =>
-  plugin({
+const dbUnitFactory = (instance: string) =>
+  infra({
     name: 'db',
     needs: { log: service<Log>() },
     provides: {
-      db: ({ log, $plugin }) => {
-        ev(`boot:${$plugin}`);
+      db: ({ log, $unit }) => {
+        ev(`boot:${$unit}`);
         log.info(`db ${instance} opening`);
         return mkDb(instance);
       },
     },
-    dispose: ({ $plugin }) => {
-      ev(`dispose:${$plugin}`);
+    dispose: ({ $unit }) => {
+      ev(`dispose:${$unit}`);
     },
   });
 
-const dbPlugin = dbPluginFactory('primary');
-const reportsDbPlugin = rename(dbPluginFactory('reports'), { db: 'reportsDb' }, 'db-reports');
+const dbUnit = dbUnitFactory('primary');
+const reportsDbUnit = rename(dbUnitFactory('reports'), { db: 'reportsDb' }, 'db-reports');
 
-const kvPluginFactory = (ns: string) =>
-  plugin({
+const kvUnitFactory = (ns: string) =>
+  infra({
     name: 'kv',
     provides: {
-      [Kv.key]: ({ $plugin }) => {
-        ev(`boot:${$plugin}`);
+      [Kv.key]: ({ $unit }) => {
+        ev(`boot:${$unit}`);
         return mkKv(ns);
       },
     },
-    dispose: ({ $plugin }) => {
-      ev(`dispose:${$plugin}`);
+    dispose: ({ $unit }) => {
+      ev(`dispose:${$unit}`);
     },
   });
 
-const kvPlugin = kvPluginFactory('main');
+const kvUnit = kvUnitFactory('main');
 // Rename the token's wire key to the DERIVED token's key — rename and
 // token.instance() composing is the multi-instance story for contracts.
-const sessionsKvPlugin = rename(kvPluginFactory('sessions'), { 'stress.kv': SessionsKv.key }, 'kv-sessions');
+const sessionsKvUnit = rename(kvUnitFactory('sessions'), { 'stress.kv': SessionsKv.key }, 'kv-sessions');
 
-const blobPlugin = plugin({
+const blobUnit = infra({
   name: 'blob',
   provides: {
     blob: () => {
@@ -194,7 +194,7 @@ const blobPlugin = plugin({
   },
 });
 
-const searchPlugin = plugin({
+const searchUnit = infra({
   name: 'search',
   provides: {
     search: () => {
@@ -211,7 +211,7 @@ const searchPlugin = plugin({
   },
 });
 
-const mailerPlugin = plugin({
+const mailerUnit = infra({
   name: 'mailer',
   needs: { env: service<Env>() },
   provides: {
@@ -229,7 +229,7 @@ const mailerPlugin = plugin({
   },
 });
 
-const busPlugin = plugin({
+const busUnit = infra({
   name: 'bus',
   provides: {
     bus: () => {
@@ -258,7 +258,7 @@ const busPlugin = plugin({
 /* Layer 2 — domain                                                    */
 /* ------------------------------------------------------------------ */
 
-const authPlugin = plugin({
+const authUnit = infra({
   name: 'auth',
   needs: { db: service<Db>(), cache: Kv, log: service<Log>() }, // token under a free alias
   provides: {
@@ -271,7 +271,7 @@ const authPlugin = plugin({
   },
 });
 
-const catalogPlugin = plugin({
+const catalogUnit = infra({
   name: 'catalog',
   needs: { db: service<Db>(), search: service<Lazy<SearchClient>>(), log: service<Log>() },
   provides: {
@@ -292,7 +292,7 @@ const catalogPlugin = plugin({
   },
 });
 
-const pricingPlugin = plugin({
+const pricingUnit = infra({
   name: 'pricing',
   needs: { catalog: service<Catalog>(), env: service<Env>(), clock: service<Clock>() },
   provides: {
@@ -303,7 +303,7 @@ const pricingPlugin = plugin({
   },
 });
 
-const inventoryPlugin = plugin({
+const inventoryUnit = infra({
   name: 'inventory',
   needs: { db: service<Db>(), stock: Kv, metrics: service<Metrics>() },
   provides: {
@@ -319,7 +319,7 @@ const inventoryPlugin = plugin({
   },
 });
 
-const cartPlugin = plugin({
+const cartUnit = infra({
   name: 'cart',
   // Consumes the DERIVED token — wired to the renamed second kv instance.
   needs: { pricing: service<Pricing>(), inventory: service<Inventory>(), sessions: SessionsKv },
@@ -339,7 +339,7 @@ const cartPlugin = plugin({
   },
 });
 
-const paymentsPlugin = plugin({
+const paymentsUnit = infra({
   name: 'payments',
   needs: { env: service<Env>(), mailer: service<Lazy<Mailer>>(), bus: service<Bus>() },
   provides: {
@@ -355,7 +355,7 @@ const paymentsPlugin = plugin({
   },
 });
 
-const ordersPlugin = plugin({
+const ordersUnit = infra({
   name: 'orders',
   needs: { db: service<Db>(), cart: service<Cart>(), payments: service<Payments>(), bus: service<Bus>() },
   provides: {
@@ -375,7 +375,7 @@ const ordersPlugin = plugin({
   },
 });
 
-const shippingPlugin = plugin({
+const shippingUnit = infra({
   name: 'shipping',
   // Declares the blob need but NEVER calls .get() — blob must stay cold.
   needs: { orders: service<Orders>(), blob: service<Lazy<BlobStore>>(), bus: service<Bus>() },
@@ -392,7 +392,7 @@ const shippingPlugin = plugin({
   },
 });
 
-const notificationsPlugin = plugin({
+const notificationsUnit = infra({
   name: 'notifications',
   needs: { mailer: service<Lazy<Mailer>>(), bus: service<Bus>(), auth: service<Auth>() },
   provides: {
@@ -410,7 +410,7 @@ const notificationsPlugin = plugin({
   stop: () => ev('stop:notifications'),
 });
 
-const analyticsPlugin = plugin({
+const analyticsUnit = infra({
   name: 'analytics',
   needs: { reportsDb: service<Db>(), metrics: service<Metrics>(), bus: service<Bus>() },
   provides: {
@@ -426,7 +426,7 @@ const analyticsPlugin = plugin({
   stop: () => ev('stop:analytics'),
 });
 
-const reportingPlugin = plugin({
+const reportingUnit = infra({
   name: 'reporting',
   needs: { reportsDb: service<Db>(), catalog: service<Catalog>(), orders: service<Orders>() },
   provides: {
@@ -440,7 +440,7 @@ const reportingPlugin = plugin({
   },
 });
 
-const adminPlugin = plugin({
+const adminUnit = infra({
   name: 'admin',
   needs: { auth: service<Auth>(), reporting: service<Reporting>(), log: service<Log>() },
   provides: {
@@ -451,7 +451,7 @@ const adminPlugin = plugin({
   },
 });
 
-const apiPlugin = plugin({
+const apiUnit = infra({
   name: 'api',
   needs: {
     auth: service<Auth>(),
@@ -484,7 +484,7 @@ const apiPlugin = plugin({
 /* Layer 3 — workers                                                   */
 /* ------------------------------------------------------------------ */
 
-const indexerPlugin = plugin({
+const indexerUnit = infra({
   name: 'worker-indexer',
   needs: { catalog: service<Catalog>(), search: service<Lazy<SearchClient>>(), bus: service<Bus>() },
   boot: () => {
@@ -498,7 +498,7 @@ const indexerPlugin = plugin({
   stop: () => ev('stop:worker-indexer'),
 });
 
-const emailWorkerPlugin = plugin({
+const emailWorkerUnit = infra({
   name: 'worker-emails',
   needs: { notifications: service<Notifications>(), bus: service<Bus>() },
   boot: () => {
@@ -511,7 +511,7 @@ const emailWorkerPlugin = plugin({
   stop: () => ev('stop:worker-emails'),
 });
 
-const healthcheckPlugin = plugin({
+const healthcheckUnit = infra({
   name: 'healthcheck',
   needs: { api: service<Api>(), db: service<Db>(), metrics: service<Metrics>() },
   boot: () => {
@@ -526,7 +526,7 @@ const healthcheckPlugin = plugin({
 });
 
 /* ------------------------------------------------------------------ */
-/* The composition — 28 plugins, one chain                                */
+/* The composition — 28 units, one chain                                */
 /* ------------------------------------------------------------------ */
 
 const DECLARATION_ORDER = [
@@ -562,37 +562,37 @@ const DECLARATION_ORDER = [
 
 function composeStressApp() {
   return defineApp('stress-commerce', { version: '9.9.9', config: { FEATURE_STRESS: true } })
-    .use(envPlugin)
-    .use(clockPlugin)
-    .use(loggerPlugin)
-    .use(metricsPlugin)
-    .use(dbPlugin)
-    .use(reportsDbPlugin)
-    .use(kvPlugin)
-    .use(sessionsKvPlugin)
-    .use(blobPlugin)
-    .use(searchPlugin)
-    .use(mailerPlugin)
-    .use(busPlugin)
-    .use(authPlugin)
-    .use(catalogPlugin)
-    .use(pricingPlugin)
-    .use(inventoryPlugin)
-    .use(cartPlugin)
-    .use(paymentsPlugin)
-    .use(ordersPlugin)
-    .use(shippingPlugin)
-    .use(notificationsPlugin)
-    .use(analyticsPlugin)
-    .use(reportingPlugin)
-    .use(adminPlugin)
-    .use(apiPlugin)
-    .use(indexerPlugin)
-    .use(emailWorkerPlugin)
-    .use(healthcheckPlugin);
+    .infra(envUnit)
+    .infra(clockUnit)
+    .infra(loggerUnit)
+    .infra(metricsUnit)
+    .infra(dbUnit)
+    .infra(reportsDbUnit)
+    .infra(kvUnit)
+    .infra(sessionsKvUnit)
+    .infra(blobUnit)
+    .infra(searchUnit)
+    .infra(mailerUnit)
+    .infra(busUnit)
+    .infra(authUnit)
+    .infra(catalogUnit)
+    .infra(pricingUnit)
+    .infra(inventoryUnit)
+    .infra(cartUnit)
+    .infra(paymentsUnit)
+    .infra(ordersUnit)
+    .infra(shippingUnit)
+    .infra(notificationsUnit)
+    .infra(analyticsUnit)
+    .infra(reportingUnit)
+    .infra(adminUnit)
+    .infra(apiUnit)
+    .infra(indexerUnit)
+    .infra(emailWorkerUnit)
+    .infra(healthcheckUnit);
 }
 
-describe('stress: 28-plugin commerce composition', () => {
+describe('stress: 28-unit commerce composition', () => {
   it('boots, runs, and tears down the full graph with exact ordering', async () => {
     events.length = 0;
     const observed: DotLifecycleEvent[] = [];
@@ -650,7 +650,7 @@ describe('stress: 28-plugin commerce composition', () => {
       expect.arrayContaining([
         { from: 'logger', to: 'env', kind: 'requires', key: 'env' },
         { from: 'auth', to: 'kv', kind: 'requires', key: 'stress.kv' },
-        { from: 'cart', to: 'kv-sessions', kind: 'requires', key: 'stress.kv#sessions' }, // derived token → renamed plugin
+        { from: 'cart', to: 'kv-sessions', kind: 'requires', key: 'stress.kv#sessions' }, // derived token → renamed unit
         { from: 'analytics', to: 'db-reports', kind: 'requires', key: 'reportsDb' }, // renamed db instance
         { from: 'api', to: 'admin', kind: 'requires', key: 'admin' },
         { from: 'healthcheck', to: 'api', kind: 'requires', key: 'api' },
@@ -660,7 +660,7 @@ describe('stress: 28-plugin commerce composition', () => {
     for (const edge of m.dependencies) {
       const from = DECLARATION_ORDER.indexOf(edge.from as (typeof DECLARATION_ORDER)[number]);
       const to = DECLARATION_ORDER.indexOf(edge.to as (typeof DECLARATION_ORDER)[number]);
-      expect(to, `${edge.from} -> ${edge.to} must point to an earlier plugin`).toBeLessThan(from);
+      expect(to, `${edge.from} -> ${edge.to} must point to an earlier unit`).toBeLessThan(from);
     }
 
     /* ---- diagnostics + timeline ---- */
@@ -704,9 +704,9 @@ describe('stress: 28-plugin commerce composition', () => {
 
   it('type-level: the guard still bites at depth', () => {
     // @ts-expect-error — api's five needs are all missing at position 1
-    defineApp('bad').use(apiPlugin);
+    defineApp('bad').infra(apiUnit);
     // @ts-expect-error — healthcheck before api (one missing need among many)
-    composeStressAppWithoutApi().use(healthcheckPlugin);
+    composeStressAppWithoutApi().infra(healthcheckUnit);
     expect(true).toBe(true);
   });
 });
@@ -714,28 +714,28 @@ describe('stress: 28-plugin commerce composition', () => {
 /** Same chain as composeStressApp but stops before api — guard fixture. */
 function composeStressAppWithoutApi() {
   return defineApp('bad-stress')
-    .use(envPlugin)
-    .use(clockPlugin)
-    .use(loggerPlugin)
-    .use(metricsPlugin)
-    .use(dbPlugin)
-    .use(reportsDbPlugin)
-    .use(kvPlugin)
-    .use(sessionsKvPlugin)
-    .use(blobPlugin)
-    .use(searchPlugin)
-    .use(mailerPlugin)
-    .use(busPlugin)
-    .use(authPlugin)
-    .use(catalogPlugin)
-    .use(pricingPlugin)
-    .use(inventoryPlugin)
-    .use(cartPlugin)
-    .use(paymentsPlugin)
-    .use(ordersPlugin)
-    .use(shippingPlugin)
-    .use(notificationsPlugin)
-    .use(analyticsPlugin)
-    .use(reportingPlugin)
-    .use(adminPlugin);
+    .infra(envUnit)
+    .infra(clockUnit)
+    .infra(loggerUnit)
+    .infra(metricsUnit)
+    .infra(dbUnit)
+    .infra(reportsDbUnit)
+    .infra(kvUnit)
+    .infra(sessionsKvUnit)
+    .infra(blobUnit)
+    .infra(searchUnit)
+    .infra(mailerUnit)
+    .infra(busUnit)
+    .infra(authUnit)
+    .infra(catalogUnit)
+    .infra(pricingUnit)
+    .infra(inventoryUnit)
+    .infra(cartUnit)
+    .infra(paymentsUnit)
+    .infra(ordersUnit)
+    .infra(shippingUnit)
+    .infra(notificationsUnit)
+    .infra(analyticsUnit)
+    .infra(reportingUnit)
+    .infra(adminUnit);
 }

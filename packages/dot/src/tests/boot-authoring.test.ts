@@ -5,8 +5,8 @@ import { defineFailure } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
-import { initPlugins } from '../init-plugins.js';
-import { createPlugin, plugin, rename } from '../plugin-contract.js';
+import { initUnits } from '../init-units.js';
+import { createUnit, infra, rename } from '../unit-contract.js';
 
 const Refused = defineFailure('test.boot_authoring.refused');
 
@@ -34,19 +34,19 @@ describe('boot authoring', () => {
       const start = (): undefined => {
         events.push('start');
       };
-      const factory = initPlugins.context<{ db: typeof db }>().create();
+      const factory = initUnits.context<{ db: typeof db }>().create();
       const app = defineApp(`boot-${form}`);
       const mounted =
         form === 'feature'
           ? app.features([feature('domain', { provides, boot, start })])
-          : app.use(
+          : app.infra(
               form === 'keys'
-                ? factory.plugin({ name: 'domain', provides, boot, start })
+                ? factory.infra({ name: 'domain', provides, boot, start })
                 : form === 'witness'
-                  ? factory.plugin({ name: 'domain', needs: {}, provides, boot, start })
+                  ? factory.infra({ name: 'domain', needs: {}, provides, boot, start })
                   : form === 'constructor'
-                    ? createPlugin({ name: 'domain', provides, boot, start })
-                    : plugin({ name: 'domain', provides, boot, start }),
+                    ? createUnit({ name: 'domain', provides, boot, start })
+                    : infra({ name: 'domain', provides, boot, start }),
             );
       expect(await mounted.start()).toBe(failure);
       expect(events).toEqual(['boot', 'close']);
@@ -57,7 +57,7 @@ describe('boot authoring', () => {
 it('runs replacement boot and providers, and closes only the resources they acquire', async () => {
   const events: string[] = [];
   const failure = Refused();
-  const original = plugin({
+  const original = infra({
     name: 'source',
     provides: {
       value: () =>
@@ -96,7 +96,7 @@ it('runs replacement boot and providers, and closes only the resources they acqu
     },
     { value: 'renamed' },
   );
-  expect(await defineApp('replacement').use(actual).boot()).toBe(failure);
+  expect(await defineApp('replacement').infra(actual).boot()).toBe(failure);
   expect(events).toEqual(['replacement-provider', 'replacement-boot:2', 'replacement-close']);
 });
 
@@ -104,7 +104,7 @@ it('returns a replacement provider failure before boot runs', async () => {
   const failure = Refused();
   let calls = 0;
   const actual = {
-    ...plugin({ name: 'source', provides: { value: () => 1 } }),
+    ...infra({ name: 'source', provides: { value: () => 1 } }),
     factories: { value: () => failure },
     hooks: {
       boot: (): undefined => {
@@ -112,7 +112,7 @@ it('returns a replacement provider failure before boot runs', async () => {
       },
     },
   };
-  expect(await defineApp('replacement-provider').use(actual).boot()).toBe(failure);
+  expect(await defineApp('replacement-provider').infra(actual).boot()).toBe(failure);
   expect(calls).toBe(0);
 });
 

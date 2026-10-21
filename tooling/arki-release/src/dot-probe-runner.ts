@@ -68,14 +68,14 @@ function probeApp() {
   const relations = defineRelations({ widgets });
 
   return defineApp('arki-dot-probe')
-    .use(
+    .infra(
       env({
         schema: { PROBE_GREETING: z.string().default('hello') },
         skipValidation: true,
       }),
     )
-    .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'arki-dot-probe' }))
-    .use(db({ driver: 'pglite', memory: true, relations }));
+    .infra(kv({ url: 'redis://127.0.0.1:1', namespace: 'arki-dot-probe' }))
+    .infra(db({ driver: 'pglite', memory: true, relations }));
 }
 
 export default probeApp();

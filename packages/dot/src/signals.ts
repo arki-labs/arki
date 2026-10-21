@@ -77,7 +77,7 @@ function globalProcessTarget(): SignalTarget | undefined {
  * torn down through another path first.
  *
  * ```ts
- * const app = await defineApp('shop').use(...).start();
+ * const app = await defineApp('shop').infra(...).start();
  * hookSignals(app);                          // SIGTERM/SIGINT → drain → exit
  * hookSignals(app, { timeoutMs: 30_000 });   // slower drain budget
  * ```

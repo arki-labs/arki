@@ -23,7 +23,7 @@ and not committee-shaped.
 **Playful** does _not_ mean cute, ironic, or whimsical for its own sake.
 It means _human_. A real developer wrote this. They cared. They had taste.
 
-**Precise** means every word is the _right_ word. `plugin` not "module." `boot`
+**Precise** means every word is the _right_ word. `unit` not "module." `boot`
 not "initialize." `dispose` not "cleanup." `dot doctor` not "validate." If
 a shorter, more accurate word exists, use it. If a longer word adds
 meaning, accept the length.
@@ -44,23 +44,23 @@ This means we:
 
 What this principle _forbids_:
 
-- Generic, committee-shaped naming (`Plugin`, `Manager`, `Provider`,
+- Generic, committee-shaped naming (`Unit`, `Manager`, `Provider`,
   `Helper`, `Util`).
 - Apology-shaped error messages ("Sorry, something went wrong").
 - Filler that makes prose longer without making it clearer.
 
 ---
 
-## 2. Plugins ARE the app — no hidden core
+## 2. Units ARE the app — no hidden core
 
-There is no framework "underneath" the plugins. Remove every plugin and you
-remove the app. The kernel composes plugins; it does not contain the app's
+There is no framework "underneath" the units. Remove every unit and you
+remove the app. The kernel composes units; it does not contain the app's
 behavior.
 
 This means we:
 
 - Never add **framework-reserved service kinds** that "always work" without
-  a plugin publishing them. If you want `services.logger`, a plugin publishes it.
+  a unit publishing them. If you want `services.logger`, a unit publishes it.
 - Never add **hidden lifecycle hooks** that run outside the 5-hook
   sequence (`configure → boot → start → stop → dispose`).
 - Never put **app behavior in defaults**. Defaults can shape _config_; they
@@ -68,9 +68,9 @@ This means we:
 
 What this principle _forbids_:
 
-- A global "DOT context" that plugins read from without declaring it.
+- A global "DOT context" that units read from without declaring it.
 - "Built-in" services that bypass the registration protocol.
-- Magic auto-loading of plugins from the filesystem.
+- Magic auto-loading of units from the filesystem.
 
 ---
 
@@ -93,7 +93,7 @@ This means we:
 
 What this principle _forbids_:
 
-- "Eventual consistency" between plugins during boot.
+- "Eventual consistency" between units during boot.
 - Race-prone boot sequences disguised as `Promise.all`.
 - Logs / diagnostics that include `new Date().toISOString()` inside the
   package body (it belongs at the envelope edge, once).

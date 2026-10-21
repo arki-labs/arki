@@ -7,7 +7,7 @@ database URL, and check `/api/health`. This recipe assumes the default
 ```text
  docker build ──▶ image (server bundle + drizzle/ migrations)
                      │
- docker run ────────▶ boot: env check → migrations → plugins → start
+ docker run ────────▶ boot: env check → migrations → units → start
                      │
  curl /api/health ──▶ {"status":"ok"}  (app started, Postgres answers)
 ```
@@ -43,7 +43,7 @@ database URL, and check `/api/health`. This recipe assumes the default
    docker run -p 3000:3000 -e DB_URL=postgres://app:secret@db.internal:5432/app my-app
    ```
 
-   On boot, the `dbMigrations` plugin applies the migrations in `drizzle/`
+   On boot, the `dbMigrations` unit applies the migrations in `drizzle/`
    to that database. `SIGTERM` (what `docker stop` sends) drains the app:
    `stop` hooks run, then `dispose` hooks, in reverse order.
 

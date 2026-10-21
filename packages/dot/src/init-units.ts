@@ -3,7 +3,7 @@ import type { Failure } from '@arki/failure';
 
 import type {
   ActionSource,
-  AuthoredPlugin,
+  AuthoredUnit,
   BootGuard,
   CheckedProvider,
   CtxOf,
@@ -17,13 +17,13 @@ import type {
   NeedsShape,
   NoReservedKeys,
   PhaseHooks,
-  PluginDefinition,
+  UnitDefinition,
   ProvidedValues,
   Service,
   ServiceRecord,
   WireNeeds,
-} from './plugin-contract.js';
-import { createPlugin as definePlugin, service } from './plugin-contract.js';
+} from './unit-contract.js';
+import { createUnit as defineUnit, service } from './unit-contract.js';
 
 type MaybePromise<T> = T | Promise<T>;
 type ServiceKey<TServices extends object> = Extract<keyof TServices, string>;
@@ -52,19 +52,19 @@ type CheckedFactories<TCtx, TServices extends object, TProvides extends ServiceR
   ) => TProvides[K] & SchemaCheckedProvides<TServices, NoInfer<TProvides>>[K] & CheckedProvider<NoInfer<TProvides[K]>>;
 };
 
-type CommonPluginDefinition = {
+type CommonUnitDefinition = {
   readonly name: string;
   readonly actions?: readonly ActionSource[];
 };
 
-type KeyArrayPluginDefinition<
+type KeyArrayUnitDefinition<
   TServices extends object,
   TKeys extends ServiceKeys<TServices>,
   TProvides extends ServiceRecord & NoReservedKeys,
   TBoot extends undefined | ScopePlan | Failure = undefined,
   TReturns extends HookReturns = EmptyHookReturns,
   TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
-> = CommonPluginDefinition &
+> = CommonUnitDefinition &
   LoggingSlot<TLogging> &
   PhaseHooks<PickServices<TServices, TKeys> & ProvidedValues<NoInfer<TProvides>> & KernelCtx, TReturns> & {
     readonly needs?: TKeys;
@@ -74,14 +74,14 @@ type KeyArrayPluginDefinition<
     ) => MaybePromise<TBoot>;
   };
 
-type WitnessPluginDefinition<
+type WitnessUnitDefinition<
   TServices extends object,
   TShape extends NeedsShape & NoReservedKeys,
   TProvides extends ServiceRecord & NoReservedKeys,
   TBoot extends undefined | ScopePlan | Failure = undefined,
   TReturns extends HookReturns = EmptyHookReturns,
   TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
-> = CommonPluginDefinition &
+> = CommonUnitDefinition &
   LoggingSlot<TLogging> &
   PhaseHooks<CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx, TReturns> & {
     readonly needs: TShape;
@@ -89,24 +89,24 @@ type WitnessPluginDefinition<
     readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
   };
 
-export type InitPluginsFactory<TServices extends object> = ReturnType<typeof createPluginFactory<TServices>>;
+export type InitUnitsFactory<TServices extends object> = ReturnType<typeof createUnitFactory<TServices>>;
 
-type ErasedPluginDefinition<
+type ErasedUnitDefinition<
   TServices extends object,
   TProvides extends ServiceRecord & NoReservedKeys = ServiceRecord & NoReservedKeys,
   TBoot extends undefined | ScopePlan | Failure = undefined | ScopePlan | Failure,
   TReturns extends HookReturns = HookReturns,
   TLogging extends DotLoggingHandle | Failure = DotLoggingHandle | Failure,
 > =
-  | KeyArrayPluginDefinition<TServices, ServiceKeys<TServices>, TProvides, TBoot, TReturns, TLogging>
-  | WitnessPluginDefinition<TServices, NeedsShape & NoReservedKeys, TProvides, TBoot, TReturns, TLogging>;
+  | KeyArrayUnitDefinition<TServices, ServiceKeys<TServices>, TProvides, TBoot, TReturns, TLogging>
+  | WitnessUnitDefinition<TServices, NeedsShape & NoReservedKeys, TProvides, TBoot, TReturns, TLogging>;
 
-type KernelPluginDefinition<
+type KernelUnitDefinition<
   TProvides extends ServiceRecord & NoReservedKeys,
   TBoot extends undefined | ScopePlan | Failure,
   TReturns extends HookReturns,
   TLogging extends DotLoggingHandle | Failure,
-> = PluginDefinition<NeedsShape & NoReservedKeys, TProvides, string, TBoot, TReturns, TLogging>;
+> = UnitDefinition<NeedsShape & NoReservedKeys, TProvides, string, TBoot, TReturns, TLogging>;
 
 function needsFor<TServices extends object, const TKeys extends ServiceKeys<TServices>>(
   keys: TKeys,
@@ -119,18 +119,18 @@ function needsFor<TServices extends object, const TKeys extends ServiceKeys<TSer
 }
 
 function isServiceKeyArray<TServices extends object>(
-  needs: ErasedPluginDefinition<TServices>['needs'],
+  needs: ErasedUnitDefinition<TServices>['needs'],
 ): needs is ServiceKeys<TServices> {
   return Array.isArray(needs);
 }
 
-function createPluginFactory<TServices extends object>() {
-  function plugin<
+function createUnitFactory<TServices extends object>() {
+  function infra<
     const TKeys extends ServiceKeys<TServices> = readonly [],
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
     TBoot extends undefined = undefined,
   >(
-    def: KeyArrayPluginDefinition<
+    def: KeyArrayUnitDefinition<
       TServices,
       TKeys,
       TProvides,
@@ -139,7 +139,7 @@ function createPluginFactory<TServices extends object>() {
       DotLoggingHandle<undefined>
     >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): AuthoredPlugin<
+  ): AuthoredUnit<
     PickServices<TServices, TKeys>,
     ProvidedValues<TProvides>,
     WitnessesFor<TServices, TKeys>,
@@ -149,7 +149,7 @@ function createPluginFactory<TServices extends object>() {
     DotLoggingHandle<undefined>,
     TBoot
   >;
-  function plugin<
+  function infra<
     const TKeys extends ServiceKeys<TServices> = readonly [],
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
     TBoot extends undefined | ScopePlan | Failure = undefined,
@@ -159,7 +159,7 @@ function createPluginFactory<TServices extends object>() {
     TDispose extends undefined | Failure = undefined,
     TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
   >(
-    def: KeyArrayPluginDefinition<
+    def: KeyArrayUnitDefinition<
       TServices,
       TKeys,
       TProvides,
@@ -168,7 +168,7 @@ function createPluginFactory<TServices extends object>() {
       TLogging
     >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): AuthoredPlugin<
+  ): AuthoredUnit<
     PickServices<TServices, TKeys>,
     ProvidedValues<TProvides>,
     WitnessesFor<TServices, TKeys>,
@@ -178,12 +178,12 @@ function createPluginFactory<TServices extends object>() {
     TLogging,
     TBoot
   >;
-  function plugin<
+  function infra<
     TShape extends NeedsShape & NoReservedKeys,
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
     TBoot extends undefined = undefined,
   >(
-    def: WitnessPluginDefinition<
+    def: WitnessUnitDefinition<
       TServices,
       TShape,
       TProvides,
@@ -192,7 +192,7 @@ function createPluginFactory<TServices extends object>() {
       DotLoggingHandle<undefined>
     >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): AuthoredPlugin<
+  ): AuthoredUnit<
     WireNeeds<TShape>,
     ProvidedValues<TProvides>,
     TShape,
@@ -202,7 +202,7 @@ function createPluginFactory<TServices extends object>() {
     DotLoggingHandle<undefined>,
     TBoot
   >;
-  function plugin<
+  function infra<
     TShape extends NeedsShape & NoReservedKeys,
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
     TBoot extends undefined | ScopePlan | Failure = undefined,
@@ -212,7 +212,7 @@ function createPluginFactory<TServices extends object>() {
     TDispose extends undefined | Failure = undefined,
     TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
   >(
-    def: WitnessPluginDefinition<
+    def: WitnessUnitDefinition<
       TServices,
       TShape,
       TProvides,
@@ -221,7 +221,7 @@ function createPluginFactory<TServices extends object>() {
       TLogging
     >,
     ...guard: BootGuard<NoInfer<TBoot>>
-  ): AuthoredPlugin<
+  ): AuthoredUnit<
     WireNeeds<TShape>,
     ProvidedValues<TProvides>,
     TShape,
@@ -231,7 +231,7 @@ function createPluginFactory<TServices extends object>() {
     TLogging,
     TBoot
   >;
-  function plugin<
+  function infra<
     TProvides extends ServiceRecord & NoReservedKeys,
     TBoot extends undefined | ScopePlan | Failure,
     TConfigure extends undefined | Failure = undefined,
@@ -240,7 +240,7 @@ function createPluginFactory<TServices extends object>() {
     TDispose extends undefined | Failure = undefined,
     TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
   >(
-    def: ErasedPluginDefinition<
+    def: ErasedUnitDefinition<
       TServices,
       TProvides,
       TBoot,
@@ -254,7 +254,7 @@ function createPluginFactory<TServices extends object>() {
       : rawNeeds;
     // Factory seam: key-array authoring is runtime-compiled to the same
     // witness record that the kernel already understands.
-    const kernelDef: KernelPluginDefinition<
+    const kernelDef: KernelUnitDefinition<
       TProvides,
       TBoot,
       { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -268,7 +268,7 @@ function createPluginFactory<TServices extends object>() {
       ...(def.provides === undefined
         ? {}
         : {
-            provides: def.provides as KernelPluginDefinition<
+            provides: def.provides as KernelUnitDefinition<
               TProvides,
               TBoot,
               { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -278,7 +278,7 @@ function createPluginFactory<TServices extends object>() {
       ...(def.boot === undefined
         ? {}
         : {
-            boot: def.boot as KernelPluginDefinition<
+            boot: def.boot as KernelUnitDefinition<
               TProvides,
               TBoot,
               { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -288,7 +288,7 @@ function createPluginFactory<TServices extends object>() {
       ...(def.start === undefined
         ? {}
         : {
-            start: def.start as KernelPluginDefinition<
+            start: def.start as KernelUnitDefinition<
               TProvides,
               TBoot,
               { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -298,7 +298,7 @@ function createPluginFactory<TServices extends object>() {
       ...(def.stop === undefined
         ? {}
         : {
-            stop: def.stop as KernelPluginDefinition<
+            stop: def.stop as KernelUnitDefinition<
               TProvides,
               TBoot,
               { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -308,7 +308,7 @@ function createPluginFactory<TServices extends object>() {
       ...(def.dispose === undefined
         ? {}
         : {
-            dispose: def.dispose as KernelPluginDefinition<
+            dispose: def.dispose as KernelUnitDefinition<
               TProvides,
               TBoot,
               { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
@@ -316,7 +316,7 @@ function createPluginFactory<TServices extends object>() {
             >['dispose'],
           }),
     };
-    return definePlugin<
+    return defineUnit<
       NeedsShape & NoReservedKeys,
       TProvides,
       string,
@@ -331,14 +331,14 @@ function createPluginFactory<TServices extends object>() {
   function needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys> {
     return needsFor<TServices, typeof keys>(keys);
   }
-  return { plugin, needs };
+  return { infra, needs };
 }
 
-export const initPlugins = {
+export const initUnits = {
   context<TServices extends object>() {
     return {
-      create(): InitPluginsFactory<TServices> {
-        return createPluginFactory<TServices>();
+      create(): InitUnitsFactory<TServices> {
+        return createUnitFactory<TServices>();
       },
     };
   },

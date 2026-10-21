@@ -1,4 +1,4 @@
-/** Identity-scoped custom OpenTelemetry instrumentation for Dot plugin and feature authors. */
+/** Identity-scoped custom OpenTelemetry instrumentation for Dot unit and feature authors. */
 import type { Attributes, MetricOptions, SpanOptions } from '@opentelemetry/api';
 import { context, isSpanContextValid, metrics, trace } from '@opentelemetry/api';
 
@@ -9,7 +9,7 @@ import { getLogger } from '@arki/log';
 import { observe, withOutcomeSpan, withSpanContext } from './kernel/otel.js';
 
 /**
- * Scope custom instrumentation from an existing plugin, feature or hook context.
+ * Scope custom instrumentation from an existing unit, feature or hook context.
  * App-owned OTel providers supply tracing; without an SDK every call is safe.
  * Use a new span only for a new operational boundary, not one already instrumented.
  *
@@ -17,10 +17,10 @@ import { observe, withOutcomeSpan, withSpanContext } from './kernel/otel.js';
  * const telemetry = telemetryFor(catalog);
  * const found = telemetry.span('cache.lookup', () => cache.get(key));
  */
-export function telemetryFor(owner: { readonly name: string } | { readonly $plugin: string }) {
-  const name = 'name' in owner ? owner.name : owner.$plugin;
+export function telemetryFor(owner: { readonly name: string } | { readonly $unit: string }) {
+  const name = 'name' in owner ? owner.name : owner.$unit;
   const scope = `@arki/dot/${name}`;
-  const identity = { 'dot.plugin.name': name };
+  const identity = { 'dot.unit.name': name };
   return {
     /** Observe a custom operation, retaining its exact return value, promise and failure identity. */
     span<Value>(name: string, run: () => Value, options?: SpanOptions): Value {
@@ -66,5 +66,5 @@ export function telemetryFor(owner: { readonly name: string } | { readonly $plug
   };
 }
 
-/** The inferred custom instrumentation surface, shared by all plugin and feature contexts. */
+/** The inferred custom instrumentation surface, shared by all unit and feature contexts. */
 export type DotTelemetry = ReturnType<typeof telemetryFor>;

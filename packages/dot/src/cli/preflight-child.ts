@@ -57,12 +57,12 @@ export async function runPreflightChild(options: {
     return { ...none, failure: asJson(lifecycleFailed(error, 'configure')) };
   }
   if (isFailure(configured)) return { ...none, failure: asJson(configured) };
-  const { plugins } = configured.manifest;
+  const { plugins: units } = configured.manifest;
   const app = {
     file: discovered.filePath,
     exportName: discovered.exportName,
-    plugins: plugins.length,
-    features: plugins.filter(entry => entry.role === 'feature').length,
+    plugins: units.length,
+    features: units.filter(entry => entry.role === 'feature').length,
   };
 
   let migrations: string[] | null = null;

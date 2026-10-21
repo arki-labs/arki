@@ -97,15 +97,15 @@ describe('queue() client + queueWorker() in separate apps', () => {
 
     const api = await orThrow(
       defineApp('api')
-        .use(queue({ connection: redisUrl, keyPrefix }))
+        .infra(queue({ connection: redisUrl, keyPrefix }))
         .features([mail])
         .start(),
     );
     const worker = await orThrow(
       defineApp('worker')
-        .use(queue({ connection: redisUrl, keyPrefix }))
+        .infra(queue({ connection: redisUrl, keyPrefix }))
         .features([mail])
-        .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+        .entrypoints(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
         .start(),
     );
 
@@ -169,15 +169,15 @@ describe('queue() client + queueWorker() in separate apps', () => {
 
     const api = await orThrow(
       defineApp('api')
-        .use(queue({ connection: redisUrl, keyPrefix }))
+        .infra(queue({ connection: redisUrl, keyPrefix }))
         .features([orders])
         .start(),
     );
     const worker = await orThrow(
       defineApp('worker')
-        .use(queue({ connection: redisUrl, keyPrefix }))
+        .infra(queue({ connection: redisUrl, keyPrefix }))
         .features([orders])
-        .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+        .entrypoints(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
         .start(),
     );
 

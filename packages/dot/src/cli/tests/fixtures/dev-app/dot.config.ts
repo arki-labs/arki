@@ -1,12 +1,12 @@
 /**
- * The `dot dev` fixture: a `dev` export with one plain plugin and no
+ * The `dot dev` fixture: a `dev` export with one plain unit and no
  * database, next to a `default` export that `dot dev` must not pick.
  * Imports the kernel modules directly, like the discover tests do.
  */
 import { defineApp } from '../../../../define-app.js';
-import { plugin } from '../../../../plugin-contract.js';
+import { infra } from '../../../../unit-contract.js';
 
-const clock = plugin({
+const clock = infra({
   name: 'clock',
   start: () => {
     // The runner's output is under test: one line when the app starts.
@@ -14,6 +14,6 @@ const clock = plugin({
   },
 });
 
-export const dev = defineApp('dev-app').use(clock);
+export const dev = defineApp('dev-app').infra(clock);
 
-export default defineApp('dev-app-default').use(clock);
+export default defineApp('dev-app-default').infra(clock);

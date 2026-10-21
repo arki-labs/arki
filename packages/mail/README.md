@@ -261,9 +261,9 @@ await journal.worker(db, { jobs: outbox.runner });
 import { mail, mailJobs, mailOutboxPlugin } from '@arki/mail/dot';
 
 defineApp('shop')
-  .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
-  .use(mailOutboxPlugin({ tables }))
-  .serve(journalWorker({ jobs: mailJobs() }));
+  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
+  .infra(mailOutboxPlugin({ tables }))
+  .entrypoints(journalWorker({ jobs: mailJobs() }));
 ```
 
 - `mail(options)` provides `mail`. Pass a function so the manifest and `dot explain` never read your keys.

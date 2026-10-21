@@ -1,13 +1,13 @@
 /**
- * @arki/dot — Compose an app from typed plugins that boot in declaration order and dispose in reverse.
+ * @arki/dot — Compose an app from typed units that boot in declaration order and dispose in reverse.
  *
  * Public surface:
  *   - `defineApp(name)` — the entry point for composing applications.
- *   - `plugin(config)` — author lifecycle-aware plugins with typed needs/provides.
+ *   - `infra(config)` — author lifecycle-aware units with typed needs/provides.
  *   - `service<T>()` / `token<T>()(key)` — service witnesses for DI wiring.
- *   - `rename(plugin, map)` — mount-time multi-instance primitive.
+ *   - `rename(unit, map)` — mount-time multi-instance primitive.
  *   - Lifecycle / manifest / diagnostics types.
- *   - `testApp` / `bootTestApp` — test harnesses for plugin authors.
+ *   - `testApp` / `bootTestApp` — test harnesses for unit authors.
  */
 
 // #region Kernel — public surface
@@ -25,18 +25,18 @@ export type {
   UseGuard,
 } from './define-app.js';
 
-export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
+export { entrypoint, infra, isLazy, lazy, lazyOf, provide, rename, service, token, DotUnitError } from './unit-contract.js';
 export { LazyClosed } from './lazy.js';
 export type {
-  AnyPlugin,
-  AuthoredPlugin,
+  AnyUnit,
+  AuthoredUnit,
   FactoryContract,
   FactoryContractOf,
-  PluginFactoryGuard,
-  PluginSourceGuard,
-  PluginPreparation,
+  UnitFactoryGuard,
+  UnitSourceGuard,
+  UnitPreparation,
   LoggingSlot,
-  DotPluginRole,
+  UnitRole,
   ActionSource,
   CtxOf,
   DotConfigureContext,
@@ -53,20 +53,20 @@ export type {
   LazyService,
   NeedsShape,
   NoReservedKeys,
-  Plugin,
-  PluginNeeds,
+  Unit,
+  UnitNeeds,
   InferredOwnership,
   ProvidedValues,
   ProvidedValue,
-  PluginOwnership,
-  PluginOpenFailure,
-  PluginCloseFailure,
-  PluginPhases,
+  UnitOwnership,
+  UnitOpenFailure,
+  UnitCloseFailure,
+  UnitPhases,
   EmptyPhases,
-  PluginPhaseFailures,
+  UnitPhaseFailures,
   InferredPhases,
   MergePhases,
-  PluginProvides,
+  UnitProvides,
   Provided,
   ProvidesFactories,
   RenamedProvides,
@@ -74,16 +74,16 @@ export type {
   ServiceRecord,
   Token,
   WireNeeds,
-} from './plugin-contract.js';
+} from './unit-contract.js';
 
-export { initPlugins } from './init-plugins.js';
-export type { InitPluginsFactory } from './init-plugins.js';
+export { initUnits } from './init-units.js';
+export type { InitUnitsFactory } from './init-units.js';
 
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 export type {
   DotLifecycleHook,
   DotLifecycleState,
-  DotLifecyclePluginFailure,
+  DotLifecycleUnitFailure,
   DotLifecycleErrorCodeValue,
 } from './lifecycle.js';
 
@@ -93,7 +93,7 @@ export type {
   ActionManifest,
   JsonObject,
   JsonValue,
-  PluginManifest,
+  UnitManifest,
   ProjectionManifest,
   ServiceManifest,
   LifecycleManifest,
@@ -105,7 +105,7 @@ export { DOT_MANIFEST_ERROR_CODE, DotManifestError, toJsonObject } from './manif
 
 export type {
   DotDiagnosticsSnapshot,
-  PluginDiagnostic,
+  UnitDiagnostic,
   ActionDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
@@ -119,14 +119,14 @@ export type {
   DotLifecycleEventStatus,
   DotLifecycleObserver,
   DotPhaseLifecycleEvent,
-  DotPluginHookLifecycleEvent,
+  DotUnitHookLifecycleEvent,
 } from './lifecycle-observer.js';
 
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
 
-export { fake, testApp, bootTestApp, testPlugin } from './test-harness.js';
-export type { TestAppOptions, TestPluginBuilder } from './test-harness.js';
+export { fake, testApp, bootTestApp, testUnit } from './test-harness.js';
+export type { TestAppOptions, TestUnitBuilder } from './test-harness.js';
 
 export { hookSignals } from './signals.js';
 export type { HookSignalsOptions, SignalTarget } from './signals.js';

@@ -10,7 +10,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { defineFeature } from '@arki/dot/feature';
-import { defineApp, plugin, rename } from '@arki/dot/plugin';
+import { defineApp, infra, rename } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { ScheduleNameOf } from './dot.js';
@@ -18,7 +18,7 @@ import type { Locker } from './index.js';
 import { schedule, schedules } from './dot.js';
 
 type Region = { readonly region: string };
-const regionDb = (region: string) => plugin({ name: 'database', provides: { db: (): Region => ({ region }) } });
+const regionDb = (region: string) => infra({ name: 'database', provides: { db: (): Region => ({ region }) } });
 const database = regionDb('us');
 const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
 
@@ -40,7 +40,7 @@ function build(lock: true | string | undefined) {
   const { keys, locker } = recordingLocker();
   const base = defineFeature('reports')
     .needs({ db: database.provides.db })
-    .infra(plugin({ name: 'locks', provides: { locks: () => locker } }))
+    .infra(infra({ name: 'locks', provides: { locks: () => locker } }))
     .usecases({
       region:
         ({ db }) =>

@@ -23,7 +23,7 @@ import { z } from 'zod';
 import { defineApp, DotLifecycleErrorCode } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { http } from '@arki/http/dot';
 
@@ -85,14 +85,14 @@ const TRIGGERS = liveMigration({ app: 'blog', tables: liveTables(liveManifest(ap
 function blogApp(options: { readonly triggers: boolean; readonly failStart?: boolean }) {
   const pglite = new PGlite();
   const pool = pglitePool(pglite);
-  const database = plugin({
+  const database = infra({
     name: 'db',
     provides: { db: () => drizzle({ client: pglite }) },
     async dispose() {
       await pglite.close();
     },
   });
-  const schema = plugin({
+  const schema = infra({
     name: 'schema',
     needs: { db: database.provides.db },
     async boot() {
@@ -114,19 +114,19 @@ function blogApp(options: { readonly triggers: boolean; readonly failStart?: boo
     limits: { batchMs: 1 },
     receipts: RECEIPTS,
   });
-  const broken = plugin({
+  const broken = infra({
     name: 'broken',
     start() {
       if (options.failStart === true) throw new Error('a later plugin failed to start');
     },
   });
   const app = defineApp('blog')
-    .use(database)
-    .use(schema)
-    .use(liveQ)
-    .use(broken)
+    .infra(database)
+    .infra(schema)
+    .infra(liveQ)
+    .infra(broken)
     .features([postsFeature])
-    .serve(http({ port: 0, bundles: [liveQ.provides.liveRoutes] }));
+    .entrypoints(http({ port: 0, bundles: [liveQ.provides.liveRoutes] }));
   return { app, stats: pool.stats };
 }
 

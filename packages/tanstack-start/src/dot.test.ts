@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
-import { DotPluginError } from '@arki/dot/plugin';
+import { DotUnitError } from '@arki/dot/unit';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
@@ -38,7 +38,7 @@ function makeApp(options: AppOptions = {}) {
     },
     ...(options.cors === undefined ? {} : { cors: () => options.cors ?? { origins: [] } }),
   });
-  return { app: defineApp('shop').use(authn).use(gateway).entrypoints(start), calls };
+  return { app: defineApp('shop').infra(authn).infra(gateway).entrypoints(start), calls };
 }
 
 async function started(app: ReturnType<typeof makeApp>['app']) {
@@ -103,7 +103,7 @@ describe('tanstackStart() manifest', () => {
   it('declares no mount action when no mount is declared', () => {
     const { gateway } = makeGateway();
     const start = tanstackStart({ needs: { api: gateway.provides.api }, session: () => null, rpc: () => null });
-    const configured = defineApp('bare').use(gateway).entrypoints(start).configure();
+    const configured = defineApp('bare').infra(gateway).entrypoints(start).configure();
     if (isFailure(configured)) throw new Error('configure failed');
     expect(configured.manifest.actions.filter(action => action.plugin === 'tanstack-start')).toEqual([]);
   });
@@ -113,7 +113,7 @@ describe('tanstackStart() manifest', () => {
 async function bootError(app: ReturnType<typeof makeApp>['app']) {
   const caught = await app.start();
   if (!UnexpectedDefect.is(caught)) throw new Error('boot should stop on a defect');
-  if (!(caught.cause instanceof DotPluginError)) throw new Error('the defect should carry a DotPluginError');
+  if (!(caught.cause instanceof DotUnitError)) throw new Error('the defect should carry a DotUnitError');
   return caught.cause;
 }
 

@@ -1,7 +1,7 @@
 /**
  * `boot` is side effects only; `provides` is the one way a feature
  * publishes. A seed-only feature (boot = seed, no factories) must plug in
- * as a plugin that provides `{}` — never an open record that "provides
+ * as a unit that provides `{}` — never an open record that "provides
  * every key" and collides with whatever is already mounted (`db`, `kv`, …).
  *
  * Found by the Drop Studio demo (catalog feature: boot = seed, no provides).
@@ -13,11 +13,11 @@ import { orThrow } from '@arki/failure';
 import type { ProvidedOf } from '../feature.js';
 import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
-import { plugin, service } from '../plugin-contract.js';
+import { infra, service } from '../unit-contract.js';
 
 type Db = { readonly name: string };
 
-const db = plugin({
+const db = infra({
   name: 'db',
   provides: { db: () => ({ name: 'pglite' }) },
 });
@@ -35,8 +35,8 @@ describe('boot is side-effect only', () => {
     expect(Object.keys(catalog.provides)).toEqual([]);
 
     // Both forms must type-check: the guard tuple is `[]` when there is no error.
-    const app = orThrow(await defineApp('void-boot').use(db).features([catalog]).boot());
-    const viaAll = orThrow(await defineApp('void-boot-all').use(db).features([catalog]).boot());
+    const app = orThrow(await defineApp('void-boot').infra(db).features([catalog]).boot());
+    const viaAll = orThrow(await defineApp('void-boot-all').infra(db).features([catalog]).boot());
 
     expect(seededWith).toBe('pglite');
     expect(Object.keys(app.services)).toEqual(['db', 'feature.catalog']);
@@ -61,7 +61,7 @@ describe('boot is side-effect only', () => {
         bootSaw = built;
       },
     });
-    const app = orThrow(await defineApp('provides').use(db).features([search]).boot());
+    const app = orThrow(await defineApp('provides').infra(db).features([search]).boot());
     expect(app.services.search).toEqual({ index: 'pglite' });
     expect(order).toEqual(['factory', 'boot']);
     // One instance: boot sees the very value the kernel publishes.

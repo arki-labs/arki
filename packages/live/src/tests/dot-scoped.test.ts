@@ -21,7 +21,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { http } from '@arki/http/dot';
 
@@ -66,14 +66,14 @@ function teamApp(options: { readonly withoutMemberships?: boolean } = {}) {
     ['u1', ['A']],
     ['u2', ['B']],
   ]);
-  const database = plugin({
+  const database = infra({
     name: 'db',
     provides: { db: () => drizzle({ client: pglite }) },
     async dispose() {
       await pglite.close();
     },
   });
-  const schema = plugin({
+  const schema = infra({
     name: 'schema',
     needs: { db: database.provides.db },
     async boot() {
@@ -102,11 +102,11 @@ function teamApp(options: { readonly withoutMemberships?: boolean } = {}) {
     receipts: RECEIPTS,
   });
   const app = defineApp('team')
-    .use(database)
-    .use(schema)
-    .use(liveQ)
+    .infra(database)
+    .infra(schema)
+    .infra(liveQ)
     .features([notesFeature])
-    .serve(http({ port: 0, bundles: [liveQ.provides.liveRoutes] }));
+    .entrypoints(http({ port: 0, bundles: [liveQ.provides.liveRoutes] }));
   return { app, orgsOf };
 }
 

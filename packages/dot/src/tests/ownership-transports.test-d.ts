@@ -5,13 +5,13 @@ import type { FailureOf, SuccessOf } from '@arki/failure';
 import { child, cleanup, resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
-import type { PluginCloseFailure, PluginOpenFailure, PluginProvides, Provided } from '../plugin-contract.js';
+import type { UnitCloseFailure, UnitOpenFailure, UnitProvides, Provided } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
-import { bindDriver, driven, driver, feature, plug } from '../feature.js';
-import { initPlugins } from '../init-plugins.js';
+import { bindEntrypoint, entrypoint, feature, plug } from '../feature.js';
+import { initUnits } from '../init-units.js';
 import { lazy } from '../lazy.js';
-import { plugin, rename, service } from '../plugin-contract.js';
+import { infra, rename, service } from '../unit-contract.js';
 
 const OpenRefused = defineFailure('ownership.transport.open');
 const CloseRefused = defineFailure('ownership.transport.close');
@@ -23,30 +23,30 @@ const watch = () => (possible() ? ChildRefused() : undefined);
 const flush = () => (possible() ? CloseRefused() : undefined);
 const factories = { db: () => resource(open, close) };
 const boot = () => ({ watch: child(watch), flush: cleanup(flush) });
-const direct = plugin({ name: 'direct', provides: factories, boot });
+const direct = infra({ name: 'direct', provides: factories, boot });
 const objectFeature = feature('object', { provides: factories, boot });
 const _mountedObject = plug(objectFeature);
 const _renamed = rename(direct, { db: 'renamedDb' });
-const driving = driver(() => direct);
-const _drivingBound = bindDriver(driving, []);
-const _drivenBound = driven(() => direct).bind([]);
-const factory = initPlugins.context<{ count: number; db: SuccessOf<typeof open> }>().create();
-const byKeys = factory.plugin({ name: 'keys', needs: ['count'], provides: factories, boot });
-const _byWitness = factory.plugin({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
+const driving = entrypoint.fromFeatures(() => direct);
+const _drivingBound = bindEntrypoint(driving, []);
+const _drivenBound = infra.fromFeatures(() => direct).bind([]);
+const factory = initUnits.context<{ count: number; db: SuccessOf<typeof open> }>().create();
+const byKeys = factory.infra({ name: 'keys', needs: ['count'], provides: factories, boot });
+const _byWitness = factory.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
 const chain = defineFeature('chain').provides(factories).entrypoints();
 const childFeature = defineFeature('parent.child').provides(factories).entrypoints();
 const parent = defineFeature('parent').features(childFeature).entrypoints();
 const _withInfra = defineFeature('infra').infra(direct).entrypoints();
 const instanced = chain.instance('copy');
 const lazyHandle = lazy(open, { dispose: close });
-const _lazyPlugin = plugin({ name: 'lazy', provides: { db: () => lazyHandle } });
+const _lazyUnit = infra({ name: 'lazy', provides: { db: () => lazyHandle } });
 const _lazyFeature = feature('lazy-feature', { provides: { db: () => lazyHandle } });
 const _chainLazy = defineFeature('chain-lazy')
   .provides({ db: () => lazyHandle })
   .entrypoints();
 
-type OpenOfDirect = PluginOpenFailure<typeof direct>;
-type CloseOfDirect = PluginCloseFailure<typeof direct>;
+type OpenOfDirect = UnitOpenFailure<typeof direct>;
+type CloseOfDirect = UnitCloseFailure<typeof direct>;
 type OwnedForms =
   | typeof _mountedObject
   | typeof _renamed
@@ -54,67 +54,67 @@ type OwnedForms =
   | typeof byKeys
   | typeof _byWitness;
 // Object keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof _mountedObject>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof _mountedObject>>().toEqualTypeOf<CloseOfDirect>();
+expectTypeOf<UnitOpenFailure<typeof _mountedObject>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof _mountedObject>>().toEqualTypeOf<CloseOfDirect>();
 // Renamed keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof _renamed>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof _renamed>>().toEqualTypeOf<CloseOfDirect>();
-// Driver keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof _drivingBound>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof _drivingBound>>().toEqualTypeOf<CloseOfDirect>();
-// Driven keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof _drivenBound>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof _drivenBound>>().toEqualTypeOf<CloseOfDirect>();
+expectTypeOf<UnitOpenFailure<typeof _renamed>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof _renamed>>().toEqualTypeOf<CloseOfDirect>();
+// An entrypoint binder keeps both phases exact.
+expectTypeOf<UnitOpenFailure<typeof _drivingBound>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof _drivingBound>>().toEqualTypeOf<CloseOfDirect>();
+// An infra binder keeps both phases exact.
+expectTypeOf<UnitOpenFailure<typeof _drivenBound>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof _drivenBound>>().toEqualTypeOf<CloseOfDirect>();
 // Keys keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof byKeys>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof byKeys>>().toEqualTypeOf<CloseOfDirect>();
+expectTypeOf<UnitOpenFailure<typeof byKeys>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof byKeys>>().toEqualTypeOf<CloseOfDirect>();
 // Witness keeps both phases exact.
-expectTypeOf<PluginOpenFailure<typeof _byWitness>>().toEqualTypeOf<OpenOfDirect>();
-expectTypeOf<PluginCloseFailure<typeof _byWitness>>().toEqualTypeOf<CloseOfDirect>();
+expectTypeOf<UnitOpenFailure<typeof _byWitness>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitCloseFailure<typeof _byWitness>>().toEqualTypeOf<CloseOfDirect>();
 // ObjectService
 expectTypeOf<Provided<typeof objectFeature.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
 // MountedService
-expectTypeOf<PluginProvides<typeof _mountedObject>['db']>().toEqualTypeOf<SuccessOf<typeof open>>();
+expectTypeOf<UnitProvides<typeof _mountedObject>['db']>().toEqualTypeOf<SuccessOf<typeof open>>();
 // ChainService
 expectTypeOf<Provided<typeof chain.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
 // ChainOpen
-expectTypeOf<PluginOpenFailure<ReturnType<typeof chain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof chain.units>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
 // ChainClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof chain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof chain.units>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
 // NestedOpen
-expectTypeOf<PluginOpenFailure<ReturnType<typeof parent.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof parent.units>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
 // NestedClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof parent.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof parent.units>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
 // InfraOpen
-expectTypeOf<PluginOpenFailure<ReturnType<typeof _withInfra.plugins>[0]>>().toEqualTypeOf<OpenOfDirect>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof _withInfra.units>[0]>>().toEqualTypeOf<OpenOfDirect>();
 // InfraClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof _withInfra.plugins>[0]>>().toEqualTypeOf<CloseOfDirect>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof _withInfra.units>[0]>>().toEqualTypeOf<CloseOfDirect>();
 // InstanceOpen
-expectTypeOf<PluginOpenFailure<ReturnType<typeof instanced.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof instanced.units>[0]>>().toEqualTypeOf<FailureOf<typeof open>>();
 // InstanceClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof instanced.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof instanced.units>[0]>>().toEqualTypeOf<FailureOf<typeof close>>();
 // LazyObjectClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof plug<typeof _lazyFeature>>>>().toEqualTypeOf<
-  PluginCloseFailure<typeof _lazyPlugin>
+expectTypeOf<UnitCloseFailure<ReturnType<typeof plug<typeof _lazyFeature>>>>().toEqualTypeOf<
+  UnitCloseFailure<typeof _lazyUnit>
 >();
 // LazyChainClose
-expectTypeOf<PluginCloseFailure<ReturnType<typeof _chainLazy.plugins>[0]>>().toEqualTypeOf<
-  PluginCloseFailure<typeof _lazyPlugin>
+expectTypeOf<UnitCloseFailure<ReturnType<typeof _chainLazy.units>[0]>>().toEqualTypeOf<
+  UnitCloseFailure<typeof _lazyUnit>
 >();
 // NoBareFailure
-expectTypeOf<string extends PluginCloseFailure<OwnedForms>['code'] ? true : false>().toEqualTypeOf<false>();
+expectTypeOf<string extends UnitCloseFailure<OwnedForms>['code'] ? true : false>().toEqualTypeOf<false>();
 
-const _directApp = defineApp('direct').use(direct);
+const _directApp = defineApp('direct').infra(direct);
 const _objectApp = defineApp('object').features([objectFeature]);
-const _drivingApp = defineApp('driver').features([]).serve(driving);
+const _drivingApp = defineApp('driver').features([]).entrypoints(driving);
 const _drivenApp = defineApp('driven')
-  .use(driven(() => direct))
+  .infra(infra.fromFeatures(() => direct))
   .features([]);
-const _allApp = defineApp('all').useAll([direct]);
+const _allApp = defineApp('all').infra(direct);
 const _infraApp = defineApp('infra').infra(direct);
 const _entrypointApp = defineApp('entrypoint').features([]).entrypoints(driving);
-const directResource = plugin({ name: 'resource', provides: factories });
-const _resourceApp = defineApp('resource').use(directResource);
+const directResource = infra({ name: 'resource', provides: factories });
+const _resourceApp = defineApp('resource').infra(directResource);
 const _chainApp = defineApp('chain').features([chain]);
 const _nestedApp = defineApp('parent').features([parent]);
 const _instanceApp = defineApp('instance').features([instanced]);
@@ -154,11 +154,11 @@ expectTypeOf<FailureOf<typeof _instanceApp.boot>>().toEqualTypeOf<FailureOf<type
 expectTypeOf<FailureOf<SuccessOf<typeof _instanceApp.boot>['dispose']>>().toEqualTypeOf<
   FailureOf<SuccessOf<typeof _resourceApp.boot>['dispose']>
 >();
-export function consumers(value: PluginProvides<typeof _mountedObject>['db']) {
+export function consumers(value: UnitProvides<typeof _mountedObject>['db']) {
   const database = defineApp('object').features([objectFeature]);
   const adapters = defineApp('adapters')
-    .use(plugin({ name: 'count', provides: { count: () => 1 } }))
-    .use(byKeys);
+    .infra(infra({ name: 'count', provides: { count: () => 1 } }))
+    .infra(byKeys);
   void database;
   void adapters;
   // @ts-expect-error A resource descriptor must never reach the service consumer.
@@ -166,7 +166,7 @@ export function consumers(value: PluginProvides<typeof _mountedObject>['db']) {
   // @ts-expect-error A boot callback only returns a supported scope plan, void or a declared failure.
   feature('invalid-boot', { boot: () => ({ arbitrary: true }) });
   // @ts-expect-error Published success must match the context schema, even when acquired through a resource.
-  factory.plugin({
+  factory.infra({
     name: 'invalid-service',
     provides: {
       count: () =>

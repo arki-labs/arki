@@ -42,7 +42,7 @@ Node, Bun, Deno, modern browsers and React Native (Hermes). Pure ESM. The packag
 | Import                 | What it gives you                                                                                        |
 | ---------------------- | -------------------------------------------------------------------------------------------------------- |
 | `@arki/resilience`     | Policies, `backoff`, presets, `withFallback`, `wrap`, `attachPolicyLogger`, typed errors and their codes |
-| `@arki/resilience/dot` | `resilience(presets)` plugin for `@arki/dot`, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`       |
+| `@arki/resilience/dot` | `resilience(presets)` unit for `@arki/dot`, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`         |
 
 The full list of exports is in [API](#api).
 
@@ -99,7 +99,7 @@ if (calls !== 3) throw new Error(`upTo(2) must call the function 3 times, got ${
 
 ## Documentation
 
-`@arki/resilience` is framework-agnostic and works on its own. When you compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) application framework, see `packages/dot/docs/` for plugin authoring, lifecycle, and diagnostics.
+`@arki/resilience` is framework-agnostic and works on its own. When you compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) application framework, see `packages/dot/docs/` for unit authoring, lifecycle, and diagnostics.
 
 - [Agent guide](docs/agent-guide.md): the model, the task map and the rules.
 - [llms.txt](llms.txt): the short index for agents.
@@ -358,7 +358,7 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 `logger` needs `info`, `warn` and `error` methods. The helper subscribes to the events a policy exposes: every policy has `onSuccess` and `onFailure`; a retry policy adds `onRetry` and `onGiveUp`; a circuit breaker adds `onBreak`, `onHalfOpen` and `onReset`; a timeout policy adds `onTimeout`; a bulkhead adds `onReject`. Each event method takes a listener and returns a subscription with `dispose()`. A composed policy (`wrap`, `createResiliencePolicy`, the presets) exposes only `onSuccess` and `onFailure` itself; `createResiliencePolicy` and the presets also give you `components`, whose events are the full set. `attachPolicyLogger` returns a function that ends all its subscriptions.
 
-### Dot plugin
+### Dot unit
 
 ```ts
 import { defineApp } from '@arki/dot';
@@ -372,11 +372,11 @@ const presets = definePresets({
   carrier: { retry: backoff.exponential({ base: 200, max: 5000 }).upTo(3), timeout: { timeoutMs: 10_000 } },
 });
 
-const app = orThrow(await defineApp('my-app').use(resilience(presets)).boot());
+const app = orThrow(await defineApp('my-app').infra(resilience(presets)).boot());
 await app.services.resilience.run('carrier', () => callCarrier());
 ```
 
-`services.resilience` has `for(name)` (the preset itself) and `run(name, fn, signal?)`. Names are typed from `presets`. While the app runs, the plugin logs the events of every preset component (retry, give up, circuit open / half-open / closed, timeout, bulkhead reject) at `debug` in the `arki:resilience` category. Turn them on with `DEBUG=arki:resilience`. `dispose` ends the subscriptions. For other levels or per-call records, use `attachPolicyLogger`. `@arki/dot` is an optional peer dependency.
+`services.resilience` has `for(name)` (the preset itself) and `run(name, fn, signal?)`. Names are typed from `presets`. While the app runs, the unit logs the events of every preset component (retry, give up, circuit open / half-open / closed, timeout, bulkhead reject) at `debug` in the `arki:resilience` category. Turn them on with `DEBUG=arki:resilience`. `dispose` ends the subscriptions. For other levels or per-call records, use `attachPolicyLogger`. `@arki/dot` is an optional peer dependency.
 
 ## API
 
@@ -386,7 +386,7 @@ await app.services.resilience.run('carrier', () => callCarrier());
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.
 - `withFallback(policy, fallback)` — a last answer when a policy gives up; `definePresets({ name: options })` — named composed policies.
-- `@arki/resilience/dot`: `resilience(presets)` plugin, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`.
+- `@arki/resilience/dot`: `resilience(presets)` unit, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
 - `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError`, `InvalidBackoffError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
@@ -407,7 +407,7 @@ Every error the policies raise is a `ResilienceError` with a stable `code` and a
 
 The codes are also exported as `RESILIENCE_ERROR_CODES`.
 
-The Dot plugin has one code of its own, exported as `RESILIENCE_PLUGIN_ERROR_CODES`:
+The Dot unit has one code of its own, exported as `RESILIENCE_PLUGIN_ERROR_CODES`:
 
 | Code                          | Meaning                                                                                                  |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------- |

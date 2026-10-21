@@ -1,11 +1,11 @@
 /**
  * `@arki/dot` adapter, in two parts:
  *
- * - `journal(...)` is the driven part, for `.use()`. It publishes `services.journal`, so
+ * - `journal(...)` is the infra part, for `.infra()`. It publishes `services.journal`, so
  *   features can write through it. With `{ j }` it composes the journal from the
  *   features' `journalHandlers` declarations. It reads them from the feature values, so it
  *   boots before the features.
- * - `journalWorker(...)` is the driving part, for `.serve()`. It runs the effects, taps and
+ * - `journalWorker(...)` is the entrypoint, for `.entrypoints()`. It runs the effects, taps and
  *   async projections between `start` and `stop`. It gives each effect and tap the services
  *   of the feature that lists it.
  *
@@ -25,11 +25,11 @@
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
-import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
-import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/plugin';
+import type { AnyFeatureCore, DepsOf, InfraBinder, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
-import { driven, driver, entrypointsOf, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
-import { DotPluginError, plugin, service } from '@arki/dot/plugin';
+import { entrypoint, entrypointsOf, instanceOf, ownUnits, sliceOf, unit } from '@arki/dot/feature';
+import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import type { Journal, JournalDefinitions } from './api.js';
 import type {
@@ -207,7 +207,7 @@ function resolveServices(
 /* defineFeature descriptors                                           */
 /* ------------------------------------------------------------------ */
 
-/** Marks the infra plugin `journalProjections(...)` makes, so the journal can find it among a feature's units. */
+/** Marks the infra unit `journalProjections(...)` makes, so the journal can find it among a feature's units. */
 export const JOURNAL_PROJECTIONS_KIND = 'journal-projections';
 
 /**
@@ -226,7 +226,7 @@ export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = ReturnType
  * unit shows in `dot explain` as `<feature>/journal-projections`.
  */
 export function journalProjections<Meta = unknown, Tx = DbHandle>(...projections: readonly Projection<Meta, Tx>[]) {
-  return Object.assign(plugin({ name: 'journal-projections', provides: {} }), {
+  return Object.assign(infra({ name: 'journal-projections', provides: {} }), {
     kind: JOURNAL_PROJECTIONS_KIND,
     handlers: { projections, effects: [], taps: [], workflows: [] },
   } as const);
@@ -357,7 +357,7 @@ export type JournalDriven<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
-> = Driven<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
+> = InfraBinder<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
 
 const isHandler = (value: unknown): boolean =>
   typeof value === 'object' &&
@@ -397,8 +397,8 @@ function isJournalDeclarations(value: unknown): value is JournalDeclarations {
   );
 }
 
-function badSlice(feature: MountedFeature, what: string): DotPluginError {
-  return new DotPluginError({
+function badSlice(feature: MountedFeature, what: string): DotUnitError {
+  return new DotUnitError({
     code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
     message: `[journal] feature "${feature.name}" has a \`journal\` slice whose ${what}.`,
     remediation:
@@ -445,7 +445,7 @@ function declaredBy(feature: MountedFeature): readonly unknown[] {
   const declared: unknown[] = [];
   const slice = entrypointsOf(feature).find(item => item.key === 'journal');
   if (slice !== undefined) declared.push('handlers' in slice ? slice.handlers : undefined);
-  if ('plugins' in feature) {
+  if ('units' in feature) {
     for (const unit of ownUnits(feature)) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
   }
   return declared;
@@ -503,7 +503,7 @@ function journalPlugin<
   const needs: { readonly db: Service<AppDb & RootDb & TransactionSource<Tx>> } = {
     db: service<AppDb & RootDb & TransactionSource<Tx>>(),
   };
-  return plugin({
+  return infra({
     name: 'journal',
     needs,
     configure(ctx) {
@@ -517,7 +517,7 @@ function journalPlugin<
 }
 
 /**
- * The driven part, for `.use()`: publishes the journal as `services.journal`.
+ * The infra part, for `.infra()`: publishes the journal as `services.journal`.
  * It runs nothing in the background: serve `journalWorker()` for that.
  *
  * - `journal({ journal })`: the journal the app composed itself.
@@ -546,7 +546,7 @@ export function journal<
     return journalPlugin(() => composed);
   }
   const { j, workflowMeta } = options;
-  return driven(features =>
+  return infra.fromFeatures(features =>
     journalPlugin(() =>
       // `'worker'`: the effects' services exist only once the features boot, after this journal.
       j.compose({
@@ -609,26 +609,26 @@ function sliceServices(ctx: object, feature: MountedFeature): Services {
 }
 
 /**
- * The driving part, for `.serve()`: one worker between `start` and `stop`, for the
+ * The entrypoint, for `.entrypoints()`: one worker between `start` and `stop`, for the
  * journal that `journal(...)` published. Each effect and tap of a feature gets the
  * services of that feature. A process that serves no worker still writes: its jobs
  * wait for a process that does. With `jobs`, the worker also runs queue rows
  * (`@arki/queue/outbox`) through the runner the source builds at boot.
  */
-export function journalWorker(options?: JournalWorkerOptions): Driver<WireNeeds<WorkerNeeds>, EmptyShape>;
+export function journalWorker(options?: JournalWorkerOptions): EntrypointBinder<WireNeeds<WorkerNeeds>, EmptyShape>;
 export function journalWorker<TNeeds extends NeedsShape & NoReservedKeys>(
   options: JournalWorkerOptions & { readonly jobs: JobsSource<TNeeds> },
-): Driver<WireNeeds<WorkerNeeds & TNeeds>, EmptyShape>;
+): EntrypointBinder<WireNeeds<WorkerNeeds & TNeeds>, EmptyShape>;
 export function journalWorker(
   options: JournalWorkerOptions & { readonly jobs?: JobsSource<NeedsShape> } = {},
-): Driver<WireNeeds<WorkerNeeds>, EmptyShape> {
+): EntrypointBinder<WireNeeds<WorkerNeeds>, EmptyShape> {
   const { jobs: source, ...workerOptions } = options;
   // The source's needs join the worker's, so the kernel resolves and checks them with the
   // worker's own; the overloads above type them for the app.
   const needs: WorkerNeeds = { ...source?.needs, db: service<RootDb>(), journal: service<WorkerHost>() };
-  return driver(features => {
+  return entrypoint.fromFeatures(features => {
     let worker: JournalWorker | undefined;
-    return plugin<WorkerNeeds, EmptyShape>({
+    return unit<WorkerNeeds, EmptyShape>({
       name: 'journal-worker',
       needs,
       actions: source?.actions?.(features),

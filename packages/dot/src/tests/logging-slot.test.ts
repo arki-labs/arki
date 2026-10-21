@@ -1,5 +1,5 @@
 /**
- * The logging slot (`@arki/log` redesign RFC §9): one plugin may fill it; the
+ * The logging slot (`@arki/log` redesign RFC §9): one unit may fill it; the
  * kernel activates logging after pure configure and closes it after the last
  * boot or teardown record.
  */
@@ -12,7 +12,7 @@ import { configure } from '@arki/log';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { plugin } from '../plugin-contract.js';
+import { infra } from '../unit-contract.js';
 
 /** A sink that records what it got, and how many records it had when it was closed. */
 function recordingSink(): Sink & { readonly records: LogRecord[]; closedAt: number | undefined } {
@@ -29,8 +29,8 @@ function recordingSink(): Sink & { readonly records: LogRecord[]; closedAt: numb
   return sink;
 }
 
-function loggingPlugin(sink: Sink, name = 'logging') {
-  return plugin({
+function loggingUnit(sink: Sink, name = 'logging') {
+  return infra({
     name,
     logging: () => {
       const handle = configure({ channels: { mem: sink }, default: { level: 'trace', channels: ['mem'] } });
@@ -48,9 +48,9 @@ describe('logging slot', () => {
     const sink = recordingSink();
     const app = orThrow(
       await defineApp('slot-app')
-        .use(loggingPlugin(sink))
-        .use(
-          plugin({
+        .infra(loggingUnit(sink))
+        .infra(
+          infra({
             name: 'db',
             boot: () => {
               /* side effects only */
@@ -71,14 +71,14 @@ describe('logging slot', () => {
 
   it('a failed boot still writes the failure, then closes logging', async () => {
     const sink = recordingSink();
-    const failing = plugin({
+    const failing = infra({
       name: 'broken',
       boot: () => {
         throw new Error('database unreachable');
       },
     });
 
-    const failure = await defineApp('failing-app').use(loggingPlugin(sink)).use(failing).boot();
+    const failure = await defineApp('failing-app').infra(loggingUnit(sink)).infra(failing).boot();
     expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({ cause: new Error('database unreachable') });
 
@@ -88,13 +88,13 @@ describe('logging slot', () => {
     expect(sink.closedAt).toBe(sink.records.length);
   });
 
-  it('rejects two logging plugins with a coded error, before anything is switched on', async () => {
+  it('rejects two logging units with a coded error, before anything is switched on', async () => {
     const first = recordingSink();
     const second = recordingSink();
 
     const attempt = defineApp('two-loggers')
-      .use(loggingPlugin(first, 'log-a'))
-      .use(loggingPlugin(second, 'log-b'))
+      .infra(loggingUnit(first, 'log-a'))
+      .infra(loggingUnit(second, 'log-b'))
       .boot();
 
     await expect(attempt).resolves.toMatchObject({
@@ -112,8 +112,8 @@ describe('owned logging lifetime', () => {
     let closes = 0;
     const configured = orThrow(
       defineApp('pure-configure')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'logger',
             logging: () => {
               activations += 1;
@@ -140,8 +140,8 @@ describe('owned logging lifetime', () => {
     const failure = ConfigureFailed();
     let activations = 0;
     const outcome = await defineApp('failed-configure')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'logger',
           logging: () => {
             activations += 1;
@@ -153,7 +153,7 @@ describe('owned logging lifetime', () => {
           },
         }),
       )
-      .use(plugin({ name: 'failed', configure: () => failure }))
+      .infra(infra({ name: 'failed', configure: () => failure }))
       .boot();
     expect(outcome).toBe(failure);
     expect(activations).toBe(0);
@@ -167,7 +167,7 @@ describe('owned logging lifetime', () => {
     try {
       const app = orThrow(
         await defineApp('logging-close')
-          .use(plugin({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
+          .infra(infra({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
           .boot(),
       );
       const result = await app.dispose();
@@ -191,8 +191,8 @@ describe('owned logging lifetime', () => {
     });
     try {
       const outcome = await defineApp('logging-rollback')
-        .use(plugin({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
-        .use(plugin({ name: 'failed', boot: () => primary }))
+        .infra(infra({ name: 'logger', logging: () => ({ close: () => Promise.reject(cause) }) }))
+        .infra(infra({ name: 'failed', boot: () => primary }))
         .boot();
       expect(outcome).toMatchObject({
         code: 'async.scope_failed',

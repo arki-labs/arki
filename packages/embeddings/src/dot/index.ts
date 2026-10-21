@@ -1,9 +1,9 @@
 /**
- * `@arki/embeddings/dot`: the app's one embedder as a Dot plugin. `@arki/dot` is an optional peer;
+ * `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `@arki/dot` is an optional peer;
  * importing this entry without it fails at module load, on purpose.
  */
 import type { Policy, RetryWaitFailure } from '@arki/resilience';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { getLogger } from '@arki/log';
 
 import type { EmbedFailure } from '../failures.js';
@@ -64,11 +64,11 @@ function build(options: EmbeddingsPluginOptions): Embedder | EmbedFailure {
  * `embedder` is `null`, so the app boots and features that embed degrade instead of failing it.
  *
  * @example
- * defineApp('reader').use(embeddings({ model: 'ollama:qwen3-embedding:0.6b', cache: true }));
+ * defineApp('reader').infra(embeddings({ model: 'ollama:qwen3-embedding:0.6b', cache: true }));
  * // in a feature: needs: { embedder: embedding.provides.embedder } → Embedder | null
  */
 export function embeddings(options: EmbeddingsPluginOptions = {}) {
-  return plugin({
+  return infra({
     name: 'embeddings',
     provides: {
       embedder: (): Embedder | null => {

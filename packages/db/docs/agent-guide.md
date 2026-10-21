@@ -266,7 +266,7 @@ bun run test:docs
 bun run test:runtimes
 ```
 
-In an app that mounts the plugin: the static graph, then the booted app's health.
+In an app that mounts the unit: the static graph, then the booted app's health.
 
 ```sh
 dot explain --json | jq '.data'

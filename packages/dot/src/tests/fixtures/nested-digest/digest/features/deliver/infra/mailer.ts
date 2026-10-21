@@ -1,7 +1,7 @@
-import { plugin } from '../../../../../../../plugin-contract.js';
+import { infra } from '../../../../../../../unit-contract.js';
 
 /** Private to `digest.deliver`. A user called `bounce` never gets mail. */
-export const mailer = plugin({
+export const mailer = infra({
   name: 'mailer',
   provides: {
     mailer: () => {

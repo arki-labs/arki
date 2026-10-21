@@ -1,5 +1,5 @@
 /**
- * `repos()` — a feature's repositories as one private infra plugin.
+ * `repos()` — a feature's repositories as one private infra unit.
  *
  * These tests pin what the builder and the apps rely on: the set is built
  * once per boot and bound to the database the feature names in `.needs()`
@@ -13,7 +13,7 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { DepsOf } from '@arki/dot/feature';
-import type { Provided } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
 import { defineApp, rename } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { orThrow, UnexpectedDefect } from '@arki/failure';

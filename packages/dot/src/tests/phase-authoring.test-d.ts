@@ -8,16 +8,16 @@ import { defineFailure } from '@arki/failure';
 import type {
   EmptyPhases,
   EmptyShape,
-  PluginCloseFailure,
-  PluginOpenFailure,
-  PluginPhaseFailures,
+  UnitCloseFailure,
+  UnitOpenFailure,
+  UnitPhaseFailures,
   Provided,
   Service,
-} from '../plugin-contract.js';
+} from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { bindDriver, driven, driver, feature, plug } from '../feature.js';
-import { initPlugins } from '../init-plugins.js';
-import { createPlugin, plugin, rename, service } from '../plugin-contract.js';
+import { bindEntrypoint, entrypoint, feature, plug } from '../feature.js';
+import { initUnits } from '../init-units.js';
+import { createUnit, infra, rename, service } from '../unit-contract.js';
 
 const ConfigureRefused = defineFailure('test.phase_authoring.configure');
 const StartRefused = defineFailure('test.phase_authoring.start');
@@ -34,23 +34,23 @@ const hooks = {
 };
 const open = () => (branch() ? OpenRefused() : { value: 1 });
 const factories = { db: () => resource(open, () => CloseRefused()) };
-const direct = plugin({ name: 'direct', provides: factories, ...hooks });
+const direct = infra({ name: 'direct', provides: factories, ...hooks });
 const object = feature('object', { provides: factories, ...hooks });
-const factory = initPlugins.context<{ count: number; db: SuccessOf<typeof open> }>().create();
+const factory = initUnits.context<{ count: number; db: SuccessOf<typeof open> }>().create();
 const _forms = {
   object: plug(object),
   renamed: rename(direct, { db: 'otherDb' }),
-  driving: bindDriver(
-    driver(() => direct),
+  driving: bindEntrypoint(
+    entrypoint.fromFeatures(() => direct),
     [],
   ),
-  driven: driven(() => direct).bind([]),
-  keys: factory.plugin({ name: 'keys', needs: ['count'], provides: factories, ...hooks }),
-  witness: factory.plugin({ name: 'witness', needs: { count: service<number>() }, provides: factories, ...hooks }),
+  driven: infra.fromFeatures(() => direct).bind([]),
+  keys: factory.infra({ name: 'keys', needs: ['count'], provides: factories, ...hooks }),
+  witness: factory.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, ...hooks }),
 };
-type Phases = PluginPhaseFailures<typeof direct>;
+type Phases = UnitPhaseFailures<typeof direct>;
 type Forms = typeof _forms;
-type PhasesByForm = { [Form in keyof Forms]: PluginPhaseFailures<Forms[Form]> };
+type PhasesByForm = { [Form in keyof Forms]: UnitPhaseFailures<Forms[Form]> };
 
 expectTypeOf<Phases>().toEqualTypeOf<{
   readonly configure: FailureOf<typeof hooks.configure>;
@@ -59,15 +59,15 @@ expectTypeOf<Phases>().toEqualTypeOf<{
   readonly dispose: FailureOf<typeof hooks.dispose>;
 }>();
 expectTypeOf<PhasesByForm>().toEqualTypeOf<{ [Form in keyof Forms]: Phases }>();
-expectTypeOf<PluginOpenFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof open>>();
-expectTypeOf<PluginCloseFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof CloseRefused>>();
+expectTypeOf<UnitOpenFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof open>>();
+expectTypeOf<UnitCloseFailure<Forms[keyof Forms]>>().toEqualTypeOf<FailureOf<typeof CloseRefused>>();
 expectTypeOf<Provided<typeof object.provides.db>>().toEqualTypeOf<SuccessOf<typeof open>>();
 
-const _empty = plugin({ name: '_empty' });
+const _empty = infra({ name: '_empty' });
 const _emptyObject = feature('_empty', {});
-const _emptyKeys = factory.plugin({ name: '_empty' });
+const _emptyKeys = factory.infra({ name: '_empty' });
 expectTypeOf<
-  PluginPhaseFailures<typeof _empty | typeof _emptyObject | typeof _emptyKeys>
+  UnitPhaseFailures<typeof _empty | typeof _emptyObject | typeof _emptyKeys>
 >().toEqualTypeOf<EmptyPhases>();
 
 const _contextual = feature('_contextual', {
@@ -80,7 +80,7 @@ const _contextual = feature('_contextual', {
     return Promise.resolve(StartRefused());
   },
 });
-const _contextualKeys = factory.plugin({
+const _contextualKeys = factory.infra({
   name: '_contextual-keys',
   needs: ['count'],
   provides: { total: ({ count }) => count + 1 },
@@ -91,20 +91,20 @@ const _contextualKeys = factory.plugin({
     return Promise.resolve(DisposeRefused());
   },
 });
-expectTypeOf<PluginPhaseFailures<ReturnType<typeof plug<typeof _contextual>>>['start']>().toEqualTypeOf<
+expectTypeOf<UnitPhaseFailures<ReturnType<typeof plug<typeof _contextual>>>['start']>().toEqualTypeOf<
   FailureOf<typeof StartRefused>
 >();
-expectTypeOf<PluginPhaseFailures<typeof _contextualKeys>['dispose']>().toEqualTypeOf<
+expectTypeOf<UnitPhaseFailures<typeof _contextualKeys>['dispose']>().toEqualTypeOf<
   FailureOf<typeof DisposeRefused>
 >();
 
-const _directApp = defineApp('direct').use(direct);
+const _directApp = defineApp('direct').infra(direct);
 const _objectApp = defineApp('object').features([object]);
 const _drivingApp = defineApp('driving')
   .features([])
-  .serve(driver(() => direct));
+  .entrypoints(entrypoint.fromFeatures(() => direct));
 const _drivenApp = defineApp('driven')
-  .use(driven(() => direct))
+  .infra(infra.fromFeatures(() => direct))
   .features([]);
 expectTypeOf<FailureOf<typeof _objectApp.configure>>().toEqualTypeOf<FailureOf<typeof _directApp.configure>>();
 expectTypeOf<FailureOf<typeof _objectApp.boot>>().toEqualTypeOf<FailureOf<typeof _directApp.boot>>();
@@ -131,10 +131,10 @@ expectTypeOf<
 // @ts-expect-error configure is synchronous
 feature('async-configure', { configure: () => Promise.resolve(ConfigureRefused()) });
 // @ts-expect-error configure is synchronous
-factory.plugin({ name: 'async-configure', configure: () => Promise.resolve(ConfigureRefused()) });
+factory.infra({ name: 'async-configure', configure: () => Promise.resolve(ConfigureRefused()) });
 
 // Inline callbacks get an exact undefined context, including when another phase fails.
-const _mixedDirect = plugin({
+const _mixedDirect = infra({
   name: 'mixed',
   configure() {
     /* Prove contextual undefined without an explicit return. */
@@ -165,7 +165,7 @@ const _mixedObject = feature('mixed-object', {
     await Promise.resolve();
   },
 });
-const _mixedKeys = factory.plugin({
+const _mixedKeys = factory.infra({
   name: 'mixed-keys',
   configure() {
     /* Prove contextual undefined without an explicit return. */
@@ -181,7 +181,7 @@ const _mixedKeys = factory.plugin({
     await Promise.resolve();
   },
 });
-const _mixedWitness = factory.plugin({
+const _mixedWitness = factory.infra({
   name: 'mixed-witness',
   needs: { count: service<number>() },
   configure() {
@@ -200,9 +200,9 @@ const _mixedWitness = factory.plugin({
   },
 });
 expectTypeOf<
-  PluginPhaseFailures<typeof _mixedDirect | typeof _mixedKeys | typeof _mixedWitness>['start']
+  UnitPhaseFailures<typeof _mixedDirect | typeof _mixedKeys | typeof _mixedWitness>['start']
 >().toEqualTypeOf<FailureOf<typeof StartRefused>>();
-expectTypeOf<PluginPhaseFailures<ReturnType<typeof plug<typeof _mixedObject>>>['start']>().toEqualTypeOf<
+expectTypeOf<UnitPhaseFailures<ReturnType<typeof plug<typeof _mixedObject>>>['start']>().toEqualTypeOf<
   FailureOf<typeof StartRefused>
 >();
 
@@ -211,40 +211,40 @@ expectTypeOf<PluginPhaseFailures<ReturnType<typeof plug<typeof _mixedObject>>>['
 const erasedHook: () => void = () => StartRefused();
 const erasedPromiseHook: () => Promise<void> = () => Promise.resolve(erasedHook());
 // @ts-expect-error a void return hides a failure
-plugin({ name: 'erased', start: erasedHook });
+infra({ name: 'erased', start: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
-plugin({ name: 'erased', start: erasedPromiseHook });
+infra({ name: 'erased', start: erasedPromiseHook });
 // @ts-expect-error a void configure return hides a failure
-plugin({ name: 'erased', configure: erasedHook });
+infra({ name: 'erased', configure: erasedHook });
 // @ts-expect-error a void return hides a failure
-createPlugin({ name: 'erased', stop: erasedHook });
+createUnit({ name: 'erased', stop: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
-createPlugin({ name: 'erased', dispose: erasedPromiseHook });
+createUnit({ name: 'erased', dispose: erasedPromiseHook });
 // @ts-expect-error a void return hides a failure
 feature('erased', { stop: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
 feature('erased', { dispose: erasedPromiseHook });
 // @ts-expect-error a void return hides a failure
-factory.plugin({ name: 'erased', stop: erasedHook });
+factory.infra({ name: 'erased', stop: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
-factory.plugin({ name: 'erased', dispose: erasedPromiseHook });
+factory.infra({ name: 'erased', dispose: erasedPromiseHook });
 // @ts-expect-error a void return hides a failure
-factory.plugin({ name: 'erased', needs: { count: service<number>() }, configure: erasedHook });
+factory.infra({ name: 'erased', needs: { count: service<number>() }, configure: erasedHook });
 // @ts-expect-error a Promise<void> return hides a failure
-factory.plugin({ name: 'erased', needs: { count: service<number>() }, start: erasedPromiseHook });
+factory.infra({ name: 'erased', needs: { count: service<number>() }, start: erasedPromiseHook });
 
 // Explicit early generics must not restore TypeScript's permissive contextual void rule.
 // eslint-disable-next-line unicorn/no-useless-undefined -- Explicit undefined prevents void from erasing returned failures.
 const configurePromise = () => Promise.resolve<undefined>(undefined);
 // @ts-expect-error configure remains synchronous with partial explicit generics
-plugin<EmptyShape>({ name: 'partial', configure: configurePromise });
+infra<EmptyShape>({ name: 'partial', configure: configurePromise });
 // @ts-expect-error configure remains synchronous with explicit wiring generics
-createPlugin<EmptyShape, EmptyShape, 'partial', void>({ name: 'partial', configure: configurePromise });
+createUnit<EmptyShape, EmptyShape, 'partial', void>({ name: 'partial', configure: configurePromise });
 // @ts-expect-error configure remains synchronous with partial explicit generics
 feature<'partial'>('partial', { configure: configurePromise });
 // @ts-expect-error configure remains synchronous with partial explicit key-array generics
-factory.plugin<readonly []>({ name: 'partial', configure: configurePromise });
-factory.plugin<{ count: Service<number> }>({
+factory.infra<readonly []>({ name: 'partial', configure: configurePromise });
+factory.infra<{ count: Service<number> }>({
   name: 'partial',
   needs: { count: service<number>() },
   // @ts-expect-error configure remains synchronous with partial explicit witness generics
@@ -254,17 +254,17 @@ factory.plugin<{ count: Service<number> }>({
 // Hook replacements are the source of both execution and inferred failure types.
 const ReplacementRefused = defineFailure('test.phase_authoring.replacement');
 const _overridden = { ...direct, hooks: { ...direct.hooks, start: () => ReplacementRefused() } };
-expectTypeOf<PluginPhaseFailures<typeof _overridden>['start']>().toEqualTypeOf<FailureOf<typeof ReplacementRefused>>();
-const _overriddenApp = defineApp('overridden').use(_overridden);
+expectTypeOf<UnitPhaseFailures<typeof _overridden>['start']>().toEqualTypeOf<FailureOf<typeof ReplacementRefused>>();
+const _overriddenApp = defineApp('overridden').infra(_overridden);
 expectTypeOf<Extract<FailureOf<typeof _overriddenApp.start>, FailureOf<typeof ReplacementRefused>>>().toEqualTypeOf<
   FailureOf<typeof ReplacementRefused>
 >();
 expectTypeOf<Extract<FailureOf<typeof _overriddenApp.start>, FailureOf<typeof StartRefused>>>().toEqualTypeOf<never>();
 
-const _overriddenDriven = driven(() => _overridden);
-const _overriddenDriver = driver(() => _overridden);
-const _overriddenDrivenApp = defineApp('driven-override').use(_overriddenDriven);
-const _driverApp = defineApp('driver-override').serve(_overriddenDriver);
+const _overriddenDriven = infra.fromFeatures(() => _overridden);
+const _overriddenDriver = entrypoint.fromFeatures(() => _overridden);
+const _overriddenDrivenApp = defineApp('driven-override').infra(_overriddenDriven);
+const _driverApp = defineApp('driver-override').entrypoints(_overriddenDriver);
 expectTypeOf<
   Extract<FailureOf<typeof _overriddenDrivenApp.start>, FailureOf<typeof ReplacementRefused>>
 >().toEqualTypeOf<FailureOf<typeof ReplacementRefused>>();

@@ -69,7 +69,7 @@ export const AppNotFound = defineFailure('dot.app_not_found', {
   ),
   message: 'No DOT app file found in {cwd}',
   remediation:
-    'Create `dot.config.ts` exporting your app (`export default defineApp("my-app").use(plugin)`), or pass `--app <path>`.',
+    'Create `dot.config.ts` exporting your app (`export default defineApp("my-app").infra(unit)`), or pass `--app <path>`.',
 });
 
 export type AppInvalidExportData = {
@@ -104,7 +104,7 @@ export const AppInvalidExport = defineFailure('dot.app_invalid_export', {
       ? `${data.filePath} exports several DOT apps (${listed(data.matches)}) and none is \`default\` or \`app\`.`
       : `${data.filePath} exports no DOT app. Exports found: ${listed(data.exports)}.`;
   },
-  remediation: 'Export the app as `default` or as `app`: `export const app = defineApp("my-app").use(plugin);`',
+  remediation: 'Export the app as `default` or as `app`: `export const app = defineApp("my-app").infra(unit);`',
 });
 
 export type AppImportFailedData = {
@@ -158,7 +158,7 @@ export const AppLifecycleFailed = defineFailure('dot.app_lifecycle_failed', {
   ),
   message: 'App {phase} failed: {causeMessage}',
   remediation:
-    'Read `error.data.underlyingCode` and apply the remediation of that code (`ARKI_DOT_E020` means a provider is mounted after its consumer); `dot doctor` shows per-plugin diagnostics.',
+    'Read `error.data.underlyingCode` and apply the remediation of that code (`ARKI_DOT_E020` means a provider is mounted after its consumer); `dot doctor` shows per-unit diagnostics.',
 });
 
 /**
@@ -175,7 +175,7 @@ export const ObservabilityNoSdk = defineFailure('dot.observability_no_sdk', {
 export type ProjectionNotFoundData = { readonly format: string; readonly registeredFormats: readonly string[] };
 
 /**
- * No plugin registers the `--as` format.
+ * No unit registers the `--as` format.
  * @fix Use a format from `.error.data.registeredFormats`, or mount the adapter that provides it.
  * @verify dot explain --as <format> --json | jq -e .ok
  */
@@ -248,8 +248,8 @@ export type ProjectionConflictData = {
 };
 
 /**
- * Two plugins register different modules for one projection format.
- * @fix Remove one registration, or make both plugins register the same module.
+ * Two units register different modules for one projection format.
+ * @fix Remove one registration, or make both units register the same module.
  * @verify dot explain --as <format> --json | jq -e .ok
  */
 export const ProjectionConflict = defineFailure('dot.projection_conflict', {
@@ -262,7 +262,7 @@ export const ProjectionConflict = defineFailure('dot.projection_conflict', {
       value['projections'].every(entry => is(entry, recordSchema) && strings(entry, ['plugin', 'module'])),
   ),
   message: 'Multiple projection modules are registered for format "{format}"',
-  remediation: 'Remove one registration, or make both plugins register the same module specifier.',
+  remediation: 'Remove one registration, or make both units register the same module specifier.',
 });
 
 /**
@@ -467,7 +467,7 @@ export const DevAppStarted = defineFailure('dot.dev_app_started', {
   message:
     'The `{exportName}` export in {filePath} is already configured or started; dot dev needs an unstarted builder',
   remediation:
-    'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("my-app").use(plugin);`',
+    'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("my-app").infra(unit);`',
 });
 
 export type DevPreflightFailedData = {

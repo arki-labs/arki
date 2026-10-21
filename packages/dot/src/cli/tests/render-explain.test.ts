@@ -1,7 +1,7 @@
 /**
  * Tests for the explain renderer.
  *
- * Uses `testApp` to spin up synthetic plugins — no spawn, no temp dirs.
+ * Uses `testApp` to spin up synthetic units — no spawn, no temp dirs.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -9,20 +9,20 @@ import { describe, expect, it } from 'vitest';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../../define-app.js';
-import { plugin, service } from '../../plugin-contract.js';
+import { infra, service } from '../../unit-contract.js';
 import { runExplain } from '../explain.js';
 import { renderExplainText } from '../render-explain.js';
 import { textUi } from './text-ui.js';
 
 function syntheticApp() {
-  const db = plugin({
+  const db = infra({
     name: 'db',
     configure: ctx => {
       ctx.registerService('db', 'db');
     },
     provides: { db: () => ({ name: 'primary' }) },
   });
-  const api = plugin({
+  const api = infra({
     name: 'api',
     needs: { db: service<{ name: string }>() },
     configure: ctx => {
@@ -35,7 +35,7 @@ function syntheticApp() {
       ctx.registerProjection({ format: 'openapi', binding: 'http', module: '@arki/http/projection' });
     },
   });
-  return defineApp('synthetic').use(db).use(api);
+  return defineApp('synthetic').infra(db).infra(api);
 }
 
 describe('runExplain', () => {
@@ -44,7 +44,7 @@ describe('runExplain', () => {
     if (!('manifestVersion' in manifest)) throw new Error('expected the manifest');
 
     expect(manifest.manifestVersion).toBe(2);
-    // 6-array contract (manifest has plugins, actions, services, lifecycle, dependencies, projections)
+    // 6-array contract (manifest has units, actions, services, lifecycle, dependencies, projections)
     expect(manifest.plugins).toBeInstanceOf(Array);
     expect(manifest.actions).toBeInstanceOf(Array);
     expect(manifest.services).toBeInstanceOf(Array);
@@ -64,13 +64,13 @@ describe('runExplain', () => {
   });
 
   it('preserves the supervised configure defect instead of throwing', async () => {
-    const broken = plugin({
+    const broken = infra({
       name: 'broken',
       configure: () => {
         throw new Error('configure-boom');
       },
     });
-    const result = await runExplain(defineApp('broken').use(broken));
+    const result = await runExplain(defineApp('broken').infra(broken));
     expect(result).toMatchObject({
       code: UnexpectedDefect.code,
       cause: expect.objectContaining({ message: expect.stringContaining('configure-boom') }),
@@ -86,7 +86,7 @@ describe('runExplain', () => {
 
 describe('renderExplainText', () => {
   it('prints the summary line right after an action row, and nothing for an action without one', () => {
-    const api = plugin({
+    const api = infra({
       name: 'api',
       configure: ctx => {
         ctx.registerAction({ id: 'api.plain', binding: 'http', direction: 'in', address: 'GET /plain' });
@@ -100,7 +100,7 @@ describe('renderExplainText', () => {
         ctx.registerAction({ id: 'api.after', binding: 'http', direction: 'in', address: 'GET /after' });
       },
     });
-    const configured = orThrow(defineApp('synthetic').use(api).configure());
+    const configured = orThrow(defineApp('synthetic').infra(api).configure());
     const { ui, text } = textUi();
     renderExplainText(configured.manifest, ui);
     const lines = text().split('\n');
@@ -111,7 +111,7 @@ describe('renderExplainText', () => {
     expect(lines.filter(line => line.includes('↳'))).toHaveLength(1);
   });
 
-  it('includes plugin names, service names, actions, and projections', () => {
+  it('includes unit names, service names, actions, and projections', () => {
     const configured = orThrow(syntheticApp().configure());
     const { ui, text } = textUi();
     renderExplainText(configured.manifest, ui);

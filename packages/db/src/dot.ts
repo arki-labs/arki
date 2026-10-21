@@ -29,12 +29,12 @@
  * export const database = db({ relations, url: () => env.DB_URL });
  * export type Db = Provided<typeof database.provides.db>;
  *
- * const app = await defineApp('my-app').use(database).boot();
+ * const app = await defineApp('my-app').infra(database).boot();
  * // a consumer: needs: { db: database.provides.db }
  *
  * // PGlite in-memory (great for tests):
  * const testApp = await defineApp('test')
- *   .use(db({ driver: 'pglite', memory: true, relations }))
+ *   .infra(db({ driver: 'pglite', memory: true, relations }))
  *   .boot();
  * ```
  *
@@ -57,9 +57,9 @@ import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
-import type { Handle } from '@arki/dot/plugin';
+import type { Handle } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
-import { DotPluginError, plugin, service } from '@arki/dot/plugin';
+import { DotUnitError, infra, service } from '@arki/dot/unit';
 import { isFailure } from '@arki/failure';
 
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
@@ -164,7 +164,7 @@ function createPglitePlugin<TRelations extends AnyRelations>(options: PgliteDbDo
   // it deterministically. `services.db` is the Drizzle handle only —
   // exposing the PGlite client would leak driver-specific surface.
   let close: SuccessOf<typeof initDbRuntimeLocal<TRelations>>['close'] | undefined;
-  return plugin({
+  return infra({
     name: 'db',
     configure(ctx): undefined {
       ctx.registerService('db', 'db');
@@ -202,7 +202,7 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
   // Node-postgres path: createDb already reads env vars and constructs the
   // pool. Drizzle owns the pool — closing it goes via the `$client.end()`
   // path that node-postgres exposes through Drizzle's handle.
-  return plugin({
+  return infra({
     name: 'db',
     configure(ctx) {
       ctx.registerService('db', 'db');
@@ -215,7 +215,7 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
         // never reach it without a URL.
         const url = ('url' in options ? options.url?.() : undefined) ?? env.DB_URL;
         if (url === undefined || url === '') {
-          throw new DotPluginError({
+          throw new DotUnitError({
             code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
             message: '[db] DB_URL is not configured.',
             remediation:
@@ -252,7 +252,7 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
  * reads it from its preflight boot to print what it applied.
  */
 export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(options: MigrateDbOptions) {
-  return plugin({
+  return infra({
     name: 'db-migrations',
     needs: { db: service<MigratableDb<TRelations>>() },
     provides: {
@@ -268,7 +268,7 @@ export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(opt
 }
 
 /* ------------------------------------------------------------------ */
-/* repos() — a feature's repositories as one private infra plugin      */
+/* repos() — a feature's repositories as one private infra unit      */
 /* ------------------------------------------------------------------ */
 
 /** Repository factories by name: `{ highlights: createHighlightRepository }`, each `(database) => repository`. */
@@ -321,7 +321,7 @@ export type TxRepos<F extends RepoFactories> = { withTx(tx: DatabaseOf<F>): Repo
 
 function refuseReservedRepoName(factories: RepoFactories): void {
   if (Object.hasOwn(factories, 'withTx')) {
-    throw new DotPluginError({
+    throw new DotUnitError({
       code: DB_PLUGIN_ERROR_CODES.reservedRepoName,
       message: '[repos] "withTx" is reserved: every repos set uses it to rebind to a transaction.',
       remediation: 'Rename the repository (for example "transactions" or "txLog").',
@@ -331,7 +331,7 @@ function refuseReservedRepoName(factories: RepoFactories): void {
 }
 
 /**
- * A feature's repositories as one infra plugin: built once at boot, bound to
+ * A feature's repositories as one infra unit: built once at boot, bound to
  * the feature's `db`, published as `repos`. In the feature chain it becomes
  * private (`highlights.repos`), and `dot explain` draws
  * `highlights → highlights/repos → database`.
@@ -361,7 +361,7 @@ function refuseReservedRepoName(factories: RepoFactories): void {
  */
 export function repos<const F extends RepoFactories>(factories: F & SameDatabase<F> & NoWithTx) {
   refuseReservedRepoName(factories);
-  return plugin({
+  return infra({
     name: 'repos',
     // Unbound: the feature binds `db` to its own handle at `.infra()`, and the
     // kernel orders this plugin after the database that publishes it.
@@ -391,7 +391,7 @@ export function repos<const F extends RepoFactories>(factories: F & SameDatabase
  */
 export function txRepos<const F extends RepoFactories>(factories: F & SameDatabase<F> & NoWithTx) {
   refuseReservedRepoName(factories);
-  return plugin({
+  return infra({
     name: 'repos',
     needs: { db: service<DatabaseOf<F>>() },
     provides: {
@@ -419,7 +419,7 @@ export type TxOf<TDb> = TDb extends { transaction(fn: (tx: infer Tx) => never): 
 export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T | TransactionFailure>;
 
 /**
- * A feature's transaction opener as one private infra plugin: it needs `db`
+ * A feature's transaction opener as one private infra unit: it needs `db`
  * unbound (the feature binds its own handle at `.infra()`) and publishes
  * `transaction(fn)` — and nothing else: no query builder, no `db`. Pair it
  * with `.needs({ db: entrypointOnly(database.provides.db) })`: a usecase
@@ -440,7 +440,7 @@ export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T |
 export function transactions<TDb extends Transactable<Tx>, K extends string, O extends string, Tx = TxOf<TDb>>(
   db: Handle<TDb, K, O>,
 ) {
-  return plugin({
+  return infra({
     name: 'transactions',
     // Bound to the feature's database handle — key and provider literals included, so `.infra()` refuses any other.
     needs: { db },
@@ -476,7 +476,7 @@ export function reader<R extends object, const M extends readonly MethodKeys<R>[
   for (const name of methods) {
     const method: unknown = repository[name];
     if (typeof method !== 'function') {
-      throw new DotPluginError({
+      throw new DotUnitError({
         code: DB_PLUGIN_ERROR_CODES.readerNotAMethod,
         message: `[repos] reader(): "${String(name)}" is not a method of the repository.`,
         remediation: 'List only method names; publish plain values through provides() directly.',

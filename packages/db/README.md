@@ -245,7 +245,7 @@ export const bookings = pgTable('bookings', {
 
 The schema has a different lifetime than runtime services: `drizzle-kit`
 imports tables statically, and `Db = typeof db` must exist before any DOT
-plugin runs. Schema is therefore **module-composed, never runtime-contributed**.
+unit runs. Schema is therefore **module-composed, never runtime-contributed**.
 The layout:
 
 ```text
@@ -288,7 +288,7 @@ export default defineConfig({
 
 The layering rule that keeps the module graph a DAG: `tables.ts` imports
 nothing from `core/`; `core/schema.ts` imports only leaves; feature code
-imports its own leaves plus the app's plugin factory.
+imports its own leaves plus the app's unit factory.
 
 ### Relations split by feature: `mergeRelations`
 
@@ -493,7 +493,7 @@ usecases a transaction calls before you adopt it.
 
 ## In a Dot feature: `repos()`, `transactions()`, `reader()`
 
-All of these live in `@arki/db/dot` and return plain plugins. In a
+All of these live in `@arki/db/dot` and return plain units. In a
 `defineFeature` chain, `.infra(...)` makes them private to the feature.
 
 ### `repos(factories)` — repositories built once
@@ -565,9 +565,9 @@ export const compile =
     transaction(tx => compiler.store(tx, plan)); // tx is the database's own transaction type
 ```
 
-- **One function, nothing else.** The plugin publishes `transaction(fn)`:
+- **One function, nothing else.** The unit publishes `transaction(fn)`:
   `fn` runs inside one transaction of the feature's `db`, committed on ordinary values and rolled back on returned failures or thrown errors. No query builder and no `db`
-  leave the plugin, so with `db` entrypoint-only a usecase can open a
+  leave the unit, so with `db` entrypoint-only a usecase can open a
   transaction and hand its `tx` on, but never run raw SQL.
 - **`db` is the feature's handle.** `transactions(database.provides.db)` is
   bound to that handle, key and provider included; the feature must declare
@@ -580,7 +580,7 @@ export const compile =
 
 Usecases are built once at boot, so they capture the pool-bound repositories.
 A middleware cannot rebind them. The pattern that works: mount the repository
-plugin under another name, and let a transaction-aware usecase take the scope
+unit under another name, and let a transaction-aware usecase take the scope
 per call.
 
 ```ts skip="a Dot feature split across files (feature.ts, usecases, entrypoints): not converted yet, it needs a Dot app in the docs fixture"
@@ -847,7 +847,7 @@ these logs alone do not claim complete A-36 coverage.
   Consumers name the handle: `needs: { db: database.provides.db }`, and the
   app names the type once: `export type Db = Provided<typeof database.provides.db>`.
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-  package for plugin authoring, lifecycle, diagnostics, and the
+  package for unit authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
 ## Support

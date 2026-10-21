@@ -2,7 +2,7 @@
  * Lifecycle primitives for the DOT kernel.
  *
  * The kernel uses a 5-hook lifecycle that runs in declaration order
- * (providers are `.use()`d before their consumers — the app builder's
+ * (providers are `.infra()`d before their consumers — the app builder's
  * type-level guard enforces this at compile time):
  *
  *  - `configure` — synchronous registration of metadata, routes, services
@@ -20,7 +20,7 @@ export type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispos
 
 /**
  * The complete set of lifecycle hooks in execution order.
- * `stop` and `dispose` run in reverse declaration order across plugins, but the
+ * `stop` and `dispose` run in reverse declaration order across units, but the
  * sequence of hooks themselves is always `configure -> boot -> start -> stop -> dispose`.
  */
 export const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[] = [
@@ -49,7 +49,7 @@ export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' 
 /**
  * Stable error codes for every failure the kernel throws, `ARKI_DOT_E001`..
  * Codes are never renumbered and never reused (E009 and E010 are retired).
- * E001-E021 are lifecycle failures; E022-E031 are feature-composition
+ * E001-E021 and E033 are lifecycle failures; E022-E031 are feature-composition
  * failures (see `FEATURE_ERROR_CODES`); E032 is non-JSON manifest data.
  */
 export const DotLifecycleErrorCode = {
@@ -61,31 +61,31 @@ export const DotLifecycleErrorCode = {
   ConfigureAsync: 'ARKI_DOT_E001',
   /**
    * A `configure` hook threw.
-   * @fix Fix the plugin's config or its `configure` hook, then build a new app.
+   * @fix Fix the unit's config or its `configure` hook, then build a new app.
    * @verify dot explain --json | jq -e .ok
    */
   ConfigureFailed: 'ARKI_DOT_E002',
   /**
    * A `boot` hook threw.
-   * @fix Read `cause` and `plugin`, then fix that plugin's `boot` hook or the service it opens.
+   * @fix Read `cause` and `plugin`, then fix that unit's `boot` hook or the service it opens.
    * @verify dot doctor --json | jq -e .ok
    */
   BootFailed: 'ARKI_DOT_E003',
   /**
    * A `start` hook threw.
-   * @fix Read `cause` and `plugin`, then fix that plugin's `start` hook.
+   * @fix Read `cause` and `plugin`, then fix that unit's `start` hook.
    * @verify bun run test
    */
   StartFailed: 'ARKI_DOT_E004',
   /**
    * One or more `stop` hooks threw — aggregate.
-   * @fix Read `failures`: each entry names the plugin whose `stop` hook threw.
+   * @fix Read `failures`: each entry names the unit whose `stop` hook threw.
    * @verify bun run test
    */
   StopFailed: 'ARKI_DOT_E005',
   /**
    * One or more `dispose` hooks threw — aggregate.
-   * @fix Read `failures`: each entry names the plugin whose `dispose` hook threw.
+   * @fix Read `failures`: each entry names the unit whose `dispose` hook threw.
    * @verify dot doctor --json | jq -e .ok
    */
   DisposeFailed: 'ARKI_DOT_E006',
@@ -106,19 +106,19 @@ export const DotLifecycleErrorCode = {
   // name-based dependency declarations no longer exist. Codes are never
   // reused for new meanings.
   /**
-   * Plugin registered twice.
-   * @fix Remove the second `.use()` of this plugin, or `rename` it to run two copies.
+   * Unit registered twice.
+   * @fix Remove the second `.infra()` of this unit, or `rename` it to run two copies.
    * @verify dot explain --json | jq -e .ok
    */
-  DuplicatePlugin: 'ARKI_DOT_E011',
+  DuplicateUnit: 'ARKI_DOT_E011',
   /**
-   * A plugin's `needs` entry has no provider among earlier-booted plugins.
-   * @fix Mount a plugin that provides the needed key before its consumer.
+   * A unit's `needs` entry has no provider among earlier-booted units.
+   * @fix Mount a unit that provides the needed key before its consumer.
    * @verify dot doctor --json | jq -e .ok
    */
   UnsatisfiedNeed: 'ARKI_DOT_E012',
   /**
-   * A plugin published a wire key that an earlier plugin already provides.
+   * A unit published a wire key that an earlier unit already provides.
    * @fix Give one of the two providers a different key with `rename`.
    * @verify dot doctor --json | jq -e .ok
    */
@@ -148,8 +148,8 @@ export const DotLifecycleErrorCode = {
    */
   ActionMetaNotJson: 'ARKI_DOT_E017',
   /**
-   * More than one plugin fills the logging slot.
-   * @fix Keep one `log()` plugin in the app.
+   * More than one unit fills the logging slot.
+   * @fix Keep one `log()` unit in the app.
    * @verify dot explain --json | jq -e .ok
    */
   DuplicateLogging: 'ARKI_DOT_E018',
@@ -166,11 +166,19 @@ export const DotLifecycleErrorCode = {
    */
   ProviderMountedLater: 'ARKI_DOT_E020',
   /**
-   * `$describeAction` named an action the calling plugin may not amend (unknown id, or not its own).
-   * @fix Describe only actions the calling plugin declared or owns.
+   * `$describeAction` named an action the calling unit may not amend (unknown id, or not its own).
+   * @fix Describe only actions the calling unit declared or owns.
    * @verify dot explain --json | jq -e .ok
    */
   ActionNotAmendable: 'ARKI_DOT_E021',
+  /**
+   * A unit was mounted on the wrong side of the hexagon: an `entrypoint` in
+   * `.infra()` / `.infra()`, or an `infra` or `feature` unit in `.entrypoints()` / `.entrypoints()`.
+   * Typed graphs refuse this at compile time; this catches erased ones.
+   * @fix Mount infra with `.infra(...)` and entrypoints with `.entrypoints(...)`, or build the unit with the other constructor.
+   * @verify dot explain --json | jq -e .ok
+   */
+  UnitOnWrongSide: 'ARKI_DOT_E033',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
@@ -183,27 +191,29 @@ export function dotErrorDocsUrl(code: string): string {
 /** Stock remediation per lifecycle code. A throw site may override it with a more specific line. */
 const LIFECYCLE_REMEDIATION: Record<DotLifecycleErrorCodeValue, string> = {
   [DotLifecycleErrorCode.ConfigureAsync]: 'Make `configure` synchronous and move async work to `boot`.',
-  [DotLifecycleErrorCode.ConfigureFailed]: "Fix the plugin's config or its `configure` hook, then build a new app.",
+  [DotLifecycleErrorCode.ConfigureFailed]: "Fix the unit's config or its `configure` hook, then build a new app.",
   [DotLifecycleErrorCode.BootFailed]:
-    "Read `cause` and `plugin`: fix that plugin's `boot` hook or the service it opens.",
-  [DotLifecycleErrorCode.StartFailed]: "Read `cause` and `plugin`: fix that plugin's `start` hook.",
-  [DotLifecycleErrorCode.StopFailed]: 'Read `failures`: each entry names the plugin whose `stop` hook threw.',
-  [DotLifecycleErrorCode.DisposeFailed]: 'Read `failures`: each entry names the plugin whose `dispose` hook threw.',
+    "Read `cause` and `plugin`: fix that unit's `boot` hook or the service it opens.",
+  [DotLifecycleErrorCode.StartFailed]: "Read `cause` and `plugin`: fix that unit's `start` hook.",
+  [DotLifecycleErrorCode.StopFailed]: 'Read `failures`: each entry names the unit whose `stop` hook threw.',
+  [DotLifecycleErrorCode.DisposeFailed]: 'Read `failures`: each entry names the unit whose `dispose` hook threw.',
   [DotLifecycleErrorCode.ReuseAfterDispose]: 'Build a fresh app instance; a disposed app cannot run again.',
   [DotLifecycleErrorCode.ReuseAfterFailure]: 'Build a fresh app instance; a failed app cannot run again.',
-  [DotLifecycleErrorCode.DuplicatePlugin]:
-    'Remove the second `.use()` of this plugin, or `rename` it to run two copies.',
-  [DotLifecycleErrorCode.UnsatisfiedNeed]: 'Mount a plugin that provides the needed key before its consumer.',
+  [DotLifecycleErrorCode.DuplicateUnit]:
+    'Remove the second `.infra()` of this unit, or `rename` it to run two copies.',
+  [DotLifecycleErrorCode.UnsatisfiedNeed]: 'Mount a unit that provides the needed key before its consumer.',
   [DotLifecycleErrorCode.ServiceCollision]: 'Give one of the two providers a different key with `rename`.',
   [DotLifecycleErrorCode.ReservedServiceKey]: 'Rename the key; names starting with `$` belong to the kernel.',
   [DotLifecycleErrorCode.HookTimeout]: "Pass the hook's `$signal` to its I/O, or raise `hookTimeoutMs`.",
   [DotLifecycleErrorCode.DuplicateAction]: 'Give each action in a binding its own id.',
   [DotLifecycleErrorCode.ActionMetaNotJson]: 'Keep action `meta` plain JSON: no functions, Dates, Maps or cycles.',
-  [DotLifecycleErrorCode.DuplicateLogging]: 'Keep one `log()` plugin in the app.',
+  [DotLifecycleErrorCode.DuplicateLogging]: 'Keep one `log()` unit in the app.',
   [DotLifecycleErrorCode.CapabilityRing]: 'Move the shared piece into a third unit that both sides need.',
   [DotLifecycleErrorCode.ProviderMountedLater]: 'Mount the provider before the unit that needs it.',
   [DotLifecycleErrorCode.ActionNotAmendable]:
-    '`$describeAction` only accepts actions the calling plugin declared or owns.',
+    '`$describeAction` only accepts actions the calling unit declared or owns.',
+  [DotLifecycleErrorCode.UnitOnWrongSide]:
+    'Mount infra({...}) units with .infra(...) and entrypoint({...}) units with .entrypoints(...).',
 };
 
 /**
@@ -212,20 +222,20 @@ const LIFECYCLE_REMEDIATION: Record<DotLifecycleErrorCodeValue, string> = {
  * Carries:
  *  - `code`     — stable machine-readable error code (see {@link DotLifecycleErrorCode}).
  *  - `phase`    — which hook (or pseudo-hook) failed.
- *  - `plugin`   — which plugin name, when applicable.
+ *  - `plugin`   — which unit name, when applicable.
  *  - `cause`    — original error if wrapped from a hook throw.
- *  - `failures` — for aggregate errors (stop/dispose), the per-plugin failures.
+ *  - `failures` — for aggregate errors (stop/dispose), the per-unit failures.
  */
 export class DotLifecycleError extends Error {
   readonly code: DotLifecycleErrorCodeValue;
-  /** One-sentence guidance on how to fix the problem. Same shape as `DotPluginError.remediation`. */
+  /** One-sentence guidance on how to fix the problem. Same shape as `DotUnitError.remediation`. */
   readonly remediation: string;
   /** Documentation page that explains this error. */
   readonly docsUrl: string;
   readonly phase: DotLifecycleHook;
   readonly plugin?: string;
   override readonly cause?: unknown;
-  readonly failures?: readonly DotLifecyclePluginFailure[];
+  readonly failures?: readonly DotLifecycleUnitFailure[];
 
   constructor(args: {
     code: DotLifecycleErrorCodeValue;
@@ -235,7 +245,7 @@ export class DotLifecycleError extends Error {
     remediation?: string;
     plugin?: string;
     cause?: unknown;
-    failures?: readonly DotLifecyclePluginFailure[];
+    failures?: readonly DotLifecycleUnitFailure[];
   }) {
     super(args.message);
     this.name = 'DotLifecycleError';
@@ -249,8 +259,8 @@ export class DotLifecycleError extends Error {
   }
 }
 
-/** Single plugin failure inside an aggregate lifecycle error (stop/dispose). */
-export type DotLifecyclePluginFailure = {
+/** Single unit failure inside an aggregate lifecycle error (stop/dispose). */
+export type DotLifecycleUnitFailure = {
   plugin: string;
   phase: DotLifecycleHook;
   error: unknown;

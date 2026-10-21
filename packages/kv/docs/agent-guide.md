@@ -8,7 +8,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 2. `createKV(namespace)` reads `KV_URL` and throws without it. `createKVInstance(namespace)` returns `null` in development and fails in production.
 3. If the rate-limiter Redis client is not ready, the limiter falls back to memory, per process.
 4. `@arki/kv/redis/idempotency` is the Redis store for the `idempotent()` middleware of `@arki/http`.
-5. `@arki/kv/dot` is the Dot plugin. It publishes `kv` and closes the client on dispose.
+5. `@arki/kv/dot` is the Dot unit. It publishes `kv` and closes the client on dispose.
 6. It is not a database. Keys expire and Redis can lose data.
 
 ## Task map
@@ -68,7 +68,7 @@ bun run test:docs
 bun ../../tooling/library/src/llms.ts --check
 ```
 
-In an app that mounts the plugin: the static graph, then the booted app's health.
+In an app that mounts the unit: the static graph, then the booted app's health.
 
 ```sh
 dot explain --json | jq '.data'

@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vit
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { plugin, rename, service } from '@arki/dot/plugin';
+import { infra, rename, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journal, journalWorker } from '@arki/journal/dot';
@@ -39,7 +39,7 @@ afterAll(async () => {
   await client.close();
 });
 
-const database = plugin({ name: 'db', provides: { db: (): PgliteDatabase => db } });
+const database = infra({ name: 'db', provides: { db: (): PgliteDatabase => db } });
 const scheduling = outboxPlugin({ tables });
 const _namedScheduling = outboxPlugin({ tables, name: 'mail-outbox' });
 expectTypeOf(scheduling.provides.schedule.provider).toEqualTypeOf<'outbox'>();
@@ -75,7 +75,7 @@ const signup = defineFeature('signup')
   .entrypoints(jobs(q.registry({ welcome })));
 
 // Two copies of one feature, each on its own region: the copy's rows must carry its name and run its job.
-const regionOf = (region: string) => plugin({ name: 'region', provides: { region: () => region } });
+const regionOf = (region: string) => infra({ name: 'region', provides: { region: () => region } });
 const regionUs = regionOf('us');
 const regionEu = rename(regionOf('eu'), { region: 'regionEu' }, 'regionEu');
 const rq = initQueue.context<FeatureJobContext<{ readonly region: string }>>().create();

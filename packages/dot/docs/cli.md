@@ -30,7 +30,7 @@ dot explain --app ./my-app.ts
 # Run boot-time diagnostics; exit 3 (dot.doctor_failed) if any check fails.
 dot doctor --app ./my-app.ts
 
-# Render the plugin graph as Mermaid flowchart source. explain shows
+# Render the unit graph as Mermaid flowchart source. explain shows
 # declaration (= boot) order; doctor boots and shows the OBSERVED wiring.
 dot doctor --app ./my-app.ts --graph
 
@@ -42,7 +42,7 @@ The CLI emits the same envelope shape as the in-process diagnostics snapshot
 (`app.diagnostics`), so the same downstream tools can consume either. Edges
 between features are derived before boot from their static `provides` and
 carry the capability `key`, so `explain` shows them; the rest are **observed** —
-the kernel records which plugin's published service satisfied which need
+the kernel records which unit's published service satisfied which need
 during boot.
 
 ## `dot dev`
@@ -56,7 +56,7 @@ dot dev --once --json   # preflight only: exit 0 when env, migrations and boot p
 ```
 
 ```text
-dot dev ▸ app (src/app.ts, export dev)  graph: 7 plugins, 0 features
+dot dev ▸ app (src/app.ts, export dev)  graph: 7 units, 0 features
 dot dev ▸ db: pglite (embedded)
 dot dev ▸ migrations: 1 pending (20261014000000_init), applied by the preflight
 dot dev ▸ preflight: doctor OK
@@ -176,13 +176,13 @@ Every failure below is exported from `@arki/dot/cli` and comes back in the
 `error` field of the JSON envelope.
 
 - `DoctorFailed` (`dot.doctor_failed`): `dot doctor` found error issues. The whole report is in `.error.data`.
-  When a plugin fails to boot, its issue keeps the outer code `ARKI_DOT_E003`. The issue `message` now ends with the plugin's own failure message, and `metadata.failureCode` holds the plugin's failure code (for example `ai.provider_unavailable`). A thrown error still shows only the generic defect message.
+  When a unit fails to boot, its issue keeps the outer code `ARKI_DOT_E003`. The issue `message` now ends with the unit's own failure message, and `metadata.failureCode` holds the unit's failure code (for example `ai.provider_unavailable`). A thrown error still shows only the generic defect message.
 - `PreflightFailed` (`dot.preflight_failed`): a managed preflight reported a lifecycle failure. The report is in `.error.data`.
 - `ObservabilityNoSdk` (`dot.observability_no_sdk`): `dot doctor --observability` found no OpenTelemetry SDK. It shows up as a warning issue, not as a returned failure.
-- `ProjectionNotFound` (`dot.projection_not_found`): no plugin registers the `--as` format you asked for.
+- `ProjectionNotFound` (`dot.projection_not_found`): no unit registers the `--as` format you asked for.
 - `ProjectionImportFailed` (`dot.projection_import_failed`): the projection module could not be resolved or imported, or it exports no `project(manifest)`.
 - `ProjectionExecutionFailed` (`dot.projection_execution_failed`): `project(manifest)` threw, or returned output that does not survive a JSON round trip.
-- `ProjectionConflict` (`dot.projection_conflict`): two plugins register different modules for the same projection format.
+- `ProjectionConflict` (`dot.projection_conflict`): two units register different modules for the same projection format.
 - `TargetNotEmpty` (`dot.target_not_empty`): `dot new` would overwrite files in a target directory that is not empty. Use an empty directory or `--force`.
 - `TemplateMissing` (`dot.template_missing`): the template folder shipped with `@arki/dot` is empty or missing. Reinstall the package.
 - `WriteFailed` (`dot.write_failed`): `dot new` could not write some files. `.error.data.written` lists the files that did land.

@@ -14,7 +14,7 @@ export default defineCommand({
   input: z.object({
     app: z.string().optional().describe('App file (default: ./dot.config.ts, ./src/app.ts or ./app.ts)'),
     cwd: z.string().optional().describe('Working directory (default: current)'),
-    graph: z.boolean().optional().describe('The plugin graph observed during boot, as Mermaid flowchart source'),
+    graph: z.boolean().optional().describe('The unit graph observed during boot, as Mermaid flowchart source'),
     observability: z.boolean().optional().describe('Also check that an OpenTelemetry SDK is registered'),
   }),
   effects: 'read',

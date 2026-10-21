@@ -24,7 +24,7 @@
  * stripped during scaffolding so `package.json.tmpl` becomes
  * `package.json` on disk.
  *
- * Commands deferred to v1.1 (`dot add <plugin>`, `dot migrate`) are
+ * Commands deferred to v1.1 (`dot add <unit>`, `dot migrate`) are
  * deliberately NOT surfaced here.
  */
 

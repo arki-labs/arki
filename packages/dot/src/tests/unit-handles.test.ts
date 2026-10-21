@@ -1,5 +1,5 @@
 /**
- * Plugins get handles exactly like features. An adapter's `provides` is one
+ * Units get handles exactly like features. An adapter's `provides` is one
  * factory per key, so `database.provides.db` is a typed handle before
  * anything boots. That is why these tests exist:
  *
@@ -14,20 +14,20 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
-import type { Handle, Lazy, Provided } from '../plugin-contract.js';
+import type { Handle, Lazy, Provided } from '../unit-contract.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
 import { feature, providesOf } from '../feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { plugin, rename } from '../plugin-contract.js';
+import { infra, rename } from '../unit-contract.js';
 import { fake } from '../test-harness.js';
 
 type Rows = { readonly url: string; readonly query: (sql: string) => readonly string[] };
 
 /** A db-shaped adapter generic over nothing but its options — the type comes from the factory. */
 function makeDb(url: string, opened: string[] = []) {
-  return plugin({
+  return infra({
     name: 'db',
     provides: {
       db: async (): Promise<Rows> => {
@@ -40,7 +40,7 @@ function makeDb(url: string, opened: string[] = []) {
   });
 }
 
-describe('plugin handles are data before boot', () => {
+describe('unit handles are data before boot', () => {
   it('names its keys and provider without running a factory', () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
@@ -59,20 +59,20 @@ describe('plugin handles are data before boot', () => {
       needs: { db: database.provides.db },
       provides: { report: ({ db }) => db.query('select 1') },
     });
-    const app = orThrow(await defineApp('handles').use(database).features([reports]).boot());
+    const app = orThrow(await defineApp('handles').infra(database).features([reports]).boot());
     expectTypeOf(app.services.report).toEqualTypeOf<readonly string[]>();
     expect(app.services.report).toEqual(['pg://main:select 1']);
     orThrow(await app.dispose());
     expect(opened).toEqual(['pg://main', 'closed:pg://main']);
   });
 
-  it('a value-returning plugin boot does not compile — publish through provides', () => {
-    plugin({
+  it('a value-returning unit boot does not compile — publish through provides', () => {
+    infra({
       name: 'legacy',
       // @ts-expect-error -- publish values through provides, never boot
       boot: () => ({ db: 1 }),
     });
-    plugin({
+    infra({
       name: 'legacy-async',
       // @ts-expect-error -- async publication also belongs in provides
       boot: async () => {
@@ -80,26 +80,26 @@ describe('plugin handles are data before boot', () => {
         return { db: 1 };
       },
     });
-    const sideEffectOnly = plugin({ name: 'seed', boot: ({ $app }) => void $app });
+    const sideEffectOnly = infra({ name: 'seed', boot: ({ $app }) => void $app });
     expect(Object.keys(sideEffectOnly.provides)).toEqual([]);
     expectTypeOf<keyof typeof sideEffectOnly.provides>().toEqualTypeOf<never>();
   });
 });
 
 describe('the kernel checks adapters at configure time', () => {
-  it('a feature mounted before its db() adapter fails configure() with E020 naming .use() — nothing boots', () => {
+  it('a feature mounted before its db() adapter fails configure() with E020 naming .infra() — nothing boots', () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
     const digest = feature('daily-digest', { needs: { db: database.provides.db } });
     // @ts-expect-error -- driven adapters cannot follow the domain; the erased path is the kernel's job
-    const builder = defineApp('late-adapter').features([digest]).use(database);
+    const builder = defineApp('late-adapter').features([digest]).infra(database);
     expect(builder.configure()).toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
         code: DotLifecycleErrorCode.ProviderMountedLater,
         phase: 'configure',
         plugin: 'daily-digest',
-        message: expect.stringContaining('Mount "db" with .use() before "daily-digest".'),
+        message: expect.stringContaining('Mount "db" with .infra() before "daily-digest".'),
       },
     });
     expect(opened).toEqual([]);
@@ -109,7 +109,7 @@ describe('the kernel checks adapters at configure time', () => {
     const billing = feature('billing', {
       provides: { entitlements: () => ({ plan: 'pro' as const }) },
     });
-    const audit = plugin({
+    const audit = infra({
       name: 'audit',
       needs: { access: billing.provides.entitlements },
       provides: { audit: ({ access }) => ({ record: (what: string) => `${access.plan}:${what}` }) },
@@ -119,7 +119,7 @@ describe('the kernel checks adapters at configure time', () => {
       provides: { entitlements: () => ({ plan: 'pro' as const }) },
     });
     // @ts-expect-error -- audit needs entitlements, which nothing before it provides
-    const builder = defineApp('ring').use(audit).features([ringed]);
+    const builder = defineApp('ring').infra(audit).features([ringed]);
     expect(builder.configure()).toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -133,7 +133,7 @@ describe('the kernel checks adapters at configure time', () => {
     const opened: string[] = [];
     const database = makeDb('pg://main', opened);
     const digest = feature('daily-digest', { needs: { db: database.provides.db } });
-    const configured = orThrow(defineApp('explain-db').use(database).features([digest]).configure());
+    const configured = orThrow(defineApp('explain-db').infra(database).features([digest]).configure());
     const explained = textUi();
     renderExplainText(configured.manifest, explained.ui);
     const table = explained.text();
@@ -153,14 +153,14 @@ describe('rename() moves the handle with the mounted object', () => {
     expect(reportsDb.provides.db).toBeUndefined();
 
     const fresh = feature('analytics', { needs: { db: reportsDb.provides.reportsDb } });
-    const app = orThrow(await defineApp('renamed').use(reportsDb).features([fresh]).boot());
+    const app = orThrow(await defineApp('renamed').infra(reportsDb).features([fresh]).boot());
     expect(app.services.reportsDb.url).toBe('pg://reports');
     orThrow(await app.dispose());
 
     // A handle taken from the object before the rename keeps the old key.
     const stale = feature('stale', { needs: { db: makeDb('pg://x').provides.db } });
     // @ts-expect-error -- `db` is not provided: only `reportsDb` is mounted
-    const builder = defineApp('stale').use(reportsDb).features([stale]);
+    const builder = defineApp('stale').infra(reportsDb).features([stale]);
     await expect(builder.boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: { code: DotLifecycleErrorCode.UnsatisfiedNeed },
@@ -171,7 +171,7 @@ describe('rename() moves the handle with the mounted object', () => {
 describe('handle.lazy', () => {
   it('delivers a Lazy<T> even when the provider is eager', async () => {
     const database = makeDb('pg://main');
-    const slow = plugin({
+    const slow = infra({
       name: 'slow',
       needs: { db: database.provides.db.lazy },
       provides: {
@@ -184,13 +184,13 @@ describe('handle.lazy', () => {
         expectTypeOf(db).toEqualTypeOf<Lazy<Rows>>();
       },
     });
-    const app = orThrow(await defineApp('lazy').use(database).use(slow).boot());
+    const app = orThrow(await defineApp('lazy').infra(database).infra(slow).boot());
     expect(app.services.first).toBe('pg://main:q');
     orThrow(await app.dispose());
   });
 });
 
-describe('fake(handle, value) and providesOf over plugins', () => {
+describe('fake(handle, value) and providesOf over units', () => {
   it('mounts a fake under the real handle, type-checked against it', async () => {
     const database = makeDb('pg://main');
     const reports = feature('reports', {
@@ -198,7 +198,7 @@ describe('fake(handle, value) and providesOf over plugins', () => {
       provides: { report: ({ db }) => db.query('q') },
     });
     const fakeDb: Rows = { url: 'fake', query: () => ['faked'] };
-    const app = orThrow(await defineApp('faked').use(fake(database.provides.db, fakeDb)).features([reports]).boot());
+    const app = orThrow(await defineApp('faked').infra(fake(database.provides.db, fakeDb)).features([reports]).boot());
     expect(app.services.report).toEqual(['faked']);
     expect(app.manifest.plugins[0]?.name).toBe('fake:db');
     orThrow(await app.dispose());
@@ -207,7 +207,7 @@ describe('fake(handle, value) and providesOf over plugins', () => {
     fake(database.provides.db, { url: 'fake' });
   });
 
-  it('providesOf() merges plugin handles with feature handles', () => {
+  it('providesOf() merges unit handles with feature handles', () => {
     const database = makeDb('pg://main');
     const billing = feature('billing', { provides: { entitlements: () => 'pro' as const } });
     const merged = providesOf([database, billing]);

@@ -1,8 +1,8 @@
 /**
- * Dot plugins: `vectorIndex(...)` (the app's vector index) and `llm(...)` (the app's
+ * Dot units: `vectorIndex(...)` (the app's vector index) and `llm(...)` (the app's
  * text-generation provider, checked at boot).
  *
- * `vectorIndex(...)` — the app's vector index as a Dot plugin, sized by an embedding space.
+ * `vectorIndex(...)` — the app's vector index as a Dot unit, sized by an embedding space.
  * The embedder itself comes from `embeddings()` in `@arki/embeddings/dot`.
  *
  * Resolved ONCE at boot from the thunks (no module-level cache): the index is Qdrant or the
@@ -11,7 +11,7 @@
  * of failing the boot. Tests inject `provider` and never touch env.
  */
 import type { Embedder, EmbeddingSpace } from '@arki/embeddings';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { isFailure } from '@arki/failure';
 
 import type { LLMProviderConfig } from '../ai-service/factory';
@@ -53,7 +53,7 @@ function processEnv(): EnvSource {
  *
  * @example
  * ```ts
- * defineApp('reader').use(
+ * defineApp('reader').infra(
  *   vectorIndex<VectorPayload>({ collection: 'reader_embeddings', payloadIndexes: ['userId', 'kind'], space: () => embedder.space }),
  * );
  * ```
@@ -61,7 +61,7 @@ function processEnv(): EnvSource {
 export function vectorIndex<P extends Record<string, unknown>>(options: VectorIndexPluginOptions<P>) {
   const { collection, payloadIndexes, env = processEnv, provider, durable = false } = options;
 
-  return plugin({
+  return infra({
     name: 'vectorIndex',
     provides: {
       vectorIndex: (): VectorIndex<P> | { provider: null; durable: false } => {
@@ -99,12 +99,12 @@ export type LlmPluginOptions = LLMProviderConfig & {
  *
  * @example
  * ```ts
- * defineApp('studio').use(llm(() => ({ provider: env.LLM_PROVIDER, model: env.LLM_MODEL })));
+ * defineApp('studio').infra(llm(() => ({ provider: env.LLM_PROVIDER, model: env.LLM_MODEL })));
  * // in a feature: services.llm.generateStructuredResult(prompt, schema)
  * ```
  */
 export function llm(options: LlmPluginOptions | (() => LlmPluginOptions) = {}) {
-  return plugin({
+  return infra({
     name: 'llm',
     provides: {
       llm: async () => {

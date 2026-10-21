@@ -11,7 +11,7 @@ import { chainNativePromise } from './usecase.js';
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
  *
- * DOT is OTel-first: every lifecycle phase and every per-plugin hook
+ * DOT is OTel-first: every lifecycle phase and every per-unit hook
  * automatically emits a span and a duration histogram. When no SDK is
  * registered, the OTel API returns no-op implementations. Instruments are
  * acquired inside the observation boundary so late or defective SDK setup
@@ -25,13 +25,13 @@ import { chainNativePromise } from './usecase.js';
  *   - Phase span: `dot.app.<phase>` — one root span per `configure()` /
  *     `boot()` / `start()` / `stop()` / `dispose()` call. Children
  *     auto-link via async-context.
- *   - Hook span:  `dot.plugin.<hook>` — one child span per plugin's hook
- *     execution. The plugin name lives on `dot.plugin.name`, not in the span
- *     name, so backends can aggregate by hook across plugins.
+ *   - Hook span:  `dot.unit.<hook>` — one child span per unit's hook
+ *     execution. The unit name lives on `dot.unit.name`, not in the span
+ *     name, so backends can aggregate by hook across units.
  *   - Usecase span: `feature.<feature>.<usecase>` — one active span per call
  *     of a `defineFeature(...).usecases(...)` function (see {@link traceUsecase}).
- *   - Attributes (`dot.app.name`, `dot.plugin.name`, `dot.hook`,
- *     `dot.plugin.order`) follow the OTel convention of
+ *   - Attributes (`dot.app.name`, `dot.unit.name`, `dot.hook`,
+ *     `dot.unit.order`) follow the OTel convention of
  *     namespacing under the library's prefix.
  *
  * @see packages/dot/docs/principles.md — principle 3 (deterministic) +
@@ -92,35 +92,35 @@ function recordOutcome(span: Span, outcome: unknown): 'ok' | 'failed' {
 }
 
 /**
- * Wrap a single plugin-hook execution in a child span and record its
+ * Wrap a single unit-hook execution in a child span and record its
  * duration in the histogram. The span auto-links to the active phase
  * span (set by {@link withPhaseSpan}) so traces show a clean parent-child
  * hierarchy:
  *
  *     dot.app.boot
- *     ├── dot.plugin.boot   (dot.plugin.name=env, dot.hook=boot)
- *     ├── dot.plugin.boot   (dot.plugin.name=db,  dot.hook=boot)
- *     └── dot.plugin.boot   (dot.plugin.name=kv,  dot.hook=boot)
+ *     ├── dot.unit.boot   (dot.unit.name=env, dot.hook=boot)
+ *     ├── dot.unit.boot   (dot.unit.name=db,  dot.hook=boot)
+ *     └── dot.unit.boot   (dot.unit.name=kv,  dot.hook=boot)
  *
  * Re-throws on failure after marking the span ERROR so the caller's
  * existing error-handling path stays intact.
  */
-export function withPluginHookSpan<R>(
+export function withUnitHookSpan<R>(
   opts: {
     readonly appName: string;
-    readonly pluginName: string;
+    readonly unitName: string;
     readonly hook: DotLifecycleHook;
     readonly order: number;
   },
   fn: (span: Span) => R,
 ): R {
   const span = observe(() =>
-    tracer().startSpan(`dot.plugin.${opts.hook}`, {
+    tracer().startSpan(`dot.unit.${opts.hook}`, {
       attributes: attrs({
         'dot.app.name': opts.appName,
-        'dot.plugin.name': opts.pluginName,
+        'dot.unit.name': opts.unitName,
         'dot.hook': opts.hook,
-        'dot.plugin.order': opts.order,
+        'dot.unit.order': opts.order,
       }),
     }),
   );
@@ -129,11 +129,11 @@ export function withPluginHookSpan<R>(
     span,
     () => fnWithSpan(span, fn),
     status => {
-      duration('dot.plugin.hook.duration', 'Wall-clock duration of a single plugin lifecycle hook execution.').record(
+      duration('dot.unit.hook.duration', 'Wall-clock duration of a single unit lifecycle hook execution.').record(
         nowMs() - started,
         {
           'dot.app.name': opts.appName,
-          'dot.plugin.name': opts.pluginName,
+          'dot.unit.name': opts.unitName,
           'dot.hook': opts.hook,
           'dot.status': status,
         },
@@ -144,7 +144,7 @@ export function withPluginHookSpan<R>(
 
 /**
  * Wrap an entire app-level phase (`configure`/`boot`/`start`/`stop`/`dispose`)
- * in an active span. Children created by {@link withPluginHookSpan} inherit
+ * in an active span. Children created by {@link withUnitHookSpan} inherit
  * this span as their parent via async-context.
  *
  * The callback's return value (sync or Promise) is propagated unchanged
@@ -155,7 +155,7 @@ export function withPhaseSpan<R>(
     readonly appName: string;
     readonly appVersion?: string;
     readonly phase: DotLifecycleHook;
-    readonly pluginCount: number;
+    readonly unitCount: number;
   },
   fn: (span: Span) => R,
 ): R {
@@ -165,7 +165,7 @@ export function withPhaseSpan<R>(
         'dot.app.name': opts.appName,
         'dot.app.version': opts.appVersion,
         'dot.app.phase': opts.phase,
-        'dot.app.plugin.count': opts.pluginCount,
+        'dot.app.unit.count': opts.unitCount,
       }),
     }),
   );

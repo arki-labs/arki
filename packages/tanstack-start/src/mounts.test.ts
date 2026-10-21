@@ -12,7 +12,7 @@ import { os } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 
 import type { CronContext } from '@arki/schedule/orpc';
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 import { isFailure } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
@@ -20,7 +20,7 @@ import { tanstackStart } from './dot';
 import { authHandlers, cronHandlers, healthHandlers, rpcHandlers } from './mounts';
 
 const triggered: string[] = [];
-const timers = plugin({
+const timers = infra({
   name: 'timers',
   provides: {
     timers: () => ({
@@ -54,7 +54,7 @@ async function startedApp(options: { readonly extensions?: boolean } = {}) {
     },
     cors: () => ({ origins: ['https://shop.example'], extensions: options.extensions ?? false }),
   });
-  const app = await defineApp('shop').use(authn).use(gateway).use(timers).entrypoints(start).start();
+  const app = await defineApp('shop').infra(authn).infra(gateway).infra(timers).entrypoints(start).start();
   if (isFailure(app)) throw new Error(`app did not start: ${app.code}`);
   return { context: { services: app.services }, calls, dispose: () => app.dispose() };
 }
@@ -63,7 +63,7 @@ async function startedApp(options: { readonly extensions?: boolean } = {}) {
 async function bareApp() {
   const { gateway } = makeGateway();
   const start = tanstackStart({ needs: { api: gateway.provides.api }, session: () => null, rpc: () => null });
-  const app = await defineApp('bare').use(gateway).entrypoints(start).start();
+  const app = await defineApp('bare').infra(gateway).entrypoints(start).start();
   if (isFailure(app)) throw new Error(`app did not start: ${app.code}`);
   return { context: { services: app.services }, dispose: () => app.dispose() };
 }

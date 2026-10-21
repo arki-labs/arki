@@ -23,13 +23,13 @@ const KERNEL = (file: string): string => JSON.stringify(fileURLToPath(new URL(`.
 /** The app the paths are checked against: one provider, one consumer, one registered service. */
 const APP_SOURCE = `
 import { defineApp } from ${KERNEL('define-app.ts')};
-import { plugin } from ${KERNEL('plugin-contract.ts')};
+import { infra } from ${KERNEL('unit-contract.ts')};
 
-const database = plugin({
+const database = infra({
   name: 'database',
   provides: { db: () => ({ query: (sql: string) => Promise.resolve([sql]) }) },
 });
-const reports = plugin({
+const reports = infra({
   name: 'reports',
   needs: { db: database.provides.db },
   configure: ctx => {
@@ -37,7 +37,7 @@ const reports = plugin({
   },
   provides: { reports: ({ db }) => ({ daily: () => db.query('daily') }) },
 });
-export default defineApp('jq-paths').use(database).use(reports);
+export default defineApp('jq-paths').infra(database).infra(reports);
 `;
 
 const workDir = mkdtempSync(path.join(tmpdir(), 'dot-json-paths-'));

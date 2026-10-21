@@ -5,7 +5,7 @@ import type { Failure } from '@arki/failure';
 import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { DepsOf } from '../define-feature.js';
-import type { PluginOpenFailure } from '../plugin-contract.js';
+import type { UnitOpenFailure } from '../unit-contract.js';
 import type { SupervisedUsecase, SupervisedUsecases } from './usecase.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
@@ -196,8 +196,8 @@ describe('feature usecase construction', () => {
         ? (accepted: boolean): number | ReturnType<typeof Refused> => (accepted ? 42 : Refused())
         : ConstructionRefused();
     const feature = defineFeature('async-usecase').usecases({ run: create }).entrypoints();
-    type Unit = ReturnType<typeof feature.plugins>[0];
-    expectTypeOf<PluginOpenFailure<Unit>>().toEqualTypeOf<ReturnType<typeof ConstructionRefused>>();
+    type Unit = ReturnType<typeof feature.units>[0];
+    expectTypeOf<UnitOpenFailure<Unit>>().toEqualTypeOf<ReturnType<typeof ConstructionRefused>>();
     const app = orThrow(await defineApp('async-usecase').features([feature]).boot());
     const run = app.services['async-usecase.usecases'].run;
     expectTypeOf<ReturnType<typeof run>>().toEqualTypeOf<

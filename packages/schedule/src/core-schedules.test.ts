@@ -12,17 +12,17 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { DepsOf } from '@arki/dot/feature';
 import type { SuccessOf } from '@arki/failure';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import { composeSchedules, schedule, schedules } from './dot.js';
 
 type Ledger = { readonly close: () => string };
 
-const database = plugin({ name: 'database', provides: { db: () => ({ rows: 3 }) } });
+const database = infra({ name: 'database', provides: { db: () => ({ rows: 3 }) } });
 
 /** infra/: private to the feature; only its usecases and entrypoints see it. */
-const outbox = plugin({
+const outbox = infra({
   name: 'outbox',
   needs: { db: database.provides.db },
   provides: { outbox: ({ db }) => ({ pending: () => db.rows }) },
@@ -52,7 +52,7 @@ const billing = feature('billing', {
 
 const boot = () =>
   defineApp('mixed')
-    .infra(database, plugin({ name: 'ledger', provides: { ledger: (): Ledger => ({ close: () => 'closed' }) } }))
+    .infra(database, infra({ name: 'ledger', provides: { ledger: (): Ledger => ({ close: () => 'closed' }) } }))
     .features([digest, billing])
     .entrypoints(schedule({ clock: 'host' }))
     .start();

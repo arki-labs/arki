@@ -15,7 +15,7 @@ import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { MigratableDb } from './migrate.js';
@@ -79,7 +79,7 @@ describe('migrateDb with in-memory migrations', () => {
 describe('dbMigrations()', () => {
   it('migrates during boot so a dependent plugin can read the tables', async () => {
     let seenLabels: string[] = [];
-    const reader = plugin({
+    const reader = infra({
       name: 'reader',
       needs: { db: service<MigratableDb<typeof relations>>() },
       async boot({ db: handle }) {
@@ -89,9 +89,9 @@ describe('dbMigrations()', () => {
 
     const app = await orThrow(
       defineApp('migrate-test')
-        .use(db({ driver: 'pglite', memory: true, relations }))
-        .use(dbMigrations<typeof relations>({ migrationsFolder }))
-        .use(reader)
+        .infra(db({ driver: 'pglite', memory: true, relations }))
+        .infra(dbMigrations<typeof relations>({ migrationsFolder }))
+        .infra(reader)
         .boot(),
     );
     try {

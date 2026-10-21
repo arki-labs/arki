@@ -23,7 +23,7 @@ import { freePort, isAlive, recordingUi, tempProject, waitFor } from './dev-help
 const CLI = path.resolve(__dirname, '..', 'index.ts');
 const FIXTURE_APP = path.resolve(__dirname, 'fixtures', 'dev-app', 'dot.config.ts');
 const DEFINE_APP_PATH = path.resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const UNIT_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'unit-contract.ts');
 
 let workDir: string;
 const leftovers: number[] = [];
@@ -47,7 +47,7 @@ async function appFile(name: string, body: string): Promise<string> {
   const file = path.join(workDir, `${name}.ts`);
   await writeFile(
     file,
-    `import { defineApp } from '${DEFINE_APP_PATH}';\nimport { plugin } from '${PLUGIN_CONTRACT_PATH}';\n${body}\n`,
+    `import { defineApp } from '${DEFINE_APP_PATH}';\nimport { infra } from '${UNIT_CONTRACT_PATH}';\n${body}\n`,
   );
   return file;
 }
@@ -86,7 +86,7 @@ describe('dot dev hardening', () => {
     const app = await appFile(
       'slot-app',
       `let active = false;
-const slot = plugin({
+const slot = infra({
   name: 'slot',
   logging: () => {
     if (active) throw new Error('Logging is already configured');
@@ -94,7 +94,7 @@ const slot = plugin({
     return { close: () => { active = false; return Promise.resolve(); } };
   },
 });
-export const dev = defineApp('slot-app').use(slot);`,
+export const dev = defineApp('slot-app').infra(slot);`,
     );
     await mkdir(path.join(workDir, 'drizzle'));
     const { result, events, lines, controller } = await session({ app, run: 'sleep 30' });
@@ -118,13 +118,13 @@ export const dev = defineApp('slot-app').use(slot);`,
     const port = await freePort();
     const app = await appFile(
       'env-app',
-      `const check = plugin({ name: 'check', boot: () => {
+      `const check = infra({ name: 'check', boot: () => {
   const env = process.env;
   if (env['DOT_DEV'] !== '1' || env['PORT'] !== '${String(port)}' || !String(env['DOT_DEV_STATE']).endsWith('dev.json')) {
     throw new Error('the preflight env is not the runner env');
   }
 } });
-export const dev = defineApp('env-app').use(check);`,
+export const dev = defineApp('env-app').infra(check);`,
     );
     const { result } = await session({ app, port, once: true });
     const done = await result;

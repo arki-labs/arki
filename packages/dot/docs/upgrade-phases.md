@@ -11,11 +11,12 @@ canonical `UnexpectedDefect`. It remains synchronous and performs no I/O.
 Replace direct `.configure().manifest` access with a failure check:
 
 ```ts run
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
-const catalog = plugin({ name: 'catalog', provides: { catalog: () => ({ ready: true }) } });
-const configured = defineApp('shop').use(catalog).configure();
+const catalog = defineFeature('catalog').provides({ catalog: () => ({ ready: true }) }).entrypoints();
+const configured = defineApp('shop').features([catalog]).configure();
 if (isFailure(configured)) throw new Error(configured.code); // Example's process boundary.
 const manifest = configured.manifest;
 if (manifest.app.name !== 'shop') throw new Error('wrong manifest');
@@ -32,11 +33,11 @@ returned failure erases the contract.
 
 ## Keep each phase's outcomes
 
-The compiler infers refusals from the actual callbacks across plugin, object
-feature, `defineFeature`, `initPlugins`, driver, rename and app builder forms.
+The compiler infers refusals from the actual callbacks across unit, object
+feature, `defineFeature`, `initUnits`, `entrypoint`, rename and app builder forms.
 Avoid annotating them with a broad `Failure` return or a manually restated union.
 Providers expose only their successful service values. Failed providers never
-enter the registry; each completed plugin publishes its services atomically.
+enter the registry; each completed unit publishes its services atomically.
 
 | Operation             | Success        | Failures reachable from this entry point                                                                                                    |
 | --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -75,9 +76,9 @@ rejected: author the callback inline, or explicitly return `undefined` from the
 detached function. A configure callback must never return a Promise. Mounting also checks spread
 replacements: boot callbacks retain concrete outcomes and valid ownership plans,
 and replacement factories preserve the successful shapes carried by their handles.
-Adapter functions must preserve their inferred plugin returns. For overloads,
+Adapter functions must preserve their inferred unit returns. For overloads,
 derive each return with `ReturnType` from its implementation helper; a broad
-`Plugin` annotation discards the actual callback contracts.
+`Unit` annotation discards the actual callback contracts.
 
 Unknown or broad `Failure` factory results cannot prove an exact refusal union
 and are rejected. Keep factory returns inferred, or validate untyped external

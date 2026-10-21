@@ -16,7 +16,7 @@ import { z } from 'zod';
 
 import { defineApp, rename } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin, service, token } from '@arki/dot/plugin';
+import { infra, service, token } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import { journal, journalHandlers, journalWorker, journalWorkflows } from './dot.js';
@@ -50,13 +50,13 @@ function track<App extends { stop(): Promise<unknown>; dispose(): Promise<unknow
   return app;
 }
 
-const dbPlugin = () => plugin({ name: 'db', provides: { db: () => db } });
+const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
 const freshJournal = () => initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 
 /** What a feature's steps talk to: a provider that has a name. */
 type Provider = { readonly name: string };
 const providerOf = (name: string) =>
-  plugin({ name: `${name}-provider`, provides: { provider: (): Provider => ({ name }) } });
+  infra({ name: `${name}-provider`, provides: { provider: (): Provider => ({ name }) } });
 
 const newId = () => `wfr_dot_${++counter}`;
 const stateOf = async (id: string) =>
@@ -74,10 +74,10 @@ describe('journalHandlers({ workflows })', () => {
     const greeter = feature('greeter', { use: [journalHandlers({ workflows: [hello] })] });
     const app = track(
       await orThrow(defineApp('wf-compose')
-        .use(dbPlugin())
-        .use(journal({ j: wj, workflowMeta }))
+        .infra(dbPlugin())
+        .infra(journal({ j: wj, workflowMeta }))
         .features([greeter])
-        .serve(journalWorker({ pollMs: POLL_MS }))
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot()),
     );
     await orThrow(app.start());
@@ -100,11 +100,11 @@ describe('journalHandlers({ workflows })', () => {
     });
     const app = track(
       await orThrow(defineApp('wf-services')
-        .use(dbPlugin())
-        .use(journal({ j: wj, workflowMeta }))
-        .use(providerOf('orders'))
+        .infra(dbPlugin())
+        .infra(journal({ j: wj, workflowMeta }))
+        .infra(providerOf('orders'))
         .features([orders])
-        .serve(journalWorker({ pollMs: POLL_MS }))
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot()),
     );
     await orThrow(app.start());
@@ -136,12 +136,12 @@ describe('journalHandlers({ workflows })', () => {
     const billing = featureOf('billing');
     const app = track(
       await orThrow(defineApp('wf-two-features')
-        .use(dbPlugin())
-        .use(orders.provider)
-        .use(billing.provider)
-        .use(journal({ j: wj, workflowMeta }))
+        .infra(dbPlugin())
+        .infra(orders.provider)
+        .infra(billing.provider)
+        .infra(journal({ j: wj, workflowMeta }))
         .features([orders.feature, billing.feature])
-        .serve(journalWorker({ pollMs: POLL_MS }))
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot()),
     );
     await orThrow(app.start());
@@ -163,8 +163,8 @@ describe('journalHandlers({ workflows })', () => {
       feature(name, { use: [journalHandlers({ workflows: [flow] })] });
     await expect(
       defineApp('wf-twice')
-        .use(dbPlugin())
-        .use(journal({ j: wj, workflowMeta }))
+        .infra(dbPlugin())
+        .infra(journal({ j: wj, workflowMeta }))
         .features([declare('one'), declare('two')])
         .boot(),
     ).resolves.toMatchObject({
@@ -186,10 +186,10 @@ describe('journalHandlers({ workflows })', () => {
     const bare = feature('bare', { use: [journalHandlers(erased)] });
     await expect(
       defineApp('wf-missing')
-        .use(dbPlugin())
-        .use(journal({ j: wj, workflowMeta }))
+        .infra(dbPlugin())
+        .infra(journal({ j: wj, workflowMeta }))
         .features([bare])
-        .serve(journalWorker({ pollMs: POLL_MS }))
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -206,8 +206,8 @@ describe('journalHandlers({ workflows })', () => {
       .finish();
     const approvals = feature('approvals', { use: [journalHandlers({ workflows: [flow] })] });
     const configured = orThrow(defineApp('wf-manifest')
-      .use(dbPlugin())
-      .use(journal({ j: wj, workflowMeta }))
+      .infra(dbPlugin())
+      .infra(journal({ j: wj, workflowMeta }))
       .features([approvals])
       .configure());
     expect(configured.manifest.actions.filter(action => action.binding === 'journal')).toEqual([
@@ -260,10 +260,10 @@ describe('journalWorker() and workflows', () => {
     const sleepy = feature('sleepy', { use: [journalHandlers({ workflows: [flow] })] });
     const app = track(
       await orThrow(defineApp('wf-timer')
-        .use(dbPlugin())
-        .use(journal({ j: wj, workflowMeta }))
+        .infra(dbPlugin())
+        .infra(journal({ j: wj, workflowMeta }))
         .features([sleepy])
-        .serve(journalWorker({ pollMs: POLL_MS }))
+        .entrypoints(journalWorker({ pollMs: POLL_MS }))
         .boot()),
     );
     await orThrow(app.start());

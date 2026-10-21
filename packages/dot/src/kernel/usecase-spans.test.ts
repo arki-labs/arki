@@ -11,7 +11,7 @@ import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import type { SupervisedUsecase } from './usecase.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
-import { traceUsecase, withPhaseSpan, withPluginHookSpan } from './otel.js';
+import { traceUsecase, withPhaseSpan, withUnitHookSpan } from './otel.js';
 import { superviseUsecase } from './usecase.js';
 
 const tracer = trace.getTracer('@arki/dot');
@@ -149,13 +149,13 @@ describe('with an SDK registered', () => {
   });
 
   it('activates hook context while the hook runs, including spans created by hook work', () => {
-    withPluginHookSpan({ appName: 'context', pluginName: 'plugin', hook: 'boot', order: 0 }, hookSpan => {
+    withUnitHookSpan({ appName: 'context', unitName: 'plugin', hook: 'boot', order: 0 }, hookSpan => {
       expect(trace.getActiveSpan()).toBe(hookSpan);
       trace.getTracer('test').startSpan('hook.child').end();
     });
     const hookSpan = exporter
       .getFinishedSpans()
-      .find(span => span.attributes['dot.app.name'] === 'context' && span.name === 'dot.plugin.boot');
+      .find(span => span.attributes['dot.app.name'] === 'context' && span.name === 'dot.unit.boot');
     if (hookSpan === undefined) throw new Error('missing context hook span');
     expect(spanNamed('hook.child').parentSpanContext?.spanId).toBe(hookSpan.spanContext().spanId);
   });
@@ -168,9 +168,9 @@ describe('with an SDK registered', () => {
     try {
       const success = Promise.resolve('kept');
       expect(
-        withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () => success),
+        withUnitHookSpan({ appName: 'reporter', unitName: 'plugin', hook: 'boot', order: 0 }, () => success),
       ).toBe(success);
-      expect(withPhaseSpan({ appName: 'reporter', phase: 'boot', pluginCount: 1 }, () => 'plain')).toBe('plain');
+      expect(withPhaseSpan({ appName: 'reporter', phase: 'boot', unitCount: 1 }, () => 'plain')).toBe('plain');
       const primary = new Error('primary');
       const wrapped = traceUsecase(
         'reporter',
@@ -209,7 +209,7 @@ describe('with an SDK registered', () => {
     });
     try {
       const primary = OrderNotFound();
-      const result = withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () =>
+      const result = withUnitHookSpan({ appName: 'reporter', unitName: 'plugin', hook: 'boot', order: 0 }, () =>
         Promise.resolve(primary),
       );
       expect(await Promise.resolve(result)).toBe(primary);
@@ -247,7 +247,7 @@ describe('with an SDK registered', () => {
     try {
       const result: unknown = runInNewContext('Promise.reject(cause)', { cause });
       expect(
-        withPluginHookSpan({ appName: 'reporter', pluginName: 'plugin', hook: 'boot', order: 0 }, () => result),
+        withUnitHookSpan({ appName: 'reporter', unitName: 'plugin', hook: 'boot', order: 0 }, () => result),
       ).toBe(result);
       await expect(Promise.resolve(result)).rejects.toBe(cause);
       expect(exception).toHaveBeenCalledTimes(1);
@@ -261,8 +261,8 @@ describe('with an SDK registered', () => {
 
   it('observes foreign promises without changing their identity or invoking deferred thenables', async () => {
     const foreign: unknown = runInNewContext('Promise.resolve("foreign success")');
-    const observed = withPluginHookSpan(
-      { appName: 'foreign', pluginName: 'promise', hook: 'boot', order: 0 },
+    const observed = withUnitHookSpan(
+      { appName: 'foreign', unitName: 'promise', hook: 'boot', order: 0 },
       () => foreign,
     );
     expect(observed).toBe(foreign);
@@ -278,7 +278,7 @@ describe('with an SDK registered', () => {
       },
     });
     expect(
-      withPluginHookSpan({ appName: 'deferred', pluginName: 'query', hook: 'boot', order: 0 }, () => deferred),
+      withUnitHookSpan({ appName: 'deferred', unitName: 'query', hook: 'boot', order: 0 }, () => deferred),
     ).toBe(deferred);
     expect(inspected).toBe(false);
   });

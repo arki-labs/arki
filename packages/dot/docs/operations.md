@@ -1,12 +1,12 @@
 # Logging, shutdown and timeouts
 
-What an app needs once it leaves your laptop: one logging plugin, a clean
+What an app needs once it leaves your laptop: one logging unit, a clean
 shutdown on `SIGTERM`, and a watchdog so a hung hook fails loudly.
 
 ## The lifecycle at a glance
 
-`defineApp(name)` returns a builder. Calling `.use(plugin)` accumulates
-plugins. The lifecycle then flows:
+`defineApp(name)` returns a builder. Calling `.infra(...)`, `.features([...])` and `.entrypoints(...)`
+accumulates units. The lifecycle then flows:
 
 ```text
 defined ──configure()──▶ configured ──boot()──▶ booted ──start()──▶ started
@@ -23,7 +23,7 @@ The full contract, with every failure rule, is in [Lifecycle](./lifecycle.md).
 
 Dot logs through `@arki/log`. The kernel's own records go to the
 `arki:dot:lifecycle` category. Importing Dot switches nothing on: the app
-does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
+does, with `log()` from `@arki/dot/log` as its **first** `.infra(...)` unit.
 
 ```ts
 import { defineApp } from '@arki/dot';
@@ -32,7 +32,7 @@ import { isFailure } from '@arki/failure';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 const app = await defineApp('checkout')
-  .use(
+  .infra(
     log(() => ({
       ...fromEnv(),
       context: asyncContext(),
@@ -51,15 +51,15 @@ if (isFailure(app)) throw new Error(app.code);
 - `log()` reads no env on its own (spread `fromEnv()`), installs no
   OpenTelemetry SDK and does not patch `console`.
 
-`log()` fills Dot's **logging slot**. Any plugin can fill it with
-`plugin({ name, logging: ({ appName }) => handle })`, where `handle` has
+`log()` fills Dot's **logging slot**. Any unit can fill it with
+`infra({ name, logging: ({ appName }) => handle })`, where `handle` has
 `close(): Promise<void>`. The kernel calls the factory before its first
 boot lifecycle record (`boot: starting`) and closes the handle after its
 last one (`dispose: complete`). Logging is inactive during synchronous, I/O-free `configure`. On a failed `boot` or `start`,
 the failure is written first and logging closes last. An app has at most one
-logging plugin: two is `ARKI_DOT_E018`.
+logging unit: two is `ARKI_DOT_E018`.
 
-Without a logging plugin, `@arki/log` keeps only the first 64 records at
+Without a logging unit, `@arki/log` keeps only the first 64 records at
 `warn` and above, and writes nothing else.
 
 ## Shutdown and timeouts
@@ -68,18 +68,21 @@ Two kernel helpers close the gap between "boots on my machine" and "runs
 under a process manager":
 
 ```ts
-import { defineApp, hookSignals, plugin } from '@arki/dot';
+import { defineApp, entrypoint, hookSignals } from '@arki/dot';
 import { isFailure } from '@arki/failure';
 
-const worker = plugin({
+let timer: ReturnType<typeof setInterval> | undefined;
+const worker = entrypoint({
   name: 'worker',
-  provides: { jobs: () => ({ poll: () => setInterval(() => {}, 1_000) }) },
-  start: ({ jobs }) => {
-    jobs.poll(); // begin processing
+  start: () => {
+    timer = setInterval(() => {}, 1_000); // begin processing
+  },
+  stop: () => {
+    clearInterval(timer);
   },
 });
 
-const app = await defineApp('shop', { hookTimeoutMs: 30_000 }).use(worker).start();
+const app = await defineApp('shop', { hookTimeoutMs: 30_000 }).entrypoints(worker).start();
 if (isFailure(app)) throw new Error(app.code);
 
 hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise

@@ -1,10 +1,10 @@
 # Dot documentation
 
-`@arki/dot` composes an app from typed plugins. These pages are small and
+`@arki/dot` composes an app from typed units. These pages are small and
 organised by job. Pick the one that matches what you are about to do.
 
 ```text
- new here?   principles → quickstart → di → plugin-authoring
+ new here?   principles → quickstart → di → unit-authoring
  shipping?   operations → recipes/deploy → recipes/upgrade
  an agent?   ../llms.txt → agent-guide
 ```
@@ -22,12 +22,12 @@ organised by job. Pick the one that matches what you are about to do.
   error, inspect it with `dot explain` and `dot doctor`.
 - [Dependency injection](./di.md): needs, provides, handles, tokens, `rename`,
   lazy services and `defineFeature`.
-- [A complex setup](./complex-setup.md): a many-plugin app and the order it
+- [A complex setup](./complex-setup.md): a many-unit app and the order it
   boots in.
-- [Plugin authoring](./plugin-authoring.md): write your own plugin.
+- [Unit authoring](./unit-authoring.md): write your own unit.
 - [Lifecycle](./lifecycle.md): the five hooks, failure order, idempotency.
-- [Testing plugins](./testing.md): `testPlugin` against fakes, `testApp`
-  across real plugins.
+- [Testing units](./testing.md): `testUnit` against fakes, `testApp`
+  across real units.
 - [Logging, shutdown and timeouts](./operations.md): `log()`, `hookSignals`,
   `createAppRuntime`, `hookTimeoutMs`.
 - [Diagnostics](./diagnostics.md): `app.manifest`, `app.diagnostics` and the
@@ -48,7 +48,7 @@ Each recipe ends in one command and its expected output.
 ## For package authors
 
 - [Adapter authoring](./adapter-authoring.md): expose your package as a Dot
-  plugin through a `./dot` subpath export.
+  unit through a `./dot` subpath export.
 
 ## For agents
 

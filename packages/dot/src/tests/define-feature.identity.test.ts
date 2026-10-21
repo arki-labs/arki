@@ -6,7 +6,7 @@
  * - A1: a child needs the GLOBAL `database.provides.db`; its parent owns a
  *   same-shaped private infra `db`. The type-level remap went by key, so the
  *   app compiled without `database` and booted into `UnsatisfiedNeed` (E012).
- * - A2: an infra plugin binds its need to `dbB.provides.db`; the feature
+ * - A2: an infra unit binds its need to `dbB.provides.db`; the feature
  *   declares `dbA.provides.db`. The shapes matched; `.infra()` threw E026.
  *
  * Both are compile errors now, at the step that can see them. Their
@@ -19,15 +19,15 @@ import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { defineApp } from '../define-app.js';
 import { defineFeature, entrypointOnly } from '../define-feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { plugin, service } from '../plugin-contract.js';
+import { infra, service } from '../unit-contract.js';
 import { testApp } from '../test-harness.js';
 
 type Db = { readonly query: (sql: string) => Promise<readonly string[]> };
 const dbOf = (tag: string) => (): Db => ({ query: sql => Promise.resolve([`${tag}:${sql}`]) });
 
 describe('A1: a child need is remapped onto the parent only when it names the parent’s own infra handle', () => {
-  const database = plugin({ name: 'database', provides: { db: dbOf('global') } });
-  const privateDb = plugin({ name: 'private-db', provides: { db: dbOf('private') } });
+  const database = infra({ name: 'database', provides: { db: dbOf('global') } });
+  const privateDb = infra({ name: 'private-db', provides: { db: dbOf('private') } });
 
   const readsGlobal = defineFeature('parent.child')
     .needs({ db: database.provides.db })
@@ -62,25 +62,25 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
 
   it('the raw unit list says the same thing', async () => {
     // @ts-expect-error -- the raw list needs `db` before anything provides it; the type guard on testApp's argument says so too
-    await expect(testApp(parent.plugins()).boot()).resolves.toMatchObject({
+    await expect(testApp(parent.units()).boot()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
       cause: { code: DotLifecycleErrorCode.UnsatisfiedNeed },
     });
-    const app = orThrow(await testApp(owner.plugins()).boot());
+    const app = orThrow(await testApp(owner.units()).boot());
     orThrow(await app.dispose());
   });
 });
 
-describe('A2: an infra plugin bound to a handle must be bound to the feature’s handle', () => {
-  const dbA = plugin({ name: 'dbA', provides: { db: dbOf('a') } });
-  const dbB = plugin({ name: 'dbB', provides: { db: dbOf('b') } });
-  const storeBoundToB = plugin({
+describe('A2: an infra unit bound to a handle must be bound to the feature’s handle', () => {
+  const dbA = infra({ name: 'dbA', provides: { db: dbOf('a') } });
+  const dbB = infra({ name: 'dbB', provides: { db: dbOf('b') } });
+  const storeBoundToB = infra({
     name: 'store',
     needs: { db: dbB.provides.db },
     provides: { repos: ({ db }) => ({ all: () => db.query('all') }) },
   });
 
-  it('another plugin’s same-shaped handle is refused at .infra()', () => {
+  it('another unit’s same-shaped handle is refused at .infra()', () => {
     expect(() =>
       // @ts-expect-error -- the store binds `db` to "dbB"; this feature's `db` is "dbA"
       defineFeature('f').needs({ db: dbA.provides.db }).infra(storeBoundToB),
@@ -98,7 +98,7 @@ describe('A2: an infra plugin bound to a handle must be bound to the feature’s
     orThrow(await app.dispose());
   });
 
-  it('a feature that declares the need anonymously cannot take a bound plugin', () => {
+  it('a feature that declares the need anonymously cannot take a bound unit', () => {
     const anonymous = defineFeature('k').needs({ db: service<Db>() });
     expect(() =>
       // @ts-expect-error -- the store binds `db` to "dbB"; an anonymous need is not that handle

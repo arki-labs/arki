@@ -12,7 +12,7 @@ import type { Ui } from '@arki/cli';
 import type { DiagnosticIssue, DiagnosticStatus, DotDiagnosticsSnapshot } from '../diagnostics.js';
 import type { DoctorReport, DoctorStatus } from './failures.js';
 
-/** Every issue in the snapshot: top-level, then per plugin, action, service and lifecycle entry. */
+/** Every issue in the snapshot: top-level, then per unit, action, service and lifecycle entry. */
 export function allIssues(snap: DotDiagnosticsSnapshot): DiagnosticIssue[] {
   return [
     ...snap.issues,
@@ -72,7 +72,7 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DoctorStatus): s
     '='.repeat(title.length),
     `generatedAt: ${snap.generatedAt}`,
     '',
-    `Plugins (${snap.plugins.length})`,
+    `Units (${snap.plugins.length})`,
   );
   if (snap.plugins.length === 0) {
     lines.push('  (none)');
@@ -131,7 +131,7 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DoctorStatus): s
   return lines.join('\n');
 }
 
-/** Print the report as text: per-plugin status, services, actions, lifecycle and app-level issues, the verdict. */
+/** Print the report as text: per-unit status, services, actions, lifecycle and app-level issues, the verdict. */
 export function renderDoctorText(report: DoctorReport, ui: Ui): void {
   ui.out(renderTextDoctor(report, report.status));
 }

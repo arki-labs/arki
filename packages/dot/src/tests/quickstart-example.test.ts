@@ -17,19 +17,28 @@ import shop from '../../docs/examples/quickstart.js';
 const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
 describe('quickstart example', () => {
-  it('boots provider first, places an order through the needed db, and disposes', async () => {
+  it('boots infra in order, then the feature, and both write through the one db', async () => {
     const app = orThrow(await shop.boot());
-    expect(app.manifest.plugins.map(entry => entry.name)).toEqual(['database', 'orders']);
+    expect(app.manifest.plugins.map(entry => [entry.name, entry.role])).toEqual([
+      ['database', 'infra'],
+      ['sessions', 'infra'],
+      ['orders', 'feature'],
+    ]);
+    expect(app.services.sessions.open('u1')).toEqual({ userId: 'u1' });
     expect(app.services.orders.place(1250)).toEqual({ id: 1, cents: 1250 });
-    expect(app.services.db.count()).toBe(1);
+    // Both units got the same db instance: the graph wires one provider to every unit that needs it.
+    expect([app.services.db.count('sessions'), app.services.db.count('orders')]).toEqual([1, 1]);
     orThrow(await app.dispose());
   });
 
   it('quotes the guard message that the compiler prints for the wrong order', () => {
-    const guard = /'(DOT: this unit needs services that nothing before it provides[^']*)'/.exec(
-      read('../define-app.ts'),
-    )?.[1];
+    const source = read('../define-app.ts');
+    const page = read('../../docs/quickstart.md');
+    const guard = /'(DOT: a unit in this list cannot be mounted at its position)'/.exec(source)?.[1];
     expect(guard).toBeDefined();
-    expect(read('../../docs/quickstart.md')).toContain(`''${guard ?? ''}''`);
+    expect(page).toContain(`''${guard ?? ''}''`);
+    // The page names the alias the compiler prints for the reason, so renaming it must update the page.
+    expect(source).toContain('type NeedsError<');
+    expect(page).toContain('NeedsError<EmptyShape');
   });
 });

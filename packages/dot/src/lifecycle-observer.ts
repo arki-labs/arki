@@ -2,7 +2,7 @@
  * Lifecycle observer surface for the DOT kernel.
  *
  * `DotLifecycleObserver` is the in-process companion to the OTel signals
- * emitted by {@link withPhaseSpan} / {@link withPluginHookSpan}. Where OTel
+ * emitted by {@link withPhaseSpan} / {@link withUnitHookSpan}. Where OTel
  * is the contract for cross-process tracing (consumers register an SDK
  * and ship spans to a backend), the observer is the contract for *local*
  * programmatic inspection — used by tests, CLI tooling, ASCII waterfalls,
@@ -24,7 +24,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  * observer. Discriminated by `kind`:
  *
  *   - `'phase'`     — boundary of a top-level lifecycle phase
- *   - `'plugin-hook'`  — boundary of a single plugin's hook execution
+ *   - `'unit-hook'`  — boundary of a single unit's hook execution
  *
  * Status discriminates the boundary itself:
  *
@@ -35,7 +35,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  * `starting` events never carry `durationMs` / `error`. `completed` events
  * carry `durationMs`. `failed` events carry both `durationMs` and `error`.
  */
-export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotPluginHookLifecycleEvent;
+export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotUnitHookLifecycleEvent;
 
 /** Possible event statuses. See {@link DotLifecycleEvent}. */
 export type DotLifecycleEventStatus = 'starting' | 'completed' | 'failed';
@@ -56,14 +56,14 @@ export type DotPhaseLifecycleEvent = {
   readonly timestamp: number;
 };
 
-/** Boundary of a single plugin's hook execution. */
-export type DotPluginHookLifecycleEvent = {
-  readonly kind: 'plugin-hook';
+/** Boundary of a single unit's hook execution. */
+export type DotUnitHookLifecycleEvent = {
+  readonly kind: 'unit-hook';
   /** The phase the hook belongs to. */
   readonly phase: DotLifecycleHook;
-  /** The plugin whose hook is being executed. */
+  /** The unit whose hook is being executed. */
   readonly plugin: string;
-  /** Topological order of the plugin within the phase (0-based). */
+  /** Topological order of the unit within the phase (0-based). */
   readonly order: number;
   readonly status: DotLifecycleEventStatus;
   readonly appName: string;
@@ -91,7 +91,7 @@ export type DotPluginHookLifecycleEvent = {
  * const app = await defineApp('my-app', {
  *   observers: [(event) => events.push(event)],
  * })
- *   .use(myPlugin)
+ *   .infra(myUnit)
  *   .boot();
  *
  * // events now contains the full configure + boot event stream.

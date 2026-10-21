@@ -24,7 +24,7 @@ FROM oven/bun:1-alpine AS runner
 RUN apk add --no-cache curl tini
 WORKDIR /app
 COPY --from=build --chown=bun:bun /app/.output ./.output
-# Applied on boot by the dbMigrations plugin (src/app.ts reads ./drizzle).
+# Applied on boot by the dbMigrations unit (src/app.ts reads ./drizzle).
 COPY --from=build --chown=bun:bun /app/drizzle ./drizzle
 USER bun
 ENV NODE_ENV=production \

@@ -14,12 +14,12 @@ import { discoverApp, guards } from '../discover.js';
 import { tempProject } from './dev-helpers.js';
 
 const DEFINE_APP_PATH = path.resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const UNIT_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'unit-contract.ts');
 
 const source = (exports: string): string => `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const p = plugin({ name: 'p', boot: () => ({}) });
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const p = infra({ name: 'p', boot: () => ({}) });
 ${exports}
 `;
 
@@ -44,7 +44,7 @@ async function discover(exports: string, prefer?: 'default' | 'dev') {
 describe('discoverApp prefer', () => {
   it('takes an unstarted dev builder over default when prefer is dev', async () => {
     const result = await discover(
-      `export const dev = defineApp('dev-app').use(p);\nexport default defineApp('prod-app').use(p);`,
+      `export const dev = defineApp('dev-app').infra(p);\nexport default defineApp('prod-app').infra(p);`,
       'dev',
     );
     expect(result.exportName).toBe('dev');
@@ -53,21 +53,21 @@ describe('discoverApp prefer', () => {
 
   it('keeps the default export without prefer, even when a dev export exists', async () => {
     const result = await discover(
-      `export const dev = defineApp('dev-app').use(p);\nexport default defineApp('prod-app').use(p);`,
+      `export const dev = defineApp('dev-app').infra(p);\nexport default defineApp('prod-app').infra(p);`,
     );
     expect(result.exportName).toBe('default');
   });
 
   it('falls back to the usual order when the dev export is already configured', async () => {
     const result = await discover(
-      `export const dev = defineApp('dev-app').use(p).configure();\nexport const app = defineApp('prod-app').use(p);`,
+      `export const dev = defineApp('dev-app').infra(p).configure();\nexport const app = defineApp('prod-app').infra(p);`,
       'dev',
     );
     expect(result.exportName).toBe('app');
   });
 
   it('uses the default export under prefer dev when there is no dev export', async () => {
-    const result = await discover(`export default defineApp('prod-app').use(p);`, 'dev');
+    const result = await discover(`export default defineApp('prod-app').infra(p);`, 'dev');
     expect(result.exportName).toBe('default');
   });
 });

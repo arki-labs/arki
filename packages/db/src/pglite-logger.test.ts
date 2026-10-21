@@ -8,7 +8,7 @@ import type { Logger } from 'drizzle-orm';
 import { defineRelations, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import { db } from './dot.js';
@@ -44,7 +44,7 @@ describe('pglite driver + logger', () => {
     const { logger, queries } = recordingLogger();
     const app = await orThrow(
       defineApp('pglite-logger')
-        .use(db({ driver: 'pglite', memory: true, relations, logger }))
+        .infra(db({ driver: 'pglite', memory: true, relations, logger }))
         .boot(),
     );
     try {

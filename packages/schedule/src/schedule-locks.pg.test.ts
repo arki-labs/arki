@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { DotApp } from '@arki/dot';
 import type { Failure } from '@arki/failure';
 import { defineFeature } from '@arki/dot/feature';
-import { defineApp, plugin } from '@arki/dot/plugin';
+import { defineApp, infra } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { createLocks } from '@arki/lock';
 import { ensureLockTable, pgLease } from '@arki/lock/pg/lease';
@@ -59,7 +59,7 @@ async function replica(name: string, work: Work) {
   pools.push(pool);
   const db: NodePgDatabase = drizzle({ client: pool });
   const lockService = createLocks({ store: pgLease(db, { ttl: TTL, table: TABLE }), namespace: 'cluster' });
-  const core = defineFeature('reports').infra(plugin({ name: 'locks', provides: { locks: () => lockService } }));
+  const core = defineFeature('reports').infra(infra({ name: 'locks', provides: { locks: () => lockService } }));
   const reports = core.entrypoints(
     schedules(core, [
       { name: 'nightly-report', cron: '0 3 * * *', lock: { holdAtLeast: 0 }, handler: (_deps, run) => work(name, run) },

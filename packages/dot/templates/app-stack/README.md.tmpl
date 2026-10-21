@@ -6,7 +6,7 @@ A full-stack app made with `dot new`. It runs on Bun and uses:
 - **oRPC** for a typed API at `/api/rpc`.
 - **Postgres + Drizzle** through `@arki/db`.
 - **`@arki/journal`** so every write is a command that also records an event: an audit trail you get for free.
-- **`@arki/dot`** to compose the server from plugins: logging, env, database, migrations, journal.
+- **`@arki/dot`** to compose the server from units: logging, env, database, migrations, journal.
 - **`@arki/ui`** with the workbench theme in `src/workbench.css`.
 
 It ships one example feature, `notes`, from the table to the page.
@@ -35,14 +35,14 @@ Tests need no Docker: `bun run test` boots the app on an in-memory PGlite databa
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run db:generate` | Writes a new migration into `drizzle/` after you change a `tables.ts`. |
 | `bun run db:migrate` | Applies pending migrations to `DB_URL`. The server also does this on boot. |
-| `bun run dot:explain` | Prints the app's plugins and services. |
-| `bun run dot:doctor` | Boots the app and checks every plugin (needs `DB_URL`). |
+| `bun run dot:explain` | Prints the app's units and services. |
+| `bun run dot:doctor` | Boots the app and checks every unit (needs `DB_URL`). |
 
 ## Database migrations
 
 1. Change or add a `src/features/<name>/tables.ts`.
 2. `bun run db:generate` writes `drizzle/<timestamp>_<name>/migration.sql`. Commit it.
-3. Restart the server, or run `bun run db:migrate`. The `dbMigrations` plugin in `src/app.ts` applies pending migrations every time the app boots, from `./drizzle` in the working directory.
+3. Restart the server, or run `bun run db:migrate`. The `dbMigrations` unit in `src/app.ts` applies pending migrations every time the app boots, from `./drizzle` in the working directory.
 
 ## Deploy to Coolify
 
@@ -60,7 +60,7 @@ To try the image locally: `docker build -t {{name}} .` then
 
 ## Coming next
 
-These `@arki` packages are not published yet. They will plug into this app as DOT plugins when they are:
+These `@arki` packages are not published yet. They will plug into this app as DOT units when they are:
 
 - **Sign-in** (`@arki/auth`): the journal's `actorId` will hold the signed-in user instead of `null`.
 - **Background jobs** (`@arki/queue`): until then, journal effects already run after commit in the built-in worker.

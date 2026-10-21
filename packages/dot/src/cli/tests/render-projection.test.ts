@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
-import { plugin } from '../../plugin-contract.js';
+import { infra } from '../../unit-contract.js';
 import { runExplain } from '../explain.js';
 import { program } from '../index.js';
 import { renderProjection } from '../render-projection.js';
@@ -143,13 +143,13 @@ export function project(manifest) {
 `,
     );
 
-    const api = plugin({
+    const api = infra({
       name: 'api',
       configure: ctx => {
         ctx.registerProjection({ format: 'help-text', binding: 'cli', module: './missing.ts' });
       },
     });
-    const builder = defineApp('cli-app').use(api);
+    const builder = defineApp('cli-app').infra(api);
 
     const projected = await runExplain(builder, { as: 'help-text', module: './override.ts', appFilePath });
 

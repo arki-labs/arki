@@ -1,46 +1,63 @@
 /**
- * The quickstart app: an in-memory database and an orders service that needs it.
+ * The quickstart app: an in-memory database, a session store on top of it, and an
+ * orders feature that needs the database.
  *
  * `docs/quickstart.md` shows the regions below, and its run blocks call
  * `dot explain` and `dot doctor` on this file. `src/tests/quickstart-example.test.ts`
  * boots it, so the tutorial cannot drift from what the kernel does.
  */
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 
 // #region database
 type Order = { readonly id: number; readonly cents: number };
 
-export const database = plugin({
+export const database = infra({
   name: 'database',
   provides: {
-    // A stand-in for a real client. It is a plain array, so nobody gets paged at 3 a.m.
+    // A stand-in for a real client: tables are plain arrays, so nobody gets paged at 3 a.m.
     db: () => {
-      const rows: Order[] = [];
+      const tables = new Map<string, unknown[]>();
+      const table = (name: string): unknown[] => tables.get(name) ?? tables.set(name, []).get(name) ?? [];
       return {
-        insert: (row: Order) => rows.push(row),
-        count: () => rows.length,
+        insert: (name: string, row: unknown) => table(name).push(row),
+        count: (name: string) => table(name).length,
       };
     },
   },
 });
 // #endregion database
 
-// #region orders
-export const orders = plugin({
-  name: 'orders',
+// #region sessions
+export const sessions = infra({
+  name: 'sessions',
   needs: { db: database.provides.db }, // the handle, not a string: a typo cannot compile
   provides: {
-    orders: ({ db }) => ({
-      place: (cents: number): Order => {
-        const order = { id: db.count() + 1, cents };
-        db.insert(order);
-        return order;
+    sessions: ({ db }) => ({
+      open: (userId: string) => {
+        db.insert('sessions', { userId });
+        return { userId };
       },
     }),
   },
 });
+// #endregion sessions
+
+// #region orders
+export const orders = defineFeature('orders')
+  .needs({ db: database.provides.db })
+  .provides({
+    orders: ({ db }) => ({
+      place: (cents: number): Order => {
+        const order = { id: db.count('orders') + 1, cents };
+        db.insert('orders', order);
+        return order;
+      },
+    }),
+  })
+  .entrypoints(); // nothing calls orders from outside yet
 // #endregion orders
 
 // #region app
-export default defineApp('shop').use(database).use(orders);
+export default defineApp('shop').infra(database, sessions).features([orders]);
 // #endregion app

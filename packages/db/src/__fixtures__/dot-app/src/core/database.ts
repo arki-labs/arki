@@ -2,7 +2,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 
 export const client = new PGlite();
 export const handle = drizzle({ client });
@@ -12,4 +12,4 @@ export type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
 /** What a repository factory takes: the pool or a transaction. */
 export type Database = Db | Transaction;
 
-export const database = plugin({ name: 'database', provides: { db: (): Db => handle } });
+export const database = infra({ name: 'database', provides: { db: (): Db => handle } });

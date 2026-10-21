@@ -132,13 +132,13 @@ Upgrade with all old writers stopped: drain active requests, inventory legacy pe
 | `@arki/kv/errors` | `RateLimitExceededError`, `KV_INITIALIZATION_ERROR_CODES`, `KVInitializationError` |
 | `@arki/kv/instance` | `initializeKV`, `createKVInstance` |
 | `@arki/kv/redis/idempotency` | `redisResponseCache`, the response cache for `@arki/http/idempotency` |
-| `@arki/kv/dot` | `kv()`, `kv.optional()`, the Dot plugin |
+| `@arki/kv/dot` | `kv()`, `kv.optional()`, the Dot unit |
 
 ## Failure behaviour
 
 - A rate limit hit throws `RateLimitExceededError`. Answer 429 and send `cause.getHttpHeaders(points)`.
 - A missing URL: `createKV` throws. `createKVInstance` returns `null` in development and throws a `KVInitializationError` in production. Match on `error.code` (`KV_INIT_E001` to `KV_INIT_E003`).
-- The Dot plugin fails boot with `ARKI_KV_PLUGIN_E001` (no URL) or `ARKI_KV_PLUGIN_E002` (the probe failed).
+- The Dot unit fails boot with `ARKI_KV_PLUGIN_E001` (no URL) or `ARKI_KV_PLUGIN_E002` (the probe failed).
 - If the rate-limiter Redis client is not ready, the limiter uses memory instead of throwing. Your code keeps working. Persistence is briefly lost.
 - `get` returns `undefined` for a missing or expired key. It does not throw.
 
@@ -158,8 +158,8 @@ Never match on the message.
 `@arki/kv` ships an optional `@arki/kv/dot` adapter for the
 [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
 
-- The plugin publishes `kv` through `provides`. Consumers write
-  `needs: { kv: kvPlugin.provides.kv }`; `.lazy` on the handle gives a `Lazy<T>`.
+- The unit publishes `kv` through `provides`. Consumers write
+  `needs: { kv: kvInfra.provides.kv }`; `.lazy` on the handle gives a `Lazy<T>`.
 - `kv()` fails boot without a URL (`ARKI_KV_PLUGIN_E001`).
 
 ### Optional KV: `kv.optional()`
@@ -173,7 +173,7 @@ as `kv()` and publishes `kv` as `KV | null`:
 - A URL: the same client `kv()` opens. `dispose` closes it.
 
 ```ts
-import type { Provided } from '@arki/dot/plugin';
+import type { Provided } from '@arki/dot/unit';
 import { kv } from '@arki/kv/dot';
 
 const env = { KV_URL: process.env.KV_URL };
@@ -193,7 +193,7 @@ request. An unreachable Redis never answers, so the probe gives up after
 `probeTimeoutMs` (default `5000`) and closes the client. Off by default.
 
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
-  package for plugin authoring, lifecycle, diagnostics, and the
+  package for unit authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
 ## Support

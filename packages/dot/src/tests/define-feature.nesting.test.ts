@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { AnyDefinedFeature, Provided, ServicesBag } from '../feature.js';
-import type { AnyPlugin } from '../plugin-contract.js';
+import type { AnyUnit } from '../unit-contract.js';
 import type { Db, Tx } from './fixtures/nested-digest/db.js';
 import type { digestLogic } from './fixtures/nested-digest/digest/feature.js';
 import type { Repos } from './fixtures/nested-digest/digest/infra/store.js';
@@ -26,8 +26,7 @@ import { textUi } from '../cli/tests/text-ui.js';
 import {
   allFeatures,
   defineFeature,
-  driven,
-  driver,
+  entrypoint,
   entrypointOnly,
   mountFeatures,
   ownUnits,
@@ -37,7 +36,8 @@ import {
   servicesOf,
   sliceOf,
 } from '../feature.js';
-import { defineApp, fake, plugin } from '../index.js';
+import { defineApp, fake, infra } from '../index.js';
+import { unit } from '../unit-contract.js';
 import { rpc } from '../orpc.js';
 import { createDb, database } from './fixtures/nested-digest/db.js';
 import { digest } from './fixtures/nested-digest/digest/feature.js';
@@ -52,9 +52,9 @@ type Witness = {
   readonly lazy?: unknown;
   readonly entrypointOnly?: boolean;
 };
-const witness = (unit: AnyPlugin, alias: string): Witness => unit.needs[alias] as Witness;
-const unitNamed = (name: string): AnyPlugin => {
-  const unit = digest.plugins().find(u => u.name === name);
+const witness = (unit: AnyUnit, alias: string): Witness => unit.needs[alias] as Witness;
+const unitNamed = (name: string): AnyUnit => {
+  const unit = digest.units().find(u => u.name === name);
   if (unit === undefined) throw new Error(`no unit ${name}`);
   return unit;
 };
@@ -70,7 +70,7 @@ const start = (f: typeof digest = digest) => defineApp('nesting').infra(database
 
 describe('identity: a child is a finished feature named <parent>.<child>', () => {
   it('boots infra, then each child (any depth), then the feature; every unit name is qualified by path', () => {
-    expect(digest.plugins().map(p => p.name)).toEqual([
+    expect(digest.units().map(p => p.name)).toEqual([
       'digest/store',
       'digest/projections',
       'digest.compile/ranker',
@@ -146,14 +146,14 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
       'digest.deliver',
     ]);
     expect(allFeatures(mounted.features)).toHaveLength(8);
-    expect(mounted.units.map(u => u.name)).toEqual(digest.plugins().map(u => u.name));
+    expect(mounted.units.map(u => u.name)).toEqual(digest.units().map(u => u.name));
   });
 
   it('hands drivers (.entrypoints) and driven adapters (.infra) the same list, so each node is read once', async () => {
     const seenByDriver: string[] = [];
     const seenByDriven: string[] = [];
-    const scheduler = driver(features =>
-      plugin({
+    const scheduler = entrypoint.fromFeatures(features =>
+      unit({
         name: 'scheduler',
         provides: {
           scheduled: ctx => {
@@ -164,8 +164,8 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
         },
       }),
     );
-    const collector = driven(features =>
-      plugin({ name: 'collector', provides: { collected: () => features.map(f => f.name) } }),
+    const collector = infra.fromFeatures(features =>
+      unit({ name: 'collector', provides: { collected: () => features.map(f => f.name) } }),
     );
     const app = orThrow(
       await defineApp('adapters').infra(database, collector).features([digest]).entrypoints(scheduler).start(),
@@ -178,10 +178,10 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
 
   it("ownUnits reads a node's OWN units only, so a child's projections register once (Astra round 2: the journal threw)", () => {
     type Declared = { readonly projections: readonly { readonly name: string }[] };
-    const isProjectionsUnit = (u: object): u is AnyPlugin & { readonly handlers: Declared } =>
+    const isProjectionsUnit = (u: object): u is AnyUnit & { readonly handlers: Declared } =>
       'kind' in u && u.kind === 'journal-projections' && 'handlers' in u;
     // A faithful replica of @arki/journal's `declaredBy` + `claimName`, over the normalized node list.
-    const read = (unitsOf: (f: AnyDefinedFeature) => readonly AnyPlugin[]): string[] => {
+    const read = (unitsOf: (f: AnyDefinedFeature) => readonly AnyUnit[]): string[] => {
       const owners = new Map<string, string>();
       for (const f of mountFeatures([digest]).features) {
         for (const unit of unitsOf(f)) {
@@ -195,7 +195,7 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
       }
       return [...owners.keys()];
     };
-    expect(() => read(f => f.plugins())).toThrow(
+    expect(() => read(f => f.units())).toThrow(
       'duplicate projection name "compile-stats" (digest and digest.compile)',
     );
     expect(read(ownUnits)).toEqual(['digest-stats', 'compile-stats']);
@@ -204,7 +204,7 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
 
 describe('rpc: the parent mounts the children (Astra round 1 #5)', () => {
   it("declares each action once: a child's router is skipped, an inline group is kept", () => {
-    const actions = digest.plugins().flatMap(p => p.actions.map(a => ('toDotAction' in a ? a.toDotAction().id : a.id)));
+    const actions = digest.units().flatMap(p => p.actions.map(a => ('toDotAction' in a ? a.toDotAction().id : a.id)));
     expect(new Set(actions).size).toBe(actions.length);
     expect(actions).toContain('digest.admin.ping');
     expect(actions).toContain('digest.run');
@@ -344,16 +344,16 @@ describe('re-export and override by path', () => {
     // @ts-expect-error unknown child
     expect(() => digest.override({ 'nope.ranker': 1 })).toThrow(/names no child feature/);
     // @ts-expect-error unknown service of a known child
-    expect(() => digest.override({ 'compile.nope': 1 })).toThrow(/names no service of its infra plugins/);
+    expect(() => digest.override({ 'compile.nope': 1 })).toThrow(/names no service of its infra units/);
     // @ts-expect-error a grandchild without infra has nothing to override
-    expect(() => digest.override({ 'compile.rank.nothing': 1 })).toThrow(/names no service of its infra plugins/);
+    expect(() => digest.override({ 'compile.rank.nothing': 1 })).toThrow(/names no service of its infra units/);
   });
 });
 
 describe('ownership metadata (Astra rounds 1–3 #1): every minted handle, unit handles and lazy forms included', () => {
-  const featureUnit = digest.plugins()[8];
-  const storeUnit = digest.plugins()[0];
-  const compileUnit = digest.plugins()[5];
+  const featureUnit = digest.units()[8];
+  const storeUnit = digest.units()[0];
+  const compileUnit = digest.units()[5];
 
   it("refuses a feature's usecases/services handles from anywhere: they are internal", () => {
     // @ts-expect-error the unit's usecases handle is internal
@@ -418,13 +418,13 @@ describe('ownership metadata (Astra rounds 1–3 #1): every minted handle, unit 
     expectTypeOf(digest.provides.digests.scope).toEqualTypeOf<undefined>();
   });
 
-  it('leaves an infra plugin no way in with a private handle (a backdoor): undeclared at .infra(), refused at .needs()', () => {
-    const backdoor = plugin({
+  it('leaves an infra unit no way in with a private handle (a backdoor): undeclared at .infra(), refused at .needs()', () => {
+    const backdoor = infra({
       name: 'backdoor',
       needs: { compiler: compile.provides.compiler },
       provides: { leak: () => 1 },
     });
-    // @ts-expect-error the plugin's need is not declared by the feature
+    // @ts-expect-error the unit's need is not declared by the feature
     expect(() => defineFeature('other').infra(backdoor)).toThrow(
       /needs "compiler", which the feature does not declare/,
     );
@@ -435,13 +435,13 @@ describe('ownership metadata (Astra rounds 1–3 #1): every minted handle, unit 
 });
 
 describe('remap by identity, assembly validates the original owner (Astra rounds 2–3 #2)', () => {
-  const otherStore = plugin({ name: 'store', provides: { repos: (): Repos => ({ withTx: tx => bindRepos(tx) }) } });
+  const otherStore = infra({ name: 'store', provides: { repos: (): Repos => ({ withTx: tx => bindRepos(tx) }) } });
 
   it('leaves a same-key handle of ANOTHER store untouched; assembly then refuses it naming the owner', () => {
     // `reports.x` names DIGEST's raw store handle, under the key reports' own store also uses.
     const x = defineFeature('reports.x').needs({ repos: store.provides.repos }).entrypoints();
     const reports = defineFeature('reports').infra(otherStore).features(x).entrypoints();
-    const xUnit = reports.plugins().find(u => u.name === 'reports.x');
+    const xUnit = reports.units().find(u => u.name === 'reports.x');
     expect(xUnit?.needs['repos']).toBe(store.provides.repos);
     expect(() => mountFeatures([digest, reports])).toThrow(/raw infra handle of "digest"/);
   });
@@ -466,13 +466,13 @@ describe('remap by identity, assembly validates the original owner (Astra rounds
     expect(() => defineApp('x').infra(database).features([digest, outsider])).toThrow(/raw infra handle of "digest"/);
   });
 
-  it("a child's infra plugin that needs the parent's store: by alias it is remapped with origin kept; bound directly it is refused", () => {
-    // Done right (the fixture's `ranker`): the plugin holds the child's need object, so the parent's remap rewrites it.
+  it("a child's infra unit that needs the parent's store: by alias it is remapped with origin kept; bound directly it is refused", () => {
+    // Done right (the fixture's `ranker`): the unit holds the child's need object, so the parent's remap rewrites it.
     const rankerNeed = witness(unitNamed('digest.compile/ranker'), 'repos');
     expect(rankerNeed.key).toBe('digest.repos');
     expect(rankerNeed.origin).toBe(store.provides.repos);
-    // Astra round 3's variant: the plugin names digest's raw handle itself, inside another tree. Refused at `.infra()`.
-    const sneaky = plugin({
+    // Astra round 3's variant: the unit names digest's raw handle itself, inside another tree. Refused at `.infra()`.
+    const sneaky = infra({
       name: 'sneaky',
       needs: { repos: store.provides.repos },
       provides: { n: ({ repos }) => repos },
@@ -494,8 +494,8 @@ describe('remap by identity, assembly validates the original owner (Astra rounds
       .infra(store)
       .features(doorChild)
       .entrypoints();
-    const unit = parent.plugins().find(u => u.name === 'digest.door');
-    const need = witness(unit as AnyPlugin, 'repos');
+    const unit = parent.units().find(u => u.name === 'digest.door');
+    const need = witness(unit as AnyUnit, 'repos');
     expect(need.key).toBe('digest.repos');
     expect(need.origin).toBe(store.provides.repos);
     expect(need.entrypointOnly).toBe(true);
@@ -576,8 +576,8 @@ describe('tests at depth: fake() the one need, override by path', () => {
 describe('lifecycle and explain', () => {
   it('stops in reverse boot order: the feature, then its children, then its infra', async () => {
     const stopped: string[] = [];
-    // `stop` runs for started plugins only, so each declares `start` too.
-    const leaf = plugin({
+    // `stop` runs for started units only, so each declares `start` too.
+    const leaf = infra({
       name: 'leaf',
       provides: { leaf: () => 'leaf' },
       start: async () => {
@@ -585,7 +585,7 @@ describe('lifecycle and explain', () => {
       },
       stop: () => void stopped.push('leaf'),
     });
-    const root = plugin({
+    const root = infra({
       name: 'root',
       provides: { root: () => 'root' },
       start: async () => {
@@ -598,7 +598,7 @@ describe('lifecycle and explain', () => {
     const app = orThrow(await defineApp('order').features([tree]).start());
     expect(await app.stop()).toBeUndefined();
     expect(stopped).toEqual(['leaf', 'root']);
-    expect(tree.plugins().map(u => u.name)).toEqual(['tree/root', 'tree.child/leaf', 'tree.child', 'tree']);
+    expect(tree.units().map(u => u.name)).toEqual(['tree/root', 'tree.child/leaf', 'tree.child', 'tree']);
   });
 
   it('dot explain shows the tree by name: nested units in boot order and the edges between them', () => {

@@ -27,7 +27,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { z } from 'zod';
 
 import { defineApp, DotLifecycleError } from '@arki/dot';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 
 import type { LiveFeed, LiveHub, LiveLimits, LiveManifest, LiveMeta, TableTag } from '../index.js';
 import type { LiveQuery, ScriptedClient } from './scripted-client.js';
@@ -491,10 +491,10 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     pool.on('acquire', () => {
       listened += 1;
     });
-    const database = plugin({ name: 'db', provides: { db: () => drizzle({ client: writer }) } });
+    const database = infra({ name: 'db', provides: { db: () => drizzle({ client: writer }) } });
     const app = defineApp('blog')
-      .use(database)
-      .use(
+      .infra(database)
+      .infra(
         liveQueries({
           app: 'blog',
           needs: { db: database.provides.db },

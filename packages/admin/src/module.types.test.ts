@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { ActionSource } from '@arki/dot/plugin';
+import type { ActionSource } from '@arki/dot/unit';
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 

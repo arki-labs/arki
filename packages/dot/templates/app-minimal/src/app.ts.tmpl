@@ -9,7 +9,7 @@ import { envSchema } from './env.js';
  * synchronously inside a `test(...)` block) and as the module default
  * (so `dot explain` / `dot doctor` can discover it via the CLI).
  */
-export const app = defineApp('{{name}}').use(env({ schema: envSchema }));
+export const app = defineApp('{{name}}').infra(env({ schema: envSchema }));
 
 export default app;
 

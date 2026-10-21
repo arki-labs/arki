@@ -15,8 +15,7 @@ import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from 
 import {
   composeRepos,
   composeRouter,
-  driven,
-  driver,
+  entrypoint,
   entrypointsOf,
   feature,
   FEATURE_ERROR_CODES,
@@ -27,7 +26,8 @@ import {
   sliceOf,
   tokenOf,
 } from '../feature.js';
-import { defineApp, plugin, service } from '../index.js';
+import { defineApp, infra, service } from '../index.js';
+import { unit } from '../unit-contract.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 
 type FakeDb = { readonly tag: 'db' };
@@ -125,8 +125,8 @@ describe('slice keys', () => {
 
 describe('mounting features (.features)', () => {
   it('publishes slice payloads under the derived feature token and merges boot provides', async () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = orThrow(await defineApp('feature-test').use(dbPlugin).features([orders, billing, authish]).boot());
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
+    const app = orThrow(await defineApp('feature-test').infra(dbUnit).features([orders, billing, authish]).boot());
 
     const manifest = app.manifest;
     const ordersUnit = manifest.plugins.find(p => p.name === 'orders');
@@ -150,20 +150,20 @@ describe('mounting features (.features)', () => {
   });
 
   it('mounts features in list order (boot order is the list order)', () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const { manifest } = orThrow(defineApp('order-test').use(dbPlugin).features([orders, billing]).configure());
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
+    const { manifest } = orThrow(defineApp('order-test').infra(dbUnit).features([orders, billing]).configure());
     expect(manifest.plugins.map(p => p.name)).toEqual(['db', 'orders', 'billing']);
     expect(plug(orders).name).toBe('orders');
   });
 
   it('resolves endpoint-style slices with the feature needs at boot', async () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     const serving = feature('serving', {
       needs: { db: service<FakeDb>() },
       use: [{ key: 'routes', actions: [], resolve: ({ db }: { db: FakeDb }) => ({ boundTo: db.tag }) }],
     });
 
-    const app = orThrow(await defineApp('slice-services-test').use(dbPlugin).features([serving]).boot());
+    const app = orThrow(await defineApp('slice-services-test').infra(dbUnit).features([serving]).boot());
     const services = app.services as Record<string, unknown>;
     expect(services['feature.serving']).toEqual({ routes: { boundTo: 'db' } });
     orThrow(await app.dispose());
@@ -223,8 +223,8 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
   });
 
   it('wires the consumer to the instance the provider built, on the same wire key', async () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
-    const app = orThrow(await defineApp('provides-test').use(dbPlugin).features([plans, digest]).boot());
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
+    const app = orThrow(await defineApp('provides-test').infra(dbUnit).features([plans, digest]).boot());
 
     expect(app.services.digestPlan('usr_pro')).toBe('pro');
     expect(app.services.digestPlan('usr_free')).toBe('free');
@@ -234,9 +234,9 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
   });
 
   it('keeps boot order honest: a consumer mounted before its provider fails to compile and to configure', () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     // @ts-expect-error — digest needs `entitlements`, which nothing mounted before it provides.
-    const misordered = defineApp('provides-order-test').use(dbPlugin).features([digest, plans]);
+    const misordered = defineApp('provides-order-test').infra(dbUnit).features([digest, plans]);
     expect(misordered.configure()).toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -277,9 +277,9 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
   });
 
   it('the gateway is mounted after every provider, or the app does not compile — it never sees a half-built bag', () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     // @ts-expect-error — the gateway spreads every capability into its needs; scoring is mounted after it.
-    const halfBuilt = defineApp('half-built').use(dbPlugin).features([plans, gateway, scoring, companion]);
+    const halfBuilt = defineApp('half-built').infra(dbUnit).features([plans, gateway, scoring, companion]);
     expect(halfBuilt.configure()).toMatchObject({
       code: UnexpectedDefect.code,
       cause: {
@@ -290,15 +290,15 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
   });
 
   it('a procedure resolves its capability to the very instance the app published — one DI system', async () => {
-    const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
+    const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     const app = orThrow(
       await defineApp('bag')
-        .use(dbPlugin)
+        .infra(dbUnit)
         .features([...features, gateway])
         .boot(),
     );
     const resolved = resolveNeeds(app.services.bag, companionNeeds);
-    // Driven services (`db`) are not capabilities: they stay on the context explicitly.
+    // Infra services (`db`) are not capabilities: they stay on the context explicitly.
     expectTypeOf(resolved).toEqualTypeOf<{ access: ReturnType<typeof createPlanLookup> }>();
     expect(Object.keys(resolved)).toEqual(['access']);
     expect(resolved.access).toBe(app.services.entitlements);
@@ -318,13 +318,13 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
   });
 });
 
-describe('the hexagon: .use → .features → .serve', () => {
-  const dbPlugin = plugin({ name: 'db', provides: { db: () => fakeDb } });
+describe('the hexagon: .infra → .features → .entrypoints', () => {
+  const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
 
   // A driving adapter in miniature: it reads each mounted feature's slice
   // record through the feature token, exactly as http/queue workers do.
-  const collector = driver(features =>
-    plugin({
+  const collector = entrypoint.fromFeatures(features =>
+    unit({
       name: 'collector',
       provides: { collected: ctx => features.map(f => [f.name, Object.keys(sliceOf(ctx, f))] as const) },
     }),
@@ -332,7 +332,7 @@ describe('the hexagon: .use → .features → .serve', () => {
 
   it('binds a driver to the mounted features — the app never lists them twice', async () => {
     const app = orThrow(
-      await defineApp('serve-test').use(dbPlugin).features([orders, billing]).serve(collector).boot(),
+      await defineApp('serve-test').infra(dbUnit).features([orders, billing]).entrypoints(collector).boot(),
     );
     expect(app.services.collected).toEqual([
       ['orders', ['queue']],
@@ -342,33 +342,33 @@ describe('the hexagon: .use → .features → .serve', () => {
     orThrow(await app.dispose());
   });
 
-  it('mounts a plain plugin in .serve() unchanged', async () => {
-    const health = plugin({
+  it('mounts a plain unit in .entrypoints() unchanged', async () => {
+    const health = entrypoint({
       name: 'health',
       needs: { db: service<FakeDb>() },
       provides: { health: ({ db }) => db.tag },
     });
-    const app = orThrow(await defineApp('serve-plain').use(dbPlugin).features([billing]).serve(health).boot());
+    const app = orThrow(await defineApp('serve-plain').infra(dbUnit).features([billing]).entrypoints(health).boot());
     expect(app.services.health).toBe('db');
     orThrow(await app.dispose());
   });
 
   it('rejects infrastructure after the domain, and the domain outside .features()', () => {
-    const kv = plugin({ name: 'kv', provides: { kv: () => 'kv' } });
-    const afterDomain = defineApp('phase').use(dbPlugin).features([authish]);
+    const kv = infra({ name: 'kv', provides: { kv: () => 'kv' } });
+    const afterDomain = defineApp('phase').infra(dbUnit).features([authish]);
     // @ts-expect-error — driven adapters cannot follow the domain: infra never depends on a feature
-    afterDomain.use(kv);
+    afterDomain.infra(kv);
     // @ts-expect-error — one .features() call per app: the domain is declared in one list
     afterDomain.features([billing]);
-    // @ts-expect-error — a driving adapter calls into the features, so it cannot sit in .use()
-    defineApp('driver-in-use').use(dbPlugin).use(collector);
+    // @ts-expect-error — a driving adapter calls into the features, so it cannot sit in .infra()
+    defineApp('driver-in-use').infra(dbUnit).infra(collector);
     defineApp('driven-in-serve')
-      .use(dbPlugin)
+      .infra(dbUnit)
       .features([billing])
-      // @ts-expect-error — a driven adapter cannot sit in .serve(): it would boot after the domain
-      .serve(driven(() => plugin({ name: 'late' })));
-    // @ts-expect-error — a feature is not a plugin; it is mounted only through .features()
-    defineApp('not-a-plugin').use(dbPlugin).use(authish);
+      // @ts-expect-error — a driven adapter cannot sit in .entrypoints(): it would boot after the domain
+      .entrypoints(infra.fromFeatures(() => unit({ name: 'late' })));
+    // @ts-expect-error — a feature is not a unit; it is mounted only through .features()
+    defineApp('not-a-unit').infra(dbUnit).infra(authish);
     // @ts-expect-error — authish needs db, which nothing before it provides
     defineApp('missing').features([authish]);
     expect(afterDomain).toBeDefined();
@@ -379,21 +379,21 @@ describe('the hexagon: .use → .features → .serve', () => {
       needs: { session: service<{ via: 'db' }>() },
       provides: { profile: ({ session }) => `profile:${session.via}` },
     });
-    const app = orThrow(await defineApp('chain').use(dbPlugin).features([authish, profile]).boot());
+    const app = orThrow(await defineApp('chain').infra(dbUnit).features([authish, profile]).boot());
     expectTypeOf(app.services.profile).toEqualTypeOf<string>();
     expect(app.services.profile).toBe('profile:db');
     // @ts-expect-error — profile needs session, which authish only provides if it comes first
-    defineApp('chain-wrong').use(dbPlugin).features([profile, authish]);
+    defineApp('chain-wrong').infra(dbUnit).features([profile, authish]);
     orThrow(await app.dispose());
   });
 });
 
-describe('a driven adapter that reads the features (.use(driven))', () => {
+describe('a driven adapter that reads the features (.infra(driven))', () => {
   // The journal's shape in miniature: it must know every feature's handler
   // declarations when it is built, AND features must be able to write
   // through it — so it boots before them and reads only static declarations.
-  const registry = driven(features =>
-    plugin({
+  const registry = infra.fromFeatures(features =>
+    unit({
       name: 'registry',
       provides: {
         registry: () => ({
@@ -408,10 +408,10 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
       needs: { registry: service<{ handlers: readonly string[] }>() },
       provides: { seenAtBoot: ({ registry: r }) => r.handlers },
     });
-    const app = orThrow(await defineApp('driven-binding').use(registry).features([orders, writer]).boot());
+    const app = orThrow(await defineApp('driven-binding').infra(registry).features([orders, writer]).boot());
     expect(app.services.seenAtBoot).toEqual(['orders:queue']);
     expect(app.manifest.plugins.map(p => [p.name, p.role])).toEqual([
-      ['registry', undefined],
+      ['registry', 'infra'],
       ['orders', 'feature'],
       ['writer', 'feature'],
     ]);
@@ -419,10 +419,10 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
   });
 
   it('gets no slice records: those exist only once the features boot', async () => {
-    const peeking = driven(features =>
-      plugin({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }),
+    const peeking = infra.fromFeatures(features =>
+      unit({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }),
     );
-    const failure = await defineApp('peek').use(peeking).features([orders]).boot();
+    const failure = await defineApp('peek').infra(peeking).features([orders]).boot();
     expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({
       cause: { code: 'ARKI_DOT_E025', message: expect.stringContaining('slice record') },

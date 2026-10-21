@@ -16,7 +16,7 @@ import { scopeAggregate, ScopeFailed } from '@arki/async';
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { DotApp, DotAppLifecycle } from './define-app.js';
-import type { EmptyPhases, PluginPhases, ServiceRecord } from './plugin-contract.js';
+import type { EmptyPhases, UnitPhases, ServiceRecord } from './unit-contract.js';
 import { hookSignals } from './signals.js';
 
 /**
@@ -47,7 +47,7 @@ function failed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
 }
 
-function startedApp<S extends ServiceRecord, Open extends Failure, Close extends Failure, Phases extends PluginPhases>(
+function startedApp<S extends ServiceRecord, Open extends Failure, Close extends Failure, Phases extends UnitPhases>(
   value: DotApp<S, Close, Open, Phases> | Failure,
 ): value is DotApp<S, Close, Open, Phases> {
   return !isFailure<unknown>(value);
@@ -90,7 +90,7 @@ export function createAppRuntime<
   S extends ServiceRecord,
   Open extends Failure = never,
   Close extends Failure = never,
-  Phases extends PluginPhases = EmptyPhases,
+  Phases extends UnitPhases = EmptyPhases,
 >(
   app: DotAppLifecycle<S, Open, Close, Phases>,
   options: {

@@ -3,7 +3,7 @@
 The old API had one big options object (`defineAuthBackend`) that each app filled in. The new API splits it in two:
 
 - `defineAuth` (from `@arki/auth`): plain data about the app's auth. The backend, the start app and the sign-in form share it.
-- `createAuth` (from `@arki/auth/pg`) or the Dot plugin `auth` (from `@arki/auth/dot`): the runtime bindings. Database, tables, secrets, mail, limiter store.
+- `createAuth` (from `@arki/auth/pg`) or the Dot unit `auth` (from `@arki/auth/dot`): the runtime bindings. Database, tables, secrets, mail, limiter store.
 
 The code blocks that import from `./fixture.ts` use [the docs fixture](examples/fixture.ts). It holds a Notes app's auth tables, definition and env, so the blocks compile. Replace it with your own modules.
 
@@ -90,7 +90,7 @@ Choices to make per app, from the old config:
 
 ### 3. Server
 
-Replace the old auth module (`backend/src/core/auth.ts`, `backend/src/infra/auth/*`, or `core/auth/config.ts`) with the Dot plugin:
+Replace the old auth module (`backend/src/core/auth.ts`, `backend/src/infra/auth/*`, or `core/auth/config.ts`) with the Dot unit:
 
 ```ts
 import type { PrincipalOf } from '@arki/auth';
@@ -117,7 +117,7 @@ export type Auth = AuthOf<typeof authn>;
 export type Principal = PrincipalOf<Auth>;
 ```
 
-- The app must use `@arki/mail/dot`'s `mail(...)` plugin before `authn`. The old `magicLink.send` callbacks go away. A custom mail (for example a localized magic link) becomes a `templates` entry.
+- The app must use `@arki/mail/dot`'s `mail(...)` unit before `authn`. The old `magicLink.send` callbacks go away. A custom mail (for example a localized magic link) becomes a `templates` entry.
 - A test-only magic-link capture becomes `lastMagicLink(mail, email)` in tests.
 - Production needs `rateLimit: { store: kv }` from the app's `@arki/kv` instance. An app with one instance and no Redis may write `rateLimit: { store: 'memory' }` instead. It counts per process, and boot logs a warning.
 - `onAPIError` and other engine options have no binding. Use `on` (events) for observers and `beforeUserCreate` for a waitlist. Anything else goes through `plugins`, and needs a review.

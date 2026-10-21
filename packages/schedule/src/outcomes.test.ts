@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineFeature, feature } from '@arki/dot/feature';
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks } from '@arki/lock';
 import { memoryStore } from '@arki/lock/memory';
@@ -75,7 +75,7 @@ describe('business outcomes', () => {
     const app = await orThrow(
       defineApp('typed-failures')
         .features([objectFeature, chain])
-        .serve(schedule({ clock: 'host' }))
+        .entrypoints(schedule({ clock: 'host' }))
         .boot(),
     );
     const client = composeSchedules([objectFeature, chain], app.services.scheduler);
@@ -96,7 +96,7 @@ describe('business outcomes', () => {
     const app = await orThrow(
       defineApp('legacy')
         .features([reports])
-        .serve(schedule({ clock: 'host' }))
+        .entrypoints(schedule({ clock: 'host' }))
         .boot(),
     );
     const result = await composeSchedules([reports], app.services.scheduler).trigger('legacy');

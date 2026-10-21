@@ -5,7 +5,7 @@
  * throws. Rows are copied in and out, so nothing outside a transaction
  * holds a committed row.
  */
-import { plugin } from '../../../plugin-contract.js';
+import { infra } from '../../../unit-contract.js';
 
 export type Digest = { id: string; userId: string; status: 'compiled' | 'sent'; items: string[] };
 declare const txBrand: unique symbol;
@@ -39,11 +39,11 @@ export const createDb = (): Db => {
   };
 };
 
-export const database = plugin({ name: 'database', provides: { db: createDb } });
+export const database = infra({ name: 'database', provides: { db: createDb } });
 
 /** A stand-in for `@arki/journal`'s `journalProjections(...)`: a need-free infra unit the adapter finds by `kind`. */
 export const projectionsUnit = (projection: string) =>
-  Object.assign(plugin({ name: 'projections', provides: {} }), {
+  Object.assign(infra({ name: 'projections', provides: {} }), {
     kind: 'journal-projections' as const,
     handlers: { projections: [{ name: projection }], effects: [] as const, taps: [] as const },
   });

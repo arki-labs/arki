@@ -6,7 +6,7 @@
  */
 import { describe, expectTypeOf, test } from 'vitest';
 
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 
 import type { RequestContextOf } from './request-context';
 import { tanstackStart } from './dot';
@@ -17,7 +17,7 @@ type Principal = { readonly user: { readonly id: string } };
 type Client = { readonly posts: { list(): Promise<readonly string[]> } };
 
 /** The gateway is published as `api`: nothing in the package assumes a service key. */
-const gateway = plugin({
+const gateway = infra({
   name: 'gateway',
   provides: {
     api: () => ({
@@ -28,7 +28,7 @@ const gateway = plugin({
   },
 });
 
-const authn = plugin({
+const authn = infra({
   name: 'authn',
   provides: {
     auth: () => ({
@@ -48,12 +48,12 @@ const start = tanstackStart({
   },
 });
 
-const app = defineApp('shop').use(authn).use(gateway).entrypoints(start);
+const app = defineApp('shop').infra(authn).infra(gateway).entrypoints(start);
 
 type Context = RequestContextOf<typeof app>;
 
 const noMounts = tanstackStart({ needs: { api: gateway.provides.api }, session: () => null, rpc: () => 1 });
-const _bareApp = defineApp('bare').use(gateway).entrypoints(noMounts);
+const _bareApp = defineApp('bare').infra(gateway).entrypoints(noMounts);
 
 declare const appContext: Context;
 declare const bareContext: RequestContextOf<typeof _bareApp>;
@@ -79,7 +79,7 @@ describe('RequestContextOf', () => {
 describe('wiring mistakes do not compile', () => {
   test('tanstackStart() before the plugins that provide its needs', () => {
     // @ts-expect-error -- the gateway (api) is not mounted before the entrypoint
-    defineApp('shop').use(authn).entrypoints(start);
+    defineApp('shop').infra(authn).entrypoints(start);
     // @ts-expect-error -- nothing provides api or auth
     defineApp('shop').entrypoints(start);
   });

@@ -1,5 +1,5 @@
 /**
- * Tests for `testPlugin` — the typed unit-test builder.
+ * Tests for `testUnit` — the typed unit-test builder.
  *
  * Two layers:
  *   1. Type-level: `.provide()` is compile-checked (wrong shape, unknown
@@ -12,18 +12,18 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
-import type { Lazy } from '../plugin-contract.js';
-import { lazyOf, plugin, service, token } from '../plugin-contract.js';
-import { testPlugin } from '../test-harness.js';
+import type { Lazy } from '../unit-contract.js';
+import { lazyOf, infra, service, token } from '../unit-contract.js';
+import { testUnit } from '../test-harness.js';
 
 type Db = { query(sql: string): readonly string[] };
 type Cache = { get(key: string): string | undefined };
 
 const Db = token<Db>()('test.db');
 
-describe('testPlugin', () => {
+describe('testUnit', () => {
   it('satisfies token and anonymous needs with typed fakes', async () => {
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
       provides: {
@@ -34,7 +34,7 @@ describe('testPlugin', () => {
     const fakeDb: Db = { query: () => ['row'] };
     const fakeCache: Cache = { get: () => 'hit' };
 
-    const app = orThrow(await testPlugin(consumer)
+    const app = orThrow(await testUnit(consumer)
       .provide(Db, fakeDb) // token form
       .provide('cache', fakeCache) // anonymous form — wire key is the alias
       .boot());
@@ -45,7 +45,7 @@ describe('testPlugin', () => {
   });
 
   it('boot() does not compile until every need is provided; wrong shapes fail at provide()', async () => {
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
       provides: { rows: ({ db }) => db.query('q') },
@@ -53,19 +53,19 @@ describe('testPlugin', () => {
 
     // Missing providers are also rejected at runtime with the canonical wiring defect.
     // @ts-expect-error — `cache` is still unprovided: `.boot()`'s `this` type names it.
-    const missingProvider = await testPlugin(consumer).provide(Db, { query: () => [] }).boot();
+    const missingProvider = await testUnit(consumer).provide(Db, { query: () => [] }).boot();
     expect(UnexpectedDefect.is(missingProvider)).toBe(true);
     if (UnexpectedDefect.is(missingProvider)) expect(missingProvider.cause).toMatchObject({ code: 'ARKI_DOT_E012' });
 
     // @ts-expect-error — a number is not a Db
-    void testPlugin(consumer).provide(Db, 42);
+    void testUnit(consumer).provide(Db, 42);
 
-    // @ts-expect-error — `nope` is not one of this plugin's needs
-    void testPlugin(consumer).provide('nope', 1);
+    // @ts-expect-error — `nope` is not one of this unit's needs
+    void testUnit(consumer).provide('nope', 1);
   });
 
   it('lifts a plain fake for a service.lazy need; lazyOf works for pre-built handles', async () => {
-    const consumer = plugin({
+    const consumer = infra({
       name: 'lazy-consumer',
       needs: { db: service.lazy<Db>() },
       provides: {
@@ -77,13 +77,13 @@ describe('testPlugin', () => {
       },
     });
 
-    const plain = orThrow(await testPlugin(consumer)
+    const plain = orThrow(await testUnit(consumer)
       .provide('db', { query: () => ['plain'] })
       .boot());
     expect(plain.services.rows).toEqual(['plain']);
     orThrow(await plain.dispose());
 
-    const handle = orThrow(await testPlugin(consumer)
+    const handle = orThrow(await testUnit(consumer)
       .provide('db', lazyOf<Db>({ query: () => ['handle'] }))
       .boot());
     expect(handle.services.rows).toEqual(['handle']);
@@ -92,14 +92,14 @@ describe('testPlugin', () => {
 
   it('runs the real kernel: teardown order, own provides in dispose, $config', async () => {
     const order: string[] = [];
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: Db },
       provides: { rows: ({ db }) => db.query('q'), flag: ({ $config }) => String($config['flag']) },
       dispose: ({ flag }) => void order.push(`consumer-dispose:${String(flag)}`),
     });
 
-    const app = orThrow(await testPlugin(consumer, { config: { flag: 'on' } })
+    const app = orThrow(await testUnit(consumer, { config: { flag: 'on' } })
       .provide(Db, { query: () => [] })
       .start());
     expect(app.state).toBe('started');
@@ -113,10 +113,10 @@ const HarnessRefused = defineFailure('test.harness.refused');
 it('returns provider, boot and logging refusals unchanged through the focused harness', async () => {
   const refusal = HarnessRefused();
   for (const unit of [
-    plugin({ name: 'provider-refusal', provides: { value: () => refusal } }),
-    plugin({ name: 'boot-refusal', boot: () => refusal }),
-    plugin({ name: 'logging-refusal', logging: () => refusal }),
+    infra({ name: 'provider-refusal', provides: { value: () => refusal } }),
+    infra({ name: 'boot-refusal', boot: () => refusal }),
+    infra({ name: 'logging-refusal', logging: () => refusal }),
   ]) {
-    expect(await testPlugin(unit).boot()).toBe(refusal);
+    expect(await testUnit(unit).boot()).toBe(refusal);
   }
 });

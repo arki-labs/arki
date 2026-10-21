@@ -45,9 +45,9 @@ actions, building a handler from a static router); _observation_ is not.
 - Adapter config that comes from env is passed as a **thunk** — prefer
   thunking the whole options object: `kv(() => ({ url: env.REDIS_URL }))`.
   Where an adapter's options carry declaration-time wiring that cannot
-  defer (`http`'s `bundles`/`features` tokens shape the plugin's needs),
+  defer (`http`'s `bundles`/`features` tokens shape the unit's needs),
   only the runtime fields thunk: `http({ port: () => env.PORT, ... })`.
-  The vocabulary for this is `Deferred<T>`/`resolveDeferred` from `@arki/dot/plugin`.
+  The vocabulary for this is `Deferred<T>`/`resolveDeferred` from `@arki/dot/unit`.
 - Client-facing declarations (contracts, enums, branded-id schemas) live in
   modules that never import server code, published as universal exports;
   server-only modules get `{ "types", "node" }`-conditioned exports so a
@@ -107,7 +107,7 @@ The pin makes the hand list compiler-enforced instead of trusted.
 ## 3. One declaration, many projections
 
 A feature is declared **once** (`feature()`) and everything else is a
-projection of it: the plugin `.features()` mounts, the slice token
+projection of it: the unit `.features()` mounts, the slice token
 (`tokenOf`), manifest actions (`dot explain` attribution), the composed
 router (client types), the repo record. If adding a capability requires editing a second
 place, the design is wrong — extend the declaration and derive.
@@ -122,9 +122,9 @@ use; the slice set stays open; `@arki/dot/feature` imports no adapter.
 
 `src/features.ts` is THE list. Everything derives from the tuple:
 `.features(features)`, `composeRouter(features)`,
-`composeRepos(features, db)`, `composeSchema(...)`. Driving adapters
+`composeRepos(features, db)`, `composeSchema(...)`. Entrypoint units
 (`http`, `schedule`, `queueWorker`) are bound to the mounted list by
-`.serve()` — they never take it as an argument. Folds are typed
+`.entrypoints()` — they never take it as an argument. Folds are typed
 identities: runtime merge + exact intersection type + duplicate-key
 rejection, as a compile error first and a coded throw at module load behind
 it. There is never a second list to
@@ -133,23 +133,22 @@ forget.
 ### The app spine: `.infra()` → `.features()` → `.entrypoints()`
 
 The same three steps under their final names (RFC
-`docs/rfcs/2026-10-15-dot-feature-builder.md`). `.use()` folds into
-`.infra()` and `.serve()` becomes `.entrypoints()`; both take a list in boot
-order, checked like `.useAll()`:
+`docs/rfcs/2026-10-15-dot-feature-builder.md`). Each step takes a list in boot order. A list is checked in order, like
+separate calls:
 
 ```ts run
-import { defineApp, plugin } from '@arki/dot';
-import { defineFeature, driver, sliceOf } from '@arki/dot/feature';
+import { defineApp, entrypoint, infra } from '@arki/dot';
+import { defineFeature, sliceOf, unit } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { isFailure } from '@arki/failure';
 
 // Stand-ins: in a real app these come from @arki/log, @arki/db and @arki/http.
-const logger = plugin({ name: 'log', provides: { log: () => ({ info: (_message: string) => {} }) } });
-const database = plugin({ name: 'database', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
+const logger = infra({ name: 'log', provides: { log: () => ({ info: (_message: string) => {} }) } });
+const database = infra({ name: 'database', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
 const orders = defineFeature('orders').entrypoints(rpc({}, {}, {}));
 const features = [orders] as const;
-const gateway = driver(mounted =>
-  plugin({
+const gateway = entrypoint.fromFeatures(mounted =>
+  unit({
     name: 'gateway',
     boot: ctx => {
       for (const mountedFeature of mounted) {
@@ -175,17 +174,16 @@ A feature is a chain whose steps are its folders:
 
 ```ts run
 import type { DepsOf } from '@arki/dot/feature';
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { isFailure } from '@arki/failure';
 
-// Stand-ins for the units the feature uses.
-const billing = plugin({
-  name: 'billing',
-  provides: { entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 2 : 1) }) },
-});
-const store = plugin({
+// Stand-ins for what the feature uses: a billing feature and a store.
+const billing = defineFeature('billing')
+  .provides({ entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 2 : 1) }) })
+  .entrypoints();
+const store = infra({
   name: 'store',
   provides: { store: () => ({ itemsFor: async (userId: string) => [`${userId}:welcome`, `${userId}:tips`] }) },
 });
@@ -193,7 +191,7 @@ const store = plugin({
 // features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` as a type
 const dailyDigestDeps = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements }) // other units, by handle
-  .infra(store); // infra/ — private plugins
+  .infra(store); // infra/ — private units
 export type Deps = DepsOf<typeof dailyDigestDeps>; // what a usecase may ask for
 
 // usecases/ — one file per usecase
@@ -207,7 +205,7 @@ export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
   .entrypoints(rpc({}, {}, {})); // entrypoints/ — the contract is empty here
 
-const shop = await defineApp('shop').infra(billing).features([dailyDigest]).boot();
+const shop = await defineApp('shop').features([billing, dailyDigest]).boot();
 if (isFailure(shop)) throw new Error(shop.code);
 const items = await shop.services.digests.previewFor('u1');
 if (isFailure(items)) throw new Error(items.code);
@@ -231,12 +229,12 @@ Rules the types enforce (each is also a coded runtime check):
   and `key` literals the handle carries — not only its service type. A
   child's need is remapped onto its parent only when it names the parent's
   own infra handle; a same-shaped global handle stays a global need
-  (`ARKI_DOT_E012` at boot otherwise). An infra plugin that binds a need to a
+  (`ARKI_DOT_E012` at boot otherwise). An infra unit that binds a need to a
   handle must bind the feature's handle (`ARKI_DOT_E026` at `.infra()`).
-  Residual the types cannot see: two plugins with the same name, publish key
+  Residual the types cannot see: two units with the same name, publish key
   and service type are one identity to the compiler; the runtime still tells
-  them apart by object. A `Plugin<N, P>` annotation erases both the shape and
-  the name, and the checks fall back to wire keys for that plugin.
+  them apart by object. A `Unit<N, P>` annotation erases both the shape and
+  the name, and the checks fall back to wire keys for that unit.
 - `session`, `headers`, `services` and `usecases` are reserved aliases; an
   infra key equal to a need alias, and an entrypoint key equal to a provided
   key, are compile errors (`ARKI_DOT_E027` at runtime).
@@ -251,7 +249,7 @@ App `.infra()` is shared (every feature names it by handle, it owns process
 resources); feature `.infra()` is private (it wraps the app's handles or owns
 a client nobody else shares — never a second Postgres pool).
 
-Three ways to have two of something: `rename(plugin, …)` for a second plugin
+Three ways to have two of something: `rename(unit, …)` for a second unit
 instance (keys renamed, same declaration); nesting for a feature that belongs to
 another (`digest.compile`, scoped keys); `feature.instance('eu', rebind)` for the
 same feature twice (`reports#eu`, qualified keys, needs rebound to another
@@ -264,23 +262,22 @@ top-level, and owns its own infra units.
 order — a unit in the wrong step does not compile:
 
 ```ts run
-import { defineApp, plugin } from '@arki/dot';
-import { driver, feature } from '@arki/dot/feature';
+import { defineApp, entrypoint, infra } from '@arki/dot';
+import { feature, unit } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
 // Stand-ins for adapters from @arki/db, @arki/queue and @arki/http.
-const db = plugin({ name: 'db', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
-const queue = plugin({ name: 'queue', provides: { queue: () => ({ enqueue: async (_job: string) => {} }) } });
-const http = driver(() => plugin({ name: 'http' }));
-const queueWorker = driver(() => plugin({ name: 'queue-worker' }));
+const db = infra({ name: 'db', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
+const queue = infra({ name: 'queue', provides: { queue: () => ({ enqueue: async (_job: string) => {} }) } });
+const http = entrypoint({ name: 'http' });
+const queueWorker = entrypoint({ name: 'queue-worker' });
 const features = [feature('orders', { needs: { db: db.provides.db }, provides: { orders: () => 'orders' } })] as const;
 
 const app = await defineApp('shop')
-  .use(db) // driven adapters — what features need
-  .use(queue) //   (a queue CLIENT features enqueue with)
+  .infra(db) // infra units — what features need
+  .infra(queue) //   (a queue CLIENT features enqueue with)
   .features(features) // the domain core — feature() values, one list
-  .serve(http) // driving adapters — what calls the features
-  .serve(queueWorker)
+  .entrypoints(http, queueWorker) // entrypoint units — what calls the features
   .boot();
 if (isFailure(app)) throw new Error(app.code);
 
@@ -289,12 +286,12 @@ if (order !== 'db → queue → orders → http → queue-worker') throw new Err
 await app.dispose();
 ```
 
-Infrastructure never depends on the domain: nothing in `.use()` can need a
-feature service, and `.use()` is closed once `.features()` is called.
-Adapter authors pick the side explicitly: `driver(features => plugin(...))`
-is accepted only by `.serve()`; `driven(features => plugin(...))` — a driven
-adapter that reads the features' static declarations, like the journal — only
-by `.use()`.
+Infrastructure never depends on the domain: nothing in `.infra()` can need a
+feature service, and `.infra()` is closed once `.features()` is called.
+Adapter authors pick the side with the constructor: `entrypoint.fromFeatures(features => unit(...))`
+is accepted only by `.entrypoints()`; `infra.fromFeatures(features => unit(...))` — an infra
+unit that reads the features' static declarations, like the journal — only
+by `.infra()`.
 
 ## 5. Dependencies point one way (the drizzle-relations rule)
 
@@ -323,12 +320,12 @@ schema leaves (tables.ts — import nothing above)
   internals is still a lateral import. Mount order stays the boot order: the
   provider must be listed before the consumer — a compile error, and
   `ARKI_DOT_E020` at `configure()` for code that skips types. The kernel
-  checks every plugin's needs against every plugin's static provides, so the
+  checks every unit's needs against every unit's static provides, so the
   same rule holds for adapters, not only features.
 - **Capabilities never form a ring.** Two feature modules naming each
   other's handles fail as `TS7022` on both `feature()` consts (and an ESM TDZ
   `ReferenceError` at runtime); erased graphs fail `configure()` with
-  `ARKI_DOT_E019`, which prints the ring (through any plugins). Break it by moving the shared
+  `ARKI_DOT_E019`, which prints the ring (through any units). Break it by moving the shared
   piece into a third feature both need, or by reading through `db.query`
   instead of a handle. A feature's own router never names its own handle
   (also `TS7022`): own capabilities are called by import.
@@ -361,13 +358,13 @@ schema leaves (tables.ts — import nothing above)
 
 Three lifetimes, three homes:
 
-| Lifetime     | Home                                                                    | Examples                                                 |
-| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------- |
-| compile-time | ES modules, composed folds                                              | schema, relations, routers, repo factories, context TYPE |
-| boot-time    | plugins / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles     |
-| request-time | the gateway's context factory                                           | session lookup, per-request context value                |
+| Lifetime     | Home                                                                  | Examples                                                 |
+| ------------ | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| compile-time | ES modules, composed folds                                            | schema, relations, routers, repo factories, context TYPE |
+| boot-time    | units / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles     |
+| request-time | the gateway's context factory                                         | session lookup, per-request context value                |
 
-"If it doesn't need boot, it doesn't need a plugin" — static data rides
+"If it doesn't need boot, it doesn't need a unit" — static data rides
 modules and folds, not the graph. The gateway is the one legitimate
 cross-feature aggregation point (requests → contexts).
 

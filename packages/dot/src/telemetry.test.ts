@@ -14,7 +14,7 @@ import { action, ACTION_FAILURES } from './action.js';
 import { bindAction } from './execute.js';
 import { defineApp } from './define-app.js';
 import { defineFeature } from './define-feature.js';
-import { plugin } from './plugin-contract.js';
+import { infra } from './unit-contract.js';
 import { telemetryFor } from './telemetry.js';
 
 const Refused = defineFailure('telemetry.refused', { status: 403, message: 'Refused' });
@@ -82,7 +82,7 @@ describe('author telemetry', () => {
 it('adds scoped events and correlated logs to the existing active span without another span', () => {
   const logs = fakeLog();
   try {
-    const telemetry = telemetryFor({ $plugin: 'search' });
+    const telemetry = telemetryFor({ $unit: 'search' });
     const parent = trace.getTracer('transport').startSpan('request');
     context.with(trace.setSpan(context.active(), parent), () => {
       telemetry.event('cache.hit', { tier: 'memory' });
@@ -92,13 +92,13 @@ it('adds scoped events and correlated logs to the existing active span without a
     expect(exporter.getFinishedSpans()).toHaveLength(1);
     expect(exporter.getFinishedSpans()[0]?.events[0]).toMatchObject({
       name: 'cache.hit',
-      attributes: { tier: 'memory', 'dot.plugin.name': 'search' },
+      attributes: { tier: 'memory', 'dot.unit.name': 'search' },
     });
     expect(logs.records[0]).toMatchObject({
       category: 'arki:dot:search',
       traceId: parent.spanContext().traceId,
       spanId: parent.spanContext().spanId,
-      fields: { tier: 'memory', 'dot.plugin.name': 'search' },
+      fields: { tier: 'memory', 'dot.unit.name': 'search' },
     });
   } finally {
     logs.restore();
@@ -139,16 +139,16 @@ it('records scoped metrics in the active context without adding spans', () => {
   const spans = exporter.getFinishedSpans();
   expect(spans).toHaveLength(1);
   expect(measurements).toEqual([
-    { value: 1, attributes: { tier: 'memory', 'dot.plugin.name': 'catalog' }, parent: spans[0]?.spanContext().spanId },
-    { value: 4, attributes: { 'dot.plugin.name': 'catalog' }, parent: spans[0]?.spanContext().spanId },
+    { value: 1, attributes: { tier: 'memory', 'dot.unit.name': 'catalog' }, parent: spans[0]?.spanContext().spanId },
+    { value: 4, attributes: { 'dot.unit.name': 'catalog' }, parent: spans[0]?.spanContext().spanId },
   ]);
 });
 
-it('supplies plugin and feature hooks with telemetry scoped from their mounted identity', async () => {
+it('supplies unit and feature hooks with telemetry scoped from their mounted identity', async () => {
   const app = orThrow(
     await defineApp('test')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'cache',
           configure: ctx => {
             ctx.$telemetry.event('cache.configured');
@@ -174,17 +174,17 @@ it('supplies plugin and feature hooks with telemetry scoped from their mounted i
   orThrow(await app.dispose());
   const cache = exporter
     .getFinishedSpans()
-    .find(span => span.name === 'dot.plugin.boot' && span.attributes['dot.plugin.name'] === 'cache');
+    .find(span => span.name === 'dot.unit.boot' && span.attributes['dot.unit.name'] === 'cache');
   const configured = exporter
     .getFinishedSpans()
     .find(span => span.events.some(event => event.name === 'cache.configured'));
-  expect(configured?.events[0]?.attributes).toMatchObject({ 'dot.plugin.name': 'cache' });
-  expect(cache?.events).toMatchObject([{ name: 'cache.ready', attributes: { 'dot.plugin.name': 'cache' } }]);
+  expect(configured?.events[0]?.attributes).toMatchObject({ 'dot.unit.name': 'cache' });
+  expect(cache?.events).toMatchObject([{ name: 'cache.ready', attributes: { 'dot.unit.name': 'cache' } }]);
   const feature = exporter.getFinishedSpans().find(span => span.events.some(event => event.name === 'catalog.ready'));
-  expect(feature?.events[0]?.attributes).toMatchObject({ 'dot.plugin.name': 'catalog#eu' });
+  expect(feature?.events[0]?.attributes).toMatchObject({ 'dot.unit.name': 'catalog#eu' });
 });
 
-it('keeps resource telemetry in the plugin lifetime through cleanup and preserves its refusal', async () => {
+it('keeps resource telemetry in the unit lifetime through cleanup and preserves its refusal', async () => {
   const refusal = Refused({ cause: new Error('private cleanup detail') });
   const parent = provider.getTracer('host').startSpan('host');
   const activeIds: (string | undefined)[] = [];
@@ -193,8 +193,8 @@ it('keeps resource telemetry in the plugin lifetime through cleanup and preserve
   const app = orThrow(
     await context.with(trace.setSpan(context.active(), parent), () =>
       defineApp('owned-telemetry')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'connection',
             provides: {
               connection: ctx =>
@@ -231,7 +231,7 @@ it('keeps resource telemetry in the plugin lifetime through cleanup and preserve
   expect(owner?.spanContext().traceId).toBe(parent.spanContext().traceId);
   expect(activeIds).toEqual([owner?.spanContext().spanId, owner?.spanContext().spanId]);
   expect(owner?.events.map(event => event.name)).toEqual(['connection.opened', 'connection.closed']);
-  expect(owner?.events.every(event => event.attributes?.['dot.plugin.name'] === 'connection')).toBe(true);
+  expect(owner?.events.every(event => event.attributes?.['dot.unit.name'] === 'connection')).toBe(true);
   expect(owner?.status.code).toBe(SpanStatusCode.ERROR);
   expect(owner?.attributes['failure.code']).toBe(refusal.code);
   expect(JSON.stringify(owner?.attributes)).not.toContain('private cleanup detail');

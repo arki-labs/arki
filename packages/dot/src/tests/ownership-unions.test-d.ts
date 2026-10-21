@@ -5,7 +5,7 @@ import type { FailureOf } from '@arki/failure';
 import { child, cleanup, resource } from '@arki/async';
 import { defineFailure } from '@arki/failure';
 
-import type { InferredOwnership, PluginCloseFailure, PluginOpenFailure } from '../plugin-contract.js';
+import type { InferredOwnership, UnitCloseFailure, UnitOpenFailure } from '../unit-contract.js';
 
 const definitions = {
   provider: defineFailure('test.ownership_unions.provider'),
@@ -69,19 +69,19 @@ type OptionalSource = {
   readonly factories: Partial<typeof _factories>;
   readonly hooks: { readonly boot: () => OptionalPlan };
 };
-expectTypeOf<PluginOpenFailure<OptionalSource>>().toEqualTypeOf<OpenFailure>();
-expectTypeOf<PluginCloseFailure<OptionalSource>>().toEqualTypeOf<CloseFailure>();
+expectTypeOf<UnitOpenFailure<OptionalSource>>().toEqualTypeOf<OpenFailure>();
+expectTypeOf<UnitCloseFailure<OptionalSource>>().toEqualTypeOf<CloseFailure>();
 
 type UnionSource = {
   readonly factories: Pick<typeof _factories, 'left'> | Pick<typeof _factories, 'right' | 'owned'>;
   readonly hooks: { readonly boot: () => UnionPlan };
 };
-expectTypeOf<PluginOpenFailure<UnionSource>>().toEqualTypeOf<OpenFailure>();
-expectTypeOf<PluginCloseFailure<UnionSource>>().toEqualTypeOf<CloseFailure>();
+expectTypeOf<UnitOpenFailure<UnionSource>>().toEqualTypeOf<OpenFailure>();
+expectTypeOf<UnitCloseFailure<UnionSource>>().toEqualTypeOf<CloseFailure>();
 
 expectTypeOf<Extract<OptionalOwnership['open'], undefined>>().toEqualTypeOf<never>();
 expectTypeOf<Extract<OptionalOwnership['close'], undefined>>().toEqualTypeOf<never>();
 expectTypeOf<Extract<UnionOwnership['open'], undefined>>().toEqualTypeOf<never>();
 expectTypeOf<Extract<UnionOwnership['close'], undefined>>().toEqualTypeOf<never>();
-expectTypeOf<Extract<PluginOpenFailure<OptionalSource | UnionSource>, undefined>>().toEqualTypeOf<never>();
-expectTypeOf<Extract<PluginCloseFailure<OptionalSource | UnionSource>, undefined>>().toEqualTypeOf<never>();
+expectTypeOf<Extract<UnitOpenFailure<OptionalSource | UnionSource>, undefined>>().toEqualTypeOf<never>();
+expectTypeOf<Extract<UnitCloseFailure<OptionalSource | UnionSource>, undefined>>().toEqualTypeOf<never>();

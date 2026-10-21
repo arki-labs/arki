@@ -4,13 +4,13 @@ import { expectTypeOf } from 'vitest';
 import type { Failure } from '@arki/failure';
 
 import type { FeatureUnit } from '../define-feature.js';
-import type { EmptyShape, PluginProvides, ServiceRecord } from '../plugin-contract.js';
+import type { EmptyShape, UnitProvides, ServiceRecord } from '../unit-contract.js';
 
 type PublicOnly<Services, Name extends string> = Services extends unknown
   ? Pick<Services, Exclude<keyof Services, `${Name}.usecases` | `${Name}.services` | `feature.${Name}`>>
   : never;
 type Published<Name extends string, Values extends ServiceRecord> = PublicOnly<
-  PluginProvides<FeatureUnit<Name, EmptyShape, readonly [], readonly [], EmptyShape, Values, readonly []>>,
+  UnitProvides<FeatureUnit<Name, EmptyShape, readonly [], readonly [], EmptyShape, Values, readonly []>>,
   Name
 >;
 declare const hidden: unique symbol;

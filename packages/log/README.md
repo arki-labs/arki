@@ -220,7 +220,7 @@ test('refund over limit alerts', async () => {
 
 ## Dot
 
-A Dot app switches logging on with `log()` from `@arki/dot/log`, as its first `.use(...)`. The kernel activates it before its first lifecycle record and closes it after its last one, also on a failed boot. `resource['service.name']` defaults to the app name.
+A Dot app switches logging on with `log()` from `@arki/dot/log`, as its first `.infra(...)`. The kernel activates it before its first lifecycle record and closes it after its last one, also on a failed boot. `resource['service.name']` defaults to the app name.
 
 ```ts skip="@arki/dot is not a dependency of @arki/log"
 import { defineApp } from '@arki/dot';
@@ -228,7 +228,7 @@ import { log } from '@arki/dot/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 const app = await defineApp('checkout')
-  .use(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
+  .infra(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
   .boot();
 ```
 

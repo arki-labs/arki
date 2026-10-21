@@ -21,21 +21,21 @@ import { AppImportFailed, AppInvalidExport, AppNotFound } from '../failures.js';
 // modules (not the barrel `index.ts`) so vitest's import-analysis doesn't
 // trip on transitive JSX deps from the legacy package surface.
 const DEFINE_APP_PATH = path.resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const UNIT_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'unit-contract.ts');
 
 const BUILDER_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const p = plugin({ name: 'p', boot: () => ({}) });
-export default defineApp('discovered').use(p);
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const p = infra({ name: 'p', boot: () => ({}) });
+export default defineApp('discovered').infra(p);
 `;
 
 const FACTORY_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
+import { infra } from '${UNIT_CONTRACT_PATH}';
 export default async function makeApp() {
-  const p = plugin({ name: 'p' });
-  return defineApp('factory').use(p);
+  const p = infra({ name: 'p' });
+  return defineApp('factory').infra(p);
 }
 `;
 
@@ -45,8 +45,8 @@ export default { not: 'a DOT app' };
 
 const appSource = (exportLines: string): string => `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const p = plugin({ name: 'p', boot: () => ({}) });
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const p = infra({ name: 'p', boot: () => ({}) });
 ${exportLines}
 `;
 
@@ -104,7 +104,7 @@ describe('loadAppFromFile', () => {
     await writeFile(file, BUILDER_SOURCE);
     const app = await loadAppFromFile(file);
     // DotAppBuilder duck-typing: `use` + `configure` + `boot` all functions.
-    expect(typeof (app as { use?: unknown }).use).toBe('function');
+    expect(typeof (app as { infra?: unknown }).infra).toBe('function');
     expect(typeof (app as { configure?: unknown }).configure).toBe('function');
     expect(typeof (app as { boot?: unknown }).boot).toBe('function');
   });
@@ -113,14 +113,14 @@ describe('loadAppFromFile', () => {
     const file = path.join(workDir, 'app.ts');
     await writeFile(file, FACTORY_SOURCE);
     const app = await loadAppFromFile(file);
-    expect(typeof (app as { use?: unknown }).use).toBe('function');
+    expect(typeof (app as { infra?: unknown }).infra).toBe('function');
   });
 
   it('finds a named `app` export, because apps export `app` by name and `dot explain --app <file>` must work on them', async () => {
     const file = path.join(workDir, 'app.server.ts');
-    await writeFile(file, appSource("export const app = defineApp('named').use(p);"));
+    await writeFile(file, appSource("export const app = defineApp('named').infra(p);"));
     const app = await loadAppFromFile(file);
-    expect(typeof (app as { use?: unknown }).use).toBe('function');
+    expect(typeof (app as { infra?: unknown }).infra).toBe('function');
   });
 
   it('lets the default export win over `app`, so existing default-export apps keep their meaning', async () => {
@@ -128,7 +128,7 @@ describe('loadAppFromFile', () => {
     await writeFile(
       file,
       appSource(
-        "export const app = defineApp('named').use(p);\nexport default Object.assign(defineApp('wins').use(p), { marker: 'default' });",
+        "export const app = defineApp('named').infra(p);\nexport default Object.assign(defineApp('wins').infra(p), { marker: 'default' });",
       ),
     );
     const app = await loadAppFromFile(file);
@@ -137,16 +137,16 @@ describe('loadAppFromFile', () => {
 
   it('finds the one DOT app under another name, because a file with a single app is not ambiguous', async () => {
     const file = path.join(workDir, 'app.ts');
-    await writeFile(file, appSource("export const helper = 1;\nexport const server = defineApp('other').use(p);"));
+    await writeFile(file, appSource("export const helper = 1;\nexport const server = defineApp('other').infra(p);"));
     const app = await loadAppFromFile(file);
-    expect(typeof (app as { use?: unknown }).use).toBe('function');
+    expect(typeof (app as { infra?: unknown }).infra).toBe('function');
   });
 
   it('lists both names when two DOT apps are exported without default/app, so the developer knows what to rename', async () => {
     const file = path.join(workDir, 'app.ts');
     await writeFile(
       file,
-      appSource("export const one = defineApp('one').use(p);\nexport const two = defineApp('two').use(p);"),
+      appSource("export const one = defineApp('one').infra(p);\nexport const two = defineApp('two').infra(p);"),
     );
     await expect(loadAppFromFile(file)).resolves.toMatchObject({
       code: AppInvalidExport.code,
@@ -208,7 +208,7 @@ describe('discoverApp', () => {
     await writeFile(path.join(workDir, 'dot.config.ts'), BUILDER_SOURCE);
     const result = found(await discoverApp({ cwd: workDir }));
     expect(result.filePath).toBe(path.join(workDir, 'dot.config.ts'));
-    expect(typeof (result.app as { use?: unknown }).use).toBe('function');
+    expect(typeof (result.app as { infra?: unknown }).infra).toBe('function');
   });
 
   it('default discovery: src/app.ts is loaded when dot.config.ts is missing', async () => {

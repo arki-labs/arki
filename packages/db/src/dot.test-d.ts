@@ -1,12 +1,12 @@
-/** Driver overloads retain their service factories and lifecycle outcomes at app mounting. */
+/** Entrypoint overloads retain their service factories and lifecycle outcomes at app mounting. */
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { expectTypeOf } from 'vitest';
 
-import type { PluginCloseFailure, PluginOpenFailure, PluginPhaseFailures, Provided } from '@arki/dot/plugin';
-import { defineApp } from '@arki/dot/plugin';
+import type { UnitCloseFailure, UnitOpenFailure, UnitPhaseFailures, Provided } from '@arki/dot/unit';
+import { defineApp } from '@arki/dot/unit';
 
 import type { LocalRuntimeCloseFailure, LocalRuntimeFailure } from './runtime-local.js';
 import { db } from './dot.js';
@@ -36,19 +36,19 @@ const _invalidPg: typeof database.factories.db = () => 42;
 const _invalidEmbedded: typeof embedded.factories.db = () => Promise.resolve('wrong');
 
 const _drivers = { database, embedded };
-type Driver = (typeof _drivers)[keyof typeof _drivers];
-expectTypeOf<Driver['name']>().toEqualTypeOf<string>();
-expectTypeOf<Driver['provides']['db']['provider']>().toEqualTypeOf<'db'>();
-expectTypeOf<Awaited<ReturnType<NonNullable<Driver['hooks']['boot']>>>>().toEqualTypeOf<undefined>();
-expectTypeOf<ReturnType<NonNullable<Driver['hooks']['configure']>>>().toEqualTypeOf<undefined>();
-expectTypeOf<IsAny<Driver['hooks']['dispose']>>().toEqualTypeOf<false>();
+type EntrypointBinder = (typeof _drivers)[keyof typeof _drivers];
+expectTypeOf<EntrypointBinder['name']>().toEqualTypeOf<string>();
+expectTypeOf<EntrypointBinder['provides']['db']['provider']>().toEqualTypeOf<'db'>();
+expectTypeOf<Awaited<ReturnType<NonNullable<EntrypointBinder['hooks']['boot']>>>>().toEqualTypeOf<undefined>();
+expectTypeOf<ReturnType<NonNullable<EntrypointBinder['hooks']['configure']>>>().toEqualTypeOf<undefined>();
+expectTypeOf<IsAny<EntrypointBinder['hooks']['dispose']>>().toEqualTypeOf<false>();
 // @ts-expect-error -- disposal cannot resolve to an unrelated value
-const _invalidDispose: Driver['hooks']['dispose'] = () => Promise.resolve(42);
-expectTypeOf<PluginOpenFailure<Driver>>().toEqualTypeOf<LocalRuntimeFailure>();
-expectTypeOf<PluginCloseFailure<Driver>>().toEqualTypeOf<never>();
-expectTypeOf<PluginPhaseFailures<typeof embedded>['dispose']>().toEqualTypeOf<LocalRuntimeCloseFailure>();
+const _invalidDispose: EntrypointBinder['hooks']['dispose'] = () => Promise.resolve(42);
+expectTypeOf<UnitOpenFailure<EntrypointBinder>>().toEqualTypeOf<LocalRuntimeFailure>();
+expectTypeOf<UnitCloseFailure<EntrypointBinder>>().toEqualTypeOf<never>();
+expectTypeOf<UnitPhaseFailures<typeof embedded>['dispose']>().toEqualTypeOf<LocalRuntimeCloseFailure>();
 
-// The source guard must see precise hooks, rather than an erased Plugin boot callback.
-defineApp('pg-types').use(database);
-defineApp('explicit-pg-types').use(explicitPg);
-defineApp('pglite-types').use(embedded);
+// The source guard must see precise hooks, rather than an erased Unit boot callback.
+defineApp('pg-types').infra(database);
+defineApp('explicit-pg-types').infra(explicitPg);
+defineApp('pglite-types').infra(embedded);

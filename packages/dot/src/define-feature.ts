@@ -5,7 +5,7 @@
  *
  *   defineFeature('daily-digest')
  *     .needs({ db: entrypointOnly(database.provides.db), plans: billing.provides.entitlements })
- *     .infra(store, mailer)                              its own plugins, private to it
+ *     .infra(store, mailer)                              its own units, private to it
  *     .features(compile, deliver)                       its nested features, named `daily-digest.<child>`
  *     .usecases({ preview, send })                       what it does: one factory per usecase
  *     .provides({ digests: ({ usecases }) => … })        what it offers other features
@@ -16,17 +16,17 @@
  * `{ ...needs, ...infra, ...children }` (minus the entrypoint-only needs);
  * `provides` factories and entrypoints get the same plus `usecases`.
  *
- * Handles enter a feature through one door, `.needs()`. An infra plugin names
+ * Handles enter a feature through one door, `.needs()`. An infra unit names
  * the handles it needs (`db: database.provides.db`) or declares them unbound
  * (`service<Db>()`); `.infra()` binds each alias to a sibling's key first, then
  * to the feature's need of the same alias, and refuses a handle that is not
  * the feature's.
  *
- * The feature compiles to plain kernel units (`plugins()`): every infra
- * plugin, its keys qualified as `<feature>.<key>` and its unit named
- * `<feature>/<plugin>`, then each child's units, then one feature plugin.
+ * The feature compiles to plain kernel units (`units()`): every infra
+ * unit, its keys qualified as `<feature>.<key>` and its unit named
+ * `<feature>/<unit>`, then each child's units, then one feature unit.
  * Nothing in the kernel changes: ordering, rings, the manifest and
- * `dot explain` see ordinary plugins with ordinary edges
+ * `dot explain` see ordinary units with ordinary edges
  * (`digest → digest/store → database`, `digest.compile → digest/store`).
  */
 import type { Failure, FailureIn } from '@arki/failure';
@@ -37,7 +37,7 @@ import type { SupervisedUsecase } from './kernel/usecase.js';
 import type {
   ActionSource,
   AnyHandle,
-  AnyPlugin,
+  AnyUnit,
   CheckedProvider,
   CtxOf,
   EmptyShape,
@@ -48,25 +48,25 @@ import type {
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
-  Plugin,
-  PluginNeeds,
-  PluginOwner,
-  PluginOwnership,
-  PluginPhaseFailures,
-  PluginPreparation,
-  PluginProviderIdentities,
-  PluginProvides,
-  PluginRuntime,
+  Unit,
+  UnitNeeds,
+  UnitOwner,
+  UnitOwnership,
+  UnitPhaseFailures,
+  UnitPreparation,
+  UnitProviderIdentities,
+  UnitProvides,
+  UnitRuntime,
   Provided,
   ProvidedValues,
   Service,
   ServiceRecord,
   WireNeeds,
-} from './plugin-contract.js';
+} from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { traceUsecase } from './kernel/otel.js';
 import { superviseUsecase } from './kernel/usecase.js';
-import { createPluginRuntime, handleOf, isLazyWitness, rename } from './plugin-contract.js';
+import { createUnitRuntime, handleOf, isLazyWitness, rename } from './unit-contract.js';
 
 type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer I) => void
   ? I
@@ -88,10 +88,10 @@ const RESERVED: ReadonlySet<string> = new Set<ReservedAlias>(['session', 'header
 
 type NoKeys<K extends string> = Partial<Readonly<Record<K, never>>>;
 
-/** The services the infra plugins provide, merged, under their local keys. */
-export type InfraProvides<I extends readonly AnyPlugin[]> = I extends readonly []
+/** The services the infra units provide, merged, under their local keys. */
+export type InfraProvides<I extends readonly AnyUnit[]> = I extends readonly []
   ? EmptyShape
-  : UnionToIntersection<PluginProvides<I[number]>>;
+  : UnionToIntersection<UnitProvides<I[number]>>;
 
 /**
  * A need only entrypoints receive — a `db` to open a transaction with:
@@ -110,14 +110,14 @@ export type UsecaseNeeds<N extends NeedsShape> = {
 /** What `.usecases(create)` receives: the usecase-visible needs by alias, the infra services and the children's services by local key. */
 export type CoreDeps<
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
 > = CtxOf<UsecaseNeeds<N>> & InfraProvides<I> & ChildProvides<C>;
 
 /** What `.provides` factories and every entrypoint receive: every need (entrypoint-only included), infra, children and the usecases object. */
 export type CoreServices<
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
 > = CtxOf<N> & InfraProvides<I> & ChildProvides<C> & { readonly usecases: UsecaseValues<U> };
@@ -258,13 +258,13 @@ export type ChildProvides<C extends readonly AnyDefinedFeature[]> = C extends re
   ? EmptyShape
   : UnionToIntersection<ProvidesOf<C[number]>>;
 
-/** The `provider` literals of a handle record (`string` when the plugin was typed without its name). */
+/** The `provider` literals of a handle record (`string` when the unit was typed without its name). */
 type HandleProviders<H> = {
   [K in keyof H]: H[K] extends { readonly provider: infer O extends string } ? O : never;
 }[keyof H];
-/** The names of a feature's infra plugins, read off their raw handles — what a child's need may name to reach them. */
-type InfraOwners<I extends readonly AnyPlugin[]> = {
-  [J in keyof I]: I[J] extends AnyPlugin ? HandleProviders<I[J]['provides']> : never;
+/** The names of a feature's infra units, read off their raw handles — what a child's need may name to reach them. */
+type InfraOwners<I extends readonly AnyUnit[]> = {
+  [J in keyof I]: I[J] extends AnyUnit ? HandleProviders<I[J]['provides']> : never;
 }[number];
 /** The `provider` of the witness that resolves to wire key `K` in a needs shape: a literal, `string` (erased), or `never` (anonymous). */
 type ProviderOfWireKey<S extends NeedsShape, K> = {
@@ -281,7 +281,7 @@ type ProviderOfWireKey<S extends NeedsShape, K> = {
  * `provider` is one of `Owners`), exactly as the runtime remaps by handle
  * identity. An anonymous witness never remaps: the kernel resolves it by wire
  * key, so the app must provide it. Where identity is unknown — the shape or
- * the provider was erased by a `Plugin<N, P>` annotation — the key rule
+ * the provider was erased by a `Unit<N, P>` annotation — the key rule
  * stands in, as it did before identities existed.
  */
 type RemappedKey<TName extends string, TLocal, Owners extends string, S extends NeedsShape, K> = K extends TLocal
@@ -301,25 +301,25 @@ type RemappedKey<TName extends string, TLocal, Owners extends string, S extends 
  * record is kept, so its handles stay scoped/internal after the remap (Astra
  * round 3); its needs shape is kept, so a grandparent reads the same identities.
  */
-type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyPlugin> = Omit<
-  Plugin<
+type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyUnit> = Omit<
+  Unit<
     {
       [
-        K in keyof PluginNeeds<P> as RemappedKey<TName, TLocal, Owners, PluginProviderIdentities<P>, K>
-      ]: PluginNeeds<P>[K];
+        K in keyof UnitNeeds<P> as RemappedKey<TName, TLocal, Owners, UnitProviderIdentities<P>, K>
+      ]: UnitNeeds<P>[K];
     },
-    PluginProvides<P>,
-    PluginProviderIdentities<P>,
-    PluginOwner<P>,
-    PluginPreparation<P>,
-    PluginPhaseFailures<P>
+    UnitProvides<P>,
+    UnitProviderIdentities<P>,
+    UnitOwner<P>,
+    UnitPreparation<P>,
+    UnitPhaseFailures<P>
   >,
   'runtime' | 'hooks' | 'factories' | 'logging'
 > &
   Pick<P, 'runtime' | 'hooks' | 'factories' | 'logging' | 'provides'> &
   FactoryContractOf<P>;
-type RemappedUnits<TName extends string, TLocal, Owners extends string, U extends readonly AnyPlugin[]> = {
-  readonly [K in keyof U]: U[K] extends AnyPlugin ? RemappedUnit<TName, TLocal, Owners, U[K]> : never;
+type RemappedUnits<TName extends string, TLocal, Owners extends string, U extends readonly AnyUnit[]> = {
+  readonly [K in keyof U]: U[K] extends AnyUnit ? RemappedUnit<TName, TLocal, Owners, U[K]> : never;
 };
 /** Every child's units, in declaration order, each remapped onto the parent's scope. */
 export type ChildUnits<
@@ -327,26 +327,26 @@ export type ChildUnits<
   TLocal,
   Owners extends string,
   C extends readonly AnyDefinedFeature[],
-  Acc extends readonly AnyPlugin[] = readonly [],
+  Acc extends readonly AnyUnit[] = readonly [],
 > = C extends readonly [infer H extends AnyDefinedFeature, ...infer T extends readonly AnyDefinedFeature[]]
   ? ChildUnits<
       TName,
       TLocal,
       Owners,
       T,
-      readonly [...Acc, ...RemappedUnits<TName, TLocal, Owners, ReturnType<H['plugins']>>]
+      readonly [...Acc, ...RemappedUnits<TName, TLocal, Owners, ReturnType<H['units']>>]
     >
   : Acc;
 /** The whole unit list of a feature with children: infra, children, then the feature itself. */
 export type UnitsOf<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
-  Unit extends AnyPlugin,
+  Unit extends AnyUnit,
 > =
   ChildUnits<TName, keyof InfraProvides<I>, InfraOwners<I>, C, QualifiedInfra<TName, N, I>> extends infer U extends
-    readonly AnyPlugin[]
+    readonly AnyUnit[]
     ? readonly [...U, Unit]
     : never;
 
@@ -383,7 +383,7 @@ type NotChildName<TName extends string, C extends readonly AnyDefinedFeature[]> 
 }[number];
 type ChildKeyCollision<
   N,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
 > = keyof ChildProvides<C> & (keyof N | keyof InfraProvides<I> | ReservedAlias);
 type SiblingDup<C extends readonly AnyDefinedFeature[], Seen = never> = C extends readonly [
@@ -395,7 +395,7 @@ type SiblingDup<C extends readonly AnyDefinedFeature[], Seen = never> = C extend
 export type ChildrenGuard<
   TName extends string,
   N,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
 > = ([NotChildName<TName, C>] extends [never]
   ? unknown
@@ -430,7 +430,7 @@ type ChildContractGuard<C extends readonly AnyDefinedFeature[], E extends readon
 /** The keys the feature generates for itself: a provides factory may not take them. */
 type GeneratedKeys<TName extends string> = `${TName}.services` | `${TName}.usecases` | `feature.${TName}`;
 /** Inside a parent, a provided key must not also be an infra key: both publish under `<name>.<key>`. */
-type ProvidesGuard<TName extends string, I extends readonly AnyPlugin[], P> = ([
+type ProvidesGuard<TName extends string, I extends readonly AnyUnit[], P> = ([
   keyof P & GeneratedKeys<TName>,
 ] extends [never]
   ? unknown
@@ -461,9 +461,9 @@ export type ChildOverrides<TName extends string, C extends readonly AnyDefinedFe
 type WireKeyOfNeed<W, K> = W extends { readonly key: infer WK extends string } ? WK : K;
 
 /**
- * An infra plugin's needs shape once the feature owns it: an alias the
+ * An infra unit's needs shape once the feature owns it: an alias the
  * feature declares names the feature's handle — `qualifyInfra` substitutes
- * `declared[alias]` for the plugin's witness — so a parent remapping this
+ * `declared[alias]` for the unit's witness — so a parent remapping this
  * unit later reads the feature's identity, as the runtime does.
  */
 type OwnedShape<N extends NeedsShape, S extends NeedsShape> = string extends keyof S
@@ -471,27 +471,27 @@ type OwnedShape<N extends NeedsShape, S extends NeedsShape> = string extends key
   : { [A in keyof S]: A extends keyof N ? N[A] : S[A] };
 
 /**
- * An infra plugin after qualification: it provides under `<feature>.<key>`;
+ * An infra unit after qualification: it provides under `<feature>.<key>`;
  * a need that named a sibling infra key (`TLocal`) names the qualified key,
- * so the sibling — not an app plugin — satisfies it; any other need alias is
+ * so the sibling — not an app unit — satisfies it; any other need alias is
  * the feature's need of that alias, on that handle's wire key.
  */
-export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extends AnyPlugin, TLocal> = Omit<
-  Plugin<
+export type QualifiedUnit<TName extends string, N extends NeedsShape, P extends AnyUnit, TLocal> = Omit<
+  Unit<
     {
       [
-        K in keyof PluginNeeds<P> as K extends TLocal
+        K in keyof UnitNeeds<P> as K extends TLocal
           ? Qualify<TName, K>
           : K extends keyof N
             ? WireKeyOfNeed<N[K], K>
             : K
-      ]: PluginNeeds<P>[K];
+      ]: UnitNeeds<P>[K];
     },
-    { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
-    OwnedShape<N, PluginProviderIdentities<P>>,
+    { [K in keyof UnitProvides<P> as Qualify<TName, K>]: UnitProvides<P>[K] },
+    OwnedShape<N, UnitProviderIdentities<P>>,
     `${TName}/${string}`,
-    PluginPreparation<P>,
-    PluginPhaseFailures<P>
+    UnitPreparation<P>,
+    UnitPhaseFailures<P>
   >,
   'runtime' | 'hooks' | 'factories' | 'logging' | 'provides'
 > &
@@ -499,13 +499,13 @@ export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extend
   FactoryContractOf<P> & {
     readonly provides: InfraUnitHandles<
       TName,
-      { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }
+      { [K in keyof UnitProvides<P> as Qualify<TName, K>]: UnitProvides<P>[K] }
     >;
   };
 
-/** Every infra plugin qualified, as a tuple in declaration order. */
-export type QualifiedInfra<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = {
-  readonly [K in keyof I]: I[K] extends AnyPlugin ? QualifiedPlugin<TName, N, I[K], keyof InfraProvides<I>> : never;
+/** Every infra unit qualified, as a tuple in declaration order. */
+export type QualifiedInfra<TName extends string, N extends NeedsShape, I extends readonly AnyUnit[]> = {
+  readonly [K in keyof I]: I[K] extends AnyUnit ? QualifiedUnit<TName, N, I[K], keyof InfraProvides<I>> : never;
 };
 
 /** Resolve qualification once for the whole published record, preserving property modifiers. */
@@ -526,13 +526,13 @@ type PublishRecord<TName extends string, Values> =
 export type FeatureUnit<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
   P extends ServiceRecord,
   E extends readonly AnyEntrypoint[],
 > = Omit<
-  Plugin<
+  Unit<
     WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<
         ChildHandles<C>
       >,
@@ -569,7 +569,7 @@ export type FeatureUnit<
 export type CoreHandles<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
 > = N & {
@@ -592,7 +592,7 @@ declare const CoreServicesTag: unique symbol;
 export type FeatureCore<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
 > = {
@@ -661,7 +661,7 @@ type InstanceOfChild<F, From extends string, To extends string, N, R> = F extend
   readonly [FeatureParamsTag]?: FeatureParams<
     infer CName extends string,
     infer CN extends NeedsShape,
-    infer CI extends readonly AnyPlugin[],
+    infer CI extends readonly AnyUnit[],
     infer CC extends readonly AnyDefinedFeature[],
     infer CU,
     infer CP extends ServiceRecord,
@@ -695,7 +695,7 @@ type FeatureNameGuard<TName extends string> = TName extends `${string}#${string}
 export type DefinedFeature<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
   P extends ServiceRecord,
@@ -712,11 +712,11 @@ export type DefinedFeature<
   /** The contract of the `rpc` entrypoint (`never` without one) — `routerFor` matches on it. */
   readonly contract: ContractOf<E>;
   readonly router: RouterOf<E>;
-  /** Kernel units in boot order: the qualified infra plugins, each child's units, then the feature plugin. A tuple, so the app builder's guard checks it. */
-  plugins(): UnitsOf<TName, N, I, C, FeatureUnit<TName, N, I, C, U, P, E>>;
+  /** Kernel units in boot order: the qualified infra units, each child's units, then the feature unit. A tuple, so the app builder's guard checks it. */
+  units(): UnitsOf<TName, N, I, C, FeatureUnit<TName, N, I, C, U, P, E>>;
   /**
    * Replace infra services by local key before compilation (tests), this
-   * feature's (`repos`) or a child's (`'compile.ranker'`). The plugin that
+   * feature's (`repos`) or a child's (`'compile.ranker'`). The unit that
    * provides a key is rebuilt in place: same name and needs, the overridden
    * keys return the value, its other keys keep their factory. Its lifecycle
    * hooks are dropped — they were written for the real services.
@@ -756,25 +756,25 @@ export type AnyDefinedFeature = {
   readonly router: unknown;
   /** Raw infra handles this feature (or a descendant) owns → the owning feature. Checked by `mountFeatures`. */
   readonly owned: ReadonlyMap<object, string>;
-  plugins(): readonly AnyPlugin[];
+  units(): readonly AnyUnit[];
 };
 
 /* ---- guards: collisions are compile errors at the offending step ---- */
 
-type InfraCollision<N, I extends readonly AnyPlugin[]> = keyof InfraProvides<I> & (keyof N | ReservedAlias);
+type InfraCollision<N, I extends readonly AnyUnit[]> = keyof InfraProvides<I> & (keyof N | ReservedAlias);
 /** What no need resolves to: a type no service satisfies, so the alias is reported. */
 type Undeclared = { readonly 'DOT: undeclared need': never };
-/** What an infra plugin's need alias resolves to inside the feature: a sibling's service, else the feature's need, else nothing. */
-type ResolvedInfraNeed<N extends NeedsShape, I extends readonly AnyPlugin[], K> = K extends keyof InfraProvides<I>
+/** What an infra unit's need alias resolves to inside the feature: a sibling's service, else the feature's need, else nothing. */
+type ResolvedInfraNeed<N extends NeedsShape, I extends readonly AnyUnit[], K> = K extends keyof InfraProvides<I>
   ? InfraProvides<I>[K]
   : K extends keyof N
     ? CtxOf<N>[K]
     : Undeclared;
 /**
- * The compile-time `sameHandle`: is the plugin's bound witness `W` the feature's
+ * The compile-time `sameHandle`: is the unit's bound witness `W` the feature's
  * own handle `Own` (either form, lazy included)? Identity is the `provider` +
- * `key` literal pair. An unbound plugin witness (`service<T>()`) passes — the
- * feature's handle is what it gets. A plugin that binds a handle where the
+ * `key` literal pair. An unbound unit witness (`service<T>()`) passes — the
+ * feature's handle is what it gets. A unit that binds a handle where the
  * feature declared none fails, as the runtime does (`ARKI_DOT_E026`). An
  * erased provider (`string`) on either side cannot be compared: the shape
  * check alone decides.
@@ -791,12 +791,12 @@ type SameHandle<Own, W> = W extends { readonly provider: infer O extends string;
     : false
   : true;
 /**
- * An infra plugin's unsatisfied needs when its shape is known — resolved as
+ * An infra unit's unsatisfied needs when its shape is known — resolved as
  * `qualifyInfra` resolves them: a sibling by the witness's wire key, else the
  * feature's need under the same ALIAS, which must be the same handle (when the
- * plugin bound one) and of the needed type.
+ * unit bound one) and of the needed type.
  */
-type UnsatisfiedInfraAliases<N extends NeedsShape, I extends readonly AnyPlugin[], S extends NeedsShape> = {
+type UnsatisfiedInfraAliases<N extends NeedsShape, I extends readonly AnyUnit[], S extends NeedsShape> = {
   [A in keyof S]: WireKeyOfNeed<S[A], A> extends keyof InfraProvides<I>
     ? InfraProvides<I>[WireKeyOfNeed<S[A], A>] extends NeedValue<S[A]>
       ? never
@@ -811,35 +811,35 @@ type UnsatisfiedInfraAliases<N extends NeedsShape, I extends readonly AnyPlugin[
 }[keyof S];
 /** The service type a witness asks for — what {@link WireNeeds} holds under its wire key (`T | Lazy<T>` for a lazy witness). */
 type NeedValue<W> = W extends Service<infer T> ? T : never;
-/** The need aliases of the infra plugins that no sibling and no declared need satisfies (missing, of another type, or bound to another handle). A plugin typed without its shape is checked by wire key. */
-type UnsatisfiedInfraNeeds<N extends NeedsShape, I extends readonly AnyPlugin[]> = {
-  [J in keyof I]: I[J] extends AnyPlugin
-    ? string extends keyof PluginProviderIdentities<I[J]>
+/** The need aliases of the infra units that no sibling and no declared need satisfies (missing, of another type, or bound to another handle). A unit typed without its shape is checked by wire key. */
+type UnsatisfiedInfraNeeds<N extends NeedsShape, I extends readonly AnyUnit[]> = {
+  [J in keyof I]: I[J] extends AnyUnit
+    ? string extends keyof UnitProviderIdentities<I[J]>
       ? {
-          [K in keyof PluginNeeds<I[J]>]: ResolvedInfraNeed<N, I, K> extends PluginNeeds<I[J]>[K] ? never : K;
-        }[keyof PluginNeeds<I[J]>]
-      : UnsatisfiedInfraAliases<N, I, PluginProviderIdentities<I[J]>>
+          [K in keyof UnitNeeds<I[J]>]: ResolvedInfraNeed<N, I, K> extends UnitNeeds<I[J]>[K] ? never : K;
+        }[keyof UnitNeeds<I[J]>]
+      : UnsatisfiedInfraAliases<N, I, UnitProviderIdentities<I[J]>>
     : never;
 }[number];
 /**
- * The service keys two infra plugins both provide. `InfraProvides` intersects
- * the plugins' records, so `{ repos }` from two plugins would merge silently;
+ * The service keys two infra units both provide. `InfraProvides` intersects
+ * the units' records, so `{ repos }` from two units would merge silently;
  * the runtime refuses it (`ARKI_DOT_E027`), so the types do too.
  */
-type InfraDup<I extends readonly AnyPlugin[], Seen = never> = I extends readonly [
-  infer H extends AnyPlugin,
-  ...infer T extends readonly AnyPlugin[],
+type InfraDup<I extends readonly AnyUnit[], Seen = never> = I extends readonly [
+  infer H extends AnyUnit,
+  ...infer T extends readonly AnyUnit[],
 ]
-  ? (keyof PluginProvides<H> & Seen) | InfraDup<T, Seen | keyof PluginProvides<H>>
+  ? (keyof UnitProvides<H> & Seen) | InfraDup<T, Seen | keyof UnitProvides<H>>
   : never;
-type InfraGuard<N extends NeedsShape, I extends readonly AnyPlugin[]> = ([InfraCollision<N, I>] extends [never]
+type InfraGuard<N extends NeedsShape, I extends readonly AnyUnit[]> = ([InfraCollision<N, I>] extends [never]
   ? unknown
   : { readonly 'DOT: an infra service key collides with a need alias or a reserved name': InfraCollision<N, I> }) &
-  ([InfraDup<I>] extends [never] ? unknown : { readonly 'DOT: two infra plugins provide the same key': InfraDup<I> }) &
+  ([InfraDup<I>] extends [never] ? unknown : { readonly 'DOT: two infra units provide the same key': InfraDup<I> }) &
   ([UnsatisfiedInfraNeeds<N, I>] extends [never]
     ? unknown
     : {
-        readonly 'DOT: an infra plugin needs a service the feature does not declare in .needs() (or declares with another type)': UnsatisfiedInfraNeeds<
+        readonly 'DOT: an infra unit needs a service the feature does not declare in .needs() (or declares with another type)': UnsatisfiedInfraNeeds<
           N,
           I
         >;
@@ -947,7 +947,7 @@ export type UsecaseGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] ex
 export type EntrypointsStage<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
   P extends ServiceRecord,
@@ -961,7 +961,7 @@ export type EntrypointsStage<
 export type ProvidesStage<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
   U,
 > = EntrypointsStage<TName, N, I, C, U, EmptyShape> & {
@@ -978,7 +978,7 @@ export type ProvidesStage<
 export type UsecasesStage<
   TName extends string,
   N extends NeedsShape,
-  I extends readonly AnyPlugin[],
+  I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
 > = Omit<ProvidesStage<TName, N, I, C, EmptyShape>, typeof CoreServicesTag> & {
   /**
@@ -1007,7 +1007,7 @@ export type UsecasesStage<
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
 };
 
-export type FeaturesStage<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = UsecasesStage<
+export type FeaturesStage<TName extends string, N extends NeedsShape, I extends readonly AnyUnit[]> = UsecasesStage<
   TName,
   N,
   I,
@@ -1026,12 +1026,12 @@ export type FeaturesStage<TName extends string, N extends NeedsShape, I extends 
 
 export type InfraStage<TName extends string, N extends NeedsShape> = FeaturesStage<TName, N, readonly []> & {
   /**
-   * The feature's own plugins, in boot order. Their keys are private to this
-   * feature and its children. A plugin's need alias is bound to a sibling's
+   * The feature's own units, in boot order. Their keys are private to this
+   * feature and its children. A unit's need alias is bound to a sibling's
    * key first, then to the feature's need of the same alias; anything else
    * is a compile error naming the alias.
    */
-  infra<const I extends readonly AnyPlugin[]>(...plugins: I & InfraGuard<N, I>): FeaturesStage<TName, N, I>;
+  infra<const I extends readonly AnyUnit[]>(...plugins: I & InfraGuard<N, I>): FeaturesStage<TName, N, I>;
 };
 
 export type NeedsStage<TName extends string> = InfraStage<TName, EmptyShape> & {
@@ -1051,15 +1051,15 @@ type Factory = (services: never) => unknown;
 type FeatureState<P extends ServiceRecord = ServiceRecord, U extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly needs: NeedsShape;
-  readonly infra: readonly AnyPlugin[];
+  readonly infra: readonly AnyUnit[];
   readonly children: readonly RuntimeFeature[];
   readonly usecases: { readonly [Key in keyof U]: (services: never) => U[Key] } | undefined;
   readonly provides: { readonly [K in keyof P]: (services: never) => P[K] };
 };
 
 /** Recursive copies carry the inferred ownership; raw factory records stay in FeatureState. */
-type RuntimeFeature<out Owned extends PluginOwnership = PluginOwnership> = {
-  readonly runtime: PluginRuntime<Owned['open'], Owned['close']>;
+type RuntimeFeature<out Owned extends UnitOwnership = UnitOwnership> = {
+  readonly runtime: UnitRuntime<Owned['open'], Owned['close']>;
   readonly name: string;
   readonly handles: NeedsShape;
   readonly provides: Readonly<Record<string, AnyHandle>>;
@@ -1068,7 +1068,7 @@ type RuntimeFeature<out Owned extends PluginOwnership = PluginOwnership> = {
   readonly entrypoints: readonly AnyEntrypoint[];
   readonly contract: unknown;
   readonly router: unknown;
-  plugins(): readonly AnyPlugin[];
+  units(): readonly AnyUnit[];
   override(values: Readonly<Record<string, unknown>>): RuntimeFeature<Owned>;
   instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature<Owned>;
   /** Recompile under another name, needs following `follow` (handle → handle). Internal: `instance()` drives it for the children. */
@@ -1081,7 +1081,7 @@ type RuntimeStage<in out P extends ServiceRecord = ServiceRecord, in out U exten
   readonly name: string;
   readonly handles: NeedsShape;
   needs(needs: NeedsShape): RuntimeStage<P, U>;
-  infra(...plugins: readonly AnyPlugin[]): RuntimeStage<P, U>;
+  infra(...plugins: readonly AnyUnit[]): RuntimeStage<P, U>;
   features(...children: readonly RuntimeFeature[]): RuntimeStage<P, U>;
   usecases<Next extends ServiceRecord>(factories: {
     readonly [Key in keyof Next]: (services: never) => Next[Key];
@@ -1177,8 +1177,8 @@ export function allFeatures<F extends { readonly name: string }>(features: reado
 }
 
 /** A node's OWN kernel units — its qualified infra and its feature unit — never a descendant's. Adapters read declarations from these. */
-export function ownUnits(feature: AnyDefinedFeature): readonly AnyPlugin[] {
-  return feature.plugins().filter(u => u.name === feature.name || u.name.startsWith(`${feature.name}/`));
+export function ownUnits(feature: AnyDefinedFeature): readonly AnyUnit[] {
+  return feature.units().filter(u => u.name === feature.name || u.name.startsWith(`${feature.name}/`));
 }
 
 /** `H` with its ownership stripped: the same handle, public. */
@@ -1192,7 +1192,7 @@ type ServicesHandlesIn<Units> = Units extends readonly (infer U)[]
   : never;
 /** What a gateway needs to serve these features' requests: their public handles, and every node's `<name>.services`. */
 export type RequestHandles<T extends readonly AnyDefinedFeature[]> = UnionToIntersection<T[number]['provides']> &
-  UnionToIntersection<ServicesHandlesIn<ReturnType<T[number]['plugins']>>>;
+  UnionToIntersection<ServicesHandlesIn<ReturnType<T[number]['units']>>>;
 
 /**
  * The handles a gateway needs to serve requests for these features, as one
@@ -1240,10 +1240,10 @@ function unreachable(feature: string, witness: Ownership): string | undefined {
  */
 export function mountFeatures(features: readonly AnyDefinedFeature[]): {
   readonly features: readonly AnyDefinedFeature[];
-  readonly units: readonly AnyPlugin[];
+  readonly units: readonly AnyUnit[];
 } {
   const nodes = allFeatures(features);
-  // A feature and its instances share the same infra plugin objects, so one raw handle may have several owners.
+  // A feature and its instances share the same infra unit objects, so one raw handle may have several owners.
   const owned = new Map<object, Set<string>>();
   for (const f of nodes) {
     for (const [handle, scope] of f.owned) {
@@ -1252,7 +1252,7 @@ export function mountFeatures(features: readonly AnyDefinedFeature[]): {
       owned.set(handle, scopes);
     }
   }
-  const units = features.flatMap(f => f.plugins());
+  const units = features.flatMap(f => f.units());
   for (const unit of units) {
     const feature = unit.name.split('/')[0] ?? unit.name;
     for (const [alias, witness] of Object.entries(unit.needs)) {
@@ -1280,7 +1280,7 @@ type Remap = { readonly key: string; readonly unit: string; readonly scope: stri
  * it is for `mountFeatures` to refuse. The remapped handle keeps the original under
  * `origin` and the entrypoint-only flag.
  */
-function remapNeeds(unit: AnyPlugin, ownedInfra: ReadonlyMap<object, Remap>): AnyPlugin {
+function remapNeeds(unit: AnyUnit, ownedInfra: ReadonlyMap<object, Remap>): AnyUnit {
   const needs: Record<string, Service<unknown>> = {};
   let touched = false;
   for (const [alias, witness] of Object.entries(unit.needs)) {
@@ -1308,19 +1308,19 @@ function childHandles(children: readonly RuntimeFeature[]): Record<string, AnyHa
 }
 
 /**
- * Qualify every infra plugin: keys → `<feature>.<key>`, names → `<feature>/<plugin>`,
+ * Qualify every infra plugin: keys → `<feature>.<key>`, names → `<feature>/<unit>`,
  * sibling needs → the qualified key, every other need alias → the feature's own handle.
  */
 function qualifyInfra(
   feature: string,
   declared: NeedsShape,
-  infra: readonly AnyPlugin[],
-): { readonly units: readonly AnyPlugin[]; readonly handles: Readonly<Record<string, AnyHandle>> } {
+  infra: readonly AnyUnit[],
+): { readonly units: readonly AnyUnit[]; readonly handles: Readonly<Record<string, AnyHandle>> } {
   const unitByKey = new Map<string, string>();
   for (const p of infra) for (const key of Object.keys(p.provides)) unitByKey.set(key, `${feature}/${p.name}`);
 
   const handles: Record<string, AnyHandle> = {};
-  const units = infra.map((p): AnyPlugin => {
+  const units = infra.map((p): AnyUnit => {
     const unitName = `${feature}/${p.name}`;
     const qualified: Record<string, string> = {};
     for (const key of Object.keys(p.provides)) {
@@ -1345,7 +1345,7 @@ function qualifyInfra(
       needs[alias] = isLazyWitness(witness) ? handle.lazy : handle;
     }
     const renamed = rename(p, qualified, unitName);
-    // The unit's own handles carry ownership too, so `plugins()[i].provides[k]` is refused outside the feature.
+    // The unit's own handles carry ownership too, so `units()[i].provides[k]` is refused outside the feature.
     const provides = Object.fromEntries(
       Object.keys(renamed.provides).map(key => [key, scopedHandleOf(key, unitName, feature)]),
     );
@@ -1354,8 +1354,8 @@ function qualifyInfra(
   return { units, handles };
 }
 
-/** Rebuild one infra plugin with some services replaced; untouched plugins are returned as they are. */
-function replaceServices(p: AnyPlugin, values: Readonly<Record<string, unknown>>, used: Set<string>): AnyPlugin {
+/** Rebuild one infra unit with some services replaced; untouched units are returned as they are. */
+function replaceServices(p: AnyUnit, values: Readonly<Record<string, unknown>>, used: Set<string>): AnyUnit {
   const factories: Record<string, Factory> = { ...p.factories };
   let touched = false;
   for (const key of Object.keys(p.provides)) {
@@ -1367,7 +1367,7 @@ function replaceServices(p: AnyPlugin, values: Readonly<Record<string, unknown>>
     used.add(key);
     touched = true;
   }
-  return touched ? { ...p, factories, runtime: createPluginRuntime(), hooks: {} } : p;
+  return touched ? { ...p, factories, runtime: createUnitRuntime(), hooks: {} } : p;
 }
 
 function checkEntrypoints(state: FeatureState, entrypoints: readonly AnyEntrypoint[]): void {
@@ -1487,15 +1487,15 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     const generated = key === usecasesKey || key === servicesKey || key === sliceKey;
     unitHandles[key] = scopedHandleOf(key, state.name, generated ? state.name : parentOf(state.name), generated);
   }
-  const runtime = createPluginRuntime<Awaited<ReturnType<typeof prepareUsecases<U>>>>(undefined, ctx =>
+  const runtime = createUnitRuntime<Awaited<ReturnType<typeof prepareUsecases<U>>>>(undefined, ctx =>
     prepareUsecases(
       state.name,
       state.usecases,
       Object.fromEntries(Object.entries(ctx).filter(([key]) => !doorKeys.has(key))) as never,
     ),
   );
-  // The record plugin() builds, written out: the needs here are already handles, and the keys already wire keys.
-  const unit: AnyPlugin = {
+  // The record infra() builds, written out: the needs here are already handles, and the keys already wire keys.
+  const unit: AnyUnit = {
     runtime,
     name: state.name,
     needs: { ...state.needs, ...infra.handles, ...childHandles(state.children) },
@@ -1507,9 +1507,9 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     hooks: {},
   };
   // Boot order: this feature's infra, then each child (its own units, any depth), then this feature.
-  const units: readonly AnyPlugin[] = [
+  const units: readonly AnyUnit[] = [
     ...infra.units,
-    ...state.children.flatMap(c => c.plugins().map(u => remapNeeds(u, ownedInfra))),
+    ...state.children.flatMap(c => c.units().map(u => remapNeeds(u, ownedInfra))),
     unit,
   ];
 
@@ -1551,7 +1551,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     entrypoints,
     contract: rpc !== undefined && 'contract' in rpc ? rpc.contract : undefined,
     router: rpc !== undefined && 'router' in rpc ? rpc.router : undefined,
-    plugins: () => units,
+    units: () => units,
     override: values => {
       // `compile.ranker` → the child named `<this>.compile`, override `ranker` there (recursive by construction).
       const own: Record<string, unknown> = {};
@@ -1573,7 +1573,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
         if (!used.has(key)) {
           throw new FeatureError({
             code: FEATURE_ERROR_CODES.unknownOverride,
-            message: `[feature] "${state.name}": override("${key}") names no service of its infra plugins.`,
+            message: `[feature] "${state.name}": override("${key}") names no service of its infra units.`,
             remediation: `Override one of: ${state.infra.flatMap(p => Object.keys(p.provides)).join(', ') || '(no infra)'}.`,
           });
         }
@@ -1713,9 +1713,9 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
       }
       return stage({ ...state, children });
     },
-    infra: (...plugins) => {
+    infra: (...units) => {
       const seen = new Set<string>();
-      for (const key of plugins.flatMap(p => Object.keys(p.provides))) {
+      for (const key of units.flatMap(p => Object.keys(p.provides))) {
         if (RESERVED.has(key) || key in state.needs || seen.has(key)) {
           throw collision(
             state.name,
@@ -1725,36 +1725,36 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
         }
         seen.add(key);
       }
-      const siblingKeys = new Set(plugins.flatMap(p => Object.keys(p.provides)));
-      for (const p of plugins) {
+      const siblingKeys = new Set(units.flatMap(p => Object.keys(p.provides)));
+      for (const p of units) {
         for (const [alias, witness] of Object.entries(p.needs)) {
           if (siblingKeys.has(wireKeyOf(witness, alias))) continue;
           const own = state.needs[alias];
           if (own === undefined) {
             throw new FeatureError({
               code: FEATURE_ERROR_CODES.missingCapability,
-              message: `[feature] "${state.name}": infra plugin "${p.name}" needs "${alias}", which the feature does not declare.`,
-              remediation: `Add it to .needs({ ${alias}: … }); the feature's handle is what the plugin gets.`,
+              message: `[feature] "${state.name}": infra unit "${p.name}" needs "${alias}", which the feature does not declare.`,
+              remediation: `Add it to .needs({ ${alias}: … }); the feature's handle is what the unit gets.`,
             });
           }
           if ('key' in witness && !sameHandle(witness, own)) {
             throw new FeatureError({
               code: FEATURE_ERROR_CODES.missingCapability,
-              message: `[feature] "${state.name}": infra plugin "${p.name}" binds "${alias}" to a handle other than the feature's.`,
-              remediation: 'Declare the plugin need unbound (service<T>()); the feature passes its own handle.',
+              message: `[feature] "${state.name}": infra unit "${p.name}" binds "${alias}" to a handle other than the feature's.`,
+              remediation: 'Declare the unit need unbound (service<T>()); the feature passes its own handle.',
             });
           }
           const why = unreachable(state.name, witness as Ownership);
           if (why !== undefined) {
             throw new FeatureError({
               code: FEATURE_ERROR_CODES.missingCapability,
-              message: `[feature] "${state.name}": infra plugin "${p.name}" needs "${alias}", ${why}.`,
-              remediation: "An infra plugin may need public handles and its own feature's scope only.",
+              message: `[feature] "${state.name}": infra unit "${p.name}" needs "${alias}", ${why}.`,
+              remediation: "An infra unit may need public handles and its own feature's scope only.",
             });
           }
         }
       }
-      return stage({ ...state, infra: plugins });
+      return stage({ ...state, infra: units });
     },
     usecases: factories => stage({ ...state, usecases: factories }),
     provides: factories => {

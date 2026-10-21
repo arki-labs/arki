@@ -24,12 +24,12 @@ it.each(['tracer', 'meter', 'histogram'] as const)(
       vi.spyOn(metrics, 'getMeter').mockReturnValue({ ...createNoopMeter(), createHistogram: broken });
     }
     const { defineApp } = await import('../define-app.js');
-    const { plugin } = await import('../plugin-contract.js');
+    const { infra } = await import('../unit-contract.js');
     const calls: string[] = [];
     const app = orThrow(
       await defineApp('early-sdk')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'work',
             boot: () => {
               calls.push('boot');
@@ -48,7 +48,7 @@ it.each(['tracer', 'meter', 'histogram'] as const)(
 
 it('records lifecycle metrics when the app installs its provider after importing Dot', async () => {
   const { defineApp } = await import('../define-app.js');
-  const { plugin } = await import('../plugin-contract.js');
+  const { infra } = await import('../unit-contract.js');
   let bootCount = 0;
   const boot = (): undefined => {
     bootCount += 1;
@@ -68,8 +68,8 @@ it('records lifecycle metrics when the app installs its provider after importing
   });
   const app = orThrow(
     await defineApp('late-sdk')
-      .use(
-        plugin({
+      .infra(
+        infra({
           name: 'work',
           boot,
         }),
@@ -79,7 +79,7 @@ it('records lifecycle metrics when the app installs its provider after importing
   orThrow(await app.dispose());
   expect(bootCount).toBe(1);
   expect(recorded).toContain('dot.app.phase.duration');
-  expect(recorded).toContain('dot.plugin.hook.duration');
+  expect(recorded).toContain('dot.unit.hook.duration');
 });
 
 function unclassifiableSuccess() {

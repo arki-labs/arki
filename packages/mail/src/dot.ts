@@ -8,14 +8,14 @@
  *
  * @example
  * defineApp('shop')
- *   .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
- *   .use(mailOutboxPlugin({ tables }))
+ *   .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
+ *   .infra(mailOutboxPlugin({ tables }))
  */
-import type { Service } from '@arki/dot/plugin';
+import type { Service } from '@arki/dot/unit';
 import type { JournalTables } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
 import type { Backoff } from '@arki/resilience';
-import { plugin, service } from '@arki/dot/plugin';
+import { infra, service } from '@arki/dot/unit';
 
 import type { Mailer, MailerOptions } from './mailer.js';
 import type { MailOutbox } from './pg/index.js';
@@ -24,7 +24,7 @@ import { mailOutbox } from './pg/index.js';
 
 /** The mailer as a Dot service named `mail`. */
 export function mail(options: MailerOptions | (() => MailerOptions)) {
-  return plugin({
+  return infra({
     name: 'mail',
     configure(ctx) {
       ctx.registerService('mail', 'email');
@@ -44,7 +44,7 @@ export type MailOutboxPluginOptions = {
 
 /** Queued mail on the journal as a Dot service named `mailOutbox`. Needs the `mail` service. */
 export function mailOutboxPlugin(options: MailOutboxPluginOptions) {
-  return plugin({
+  return infra({
     name: 'mail-outbox',
     needs: { mail: service<Mailer>() },
     configure(ctx) {

@@ -2,7 +2,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 # @arki/kv
 
-A Redis key-value store and rate limiter, with a Dot plugin. When a doc and the code disagree, `src/index.ts` and `src/dot.ts` win.
+A Redis key-value store and rate limiter, with a Dot unit. When a doc and the code disagree, `src/index.ts` and `src/dot.ts` win.
 
 ## Laws
 

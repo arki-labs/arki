@@ -32,9 +32,9 @@ const relations = defineRelations({ widgets });
 
 async function bootFixture() {
   return defineApp('arki-dot-fixture')
-    .use(env({ schema: { FIXTURE_GREETING: z.string().default('hello') }, skipValidation: true }))
-    .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'arki-dot-fixture' }))
-    .use(db({ driver: 'pglite', memory: true, relations }))
+    .infra(env({ schema: { FIXTURE_GREETING: z.string().default('hello') }, skipValidation: true }))
+    .infra(kv({ url: 'redis://127.0.0.1:1', namespace: 'arki-dot-fixture' }))
+    .infra(db({ driver: 'pglite', memory: true, relations }))
     .boot();
 }
 

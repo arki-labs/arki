@@ -1,8 +1,8 @@
 /** infra/: the feature's own store. It needs `db`; the feature's handlers never see `db`. */
-import { plugin } from '../../../../plugin.js';
+import { infra } from '../../../../unit.js';
 import { database } from '../infra.js';
 
-export const store = plugin({
+export const store = infra({
   name: 'store',
   needs: { db: database.provides.db },
   provides: {

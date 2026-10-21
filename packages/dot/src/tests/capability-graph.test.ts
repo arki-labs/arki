@@ -4,7 +4,7 @@
  * app is assembled (configure time) and `dot explain` draws the edges
  * without booting anything. These tests encode why that matters: a ring
  * or a misordered provider must fail with an error that names the fix,
- * not the generic "no earlier plugin provides it" (E012) at boot.
+ * not the generic "no earlier unit provides it" (E012) at boot.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -16,13 +16,13 @@ import { textUi } from '../cli/tests/text-ui.js';
 import { defineApp } from '../define-app.js';
 import { feature } from '../feature.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { plugin, service, token } from '../plugin-contract.js';
+import { infra, service, token } from '../unit-contract.js';
 
 type Db = { readonly tag: 'db' };
 type Scorer = { readonly score: (text: string) => number };
 type Intelligence = { readonly summarize: (text: string) => string };
 
-const db = plugin({ name: 'db', provides: { db: () => ({ tag: 'db' as const }) } });
+const db = infra({ name: 'db', provides: { db: () => ({ tag: 'db' as const }) } });
 
 describe('configure-time capability checks', () => {
   it('a ring among erased features fails configure() with E019 printing the ring in order', () => {
@@ -38,7 +38,7 @@ describe('configure-time capability checks', () => {
       provides: { scorer: ({ intelligence }): Scorer => ({ score: text => intelligence.summarize(text).length }) },
     });
     // @ts-expect-error -- the tuple guard rejects it too: scorer is provided after its consumer
-    const ring = defineApp('ring').use(db).features([summarization, scoring]);
+    const ring = defineApp('ring').infra(db).features([summarization, scoring]);
 
     expect(ring.configure()).toMatchObject({
       code: UnexpectedDefect.code,
@@ -59,7 +59,7 @@ describe('configure-time capability checks', () => {
     const billing = feature('billing', { provides: { entitlements: () => ({ plan: 'pro' as const }) } });
     const digest = feature('daily-digest', { needs: { access: billing.provides.entitlements } });
     // @ts-expect-error -- the tuple guard rejects the same order at compile time
-    const misordered = defineApp('order').use(db).features([digest, billing]);
+    const misordered = defineApp('order').infra(db).features([digest, billing]);
 
     expect(misordered.configure()).toMatchObject({
       code: UnexpectedDefect.code,
@@ -89,7 +89,7 @@ describe('dot explain', () => {
       },
     });
     const digest = feature('daily-digest', { needs: { access: billing.provides.entitlements, db: service<Db>() } });
-    const builder = defineApp('explain-edges').use(db).features([billing, digest]);
+    const builder = defineApp('explain-edges').infra(db).features([billing, digest]);
 
     const explained = textUi();
     renderExplainText(orThrow(builder.configure()).manifest, explained.ui);
@@ -107,7 +107,7 @@ describe('dot explain', () => {
       'entitlements',
       'feature.billing',
     ]);
-    // Adapters (`.use(db)`) are drawn too: their provides are static handles.
+    // Adapters (`.infra(db)`) are drawn too: their provides are static handles.
     expect(table).toContain('daily-digest --[db]--> db');
     expect(configured.manifest.dependencies).toEqual([
       { from: 'billing', to: 'db', kind: 'requires', key: 'db' },

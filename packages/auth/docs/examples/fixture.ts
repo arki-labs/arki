@@ -11,7 +11,7 @@ import {
   verificationIdColumns,
 } from '@arki/auth/pg';
 import { TEST_AUTH_SECRET, testAuth } from '@arki/auth/testing';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { KV } from '@arki/kv';
 
 export const APP_NAME = 'Notes';
@@ -72,7 +72,7 @@ export const bindings = {
 export const db = memory.db;
 
 // The app's database plugin: it publishes the in-memory `db` to the Dot graph.
-export const database = plugin({
+export const database = infra({
   name: 'database',
   configure: ctx => {
     ctx.registerService('db', 'db');

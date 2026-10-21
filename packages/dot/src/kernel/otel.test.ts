@@ -6,10 +6,10 @@
  *
  *   - Each public phase emits exactly one `dot.app.<phase>` root span
  *     (`configure`, `boot`, `start`, `stop`, `dispose`).
- *   - Each plugin with a hook emits exactly one matching `dot.plugin.<hook>`
- *     child span with stable attributes (`dot.app.name`, `dot.plugin.name`,
- *     `dot.hook`, `dot.plugin.order`).
- *   - On a failed boot, the failing plugin's span is marked ERROR and an
+ *   - Each unit with a hook emits exactly one matching `dot.unit.<hook>`
+ *     child span with stable attributes (`dot.app.name`, `dot.unit.name`,
+ *     `dot.hook`, `dot.unit.order`).
+ *   - On a failed boot, the failing unit's span is marked ERROR and an
  *     `exception` event is recorded; the parent phase span is also ERROR.
  *
  * Tests do NOT depend on histogram/metrics output — the in-memory metrics
@@ -30,7 +30,7 @@ import { otelTrace } from '@arki/log/otel';
 import { fakeLog } from '@arki/log/testing';
 
 import { defineApp } from '../define-app.js';
-import { plugin, service } from '../plugin-contract.js';
+import { infra, service } from '../unit-contract.js';
 
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
@@ -79,44 +79,44 @@ function spansByName(name: string): ReadableSpan[] {
 }
 
 describe('@arki/dot OTel instrumentation', () => {
-  it('emits a dot.app.configure root span and per-plugin dot.plugin.configure children', async () => {
-    const envPlugin = plugin({
+  it('emits a dot.app.configure root span and per-unit dot.unit.configure children', async () => {
+    const envUnit = infra({
       name: 'env',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
     });
-    const dbPlugin = plugin({
+    const dbUnit = infra({
       name: 'db',
       configure(ctx) {
         ctx.registerService('db', 'db');
       },
     });
 
-    orThrow(await defineApp('otel-configure-test').use(envPlugin).use(dbPlugin).boot());
+    orThrow(await defineApp('otel-configure-test').infra(envUnit).infra(dbUnit).boot());
 
     const phaseSpans = spansByName('dot.app.configure');
     expect(phaseSpans).toHaveLength(1);
     expect(phaseSpans[0]?.instrumentationScope.version).toBe(packageMetadata.version);
     expect(phaseSpans[0]?.attributes['dot.app.name']).toBe('otel-configure-test');
-    expect(phaseSpans[0]?.attributes['dot.app.plugin.count']).toBe(2);
+    expect(phaseSpans[0]?.attributes['dot.app.unit.count']).toBe(2);
 
-    const pluginSpans = spansByName('dot.plugin.configure');
-    expect(pluginSpans).toHaveLength(2);
-    const pluginNames = pluginSpans.map(s => s.attributes['dot.plugin.name']).sort();
-    expect(pluginNames).toEqual(['db', 'env']);
-    for (const span of pluginSpans) {
+    const unitSpans = spansByName('dot.unit.configure');
+    expect(unitSpans).toHaveLength(2);
+    const unitNames = unitSpans.map(s => s.attributes['dot.unit.name']).sort();
+    expect(unitNames).toEqual(['db', 'env']);
+    for (const span of unitSpans) {
       expect(span.attributes['dot.hook']).toBe('configure');
       expect(span.attributes['dot.app.name']).toBe('otel-configure-test');
     }
-    // Note: parent-context linkage between phase and plugin spans requires
+    // Note: parent-context linkage between phase and unit spans requires
     // a context manager (e.g. AsyncLocalStorageContextManager from
     // @opentelemetry/context-async-hooks). Real consumers register one
     // via the OTel SDK; this test asserts shape only, not linkage.
   });
 
-  it('emits a dot.app.boot root span and per-plugin dot.plugin.boot children', async () => {
-    const envPlugin = plugin({
+  it('emits a dot.app.boot root span and per-unit dot.unit.boot children', async () => {
+    const envUnit = infra({
       name: 'env',
       configure(ctx) {
         ctx.registerService('env', 'env');
@@ -126,16 +126,16 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    orThrow(await defineApp('otel-boot-test').use(envPlugin).boot());
+    orThrow(await defineApp('otel-boot-test').infra(envUnit).boot());
 
     const bootPhaseSpans = spansByName('dot.app.boot');
     expect(bootPhaseSpans).toHaveLength(1);
     expect(bootPhaseSpans[0]?.attributes['dot.app.name']).toBe('otel-boot-test');
 
-    const bootPluginSpans = spansByName('dot.plugin.boot');
-    expect(bootPluginSpans).toHaveLength(1);
-    const envSpan = bootPluginSpans[0]!;
-    expect(envSpan.attributes['dot.plugin.name']).toBe('env');
+    const bootUnitSpans = spansByName('dot.unit.boot');
+    expect(bootUnitSpans).toHaveLength(1);
+    const envSpan = bootUnitSpans[0]!;
+    expect(envSpan.attributes['dot.unit.name']).toBe('env');
     expect(envSpan.attributes['dot.hook']).toBe('boot');
     // Note: parent-context linkage across async/await boundaries requires
     // AsyncLocalStorageContextManager from @opentelemetry/context-async-hooks.
@@ -144,9 +144,9 @@ describe('@arki/dot OTel instrumentation', () => {
     // manager via the OTel SDK; we don't pull that dep into the test.
   });
 
-  it('emits phase + per-plugin spans for the full configure→boot→start→stop→dispose cascade', async () => {
+  it('emits phase + per-unit spans for the full configure→boot→start→stop→dispose cascade', async () => {
     type Svc = { web: { listening: boolean } };
-    const envPlugin = plugin({
+    const envUnit = infra({
       name: 'env',
       configure(ctx) {
         ctx.registerService('env', 'env');
@@ -155,7 +155,7 @@ describe('@arki/dot OTel instrumentation', () => {
         env: () => ({ PORT: 3000 }),
       },
     });
-    const webPlugin = plugin({
+    const webUnit = infra({
       name: 'web',
       needs: { env: service<{ PORT: number }>() },
       configure(ctx) {
@@ -173,7 +173,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    const app = orThrow(await defineApp('otel-full-lifecycle-test').use(envPlugin).use(webPlugin).start());
+    const app = orThrow(await defineApp('otel-full-lifecycle-test').infra(envUnit).infra(webUnit).start());
     expect(await app.stop()).toBeUndefined();
     orThrow(await app.dispose());
 
@@ -186,27 +186,27 @@ describe('@arki/dot OTel instrumentation', () => {
       expect(phaseSpans[0]?.status.code).toBe(1); // OK
     }
 
-    // Per-plugin hook spans: configure × 2, boot × 2, start × 1, stop × 1, dispose × 1.
+    // Per-unit hook spans: configure × 2, boot × 2, start × 1, stop × 1, dispose × 1.
     // (only `web` declared start/stop/dispose; env has none of those hooks.)
-    expect(spansByName('dot.plugin.configure')).toHaveLength(2);
-    expect(spansByName('dot.plugin.boot')).toHaveLength(2);
-    expect(spansByName('dot.plugin.start')).toHaveLength(1);
-    expect(spansByName('dot.plugin.stop')).toHaveLength(1);
-    expect(spansByName('dot.plugin.dispose')).toHaveLength(1);
+    expect(spansByName('dot.unit.configure')).toHaveLength(2);
+    expect(spansByName('dot.unit.boot')).toHaveLength(2);
+    expect(spansByName('dot.unit.start')).toHaveLength(1);
+    expect(spansByName('dot.unit.stop')).toHaveLength(1);
+    expect(spansByName('dot.unit.dispose')).toHaveLength(1);
 
-    const webStart = spansByName('dot.plugin.start')[0]!;
-    expect(webStart.attributes['dot.plugin.name']).toBe('web');
+    const webStart = spansByName('dot.unit.start')[0]!;
+    expect(webStart.attributes['dot.unit.name']).toBe('web');
     expect(webStart.attributes['dot.hook']).toBe('start');
-    expect(webStart.attributes['dot.plugin.order']).toBe(1);
+    expect(webStart.attributes['dot.unit.order']).toBe(1);
     expect(webStart.status.code).toBe(1); // OK
   });
 
-  it('stamps the phase span and each plugin hook span on the kernel lifecycle records', async () => {
+  it('stamps the phase span and each unit hook span on the kernel lifecycle records', async () => {
     using log = fakeLog();
     const app = orThrow(
       await defineApp('trace-thread-test')
-        .use(
-          plugin({
+        .infra(
+          infra({
             name: 'p',
             boot: () => {
               /* side effects only */
@@ -218,12 +218,12 @@ describe('@arki/dot OTel instrumentation', () => {
     orThrow(await app.dispose());
 
     const phase = spansByName('dot.app.boot')[0]?.spanContext();
-    const hook = spansByName('dot.plugin.boot')[0]?.spanContext();
+    const hook = spansByName('dot.unit.boot')[0]?.spanContext();
     const complete = log.records.find(record => record.template === 'boot: complete');
     const done = log.records.find(record => record.template === 'boot: done');
     expect(phase?.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(complete).toMatchObject({ traceId: phase?.traceId, spanId: phase?.spanId });
-    // Records written after a plugin's hook keep that hook's span, so they group with it.
+    // Records written after a unit's hook keep that hook's span, so they group with it.
     expect(done).toMatchObject({ traceId: hook?.traceId, spanId: hook?.spanId });
   });
 
@@ -233,8 +233,8 @@ describe('@arki/dot OTel instrumentation', () => {
     try {
       const app = orThrow(
         await defineApp('active-span-test')
-          .use(
-            plugin({
+          .infra(
+            infra({
               name: 'logging',
               logging: () => {
                 const handle = configure({
@@ -250,8 +250,8 @@ describe('@arki/dot OTel instrumentation', () => {
               },
             }),
           )
-          .use(
-            plugin({
+          .infra(
+            infra({
               name: 'web',
               boot: () => {
                 getLogger('test:web').info('registering routes');
@@ -265,8 +265,8 @@ describe('@arki/dot OTel instrumentation', () => {
       context.disable();
     }
 
-    const hook = spansByName('dot.plugin.boot')
-      .find(span => span.attributes['dot.plugin.name'] === 'web')
+    const hook = spansByName('dot.unit.boot')
+      .find(span => span.attributes['dot.unit.name'] === 'web')
       ?.spanContext();
     const record = sink.records.find(entry => entry.template === 'registering routes');
     expect(hook?.traceId).toMatch(/^[0-9a-f]{32}$/);
@@ -278,10 +278,10 @@ describe('@arki/dot OTel instrumentation', () => {
     const Refused = defineFailure('otel_test.refused');
     const refusal = Refused();
     const result = await defineApp('otel-refusal')
-      .use(plugin({ name: 'refused', boot: () => refusal }))
+      .infra(infra({ name: 'refused', boot: () => refusal }))
       .boot();
     expect(result).toBe(refusal);
-    for (const name of ['dot.plugin.boot', 'dot.app.boot']) {
+    for (const name of ['dot.unit.boot', 'dot.app.boot']) {
       const span = spansByName(name)[0];
       expect(span?.status.code).toBe(2);
       expect(span?.attributes['failure.code']).toBe(Refused.code);
@@ -289,29 +289,29 @@ describe('@arki/dot OTel instrumentation', () => {
     }
   });
 
-  it('marks the failing plugin span ERROR when boot throws', async () => {
-    const goodPlugin = plugin({
+  it('marks the failing unit span ERROR when boot throws', async () => {
+    const goodUnit = infra({
       name: 'good',
       boot() {
         /* side effects only */
       },
     });
-    const badPlugin = plugin({
+    const badUnit = infra({
       name: 'bad',
       boot() {
         throw new Error('intentional boot failure');
       },
     });
 
-    expect(await defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).toMatchObject({
+    expect(await defineApp('otel-boot-fail-test').infra(goodUnit).infra(badUnit).boot()).toMatchObject({
       code: UnexpectedDefect.code,
       cause: new Error('intentional boot failure'),
     });
 
-    const bootPluginSpans = spansByName('dot.plugin.boot');
-    expect(bootPluginSpans).toHaveLength(2);
-    const goodSpan = bootPluginSpans.find(s => s.attributes['dot.plugin.name'] === 'good');
-    const badSpan = bootPluginSpans.find(s => s.attributes['dot.plugin.name'] === 'bad');
+    const bootUnitSpans = spansByName('dot.unit.boot');
+    expect(bootUnitSpans).toHaveLength(2);
+    const goodSpan = bootUnitSpans.find(s => s.attributes['dot.unit.name'] === 'good');
+    const badSpan = bootUnitSpans.find(s => s.attributes['dot.unit.name'] === 'bad');
     // OK / unset = 0, ERROR = 2 per OTel SpanStatusCode.
     expect(goodSpan?.status.code).toBe(1); // OK
     expect(badSpan?.status.code).toBe(2); // ERROR

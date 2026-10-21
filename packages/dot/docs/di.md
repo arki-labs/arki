@@ -1,12 +1,12 @@
 # Dependency injection
 
-How a Dot app finds its services. A plugin says what it **needs** with typed
+How a Dot app finds its services. A unit says what it **needs** with typed
 handles and what it **provides** with factories. The compiler checks that
 every need has a provider mounted earlier. There is no container, no
 decorator and no reflection.
 
 ```text
-  .use(database)                 .use(orders)
+  .infra(database)               .features([orders])
  ┌───────────────┐   provides   ┌───────────────┐
  │   database    │ ─── db ────▶ │    orders     │  needs: { db }
  └───────────────┘              └───────────────┘
@@ -23,10 +23,10 @@ decorator and no reflection.
 - **Declaration order is boot order.** The order you read is the order that
   runs. A sorted graph would be cleverer; it would also surprise you at 2 a.m.
 
-## What is a plugin?
+## What is a unit?
 
-A **plugin** is the unit a DOT app is built from — one self-describing,
-lifecycle-aware piece of an application. Each plugin:
+A **unit** is the unit a DOT app is built from — one self-describing,
+lifecycle-aware piece of an application. Each unit:
 
 - declares a **name** and the services it **needs** as a shape
   of type witnesses;
@@ -34,52 +34,54 @@ lifecycle-aware piece of an application. Each plugin:
   is _inferred from the factory_, never declared separately;
 - runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
 - **publishes typed services** to a shared, type-safe registry that later
-  plugins can read from;
-- **composes deterministically** — plugins boot in declaration order and
+  units can read from;
+- **composes deterministically** — units boot in declaration order and
   dispose in reverse.
 
 The name comes from the small dots on dice, dominoes, and music notation:
-each plugin is one small mark, and the _combination_ of plugins is what gives the
-app its value. Two plugins on a die make a value of two; six plugins make six. The
-plugins **are** the app — not optional add-ons to a hidden core.
+each unit is one small mark, and the _combination_ of units is what gives the
+app its value. Two units on a die make a value of two; six units make six. The
+units **are** the app — not optional add-ons to a hidden core.
 
 ```ts skip="uses the env, db and kv adapters from other @arki packages; they depend on @arki/dot"
-import { db } from '@arki/db/dot'; // db plugin
+import { db } from '@arki/db/dot'; // db unit
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/dot/env'; // env plugin
+import { env } from '@arki/dot/env'; // env unit
 
-import { kv } from '@arki/kv/dot'; // kv plugin
+import { kv } from '@arki/kv/dot'; // kv unit
 
 const app = await defineApp('orders')
-  .use(env({ schema: {/* ... */} })) // 1st plugin — provides services.env
-  .use(db({ relations })) // 2nd plugin — provides services.db
-  .use(kv(() => ({ url: process.env.KV_URL }))) // 3rd — services.kv; env read at boot, not import
-  .boot(); // plugins boot in declaration order
+  .infra(
+    env({ schema: {/* ... */} }), // 1st unit — provides services.env
+    db({ relations }), // 2nd unit — provides services.db
+    kv(() => ({ url: process.env.KV_URL })), // 3rd — services.kv; env read at boot, not import
+  )
+  .boot(); // units boot in declaration order
 
 await app.services.db.query(/* ... */);
-await app.dispose(); // plugins dispose in REVERSE order
+await app.dispose(); // units dispose in REVERSE order
 ```
 
-Each `/dot` subpath exports a **plugin** for that package. The subpath names
-the framework the adapter targets (DOT), not the unit (which is a plugin).
+Each `/dot` subpath exports a **unit** for that package. The subpath names
+the framework the adapter targets (DOT), not the unit (which is a unit).
 
 ## Needs are witnesses, provides are inferred
 
 When the host can import the provider, name its handle (see
-[Plugin handles](#plugin-handles)). `service<T>()` is for the other cases: a
+[Unit handles](#unit-handles)). `service<T>()` is for the other cases: a
 library contract, a test, or a host external. It creates a phantom **type witness** — a runtime no-op that
 carries `T` at the type level. The property name you give it is your local
 alias _and_ (for anonymous witnesses) the wire key:
 
 ```ts
-import { plugin, service } from '@arki/dot';
+import { infra, service } from '@arki/dot';
 
 type Db = { query(sql: string): Promise<unknown[]> };
 type Logger = { info(message: string): void };
 type SearchIndex = { flush(db: Db): Promise<void> };
 declare function buildIndex(db: Db): Promise<SearchIndex>; // your code
 
-export const search = plugin({
+export const search = infra({
   name: 'search',
   needs: {
     db: service<Db>(), // wire key 'db', local alias 'db'
@@ -87,7 +89,7 @@ export const search = plugin({
   },
   provides: {
     search: async ({ db, log, $app }) => {
-      // $app/$plugin/$config: kernel context
+      // $app/$unit/$config: kernel context
       log.info(`indexing for ${$app}`);
       return buildIndex(db);
     },
@@ -95,12 +97,12 @@ export const search = plugin({
 });
 ```
 
-`boot`, `start`, `stop`, and `dispose` additionally receive the plugin's **own
-provides** — and because teardown runs in reverse declaration order, a plugin's
+`boot`, `start`, `stop`, and `dispose` additionally receive the unit's **own
+provides** — and because teardown runs in reverse declaration order, a unit's
 needs are still alive in its `dispose`:
 
 ```ts continue
-export const indexer = plugin({
+export const indexer = infra({
   name: 'indexer',
   needs: { db: service<Db>() },
   provides: { search: ({ db }) => buildIndex(db) },
@@ -113,29 +115,29 @@ export const indexer = plugin({
 
 ## Wrong wiring does not compile
 
-Declaration order IS boot order. The `.use()` guard makes unsatisfied needs,
+Declaration order IS boot order. The mount guard makes unsatisfied needs,
 type mismatches, and key collisions **compile errors at the call site**:
 
 ```ts skip="shows wiring that must not compile"
 defineApp('shop')
-  .use(billing) // ❌ the argument is refused: "Property 'DOT: this unit needs services that nothing before it provides…' is missing"
-  .use(database); //    billing's `db` need has no earlier provider
+  .infra(billing) // ❌ the argument is refused: "Property 'DOT: this unit needs services that nothing before it provides…' is missing"
+  .infra(database); //    billing's `db` need has no earlier provider
 
-defineApp('shop').use(database).use(database2); // ❌ collision: two providers of wire key 'db'
+defineApp('shop').infra(database).infra(database2); // ❌ collision: two providers of wire key 'db'
 ```
 
 Reordering the first example — or `rename`-ing one provider in the second —
 makes both compile. The kernel re-validates at runtime with coded errors
 (`E012` unsatisfied need, `E013` collision, `E014` reserved key) for
-erased/dynamic composition, with full rollback of already-booted plugins.
-`E012` now fires only for needs that no plugin declares (erased or JS graphs,
-dynamic http bundle tokens). Order mistakes between plugins that declare their
+erased/dynamic composition, with full rollback of already-booted units.
+`E012` now fires only for needs that no unit declares (erased or JS graphs,
+dynamic http bundle tokens). Order mistakes between units that declare their
 provides are caught earlier, at `configure()`: see below.
 
 There is no dependency graph to debug and **cycles are unrepresentable**:
-services flow strictly forward through the `.use()` chain. If two plugins need
+services flow strictly forward through the `.infra()`, `.features()` and `.entrypoints()` chain. If two units need
 each other's services, that's a design smell the type system surfaces
-immediately — merge them, or extract the shared piece into a third plugin both
+immediately — merge them, or extract the shared piece into a third unit both
 consume.
 
 ## Features as a chain: `defineFeature`
@@ -151,7 +153,7 @@ import { defineFeature, routerFor } from '@arki/dot/feature';
 
 const dailyDigestDeps = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements }) // other units, by handle
-  .infra(store, mailer); // infra/: private plugins — published as `daily-digest.store`
+  .infra(store, mailer); // infra/: private units — published as `daily-digest.store`
 export type Deps = DepsOf<typeof dailyDigestDeps>; // what a usecase may ask for, written once
 
 const dailyDigestLogic = dailyDigestDeps.usecases({ preview, sendDue }); // usecases/: one file per usecase
@@ -170,7 +172,7 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
 ```
 
 - **Private infra.** `.infra(store)` compiles to the unit `daily-digest/store`
-  providing `daily-digest.store`; a sibling plugin that needs `store` is
+  providing `daily-digest.store`; a sibling unit that needs `store` is
   rewired to the qualified key. Two features may each have a `store`.
 - **Usecases.** One factory per usecase, one file each:
   `usecases/preview.ts` exports `preview = (deps: Pick<Deps, 'store' | 'plans'>) => …`,
@@ -195,23 +197,22 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
   need alias; an entrypoint key equal to a provided key. Erased callers get
   `ARKI_DOT_E027`.
 - **Tests**: `dailyDigest.override({ store: fakeStore })` rebuilds the store
-  plugin in place (its sibling services keep their factories) and keeps the
+  unit in place (its sibling services keep their factories) and keeps the
   entrypoints — one provider per key.
-- **Kernel units**: `dailyDigest.plugins()` is a typed tuple
+- **Kernel units**: `dailyDigest.units()` is a typed tuple
   `[daily-digest/store, daily-digest/mailer, daily-digest]`, so
-  `.useAll(dailyDigest.plugins())` and `.features([dailyDigest])` are checked
+  `.infra(...dailyDigest.units())` and `.features([dailyDigest])` are checked
   by the builder guard. `dot explain` shows
   `daily-digest --[daily-digest.store]--> daily-digest/store --[db]--> database`.
 
-`.infra()` replaces `.use()` and `.entrypoints()` replaces `.serve()`;
 `.features()` takes `defineFeature` features and object-form `feature()`
 values side by side during the migration.
 
-Adapter authors: drivers and driven adapters receive the features as mounted
+Adapter authors: `entrypoint.fromFeatures` and `infra.fromFeatures` units receive the features as mounted
 (`MountedFeature` — either form). Read a feature's declarations with
 `entrypointsOf(f)` (its `entrypoints`, or the object form's `use`), its slice
 record with `sliceOf(ctx, f)`, and a chain feature's own units with
-`f.plugins()`.
+`f.units()`.
 
 ### oRPC, contract first: `@arki/dot/orpc`
 
@@ -223,7 +224,7 @@ import { implement, ORPCError, os } from '@orpc/server';
 import { z } from 'zod';
 
 import type { DepsOf, ServicesBag } from '@arki/dot/feature';
-import { plugin } from '@arki/dot';
+import { infra } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
 import { orThrow } from '@arki/failure';
@@ -244,11 +245,10 @@ export const digestRpcContract = oc.router({
 });
 
 // infra/ and usecases/, cut short
-export const billing = plugin({
-  name: 'billing',
-  provides: { entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 25 : 3) }) },
-});
-export const store = plugin({
+export const billing = defineFeature('billing')
+  .provides({ entitlements: () => ({ capFor: (userId: string) => (userId === 'u1' ? 25 : 3) }) })
+  .entrypoints();
+export const store = infra({
   name: 'store',
   provides: { store: () => ({ itemsFor: async (userId: string) => [`${userId}:welcome`], purge: async () => 0 }) },
 });
@@ -401,19 +401,19 @@ The app wires its units in three steps — the hexagon of ports and adapters:
 
 ```ts skip="mounts adapters from @arki/db, @arki/queue and @arki/http, which depend on @arki/dot"
 defineApp('shop')
-  .use(db({ relations })) // driven: what features need
-  .use(queue({ connection }))
+  .infra(db({ relations })) // infra: what features need
+  .infra(queue({ connection }))
   .features([orders, billing]) // the domain
-  .serve(http({ port: 3000 })) // driving: what calls the features
-  .serve(queueWorker({ q, needs: {}, context }));
+  .entrypoints(http({ port: 3000 }), queueWorker({ q, needs: {}, context })); // what calls the features
 ```
 
-The order is a compile error, not a convention: `.use()` is closed after
+The order is a compile error, not a convention: `.infra()` is closed after
 `.features()` (infrastructure never depends on the domain), a feature is not a
-plugin, and a driving adapter (`driver(...)`) cannot sit in `.use()`. Driving
-adapters are bound to the mounted features — `http()` serves every feature's
+plain unit, and an entrypoint unit (`entrypoint(...)`) cannot sit in `.infra()`. Entrypoint
+units are bound to the mounted features — `http()` serves every feature's
 routes without being told the list. `dot explain --graph` draws the three
-groups, numbered in boot order.
+groups (`infra · what features need`, features, `entrypoints · what calls the features`),
+numbered in boot order.
 
 A feature depends on a capability another feature provides, not on the whole
 feature. A feature publishes through `provides`: one factory per capability,
@@ -421,7 +421,7 @@ each receiving the feature's needs. Consumers name the capability by handle —
 the type comes from the provider's factory, so it is written once:
 
 ```ts
-import { defineApp, plugin, service } from '@arki/dot';
+import { defineApp, infra, service } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
 
 // Stand-ins for your own modules.
@@ -430,7 +430,7 @@ type Entitlements = { planOf(userId: string): Promise<string>; warmUp(): Promise
 declare function openDb(): Db;
 declare function createEntitlements(db: Db): Entitlements;
 declare function createDigest(access: Entitlements): { previewFor(userId: string): Promise<string[]> };
-const database = plugin({ name: 'database', provides: { db: () => openDb() } });
+const database = infra({ name: 'database', provides: { db: () => openDb() } });
 
 export const billing = feature('billing', {
   needs: { db: database.provides.db },
@@ -446,7 +446,7 @@ export const digest = feature('daily-digest', {
   provides: { digest: ({ access }) => createDigest(access) },
 });
 
-export const app = defineApp('app').use(database).features([billing, digest]); // provider first: boot order
+export const app = defineApp('app').infra(database).features([billing, digest]); // provider first: boot order
 ```
 
 `billing.provides.entitlements` is an ordinary token on the `entitlements` wire
@@ -456,14 +456,14 @@ data before anything boots:
 - mounting `digest` before `billing` is a compile error, and `configure()`
   returns `UnexpectedDefect` with `ARKI_DOT_E020` metadata naming both positions for code that skips types.
   The fix line is role-aware: "Move X before Y in .features([...])." for a
-  feature provider, "Mount X with .use() before Y." for any other plugin;
+  feature provider, "Mount X with .infra() before Y." for any other unit;
 - two features that need each other form a ring: TypeScript reports `TS7022`
   on both `feature()` consts (read the two files it names), and `configure()`
-  returns `UnexpectedDefect` with `ARKI_DOT_E019` ring metadata (through any plugins) for
+  returns `UnexpectedDefect` with `ARKI_DOT_E019` ring metadata (through any units) for
   erased graphs;
 - `dot explain` draws one labelled edge per capability, such as
   `daily-digest --[entitlements]--> billing`, without booting.
-  A feature's slice record (`feature.<name>`) is one of its plugin's provides.
+  A feature's slice record (`feature.<name>`) is one of its unit's provides.
 
 `boot` performs side effects (seed, warm-up) and returns `undefined`, a concrete
 failure or an ownership plan. Service values belong in `provides`.
@@ -512,20 +512,21 @@ export const ingestUrl = o
   .handler(({ context }) => ingest(context.services.entitlements));
 ```
 
-`resolveNeeds` keeps only handles (driven services such as `db` stay on the
+`resolveNeeds` keeps only handles (infra services such as `db` stay on the
 context explicitly) and throws `ARKI_DOT_E026` naming the alias, key and
 provider when a capability is missing from the bag.
 
-## Plugin handles
+## Unit handles
 
-Every plugin has typed handles before it boots. `database.provides.db` is a
-`Handle<T, 'db'>`: a token on the wire key `db`, plus `.provider` (the plugin
-name) and `.lazy`. The kernel checks every plugin's needs against every
-plugin's static provides at `configure()`.
+Every unit has typed handles before it boots. `database.provides.db` is a
+`Handle<T, 'db'>`: a token on the wire key `db`, plus `.provider` (the unit
+name) and `.lazy`. The kernel checks every unit's needs against every
+unit's static provides at `configure()`.
 
 ```ts
 import type { Provided } from '@arki/dot';
-import { plugin } from '@arki/dot';
+import { infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 
 // Stand-ins for your own clients; with @arki/db this is `db({ relations, url: () => env.DB_URL })`.
 type Pg = { query(sql: string): Promise<unknown[]> };
@@ -534,26 +535,25 @@ declare function connectPg(url: string): Pg;
 declare function connectKv(): Kv;
 declare function makeReports(db: Db): { daily(): Promise<unknown[]> };
 
-export const database = plugin({ name: 'database', provides: { db: () => connectPg('postgres://localhost/app') } });
-export const cache = plugin({ name: 'cache', provides: { kv: () => connectKv() } });
+export const database = infra({ name: 'database', provides: { db: () => connectPg('postgres://localhost/app') } });
+export const cache = infra({ name: 'cache', provides: { kv: () => connectKv() } });
 export type Db = Provided<typeof database.provides.db>; // the one alias an app names
 
-export const reports = plugin({
-  name: 'reports',
-  needs: {
+export const reports = defineFeature('reports')
+  .needs({
     db: database.provides.db, // typed from the provider
     cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager
-  },
-  provides: { reports: ({ db }) => makeReports(db) },
-});
+  })
+  .provides({ reports: ({ db }) => makeReports(db) })
+  .entrypoints();
 ```
 
 Use `service<T>()` when you cannot import the provider: a library contract, a
-test, or a host external. `providesOf([...])` takes plugins as well as features:
+test, or a host external. `providesOf([...])` takes units as well as features:
 `providesOf([database, cache, ...features])`. `provide(token, value)` is only a
 record helper; in examples prefer `provides: { [Token.key]: () => value }`.
 
-In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
+In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a unit named
 `fake:<key>` that provides `value` under the handle's wire key, type-checked
 against the handle:
 
@@ -564,9 +564,9 @@ import { isFailure } from '@arki/failure';
 
 const testDb: Db = { query: async () => [] };
 const app = await defineApp('t')
-  .use(fake(database.provides.db, testDb))
-  .use(fake(cache.provides.kv, { get: async () => null }))
-  .use(reports)
+  .infra(fake(database.provides.db, testDb))
+  .infra(fake(cache.provides.kv, { get: async () => null }))
+  .features([reports])
   .boot();
 if (isFailure(app)) throw new Error(app.code);
 await app.dispose();
@@ -579,7 +579,7 @@ When a contract spans packages, a **token** owns the wire key and the local
 alias becomes free choice:
 
 ```ts
-import { plugin, token } from '@arki/dot';
+import { infra, token } from '@arki/dot';
 
 type PgDatabase = { execute(sql: string): Promise<unknown[]> };
 declare function connect(): PgDatabase; // your code
@@ -588,14 +588,14 @@ declare function connect(): PgDatabase; // your code
 export const Db = token<PgDatabase>()('arki.db');
 
 // A provider publishes under the token's key:
-export const database = plugin({
+export const database = infra({
   name: 'database',
   provides: { [Db.key]: () => connect() }, // → { 'arki.db': PgDatabase }
 });
 
 // Any consumer, any package, any local alias:
-export const reports = plugin({
-  name: 'reports',
+export const healthCheck = infra({
+  name: 'health-check',
   needs: { warehouse: Db }, // wire key 'arki.db', alias yours
   boot: async ({ warehouse }) => {
     await warehouse.execute('select 1'); // typed as PgDatabase
@@ -610,30 +610,30 @@ compile time. `rename` is the multi-instance primitive, and
 `Token.instance()` derives the matching contract:
 
 ```ts
-import { defineApp, plugin, rename, token } from '@arki/dot';
+import { defineApp, infra, rename, token } from '@arki/dot';
 import { isFailure } from '@arki/failure';
 
 type PgDatabase = { execute(sql: string): Promise<unknown[]> };
 declare function connect(url: string): PgDatabase; // your code
 const Db = token<PgDatabase>()('arki.db');
-const database = ({ url }: { url: string }) => plugin({ name: 'database', provides: { [Db.key]: () => connect(url) } });
+const database = ({ url }: { url: string }) => infra({ name: 'database', provides: { [Db.key]: () => connect(url) } });
 const PRIMARY_URL = 'postgres://primary/shop';
 const REPLICA_URL = 'postgres://replica/shop';
 
 const ReportsDb = Db.instance('reports'); // token for key 'arki.db#reports'
 
 const app = await defineApp('shop')
-  .use(database({ url: PRIMARY_URL }))
-  .use(
+  .infra(database({ url: PRIMARY_URL }))
+  .infra(
     rename(
       database({ url: REPLICA_URL }),
       { 'arki.db': ReportsDb.key }, // republish under the derived key
-      'reports-db', // distinct plugin name
+      'reports-db', // distinct unit name
     ),
   )
-  .use(
-    plugin({
-      name: 'analytics',
+  .infra(
+    infra({
+      name: 'db-probe',
       needs: { primary: Db, replica: ReportsDb },
       boot: async ({ primary, replica }) => {
         await Promise.all([primary.execute('select 1'), replica.execute('select 1')]); // two live instances, both typed
@@ -653,7 +653,7 @@ old key and fails the builder guard.
 
 ## Two copies of a feature: `instance`
 
-`rename` is for plugins. A _feature_ is mounted twice with `instance`:
+`rename` is for units. A _feature_ is mounted twice with `instance`:
 `reports.instance('eu', { db: databaseEu.provides.dbEu })` is a second copy named
 `reports#eu` — its own infra units (`reports#eu/store`), usecases, services and
 entrypoints, publishing under `reports#eu.<key>`, so the copy mounts next to the
@@ -663,17 +663,17 @@ under the copy (`reports#eu.audit`), and a child need on the same handle follows
 lazy form included.
 
 ```ts
-import { defineApp, plugin, rename, service } from '@arki/dot';
+import { defineApp, infra, rename, service } from '@arki/dot';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { isFailure } from '@arki/failure';
 
 type Region = { readonly region: string };
-const regionDb = (region: string) => plugin({ name: 'database', provides: { db: (): Region => ({ region }) } });
+const regionDb = (region: string) => infra({ name: 'database', provides: { db: (): Region => ({ region }) } });
 const database = regionDb('us');
 const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'database-eu');
 
-const store = plugin({
+const store = infra({
   name: 'store',
   needs: { db: service<Region>() },
   provides: { repos: ({ db }) => ({ region: () => db.region }) },
@@ -693,7 +693,7 @@ const reports = defineFeature('reports')
 const eu = reports.instance('eu', { db: databaseEu.provides.dbEu }); // `reports#eu`, on the EU database
 const us = reports.instance('us'); // `reports#us`, on the primary
 
-const app = await defineApp('shop').use(database).use(databaseEu).features([eu, us]).boot();
+const app = await defineApp('shop').infra(database).infra(databaseEu).features([eu, us]).boot();
 if (isFailure(app)) throw new Error(app.code);
 app.services['reports#eu.summary'].region; // 'eu'
 app.services['reports#us.summary'].region; // 'us'
@@ -713,15 +713,15 @@ reserved: define the feature without it and call `.instance()`.
 resource. Initialization runs on first `get()` (memoized, single-flight;
 failed attempts retry). Never-touched handles never initialize — and the
 kernel auto-disposes initialized ones during teardown, _after_ the
-publishing plugin's own `dispose` hook, even if that plugin has none:
+publishing unit's own `dispose` hook, even if that unit has none:
 
 ```ts
-import { lazy, plugin, service } from '@arki/dot';
+import { infra, lazy, service } from '@arki/dot';
 
 type SearchClient = { query(text: string): Promise<string[]>; close(): Promise<void> };
 declare function connectToElastic(): Promise<SearchClient>; // your code
 
-export const search = plugin({
+export const search = infra({
   name: 'search',
   provides: {
     search: () =>
@@ -739,8 +739,8 @@ handle, wrapping eager provides and passing lazy ones through by identity:
 ```ts continue
 import { isFailure } from '@arki/failure';
 
-export const suggestions = plugin({
-  name: 'suggestions',
+export const searchWarmer = infra({
+  name: 'search-warmer',
   needs: { search: service.lazy<SearchClient>() },
   async boot({ search }) {
     const client = await search.get(); // first access initializes
@@ -756,21 +756,21 @@ consumer — the wiring guard accepts both shapes against the same witness.
 
 ## Kernel context — the reserved `$` namespace
 
-Every service-carrying hook context includes `$app` (app name), `$plugin` (plugin
+Every service-carrying hook context includes `$app` (app name), `$unit` (unit
 name), `$config` (the `defineApp(name, { config })` bag), and `$signal`: one
 `AbortSignal` per hook call that aborts when the hook exceeds `hookTimeoutMs`,
 with the `ARKI_DOT_E015` error as its reason. Pass it to the hook's I/O
 (`connect`, `fetch`, `sleep`) so a hung hook stops instead of running on after
 the kernel gave up on it. The `$` prefix
-is enforced as reserved: `plugin()` rejects `$`-prefixed needs aliases and
+is enforced as reserved: `infra()` rejects `$`-prefixed needs aliases and
 publish keys at compile time, and the kernel re-validates at runtime
 (`ARKI_DOT_E014`) — kernel keys can never be shadowed.
 
 ## Hooks at a glance
 
-`plugin(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
+`infra(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
 contexts carry the needed services (typed, under your local aliases) and
-`$`-prefixed kernel keys (`$app`, `$plugin`, `$config`, `$signal`):
+`$`-prefixed kernel keys (`$app`, `$unit`, `$config`, `$signal`):
 
 | Hook        | Purpose                                                                      |
 | ----------- | ---------------------------------------------------------------------------- |
@@ -780,9 +780,9 @@ contexts carry the needed services (typed, under your local aliases) and
 | `stop`      | Stop processing in reverse declaration order.                                |
 | `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.             |
 
-Wiring is compile-time checked: `.use(plugin)` fails to typecheck when the
-plugin's needs aren't satisfied by earlier `.use()` calls, or when its
-provides collide with an existing wire key. `rename(plugin, { db: 'reportsDb' })`
+Wiring is compile-time checked: a mount call fails to typecheck when the
+unit's needs aren't satisfied by earlier units, or when its
+provides collide with an existing wire key. `rename(unit, { db: 'reportsDb' })`
 mounts a second instance of an adapter without collision; `token<T>()('key')`
 shares a service contract across packages; `lazy(() => open(), { dispose })`
 defers an expensive open until first `get()` — never-touched services never

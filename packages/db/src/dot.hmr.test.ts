@@ -47,7 +47,7 @@ describe('db({ driver: "pglite" }) under hot updates', () => {
   it('20 fast edits: one app at a time, one handle on the data directory', async () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), 'arki-db-hmr-'));
     try {
-      const app = defineApp('hmr').use(db({ driver: 'pglite', dataDir, relations: {} }));
+      const app = defineApp('hmr').infra(db({ driver: 'pglite', dataDir, relations: {} }));
       const data: Record<string, unknown> = {};
       const requests: Promise<string>[] = [];
 

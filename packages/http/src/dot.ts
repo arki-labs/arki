@@ -1,7 +1,7 @@
 /**
- * DOT adapter for `@arki/http` — the `http()` driving adapter.
+ * DOT adapter for `@arki/http` — the `http()` entrypoint.
  *
- * `http()` is a driver: `.serve(http(...))` binds it to the features the
+ * `http()` is an entrypoint: `.entrypoints(http(...))` binds it to the features the
  * app mounted, and it serves every feature's `routes` slice — declared with
  * `endpoints(core, build)` from this module in a `defineFeature` feature's
  * `.entrypoints(...)`, or with `endpoints(build)` from `@arki/http` in an
@@ -12,9 +12,9 @@
  * import { http } from '@arki/http/dot';
  *
  * const app = await defineApp('shop-api')
- *   .use(db({ url }))
+ *   .infra(db({ url }))
  *   .features([orders, billing])   // each declares `use: [endpoints(build)]`
- *   .serve(http({ port: 3000 }))
+ *   .entrypoints(http({ port: 3000 }))
  *   .start();
  * ```
  *
@@ -24,7 +24,7 @@
  * Bundle routes come first in the route table, then feature routes in
  * mount order.
  *
- * Lifecycle mapping — `.serve()` mounts after every feature, which is what
+ * Lifecycle mapping — `.entrypoints()` mounts after every feature, which is what
  * makes the drain order right:
  *
  *  - `provides.httpServer` — collect bundles, build the router, publish `httpServer`.
@@ -41,10 +41,10 @@
  * adapter only makes sense inside a DOT app.
  */
 
-import type { AnyFeatureCore, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
-import type { Deferred, DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
-import { driver, instanceOf, sliceOf } from '@arki/dot/feature';
-import { DotPluginError, plugin, resolveDeferred } from '@arki/dot/plugin';
+import type { AnyFeatureCore, DepsOf, EntrypointBinder, MountedFeature } from '@arki/dot/feature';
+import type { Deferred, DotConfigureContext, EmptyShape, Unit, Token } from '@arki/dot/unit';
+import { entrypoint, instanceOf, sliceOf } from '@arki/dot/feature';
+import { DotUnitError, resolveDeferred, unit } from '@arki/dot/unit';
 
 import type { RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
@@ -229,7 +229,7 @@ function featureRoutes(ctx: object, f: MountedFeature): RouteBundle | undefined 
   const routes = sliceOf(ctx, f)['routes'];
   if (routes === undefined) return undefined;
   if (!isRouteBundle(routes)) {
-    throw new DotPluginError({
+    throw new DotUnitError({
       code: HTTP_PLUGIN_ERROR_CODES.routesSliceInvalid,
       message: `[http] feature "${f.name}" published a "routes" slice that is not a route bundle.`,
       remediation: 'Declare the feature\'s HTTP surface with endpoints(build) from @arki/http, where build returns routes()….',
@@ -266,7 +266,7 @@ export type EndpointsEntrypoint<TServices> = {
  *
  * `contracts` are the route contracts the bundle binds; they join the
  * manifest as the feature's actions (a chain feature has no `actions` list
- * of its own). The `.serve(http(...))` driver collects the bundle under
+ * of its own). The `.entrypoints(http(...))` entrypoint collects the bundle under
  * `routes`, exactly as for `endpoints(build)`.
  */
 export function endpoints<C extends AnyFeatureCore>(
@@ -279,13 +279,13 @@ export function endpoints<C extends AnyFeatureCore>(
 }
 
 /**
- * The HTTP driving adapter. `.serve(http(...))` binds it to the app's
+ * The HTTP entrypoint. `.entrypoints(http(...))` binds it to the app's
  * features; it serves the listed bundles plus every feature's `routes`
  * slice. See the module docs for the composition pattern and lifecycle.
  */
 export function http<const TBundles extends readonly BundleToken[] = readonly []>(
   options: HttpOptions<TBundles>,
-): Driver<BundleNeeds<TBundles>, HttpServices> {
+): EntrypointBinder<BundleNeeds<TBundles>, HttpServices> {
   const bundleTokens: readonly BundleToken[] = options.bundles ?? [];
   const needs: Record<string, BundleToken> = {};
   for (const tok of bundleTokens) {
@@ -299,13 +299,13 @@ export function http<const TBundles extends readonly BundleToken[] = readonly []
     needs[tok.key] = tok;
   }
 
-  // Erasure seam: the bound plugin is Plugin<{}, HttpServices> because its
+  // Erasure seam: the bound plugin is Unit<{}, HttpServices> because its
   // needs record is runtime-built; the cast re-attaches the token-derived
-  // needs so the builder's guard checks bundle provision at `.serve()`.
-  // Same seam as rename()/testPlugin() in the kernel.
-  return driver(
+  // needs so the builder's guard checks bundle provision at `.entrypoints()`.
+  // Same seam as rename()/testUnit() in the kernel.
+  return entrypoint.fromFeatures(
     features =>
-      bindHttp(options, bundleTokens, needs, features) as unknown as Plugin<BundleNeeds<TBundles>, HttpServices>,
+      bindHttp(options, bundleTokens, needs, features) as unknown as Unit<BundleNeeds<TBundles>, HttpServices>,
   );
 }
 
@@ -314,17 +314,17 @@ function bindHttp(
   bundleTokens: readonly BundleToken[],
   needs: Record<string, BundleToken>,
   features: readonly MountedFeature[],
-): Plugin<EmptyShape, HttpServices> {
+): Unit<EmptyShape, HttpServices> {
   const state: PluginState = { served: undefined, handle: undefined };
   const gauge: InflightGauge = { count: 0, waiters: [] };
 
-  return plugin<EmptyShape, HttpServices>({
+  return unit<EmptyShape, HttpServices>({
     name: 'http',
     // Compile-time/runtime seam: the precise needs shape is derived from
     // `options.bundles` in http()'s return-type cast; here the runtime
     // record rides in under the EmptyShape default. The kernel re-checks
     // satisfaction at boot (DOT_LIFECYCLE_E012) for erased composition.
-    // `.serve()` adds the features' slice tokens to these needs.
+    // `.entrypoints()` adds the features' slice tokens to these needs.
     needs,
     configure(ctx) {
       ctx.registerService('httpServer', 'custom');
@@ -340,7 +340,7 @@ function bindHttp(
         for (const tok of bundleTokens) {
           const bundle = record[tok.key];
           if (bundle === undefined) {
-            throw new DotPluginError({
+            throw new DotUnitError({
               code: HTTP_PLUGIN_ERROR_CODES.bundleMissing,
               message: `[http] bundle "${tok.key}" was not provided by any earlier plugin.`,
               remediation:
@@ -396,7 +396,7 @@ function bindHttp(
     async start() {
       const served = state.served;
       if (served === undefined) {
-        throw new DotPluginError({
+        throw new DotUnitError({
           code: HTTP_PLUGIN_ERROR_CODES.bundleMissing,
           message: '[http] start ran without a booted engine — kernel contract violation.',
           remediation: 'This should be unreachable; boot always precedes start. Report it.',
@@ -420,7 +420,7 @@ function bindHttp(
         const remaining = gauge.count;
         handle.forceClose();
         state.handle = undefined;
-        throw new DotPluginError({
+        throw new DotUnitError({
           code: HTTP_ERROR_CODES.drainTimeout,
           message: `[http] ${String(remaining)} request(s) still in flight after the ${String(timeoutMs)}ms drain budget — connections were severed.`,
           remediation:

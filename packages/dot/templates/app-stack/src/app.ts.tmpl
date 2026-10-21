@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import type { MigratableDb } from '@arki/db/migrate';
-import type { EmptyShape, NeedsShape, Plugin, PluginOwnership, PluginPhases } from '@arki/dot/plugin';
+import type { EmptyShape, NeedsShape, Unit, UnitOwnership, UnitPhases } from '@arki/dot/unit';
 import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
@@ -17,7 +17,7 @@ import { appJournal } from './server/journal';
 const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
 
 /**
- * The DOT app. A DOT app is the sum of its plugins, in boot order:
+ * The DOT app. A DOT app is the sum of its units, in boot order:
  *
  * 1. `log`        switches logging on (`@arki/log`) before anything else runs.
  * 2. `env`        validates `src/env.ts` and publishes `services.env`.
@@ -26,16 +26,16 @@ const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
  * 5. `journal`    publishes `services.journal`, the door every write goes through.
  * 6. `journal-worker` runs the journal's effects (after-commit jobs) between start and stop.
  *
- * The database plugin is a parameter so tests can boot the same app on an
+ * The database unit is a parameter so tests can boot the same app on an
  * in-memory PGlite database (see `src/testing.ts`). Postgres and PGlite fail
- * in different ways, so the parameter accepts any failure (`PluginOwnership`,
- * `PluginPhases`); `boot()` and `start()` return them as values.
+ * in different ways, so the parameter accepts any failure (`UnitOwnership`,
+ * `UnitPhases`); `boot()` and `start()` return them as values.
  */
 export function createApp(
-  database: Plugin<EmptyShape, { readonly db: MigratableDb<typeof relations> }, NeedsShape, string, PluginOwnership, PluginPhases>,
+  database: Unit<EmptyShape, { readonly db: MigratableDb<typeof relations> }, NeedsShape, string, UnitOwnership, UnitPhases>,
 ) {
   return defineApp('{{name}}')
-    .use(
+    .infra(
       log(() => ({
         ...fromEnv(),
         context: asyncContext(),
@@ -43,11 +43,11 @@ export function createApp(
         default: { level: 'info', channels: ['stdout'] },
       })),
     )
-    .use(env({ schema: envSchema }))
-    .use(database)
-    .use(dbMigrations({ migrationsFolder: MIGRATIONS_FOLDER }))
-    .use(journal({ journal: appJournal }))
-    .serve(journalWorker());
+    .infra(env({ schema: envSchema }))
+    .infra(database)
+    .infra(dbMigrations({ migrationsFolder: MIGRATIONS_FOLDER }))
+    .infra(journal({ journal: appJournal }))
+    .entrypoints(journalWorker());
 }
 
 /** The production app: Postgres from `DB_URL`. `dot explain` and `dot doctor` load this export. */
@@ -56,7 +56,7 @@ export const app = createApp(db({ relations }));
 export default app;
 
 /**
- * The local app `dot dev` runs: the same plugins on an embedded PGlite
+ * The local app `dot dev` runs: the same units on an embedded PGlite
  * database in `./.local/db` (git-ignored), so no Postgres is needed. `dot dev`
  * picks this export over `default` and applies `drizzle/` at boot, like
  * production does.

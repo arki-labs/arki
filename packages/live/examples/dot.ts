@@ -22,7 +22,7 @@ import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { http } from '@arki/http/dot';
 import { liveQueries } from '@arki/live/dot';
 import { live, snapshot } from '@arki/live/drizzle';
@@ -44,7 +44,7 @@ const listenPool = new pg.Pool({
   max: 1,
   application_name: 'blog_listener',
 });
-const database = plugin({ name: 'database', provides: { db: (): Db => drizzle({ client: appPool }) } });
+const database = infra({ name: 'database', provides: { db: (): Db => drizzle({ client: appPool }) } });
 
 const contract = oc.$meta<LiveMeta>({});
 const Post = z.object({ id: z.string(), title: z.string() });
@@ -89,7 +89,6 @@ const liveQ = liveQueries({
 });
 
 export const app = defineApp('blog')
-  .use(database)
-  .use(liveQ)
+  .infra(database, liveQ)
   .features([postsFeature])
-  .serve(http({ port: 3000, bundles: [liveQ.provides.liveRoutes] }));
+  .entrypoints(http({ port: 3000, bundles: [liveQ.provides.liveRoutes] }));

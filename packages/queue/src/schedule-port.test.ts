@@ -1,7 +1,7 @@
 /** Queue owns the adapter; schedule owns the canonical port. This test locks their Dot wiring. */
 import { describe, expect, it } from 'vitest';
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { durableScheduler } from '@arki/queue/dot';
 import { defineSchedule } from '@arki/schedule';
@@ -18,8 +18,8 @@ describe('the BullMQ backend fits the durable port', () => {
     // Declaring the backend opens no connection: Redis is reached only when a schedule starts.
     const app = orThrow(
       defineApp('durable-port')
-        .use(durableScheduler({ connection: 'redis://127.0.0.1:6379' }))
-        .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
+        .infra(durableScheduler({ connection: 'redis://127.0.0.1:6379' }))
+        .entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }))
         .configure(),
     );
     expect(app.manifest.actions).toContainEqual(expect.objectContaining({ id: 'nightly.fire', plugin: 'schedule' }));

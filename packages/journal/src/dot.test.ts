@@ -1,6 +1,6 @@
 /**
- * The Dot bridge. `journal(...)` is the driven part: it publishes the journal so
- * features can write through it. `journalWorker(...)` is the driving part: it runs
+ * The Dot bridge. `journal(...)` is the infra part: it publishes the journal so
+ * features can write through it. `journalWorker(...)` is the entrypoint: it runs
  * the effects, taps and async projections. `journalHandlers(...)` lets a feature
  * hand over its projections, effects and taps.
  */
@@ -10,10 +10,10 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { PluginSourceGuard } from '@arki/dot/plugin';
+import type { UnitSourceGuard } from '@arki/dot/unit';
 import { defineApp, rename } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
-import { plugin, service, token } from '@arki/dot/plugin';
+import { infra, service, token } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { journalProjections } from './dot.js';
@@ -86,7 +86,7 @@ const neverBooted = <T>(): T => {
 };
 
 /** The app's `db` plugin: it publishes the root database under the `db` key. */
-const dbPlugin = () => plugin({ name: 'db', provides: { db: () => db } });
+const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
 
 const placeOrder = j.command(
   'placeOrder',
@@ -143,9 +143,9 @@ describe('journal(...) in direct mode', () => {
   it('publishes a journal built with the typed chain as `services.journal`, so a typed app can mount it', async () => {
     const journalUnit = journal({ journal: typedJournal });
     // Public adapters retain their callbacks so mounting can validate the authored lifecycle returns.
-    expectTypeOf<PluginSourceGuard<typeof journalUnit>>().toEqualTypeOf<[]>();
-    expectTypeOf<PluginSourceGuard<ReturnType<typeof journalProjections>>>().toEqualTypeOf<[]>();
-    const app = track(await orThrow(defineApp('typed').use(dbPlugin()).use(journalUnit).boot()));
+    expectTypeOf<UnitSourceGuard<typeof journalUnit>>().toEqualTypeOf<[]>();
+    expectTypeOf<UnitSourceGuard<ReturnType<typeof journalProjections>>>().toEqualTypeOf<[]>();
+    const app = track(await orThrow(defineApp('typed').infra(dbPlugin()).infra(journalUnit).boot()));
 
     expectTypeOf(app.services.journal).toEqualTypeOf(typedJournal);
     expect(app.services.journal).toBe(typedJournal);
@@ -159,8 +159,8 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await orThrow(
         defineApp('untyped')
-          .use(dbPlugin())
-          .use(journal({ journal: untyped }))
+          .infra(dbPlugin())
+          .infra(journal({ journal: untyped }))
           .boot(),
       ),
     );
@@ -170,20 +170,20 @@ describe('journal(...) in direct mode', () => {
   });
 
   it('refuses a transaction or another database type as `db` at compile time, because the worker must see committed data', () => {
-    const withTx = defineApp('tx').use(plugin({ name: 'db', provides: { db: () => neverBooted<AppTx>() } }));
+    const withTx = defineApp('tx').infra(infra({ name: 'db', provides: { db: () => neverBooted<AppTx>() } }));
     // @ts-expect-error -- a transaction has `rollback`, so it is not a root database: effects would run before the outer commit.
-    withTx.use(journal({ journal: j.compose({}) }));
+    withTx.infra(journal({ journal: j.compose({}) }));
     // @ts-expect-error -- the same holds when the journal names the app's database type.
-    withTx.use(journal({ journal: typedJournal }));
+    withTx.infra(journal({ journal: typedJournal }));
 
     type ReportsDb = PgliteDatabase & { readonly reports: true };
     const reports = initJournal
       .db<ReportsDb>()
       .create({ tables, meta: z.object({ actorId: z.string() }) })
       .compose({});
-    const withPlainDb = defineApp('plain').use(dbPlugin());
+    const withPlainDb = defineApp('plain').infra(dbPlugin());
     // @ts-expect-error -- this journal's effects read `ctx.db` as a `ReportsDb`; the app publishes another database type.
-    withPlainDb.use(journal({ journal: reports }));
+    withPlainDb.infra(journal({ journal: reports }));
 
     expect(orThrow(withTx.configure()).manifest.plugins.map(p => p.name)).toEqual(['db']);
   });
@@ -194,9 +194,9 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await orThrow(
         defineApp('direct-worker')
-          .use(dbPlugin())
-          .use(journal({ journal: composed }))
-          .serve(journalWorker({ pollMs: POLL_MS }))
+          .infra(dbPlugin())
+          .infra(journal({ journal: composed }))
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
           .boot(),
       ),
     );
@@ -220,8 +220,8 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await orThrow(
         defineApp('web-only')
-          .use(dbPlugin())
-          .use(journal({ journal: composed }))
+          .infra(dbPlugin())
+          .infra(journal({ journal: composed }))
           .boot(),
       ),
     );
@@ -240,9 +240,9 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await orThrow(
         defineApp('two-journals')
-          .use(dbPlugin())
-          .use(journal({ journal: main }))
-          .use(rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal'))
+          .infra(dbPlugin())
+          .infra(journal({ journal: main }))
+          .infra(rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal'))
           .boot(),
       ),
     );
@@ -274,10 +274,10 @@ describe('journal({ j }) with features', () => {
     const app = track(
       await orThrow(
         defineApp('feature-mode')
-          .use(dbPlugin())
-          .use(journal({ j }))
+          .infra(dbPlugin())
+          .infra(journal({ j }))
           .features([orders, billing, plain])
-          .serve(journalWorker({ pollMs: POLL_MS }))
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
           .boot(),
       ),
     );
@@ -317,7 +317,7 @@ describe('journal({ j }) with features', () => {
     });
 
     track(
-      await orThrow(defineApp('write-at-boot').use(dbPlugin()).use(journal({ j })).features([writer, counting]).boot()),
+      await orThrow(defineApp('write-at-boot').infra(dbPlugin()).infra(journal({ j })).features([writer, counting]).boot()),
     );
 
     expect(await placedCount('boot:at-boot')).toBe(1);
@@ -348,10 +348,10 @@ describe('journal({ j }) with features', () => {
     const app = track(
       await orThrow(
         defineApp('cross-feature')
-          .use(dbPlugin())
-          .use(journal({ j }))
+          .infra(dbPlugin())
+          .infra(journal({ j }))
           .features([ordering, billing])
-          .serve(journalWorker({ pollMs: POLL_MS }))
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
           .boot(),
       ),
     );
@@ -401,7 +401,7 @@ describe('journal({ j }) with features', () => {
       const EmitterToken = token<Emitter>()(`${name}.emitter`);
       // The handle-first way to publish under a per-instance key: provide locally, rename at mount.
       const emitter = rename(
-        plugin({
+        infra({
           name: `${name}-emitter`,
           provides: {
             emitter: (): Emitter => ({
@@ -426,12 +426,12 @@ describe('journal({ j }) with features', () => {
     const app = track(
       await orThrow(
         defineApp('per-feature-services')
-          .use(dbPlugin())
-          .use(orders.emitter)
-          .use(billing.emitter)
-          .use(journal({ j }))
+          .infra(dbPlugin())
+          .infra(orders.emitter)
+          .infra(billing.emitter)
+          .infra(journal({ j }))
           .features([orders.feature, billing.feature])
-          .serve(journalWorker({ pollMs: POLL_MS }))
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
           .boot(),
       ),
     );
@@ -479,7 +479,7 @@ describe('journal({ j }) with features', () => {
     const second = feature('second', { use: [journalHandlers({ effects: [recorder('dot-twice').effect] })] });
 
     await expect(
-      defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
+      defineApp('twice').infra(dbPlugin()).infra(journal({ j })).features([first, second]).boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: expect.objectContaining({
@@ -497,7 +497,7 @@ describe('journal({ j }) with features', () => {
     });
 
     await expect(
-      defineApp('twice').use(dbPlugin()).use(journal({ j })).features([first, second]).boot(),
+      defineApp('twice').infra(dbPlugin()).infra(journal({ j })).features([first, second]).boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: expect.objectContaining({
@@ -511,7 +511,7 @@ describe('journal({ j }) with features', () => {
       use: [journalHandlers({ effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] })],
     });
 
-    await expect(defineApp('once').use(dbPlugin()).use(journal({ j })).features([only]).boot()).resolves.toMatchObject({
+    await expect(defineApp('once').infra(dbPlugin()).infra(journal({ j })).features([only]).boot()).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: expect.objectContaining({
         message: expect.stringContaining('duplicate effect name "dot-same-feature" (feature "only", twice)'),
@@ -523,7 +523,7 @@ describe('journal({ j }) with features', () => {
     const broken = feature('broken', { use: [{ key: 'journal', actions: [], resolve: () => ({}) }] });
 
     await expect(
-      defineApp('broken').use(dbPlugin()).use(journal({ j })).features([broken]).boot(),
+      defineApp('broken').infra(dbPlugin()).infra(journal({ j })).features([broken]).boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
       cause: expect.objectContaining({ message: expect.stringMatching(/feature "broken"/) }),

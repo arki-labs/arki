@@ -21,7 +21,7 @@
  * started app per process, and a hot update disposes the old app before the
  * new one starts.
  */
-import type { DotAppLifecycle, PluginPhases, ServiceRecord } from '@arki/dot';
+import type { DotAppLifecycle, UnitPhases, ServiceRecord } from '@arki/dot';
 import type { Failure } from '@arki/failure';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -152,7 +152,7 @@ type AnyStartContext = StartRequestContext<StartServices, unknown, unknown>;
  * export default createServerEntry(server);
  */
 export function startServer<Services extends ServiceRecord, Rpc, Session>(
-  app: DotAppLifecycle<WithStart<Services, Rpc, Session>, Failure, Failure, PluginPhases>,
+  app: DotAppLifecycle<WithStart<Services, Rpc, Session>, Failure, Failure, UnitPhases>,
   options: StartServerOptions<StartRequestContext<WithStart<Services, Rpc, Session>, Rpc, Session>> = {},
 ): StartServer {
   const runtime = createAppRuntime(app, { hot: options.hot, eager: options.eager });

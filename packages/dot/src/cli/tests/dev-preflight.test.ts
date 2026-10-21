@@ -20,7 +20,7 @@ import { freePort, isAlive, recordingUi, tempProject, waitFor } from './dev-help
 
 const CLI = path.resolve(__dirname, '..', 'index.ts');
 const DEFINE_APP_PATH = path.resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const UNIT_CONTRACT_PATH = path.resolve(__dirname, '..', '..', 'unit-contract.ts');
 
 let workDir: string;
 
@@ -59,10 +59,10 @@ async function session(overrides: Partial<RunDevOptions>) {
 
 /** An app whose `migrations` service reports `pending`: the version the preflight booted. */
 const versionedApp = (version: string): string => `import { defineApp } from '${DEFINE_APP_PATH}';
-import { plugin } from '${PLUGIN_CONTRACT_PATH}';
-const migrations = plugin({ name: 'db-migrations', provides: { migrations: () => ({ pending: ['${version}'] }) } });
-const serving = plugin({ name: 'serving', start: () => { process.stdout.write('serving ${version}\\n'); } });
-export const dev = defineApp('versioned').use(migrations).use(serving);
+import { infra } from '${UNIT_CONTRACT_PATH}';
+const migrations = infra({ name: 'db-migrations', provides: { migrations: () => ({ pending: ['${version}'] }) } });
+const serving = infra({ name: 'serving', start: () => { process.stdout.write('serving ${version}\\n'); } });
+export const dev = defineApp('versioned').infra(migrations).infra(serving);
 `;
 
 /** A stand-in for `dot _preflight`: a script that records its pid, then misbehaves. */

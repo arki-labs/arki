@@ -17,7 +17,7 @@ import type { SleepFailure } from '@arki/clock';
  * import { orThrow } from '@arki/failure';
  *
  * const presets = definePresets({ carrier: { timeout: { timeoutMs: 10_000 } } });
- * const app = orThrow(await defineApp('my-app').use(resilience(presets)).boot());
+ * const app = orThrow(await defineApp('my-app').infra(resilience(presets)).boot());
  *
  * await app.services.resilience.run('carrier', () => callCarrier());
  * ```
@@ -27,7 +27,7 @@ import type { SleepFailure } from '@arki/clock';
  */
 
 import type { Logger } from '@arki/log';
-import { DotPluginError, plugin } from '@arki/dot/plugin';
+import { DotUnitError, infra } from '@arki/dot/unit';
 import { getLogger } from '@arki/log';
 
 import type { ResiliencePolicy } from './policies.js';
@@ -108,7 +108,7 @@ function listen(preset: string, policy: ResiliencePolicy, into: Subscription[]):
  * @param presets - The result of `definePresets(...)`. Its names type `for` and `run`.
  */
 export function resilience<N extends string>(presets: Presets<N>) {
-  return plugin({
+  return infra({
     name: 'resilience',
     configure(ctx) {
       ctx.registerService('resilience', 'custom');
@@ -119,7 +119,7 @@ export function resilience<N extends string>(presets: Presets<N>) {
         const lookup = (name: string): ResiliencePolicy => {
           const found = byName.get(name);
           if (found === undefined) {
-            throw new DotPluginError({
+            throw new DotUnitError({
               code: RESILIENCE_PLUGIN_ERROR_CODES.unknownPreset,
               message: `[resilience] No preset named "${name}". Known: ${[...byName.keys()].join(', ')}.`,
               remediation: 'Use a name you passed to definePresets(...).',

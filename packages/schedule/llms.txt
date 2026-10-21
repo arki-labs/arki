@@ -6,7 +6,7 @@
 
 <!-- llms:start -->
 - `@arki/schedule`: `DEFAULT_LOCK_HOLD_MS`, `SCHEDULE_ERROR_CODES`, `SCHEDULE_RUNTIME_FAILURES`, `ScheduleError`, `ScheduleLockFailed`, `defineSchedule`, `initSchedule`, `lockDurationMs`, `parseEveryInterval`; types `DefineScheduleOptions`, `DurableScheduleRegistration`, `DurableScheduler`; and 14 more.
-- `@arki/schedule/dot`: DOT adapter for @arki/schedule — the `schedule()` driving adapter. `DurableSchedules`, `SCHEDULE_ACTION_META_SCHEMA`, `composeSchedules`, `lockSummary`, `schedule`, `scheduleActions`, `schedules`; types `DurableSchedulesToken`, `FeatureLockOption`, `FeatureScheduleOptions`, `FeatureScheduleSlice`, `ScheduleClient`; and 13 more.
+- `@arki/schedule/dot`: DOT adapter for @arki/schedule — the `schedule()` entrypoint. `DurableSchedules`, `SCHEDULE_ACTION_META_SCHEMA`, `composeSchedules`, `lockSummary`, `schedule`, `scheduleActions`, `schedules`; types `DurableSchedulesToken`, `FeatureLockOption`, `FeatureScheduleOptions`, `FeatureScheduleSlice`, `ScheduleClient`; and 13 more.
 - `@arki/schedule/projection`: `project`; types `ScheduleTableDocument`.
 - `@arki/schedule/runtime`: `assertDurableBackend`, `assertSingleClock`, `createScheduleRuntime`; types `DurableScheduleRegistration`, `DurableScheduler`, `ScheduleClock`, `ScheduleOutcome`, `ScheduleRefusal`, `ScheduleRunResult`, `ScheduleRunStatus`, `ScheduleRuntime`, `ScheduleRuntimeOptions`.
 - `@arki/schedule/orpc`: serve feature schedules as oRPC cron procedures. `checkOnly`, `cronErrorBody`, `cronRouterFor`, `defineCronContract`, `fail`, `lockHeld`, `ok`, `rethrow`, `skipped`; types `BodyOf`, `CronBody`, `CronContext`; and 12 more.

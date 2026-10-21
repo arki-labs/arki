@@ -3,7 +3,7 @@
 A **DOT adapter** is a package-owned bridge between an arbitrary library
 (database driver, queue client, mail provider) and the DOT kernel. Adapters
 let users wire a package into a DOT app with a single import and a
-single `.use(...)` call.
+single `.infra(...)` call.
 
 This guide walks through the adapter pattern using the canonical
 implementations in `@arki/env`, `@arki/kv`, and `@arki/db` as references.
@@ -49,8 +49,8 @@ An adapter exports a factory function with an inferred return type. Keep the
 callbacks visible so Dot can infer their exact services and failures:
 
 ```ts run
-import type { PluginProvides } from '@arki/dot/plugin';
-import { defineApp, plugin } from '@arki/dot/plugin';
+import type { UnitProvides } from '@arki/dot/unit';
+import { defineApp, infra } from '@arki/dot/unit';
 
 // my-pkg/src/index.ts, the framework-agnostic client. A stand-in here.
 class MyClient {
@@ -68,10 +68,10 @@ export type MyPkgDotOptions = {
   readonly url: string;
 };
 
-export type MyPkgServices = PluginProvides<ReturnType<typeof myPkg>>;
+export type MyPkgServices = UnitProvides<ReturnType<typeof myPkg>>;
 
 export function myPkg(options: MyPkgDotOptions) {
-  return plugin({
+  return infra({
     name: 'my-pkg',
 
     configure(ctx) {
@@ -101,7 +101,7 @@ factory above in scope:
 import { isFailure } from '@arki/failure';
 
 const app = await defineApp('billing')
-  .use(myPkg({ url: 'memory://primary' }))
+  .infra(myPkg({ url: 'memory://primary' }))
   .boot();
 if (isFailure(app)) throw new Error(app.code);
 
@@ -113,11 +113,11 @@ Do NOT take a `name` option for multi-instance mounting — that's the app
 author's job via `rename`:
 
 ```ts continue
-import { rename } from '@arki/dot/plugin';
+import { rename } from '@arki/dot/unit';
 
 const twoClients = await defineApp('billing')
-  .use(myPkg({ url: 'memory://primary' }))
-  .use(rename(myPkg({ url: 'memory://replica' }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
+  .infra(myPkg({ url: 'memory://primary' }))
+  .infra(rename(myPkg({ url: 'memory://replica' }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
   .boot();
 if (isFailure(twoClients)) throw new Error(twoClients.code);
 
@@ -132,7 +132,7 @@ metadata only:
 
 ```ts continue
 // For well-known kinds: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger'
-export const registersOnly = plugin({
+export const registersOnly = infra({
   name: 'my-pkg-registers',
   configure(ctx) {
     ctx.registerService('myClient', 'custom');
@@ -140,17 +140,17 @@ export const registersOnly = plugin({
 });
 ```
 
-The kernel merges every plugin's registration into `app.manifest`. Agents
+The kernel merges every unit's registration into `app.manifest`. Agents
 read this to know what services exist before the app boots.
 
 ## Resource opening in `provides`
 
-A plugin publishes through `provides`: one factory per key. Factories may be
+A unit publishes through `provides`: one factory per key. Factories may be
 async. Open exactly one resource per factory. `boot` performs side effects and
 returns `undefined`, a concrete refusal or a private ownership plan:
 
 ```ts continue
-export const withTimeout = plugin({
+export const withTimeout = infra({
   name: 'my-pkg-timeout',
   provides: {
     myClient: async ({ $config }) => {
@@ -167,12 +167,12 @@ export const withTimeout = plugin({
 ```
 
 Because the keys are static, consumers get typed handles before boot:
-`myPkgPlugin.provides.myClient`. Read config that may change late (a URL from
+`myPkgInfra.provides.myClient`. Read config that may change late (a URL from
 env) through a thunk option, called inside the factory, as `@arki/db/dot` does
 with `url: () => env.DB_URL`.
 
 If a factory opens multiple resources and one of them fails, clean up the
-partial state yourself before throwing — the kernel only disposes plugins
+partial state yourself before throwing — the kernel only disposes units
 whose factories completed.
 
 ```ts continue
@@ -180,7 +180,7 @@ whose factories completed.
 const openA = async () => ({ close: async () => {} });
 const openB = async () => ({ close: async () => {} });
 
-export const pairPlugin = plugin({
+export const pairInfra = infra({
   name: 'my-pkg-pair',
   provides: {
     pair: async () => {
@@ -199,17 +199,17 @@ export const pairPlugin = plugin({
 
 ## Consuming other services
 
-If your adapter needs a service from another plugin (say, a logger), declare
+If your adapter needs a service from another unit (say, a logger), declare
 it in `needs` — the hook context delivers it typed, and the app builder
 refuses composition orders that can't satisfy it:
 
 ```ts continue
-import { service } from '@arki/dot/plugin';
+import { service } from '@arki/dot/unit';
 
-// Stand-in for the logger contract another plugin provides.
+// Stand-in for the logger contract another unit provides.
 type Logger = { info(message: string): void };
 
-export const needsLogger = plugin({
+export const needsLogger = infra({
   name: 'my-pkg-logged',
   needs: { log: service<Logger>() },
   boot: ({ log }) => {
@@ -226,7 +226,7 @@ when it runs. The context carries your own published services plus your
 needs:
 
 ```ts continue
-export const closesClient = plugin({
+export const closesClient = infra({
   name: 'my-pkg-closes',
   provides: { myClient: () => new MyClient('memory://') },
   async dispose({ myClient }) {
@@ -235,8 +235,8 @@ export const closesClient = plugin({
 });
 ```
 
-`stop` runs first if the plugin has active work (workers, subscribers).
-`dispose` runs even if `stop` failed — the kernel collects per-plugin
+`stop` runs first if the unit has active work (workers, subscribers).
+`dispose` runs even if `stop` failed — the kernel collects per-unit
 failures into an aggregate `DotLifecycleError`.
 
 ## Manifest contribution beyond services
@@ -246,7 +246,7 @@ Actions are transport-neutral: HTTP routes, queue consumers/producers, CLI
 commands, cron ticks, and future bindings all share the same kernel shape.
 
 ```ts continue
-export const declaresAction = plugin({
+export const declaresAction = infra({
   name: 'my-pkg-actions',
   configure(ctx) {
     ctx.registerService('myClient', 'custom');
@@ -274,7 +274,7 @@ detail in `meta`, and version that layout with `metaSchema`.
 Adapters can also provide projections for `dot explain --as <format>`:
 
 ```ts continue
-export const declaresProjection = plugin({
+export const declaresProjection = infra({
   name: 'my-pkg-projection',
   configure(ctx) {
     ctx.registerProjection({
@@ -292,16 +292,16 @@ must include a `default` condition so the CLI's Node fallback can resolve
 them app-relative.
 
 Dependency edges are not declared — the kernel derives them at `configure()`
-from every plugin's needs and static provides, and writes them into
+from every unit's needs and static provides, and writes them into
 `app.manifest.dependencies` (each entry carries its `key`). Manifest
 `provides` is filled at configure for adapters too. A provider mounted after
 its consumer is `ARKI_DOT_E020`.
 
 ## Feature slices
 
-Apps organize by **feature plugins**: one plugin per feature, its contributions
+Apps organize by **feature units**: one unit per feature, its contributions
 published under a single token whose value is a plain object of
-adapter-owned **slice keys**. Activator plugins (an HTTP server, a queue
+adapter-owned **slice keys**. Activator units (an HTTP server, a queue
 runtime, a scheduler) accept `features:` token lists and read only their
 own key — structurally, with no shared type between adapters.
 
@@ -330,7 +330,7 @@ Rules an adapter's `features:` option must follow:
   with the feature. Duplicate `(binding, id)` pairs are the kernel's
   E016 backstop if both sides ever declare.
 - **A missing token key at boot is a coded error** (erased composition
-  only — the typed builder catches it at `.use()`).
+  only — the typed builder catches it at the mount call).
 - **Resolve feature-derived context/config ONCE inside your guarded
   start**, never per execution: assembly failure must degrade boot, not
   every later dispatch.
@@ -348,14 +348,14 @@ Rules an adapter's `features:` option must follow:
 Return a canonical failure from an owned provider or boot hook. Its code and remediation come from one definition; the app's result infers that definition.
 
 ```ts run expect
-import { defineApp, plugin } from '@arki/dot/plugin';
+import { defineApp, infra } from '@arki/dot/unit';
 import { defineFailure } from '@arki/failure';
 
 const UrlRequired = defineFailure('strict_pkg.url_required', {
   remediation: 'Pass options.url to strictPkg(...) or set MY_PKG_URL.',
 });
 export function strictPkg(options: { readonly url?: string }) {
-  return plugin({
+  return infra({
     name: 'strict-pkg',
     boot() {
       if (!options.url) return UrlRequired();
@@ -363,7 +363,7 @@ export function strictPkg(options: { readonly url?: string }) {
     },
   });
 }
-const result = await defineApp('billing').use(strictPkg({})).boot();
+const result = await defineApp('billing').infra(strictPkg({})).boot();
 if (UrlRequired.is(result)) console.log(result.code, result.remediation);
 ```
 
@@ -371,7 +371,7 @@ if (UrlRequired.is(result)) console.log(result.code, result.remediation);
 strict_pkg.url_required Pass options.url to strictPkg(...) or set MY_PKG_URL.
 ```
 
-Legacy thrown `DotPluginError` values remain private causes of `UnexpectedDefect`. Stable `ARKI_DOT_E*` diagnostics still identify the failing phase and owner; match the returned canonical failure to handle an expected refusal.
+Legacy thrown `DotUnitError` values remain private causes of `UnexpectedDefect`. Stable `ARKI_DOT_E*` diagnostics still identify the failing phase and owner; match the returned canonical failure to handle an expected refusal.
 
 ## Testing your adapter
 
@@ -380,16 +380,16 @@ Use `@arki/dot`'s test harness:
 ```ts
 import { describe, expect, it } from 'vitest';
 
-import { bootTestApp, DotPluginError, plugin } from '@arki/dot';
+import { bootTestApp, DotUnitError, infra } from '@arki/dot';
 import { orThrow } from '@arki/failure';
 
 // The adapter under test, as src/dot.ts would export it.
 function strictPkg(options: { readonly url?: string }) {
-  return plugin({
+  return infra({
     name: 'strict-pkg',
     boot() {
       if (!options.url) {
-        throw new DotPluginError({
+        throw new DotUnitError({
           code: 'MY_PKG_E001',
           message: '[strict-pkg] url is required',
           remediation: 'Pass options.url to strictPkg(...).',
@@ -440,8 +440,8 @@ Adapters declare `@arki/dot` as an **optional peer** so that:
 }
 ```
 
-Import the kernel from `@arki/dot/plugin` (a narrow entry that exports
-`plugin`, `service`, `token`, `rename`, and the plugin types — no CLI).
+Import the kernel from `@arki/dot/unit` (a narrow entry that exports
+`unit`, `service`, `token`, `rename`, and the unit types — no CLI).
 This minimises what the adapter pulls in.
 
 ## Canonical examples
@@ -457,13 +457,13 @@ combination of the hooks.
 
 ## Helpers for adapter code
 
-- `ownUnits(feature)` (from `@arki/dot/feature`) returns the plugins that belong to one feature node only, never those of its nested features.
+- `ownUnits(feature)` (from `@arki/dot/feature`) returns the units that belong to one feature node only, never those of its nested features.
 - `requestServices(features)` (from `@arki/dot/feature`) returns the `provides` a gateway needs to serve requests for those features: their public handles and the `<name>.services` bag of every node.
 - `toJsonObject(value)` (from `@arki/dot`) checks that manifest metadata survives a JSON round trip. It throws `DotManifestError` for dates, functions, `NaN` and cycles.
 
 ## See also
 
-- [Plugin authoring](./plugin-authoring.md) — the general `Plugin`
+- [Unit authoring](./unit-authoring.md) — the general `Unit`
   contract.
 - [Lifecycle](./lifecycle.md) — hook ordering and failure semantics.
 - [Diagnostics](./diagnostics.md) — emitting actionable issues.

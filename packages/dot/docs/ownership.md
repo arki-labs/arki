@@ -1,17 +1,17 @@
 # Ownership
 
-A constructing plugin owns each acquired resource immediately. The app receives that ownership only after construction succeeds. Services publish together; a refused provider never becomes a service.
+A constructing unit owns each acquired resource immediately. The app receives that ownership only after construction succeeds. Services publish together; a refused provider never becomes a service.
 
 Return a `resource` descriptor from a provider. The provider's handle exposes the successful resource type, while boot and disposal infer the failure types from its callbacks.
 
 ```ts run
 import { resource } from '@arki/async';
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 import { defineFailure, isFailure } from '@arki/failure';
 
 const Unavailable = defineFailure('ownership_example.unavailable');
 let closed = false;
-const database = plugin({
+const database = infra({
   name: 'database',
   provides: {
     db: () => resource(
@@ -20,11 +20,11 @@ const database = plugin({
     ),
   },
 });
-const unavailable = plugin({
+const unavailable = infra({
   name: 'unavailable',
   provides: { remote: () => Unavailable() },
 });
-const result = await defineApp('ownership').use(database).use(unavailable).boot();
+const result = await defineApp('ownership').infra(database).infra(unavailable).boot();
 if (!isFailure(result) || !Unavailable.is(result) || !closed) {
   throw new Error('Refusal must unwind previously acquired resources.');
 }
@@ -36,11 +36,11 @@ Closing follows one order:
 
 1. Close admission and request cancellation.
 2. Observe all admitted children and acquisitions, including late settlements.
-3. Run the plugin's legacy disposal hook while its resources remain available.
+3. Run the unit's legacy disposal hook while its resources remain available.
 4. Run owned finalizers in reverse registration order, attempting every finalizer.
-5. Continue through earlier plugins in reverse declaration order.
+5. Continue through earlier units in reverse declaration order.
 
-A partially constructed plugin closes its descriptors before earlier plugins unwind. Its legacy `dispose` hook runs only after its boot completed. Register partial resource cleanup through descriptors.
+A partially constructed unit closes its descriptors before earlier units unwind. Its legacy `dispose` hook runs only after its boot completed. Register partial resource cleanup through descriptors.
 
 ## Failure values
 

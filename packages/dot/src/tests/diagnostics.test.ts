@@ -1,7 +1,7 @@
 /**
  * Diagnostics contract tests for the DOT kernel.
  *
- * The snapshot exposes five top-level arrays — plugins, actions, services,
+ * The snapshot exposes five top-level arrays — units, actions, services,
  * lifecycle, issues — and every `DiagnosticIssue` carries code, severity,
  * message, remediation, and docsUrl.
  */
@@ -11,18 +11,18 @@ import { describe, expect, it } from 'vitest';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
-import { plugin } from '../plugin-contract.js';
+import { infra } from '../unit-contract.js';
 
 describe('DOT diagnostics', () => {
   it('pre-boot diagnostics include all five arrays', () => {
-    const p = plugin({
+    const p = infra({
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');
         ctx.registerAction({ id: 'p.ping', binding: 'orpc', direction: 'in' });
       },
     });
-    const configured = orThrow(defineApp('test').use(p).configure());
+    const configured = orThrow(defineApp('test').infra(p).configure());
     const snap = configured.diagnostics;
     expect(snap.snapshotVersion).toBe(2);
     expect(snap.generatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
@@ -48,22 +48,22 @@ describe('DOT diagnostics', () => {
     orThrow(await app.dispose());
   });
 
-  it('post-boot diagnostics include per-plugin status', async () => {
-    const a = plugin({
+  it('post-boot diagnostics include per-unit status', async () => {
+    const a = infra({
       name: 'a',
       boot: () => {
         /* side effects only */
       },
     });
-    const app = orThrow(await defineApp('test').use(a).boot());
+    const app = orThrow(await defineApp('test').infra(a).boot());
     const snap = app.diagnostics;
     expect(snap.plugins).toEqual([{ plugin: 'a', status: 'ok', issues: [] }]);
     expect(snap.lifecycle.some(l => l.hook === 'boot' && l.plugin === 'a')).toBe(true);
     orThrow(await app.dispose());
   });
 
-  it('boot failure surfaces a failed plugin diagnostic with structured issue', async () => {
-    const bad = plugin({
+  it('boot failure surfaces a failed unit diagnostic with structured issue', async () => {
+    const bad = infra({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
@@ -71,7 +71,7 @@ describe('DOT diagnostics', () => {
     });
     // The DotApp wrapper isn't returned on failure, but the configure() seam
     // gives us access through a fresh builder. Re-build to inspect.
-    const configured = orThrow(defineApp('test').use(bad).configure());
+    const configured = orThrow(defineApp('test').infra(bad).configure());
     // configure succeeded — to surface boot diagnostics, drive boot via the
     // builder and re-read diagnostics on the configured object.
     expect(await configured.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
@@ -93,13 +93,13 @@ describe('DOT diagnostics', () => {
     // Surfacing issues needs a configured app whose boot fails — the
     // configured() seam holds the underlying impl whose diagnostics we can
     // read after a boot throw.
-    const bootBad = plugin({
+    const bootBad = infra({
       name: 'bootbad',
       boot: () => {
         throw new Error('boot-boom');
       },
     });
-    const seam = orThrow(defineApp('test').use(bootBad).configure());
+    const seam = orThrow(defineApp('test').infra(bootBad).configure());
     expect(await seam.boot()).toMatchObject({ code: UnexpectedDefect.code, cause: new Error('boot-boom') });
     const snap = seam.diagnostics;
     for (const issue of snap.issues) {

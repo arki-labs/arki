@@ -1,4 +1,4 @@
-/** `dot explain`: the app's static manifest, plugin graph or a registered projection. Never boots the app. */
+/** `dot explain`: the app's static manifest, unit graph or a registered projection. Never boots the app. */
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
@@ -16,7 +16,7 @@ export default defineCommand({
     .object({
       app: z.string().optional().describe('App file (default: ./dot.config.ts, ./src/app.ts or ./app.ts)'),
       cwd: z.string().optional().describe('Working directory (default: current)'),
-      graph: z.boolean().optional().describe('The plugin graph as Mermaid flowchart source, in boot order'),
+      graph: z.boolean().optional().describe('The unit graph as Mermaid flowchart source, in boot order'),
       as: z.string().optional().describe('A registered projection format: openapi, asyncapi, help-text, ...'),
       module: z.string().optional().describe('Replace the projection module for this run (with --as)'),
     })

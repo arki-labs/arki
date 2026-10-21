@@ -2,7 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineFeature, feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
+import { service } from '@arki/dot/unit';
 
 import { journalHandlers, journalWorkflows } from './dot.js';
 import { need } from './handlers.js';

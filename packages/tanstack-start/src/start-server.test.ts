@@ -14,13 +14,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
 import { tanstackStart } from './dot';
 import { startServer } from './start-server';
 
-function makeApp(extra = plugin({ name: 'extra' })) {
+function makeApp(extra = infra({ name: 'extra' })) {
   const { authn, calls } = makeAuthn();
   const { gateway } = makeGateway();
   const start = tanstackStart({
@@ -28,7 +28,7 @@ function makeApp(extra = plugin({ name: 'extra' })) {
     session: ({ auth }, request) => auth.principal(request.headers),
     rpc: ({ rpc }, request) => rpc.client(request.headers),
   });
-  return { app: defineApp('shop').use(authn).use(gateway).use(extra).entrypoints(start), calls };
+  return { app: defineApp('shop').infra(authn).infra(gateway).infra(extra).entrypoints(start), calls };
 }
 
 const page = (user = 'ada') => new Request('https://shop.example/digest', { headers: { 'x-user': user } });
@@ -36,7 +36,7 @@ const ok = () => new Response('page');
 
 describe('startServer() boot failure', () => {
   it('answers 503 and keeps the cause out of the body', async () => {
-    const broken = plugin({
+    const broken = infra({
       name: 'extra',
       boot() {
         throw new Error('cannot reach postgres://admin:hunter2@db');
@@ -178,7 +178,7 @@ describe('startServer() client files', () => {
 
 /** A plugin that records when the app starts. */
 const booting = (events: string[]) =>
-  plugin({
+  infra({
     name: 'extra',
     start() {
       events.push('start');
@@ -206,7 +206,7 @@ describe('startServer() hot replace', () => {
   it('disposes the old app before the new one starts', async () => {
     const events: string[] = [];
     const lifecycle = (label: string) =>
-      plugin({
+      infra({
         name: 'extra',
         start() {
           events.push(`start:${label}`);

@@ -13,7 +13,7 @@ import { resource, ScopeFailed } from '@arki/async';
 import { defineFailure, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
-import { plugin } from '../plugin-contract.js';
+import { infra } from '../unit-contract.js';
 import { createAppRuntime, RuntimeReleaseFailed, RuntimeReplaced } from '../runtime.js';
 
 const Unavailable = defineFailure('runtime_test.unavailable');
@@ -35,11 +35,11 @@ function hotModule(data: Record<string, unknown>) {
   };
 }
 
-/** An app whose one plugin counts live instances and disposes slowly, like a pool draining. */
+/** An app whose one unit counts live instances and disposes slowly, like a pool draining. */
 function countedApp() {
   const counts = { live: 0, maxLive: 0, starts: 0 };
-  const app = defineApp('counted').use(
-    plugin({
+  const app = defineApp('counted').infra(
+    infra({
       name: 'probe',
       provides: {
         probe: () => {
@@ -61,8 +61,8 @@ function countedApp() {
 describe('createAppRuntime', () => {
   it('starts once for concurrent callers and retries a failed start', async () => {
     let failNext = true;
-    const app = defineApp('flaky').use(
-      plugin({
+    const app = defineApp('flaky').infra(
+      infra({
         name: 'flaky',
         provides: {
           flaky: () => {
@@ -89,7 +89,7 @@ describe('createAppRuntime', () => {
     const { app, counts } = countedApp();
     const runtime = createAppRuntime(app, { eager: true });
 
-    // No get() yet: the boot ran on its own, so the plugin's factory already ran.
+    // No get() yet: the boot ran on its own, so the unit's factory already ran.
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(counts.starts).toBe(1);
     const started = orThrow(await runtime.get());
@@ -100,8 +100,8 @@ describe('createAppRuntime', () => {
 
   it('eager: a failed start is not cached, the next get() retries', async () => {
     let failNext = true;
-    const app = defineApp('flaky-eager').use(
-      plugin({
+    const app = defineApp('flaky-eager').infra(
+      infra({
         name: 'flaky',
         provides: {
           flaky: () => {
@@ -169,8 +169,8 @@ describe('createAppRuntime', () => {
 
   it('blocks HMR replacement when the previous owner could not release its resource', async () => {
     let acquisitions = 0;
-    const app = defineApp('exclusive').use(
-      plugin({
+    const app = defineApp('exclusive').infra(
+      infra({
         name: 'lease',
         provides: {
           lease: () =>
@@ -193,8 +193,8 @@ describe('createAppRuntime', () => {
 
   it('preserves observer and cleanup defects and refuses another exclusive owner', async () => {
     let acquisitions = 0;
-    const app = defineApp('observer').use(
-      plugin({
+    const app = defineApp('observer').infra(
+      infra({
         name: 'lease',
         provides: {
           lease: () =>

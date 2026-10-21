@@ -1,5 +1,5 @@
 /**
- * The `vectorIndex` Dot plugin: a feature gets an index sized by the embedding
+ * The `vectorIndex` Dot unit: a feature gets an index sized by the embedding
  * space at boot, resolved ONCE from the thunks; with no space the app still
  * boots and the index says so; tests inject the provider and never pick real
  * Qdrant. The embedder is `embeddings()` from `@arki/embeddings/dot`.
@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { runDoctor, runExplain } from '@arki/dot/cli';
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { fakeEmbedder } from '@arki/embeddings/testing';
 import { isFailure, orThrow } from '@arki/failure';
 
@@ -34,7 +34,7 @@ describe('vectorIndex()', () => {
     const spaceOf = vi.fn(() => embedder);
     const app = await orThrow(
       defineApp('vi-mock')
-        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], space: spaceOf, env }))
+        .infra(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], space: spaceOf, env }))
         .boot(),
     );
 
@@ -50,7 +50,7 @@ describe('vectorIndex()', () => {
   it('no longer publishes embedder: that is embeddings() from @arki/embeddings/dot', async () => {
     const app = await orThrow(
       defineApp('vi-only-index')
-        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: [], space }))
+        .infra(vectorIndex<Payload>({ collection: 'test', payloadIndexes: [], space }))
         .boot(),
     );
 
@@ -61,7 +61,7 @@ describe('vectorIndex()', () => {
   it('boots with no space (no embedding provider): index provider null', async () => {
     const app = await orThrow(
       defineApp('vi-none')
-        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], space: () => null }))
+        .infra(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], space: () => null }))
         .boot(),
     );
 
@@ -73,7 +73,7 @@ describe('vectorIndex()', () => {
     const provider = new MockVectorProvider<Payload>({ space });
     const app = await orThrow(
       defineApp('vi-injected')
-        .use(
+        .infra(
           vectorIndex<Payload>({
             collection: 'test',
             payloadIndexes: ['userId'],
@@ -101,7 +101,7 @@ describe('llm()', () => {
     const manifest = await runExplain(
       orThrow(
         defineApp('llm-explain')
-          .use(llm({ probe: false }))
+          .infra(llm({ probe: false }))
           .configure(),
       ),
     );
@@ -112,7 +112,7 @@ describe('llm()', () => {
   it('fails boot with ProviderUnavailable when the probe fails, and `dot doctor` marks the plugin failed', async () => {
     // WHY: "Ollama is not running" must surface at boot as a typed, fixable failure and in
     // `dot doctor --json`, not as the first user request failing.
-    const builder = defineApp('llm-down').use(llm({ provider: 'ollama', model: 'gemma4', fetch: ollamaDown }));
+    const builder = defineApp('llm-down').infra(llm({ provider: 'ollama', model: 'gemma4', fetch: ollamaDown }));
 
     const booted = await builder.boot();
     const report = await runDoctor(builder);
@@ -129,7 +129,7 @@ describe('llm()', () => {
     // WHY: a healthy provider must cost the app nothing but the probe at boot.
     const app = await orThrow(
       defineApp('llm-up')
-        .use(llm({ provider: 'ollama', model: 'gemma4', fetch: ollamaUp }))
+        .infra(llm({ provider: 'ollama', model: 'gemma4', fetch: ollamaUp }))
         .boot(),
     );
 
@@ -142,12 +142,12 @@ describe('llm()', () => {
     const fake = createFakeLLMProvider({ answers: ['ok'] });
     const unprobed = await orThrow(
       defineApp('llm-unprobed')
-        .use(llm({ provider: 'ollama', probe: false, fetch: ollamaDown }))
+        .infra(llm({ provider: 'ollama', probe: false, fetch: ollamaDown }))
         .boot(),
     );
     const injected = await orThrow(
       defineApp('llm-fake')
-        .use(llm(() => ({ instance: fake })))
+        .infra(llm(() => ({ instance: fake })))
         .boot(),
     );
 

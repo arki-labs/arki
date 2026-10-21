@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 import type { HttpMiddleware, RequestId, RouteBundle } from '@arki/http';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin, token } from '@arki/dot/plugin';
+import { infra, token } from '@arki/dot/unit';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 import { endpoints, optional, route, routes } from '@arki/http';
 
@@ -101,7 +101,7 @@ export const orders = feature('orders', {
   use: [endpoints(() => routes().bind(listOrders, ({ query }) => db.orders.list(query)))],
 });
 
-export const adminPlugin = plugin({
+export const adminPlugin = infra({
   name: 'admin',
   provides: { 'admin.routes': () => routes().bind(listOrders, () => db.orders.list()) },
 });

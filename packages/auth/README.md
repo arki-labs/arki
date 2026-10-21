@@ -1,6 +1,6 @@
 # @arki/auth
 
-Sign-in for Arki apps on Bun, TanStack Start and oRPC. You write one declaration (`defineAuth`) and bind it once on the server (`createAuth`, or the Dot plugin `auth`). The principal, the guards and the client read their types from that declaration and from your own user table. Every security claim points at a test that runs on PGlite.
+Sign-in for Arki apps on Bun, TanStack Start and oRPC. You write one declaration (`defineAuth`) and bind it once on the server (`createAuth`, or the Dot unit `auth`). The principal, the guards and the client read their types from that declaration and from your own user table. Every security claim points at a test that runs on PGlite.
 
 The engine is [Better Auth](https://www.better-auth.com) 1.7.7. It stays behind this package's API. App code never imports `better-auth`.
 
@@ -52,7 +52,7 @@ Five tasks cover most apps. Each one builds on the one before.
 
 ### Recipe 1: set up sign-in for an app
 
-This builds sign-in for an app called Notes: password, magic link and Google, one extra user column (`plan`), and bearer tokens for a native client. First the tables, then the declaration, then the Dot plugin.
+This builds sign-in for an app called Notes: password, magic link and Google, one extra user column (`plan`), and bearer tokens for a native client. First the tables, then the declaration, then the Dot unit.
 
 #### The tables (the app owns this file)
 
@@ -107,7 +107,7 @@ export const authDefinition = defineAuth({
 });
 ```
 
-#### The Dot plugin
+#### The Dot unit
 
 `auth(definition, bindings)` takes `db` and `mail` from the Dot graph. `runtime` runs at boot, so `dot explain` and the manifest never read a secret. `providers` must hold exactly the social methods you enabled: here `google`, and nothing else.
 
@@ -147,7 +147,7 @@ export type Auth = AuthOf<typeof authn>;
 export type Principal = PrincipalOf<Auth>;
 ```
 
-The app adds the plugin after its database and mail plugins. `database` here comes from [the docs fixture](docs/examples/fixture.ts), which holds an in-memory database for the examples; use your own database plugin.
+The app adds the unit after its database and mail units. `database` here comes from [the docs fixture](docs/examples/fixture.ts), which holds an in-memory database for the examples; use your own database unit.
 
 ```ts continue
 import { defineApp } from '@arki/dot';
@@ -157,9 +157,9 @@ import { resend } from '@arki/mail/http/resend';
 import { database } from './fixture.ts';
 
 export const app = defineApp('notes')
-  .use(database)
-  .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Notes <hi@notes.app>' })))
-  .use(authn);
+  .infra(database)
+  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Notes <hi@notes.app>' })))
+  .infra(authn);
 ```
 
 ### Recipe 2: guard a procedure

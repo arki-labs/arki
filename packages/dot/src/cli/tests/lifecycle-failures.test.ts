@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defineFailure } from '@arki/failure';
 
 import { defineApp } from '../../define-app.js';
-import { plugin } from '../../plugin-contract.js';
+import { infra } from '../../unit-contract.js';
 import { discoverApp } from '../discover.js';
 import { runDoctor } from '../doctor.js';
 import { runExplain } from '../explain.js';
@@ -17,11 +17,11 @@ import { runServe } from '../serve.js';
 
 const Refused = defineFailure('test.cli_lifecycle.refused');
 const DEFINE_APP_PATH = path.resolve(__dirname, '../../define-app.ts');
-const PLUGIN_PATH = path.resolve(__dirname, '../../plugin-contract.ts');
+const UNIT_PATH = path.resolve(__dirname, '../../unit-contract.ts');
 const FAILURE_PATH = path.resolve(__dirname, '../../../../failure/src/index.ts');
 const imports = `
 import { defineApp } from ${JSON.stringify(DEFINE_APP_PATH)};
-import { plugin } from ${JSON.stringify(PLUGIN_PATH)};
+import { infra } from ${JSON.stringify(UNIT_PATH)};
 import { defineFailure } from ${JSON.stringify(FAILURE_PATH)};
 const Refused = defineFailure('test.cli_lifecycle.refused');
 `;
@@ -54,14 +54,14 @@ async function dot(argv: string[]) {
 describe('managed lifecycle failures', () => {
   it('returns configure failures before explain or doctor reads app state', async () => {
     const failure = Refused();
-    const make = () => defineApp('configure-refusal').use(plugin({ name: 'refused', configure: () => failure }));
+    const make = () => defineApp('configure-refusal').infra(infra({ name: 'refused', configure: () => failure }));
     expect(await runExplain(make())).toBe(failure);
     expect(await runDoctor(make())).toBe(failure);
   });
 
   it.each(['explain', 'doctor'])('%s exits nonzero for a returned configure failure', async command => {
     const file = await appFile(
-      "export default defineApp('configure-refusal').use(plugin({ name: 'refused', configure: () => Refused() }));",
+      "export default defineApp('configure-refusal').infra(infra({ name: 'refused', configure: () => Refused() }));",
     );
     const result = await dot([command, '--app', file]);
     expect(result.code).toBe(3);
@@ -70,7 +70,7 @@ describe('managed lifecycle failures', () => {
 
   it('preflight retains configure failure data and exits nonzero', async () => {
     const file = await appFile(
-      "export const dev = defineApp('configure-refusal').use(plugin({ name: 'refused', configure: () => Refused() }));",
+      "export const dev = defineApp('configure-refusal').infra(infra({ name: 'refused', configure: () => Refused() }));",
     );
     expect(await runPreflightChild({ app: file })).toMatchObject({
       app: null,
@@ -87,7 +87,7 @@ describe('managed lifecycle failures', () => {
 
   it('doctor and preflight report disposal failure instead of a passing boot', async () => {
     const file = await appFile(
-      "export default defineApp('dispose-refusal').use(plugin({ name: 'refused', dispose: () => Refused() }));",
+      "export default defineApp('dispose-refusal').infra(infra({ name: 'refused', dispose: () => Refused() }));",
     );
     const doctor = await dot(['doctor', '--app', file]);
     expect(doctor.code).toBe(3);
@@ -102,7 +102,7 @@ describe('managed lifecycle failures', () => {
 
   it.each(['stop', 'dispose'])('serve returns a resolved %s failure during shutdown', async phase => {
     const file = await appFile(
-      `export const dev = defineApp('shutdown-refusal').use(plugin({ name: 'refused', ${phase}: () => Refused() }));`,
+      `export const dev = defineApp('shutdown-refusal').infra(infra({ name: 'refused', ${phase}: () => Refused() }));`,
     );
     const result = await runServe({ app: file, signal: AbortSignal.abort() });
     expect(result).toMatchObject({ code: Refused.code });
@@ -137,14 +137,14 @@ describe('managed lifecycle failures', () => {
   });
 });
 
-describe('doctor plugin construction failures', () => {
-  // WHY: the generic "construction failed" message hid the plugin's own failure, so an operator
+describe('doctor unit construction failures', () => {
+  // WHY: the generic "construction failed" message hid the unit's own failure, so an operator
   // reading `dot doctor --json` could not tell a missing provider from a bad config.
-  it('shows the failure code and message a plugin returned from boot', async () => {
+  it('shows the failure code and message a unit returned from boot', async () => {
     const Unavailable = defineFailure('test.cli_lifecycle.unavailable', {
       message: 'provider "x" is not reachable',
     });
-    const report = await runDoctor(defineApp('doctor-typed').use(plugin({ name: 'llm', boot: () => Unavailable() })));
+    const report = await runDoctor(defineApp('doctor-typed').infra(infra({ name: 'llm', boot: () => Unavailable() })));
     expect(report).toMatchObject({
       code: 'dot.doctor_failed',
       data: {
@@ -164,8 +164,8 @@ describe('doctor plugin construction failures', () => {
   // other hook failure), so doctor must not leak the raw thrown text.
   it('keeps the thrown error message out of the report', async () => {
     const report = await runDoctor(
-      defineApp('doctor-thrown').use(
-        plugin({
+      defineApp('doctor-thrown').infra(
+        infra({
           name: 'db',
           boot: () => {
             throw new Error('connect ECONNREFUSED');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
-import { plugin, service } from '@arki/dot/plugin';
+import { infra, service } from '@arki/dot/unit';
 
 import { DURABLE_SCHEDULES_KEY, durableScheduler } from './dot.ts';
 import type { DurableScheduler } from './durable-scheduler.ts';
@@ -19,7 +19,7 @@ describe('durable scheduler backend', () => {
 
   it('durableScheduler() provides the backend under the key @arki/schedule needs', async () => {
     let received: DurableScheduler | undefined;
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { [DURABLE_SCHEDULES_KEY]: service<DurableScheduler>() },
       boot: ctx => {
@@ -27,8 +27,7 @@ describe('durable scheduler backend', () => {
       },
     });
     const app = await defineApp('durable-backend')
-      .use(durableScheduler({ connection: 'redis://localhost:6379' }))
-      .use(consumer)
+      .infra(durableScheduler({ connection: 'redis://localhost:6379' }), consumer)
       .boot();
 
     expect(DURABLE_SCHEDULES_KEY).toBe('arki.schedule.durable');

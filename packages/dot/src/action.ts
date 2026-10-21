@@ -4,7 +4,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { ScopeFailed, SUPERVISOR_FAILURES } from '@arki/async';
 import { defineFailure, FAILURE_ERROR_CODES, FailureError, InvalidInput, ValidatorDefect } from '@arki/failure';
 
-import type { ActionDeclaration } from './plugin-contract.js';
+import type { ActionDeclaration } from './unit-contract.js';
 
 /** An adapter may call only an explicitly exposed boundary.
  * @fix Use an adapter listed by the action contract.

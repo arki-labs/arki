@@ -21,7 +21,7 @@ import { isFailure, orThrow } from '@arki/failure';
 
 import type { DoctorReport } from '../failures.js';
 import { defineApp } from '../../define-app.js';
-import { plugin } from '../../plugin-contract.js';
+import { infra } from '../../unit-contract.js';
 import { testApp } from '../../test-harness.js';
 import { runDoctor } from '../doctor.js';
 import { DoctorFailed } from '../failures.js';
@@ -73,7 +73,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('without --observability, no dot.observability_no_sdk issue appears in the envelope', async () => {
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         /* side effects only */
@@ -89,7 +89,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and no SDK, the envelope carries a dot.observability_no_sdk warning issue', async () => {
-    const p = plugin({
+    const p = infra({
       name: 'p',
       boot: () => {
         /* side effects only */
@@ -112,7 +112,7 @@ describe('runDoctor — --observability flag', () => {
     const provider = new BasicTracerProvider();
     trace.setGlobalTracerProvider(provider);
     try {
-      const p = plugin({
+      const p = infra({
         name: 'p',
         boot: () => {
           /* side effects only */
@@ -131,13 +131,13 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and a boot failure, both the failure AND the OTel warning surface', async () => {
-    const bad = plugin({
+    const bad = infra({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
       },
     });
-    const builder = defineApp('test').use(bad);
+    const builder = defineApp('test').infra(bad);
 
     const envelope = reportOf(await runDoctor(builder, { observability: true }));
 

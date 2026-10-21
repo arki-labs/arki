@@ -8,11 +8,11 @@
  * @example
  * export const authn = auth(authDefinition, { tables: authTables, rateLimit: { store: kv }, runtime: () => ({ … }) });
  * export type Auth = AuthOf<typeof authn>;
- * defineApp('notes').use(database).use(mail(() => ({ … }))).use(authn);
+ * defineApp('notes').infra(database).infra(mail(() => ({ … }))).infra(authn);
  */
-import type { Plugin } from '@arki/dot/plugin';
+import type { Unit } from '@arki/dot/unit';
 import type { Mailer } from '@arki/mail';
-import { plugin, service } from '@arki/dot/plugin';
+import { infra, service } from '@arki/dot/unit';
 
 import type { AuthDefinition } from './definition.js';
 import type { Auth } from './pg/index.js';
@@ -24,7 +24,7 @@ export function auth<D extends AuthDefinition, T extends AuthTables, S extends S
   definition: D,
   bindings: Omit<AuthBindings<D, T, S>, 'db' | 'mail'>,
 ) {
-  return plugin({
+  return infra({
     name: 'auth',
     needs: { db: service<AuthDb>(), mail: service<Mailer>() },
     configure(ctx) {
@@ -38,4 +38,4 @@ export function auth<D extends AuthDefinition, T extends AuthTables, S extends S
 }
 
 /** The `auth` service type of an `auth(...)` plugin: `AuthOf<typeof authn>`. */
-export type AuthOf<P> = P extends Plugin<infer _Needs, { readonly auth: infer A }> ? A : never;
+export type AuthOf<P> = P extends Unit<infer _Needs, { readonly auth: infer A }> ? A : never;

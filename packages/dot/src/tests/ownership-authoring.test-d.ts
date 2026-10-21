@@ -8,12 +8,12 @@ import { defineFailure } from '@arki/failure';
 
 import type { AnyFeature } from '../feature.js';
 import type { DotBootOutcome } from '../kernel/app-instance.js';
-import type { PluginCloseFailure, PluginOpenFailure, Provided } from '../plugin-contract.js';
+import type { UnitCloseFailure, UnitOpenFailure, Provided } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
 import { feature, plug } from '../feature.js';
-import { initPlugins } from '../init-plugins.js';
-import { plugin, service } from '../plugin-contract.js';
+import { initUnits } from '../init-units.js';
+import { infra, service } from '../unit-contract.js';
 
 const Open = defineFailure('test.ownership_authoring.open');
 const Close = defineFailure('test.ownership_authoring.close');
@@ -22,7 +22,7 @@ const branch: () => boolean = () => false;
 const open = () => (branch() ? Open() : { value: 1 });
 const factories = { db: () => resource(open, () => Close()) };
 const boot = () => ({ task: child(() => Child()), clean: cleanup(() => Close()) });
-const _direct = plugin({
+const _direct = infra({
   name: 'direct',
   needs: { count: service<number>() },
   provides: {
@@ -39,8 +39,8 @@ const _direct = plugin({
     return boot();
   },
 });
-const keyed = initPlugins.context<{ count: number; db: { value: number } }>().create();
-const _keys = keyed.plugin({
+const keyed = initUnits.context<{ count: number; db: { value: number } }>().create();
+const _keys = keyed.infra({
   name: 'keys',
   needs: ['count'],
   provides: {
@@ -56,7 +56,7 @@ const _keys = keyed.plugin({
     return boot();
   },
 });
-const _witness = keyed.plugin({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
+const _witness = keyed.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
 const object = feature('object', {
   needs: { count: service<number>() },
   provides: {
@@ -72,7 +72,7 @@ const object = feature('object', {
     return boot();
   },
 });
-const _objectPlugin = plug(object);
+const _objectUnit = plug(object);
 const _chain = defineFeature('chain')
   .needs({ count: service<number>() })
   .provides({
@@ -83,14 +83,14 @@ const _chain = defineFeature('chain')
       ),
   })
   .entrypoints();
-expectTypeOf<PluginOpenFailure<typeof _direct | typeof _keys | typeof _witness | typeof _objectPlugin>>().toEqualTypeOf<
+expectTypeOf<UnitOpenFailure<typeof _direct | typeof _keys | typeof _witness | typeof _objectUnit>>().toEqualTypeOf<
   FailureOf<typeof Open> | FailureOf<typeof Child>
 >();
 expectTypeOf<
-  PluginCloseFailure<typeof _direct | typeof _keys | typeof _witness | typeof _objectPlugin>
+  UnitCloseFailure<typeof _direct | typeof _keys | typeof _witness | typeof _objectUnit>
 >().toEqualTypeOf<FailureOf<typeof Close> | FailureOf<typeof Child>>();
-expectTypeOf<PluginOpenFailure<ReturnType<typeof _chain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof Open>>();
-expectTypeOf<PluginCloseFailure<ReturnType<typeof _chain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof Close>>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof _chain.units>[0]>>().toEqualTypeOf<FailureOf<typeof Open>>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof _chain.units>[0]>>().toEqualTypeOf<FailureOf<typeof Close>>();
 expectTypeOf<Provided<typeof object.provides.db>>().toEqualTypeOf<{ value: number }>();
 const unknownResource = () =>
   resource(
@@ -99,27 +99,27 @@ const unknownResource = () =>
   );
 const erased: ScopePlan = { db: resource(open, () => Close()) };
 // @ts-expect-error unknown provider output cannot declare failures
-plugin({ name: 'bad', provides: { db: (): unknown => Open() } });
+infra({ name: 'bad', provides: { db: (): unknown => Open() } });
 // @ts-expect-error unknown resource callback output cannot declare failures
-plugin({ name: 'bad', provides: { db: unknownResource } });
+infra({ name: 'bad', provides: { db: unknownResource } });
 // @ts-expect-error unknown child output cannot declare failures
-plugin({ name: 'bad', boot: () => ({ child: child((): unknown => Child()) }) });
+infra({ name: 'bad', boot: () => ({ child: child((): unknown => Child()) }) });
 // @ts-expect-error unknown cleanup output cannot declare failures
-plugin({ name: 'bad', boot: () => ({ clean: cleanup((): unknown => Close()) }) });
+infra({ name: 'bad', boot: () => ({ clean: cleanup((): unknown => Close()) }) });
 // @ts-expect-error erased boot plan cannot declare failures
-plugin({ name: 'bad', boot: () => erased });
+infra({ name: 'bad', boot: () => erased });
 // @ts-expect-error unknown provider output cannot declare failures
-keyed.plugin({ name: 'bad', provides: { extra: (): unknown => Open() } });
+keyed.infra({ name: 'bad', provides: { extra: (): unknown => Open() } });
 // @ts-expect-error unknown resource callback output cannot declare failures
-keyed.plugin({ name: 'bad', provides: { extra: unknownResource } });
+keyed.infra({ name: 'bad', provides: { extra: unknownResource } });
 // @ts-expect-error unknown cleanup output cannot declare failures
-keyed.plugin({ name: 'bad', boot: () => ({ clean: cleanup((): unknown => Close()) }) });
+keyed.infra({ name: 'bad', boot: () => ({ clean: cleanup((): unknown => Close()) }) });
 // @ts-expect-error erased boot plan cannot declare failures
-keyed.plugin({ name: 'bad', boot: () => erased });
+keyed.infra({ name: 'bad', boot: () => erased });
 // @ts-expect-error unknown provider output cannot declare failures
-keyed.plugin({ name: 'bad', needs: { count: service<number>() }, provides: { extra: (): unknown => Open() } });
+keyed.infra({ name: 'bad', needs: { count: service<number>() }, provides: { extra: (): unknown => Open() } });
 // @ts-expect-error erased boot plan cannot declare failures
-keyed.plugin({ name: 'bad', needs: { count: service<number>() }, boot: () => erased });
+keyed.infra({ name: 'bad', needs: { count: service<number>() }, boot: () => erased });
 // @ts-expect-error unknown provider output cannot declare failures
 feature('bad', { provides: { db: (): unknown => Open() } });
 // @ts-expect-error unknown resource callback output cannot declare failures
@@ -144,13 +144,13 @@ const erasedResource: ReturnType<typeof resource> = resource(
 );
 const unknownClose = () => resource(open, (): unknown => Close());
 // @ts-expect-error erased resource callback outcomes cannot declare failures
-plugin({ name: 'bad', provides: { db: () => erasedResource } });
+infra({ name: 'bad', provides: { db: () => erasedResource } });
 // @ts-expect-error unknown resource cleanup output cannot declare failures
-plugin({ name: 'bad', provides: { db: unknownClose } });
+infra({ name: 'bad', provides: { db: unknownClose } });
 // @ts-expect-error erased resource callback outcomes cannot declare failures
-keyed.plugin({ name: 'bad', provides: { extra: () => erasedResource } });
+keyed.infra({ name: 'bad', provides: { extra: () => erasedResource } });
 // @ts-expect-error unknown resource cleanup output cannot declare failures
-keyed.plugin({ name: 'bad', provides: { extra: unknownClose } });
+keyed.infra({ name: 'bad', provides: { extra: unknownClose } });
 // @ts-expect-error erased resource callback outcomes cannot declare failures
 feature('bad', { provides: { db: () => erasedResource } });
 // @ts-expect-error unknown resource cleanup output cannot declare failures
@@ -194,8 +194,8 @@ const _mixed = feature('mixed', {
 });
 expectTypeOf<Provided<typeof _mixed.provides.entitlements>>().toEqualTypeOf<ReturnType<typeof createEntitlements>>();
 expectTypeOf<Provided<typeof _mixed.provides.warmedAt>>().toEqualTypeOf<number>();
-const mixedPlugin = plugin({
-  name: 'mixedPlugin',
+const mixedUnit = infra({
+  name: 'mixedUnit',
   needs: { db: service<{ tag: string }>() },
   provides: {
     entitlements: ({ db }) => createEntitlements(db),
@@ -209,8 +209,8 @@ const mixedPlugin = plugin({
     expectTypeOf(warmedAt).toEqualTypeOf<number>();
   },
 });
-const mixedFactory = initPlugins.context<{ db: { tag: string } }>().create();
-const mixedKeys = mixedFactory.plugin({
+const mixedFactory = initUnits.context<{ db: { tag: string } }>().create();
+const mixedKeys = mixedFactory.infra({
   name: 'mixedKeys',
   needs: ['db'],
   provides: {
@@ -225,7 +225,7 @@ const mixedKeys = mixedFactory.plugin({
     expectTypeOf(warmedAt).toEqualTypeOf<number>();
   },
 });
-const mixedWitness = mixedFactory.plugin({
+const mixedWitness = mixedFactory.infra({
   name: 'mixedWitness',
   needs: { db: service<{ tag: string }>() },
   provides: {
@@ -240,73 +240,73 @@ const mixedWitness = mixedFactory.plugin({
     expectTypeOf(warmedAt).toEqualTypeOf<number>();
   },
 });
-void mixedPlugin;
+void mixedUnit;
 void mixedKeys;
 void mixedWitness;
 const asyncFactories = { acquired: async () => resource(open, () => Close()), _direct: async () => open() };
-const _asyncPlugin = plugin({ name: 'asyncPlugin', provides: asyncFactories });
+const _asyncUnit = infra({ name: 'asyncUnit', provides: asyncFactories });
 const _asyncObject = plug(feature('asyncObject', { provides: asyncFactories }));
-const _asyncKeys = keyed.plugin({ name: 'asyncKeys', provides: asyncFactories });
-const _asyncWitness = keyed.plugin({
+const _asyncKeys = keyed.infra({ name: 'asyncKeys', provides: asyncFactories });
+const _asyncWitness = keyed.infra({
   name: 'asyncWitness',
   needs: { count: service<number>() },
   provides: asyncFactories,
 });
 expectTypeOf<
-  PluginOpenFailure<typeof _asyncPlugin | typeof _asyncObject | typeof _asyncKeys | typeof _asyncWitness>
+  UnitOpenFailure<typeof _asyncUnit | typeof _asyncObject | typeof _asyncKeys | typeof _asyncWitness>
 >().toEqualTypeOf<FailureOf<typeof Open>>();
 expectTypeOf<
-  PluginCloseFailure<typeof _asyncPlugin | typeof _asyncObject | typeof _asyncKeys | typeof _asyncWitness>
+  UnitCloseFailure<typeof _asyncUnit | typeof _asyncObject | typeof _asyncKeys | typeof _asyncWitness>
 >().toEqualTypeOf<FailureOf<typeof Close>>();
-expectTypeOf<Provided<typeof _asyncPlugin.provides.acquired>>().toEqualTypeOf<{ value: number }>();
-expectTypeOf<Provided<typeof _asyncPlugin.provides._direct>>().toEqualTypeOf<{ value: number }>();
+expectTypeOf<Provided<typeof _asyncUnit.provides.acquired>>().toEqualTypeOf<{ value: number }>();
+expectTypeOf<Provided<typeof _asyncUnit.provides._direct>>().toEqualTypeOf<{ value: number }>();
 
 // Structural service alternative must not accept promises that hide ownership outcomes.
 // @ts-expect-error unknown async output
-plugin({ name: 'bad-async', provides: { db: async (): Promise<unknown> => Open() } });
+infra({ name: 'bad-async', provides: { db: async (): Promise<unknown> => Open() } });
 // @ts-expect-error erased async resource output
-plugin({ name: 'bad-async', provides: { db: async () => erasedResource } });
+infra({ name: 'bad-async', provides: { db: async () => erasedResource } });
 // @ts-expect-error unknown async resource close output
-plugin({ name: 'bad-async', provides: { db: async () => unknownClose() } });
+infra({ name: 'bad-async', provides: { db: async () => unknownClose() } });
 // @ts-expect-error cleanup descriptors cannot be provided asynchronously
-plugin({ name: 'bad-async', provides: { db: async () => cleanup(() => Close()) } });
+infra({ name: 'bad-async', provides: { db: async () => cleanup(() => Close()) } });
 // @ts-expect-error child descriptors cannot be provided asynchronously
-plugin({ name: 'bad-async', provides: { db: async () => child(() => Child()) } });
+infra({ name: 'bad-async', provides: { db: async () => child(() => Child()) } });
 // @ts-expect-error unknown async output
-keyed.plugin({ name: 'bad-async', provides: { extra: async (): Promise<unknown> => Open() } });
+keyed.infra({ name: 'bad-async', provides: { extra: async (): Promise<unknown> => Open() } });
 // @ts-expect-error erased async resource output
-keyed.plugin({ name: 'bad-async', provides: { extra: async () => erasedResource } });
+keyed.infra({ name: 'bad-async', provides: { extra: async () => erasedResource } });
 // @ts-expect-error unknown async resource close output
-keyed.plugin({ name: 'bad-async', provides: { extra: async () => unknownClose() } });
+keyed.infra({ name: 'bad-async', provides: { extra: async () => unknownClose() } });
 // @ts-expect-error cleanup descriptors cannot be provided asynchronously
-keyed.plugin({ name: 'bad-async', provides: { extra: async () => cleanup(() => Close()) } });
+keyed.infra({ name: 'bad-async', provides: { extra: async () => cleanup(() => Close()) } });
 // @ts-expect-error child descriptors cannot be provided asynchronously
-keyed.plugin({ name: 'bad-async', provides: { extra: async () => child(() => Child()) } });
-keyed.plugin({
+keyed.infra({ name: 'bad-async', provides: { extra: async () => child(() => Child()) } });
+keyed.infra({
   name: 'bad-async',
   needs: { count: service<number>() },
   // @ts-expect-error unknown async output
   provides: { extra: async (): Promise<unknown> => Open() },
 });
-keyed.plugin({
+keyed.infra({
   name: 'bad-async',
   needs: { count: service<number>() },
   // @ts-expect-error erased async resource output
   provides: { extra: async () => erasedResource },
 });
-keyed.plugin({
+keyed.infra({
   name: 'bad-async',
   needs: { count: service<number>() },
   // @ts-expect-error unknown async resource close output
   provides: { extra: async () => unknownClose() },
 });
-keyed.plugin({
+keyed.infra({
   name: 'bad-async',
   needs: { count: service<number>() },
   // @ts-expect-error cleanup descriptors cannot be provided asynchronously
   provides: { extra: async () => cleanup(() => Close()) },
 });
-keyed.plugin({
+keyed.infra({
   name: 'bad-async',
   needs: { count: service<number>() },
   // @ts-expect-error child descriptors cannot be provided asynchronously
@@ -333,31 +333,31 @@ defineFeature('bad-async').provides({ db: async () => cleanup(() => Close()) });
 // @ts-expect-error child descriptors cannot be provided asynchronously
 defineFeature('bad-async').provides({ db: async () => child(() => Child()) });
 const _asyncChain = defineFeature('_asyncChain').provides(asyncFactories).entrypoints();
-expectTypeOf<PluginOpenFailure<ReturnType<typeof _asyncChain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof Open>>();
-expectTypeOf<PluginCloseFailure<ReturnType<typeof _asyncChain.plugins>[0]>>().toEqualTypeOf<FailureOf<typeof Close>>();
+expectTypeOf<UnitOpenFailure<ReturnType<typeof _asyncChain.units>[0]>>().toEqualTypeOf<FailureOf<typeof Open>>();
+expectTypeOf<UnitCloseFailure<ReturnType<typeof _asyncChain.units>[0]>>().toEqualTypeOf<FailureOf<typeof Close>>();
 expectTypeOf<Provided<typeof _asyncChain.provides.acquired>>().toEqualTypeOf<{ value: number }>();
 expectTypeOf<Provided<typeof _asyncChain.provides._direct>>().toEqualTypeOf<{ value: number }>();
 
 // Generic adapters must admit known service shapes without losing their resolved values.
 function genericRecord<Value extends Record<string, string>>(value: Value) {
-  const factory = initPlugins.context<{ count: number }>().create();
+  const factory = initUnits.context<{ count: number }>().create();
   const provides = { value: () => value, asyncValue: async () => value };
   return {
-    plugin: plugin({ name: 'record', provides }).provides,
+    plugin: infra({ name: 'record', provides }).provides,
     feature: feature('record', { provides }).provides,
-    keys: factory.plugin({ name: 'record', provides }).provides,
-    witness: factory.plugin({ name: 'record', needs: factory.needs('count'), provides }).provides,
+    keys: factory.infra({ name: 'record', provides }).provides,
+    witness: factory.infra({ name: 'record', needs: factory.needs('count'), provides }).provides,
     chain: defineFeature('record').provides(provides).entrypoints().provides,
   };
 }
 function genericScalar<Value extends string>(value: Value) {
-  const factory = initPlugins.context<{ count: number }>().create();
+  const factory = initUnits.context<{ count: number }>().create();
   const provides = { value: () => value, asyncValue: async () => value };
   return {
-    plugin: plugin({ name: 'scalar', provides }).provides,
+    plugin: infra({ name: 'scalar', provides }).provides,
     feature: feature('scalar', { provides }).provides,
-    keys: factory.plugin({ name: 'scalar', provides }).provides,
-    witness: factory.plugin({ name: 'scalar', needs: factory.needs('count'), provides }).provides,
+    keys: factory.infra({ name: 'scalar', provides }).provides,
+    witness: factory.infra({ name: 'scalar', needs: factory.needs('count'), provides }).provides,
     chain: defineFeature('scalar').provides(provides).entrypoints().provides,
   };
 }

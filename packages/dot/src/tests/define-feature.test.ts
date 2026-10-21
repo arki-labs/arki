@@ -25,8 +25,7 @@ import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import {
   defineFeature,
-  driven,
-  driver,
+  entrypoint,
   entrypointsOf,
   feature,
   FEATURE_ERROR_CODES,
@@ -34,13 +33,14 @@ import {
   routerFor,
   sliceOf,
 } from '../feature.js';
-import { defineApp, plugin, testApp } from '../index.js';
+import { defineApp, infra, testApp } from '../index.js';
+import { unit } from '../unit-contract.js';
 
 /* ---- app infra ---- */
 
 type Db = { readonly query: (sql: string) => Promise<number> };
-const database = plugin({ name: 'database', provides: { db: (): Db => ({ query: async sql => sql.length }) } });
-const billing = plugin({
+const database = infra({ name: 'database', provides: { db: (): Db => ({ query: async sql => sql.length }) } });
+const billing = infra({
   name: 'billing',
   provides: { entitlements: () => ({ planOf: async (userId: string) => (userId === 'u1' ? 'pro' : 'free') }) },
 });
@@ -50,7 +50,7 @@ const billing = plugin({
 type Digest = { readonly id: string; readonly userId: string; readonly items: readonly string[] };
 
 /** infra/: the feature's own store — two services, so overriding one must keep the other. */
-const store = plugin({
+const store = infra({
   name: 'store',
   needs: { db: database.provides.db },
   provides: {
@@ -66,7 +66,7 @@ const store = plugin({
 });
 
 /** infra/: needs its sibling by the sibling's local handle; the feature qualifies both sides. */
-const mailer = plugin({
+const mailer = infra({
   name: 'mailer',
   needs: { store: store.provides.store },
   provides: {
@@ -253,7 +253,7 @@ describe('the chain: each step typed from the earlier ones', () => {
       .usecases({})
       .provides({})
       .entrypoints(rpc({}, {}));
-    expect(empty.plugins().map(p => p.name)).toEqual(['x/store', 'x']);
+    expect(empty.units().map(p => p.name)).toEqual(['x/store', 'x']);
   });
 
   it('infers inline usecase deps: `({ stats }) => …` gets the feature deps with no annotation', () => {
@@ -369,10 +369,10 @@ describe('the chain: each step typed from the earlier ones', () => {
 });
 
 describe('compilation into kernel units', () => {
-  it('compiles to the qualified infra plugins, then the feature plugin', () => {
-    expect(digest.plugins().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
-    expect(Object.keys(digest.plugins()[0].provides)).toEqual(['digest.store', 'digest.stats']);
-    expect(digest.plugins()[2].role).toBe('feature');
+  it('compiles to the qualified infra units, then the feature unit', () => {
+    expect(digest.units().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
+    expect(Object.keys(digest.units()[0].provides)).toEqual(['digest.store', 'digest.stats']);
+    expect(digest.units()[2].role).toBe('feature');
   });
 
   it('keeps private keys private: two features may each have a `store`', async () => {
@@ -410,7 +410,7 @@ describe('compilation into kernel units', () => {
 
   it('exposes entrypoint metadata before boot: journal effects carry their event names', () => {
     // A collector (the journal) reads this before any feature boots.
-    const featureUnit = digest.plugins()[2];
+    const featureUnit = digest.units()[2];
     expect(featureUnit.actions).toContainEqual(
       expect.objectContaining({ id: 'send-on-request.run', meta: { events: ['DigestRequested'] } }),
     );
@@ -421,7 +421,7 @@ describe('compilation into kernel units', () => {
   });
 
   it('keeps the kernel order checks: the feature before its own infra (E020), or without it (E012)', async () => {
-    const [storeUnit, mailerUnit, featureUnit] = digest.plugins();
+    const [storeUnit, mailerUnit, featureUnit] = digest.units();
     // @ts-expect-error -- the feature before its own infra: the tuple guard on testApp's argument refuses it too
     await expect(testApp([database, billing, featureUnit, storeUnit, mailerUnit]).start()).resolves.toMatchObject({
       code: UnexpectedDefect.code,
@@ -441,7 +441,7 @@ describe('override (tests swap infra before compilation)', () => {
   it('keeps the feature whole: same type, same entrypoints, one provider per key', async () => {
     const faked = digest.override({ store: fakeStore });
     expectTypeOf(faked).toEqualTypeOf<typeof digest>();
-    expect(faked.plugins().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
+    expect(faked.units().map(p => p.name)).toEqual(['digest/store', 'digest/mailer', 'digest']);
     const app = orThrow(await boot(faked));
     const preview = orThrow(await faked.router.preview(app.services, 'u1'));
     expect(preview?.id).toBe('fake');
@@ -449,7 +449,7 @@ describe('override (tests swap infra before compilation)', () => {
     orThrow(await app.dispose());
   });
 
-  it('is typed by the port and rejects keys no infra plugin provides', () => {
+  it('is typed by the port and rejects keys no infra unit provides', () => {
     // @ts-expect-error -- wrong shape for `store`
     expect(() => digest.override({ store: { nope: 1 } })).not.toThrow();
     // @ts-expect-error -- `queue` is not an infra service of this feature
@@ -470,9 +470,9 @@ describe('reserved names and collisions: compile errors, with a runtime check be
   });
 
   it('rejects an infra key equal to a reserved name or to a need alias', () => {
-    const sessionPlugin = plugin({ name: 'p', provides: { session: () => 1 } });
+    const sessionUnit = infra({ name: 'p', provides: { session: () => 1 } });
     // @ts-expect-error -- a private `session` would shadow the request's session
-    expect(() => defineFeature('x').infra(sessionPlugin)).toThrow(collision);
+    expect(() => defineFeature('x').infra(sessionUnit)).toThrow(collision);
     const withStoreNeed = defineFeature('x').needs({ store: billing.provides.entitlements });
     // @ts-expect-error -- infra `store` collides with the need alias `store`
     expect(() => withStoreNeed.infra(store)).toThrow(collision);
@@ -530,7 +530,7 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
       defineApp('x').infra(store, database);
       // @ts-expect-error -- digest needs `entitlements`
       defineApp('x').infra(database).features([digest]);
-      const needsDigests = plugin({ name: 'gateway', needs: { digests: digest.provides.digests } });
+      const needsDigests = entrypoint({ name: 'gateway', needs: { digests: digest.provides.digests } });
       // @ts-expect-error -- `digests` comes from a feature, so the gateway cannot sit in .infra()
       defineApp('x').infra(database, billing, needsDigests);
       return defineApp('x').infra(database, billing).features([digest]).entrypoints(needsDigests);
@@ -543,8 +543,8 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
       use: [{ key: 'schedules', actions: [], resolve: () => [{ name: 'legacy-tick' }] }],
     });
     const seen: unknown[] = [];
-    const scheduler = driver(features =>
-      plugin({
+    const scheduler = entrypoint.fromFeatures(features =>
+      unit({
         name: 'scheduler',
         boot: ctx => {
           for (const f of features) seen.push([f.name, sliceOf(ctx, f)['schedules']]);
@@ -555,14 +555,14 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
       await defineApp('mixed').infra(database, billing).features([legacy, digest]).entrypoints(scheduler).start(),
     );
     expect(seen.map(entry => (Array.isArray(entry) ? entry[0] : undefined))).toEqual(['legacy', 'digest']);
-    expect(app.manifest.plugins.find(p => p.name === 'scheduler')?.role).toBe('driving');
+    expect(app.manifest.plugins.find(p => p.name === 'scheduler')?.role).toBe('entrypoint');
     orThrow(await app.dispose());
   });
 
   it('lets a driven adapter in .infra() read entrypoint declarations before the features boot', async () => {
     let declared: readonly string[] = [];
-    const collector = driven(features =>
-      plugin({
+    const collector = infra.fromFeatures(features =>
+      unit({
         name: 'collector',
         boot: () => {
           declared = features.flatMap(f => entrypointsOf(f).map(slice => `${f.name}:${slice.key}`));
@@ -580,8 +580,8 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
  * failed there and passes here; each names what broke.
  */
 describe('regressions (Astra review of Revision 1)', () => {
-  it('1. override of one service keeps the sibling services of the same plugin', async () => {
-    // Revision 1 turned the plugin into a fake of the first matching key and dropped `stats`.
+  it('1. override of one service keeps the sibling services of the same unit', async () => {
+    // Revision 1 turned the unit into a fake of the first matching key and dropped `stats`.
     const app = orThrow(await boot(digest.override({ store: { pendingFor: async () => null } })));
     expect(await app.services['digest.stats'].count()).toBe(5);
     orThrow(await app.dispose());
@@ -596,23 +596,23 @@ describe('regressions (Astra review of Revision 1)', () => {
 
   it('3. a reserved alias or a key collision never silently overwrites the request context or a factory', () => {
     // Revision 1 accepted a private `session` and an entrypoint keyed like a provided service.
-    const sessionPlugin = plugin({ name: 'p', provides: { session: () => 'forged' } });
+    const sessionUnit = infra({ name: 'p', provides: { session: () => 'forged' } });
     // @ts-expect-error -- compile error; and the runtime check below for erased callers
-    expect(() => defineFeature('x').infra(sessionPlugin)).toThrow(
+    expect(() => defineFeature('x').infra(sessionUnit)).toThrow(
       expect.objectContaining({ code: FEATURE_ERROR_CODES.keyCollision }),
     );
   });
 
-  it('4. plugins() keeps its tuple type, so the app builder guard can check it', () => {
-    // Revision 1 returned `readonly AnyPlugin[]`, and `useAll` then demanded an error argument.
-    expectTypeOf<ReturnType<typeof digest.plugins>['length']>().toEqualTypeOf<3>();
-    expectTypeOf<Provided<ReturnType<typeof digest.plugins>[0]['provides']['digest.store']>>().toEqualTypeOf<
+  it('4. units() keeps its tuple type, so the app builder guard can check it', () => {
+    // Revision 1 returned `readonly AnyUnit[]`, and `useAll` then demanded an error argument.
+    expectTypeOf<ReturnType<typeof digest.units>['length']>().toEqualTypeOf<3>();
+    expectTypeOf<Provided<ReturnType<typeof digest.units>[0]['provides']['digest.store']>>().toEqualTypeOf<
       Provided<typeof store.provides.store>
     >();
     const unused = () => {
       // @ts-expect-error -- the feature unit before its own infra: `digest.store` is not available yet
-      defineApp('x').use(database).use(billing).use(digest.plugins()[2]);
-      return defineApp('y').use(database).use(billing).useAll(digest.plugins());
+      defineApp('x').infra(database).infra(billing).infra(digest.units()[2]);
+      return defineApp('y').infra(database).infra(billing).infra(...digest.units());
     };
     expect(unused).toBeTypeOf('function');
   });

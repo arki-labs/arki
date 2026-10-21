@@ -19,7 +19,7 @@ import type { DotAppManifest as ExportedManifest } from '@arki/dot';
 type DotAppManifest = {
   manifestVersion: 2;
   app: { name: string; version?: string };
-  plugins: PluginManifest[];
+  plugins: UnitManifest[];
   actions: ActionManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
@@ -32,7 +32,7 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 export const manifestMatches: Same<DotAppManifest, ExportedManifest> = true;
 
 // The sub-shapes are in the next block.
-type PluginManifest = ExportedManifest['plugins'][number];
+type UnitManifest = ExportedManifest['plugins'][number];
 type ActionManifest = ExportedManifest['actions'][number];
 type ServiceManifest = ExportedManifest['services'][number];
 type LifecycleManifest = ExportedManifest['lifecycle'][number];
@@ -49,9 +49,9 @@ present**, even when empty. Consumers must never see an omitted array.
 ```ts
 import type { DotAppManifest, DotLifecycleHook, JsonObject } from '@arki/dot';
 
-type PluginManifest = {
+type UnitManifest = {
   name: string;
-  role?: 'feature' | 'driving'; // the hexagon role the app builder gave the plugin
+  role?: 'infra' | 'feature' | 'entrypoint'; // the role the unit was built with
   dependencies: readonly string[];
   provides: readonly string[];
 };
@@ -94,7 +94,7 @@ type ProjectionManifest = {
 
 // Each shape must equal the entry type of the exported manifest.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
-export const pluginMatches: Same<PluginManifest, DotAppManifest['plugins'][number]> = true;
+export const unitMatches: Same<UnitManifest, DotAppManifest['plugins'][number]> = true;
 export const actionMatches: Same<ActionManifest, DotAppManifest['actions'][number]> = true;
 export const serviceMatches: Same<ServiceManifest, DotAppManifest['services'][number]> = true;
 export const lifecycleMatches: Same<LifecycleManifest, DotAppManifest['lifecycle'][number]> = true;
@@ -138,7 +138,7 @@ import type { DiagnosticIssue as ExportedIssue } from '@arki/dot';
 type DiagnosticIssue = {
   code: string; // stable machine-readable code, e.g. ARKI_DOT_E003
   severity: 'info' | 'warning' | 'error';
-  plugin?: string; // owning plugin, when applicable
+  plugin?: string; // owning unit, when applicable
   message: string; // human-readable summary
   remediation: string; // what the developer (or agent) should do
   docsUrl: string; // link to the relevant doc
@@ -156,13 +156,17 @@ actionable.
 ## Programmatic access
 
 ```ts run expect
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
-const database = plugin({ name: 'database', provides: { db: () => ({ ready: true }) } });
-const billing = plugin({ name: 'billing', needs: { db: database.provides.db } });
+const database = infra({ name: 'database', provides: { db: () => ({ ready: true }) } });
+const billing = defineFeature('billing')
+  .needs({ db: database.provides.db })
+  .provides({ billing: ({ db }) => ({ ready: db.ready }) })
+  .entrypoints();
 
-const app = await defineApp('my-app').use(database).use(billing).boot();
+const app = await defineApp('my-app').infra(database).features([billing]).boot();
 if (isFailure(app)) throw new Error(app.code);
 
 // Static graph
@@ -210,15 +214,15 @@ adapters included.
 
 ### Wiring codes
 
-The kernel checks every plugin's needs against every plugin's static provides
+The kernel checks every unit's needs against every unit's static provides
 at `configure()`:
 
 - `ARKI_DOT_E020` — a provider is mounted after its consumer. The fix
   line is role-aware: "Move X before Y in .features([...])." for a feature
-  provider, "Mount X with .use() before Y." for any other plugin.
-- `ARKI_DOT_E019` — needs and provides form a ring through any plugins.
+  provider, "Mount X with .infra() before Y." for any other unit.
+- `ARKI_DOT_E019` — needs and provides form a ring through any units.
   The message prints the ring.
-- `ARKI_DOT_E012` — a need at boot that no plugin declares (erased or JS
+- `ARKI_DOT_E012` — a need at boot that no unit declares (erased or JS
   graphs, dynamic http bundle tokens). It is no longer the code for a plain
   ordering mistake.
 
@@ -229,7 +233,7 @@ import type { Envelope } from '@arki/cli';
 import type { DotAppManifest } from '@arki/dot';
 
 // What `dot explain --json` prints, read the way an agent reads it.
-export function pluginNames(envelope: Envelope<DotAppManifest>): readonly string[] {
+export function unitNames(envelope: Envelope<DotAppManifest>): readonly string[] {
   if (!envelope.ok) throw new Error(`${envelope.error.code}: ${envelope.error.remediation ?? envelope.error.message}`);
   return envelope.data?.plugins.map(p => p.name) ?? [];
 }
@@ -253,7 +257,7 @@ npx dot doctor --json | jq '.data.issues'
 ```
 
 If a managed boot or disposal phase fails, `dot doctor` **still emits a diagnostics envelope**
-populated with the per-plugin issues from the configured seam. Boot failure
+populated with the per-unit issues from the configured seam. Boot failure
 should be observable, not opaque.
 
 Exit codes:

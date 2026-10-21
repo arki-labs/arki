@@ -26,7 +26,7 @@ function contractMetaLines(action: DotAppManifest['actions'][number]): string[] 
 function renderTextManifest(manifest: DotAppManifest): string {
   const lines: string[] = [];
   const title = `App: ${manifest.app.name}${manifest.app.version ? `@${manifest.app.version}` : ''}`;
-  lines.push(title, '='.repeat(title.length), '', `Plugins (${manifest.plugins.length})`);
+  lines.push(title, '='.repeat(title.length), '', `Units (${manifest.plugins.length})`);
   if (manifest.plugins.length === 0) {
     lines.push('  (none)');
   } else {
@@ -43,7 +43,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
   } else {
     const widthName = Math.max(4, ...manifest.services.map(s => s.name.length));
     const widthKind = Math.max(4, ...manifest.services.map(s => s.kind.length));
-    lines.push(`  ${pad('NAME', widthName)}  ${pad('KIND', widthKind)}  PLUGIN`);
+    lines.push(`  ${pad('NAME', widthName)}  ${pad('KIND', widthKind)}  UNIT`);
     for (const s of manifest.services) {
       lines.push(`  ${pad(s.name, widthName)}  ${pad(s.kind, widthKind)}  ${s.plugin}`);
     }
@@ -56,7 +56,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
     const widthBinding = Math.max(7, ...manifest.actions.map(action => action.binding.length));
     const widthAddress = Math.max(7, ...manifest.actions.map(action => (action.address ?? '-').length));
     lines.push(
-      `  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PLUGIN`,
+      `  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  UNIT`,
     );
     for (const action of manifest.actions) {
       lines.push(
@@ -74,7 +74,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
     const widthBinding = Math.max(7, ...manifest.projections.map(projection => projection.binding.length));
     const widthModule = Math.max(6, ...manifest.projections.map(projection => projection.module.length));
     lines.push(
-      `  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PLUGIN`,
+      `  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  UNIT`,
     );
     for (const projection of manifest.projections) {
       lines.push(
@@ -94,11 +94,11 @@ function renderTextManifest(manifest: DotAppManifest): string {
   if (manifest.lifecycle.length === 0) {
     lines.push('  (none)');
   } else {
-    const widthPlugin = Math.max(6, ...manifest.lifecycle.map(l => l.plugin.length));
-    lines.push(`  ${pad('PLUGIN', widthPlugin)}  HOOKS`);
+    const widthUnit = Math.max(6, ...manifest.lifecycle.map(l => l.plugin.length));
+    lines.push(`  ${pad('UNIT', widthUnit)}  HOOKS`);
     for (const l of manifest.lifecycle) {
       const hooks = l.hooks.length > 0 ? l.hooks.join(', ') : '-';
-      lines.push(`  ${pad(l.plugin, widthPlugin)}  ${hooks}`);
+      lines.push(`  ${pad(l.plugin, widthUnit)}  ${hooks}`);
     }
   }
   lines.push('');
@@ -106,7 +106,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
   return lines.join('\n');
 }
 
-/** Print the manifest as text: plugins, services, actions, projections, dependencies, lifecycle hooks. */
+/** Print the manifest as text: units, services, actions, projections, dependencies, lifecycle hooks. */
 export function renderExplainText(manifest: DotAppManifest, ui: Ui): void {
   ui.out(renderTextManifest(manifest));
 }

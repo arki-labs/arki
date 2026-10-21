@@ -19,7 +19,7 @@ Read this before changing code that signs users in or reads who is calling. [`ll
 
 1. Build the tables with `createAuthTables` (`src/schema/index.ts`, exported from `@arki/auth/pg`).
 2. Declare the auth with `defineAuth` (`src/definition.ts`) in a file both the backend and the start app import.
-3. Add the Dot plugin `auth(definition, bindings)` (`src/dot.ts`) after the `db` and `mail` plugins.
+3. Add the Dot unit `auth(definition, bindings)` (`src/dot.ts`) after the `db` and `mail` units.
 4. Name the types: `type Auth = AuthOf<typeof authn>` and `type Principal = PrincipalOf<Auth>`.
 5. Serve `auth.handler` on `/api/auth/*` and put `await auth.principal(request.headers)` in the request context.
 
@@ -229,7 +229,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `ARKI_AUTH_E001` | Bad configuration: unknown method or field, missing provider keys, bad duration, no limiter store in production. Boot. | Fix the definition or the bindings. The message names the field.                          |
 | `ARKI_AUTH_E002` | Secret missing or shorter than 32 characters in production. Boot.                                                      | Set `AUTH_SECRET` to 32+ random characters.                                               |
-| `ARKI_AUTH_E003` | A method sends mail and no mailer is bound. Boot.                                                                      | Add the `mail` plugin (`@arki/mail/dot`) or pass `mail`.                                  |
+| `ARKI_AUTH_E003` | A method sends mail and no mailer is bound. Boot.                                                                      | Add the `mail` unit (`@arki/mail/dot`) or pass `mail`.                                    |
 | `ARKI_AUTH_E004` | The engine's user lacks an exposed column. 500.                                                                        | Check `user.fields` against the table and the database.                                   |
 | `ARKI_AUTH_E005` | A testing helper ran with `production: true`. 500.                                                                     | Never mount test helpers in production.                                                   |
 | `ARKI_AUTH_E006` | The mailer failed to send an auth mail. 500 with a generic message.                                                    | Check the mail transport. The user may ask again.                                         |

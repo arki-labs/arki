@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { defineFailure } from '@arki/failure';
 
 import { telemetryFor } from '../telemetry.js';
-import { traceUsecase, withPhaseSpan, withPluginHookSpan } from './otel.js';
+import { traceUsecase, withPhaseSpan, withUnitHookSpan } from './otel.js';
 
 const exporter = new InMemorySpanExporter();
 const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
@@ -15,10 +15,10 @@ const Refused = defineFailure('context.refused');
 const modes = ['active', 'before', 'after', 'replace-throw', 'twice'] as const;
 const boundaries = [
   ['custom', (run: () => unknown) => telemetryFor({ name: 'context' }).span('work', run)],
-  ['phase', (run: () => unknown) => withPhaseSpan({ appName: 'context', phase: 'boot', pluginCount: 0 }, run)],
+  ['phase', (run: () => unknown) => withPhaseSpan({ appName: 'context', phase: 'boot', unitCount: 0 }, run)],
   [
     'hook',
-    (run: () => unknown) => withPluginHookSpan({ appName: 'context', pluginName: 'p', hook: 'boot', order: 0 }, run),
+    (run: () => unknown) => withUnitHookSpan({ appName: 'context', unitName: 'p', hook: 'boot', order: 0 }, run),
   ],
   [
     'usecase',

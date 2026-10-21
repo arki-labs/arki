@@ -125,7 +125,7 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 - If the command throws, nothing of the command is committed and `run` returns `TransactionDefect`. The effect that returns it is dead, because a returned failure is final; one that throws it on is retried by its `retry` or the default (8 tries). If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
 - Where it is registered: under `effects` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app. Effect names are unique per journal.
-- Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app, `.serve(journalWorker())` does both.
+- Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app, `.entrypoints(journalWorker())` does both.
 - Which process runs the worker: an effect runs in the process that runs the worker. If an effect talks to something that lives in memory (an event emitter, a socket list, a cache), run the worker in the process that holds it. A worker in another process claims the job and the in-memory listeners never hear it. Tests do not catch this, because a test is one process.
 - `wake`: `journal.run(db, ...)` on the root database wakes the worker after its commit. After a transaction of your own, call `journal.wake()` yourself. Other processes find the job by polling.
 - A failing effect does not reach the caller. Its error is stored on the job row (`last_error`). The job is retried and marked dead after 8 failed attempts.
@@ -271,7 +271,7 @@ See [Workflows](#workflows): the rules, a five-step task, the traps and the [err
 - After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
 - Job operations and retention: `src/outbox.ts` (`createJobOps`: reads, verbs, sweep steps), `src/retention.ts` (`Keep`, defaults, `ndjsonArchiveSink`), `src/foreman/index.ts` (the Foreman module).
 - Workflows: `src/workflow/define.ts` (the builder and its types), `src/workflow/runner.ts` (`start`, `signal`, `cancel`, `read`, the `workflow.step` and `workflow.timer` effects, compensation), `src/workflow/machine.ts` (the `workflow.run` entity and its events), `src/workflow/read.ts` (`journal.workflows` reads and verbs), `src/workflow/states.ts` (states, statuses, skip causes), `src/foreman/workflows.ts` (the Foreman module), `src/testing.ts` (`workflowHarness`).
-- Edges: `src/pg.ts` (the tables), `src/dot.ts` (Dot plugin), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
+- Edges: `src/pg.ts` (the tables), `src/dot.ts` (Dot unit), `src/orpc.ts` (oRPC error mapping),`src/id.ts` (id factories, name checks), `src/debug.ts` (`DEBUG=arki:journal:*`), `src/test-support.ts` (test fixture, not shipped).
 
 ## Rules that bite
 
@@ -335,7 +335,7 @@ A command handler, its `authorize` or an `events` function returns a failure fro
 
 ### Dot boot errors
 
-- `ARKI_JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature lists a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
+- `ARKI_JOURNAL_PLUGIN_E001`, a `DotUnitError`: a feature lists a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
 - `journal: duplicate effect name "x" (features "orders" and "billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
 - `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app, and at the boot of the feature that lists the effect in a Dot app. A journal composed with `services: 'worker'` throws it from `worker` or `drain` instead. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
 - Job verbs throw a `JournalError` with `JOB_NOT_DEAD`, `JOB_NOT_PENDING`, `JOB_RUNNING`, `JOB_EXISTS` or `BAD_ARGUMENT` (a bad limit, cursor, actor or purge bound).
@@ -424,13 +424,13 @@ The Foreman module answers its refusals with `ARKI_JOURNAL_E010` to `E017` (`JOU
 
 ## Dot
 
-`@arki/journal/dot` exports the driven adapter `journal(...)` (for `.use()`), the driving adapter `journalWorker(...)` (for `.serve()`) and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
+`@arki/journal/dot` exports the infra unit `journal(...)` (for `.infra()`), the entrypoint unit `journalWorker(...)` (for `.entrypoints()`) and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
 
 | Question                   | Plain app                                             | Dot app                                                                                               |
 | -------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Where handlers are listed  | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.                        |
 | Who builds the journal     | Your code.                                            | `journal({ j, workflowMeta? })`, from the mounted features. It publishes `services.journal`.          |
-| Who runs the worker        | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.serve(journalWorker())`, between `start` and `stop`. A process without it runs no jobs.             |
+| Who runs the worker        | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.entrypoints(journalWorker())`, between `start` and `stop`. A process without it runs no jobs.             |
 | What an effect needs       | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.                       |
 | Where workflows are listed | `j.compose({ workflows, workflowMeta })`.             | `journalHandlers({ workflows })` or `journalWorkflows(core, defs)`; `workflowMeta` on `journal(...)`. |
 
@@ -438,7 +438,7 @@ The Foreman module answers its refusals with `ARKI_JOURNAL_E010` to `E017` (`JOU
 
 The code for both wirings is in the [README, Dot](../README.md#dot).
 
-The gateway binds the door once per request. Its context factory reads the session and puts `run: services.journal.bind(services.db, { actorId })` on the context. A procedure then calls `context.run(command, input)`. The plugin does not bind for you: only the app knows the actor.
+The gateway binds the door once per request. Its context factory reads the session and puts `run: services.journal.bind(services.db, { actorId })` on the context. A procedure then calls `context.run(command, input)`. The unit does not bind for you: only the app knows the actor.
 
 An effect runs a command with `ctx.run` in both wirings. The journal hands `run` to the effect when the job runs.
 
@@ -477,7 +477,7 @@ These look odd. Each one is needed.
 
 - `ownHandler` with `Object.hasOwn` in `src/handlers.ts`: an event type named `toString` must not find a handler on the prototype.
 - `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a worker runs it again on every drain for a journal composed with `services: 'worker'`: it is the one place where a need gets its service and where a missing service is caught.
-- `need<T>()` is the journal's own marker, not Dot's `service<T>()` or a plugin handle such as `mailerPlugin.provides.mailer`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
+- `need<T>()` is the journal's own marker, not Dot's `service<T>()` or a unit handle such as `mailerInfra.provides.mailer`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
 - `const E` on `compose` (`src/api.ts`) and `journalHandlers` (`src/dot.ts`): without it TypeScript reads `[plainEffect, effectWithNeeds]` as a list of plain effects, and a missing service is no longer a compile error.
 - The module-scoped `WeakMap` in `src/transaction-guard.ts`: two journals on one transaction share its savepoint stack, so they must share this guard.
 - `assertRoundTrips` in `src/storage.ts` uses `JSON.stringify`, not `structuredClone`: it checks what JSON storage does to the value.
@@ -500,7 +500,7 @@ bun run test:runtimes
 bun ../../tooling/library/src/llms.ts --check
 ```
 
-In an app that mounts the plugin: the static graph, then the booted app's health.
+In an app that mounts the unit: the static graph, then the booted app's health.
 
 ```sh
 dot explain --json | jq '.data'

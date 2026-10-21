@@ -8,21 +8,23 @@ this guide and in the README is compiled by `bun run test:docs`.
 
 ## The model
 
-1. A DOT app is a list of plugins. `defineApp(name).use(a).use(b)` builds it.
-   Declaration order is boot order. Teardown runs in reverse.
-2. A plugin declares `needs` (typed handles or `service<T>()` witnesses) and
+1. A DOT app is a list of units: infra, features, entrypoints.
+   `defineApp(name).infra(a).features([f]).entrypoints(b)` builds it. Infra
+   boots first, entrypoints last. Declaration order is boot order. Teardown
+   runs in reverse.
+2. A unit declares `needs` (typed handles or `service<T>()` witnesses) and
    `provides` (one factory per key). The type of a service is inferred from its
    factory. It is written once.
-3. Wrong wiring is a compile error at the `.use()` call: a missing provider, a
+3. Wrong wiring is a compile error at the `.infra()` call: a missing provider, a
    type mismatch, a key collision. The kernel checks again at runtime with
    coded errors (`ARKI_DOT_E012`, `E013`, `E020`).
-4. A plugin has five hooks: `configure` (sync, no I/O), `boot` (side effects,
+4. A unit has five hooks: `configure` (sync, no I/O), `boot` (side effects,
    returns undefined, a refusal or an ownership plan), `start`, `stop`, `dispose`.
 5. A feature is one chain: `defineFeature(name).needs(...).infra(...).usecases(...).provides(...).entrypoints(...)`
    from `@arki/dot/feature`. The app mounts it with `.features([...])`.
-6. `app.manifest` is the static graph (plugins, services, actions,
+6. `app.manifest` is the static graph (units, services, actions,
    dependencies, lifecycle, projections). `app.diagnostics` is the runtime
-   snapshot (per-plugin status, lifecycle, issues).
+   snapshot (per-unit status, lifecycle, issues).
 7. The CLI prints both as JSON. `dot explain --json` puts the manifest in
    `.data`. `dot doctor --json` puts the diagnostics snapshot in `.data`. There
    is no `.data.manifest` and no `.data.diagnostics`.
@@ -120,7 +122,7 @@ export const overwrites = envelope.ok
    `./src/app.ts` or `./app.ts`; pass `--app <path>` otherwise. The file's
    default export is the builder.
 2. Read `.data`. It is the `DotAppManifest` (`src/manifest.ts`). Real output
-   for a two-plugin app (`reports` needs `database`'s `db`):
+   for a two-unit app (`reports` needs `database`'s `db`):
 
    ```json
    {
@@ -154,21 +156,21 @@ The same data in code, without the CLI. `configure()` gives the manifest;
 `boot()` gives the diagnostics:
 
 ```ts run
-import { defineApp, plugin } from '@arki/dot';
+import { defineApp, infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
 import { isFailure } from '@arki/failure';
 
-const database = plugin({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
-const reports = plugin({
-  name: 'reports',
-  needs: { db: database.provides.db },
-  provides: { reports: ({ db }) => ({ daily: () => db.query('daily') }) },
-});
+const database = infra({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
+const reports = defineFeature('reports')
+  .needs({ db: database.provides.db })
+  .provides({ reports: ({ db }) => ({ daily: () => db.query('daily') }) })
+  .entrypoints();
 
 // `dot explain --json` prints this manifest under `.data`. No boot hook runs.
-const configured = defineApp('shop').use(database).use(reports).configure();
+const configured = defineApp('shop').infra(database).features([reports]).configure();
 if (isFailure(configured)) throw new Error(configured.code);
 const names = configured.manifest.plugins.map(p => p.name).join(',');
-if (names !== 'database,reports') throw new Error(`unexpected plugins: ${names}`);
+if (names !== 'database,reports') throw new Error(`unexpected units: ${names}`);
 const edge = configured.manifest.dependencies.find(d => d.from === 'reports');
 if (edge?.to !== 'database' || edge.key !== 'db') throw new Error('reports must depend on database through db');
 
@@ -177,7 +179,7 @@ const app = await configured.boot();
 if (isFailure(app)) throw new Error(app.code);
 const notOk = app.diagnostics.plugins.filter(p => p.status !== 'ok').map(p => p.plugin);
 await app.dispose();
-if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
+if (notOk.length > 0) throw new Error(`units not ok: ${notOk.join(',')}`);
 ```
 
 ### Check runtime health
@@ -191,7 +193,7 @@ if (notOk.length > 0) throw new Error(`plugins not ok: ${notOk.join(',')}`);
 3. `.data.issues` holds app-level issues; `.data.plugins[].issues`,
    `.data.actions[].issues`, `.data.services[].issues` and
    `.data.lifecycle[].issues` hold the rest.
-4. Each issue has `code`, `severity`, `plugin`, `message`, `remediation` and
+4. Each issue has `code`, `severity`, `unit`, `message`, `remediation` and
    `docsUrl`. Apply the `remediation`, then run doctor again.
 
 ```ts
@@ -204,26 +206,26 @@ import type { DoctorReport } from '@arki/dot/cli';
 const result = spawnSync('npx', ['dot', 'doctor', '--json'], { encoding: 'utf8' });
 const envelope: Envelope<DoctorReport> = JSON.parse(result.stdout);
 const isReport = (value: unknown): value is DoctorReport =>
-  typeof value === 'object' && value !== null && 'plugins' in value;
+  typeof value === 'object' && value !== null && 'units' in value;
 const report = envelope.ok ? envelope.data : isReport(envelope.error.data) ? envelope.error.data : null;
 const issues = report === null ? [] : [...report.issues, ...report.plugins.flatMap(p => p.issues)];
 export const fixes = issues
   .filter(issue => issue.severity === 'error')
   .map(issue => `${issue.code} (${issue.plugin ?? 'app'}): ${issue.remediation}`);
-export const failedPlugins = (report?.plugins ?? []).filter(p => p.status === 'failed').map(p => p.plugin);
+export const failedUnits = (report?.plugins ?? []).filter(p => p.status === 'failed').map(p => p.plugin);
 ```
 
 Pass `--observability` to also check that an OpenTelemetry SDK is registered
 (`dot.observability_no_sdk` warning when not). Pass `--graph` to print the observed wiring
 as Mermaid.
 
-### Add a plugin
+### Add a unit
 
-1. Write the plugin with `plugin({ name, needs, provides, ...hooks })` from
+1. Write the unit with `infra({ name, needs, provides, ...hooks })` from
    `@arki/dot`. Name needs by handle (`database.provides.db`) when you can
    import the provider.
-2. Chain `.use(myPlugin)` after its providers in `app.ts`.
-3. `npx dot explain --json | jq '.data.plugins[].name'`: the plugin is listed.
+2. Chain `.infra(myInfra)` after its providers in `app.ts`.
+3. `npx dot explain --json | jq '.data.plugins[].name'`: the unit is listed.
 4. `npx dot doctor --json | jq '.data.lifecycle'`: every hook ran.
 
 ### Add a feature
@@ -240,16 +242,16 @@ as Mermaid.
 
 ### Add an action
 
-1. Declare `actions: [...]` on the plugin, or call `ctx.registerAction({ id,
+1. Declare `actions: [...]` on the unit, or call `ctx.registerAction({ id,
 binding, direction, address })` in `configure`. `rpc()` from
    `@arki/dot/orpc` adds one action per procedure.
 2. `npx dot explain --json | jq '.data.actions'`: the action is listed with its
-   plugin.
+   unit.
 3. `npx dot doctor --json | jq '.data.actions'`: its `status` is `"ok"`.
 
 ### Add an env var
 
-1. Add the key to the env schema of the env plugin (`@arki/dot/env`).
+1. Add the key to the env schema of the env unit (`@arki/dot/env`).
 2. `npx dot explain --json | jq '.data.services[] | select(.kind == "env")'`:
    the env service is still registered.
 3. `npx dot doctor --json | jq '.data.issues'`: empty unless the var is
@@ -259,10 +261,10 @@ binding, direction, address })` in `configure`. `rpc()` from
 
 1. `npx dot doctor -o json | jq '.error.data.plugins[] | select(.status == "failed")'`.
 2. `npx dot doctor --json | jq '.data.plugins[] | select(.status != "ok")'`
-   names the plugin.
+   names the unit.
 3. A hook may return its canonical refusal; an unknown throw becomes
    `UnexpectedDefect` retaining its original private cause, while diagnostics
-   record `ARKI_DOT_E003` with the boot phase and plugin.
+   record `ARKI_DOT_E003` with the boot phase and unit.
    The kernel rolls back owned resources before returning.
 4. Apply the first `remediation`. Run doctor again. Repeat.
 
@@ -294,13 +296,13 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
   ownership plan. Service values go in `provides`. Detached `void` or
   `Promise<void>` callbacks must return explicit `undefined` or be written inline.
   See [Upgrade typed phases](upgrade-phases.md).
-- Providers come before consumers in `.use()` and `.features([...])`. The
+- Providers come before consumers in `.infra()`, `.features([...])` and `.entrypoints()`. The
   wrong order is a compile error, and `ARKI_DOT_E020` for erased code.
-- Two providers of one wire key collide. Use `rename(plugin, { key: 'newKey' }, 'new-name')`
+- Two providers of one wire key collide. Use `rename(unit, { key: 'newKey' }, 'new-name')`
   for a second instance.
-- `$`-prefixed keys are reserved for the kernel (`$app`, `$plugin`,
+- `$`-prefixed keys are reserved for the kernel (`$app`, `$unit`,
   `$config`, `$signal`).
-- An app has at most one logging plugin. `log()` from `@arki/dot/log` goes first.
+- An app has at most one logging unit. `log()` from `@arki/dot/log` goes first.
 - Do not cast an app to reach its manifest. Call `builder.configure()`, check
   `isFailure`, then read `configured.manifest`; a booted app has `app.manifest`.
 - `.data` is the payload. `jq '.data.manifest'` and `jq '.data.diagnostics'`
@@ -347,18 +349,18 @@ with `.error.data.underlyingCode`.
 | `dot.runtime_replaced`                                                      | HMR replaced this module.                                                                                                                               | Use the current runtime.                                                                |
 | `dot.runtime_release_failed`                                                | Prior resources failed to release.                                                                                                                      | Resolve disposal before restarting.                                                     |
 | `ARKI_DOT_E001`                                                             | `configure` returned a Promise.                                                                                                                         | Move async work to `boot`.                                                              |
-| `ARKI_DOT_E002`                                                             | `configure` threw.                                                                                                                                      | Fix the plugin config.                                                                  |
-| `ARKI_DOT_E003`                                                             | `boot` threw. Booted plugins were rolled back.                                                                                                          | Read the issue's `plugin` and `remediation`.                                            |
-| `ARKI_DOT_E004`                                                             | `start` threw.                                                                                                                                          | Fix the plugin's `start`.                                                               |
+| `ARKI_DOT_E002`                                                             | `configure` threw.                                                                                                                                      | Fix the unit config.                                                                    |
+| `ARKI_DOT_E003`                                                             | `boot` threw. Booted units were rolled back.                                                                                                            | Read the issue's `unit` and `remediation`.                                              |
+| `ARKI_DOT_E004`                                                             | `start` threw.                                                                                                                                          | Fix the unit's `start`.                                                                 |
 | `ARKI_DOT_E005` / `E006`                                                    | One or more `stop` / `dispose` hooks threw.                                                                                                             | Read the aggregated causes.                                                             |
 | `ARKI_DOT_E007` / `E008`                                                    | The app was reused after `dispose` or after a failure.                                                                                                  | Build a new app.                                                                        |
-| `ARKI_DOT_E011`                                                             | A plugin was registered twice.                                                                                                                          | Remove the duplicate `.use()`.                                                          |
+| `ARKI_DOT_E011`                                                             | A unit was registered twice.                                                                                                                            | Remove the duplicate mount.                                                          |
 | `ARKI_DOT_E012`                                                             | A need has no provider (erased or JS graphs).                                                                                                           | Mount the provider earlier.                                                             |
 | `ARKI_DOT_E013`                                                             | A wire key is provided twice.                                                                                                                           | `rename` one provider.                                                                  |
 | `ARKI_DOT_E014`                                                             | A key uses the reserved `$` prefix.                                                                                                                     | Rename the key.                                                                         |
 | `ARKI_DOT_E015`                                                             | A hook ran past `hookTimeoutMs`.                                                                                                                        | Pass `$signal` to the hook's I/O; raise the budget only with a reason.                  |
 | `ARKI_DOT_E016` / `E017`                                                    | Duplicate action id, or action meta that is not JSON.                                                                                                   | Rename the action; keep meta plain JSON.                                                |
-| `ARKI_DOT_E018`                                                             | More than one logging plugin.                                                                                                                           | Keep one `log()`.                                                                       |
+| `ARKI_DOT_E018`                                                             | More than one logging unit.                                                                                                                             | Keep one `log()`.                                                                       |
 | `ARKI_DOT_E019`                                                             | Feature needs form a ring.                                                                                                                              | Extract the shared piece into a third unit.                                             |
 | `ARKI_DOT_E020`                                                             | A provider is mounted after its consumer.                                                                                                               | Move it earlier; the message names both positions.                                      |
 | `ARKI_DOT_E026`                                                             | A handle is missing from the services bag.                                                                                                              | Mount the provider; check the gateway's needs.                                          |
@@ -399,13 +401,13 @@ checks that every `jq` path in this guide exists in the real CLI output.
 
 - [Diagnostics](diagnostics.md): the manifest and diagnostics contracts.
 - [Lifecycle](lifecycle.md): every lifecycle error code.
-- [Plugin authoring](plugin-authoring.md): write a plugin.
-- [Adapter authoring](adapter-authoring.md): expose a package as a `./dot` plugin.
+- [Unit authoring](unit-authoring.md): write a unit.
+- [Adapter authoring](adapter-authoring.md): expose a package as a `./dot` unit.
 - [Observability](observability.md): OpenTelemetry, observers, `app.timeline()`.
 - [Quickstart](quickstart.md): build an app, break it, read the error.
 - [Dependency injection](di.md): needs, provides, tokens, `rename`, features.
 - [The `dot` command](cli.md): every command and its side effects.
-- [Testing plugins](testing.md) and [Logging, shutdown and timeouts](operations.md).
+- [Testing units](testing.md) and [Logging, shutdown and timeouts](operations.md).
 - Recipes: [Deploy an app](recipes/deploy.md), [Upgrade Dot](recipes/upgrade.md).
 
 ## Author action boundaries

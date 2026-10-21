@@ -8,15 +8,15 @@ reasons behind them.
 
 ## Laws
 
-1. **Plugins are the app.** There is no hidden core: no built-in service, no
-   hook outside `configure → boot → start → stop → dispose`, no plugin
-   auto-loaded from disk. A service exists only because a plugin provides it
+1. **Units are the app.** There is no hidden core: no built-in service, no
+   hook outside `configure → boot → start → stop → dispose`, no unit
+   auto-loaded from disk. A service exists only because a unit provides it
    (principle 2).
 2. **`configure` is synchronous and does no I/O.** A `configure` that returns
    a Promise returns `UnexpectedDefect` with `ARKI_DOT_E001` metadata. Async work goes in `boot` or in a
    `provides` factory. This is what keeps `dot explain` free of side effects.
 3. **Providers before consumers.** Declaration order is boot order; nothing
-   sorts it. The wrong order is a compile error at `.use()`, and
+   sorts it. The wrong order is a compile error at the mount call, and
    `ARKI_DOT_E020` (or `ARKI_DOT_E012`) when the types are erased. Never
    "fix" it with a sort.
 4. **Never cast a manifest.** Check `isFailure(builder.configure())` before reading the configured

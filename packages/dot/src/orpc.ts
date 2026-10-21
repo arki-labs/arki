@@ -46,7 +46,7 @@ import { is, recordSchema } from '@arki/schema';
 import type { RpcEntrypoint } from './define-feature.js';
 import type { HandleEntries, ServicesBag } from './feature.js';
 import type { JsonObject } from './manifest.js';
-import type { ActionDeclaration, CtxOf, NeedsShape } from './plugin-contract.js';
+import type { ActionDeclaration, CtxOf, NeedsShape } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { toJsonObject } from './manifest.js';
 
@@ -72,7 +72,7 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
  * (needs, private infra, children's provides and usecases, by alias) — and
  * adds them to the context. One key per feature, read by the feature's own
  * name: no per-handle resolution, so a nested feature's remapped needs just
- * work. A missing key → `ARKI_DOT_E026`, naming the feature. Driven services
+ * work. A missing key → `ARKI_DOT_E026`, naming the feature. Infra services
  * such as `db` reach a handler only when the feature itself needs them — the
  * feature's store does, the procedure does not.
  *
@@ -91,7 +91,7 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
           code: FEATURE_ERROR_CODES.missingCapability,
           message: `[feature] "${logic.name}": its services ("${key}") are not in the request context's bag.`,
           remediation:
-            "Spread providesOf(units) over the features' plugins() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
+            "Spread providesOf(units) over the features' units() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
         });
       }
       return next({

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { defineRelations } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import { db, dbMigrations } from './dot.js';
@@ -58,8 +58,8 @@ describe('pendingMigrations', () => {
   it('dbMigrations publishes what this boot found pending, then applies it', async () => {
     const app = await orThrow(
       defineApp('pending')
-        .use(db({ driver: 'pglite', memory: true, relations }))
-        .use(dbMigrations({ migrationsFolder }))
+        .infra(db({ driver: 'pglite', memory: true, relations }))
+        .infra(dbMigrations({ migrationsFolder }))
         .boot(),
     );
     try {

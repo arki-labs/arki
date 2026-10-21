@@ -18,7 +18,7 @@ import type { DepsOf, ServicesBag } from '@arki/dot/feature';
 import { repos } from '@arki/db/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 
 import type { LiveMeta } from '../index.js';
 import { live, snapshot, tableTag } from '../drizzle/index.js';
@@ -56,7 +56,7 @@ const userRepository = (db: Database) => ({
 
 // ── the app: a database plugin and the request context ──
 declare const rootDb: Db;
-const database = plugin({ name: 'database', provides: { db: (): Db => rootDb } });
+const database = infra({ name: 'database', provides: { db: (): Db => rootDb } });
 type RequestContext = {
   readonly session: { readonly user: { readonly id: string } } | null;
   readonly headers: Headers;

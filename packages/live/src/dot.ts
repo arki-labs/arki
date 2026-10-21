@@ -1,5 +1,5 @@
 /**
- * The Dot plugin (peer `@arki/dot`): `liveQueries`, the Dot plugin that runs
+ * The Dot unit (peer `@arki/dot`): `liveQueries`, the Dot unit that runs
  * live queries for an app.
  *
  * - Declaration: the manifest is read from the contract once (E001 on bad meta).
@@ -19,8 +19,8 @@ import type { AnyContractRouter } from '@orpc/contract';
 import type { SQL } from 'drizzle-orm';
 
 import type { ListenPool } from '@arki/db/pg';
-import type { CtxOf, NeedsShape, NoReservedKeys } from '@arki/dot/plugin';
-import { plugin } from '@arki/dot/plugin';
+import type { CtxOf, NeedsShape, NoReservedKeys } from '@arki/dot/unit';
+import { infra } from '@arki/dot/unit';
 
 import type { LiveEndpoint, LiveGrant } from './http.js';
 import type { LiveHub, LiveLimits } from './hub.js';
@@ -75,7 +75,7 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys, Dimension
   /** The endpoint of the current boot: `stop` closes it, which releases its `hub.onChange` subscription. */
   let endpoint: LiveEndpoint | undefined;
 
-  return plugin({
+  return infra({
     name: 'live',
     needs: options.needs,
     provides: {

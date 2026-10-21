@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { PluginSourceGuard, Provided } from '@arki/dot/plugin';
-import { defineApp, DotPluginError } from '@arki/dot/plugin';
+import type { UnitSourceGuard, Provided } from '@arki/dot/unit';
+import { defineApp, DotUnitError } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
@@ -37,13 +37,13 @@ afterEach(() => {
 
 describe('@arki/resilience/dot', () => {
   it('registers one resilience service in the manifest', () => {
-    const configured = orThrow(defineApp('resilience-manifest').use(resilience(makePresets())).configure());
+    const configured = orThrow(defineApp('resilience-manifest').infra(resilience(makePresets())).configure());
     expect(configured.manifest.services).toEqual([{ name: 'resilience', plugin: 'resilience', kind: 'custom' }]);
   });
 
   it('publishes the presets under their names; the handle is the preset itself', async () => {
     const presets = makePresets();
-    const app = await orThrow(defineApp('resilience-publish').use(resilience(presets)).boot());
+    const app = await orThrow(defineApp('resilience-publish').infra(resilience(presets)).boot());
     expect(app.services.resilience.for('carrier')).toBe(presets.carrier);
     expect(await app.services.resilience.run('carrier', () => 7)).toBe(7);
     await orThrow(app.dispose());
@@ -52,7 +52,7 @@ describe('@arki/resilience/dot', () => {
   it('logs retry and breaker events at debug, and stops after dispose', async () => {
     fake = fakeLog();
     const presets = makePresets();
-    const app = await orThrow(defineApp('resilience-logs').use(resilience(presets)).boot());
+    const app = await orThrow(defineApp('resilience-logs').infra(resilience(presets)).boot());
     await app.services.resilience.run('carrier', boom).catch(swallow);
 
     fake.assertLogged({
@@ -76,8 +76,8 @@ describe('@arki/resilience/dot', () => {
   it('disposing one app leaves another app logging', async () => {
     fake = fakeLog();
     const presets = definePresets({ solo: { retry: backoff.constant(1).upTo(1) } });
-    const a = await orThrow(defineApp('resilience-a').use(resilience(presets)).boot());
-    const b = await orThrow(defineApp('resilience-b').use(resilience(presets)).boot());
+    const a = await orThrow(defineApp('resilience-a').infra(resilience(presets)).boot());
+    const b = await orThrow(defineApp('resilience-b').infra(resilience(presets)).boot());
     await orThrow(a.dispose());
     const before = resilienceRecords(fake);
     await presets.solo.components.retry.execute(boom).catch(swallow);
@@ -88,13 +88,13 @@ describe('@arki/resilience/dot', () => {
   });
 
   it('dispose twice is harmless', async () => {
-    const app = await orThrow(defineApp('resilience-twice').use(resilience(makePresets())).boot());
+    const app = await orThrow(defineApp('resilience-twice').infra(resilience(makePresets())).boot());
     await orThrow(app.dispose());
     await expect(app.dispose()).resolves.toBeUndefined();
   });
 
   it('an unknown name from untyped code throws a coded error', async () => {
-    const app = await orThrow(defineApp('resilience-unknown').use(resilience(makePresets())).boot());
+    const app = await orThrow(defineApp('resilience-unknown').infra(resilience(makePresets())).boot());
     const service = app.services.resilience;
     let thrown: unknown;
     try {
@@ -104,7 +104,7 @@ describe('@arki/resilience/dot', () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(DotPluginError);
+    expect(thrown).toBeInstanceOf(DotUnitError);
     expect(thrown).toMatchObject({ code: RESILIENCE_PLUGIN_ERROR_CODES.unknownPreset });
     await orThrow(app.dispose());
   });
@@ -113,7 +113,7 @@ describe('@arki/resilience/dot', () => {
 it('retains authored hook contracts and preset names through the adapter', () => {
   const presets = makePresets();
   const unit = resilience(presets);
-  expectTypeOf<PluginSourceGuard<typeof unit>>().toEqualTypeOf<[]>();
+  expectTypeOf<UnitSourceGuard<typeof unit>>().toEqualTypeOf<[]>();
   expectTypeOf(unit.provides.resilience.provider).toEqualTypeOf<'resilience'>();
   expectTypeOf<Parameters<Provided<typeof unit.provides.resilience>['for']>[0]>().toEqualTypeOf<keyof typeof presets>();
 });

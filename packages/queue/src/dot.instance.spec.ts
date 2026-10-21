@@ -16,7 +16,7 @@ import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { DotLifecycleErrorCode, plugin, rename, service } from '@arki/dot/plugin';
+import { DotLifecycleErrorCode, infra, rename, service } from '@arki/dot/unit';
 
 import type { FeatureJobContext, QueueClient } from './dot.ts';
 import { jobProducers, jobs, queue, queueWorker } from './dot.ts';
@@ -39,7 +39,7 @@ afterAll(async () => {
 }, 30_000);
 
 type Region = { readonly region: string };
-const regionDb = (region: string) => plugin({ name: 'database', provides: { db: (): Region => ({ region }) } });
+const regionDb = (region: string) => infra({ name: 'database', provides: { db: (): Region => ({ region }) } });
 const database = regionDb('us');
 const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
 
@@ -104,11 +104,11 @@ describe('queueWorker + jobProducers: feature instances', () => {
     ran.length = 0;
 
     const app = await defineApp('regions')
-      .use(database)
-      .use(databaseEu)
-      .use(queue({ connection: redisUrl, keyPrefix }))
+      .infra(database)
+      .infra(databaseEu)
+      .infra(queue({ connection: redisUrl, keyPrefix }))
       .features([eu, us])
-      .serve(worker())
+      .entrypoints(worker())
       .start();
     try {
       const consumed = app.manifest.actions.filter(a => a.plugin === 'queue-worker').map(a => a.id);
@@ -143,11 +143,11 @@ describe('queueWorker + jobProducers: feature instances', () => {
     const { reports } = reportsFeature('digest');
     const keyPrefix = 'inst2:';
     const app = await defineApp('regions-scheduled')
-      .use(database)
-      .use(databaseEu)
-      .use(queue({ connection: redisUrl, keyPrefix }))
+      .infra(database)
+      .infra(databaseEu)
+      .infra(queue({ connection: redisUrl, keyPrefix }))
       .features([reports.instance('eu', { db: databaseEu.provides.dbEu })])
-      .serve(worker())
+      .entrypoints(worker())
       .start();
     const eu = bullQueue('digest#eu', keyPrefix);
     try {
@@ -169,10 +169,10 @@ describe('queueWorker + jobProducers: feature instances', () => {
     const keyPrefix = 'plain:';
     ran.length = 0;
     const app = await defineApp('plain')
-      .use(database)
-      .use(queue({ connection: redisUrl, keyPrefix }))
+      .infra(database)
+      .infra(queue({ connection: redisUrl, keyPrefix }))
       .features([reports])
-      .serve(worker())
+      .entrypoints(worker())
       .start();
     const ledger = bullQueue('ledger', keyPrefix);
     try {

@@ -28,7 +28,7 @@ Where things live:
 | `liveRead()`, `liveManifest()`                           | `src/orpc/`                                       |
 | SSE endpoint                                             | `src/http.ts`                                     |
 | Stream client, React provider                            | `src/client.ts`, `src/react.ts`                   |
-| Dot plugin (`liveQueries`)                               | `src/dot.ts`                                      |
+| Dot unit (`liveQueries`)                                 | `src/dot.ts`                                      |
 
 1. Read [docs/agent-guide.md](./docs/agent-guide.md) first. When a doc and the code disagree, `src/index.ts` wins.
 2. A change to a guarantee needs a test in the failure matrix (`src/tests/failure.pg.test.ts`).

@@ -6,6 +6,9 @@
  * change that brings back a per-step re-slice or a whole-record comparison trips these
  * ceilings (counts, not seconds: stable on a busy machine). Measured 2026-10-16: 340,081 at
  * N=50 and 937,481 at N=100 (before the index walk: 766,013 and 2,650,513).
+ * Measured 2026-10-21: 399,950 at N=50 before the unit roles, 402,850 after (+0.7%: the
+ * role types and the builder's side guard). The N=50 ceiling moved from 400k to 410k for
+ * that; a per-step re-slice still roughly doubles the count and trips it.
  */
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
@@ -38,10 +41,10 @@ function instantiationsFor(features: number): { readonly instantiations: number;
 }
 
 describe('type-check budget: mounting N features', () => {
-  it('50 features stay under 400k instantiations and type-check clean', { timeout: 120_000 }, () => {
+  it('50 features stay under 410k instantiations and type-check clean', { timeout: 120_000 }, () => {
     const { instantiations, errors } = instantiationsFor(50);
     expect(errors).toEqual([]);
-    expect(instantiations).toBeLessThanOrEqual(400_000);
+    expect(instantiations).toBeLessThanOrEqual(410_000);
   });
 
   it('100 features stay under 1.1M instantiations and type-check clean', { timeout: 120_000 }, () => {

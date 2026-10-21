@@ -6,15 +6,15 @@
  *      retry, dispose idempotency, get-after-dispose.
  *   2. Kernel integration — never-touched handles never initialize or clean
  *      up; initialized handles are auto-disposed in reverse order even when
- *      the publishing plugin has no dispose hook; cleanup failures aggregate.
+ *      the publishing unit has no dispose hook; cleanup failures aggregate.
  */
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { Lazy } from '../plugin-contract.js';
+import type { Lazy } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { isLazy, lazy, LazyClosed, plugin, service } from '../plugin-contract.js';
+import { isLazy, lazy, LazyClosed, infra, service } from '../unit-contract.js';
 
 describe('lazy() handle semantics', () => {
   it('does not initialize until first get(); memoizes the value', async () => {
@@ -118,8 +118,8 @@ describe('lazy() handle semantics', () => {
 describe('lazy services in the kernel', () => {
   type Db = { readonly id: number; close(): void };
 
-  function makeLazyDbPlugin(log: string[]) {
-    return plugin({
+  function makeLazyDbUnit(log: string[]) {
+    return infra({
       name: 'db',
       provides: {
         db: () =>
@@ -137,7 +137,7 @@ describe('lazy services in the kernel', () => {
 
   it('a never-accessed lazy service never initializes and never cleans up', async () => {
     const log: string[] = [];
-    const app = orThrow(await defineApp('lazy-untouched').use(makeLazyDbPlugin(log)).boot());
+    const app = orThrow(await defineApp('lazy-untouched').infra(makeLazyDbUnit(log)).boot());
     expect(log).toEqual([]);
     expect(app.services.db.initialized).toBe(false);
     orThrow(await app.dispose());
@@ -146,7 +146,7 @@ describe('lazy services in the kernel', () => {
 
   it('an initialized lazy service is auto-disposed at app.dispose() without a dispose hook', async () => {
     const log: string[] = [];
-    const app = orThrow(await defineApp('lazy-touched').use(makeLazyDbPlugin(log)).boot());
+    const app = orThrow(await defineApp('lazy-touched').infra(makeLazyDbUnit(log)).boot());
     const db = orThrow(await app.services.db.get());
     expect(db.id).toBe(1);
     expect(log).toEqual(['init']);
@@ -157,7 +157,7 @@ describe('lazy services in the kernel', () => {
   it('consumers receive the typed handle through needs and get() it on demand', async () => {
     const log: string[] = [];
     let seen: Db | undefined;
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: service<Lazy<Db>>() },
       boot: ({ db }) => {
@@ -169,38 +169,38 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = orThrow(await defineApp('lazy-consumer').use(makeLazyDbPlugin(log)).use(consumer).start());
+    const app = orThrow(await defineApp('lazy-consumer').infra(makeLazyDbUnit(log)).infra(consumer).start());
     expect(log).toEqual(['init']);
     expect(seen?.id).toBe(1);
     orThrow(await app.dispose());
     expect(log).toEqual(['init', 'close']);
   });
 
-  it('boot rollback auto-disposes initialized lazy services of already-booted plugins', async () => {
+  it('boot rollback auto-disposes initialized lazy services of already-booted units', async () => {
     const log: string[] = [];
-    const eager = plugin({
+    const eager = infra({
       name: 'eager',
       needs: { db: service<Lazy<Db>>() },
-      // Forces initialization during boot, then a later plugin fails.
+      // Forces initialization during boot, then a later unit fails.
       boot: async ({ db }) => {
         orThrow(await db.get());
       },
     });
-    const bomb = plugin({
+    const bomb = infra({
       name: 'bomb',
       boot: () => {
         throw new Error('boom');
       },
     });
 
-    const outcome = await defineApp('lazy-rollback').use(makeLazyDbPlugin(log)).use(eager).use(bomb).boot();
+    const outcome = await defineApp('lazy-rollback').infra(makeLazyDbUnit(log)).infra(eager).infra(bomb).boot();
     expect(UnexpectedDefect.is(outcome)).toBe(true);
     expect(outcome).toMatchObject({ cause: new Error('boom') });
     expect(log).toEqual(['init', 'close']); // rollback cleaned the initialized handle
   });
 
-  it('lazy cleanup failures retain their cause and name the owning plugin', async () => {
-    const broken = plugin({
+  it('lazy cleanup failures retain their cause and name the owning unit', async () => {
+    const broken = infra({
       name: 'broken',
       provides: {
         svc: () =>
@@ -212,7 +212,7 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = orThrow(await defineApp('lazy-cleanup-fail').use(broken).boot());
+    const app = orThrow(await defineApp('lazy-cleanup-fail').infra(broken).boot());
     orThrow(await app.services.svc.get());
     const outcome = await app.dispose();
     expect(UnexpectedDefect.is(outcome)).toBe(true);
@@ -227,9 +227,9 @@ describe('lazy services in the kernel', () => {
         /* noop */
       },
     };
-    const provider = plugin({ name: 'db', provides: { db: () => eagerDb } });
+    const provider = infra({ name: 'db', provides: { db: () => eagerDb } });
     let handleSeen: Lazy<Db> | undefined;
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       boot: async ({ db }) => {
@@ -241,7 +241,7 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = orThrow(await defineApp('lift-eager').use(provider).use(consumer).boot());
+    const app = orThrow(await defineApp('lift-eager').infra(provider).infra(consumer).boot());
     expect(handleSeen).toBeDefined();
     // The lifted wrapper is per-injection and unpublished — app-level access
     // still sees the plain value, and dispose leaves it untouched.
@@ -253,7 +253,7 @@ describe('lazy services in the kernel', () => {
 
   it('service.lazy passes a LAZY provider handle through by identity', async () => {
     const log: string[] = [];
-    const consumer = plugin({
+    const consumer = infra({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       provides: {
@@ -265,7 +265,7 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = orThrow(await defineApp('lift-lazy').use(makeLazyDbPlugin(log)).use(consumer).boot());
+    const app = orThrow(await defineApp('lift-lazy').infra(makeLazyDbUnit(log)).infra(consumer).boot());
     expect(app.services.consumerDb).toBe(app.services.db); // same handle object
     expect(log).toEqual([]);
     orThrow(await app.services.consumerDb.get());
@@ -274,9 +274,9 @@ describe('lazy services in the kernel', () => {
     expect(log).toEqual(['init', 'close']); // provider-side cleanup still owns it
   });
 
-  it('a republished handle is auto-disposed by its FIRST publisher — after that plugin’s dispose hook', async () => {
+  it('a republished handle is auto-disposed by its FIRST publisher — after that unit’s dispose hook', async () => {
     const order: string[] = [];
-    const provider = plugin({
+    const provider = infra({
       name: 'db',
       provides: {
         db: () =>
@@ -286,60 +286,60 @@ describe('lazy services in the kernel', () => {
       },
       async dispose({ db }) {
         // The provider's own teardown still needs the handle alive, even
-        // though a later plugin republished it under another key. Reverse
+        // though a later unit republished it under another key. Reverse
         // dispose order must not let the republisher close it first.
         expect(orThrow(await db.get())).toMatchObject({ id: 3 });
         order.push('provider-hook');
       },
     });
-    const alias = plugin({
+    const alias = infra({
       name: 'alias',
       needs: { db: service.lazy<Db>() },
       provides: { aliasDb: ({ db }) => db },
       dispose: () => void order.push('alias-hook'),
     });
 
-    const app = orThrow(await defineApp('lazy-ownership').use(provider).use(alias).boot());
+    const app = orThrow(await defineApp('lazy-ownership').infra(provider).infra(alias).boot());
     orThrow(await app.services.aliasDb.get());
     orThrow(await app.dispose());
     expect(order).toEqual(['alias-hook', 'provider-hook', 'lazy-cleanup']);
   });
 
   it('the guard accepts eager or lazy providers for a service.lazy need — and still rejects wrong types', () => {
-    const eagerProvider = plugin({ name: 'db', provides: { db: (): Db => ({ id: 1, close: () => void 1 }) } });
-    const lazyProvider = makeLazyDbPlugin([]);
-    const consumer = plugin({
+    const eagerProvider = infra({ name: 'db', provides: { db: (): Db => ({ id: 1, close: () => void 1 }) } });
+    const lazyProvider = makeLazyDbUnit([]);
+    const consumer = infra({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       boot: ({ db }) => {
         void db;
       },
     });
-    const wrongProvider = plugin({ name: 'db', provides: { db: () => 42 } });
+    const wrongProvider = infra({ name: 'db', provides: { db: () => 42 } });
 
     // Both provider strategies typecheck against the same consumer:
-    defineApp('ok-eager').use(eagerProvider).use(consumer);
-    defineApp('ok-lazy').use(lazyProvider).use(consumer);
+    defineApp('ok-eager').infra(eagerProvider).infra(consumer);
+    defineApp('ok-lazy').infra(lazyProvider).infra(consumer);
     // @ts-expect-error — number is neither Db nor Lazy<Db>
-    defineApp('bad').use(wrongProvider).use(consumer);
+    defineApp('bad').infra(wrongProvider).infra(consumer);
     expect(true).toBe(true);
   });
 
-  it('runs the plugin dispose hook BEFORE auto-disposing its lazy publishes', async () => {
+  it('runs the unit dispose hook BEFORE auto-disposing its lazy publishes', async () => {
     const order: string[] = [];
-    const p = plugin({
+    const p = infra({
       name: 'ordered',
       provides: {
         svc: () => lazy(() => 'value', { dispose: () => void order.push('lazy-cleanup') }),
       },
       async dispose({ svc }) {
-        // The handle is still usable inside the plugin's own dispose hook.
+        // The handle is still usable inside the unit's own dispose hook.
         expect(orThrow(await svc.get())).toBe('value');
         order.push('hook');
       },
     });
 
-    const app = orThrow(await defineApp('lazy-order').use(p).boot());
+    const app = orThrow(await defineApp('lazy-order').infra(p).boot());
     orThrow(await app.services.svc.get());
     orThrow(await app.dispose());
     expect(order).toEqual(['hook', 'lazy-cleanup']);

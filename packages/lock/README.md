@@ -76,7 +76,7 @@ Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Po
 | `@arki/lock/pg/lease` | `pgLease`, `ensureLockTable`                                             | `drizzle-orm`             |
 | `@arki/lock/redis`    | `redisStore`                                                             | `ioredis`                 |
 | `@arki/lock/file`     | `fileStore`                                                              | none                      |
-| `@arki/lock/dot`      | `locks()` plugin for `@arki/dot`                                         | `@arki/dot`               |
+| `@arki/lock/dot`      | `locks()` unit for `@arki/dot`                                           | `@arki/dot`               |
 | `@arki/lock/testing`  | manual scheduler, `testStore`, store conformance suite, replica property | `vitest`, `fast-check`    |
 
 ## Which lock do I need
@@ -436,7 +436,7 @@ try {
 console.info(locks.counters.releaseErrors);
 ```
 
-`locks.counters` has `releaseErrors`, `leadAcquired` and `leadLost`. Raw keys stay out of logs unless you pass `logKeys: true` to `createLocks` (the Dot plugin has no such option).
+`locks.counters` has `releaseErrors`, `leadAcquired` and `leadLost`. Raw keys stay out of logs unless you pass `logKeys: true` to `createLocks` (the Dot unit has no such option).
 
 ### Using the fence
 
@@ -467,7 +467,7 @@ await locks.mutex('report').run(
 
 ## Dot integration
 
-`@arki/lock/dot` is a plugin for [`@arki/dot`](https://www.npmjs.com/package/@arki/dot). It builds the store at boot, hands the typed `Locks` to features, and closes the store when the app stops.
+`@arki/lock/dot` is a unit for [`@arki/dot`](https://www.npmjs.com/package/@arki/dot). It builds the store at boot, hands the typed `Locks` to features, and closes the store when the app stops.
 
 ```ts skip="needs @arki/schedule, a Postgres pool and DATABASE_URL"
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -476,13 +476,13 @@ import { Pool } from 'pg';
 import type { LeaseDb } from '@arki/lock/pg/lease';
 import type { Locker } from '@arki/schedule';
 import { feature } from '@arki/dot/feature';
-import { defineApp, plugin, service } from '@arki/dot/plugin';
+import { defineApp, infra, service } from '@arki/dot/unit';
 import { locks } from '@arki/lock/dot';
 import { pgLease } from '@arki/lock/pg/lease';
 import { schedule, schedules } from '@arki/schedule/dot';
 
 // Your database, as a Dot service named `db`.
-const database = plugin({
+const database = infra({
   name: 'database',
   provides: { db: (): LeaseDb => drizzle({ client: new Pool({ connectionString: process.env['DATABASE_URL'] }) }) },
 });
@@ -504,8 +504,8 @@ const billing = feature('billing', {
 });
 
 export const app = defineApp('billing')
-  .use(database)
-  .use(
+  .infra(database)
+  .infra(
     locks({
       namespace: 'billing',
       needs: { db: service<LeaseDb>() },
@@ -596,7 +596,7 @@ Read this before you ship a lock to production.
 - **Fence irreversible writes.** For a write you cannot undo, put the fence in the same statement as the write (see [Using the fence](#using-the-fence)). Without a fence, a process that paused longer than its lease can still write after another process took over.
 - **Alert on `lost`.** Watch for `LockError{code:'lost'}` and for `lockLost` on schedules. Frequent loss means your `ttl` is too short or your event loop stalls.
 - **Alert on `releaseErrors`.** It stays at zero when things are healthy.
-- **Shut down in this order:** stop new work, drain running callbacks, release locks, dispose the store. The Dot plugin does this for you.
+- **Shut down in this order:** stop new work, drain running callbacks, release locks, dispose the store. The Dot unit does this for you.
 - **Redis:** turn on persistence if you want locks to survive a restart, and set `maxmemory-policy noeviction`. A Redis restart or failover can lose locks and reset the best-effort fence.
 - **Postgres pool size:** one short statement for each renewal of each held lock, plus one for each tick. With `pgSession`, each held lock pins a connection, so size the pool for jobs plus locks.
 - **Run NTP** on every host. `fileStore` trusts the host clock. Lease stores that use the store's clock are not affected by skew between your processes.
@@ -782,28 +782,28 @@ it('renews through a five minute run', async () => {
 
 ### Faking `locks` in an app test
 
-The `locks()` plugin types its service by the store's guarantees: `LocksFor<G>`, not the store itself. So a test can provide it on another store with the same guarantees. `testStore(guarantees)` from `@arki/lock/testing` is that store: it runs in memory and keeps every promise `guarantees` makes.
+The `locks()` unit types its service by the store's guarantees: `LocksFor<G>`, not the store itself. So a test can provide it on another store with the same guarantees. `testStore(guarantees)` from `@arki/lock/testing` is that store: it runs in memory and keeps every promise `guarantees` makes.
 
 - Fences only when `fence` is not `false`. `semaphore` and `readWrite` only when `permits` and `shared` say so.
 - On a lease (`kind: 'lease'`), each hold expires `ttl` after it was taken (default `'30s'`), on the scheduler's clock, unless it is renewed. `lead` exists, as on the real store.
 - `wait: 'native'` is not simulated: an attempt answers at once and the manager waits for the release. `releasedBy: 'transaction'` frees the key on release, as if each run were its own transaction.
 
-```ts skip="imports ./locks, the reader's own locks() plugin"
+```ts skip="imports ./locks, the reader's own locks() unit"
 import { expect, it } from 'vitest';
 
 import { fake } from '@arki/dot';
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/unit';
 import { createLocks } from '@arki/lock';
 import { pgSessionGuarantees } from '@arki/lock/pg';
 import { manualScheduler, testStore } from '@arki/lock/testing';
 
-// Your plugin: locks({ namespace: 'billing', needs: { db }, store: ({ db }) => pgSession(db) })
+// Your unit: locks({ namespace: 'billing', needs: { db }, store: ({ db }) => pgSession(db) })
 import { locking } from './locks';
 
 it('runs the job once while another run holds the key', async () => {
   const clock = manualScheduler();
   const app = await defineApp('billing-test')
-    .use(
+    .infra(
       fake(
         locking.provides.locks,
         createLocks({
@@ -899,7 +899,7 @@ A fact table, taken from the 0.0.3 package and its docs. Both packages are young
 | Stores shipped             | memory, Postgres (advisory session, advisory transaction, lease table), Redis, file | in-memory only. Postgres (Drizzle, TypeORM) and Redis are recipes you copy into your app |
 | Test helpers               | `@arki/lock/testing`: conformance suite, chaos hooks, replica property              | a `./testing` entry point                                                                |
 | Runtime                    | Node, Bun, Deno. The memory store also runs in browsers and on Hermes.              | Node 20.19 or newer, ESM only                                                            |
-| Framework                  | none required. A Dot plugin is optional.                                            | NestJS 11 or 12, with `reflect-metadata` and `rxjs` as peers                             |
+| Framework                  | none required. A Dot unit is optional.                                              | NestJS 11 or 12, with `reflect-metadata` and `rxjs` as peers                             |
 | Fence                      | `bigint`; `durable` on `pgLease`                                                    | `number`                                                                                 |
 | Store call time limit      | `storeTimeout`, default 10 s                                                        | `storeTimeout` is in their docs for the next release, and is not in the 0.0.3 package    |
 | Decorators and Nest module | no                                                                                  | yes                                                                                      |

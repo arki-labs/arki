@@ -3,7 +3,7 @@
  *
  * Where the manifest describes the static shape of an app, a
  * `DotDiagnosticsSnapshot` is a point-in-time observability record: the
- * lifecycle state of the app and every plugin, plus structured issues with
+ * lifecycle state of the app and every unit, plus structured issues with
  * remediation guidance.
  *
  * CONTRACT: `DotDiagnosticsSnapshot` always exposes the same five arrays
@@ -17,13 +17,13 @@ import type { DotLifecycleHook, DotLifecycleState } from './lifecycle.js';
 /** Severity of a single diagnostic issue. */
 export type DiagnosticSeverity = 'info' | 'warning' | 'error';
 
-/** Status of a plugin/action/service/lifecycle entry. */
+/** Status of a unit/action/service/lifecycle entry. */
 export type DiagnosticStatus = 'ok' | 'degraded' | 'failed' | 'skipped' | 'missing';
 
 /**
  * Single point-in-time diagnostic snapshot of a DotApp.
  *
- * Five top-level arrays — plugins, actions, services, lifecycle, issues —
+ * Five top-level arrays — units, actions, services, lifecycle, issues —
  * are guaranteed to be present even when empty.
  */
 export type DotDiagnosticsSnapshot = {
@@ -35,14 +35,14 @@ export type DotDiagnosticsSnapshot = {
     name: string;
     state: DotLifecycleState;
   };
-  plugins: PluginDiagnostic[];
+  plugins: UnitDiagnostic[];
   actions: ActionDiagnostic[];
   services: ServiceDiagnostic[];
   lifecycle: LifecycleDiagnostic[];
   issues: DiagnosticIssue[];
 };
 
-export type PluginDiagnostic = {
+export type UnitDiagnostic = {
   plugin: string;
   status: Extract<DiagnosticStatus, 'ok' | 'degraded' | 'failed' | 'skipped'>;
   issues: DiagnosticIssue[];
@@ -70,7 +70,7 @@ export type LifecycleDiagnostic = {
   plugin: string;
   hook: DotLifecycleHook;
   state: DotLifecycleState;
-  /** 0-based topological order of this plugin within the hook pass. */
+  /** 0-based topological order of this unit within the hook pass. */
   order: number;
   /** Wall-clock duration of the hook call, in milliseconds. */
   durationMs?: number;
@@ -78,7 +78,7 @@ export type LifecycleDiagnostic = {
 };
 
 /**
- * Single structured issue surfaced by the kernel or by a plugin.
+ * Single structured issue surfaced by the kernel or by a unit.
  *
  * `code`, `message`, `remediation` and `docsUrl` are required so that issues
  * are always actionable — never just "something went wrong".

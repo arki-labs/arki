@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
+import { service } from '@arki/dot/unit';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleOutcome } from './dot.js';

@@ -4,8 +4,8 @@ Reference for `@arki/schedule/dot`: `schedules()`, `schedule()`, locks, the host
 
 ## Inside a DOT app
 
-A feature declares its schedules with `schedules([...])`. `schedule()` is a
-driving adapter: mount it with `.serve()`, after the features. It runs the
+A feature declares its schedules with `schedules([...])`. `schedule()` is an
+entrypoint: mount it with `.entrypoints()`, after the features. It runs the
 schedules of every mounted feature — the app lists its features once:
 
 ```ts skip="excerpt: it uses names this page does not define"
@@ -24,9 +24,9 @@ export const reports = feature('reports', {
 });
 
 defineApp('shop')
-  .use(db({ url }))
+  .infra(db({ url }))
   .features([reports, billing])
-  .serve(schedule({ needs: { db: database.provides.db }, context: ({ db }) => ({ db }) }));
+  .entrypoints(schedule({ needs: { db: database.provides.db }, context: ({ db }) => ({ db }) }));
 ```
 
 `context` builds the one value every handler receives. The features are
@@ -66,7 +66,7 @@ import { locks } from '@arki/lock/dot';
 import { pgLease } from '@arki/lock/pg/lease';
 
 // Once, in the app: the `locks` service that locked schedules read.
-defineApp('shop').use(
+defineApp('shop').infra(
   locks({
     namespace: 'shop',
     needs: { db: database.provides.db },
@@ -124,7 +124,7 @@ schedules(core, [
 When a schedule belongs to one feature and works with that feature's
 services, declare it with the feature's `needs`. The handler's parameter is
 typed from `needs` with no annotation, and the feature must list the same
-services in its own `needs` (a compile error otherwise). The driver's
+services in its own `needs` (a compile error otherwise). The entrypoint's
 `context` is not used for these handlers.
 
 ```ts skip="excerpt: it uses names this page does not define"
@@ -161,9 +161,9 @@ schedule or a durable backend with the host clock fails boot with
 
 ```ts skip="excerpt: it uses names this page does not define"
 const app = await defineApp('news')
-  .use(mailer())
+  .infra(mailer())
   .features([digest])
-  .serve(schedule({ clock: 'host' }))
+  .entrypoints(schedule({ clock: 'host' }))
   .boot();
 
 app.services.scheduler.clock; // 'host'
@@ -172,7 +172,7 @@ await app.services.scheduler.trigger('send-digest');
 ```
 
 `trigger(name)` resolves a `ScheduleOutcome`: a run result (see
-[Run results](#run-results)), or `unknown` for a name the driver does not
+[Run results](#run-results)), or `unknown` for a name the entrypoint does not
 run. A trigger works once the app has booted, before `start()` too. After
 `stop()` it reports `unavailable`; `stop()` waits for runs it already
 accepted.

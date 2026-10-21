@@ -19,7 +19,7 @@
  * });
  * ```
  *
- * The slice lands under the `routes` key, where `.serve(http(...))` collects
+ * The slice lands under the `routes` key, where `.entrypoints(http(...))` collects
  * it. `feature()` rejects two slices with one key, so put `foreman()` in
  * its own feature, not next to an `endpoints()` slice.
  *

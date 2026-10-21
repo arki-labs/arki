@@ -4,11 +4,11 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { EmptyShape } from '@arki/dot/plugin';
+import type { EmptyShape } from '@arki/dot/unit';
 import type { Mailer } from '@arki/mail';
 import { defineApp } from '@arki/dot';
-import { plugin } from '@arki/dot/plugin';
-import { testPlugin } from '@arki/dot/test-harness';
+import { infra } from '@arki/dot/unit';
+import { testUnit } from '@arki/dot/test-harness';
 import { orThrow } from '@arki/failure';
 import { mailer } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
@@ -24,7 +24,7 @@ import { actingAs, testAuth } from './testing/index.js';
 const SECRET = 'dot-manifest-secret-0123456789abcdef-xyz';
 const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'] });
 
-const providers = plugin<EmptyShape, { readonly db: AuthDb; readonly mail: Mailer }>({
+const providers = infra<EmptyShape, { readonly db: AuthDb; readonly mail: Mailer }>({
   name: 'infra',
   configure(ctx) {
     ctx.registerService('db', 'db');
@@ -35,7 +35,7 @@ const providers = plugin<EmptyShape, { readonly db: AuthDb; readonly mail: Maile
   },
 });
 
-describe('auth Dot plugin', () => {
+describe('auth Dot unit', () => {
   it('needs db and mail, publishes auth, and keeps secrets out of the manifest', () => {
     let runtimeReads = 0;
     const authn = auth(definition, {
@@ -46,7 +46,7 @@ describe('auth Dot plugin', () => {
         return { url: 'http://localhost:3000', secret: SECRET, production: false };
       },
     });
-    const app = orThrow(defineApp('notes').use(providers).use(authn).configure());
+    const app = orThrow(defineApp('notes').infra(providers).infra(authn).configure());
 
     expect(new Set(Object.keys(authn.needs))).toEqual(new Set(['db', 'mail']));
     expect(app.manifest.services).toContainEqual({ name: 'auth', plugin: 'auth', kind: 'auth' });
@@ -58,7 +58,7 @@ describe('auth Dot plugin', () => {
     const { db, dispose } = await testAuth(definition, { tables: authTables });
     try {
       const app = await orThrow(
-        testPlugin(
+        testUnit(
           auth(definition, {
             tables: authTables,
             rateLimit: false,

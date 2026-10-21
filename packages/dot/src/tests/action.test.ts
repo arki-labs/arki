@@ -7,7 +7,7 @@ import { defineFailure, InvalidInput, isFailure, reviveJson, serialize, Unexpect
 import { action, ActionApprovalRequired, ActionNotExposed, ActionPrincipalRequired } from '../action.js';
 import { bindAction } from '../execute.js';
 import { defineApp } from '../index.js';
-import { plugin } from '../plugin.js';
+import { infra } from '../unit.js';
 
 const ItemMissing = defineFailure('catalog.item_missing', { status: 404, data: z.object({ id: z.string() }) });
 const CloseFailed = defineFailure('catalog.close_failed', { status: 503 });
@@ -23,7 +23,7 @@ const invocation = { binding: 'http', principal: 'anonymous', approval: 'absent'
 describe('one owned action boundary', () => {
   it('publishes the existing ActionSource projection without binding or booting services', () => {
     const result = defineApp('catalog')
-      .use(plugin({ name: 'catalog', actions: [catalog] }))
+      .infra(infra({ name: 'catalog', actions: [catalog] }))
       .configure();
     if (isFailure(result)) throw new Error(result.code);
     expect(result.manifest.actions).toEqual([{ plugin: 'catalog', ...catalog.toDotAction() }]);

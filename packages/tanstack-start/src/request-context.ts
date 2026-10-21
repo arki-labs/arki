@@ -16,7 +16,7 @@
  *
  * No runtime code lives here, so the root entry stays browser-safe.
  */
-import type { DotAppLifecycle, PluginPhases } from '@arki/dot';
+import type { DotAppLifecycle, UnitPhases } from '@arki/dot';
 import type { Failure } from '@arki/failure';
 
 /** A server-route path, such as `/api/rpc`: starts with `/`, no trailing slash. */
@@ -121,7 +121,7 @@ export type WithStart<Services, Rpc, Session> = Services & { readonly tanstackSt
 export type StartServices = { readonly tanstackStart: StartService<unknown, unknown> };
 
 /** Any Dot app (builder) that mounts `tanstackStart()`. */
-export type StartApp = DotAppLifecycle<StartServices, Failure, Failure, PluginPhases>;
+export type StartApp = DotAppLifecycle<StartServices, Failure, Failure, UnitPhases>;
 
 /**
  * The request context of an app, inferred from its `tanstackStart()` plugin:

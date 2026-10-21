@@ -3,7 +3,7 @@
 Typed HTTP for ARKI — route contracts as data, handlers validated by any
 Standard Schema (zod, valibot, arktype, your own),
 request-scope derivers, SSE streaming, and deterministic OpenAPI
-generation. Ships a DOT adapter (`@arki/http/dot`) whose `http()` driver
+generation. Ships a DOT adapter (`@arki/http/dot`) whose `http()` entrypoint unit
 turns a composed app into a running server with correct drain-on-shutdown
 semantics.
 
@@ -76,11 +76,11 @@ A route is split in two:
   a stable id. Registerable in the DOT manifest (sync `configure`),
   renderable as OpenAPI without booting, and the source of the handler's
   inferred signature.
-- **Binding** — the handler, attached inside a plugin's `provides` factory (or `boot`) where the
-  plugin's typed needs are already injected. Handlers close over real
+- **Binding** — the handler, attached inside a unit's `provides` factory (or `boot`) where the
+  unit's typed needs are already injected. Handlers close over real
   services; no service locator exists.
 
-App-shaped blocks import their schemas, contracts, services and plugins from [the docs fixture](docs/examples/fixture.ts): a small orders app (`Order`, `listOrders`, `db`, `auth`, a `defineFeature` core, and so on).
+App-shaped blocks import their schemas, contracts, services and units from [the docs fixture](docs/examples/fixture.ts): a small orders app (`Order`, `listOrders`, `db`, `auth`, a `defineFeature` core, and so on).
 
 ```ts
 import { optional, route, routes } from '@arki/http';
@@ -255,7 +255,7 @@ runs once at boot with the feature's typed needs:
 
 ```ts
 import { feature } from '@arki/dot/feature';
-import { service } from '@arki/dot/plugin';
+import { service } from '@arki/dot/unit';
 import { endpoints, routes } from '@arki/http';
 
 import { type Db, createOrder, listOrders } from './fixture.ts';
@@ -300,7 +300,7 @@ export const orders = core.entrypoints(orderRoutes(core));
 `http()` serves both forms from one route table, in mount order. (Same
 routes, fewer places for them to hide.)
 
-`http()` is a driving adapter: mount it with `.serve()`, after the
+`http()` is an entrypoint unit: mount it with `.entrypoints()`, after the
 features. It serves the routes of every mounted feature, in mount order —
 the app lists its features once:
 
@@ -309,26 +309,26 @@ import { defineApp, hookSignals } from '@arki/dot';
 import { http } from '@arki/http/dot';
 
 const app = await defineApp('shop-api')
-  .use(db({ url: DATABASE_URL }))
+  .infra(db({ url: DATABASE_URL }))
   .features([orders, billing])
-  .serve(http({ port: 3000 }))
+  .entrypoints(http({ port: 3000 }))
   .start();
 
 hookSignals(app);
 ```
 
 A feature with no `endpoints()` slice is skipped. Mount `http()` with
-`.serve()`, not `.use()`: under `.use()` it boots before the features, so
+`.entrypoints()`, not `.infra()`: under `.infra()` it boots before the features, so
 their routes do not exist yet and boot fails.
 
 Route bundles published as plain token services (not by a feature) go in
-`bundles`. Each token becomes a need, so the `.serve(http(...))` line fails
+`bundles`. Each token becomes a need, so the `.entrypoints(http(...))` line fails
 to typecheck when no earlier unit provides it. Bundles come first in the
 route table, then feature routes:
 
 ```ts
 import { defineApp } from '@arki/dot';
-import { token } from '@arki/dot/plugin';
+import { token } from '@arki/dot/unit';
 import type { RouteBundle } from '@arki/http';
 import { http } from '@arki/http/dot';
 
@@ -337,12 +337,12 @@ import { adminPlugin, orders } from './fixture.ts';
 export const AdminRoutes = token<RouteBundle>()('admin.routes');
 
 defineApp('shop-api')
-  .use(adminPlugin) // provides: { [AdminRoutes.key]: () => routes().bind(...) }
+  .infra(adminPlugin) // provides: { [AdminRoutes.key]: () => routes().bind(...) }
   .features([orders])
-  .serve(http({ port: 3000, bundles: [AdminRoutes] }));
+  .entrypoints(http({ port: 3000, bundles: [AdminRoutes] }));
 ```
 
-Because `.serve()` mounts after every feature, reverse-order `stop` halts
+Because `.entrypoints()` mounts after every feature, reverse-order `stop` halts
 ingress FIRST: the server stops accepting, drains in-flight requests
 (`drainTimeoutMs`, default 10 s, `ARKI_HTTP_E005` on overrun), and only
 then do features tear down. `boot` builds the router without listening;
@@ -668,14 +668,14 @@ side by side. No Hono type appears in the public API.
 
 `composeMiddleware(engine, middleware)` wraps an engine and returns one, so
 Bun's natively matched routes run the same layers as `fetch`; the Dot
-`http()` plugin does this for its drain gauge and your middleware.
+`http()` unit does this for its drain gauge and your middleware.
 
 ## Public imports
 
 | Import | What it holds |
 | --- | --- |
 | `@arki/http` | `route`, `routes`, `buildEngine`, `buildHonoEngine`, `listen`, `composeMiddleware`, `derive`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
-| `@arki/http/dot` | `http()`, the Dot driver, and `endpoints()` |
+| `@arki/http/dot` | `http()`, the Dot entrypoint unit, and `endpoints()` |
 | `@arki/http/client` | the typed fetch client |
 | `@arki/http/idempotency` | `idempotent(...)`, an idempotency-key middleware |
 | `@arki/http/webhooks` | signature schemes for signed webhooks |
@@ -759,7 +759,7 @@ error messages are redacted when `NODE_ENV=production`.
 
 ## Documentation
 
-The [agent guide](docs/agent-guide.md) has the model, a task map and the rules. The Dot docs (`packages/dot/docs/`) cover plugin authoring and lifecycle.
+The [agent guide](docs/agent-guide.md) has the model, a task map and the rules. The Dot docs (`packages/dot/docs/`) cover unit authoring and lifecycle.
 
 ## Support
 
@@ -871,6 +871,6 @@ The engine creates an `http.request` span and protected idempotency middleware
 creates an `http.idempotency` span through `@opentelemetry/api`. They inherit the
 active context and record response status and canonical failure codes, without
 request IDs, URLs, keys, bodies or private causes. Configure the SDK and context
-manager in the application. Handlers and plugins can use the active span or
+manager in the application. Handlers and units can use the active span or
 create their own children. Reporting failures cannot repeat or suppress the
 owned execution. See the [identity upgrade guide](docs/upgrade-identities.md).

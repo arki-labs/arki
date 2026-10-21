@@ -3,7 +3,7 @@ import { expectTypeOf } from 'vitest';
 
 import { defineFailure } from '@arki/failure';
 
-import type { KernelCtx } from './plugin-contract.js';
+import type { KernelCtx } from './unit-contract.js';
 import type { DotTelemetry } from './telemetry.js';
 import { telemetryFor } from './telemetry.js';
 
@@ -15,7 +15,7 @@ declare const pending: Promise<typeof value>;
 expectTypeOf(telemetry.span('lookup', () => value)).toEqualTypeOf<typeof value>();
 expectTypeOf(telemetry.span('lookup', () => pending)).toEqualTypeOf<typeof pending>();
 expectTypeOf<KernelCtx['$telemetry']>().toEqualTypeOf<DotTelemetry>();
-// @ts-expect-error Scope comes from a real plugin, feature, or hook identity.
+// @ts-expect-error Scope comes from a real unit, feature, or hook identity.
 telemetryFor({ id: 'catalog' });
 // @ts-expect-error OTel attributes do not accept nested user payloads.
 telemetry.event('lookup', { payload: { secret: 'hidden' } });

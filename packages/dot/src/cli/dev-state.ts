@@ -2,7 +2,7 @@
  * `.local/dot/dev.json`: the file that says a `dot dev` runs in this project.
  *
  * The supervisor creates it at start with `{ pid, startedAt }` and removes it
- * on exit. A later console plugin adds `console.url`; the supervisor polls
+ * on exit. A later console unit adds `console.url`; the supervisor polls
  * for it. The create is atomic: the content is written to a private temp
  * file first, then hard-linked to the final name, which fails when the name
  * exists. A reader therefore never sees a half-written file.

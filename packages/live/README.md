@@ -2,7 +2,7 @@
 
 Live queries on your own Postgres. A procedure declares the tables it reads in its oRPC contract meta. A statement trigger publishes a hint at commit. A hub numbers those hints and feeds one stream per browser tab, and the client refetches the queries that read a changed table. A table can be scoped by a tenant key: then a hint names the changed keys too, a client gets only the keys it is granted, and only the queries of those keys refetch. Only table names and keys travel; data always comes from a normal, authorized refetch.
 
-This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot plugin, the stream client and the React provider, proven by a failure matrix on Postgres 16 and 18, a browser run on a TanStack Start app, and contract-checked benchmarks.
+This release covers milestones M0 to M4 of the lesson-01 plan: the wire schemas, the hub, `live()` meta, `snapshot()` and `liveRead()`, the Postgres source, the SSE endpoint, the Dot unit, the stream client and the React provider, proven by a failure matrix on Postgres 16 and 18, a browser run on a TanStack Start app, and contract-checked benchmarks.
 
 ## Install
 
@@ -54,7 +54,7 @@ On the server you also need Postgres (tested on 16 and 18) and three things set 
 - `@arki/live/orpc`: `liveRead`, `liveManifest`.
 - `@arki/live/pg`: `liveMigration`, `verifyLiveTriggers`, `pgSource`, `touch`.
 - `@arki/live/http`: `liveEndpoint`, the `GET /api/live` stream.
-- `@arki/live/dot`: `liveQueries`, the Dot plugin.
+- `@arki/live/dot`: `liveQueries`, the Dot unit.
 - `@arki/live/react`: `LiveProvider`, `useLiveQuery`, `useLiveStatus`.
 - `@arki/live/testing`: `fakeSource`, `waitForInvalidation`.
 

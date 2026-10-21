@@ -14,7 +14,7 @@
  * const app = await defineApp('my-app')
  *   // Whole-config thunk: env is read at boot, so the declaration stays
  *   // import-pure (loadable from a bare checkout).
- *   .use(kv(() => ({ url: env.KV_URL, namespace: 'my-app' })))
+ *   .infra(kv(() => ({ url: env.KV_URL, namespace: 'my-app' })))
  *   .boot();
  *
  * await app.services.kv.set('hello', 'world', 60);
@@ -27,8 +27,8 @@
  * ```ts
  * import { rename } from '@arki/dot';
  *
- * .use(kv({ namespace: 'app' }))
- * .use(rename(kv({ namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
+ * .infra(kv({ namespace: 'app' }))
+ * .infra(rename(kv({ namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
  * ```
  *
  * Redis optional (dev, tests)? `kv.optional(...)` publishes `kv` as
@@ -39,8 +39,8 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import type { Deferred } from '@arki/dot/plugin';
-import { DotPluginError, plugin, resolveDeferred } from '@arki/dot/plugin';
+import type { Deferred } from '@arki/dot/unit';
+import { DotUnitError, infra, resolveDeferred } from '@arki/dot/unit';
 
 import { KV } from './index.js';
 
@@ -126,7 +126,7 @@ async function probe(client: KV, timeoutMs: number): Promise<KV> {
     return client;
   } catch (error) {
     await client.close();
-    throw new DotPluginError({
+    throw new DotUnitError({
       code: KV_PLUGIN_ERROR_CODES.probeFailed,
       message: `[kv] KV connection probe failed: ${error instanceof Error ? error.message : String(error)}`,
       remediation: 'Check that the KV URL is correct and that Redis is reachable from this process.',
@@ -156,7 +156,7 @@ function open(url: string, config: KvDotOptions): KV | Promise<KV> {
  * @returns A plugin that publishes `services.kv`.
  */
 export function kv(options: Deferred<KvDotOptions> = {}) {
-  return plugin({
+  return infra({
     name: 'kv',
     configure(ctx) {
       ctx.registerService('kv', 'kv');
@@ -166,7 +166,7 @@ export function kv(options: Deferred<KvDotOptions> = {}) {
         const config = resolveDeferred(options);
         const url = resolveUrl(config);
         if (url === undefined) {
-          throw new DotPluginError({
+          throw new DotUnitError({
             code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,
             message: '[kv] KV URL is not configured.',
             remediation: 'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
@@ -195,7 +195,7 @@ export function kv(options: Deferred<KvDotOptions> = {}) {
  * ```
  */
 kv.optional = function optional(options: Deferred<KvDotOptions> = {}) {
-  return plugin({
+  return infra({
     name: 'kv',
     configure(ctx) {
       ctx.registerService('kv', 'kv');

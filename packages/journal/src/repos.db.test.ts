@@ -20,7 +20,7 @@ import { TransactionDefect } from '@arki/db/transaction';
 import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { plugin } from '@arki/dot/plugin';
+import { infra } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import { initJournal } from './journal.js';
@@ -60,7 +60,7 @@ const journal = j.compose({});
 
 let handle: Db;
 let client: PGlite;
-const database = plugin({ name: 'database', provides: { db: (): Db => handle } });
+const database = infra({ name: 'database', provides: { db: (): Db => handle } });
 
 const repository = repos({ accounts: (d: Database) => new AccountRepository(d) });
 

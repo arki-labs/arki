@@ -9,8 +9,8 @@ const N = Number(process.argv[2] ?? 50);
 const here = dirname(fileURLToPath(import.meta.url));
 const deps = i => [i - 1, i - 2].filter(j => j >= 0);
 
-let out = `import { isFailure } from '@arki/failure';\nimport type { DepsOf } from '../../../src/feature.js';\nimport { defineFeature } from '../../../src/feature.js';\nimport { defineApp, plugin } from '../../../src/index.js';\n\n`;
-out += `export const clock = plugin({ name: 'clock', provides: { now: () => ({ ms: () => Date.now() }) } });\n`;
+let out = `import { isFailure } from '@arki/failure';\nimport type { DepsOf } from '../../../src/feature.js';\nimport { defineFeature } from '../../../src/feature.js';\nimport { defineApp, infra } from '../../../src/index.js';\n\n`;
+out += `export const clock = infra({ name: 'clock', provides: { now: () => ({ ms: () => Date.now() }) } });\n`;
 for (let i = 0; i < N; i++) {
   const needs = [`now: clock.provides.now`, ...deps(i).map(j => `s${j}: f${j}.provides.svc${j}`)].join(', ');
   const picks = ['now', ...deps(i).map(j => `s${j}`)].map(k => `'${k}'`).join(' | ');
