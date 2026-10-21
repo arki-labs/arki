@@ -16,6 +16,7 @@ After recovery the handler runs again from the start. Its `ctx.job.attemptsMade`
 
 - BullMQ recovers a stalled job `maxStalledCount` times (default 1). The next stall moves the job to `failed` with "job stalled more than allowable limit". Retry it from Foreman or with `job.retry()`.
 - pg-boss counts a recovered claim as a retry. When the retries are used up, the job is `failed`.
+- A handler that throws is retried by the job's `Backoff`, like a stalled claim. A handler that returns a failure is not, unless `.while(...)` selects it. To make a throw final, set `retry: backoff.constant(0).upTo(0)`.
 - A job with no `expireInSeconds` waits 15 minutes before pg-boss treats its worker as dead. Set it a little above your slowest handler.
 - A handler that ignores `ctx.signal` keeps running after its claim expired. Another worker may run the same job at the same time. This is why the idempotency key is a rule and not advice.
 

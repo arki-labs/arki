@@ -38,13 +38,25 @@ function expectCode(error: unknown, code: QueueDefinitionError['code']): void {
 
 /** A flow step job. */
 const stepJob = q.job
-  .name('guards:step')
+  .name('guards.step')
   .input(z.object({}))
   .handler(() => Promise.resolve());
 
 describe('job builder guards', () => {
+  // WHY: a job name is its queue name. BullMQ throws on ":" and pg-boss allows only
+  // letters, digits and _ - . /, so a bad name must fail where it is written, not at start-up.
+  it('rejects a job name with a character a queue name cannot hold, naming the allowed ones', () => {
+    const error = thrown(() => q.job.name('orders:process'));
+    expectCode(error, QUEUE_DEFINITION_ERROR_CODES.invalidJobName);
+    expect(error).toHaveProperty('message', expect.stringContaining('letters, digits, "_", "-", "." and "/"'));
+  });
+
+  it('accepts a feature.action job name', () => {
+    expect(() => q.job.name('orders.process-v2/eu_1')).not.toThrow();
+  });
+
   it('.handler() before .input() is a compile error and throws missingInput', () => {
-    const named = q.job.name('guards:job');
+    const named = q.job.name('guards.job');
     const error = thrown(() =>
       // @ts-expect-error -- `.handler()` does not exist until `.input()` runs
       named.handler(() => Promise.resolve({ ok: true })),
@@ -54,7 +66,7 @@ describe('job builder guards', () => {
   });
 
   it('.handler() after .options() but before .input() is still a compile error', () => {
-    const withOptions = q.job.name('guards:job').options({ maxParallelism: 1 });
+    const withOptions = q.job.name('guards.job').options({ maxParallelism: 1 });
     expectCode(
       // @ts-expect-error -- `.options()` does not unlock `.handler()`
       thrown(() => withOptions.handler(() => Promise.resolve({ ok: true }))),
@@ -69,25 +81,25 @@ describe('job builder guards', () => {
 
   it('builds once .name() and .input() ran, with .options() before or after .input()', () => {
     const optionsFirst = q.job
-      .name('guards:options-first')
+      .name('guards.options-first')
       .options({ maxParallelism: 1 })
       .input(z.object({ id: z.string() }))
       .handler(data => Promise.resolve({ id: data.id }));
     const optionsLast = q.job
       .use(q.middleware(({ next }) => next()))
-      .name('guards:options-last')
+      .name('guards.options-last')
       .input(z.object({ id: z.string() }))
       .options({ maxParallelism: 1 })
       .handler((data, ctx) => Promise.resolve({ id: data.id, userId: ctx.userId }));
 
-    expect(optionsFirst._internal.name).toBe('guards:options-first');
+    expect(optionsFirst._internal.name).toBe('guards.options-first');
     expect(optionsLast._internal.options).toEqual({ maxParallelism: 1 });
   });
 });
 
 describe('schedule builder guards', () => {
   it('.handler() before .input() is a compile error and throws missingInput', () => {
-    const named = q.schedule.everyMinutes(5).name('guards:schedule');
+    const named = q.schedule.everyMinutes(5).name('guards.schedule');
     expectCode(
       // @ts-expect-error -- `.handler()` does not exist until `.input()` runs
       thrown(() => named.handler(() => Promise.resolve())),
@@ -107,7 +119,7 @@ describe('schedule builder guards', () => {
       withMiddleware.job(stepJob),
     );
     expectCode(error, QUEUE_DEFINITION_ERROR_CODES.scheduleMiddlewareWithJob);
-    expect(error).toHaveProperty('message', expect.stringContaining('Remove .use() before .job(guards:step)'));
+    expect(error).toHaveProperty('message', expect.stringContaining('Remove .use() before .job(guards.step)'));
   });
 
   it('untyped .use().job() throws scheduleMiddlewareWithJob', () => {
@@ -125,7 +137,7 @@ describe('schedule builder guards', () => {
     const schedule = q.schedule
       .interval(60_000)
       .use(q.middleware(({ next }) => next()))
-      .name('guards:schedule-ok')
+      .name('guards.schedule-ok')
       .input(z.object({}))
       .handler(() => Promise.resolve());
 
@@ -135,7 +147,7 @@ describe('schedule builder guards', () => {
 
 describe('flow builder guards', () => {
   it('.build() before the first .step() is a compile error and throws missingSteps', () => {
-    const noSteps = q.flow.name('guards:flow').input(z.object({}));
+    const noSteps = q.flow.name('guards.flow').input(z.object({}));
     expectCode(
       // @ts-expect-error -- `.build()` does not exist until the first `.step()`
       thrown(() => noSteps.build()),
@@ -145,12 +157,12 @@ describe('flow builder guards', () => {
 
   it('.build() before .input() is a compile error', () => {
     // @ts-expect-error -- the flow has no `.build()` until `.input()` and `.step()` ran
-    expect(q.flow.name('guards:flow').build).toBeUndefined();
+    expect(q.flow.name('guards.flow').build).toBeUndefined();
   });
 
   it('builds once a step exists', () => {
     const flow = q.flow
-      .name('guards:flow-ok')
+      .name('guards.flow-ok')
       .input(z.object({}))
       .step('first', { job: stepJob, data: () => ({}) })
       .build();
@@ -159,7 +171,7 @@ describe('flow builder guards', () => {
   });
 
   it('has no .use(): each step runs with its own job middleware', () => {
-    const flow = q.flow.name('guards:flow-no-use').input(z.object({}));
+    const flow = q.flow.name('guards.flow-no-use').input(z.object({}));
     // @ts-expect-error -- a flow has no middleware of its own
     expect(flow.use).toBeUndefined();
     const withStep = flow.step('first', { job: stepJob, data: () => ({}) });
@@ -169,7 +181,7 @@ describe('flow builder guards', () => {
 
   it('an unknown step id throws unknownStepDependency (runtime only)', () => {
     const flow = q.flow
-      .name('guards:flow-unknown')
+      .name('guards.flow-unknown')
       .input(z.object({}))
       .step('first', { job: stepJob, data: () => ({}), dependsOn: ['missing'] });
     expectCode(
@@ -180,7 +192,7 @@ describe('flow builder guards', () => {
 
   it('a dependency cycle throws circularStepDependency (runtime only)', () => {
     const flow = q.flow
-      .name('guards:flow-cycle')
+      .name('guards.flow-cycle')
       .input(z.object({}))
       .step('a', { job: stepJob, data: () => ({}), dependsOn: ['b'] })
       .step('b', { job: stepJob, data: () => ({}), dependsOn: ['a'] });

@@ -82,7 +82,7 @@ Here `scheduling` is `outboxPlugin({ tables })`. A feature lists its jobs with `
 ## Rules that bite
 
 - A job can run more than once. Pass `ctx.job.id` to every external system as its idempotency key.
-- Return expected refusals as `@arki/failure` values. A throw is a defect and stops by default. Retry only what `.options({ retry: ... .while(Definition) })` selects.
+- Return expected refusals as `@arki/failure` values. A throw is a defect and follows the job's retry (`upTo(2)` runs it up to 3 times). A returned failure retries only what `.options({ retry: ... .while(Definition) })` selects.
 - `trigger()` and `enqueue()` return an id or a `JobTriggerFailure`. Check the result before you use the id.
 - `QueueAcceptanceUnknown` means the acknowledgement was lost. Look for the job by its key before you send it again.
 - A job name is its queue name. Use dots, never a colon: BullMQ refuses `:` and pg-boss accepts only letters, digits, `_`, `-`, `.` and `/`.
@@ -111,7 +111,7 @@ Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 
 ### Returned outcomes
 
-`executeJob` preserves the exact handler return union plus canonical input/cancel/deadline/defect failures. BullMQ and pg-boss both persist refusals as failed deliveries. Default retry never repeats a returned refusal or defect; use `.options({ retry: backoff.constant(100).upTo(2).while(TransientFailure) })` for selected definitions. Outbox passes returned outcomes directly to Journal before acknowledgement.
+`executeJob` preserves the exact handler return union plus canonical input/cancel/deadline/defect failures. BullMQ and pg-boss both persist refusals as failed deliveries. Default retry never repeats a returned refusal, but it does retry a thrown error (it is reported as `UnexpectedDefect`, judged as the throw); use `.options({ retry: backoff.constant(100).upTo(2).while(TransientFailure) })` for selected definitions. Outbox passes returned outcomes directly to Journal before acknowledgement.
 
 `trigger` and job `enqueue` return an id or `JobTriggerFailure`; export `JOB_TRIGGER_FAILURES` into the calling transport's error map. A lost enqueue acknowledgement is `QueueAcceptanceUnknown`, so inspect the idempotency key before replay. See the README upgrade section before changing runtime-local persisted messages.
 

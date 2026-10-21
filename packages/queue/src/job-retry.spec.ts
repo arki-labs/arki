@@ -5,7 +5,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
-import { defineFailure, InvalidInput, isFailure, UnexpectedFailure, ValidatorDefect } from '@arki/failure';
+import {
+  defineFailure,
+  InvalidInput,
+  isFailure,
+  UnexpectedDefect,
+  UnexpectedFailure,
+  ValidatorDefect,
+} from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import { jobDefaultOptions } from './job-options.ts';
@@ -13,6 +20,8 @@ import {
   customJobBackoff,
   defaultJobRetry,
   jobAttempts,
+  markThrown,
+  retryReason,
   ReturnedFailureError,
   throwIfReturnedFailure,
   workerBackoffStrategy,
@@ -122,5 +131,24 @@ describe('a handler that returns a failure', () => {
   it('a thrown error keeps the default retries, and a plain result completes the job', () => {
     expect(workerBackoffStrategy(defaultJobRetry)(1, 'custom', new Error('redis blip'))).toBe(1000);
     expect(thrownFor({ charged: true })).toBeUndefined();
+  });
+});
+
+// WHY: A-23. `executeJob` turns a throw into the returned failure UnexpectedDefect for results
+// and telemetry. The retry decision must still see a throw as a throw, or `upTo(2)` runs once.
+describe('retryReason', () => {
+  it('hands the thrown error to the backoff, so a throw follows the retry policy', () => {
+    const boom = new Error('boom');
+    const defect = markThrown(UnexpectedDefect({ cause: boom }), boom);
+    const retry = backoff.constant(10).upTo(2);
+    expect(retry.delay(1, retryReason(defect))).toBe(10);
+    expect(retry.delay(1, retryReason(new ReturnedFailureError(defect)))).toBe(10);
+    expect(workerBackoffStrategy(retry)(1, 'custom', new ReturnedFailureError(defect))).toBe(10);
+  });
+
+  it('keeps a handler-returned UnexpectedDefect a failure: not retried without while()', () => {
+    const returned = UnexpectedDefect({ cause: new Error('returned on purpose') });
+    expect(backoff.constant(10).upTo(2).delay(1, retryReason(returned))).toBeUndefined();
+    expect(backoff.constant(10).upTo(2).while(UnexpectedDefect).delay(1, retryReason(returned))).toBe(10);
   });
 });

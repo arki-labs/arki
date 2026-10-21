@@ -4,7 +4,7 @@ Typed background jobs for TypeScript. You write a job once: a name, an input sch
 
 - One job definition, three lanes. Handlers see the same `ctx` on each.
 - Input is checked by any Standard Schema (Zod, Valibot, ArkType). Bad input comes back as a failure value, not a throw.
-- Retries are one `Backoff` from `@arki/resilience`. Expected refusals are returned, not thrown.
+- Retries are one `Backoff` from `@arki/resilience`. Expected refusals are returned, not thrown. A thrown error follows the retry; a returned failure does not unless `.while(...)` selects it.
 - Schedules, flows, middleware, and a Dot adapter (`@arki/queue/dot`).
 
 ## Install
@@ -107,9 +107,9 @@ A refusal you expect is a returned value. A bug in your declaration is a thrown 
 | No queue started             | `QueueUnavailable`.                                                                                                      |
 | Acknowledgement lost         | `QueueAcceptanceUnknown`. The job may be queued. Look it up by its key before you send again.                            |
 | Handler returns a failure    | The job fails. The failure's code, status and data are stored. It is not retried unless `.while(Definition)` selects it. |
-| Handler or middleware throws | `UnexpectedDefect`. Stops by default.                                                                                    |
+| Handler or middleware throws | Reported as `UnexpectedDefect`. The throw follows the job's retry: `upTo(2)` runs it up to 3 times.                      |
 | Handler passes `timeoutMs`   | `Deadline`. `ctx.signal` aborts, and settlement waits for the handler.                                                   |
-| Wrong declaration            | `QueueDefinitionError` with a code `ARKI_QUEUE_E006` to `E013` or `E017`. Thrown at build or register time.              |
+| Wrong declaration            | `QueueDefinitionError` with a code `ARKI_QUEUE_E006` to `E013`, `E017` or `E020`. Thrown at build or register time.      |
 | Outbox misuse                | An error with a code `OUTBOX_E001` to `OUTBOX_E007` and a `.remediation`. Test with `isOutboxError`.                     |
 
 Each error code has a fix and a check command in its JSDoc. [Recover jobs](docs/recipes/recover-jobs.md) shows a worker dying mid-job:
@@ -159,7 +159,7 @@ process.exit(0);
 
 - **Delivery is at least once.** After a worker dies, the job runs again from the start with `ctx.job.attemptsMade` one higher. Boundary: a handler that sends mail and then crashes before it settles sends the mail twice unless it passes `ctx.job.id` as the idempotency key.
 - **A flow is a tree.** A step can be the dependency of one other step. A step that two steps depend on throws `ARKI_QUEUE_E017` at `.build()`.
-- **Job names.** A job name is its queue name. BullMQ refuses a name with `:`. pg-boss accepts only letters, digits, `_`, `-`, `.` and `/`. `orders.ship` works on every lane; `orders:ship` throws on BullMQ.
+- **Job names.** A job name is its queue name. BullMQ refuses a name with `:`. pg-boss accepts only letters, digits, `_`, `-`, `.` and `/`. `orders.ship` works on every lane. `orders:ship` throws `ARKI_QUEUE_E020` when the job is declared.
 - **Runtime-local has no flows and no interval schedules.** It skips them with a warning. Use cron schedules.
 - **Outbox args are plain JSON, at most 256 KiB** (`maxArgsBytes`). A `Date`, `Map`, `bigint` or class instance throws `OUTBOX_E003`.
 - **Outbox order is not promised.** Priority 1 to 10 picks the claim order, but `SKIP LOCKED` is not FIFO. A steady stream of high-priority rows can starve low ones.

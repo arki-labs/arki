@@ -5,7 +5,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 ## Laws
 
 1. A job can run more than once, on every lane. A handler passes `ctx.job.id` to each external system as its idempotency key.
-2. An expected refusal is a returned `@arki/failure` value, never a throw. A throw is a defect and is not retried by default.
+2. An expected refusal is a returned `@arki/failure` value, never a throw. A throw is a defect and follows the job's retry like any thrown error.
 3. Retry lives in one option: `.options({ retry })`, a `Backoff` from `@arki/resilience`. Never pass `attempts` or `backoff` through `bullmqOptions`.
 4. `trigger()` and `enqueue()` return an id or a `JobTriggerFailure`. Never use the id before the check. After `QueueAcceptanceUnknown`, look for the job by its key before sending it again.
 5. A job name is its queue name. Use dots, never a colon. Version it (`mail.welcome.v1`) so a rename is deliberate.

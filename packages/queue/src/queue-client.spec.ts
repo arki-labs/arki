@@ -159,7 +159,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
         return Promise.resolve('sent');
       });
     const orderFlow = q.flow
-      .name('orders:process')
+      .name('orders.process')
       .input(z.object({ orderId: z.string() }))
       .step('reserve', { job: reserve, data: input => ({ orderId: input.orderId }) })
       .step('notify', { job: notify, data: input => ({ to: input.orderId }), dependsOn: ['reserve'] })
@@ -183,7 +183,7 @@ describe('queue() client + queueWorker() in separate apps', () => {
 
     try {
       const started = orThrow(await api.services.queue.enqueue(orderFlow, { orderId: 'o-1' }));
-      expect(started.flow).toBe('orders:process');
+      expect(started.flow).toBe('orders.process');
       expect(Object.keys(started.jobIds).toSorted()).toEqual(['notify', 'reserve']);
 
       await waitFor(() => finished.length === 2);

@@ -114,7 +114,7 @@ const authenticatedJob = monitoredJob.use(authMiddleware);
 
 // Simple job
 const sendEmail = baseJob
-  .name('notifications:send-email')
+  .name('notifications.send-email')
   .input(
     z.object({
       to: z.email(),
@@ -140,7 +140,7 @@ const sendEmail = baseJob
 
 // Authenticated job with logger
 const processUserData = authenticatedJob
-  .name('users:process-data')
+  .name('users.process-data')
   .input(
     z.object({
       userId: z.string(),
@@ -166,7 +166,7 @@ const processUserData = authenticatedJob
 
 // Job with database operations
 const syncData = monitoredJob
-  .name('data:sync')
+  .name('data.sync')
   .input(
     z.object({
       source: z.string(),
@@ -210,7 +210,7 @@ const dailyEmailSchedule = q.schedule
 const hourlyDataSync = q.schedule
   .interval(60 * 60 * 1000) // Every hour
   .use(structuredLoggingMiddleware())
-  .name('data:hourly-sync')
+  .name('data.hourly-sync')
   .input(z.object({ timestamp: z.string() }))
   .handler(async (data, ctx) => {
     ctx.logger.info('Running hourly sync', { timestamp: data.timestamp });
@@ -238,7 +238,7 @@ const weeklyCleanup = q.schedule
 
 // Simple two-step flow
 const userOnboardingFlow = q.flow
-  .name('users:onboarding-flow')
+  .name('users.onboarding-flow')
   .input(z.object({ userId: z.string(), email: z.string() }))
   .use(structuredLoggingMiddleware())
   .use(errorHandlingMiddleware())
@@ -262,7 +262,7 @@ const userOnboardingFlow = q.flow
 
 // Complex flow with parallel steps
 const dataProcessingFlow = q.flow
-  .name('data:complex-processing-flow')
+  .name('data.complex-processing-flow')
   .input(
     z.object({
       source: z.string(),

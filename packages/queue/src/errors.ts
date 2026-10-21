@@ -53,6 +53,11 @@ export const QUEUE_DEFINITION_ERROR_CODES = {
    * @verify bun run test -- src/builder-guards.spec.ts src/flow-builder.spec.ts
    */
   stepWithManyDependents: 'ARKI_QUEUE_E017',
+  /**
+   * @fix Rename the job with only letters, digits and _ - . / (for example "orders.process"); a job name is its queue name, and BullMQ and pg-boss reject other characters such as ":".
+   * @verify bun run test -- src/builder-guards.spec.ts
+   */
+  invalidJobName: 'ARKI_QUEUE_E020',
 } as const;
 
 export class QueueDefinitionError extends Error {

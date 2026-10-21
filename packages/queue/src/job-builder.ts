@@ -19,6 +19,9 @@ import { defaultJobRetry, jobAttempts } from './job-retry.ts';
 import { jobTraceOptions } from './job-trace.ts';
 import { QueueUnavailable, triggerValidated } from './trigger.ts';
 
+/** The characters both BullMQ and pg-boss accept in a queue name; a job name is its queue name. */
+const JOB_NAME_PATTERN = /^[\w\-./]+$/;
+
 /**
  * Internal state for job builder
  */
@@ -69,6 +72,13 @@ export function createJobBuilder<
 
     name(name: string) {
       observeQueue(() => debugBuilder.debug('Setting job name: {name}', { name }));
+      if (!JOB_NAME_PATTERN.test(name)) {
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.invalidJobName,
+          message: `Job name "${name}" has characters a queue name cannot hold. Use only letters, digits, "_", "-", "." and "/".`,
+          remediation: 'A job name is its queue name. Write it like q.job.name("feature.action"); ":" is not allowed.',
+        });
+      }
 
       // One runtime object serves both typestates: the JobBuilderNeedsInput
       // type hides `.handler()` until `.input()` runs; the throw below backs it up.

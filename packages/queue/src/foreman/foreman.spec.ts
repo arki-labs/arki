@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Permit } from '@arki/admin/module';
 import { redactSecrets as adminRedactSecrets, isModuleError } from '@arki/admin/module';
 import { z } from '@arki/contracts';
+import { backoff } from '@arki/resilience';
 
 import type { QueueInstance } from '../types/builder.ts';
 import { createRuntimeLocalQueueInstance, initQueue } from '../runtime-local/index.ts';
@@ -39,7 +40,7 @@ async function waitFor(done: () => Promise<boolean>): Promise<void> {
 async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number; release: () => void }> {
   const q = initQueue.context<{ userId: string }>().create();
   let runs = 0;
-  // A defect is permanent by default. The operator retry waits here, so it stays in flight.
+  // `upTo(0)` allows no retry, so the first throw is final. The operator retry waits here, so it stays in flight.
   let release = () => {};
   const gate = new Promise<void>(resolve => {
     release = resolve;
@@ -47,6 +48,7 @@ async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number
   const flaky = q.job
     .name('send-mail')
     .input(z.object({ to: z.string() }))
+    .options({ retry: backoff.constant(0).upTo(0) })
     .handler(async () => {
       runs += 1;
       if (runs > 1) return gate;

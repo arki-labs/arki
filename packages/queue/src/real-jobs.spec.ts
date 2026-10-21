@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import { initQueue } from './init.ts';
 import type { JobContext } from './types/job.ts';
+import { initQueue } from './init.ts';
 
 type TestContext = { userId: string };
 
@@ -25,7 +25,7 @@ const q = initQueue.context<TestContext>().create();
 
 /** A real job: typed input, typed output, and a handler that reads the queue context. */
 const sendEmail = q.job
-  .name('real-jobs:send-email')
+  .name('real-jobs.send-email')
   .input(z.object({ to: z.string() }))
   .handler((data, ctx) => Promise.resolve({ sentTo: data.to, by: ctx.userId }));
 
@@ -35,7 +35,7 @@ const withDb = q.middleware<JobContext<TestContext>, JobContext<TestContext> & {
 );
 const needsDb = q.job
   .use(withDb)
-  .name('real-jobs:needs-db')
+  .name('real-jobs.needs-db')
   .input(z.object({ id: z.string() }))
   .handler((data, ctx) => Promise.resolve(`${ctx.db}:${data.id}`));
 
@@ -84,7 +84,7 @@ describe('real jobs in schedules', () => {
 describe('real jobs as flow steps', () => {
   it('accepts real jobs and checks each step data against its job input', () => {
     const flow = q.flow
-      .name('real-jobs:flow')
+      .name('real-jobs.flow')
       .input(z.object({ email: z.string(), id: z.string() }))
       .step('email', { job: sendEmail, data: input => ({ to: input.email }) })
       // A step job runs on its own worker with its own middleware, so `needsDb` fits here.
@@ -95,7 +95,7 @@ describe('real jobs as flow steps', () => {
 
   it('rejects step data that does not match the job input', () => {
     const flow = q.flow
-      .name('real-jobs:bad-flow')
+      .name('real-jobs.bad-flow')
       .input(z.object({ email: z.string() }))
       // @ts-expect-error -- the job wants `{ to: string }`, not `{ email: string }`
       .step('email', { job: sendEmail, data: input => ({ email: input.email }) })

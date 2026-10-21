@@ -53,12 +53,12 @@ expectTypeOf<typeof _queuePlugin.hooks.stop>().toEqualTypeOf<
 >();
 
 const sendEmail = q.job
-  .name('email:send')
+  .name('email.send')
   .input(z.object({ to: z.string() }))
   .handler(() => Promise.resolve({ ok: true }));
 
 const resizeImage = q.job
-  .name('image:resize')
+  .name('image.resize')
   .input(z.object({ imageId: z.string() }))
   .handler(() => Promise.resolve({ ok: true }));
 
@@ -70,7 +70,7 @@ const registry = q.registry({
 const dailyEmail = q.schedule.cron('0 8 * * *', { timezone: 'UTC' }).job(sendEmail).data({ to: 'team@example.com' });
 
 const imageFlow = q.flow
-  .name('image:process')
+  .name('image.process')
   .input(z.object({ imageId: z.string() }))
   .step('resize', {
     job: resizeImage,
@@ -150,24 +150,24 @@ function wait(ms: number): Promise<void> {
 describe('queue DOT topology actions', () => {
   it('creates inbound consumer and outbound producer actions from nested registries', () => {
     expect(queueConsumerActions(registry).map(action => `${action.direction}:${action.id}`)).toEqual([
-      'in:email:send.consume',
-      'in:image:resize.consume',
+      'in:email.send.consume',
+      'in:image.resize.consume',
     ]);
     expect(queueProducerActions(registry).map(action => `${action.direction}:${action.id}`)).toEqual([
-      'out:email:send.produce',
-      'out:image:resize.produce',
+      'out:email.send.produce',
+      'out:image.resize.produce',
     ]);
   });
 
   it('queueActions covers jobs, queue-backed schedules, and flows', () => {
     expect(queueActions(fullRegistry).map(action => `${action.direction}:${action.id}:${kindOf(action)}`)).toEqual([
-      'in:email:send.consume:job',
-      'in:image:resize.consume:job',
-      'in:email:send-schedule.fire:schedule',
-      'in:image:process.consume:flow',
-      'out:email:send.produce:job',
-      'out:image:resize.produce:job',
-      'out:image:process.produce:flow',
+      'in:email.send.consume:job',
+      'in:image.resize.consume:job',
+      'in:email.send-schedule.fire:schedule',
+      'in:image.process.consume:flow',
+      'out:email.send.produce:job',
+      'out:image.resize.produce:job',
+      'out:image.process.produce:flow',
     ]);
   });
 
@@ -181,14 +181,14 @@ describe('queue DOT topology actions', () => {
       format: 'queue-topology',
       queues: [
         {
-          name: 'email:send',
-          consumers: [{ id: 'email:send.consume', plugin: 'queue-worker' }],
-          producers: [{ id: 'email:send.produce', plugin: 'orders' }],
+          name: 'email.send',
+          consumers: [{ id: 'email.send.consume', plugin: 'queue-worker' }],
+          producers: [{ id: 'email.send.produce', plugin: 'orders' }],
         },
         {
-          name: 'image:resize',
-          consumers: [{ id: 'image:resize.consume', plugin: 'queue-worker' }],
-          producers: [{ id: 'image:resize.produce', plugin: 'orders' }],
+          name: 'image.resize',
+          consumers: [{ id: 'image.resize.consume', plugin: 'queue-worker' }],
+          producers: [{ id: 'image.resize.produce', plugin: 'orders' }],
         },
       ],
     });
@@ -242,8 +242,8 @@ describe('queue() — the driven client', () => {
     );
 
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
-      'orders:email:send.produce',
-      'orders:image:resize.produce',
+      'orders:email.send.produce',
+      'orders:image.resize.produce',
     ]);
   });
 });
@@ -305,10 +305,10 @@ describe('queueWorker() — the driving adapter', () => {
 
     // The worker owns the consumer side; the feature keeps the producer side.
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
-      'orders:email:send.produce',
-      'orders:image:resize.produce',
-      'queue-worker:email:send.consume',
-      'queue-worker:image:resize.consume',
+      'orders:email.send.produce',
+      'orders:image.resize.produce',
+      'queue-worker:email.send.consume',
+      'queue-worker:image.resize.consume',
     ]);
 
     await orThrow(app.dispose());
@@ -321,7 +321,7 @@ describe('queueWorker() — the driving adapter', () => {
     let registered: Record<string, unknown> | undefined;
     const { fakeQ } = fakeBuilder({ ...idleInstance(), register: next => ((registered = next), done()) });
     const encodeVideo = q.job
-      .name('video:encode')
+      .name('video.encode')
       .input(z.object({ videoId: z.string() }))
       .handler(() => Promise.resolve({ ok: true }));
     const media = defineFeature('media').entrypoints(jobs(q.registry({ encodeVideo })));
@@ -336,12 +336,12 @@ describe('queueWorker() — the driving adapter', () => {
 
     expect(Object.keys(registered ?? {})).toEqual(['orders', 'media']);
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
-      'orders:email:send.produce',
-      'orders:image:resize.produce',
-      'media:video:encode.produce',
-      'queue-worker:email:send.consume',
-      'queue-worker:image:resize.consume',
-      'queue-worker:video:encode.consume',
+      'orders:email.send.produce',
+      'orders:image.resize.produce',
+      'media:video.encode.produce',
+      'queue-worker:email.send.consume',
+      'queue-worker:image.resize.consume',
+      'queue-worker:video.encode.consume',
     ]);
     await orThrow(app.dispose());
   });

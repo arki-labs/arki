@@ -15,6 +15,7 @@ import {
 import { parseAsync } from '@arki/schema';
 
 import type { InternalJobDefinition, JobLike } from './types/job.ts';
+import { markThrown } from './job-retry.ts';
 import { extractJobTrace } from './job-trace.ts';
 import { createJobContext, executeMiddlewareChain, withFeatureServices } from './middleware.ts';
 
@@ -134,7 +135,7 @@ export function executeJob<Input, Output, Dependencies>(
           if (InvalidInput.is(failure) || ValidatorDefect.is(failure) || Cancelled.is(failure) || Deadline.is(failure))
             return failure;
         }
-        return UnexpectedDefect({ cause: error });
+        return markThrown(UnexpectedDefect({ cause: error }), error);
       } finally {
         if (timer !== undefined) clearTimeout(timer);
         signal?.removeEventListener('abort', cancel);

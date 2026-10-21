@@ -62,7 +62,7 @@ q.job
 
 Without `retry`, provider failures have a limit of three attempts. Returned business failures and canonical execution failures stop after the first attempt. `.while(DatabaseUnavailable)` explicitly selects a returned failure definition; `.while(predicate)` can select a precise subset. Both BullMQ and pg-boss use the same `Backoff.delay(attempt, failure)`, counts, and millisecond delay. Polling may make delivery later than its due time.
 
-The persisted refusal contains its public code, status, message, remediation, and data. Private causes stay in process. Foreman retains that envelope. A thrown handler or middleware defect becomes `UnexpectedDefect`; bad stored input becomes `InvalidInput` or `ValidatorDefect`. These failures stop by default. Provider outages and abandoned claims remain under provider supervision; a settled handler failure is never also thrown into that retry layer.
+The persisted refusal contains its public code, status, message, remediation, and data. Private causes stay in process. Foreman retains that envelope. A thrown handler or middleware error is reported as `UnexpectedDefect`, but the retry sees the thrown error: it follows the job's `Backoff` as in `@arki/resilience`, so `upTo(2)` runs it up to 3 times and `.while(...)` can narrow it. Bad stored input becomes `InvalidInput` or `ValidatorDefect` and stops. A returned failure stops by default. Provider outages and abandoned claims remain under provider supervision; a settled handler failure is never also thrown into that retry layer.
 
 `timeoutMs` aborts `ctx.signal` and reports canonical `Deadline`; external worker cancellation reports `Cancelled`. Settlement waits for the handler and middleware to finish, so retry never overlaps owned work. Handlers must honor the signal; a handler that ignores cancellation can delay shutdown indefinitely. The older timeout middleware also waits for settlement and clears its timer; prefer `timeoutMs` when work needs the abort signal.
 
@@ -70,7 +70,7 @@ The persisted refusal contains its public code, status, message, remediation, an
 
 #### Upgrade existing workers
 
-- Handle returned enqueue failures before using the job id. Keep expected refusals as returned definitions; replace transient handler throws with an explicit returned failure and `.while(Definition)`.
+- Handle returned enqueue failures before using the job id. Keep expected refusals as returned definitions; a handler throw is retried by the job's `Backoff` like any thrown error, so return a failure (and select it with `.while(Definition)`) only for outcomes you want to name.
 - Stop and drain runtime-local workers before upgrading. pg-boss messages now use `{ version: 1, input, trace? }`; export and re-enqueue pending legacy rows with their original idempotency keys. Legacy rows left in place fail input validation, rather than running with misread input.
 - The pg-boss adapter is pinned to the 12.37 attempt-fenced `fail(name, {id,retryCount}, output, {db})` API and job schema. One PGlite transaction adjusts only the claimed attempt's retry policy, invokes native settlement, and sets the exact persisted due time. Native settlement still owns dependencies and dead-letter transitions. Re-run backend conformance before upgrading pg-boss.
 - Delivery remains at least once after worker death. External effects must use `ctx.job.id` as their idempotency key. Queue Flow remains a BullMQ dependency tree; use Journal for durable business state and replay rules.
@@ -260,7 +260,7 @@ const rateLimitedJob = authJob.use(rateLimitMiddleware);
 
 ### 3. Job Naming
 
-Use the pattern `featureName.jobType`. A job name is also its queue name. BullMQ refuses a queue name with a colon, and pg-boss (runtime-local) accepts only letters, digits, `_`, `-`, `.` and `/`:
+Use the pattern `featureName.jobType`. A job name is also its queue name. BullMQ refuses a queue name with a colon, and pg-boss (runtime-local) accepts only letters, digits, `_`, `-`, `.` and `/`. A name with another character throws `ARKI_QUEUE_E020` when the job is declared:
 
 ```ts skip="excerpt: it uses names this page does not define"
 'notifications.send-email';

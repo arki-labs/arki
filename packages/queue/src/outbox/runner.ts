@@ -4,14 +4,13 @@
  * once, run the middleware chain around the handler. A job keeps one retry policy on both lanes.
  */
 import type { JobRunner, ScheduledJob } from '@arki/journal';
-import { UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { JobLike } from '../types/job.ts';
 import type { QueueRegistry } from './registry.ts';
 import { observeQueue } from '../debug.ts';
 import { executeJob } from '../job-outcome.ts';
-import { defaultJobRetry, ReturnedFailureError } from '../job-retry.ts';
+import { defaultJobRetry, retryReason } from '../job-retry.ts';
 import { isOutboxError, OUTBOX_ERROR_CODES, outboxError } from './errors.ts';
 import { jobsByName } from './registry.ts';
 
@@ -82,10 +81,7 @@ export function outboxRunner<TContext>(options: OutboxRunnerOptions<TContext>): 
       // Stored args that fail the schema fail every time: dead at once, no handler ran.
       if (isOutboxError(error) && error.code === OUTBOX_ERROR_CODES.badStoredArgs) return;
       const retry = byName.get(job.name)?._internal.options?.retry ?? defaultJobRetry;
-      return retry.delay(
-        job.attempt,
-        error instanceof ReturnedFailureError || error instanceof UnexpectedFailure ? error.failure : error,
-      );
+      return retry.delay(job.attempt, retryReason(error));
     },
   };
 }

@@ -42,7 +42,7 @@ const notifyJob = q.job
 
 /** The README flow: validate and reserve in parallel, then payment, then notify. */
 const orderFlow = q.flow
-  .name('orders:process')
+  .name('orders.process')
   .input(orderInput)
   .step('validate', { job: validateJob, data: input => ({ orderId: input.orderId }) })
   .step('reserve', { job: reserveJob, data: input => ({ orderId: input.orderId, hold: true }) })
@@ -62,7 +62,7 @@ const orderFlow = q.flow
 /** The old README flow: inventory and notify both wait on payment. Not a tree. */
 function buildFanOutFlow() {
   return q.flow
-    .name('orders:fan-out')
+    .name('orders.fan-out')
     .input(orderInput)
     .step('payment', { job: paymentJob, data: input => input })
     .step('inventory', { job: validateJob, data: input => input, dependsOn: ['payment'] })
@@ -115,7 +115,7 @@ describe('toFlowJobs', () => {
 
   it('makes every step with no dependent its own root', () => {
     const twoRoots = q.flow
-      .name('orders:two-roots')
+      .name('orders.two-roots')
       .input(orderInput)
       .step('validate', { job: validateJob, data: input => input })
       .step('notify', { job: notifyJob, data: input => ({ to: input.orderId }) })

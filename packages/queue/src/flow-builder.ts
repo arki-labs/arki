@@ -12,7 +12,7 @@
  * @example
  * ```typescript
  * const orderFlow = q.flow
- *   .name('orders:process')
+ *   .name('orders.process')
  *   .input(z.object({ orderId: z.string() }))
  *   .step('validate', {
  *     job: validateJob,

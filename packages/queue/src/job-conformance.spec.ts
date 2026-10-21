@@ -200,11 +200,15 @@ describe.each(['bullmq', 'pg-boss'] as const)('job outcome conformance: %s', { t
     expect(runs).toBe(0);
   });
 
-  it('normalizes a thrown defect and never retries it by default', async () => {
+  // WHY: A-23. A thrown error is a defect, not an expected outcome, so it follows the retry
+  // policy exactly as in @arki/resilience: `upTo(2)` alone means 3 tries. Faultline found
+  // that it ran once, because the throw was judged as a returned failure.
+  it('retries a thrown error under the retry policy, and still reports it as an unexpected defect', async () => {
     let runs = 0;
     const job = q.job
       .name(`defect-${crypto.randomUUID()}`)
       .input(schema)
+      .options({ retry: backoff.constant(20).upTo(2) })
       .handler(async () => {
         runs++;
         throw new Error('private credential');
@@ -212,8 +216,27 @@ describe.each(['bullmq', 'pg-boss'] as const)('job outcome conformance: %s', { t
     await start(job);
     const id = orThrow(await job.trigger({ n: 1 }));
     const outcome = await until(() => stored(id));
-    expect(outcome).toMatchObject({ state: 'failed', attempts: 1, output: { code: UnexpectedDefect.code } });
+    expect(outcome).toMatchObject({ state: 'failed', attempts: 3, output: { code: UnexpectedDefect.code } });
+    // The stored outcome must not leak the thrown message.
     expect(JSON.stringify(outcome)).not.toContain('private credential');
+    expect(runs).toBe(3);
+  });
+
+  // WHY: the other half of A-23. A returned failure is an expected outcome (a declined card);
+  // repeating it is pointless or harmful, so `upTo(2)` without `.while(...)` runs it once.
+  it('does not retry a returned failure that the retry policy does not accept', async () => {
+    let runs = 0;
+    const job = q.job
+      .name(`returned-${crypto.randomUUID()}`)
+      .input(schema)
+      .options({ retry: backoff.constant(20).upTo(2) })
+      .handler(async () => {
+        runs++;
+        return Refused({ key: 'invoice-18' });
+      });
+    await start(job);
+    const id = orThrow(await job.trigger({ n: 1 }));
+    expect(await until(() => stored(id))).toMatchObject({ state: 'failed', attempts: 1 });
     expect(runs).toBe(1);
   });
 

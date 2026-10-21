@@ -28,7 +28,7 @@ import { debugJob, debugRegister, debugSchedule, debugWorker, observeQueue } fro
 import { withEnqueueSpan } from '../enqueue-span.ts';
 import { duplicateScheduleError } from '../errors.ts';
 import { executeJob } from '../job-outcome.ts';
-import { defaultJobRetry, jobFailureEnvelope } from '../job-retry.ts';
+import { defaultJobRetry, jobFailureEnvelope, retryReason } from '../job-retry.ts';
 import { captureJobTrace } from '../job-trace.ts';
 import { QueueUnavailable, triggerValidated } from '../trigger.ts';
 import { buildPgBossAdapter } from './adapter.ts';
@@ -254,7 +254,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
               name,
               pgBossJob,
               jobFailureEnvelope(outcome),
-              retry.delay(pgBossJob.retryCount + 1, outcome),
+              retry.delay(pgBossJob.retryCount + 1, retryReason(outcome)),
             );
             return;
           }

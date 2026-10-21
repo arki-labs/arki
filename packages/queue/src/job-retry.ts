@@ -59,12 +59,40 @@ export function throwIfReturnedFailure(result: unknown): void {
 /**
  * The worker's `backoffStrategy`. BullMQ passes the number of failed tries, which is the
  * number of the retry about to run; `-1` tells it to stop and fail the job. A returned
- * failure reaches the backoff as the failure, not as the error that carried it.
+ * failure reaches the backoff as the failure; an error the handler threw reaches it as that error.
  */
 export function workerBackoffStrategy(retry: Backoff): (attemptsMade: number, type?: string, error?: Error) => number {
-  return (attemptsMade, _type, error) =>
-    retry.delay(
-      attemptsMade,
-      error instanceof ReturnedFailureError || error instanceof UnexpectedFailure ? error.failure : error,
-    ) ?? -1;
+  return (attemptsMade, _type, error) => retry.delay(attemptsMade, retryReason(error)) ?? -1;
+}
+
+/**
+ * Failures that stand for an error the handler threw. A thrown error is not an expected
+ * outcome, so the retry decision must see the error, not the failure that carries it.
+ */
+const thrownByHandler = new WeakMap<object, unknown>();
+
+/** Records that `failure` reports `error`, which the handler threw. Returns `failure`. */
+export function markThrown<F extends Failure>(failure: F, error: unknown): F {
+  thrownByHandler.set(failure, error);
+  return failure;
+}
+
+/**
+ * What a job's `Backoff` should judge for a failed try. A returned failure is judged as the
+ * failure, so it is retried only when `backoff(...).while(...)` accepts it. An error the
+ * handler threw is judged as the error, so it follows the retry policy as in `@arki/resilience`.
+ * Accepts the failure itself or the error that carries it.
+ *
+ * @example backoff.exponential({ base: 100 }).upTo(2).delay(1, retryReason(outcome))
+ */
+export function retryReason(outcomeOrError: unknown): unknown {
+  const carried =
+    outcomeOrError instanceof ReturnedFailureError || outcomeOrError instanceof UnexpectedFailure
+      ? outcomeOrError.failure
+      : outcomeOrError;
+  if (typeof carried === 'object' && carried !== null && thrownByHandler.has(carried)) {
+    const thrown = thrownByHandler.get(carried);
+    return thrown instanceof UnexpectedFailure ? thrown.failure : thrown;
+  }
+  return carried;
 }

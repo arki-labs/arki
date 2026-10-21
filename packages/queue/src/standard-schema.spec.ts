@@ -54,7 +54,7 @@ const job = {
 describe.each(Object.entries(schemas))('job input from a %s schema', (_vendor, schema) => {
   it('infers the handler data from the schema output and parses with it', async () => {
     const definition = q.job
-      .name(`standard-schema:${_vendor}`)
+      .name(`standard-schema.${_vendor}`)
       .input(schema)
       .handler(data => {
         expectTypeOf(data).toEqualTypeOf<number>();
@@ -66,7 +66,7 @@ describe.each(Object.entries(schemas))('job input from a %s schema', (_vendor, s
 
   it('rejects a handler that claims another input type, because the job only ever gets the schema output', () => {
     q.job
-      .name(`standard-schema:${_vendor}:wrong-input`)
+      .name(`standard-schema.${_vendor}.wrong-input`)
       .input(schema)
       // @ts-expect-error the schema returns a number, so the handler cannot take a string
       .handler((data: string) => Promise.resolve(data.length));
