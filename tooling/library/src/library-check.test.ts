@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { checkAll, checkLibrary, updateBaseline } from './library-check';
+import { checkAll, checkLibrary, findingKey, updateBaseline } from './library-check';
 import { leaves, readManifest } from './manifest';
 
 /** `group` is the parent folder (`fleet` for a fleet package); a random temp dir when omitted. */
@@ -169,6 +169,30 @@ describe('checkAll', () => {
   it('flags a baseline entry that no longer matches an error, so the file cannot rot', () => {
     const entry = { package: '@arki/demo', error: 'export "." has no "types"', reason: 'fixed long ago' };
     expect(checkAll(repo(), [entry]).stale).toEqual([entry]);
+  });
+});
+
+describe('findingKey', () => {
+  // Why: the exposed-type list follows dependency builds. Matching on it made
+  // every baselined TYPES_E001 go stale and fail the run after a rebuild,
+  // although no export changed.
+  it('matches TYPES_E001 on the export, not on the list of exposed types', () => {
+    expect(findingKey('TYPES_E001 export "." exposes Zod types: ZodPipe, ZodString')).toBe(
+      findingKey('TYPES_E001 export "." exposes Zod types: ZodTemplateLiteral'),
+    );
+  });
+
+  // Why: a new export that exposes Zod is a new finding and must fail.
+  it('keeps two exports apart', () => {
+    expect(findingKey('TYPES_E001 export "." exposes Zod types: ZodPipe')).not.toBe(
+      findingKey('TYPES_E001 export "./core" exposes Zod types: ZodPipe'),
+    );
+  });
+
+  // Why: other rules carry the finding's location after the colon, so it stays part of the match.
+  it('matches other rules on the whole text', () => {
+    const error = 'SRC_E001 string literal equals the package version: src/dot.ts line 113';
+    expect(findingKey(error)).toBe(error);
   });
 });
 

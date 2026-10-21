@@ -192,6 +192,16 @@ export type AllResult = {
   readonly stale: BaselineEntry[];
 };
 
+/**
+ * What a baseline entry must match. Usually the whole error text. TYPES_E001
+ * ends with the list of Zod type names the export exposes; that list changes
+ * whenever a dependency's build changes, while the finding (this export
+ * exposes Zod) does not. So TYPES_E001 matches on the text before the list.
+ */
+export function findingKey(error: string): string {
+  return error.startsWith('TYPES_E001 ') ? (error.split(': ')[0] ?? error) : error;
+}
+
 export function checkAll(root: string, baseline: readonly BaselineEntry[]): AllResult {
   const errors: AllResult['errors'][number][] = [];
   const warnings: AllResult['warnings'][number][] = [];
@@ -202,7 +212,7 @@ export function checkAll(root: string, baseline: readonly BaselineEntry[]): AllR
     const result = checkLibrary(dir, kind);
     for (const warning of result.warnings) warnings.push({ package: name, warning });
     for (const error of result.errors) {
-      const known = baseline.find(entry => entry.package === name && entry.error === error);
+      const known = baseline.find(entry => entry.package === name && findingKey(entry.error) === findingKey(error));
       if (known) {
         used.add(known);
         baselined += 1;

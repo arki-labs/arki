@@ -71,16 +71,6 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/bench",
-      "error": "SRC_E001 string literal equals the package version; read it from package.json or a generated src/version.ts: src/core/losses.test.ts line 59, line 113",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/bench",
-      "error": "SRC_E001 string literal equals the package version; read it from package.json or a generated src/version.ts: src/core/version.ts line 2",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
       "package": "@arki/db",
       "error": "TYPES_E001 export \"./orpc\" exposes Zod types: ZodDefault, ZodInt, ZodLiteral, ZodObject",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
@@ -213,91 +203,6 @@
     {
       "package": "@arki/fs",
       "error": "TYPES_E001 export \"./pg\" exposes Zod types: $ZodTypeInternals, ZodEnum, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType, ZodURL",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_E001 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_E002 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_E003 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_E004 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_E005 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_PLUGIN_E001 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E001 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E002 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E003 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E004 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E005 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_JOURNAL_WEBHOOK_E006 (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: journal.conflict (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: journal.forbidden (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: journal.invalid (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: journal.not_found (no @fix, @verify)",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "ERR_E001 error code lacks @fix or @verify in its JSDoc: journal.workflow.step_dead (no @fix, @verify)",
       "reason": "Now-tier baseline 2026-10-17"
     },
     {
