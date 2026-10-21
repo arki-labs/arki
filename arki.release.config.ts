@@ -25,7 +25,7 @@
  *
  * Only packages that pass every scorecard dimension belong in an active
  * wave. Packages that are still `private: true` (auth, queue, ai, …) or
- * still missing dist / docs (fs, emails, design-systems, theme, icons)
+ * still missing dist / docs (fs, emails, design-systems, icons)
  * stay out of the waves until they earn their seat. Each excluded
  * package keeps its `private: true` flag (or, for unfinished public
  * candidates, its un-allowlisted state) — the inventory command surfaces
@@ -80,13 +80,14 @@ export const config: ReleaseConfig = {
       id: 'frontend',
       label: 'Wave 3 — Frontend',
       // Promoted 2026-10-09 for the Drop Studio demo (external consumer of
-      // the storefront stack). Leaves first: theme / icons / design-systems
-      // have no @arki deps; `@arki/ui` depends on all three plus
+      // the storefront stack). Leaves first: icons / design-systems
+      // have no @arki deps; `@arki/ui` depends on both plus
       // `@arki/date` (Wave 1). `@arki/react-hooks` merged into
-      // `@arki/ui/hooks/*` on 2026-10-21. Ships before infrastructure-adapters
+      // `@arki/ui/hooks/*` and `@arki/theme` into `@arki/ui/theme` on
+      // 2026-10-21. Ships before infrastructure-adapters
       // since 2026-10-21: `@arki/auth` peers on `@arki/ui` and `@arki/icons`,
       // and nothing here depends on that wave.
-      packages: ['@arki/theme', '@arki/icons', '@arki/design-systems', '@arki/ui'],
+      packages: ['@arki/icons', '@arki/design-systems', '@arki/ui'],
       // Source-first: these ship TypeScript source as the runtime entry plus
       // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
       // READMEs say so. Compiled dist output is a later, separate decision.
@@ -143,7 +144,7 @@ export const config: ReleaseConfig = {
     stack: [
       '@arki/dot', '@arki/cli', '@arki/env', '@arki/http', '@arki/contracts', '@arki/db', '@arki/journal', '@arki/kv',
       '@arki/log', '@arki/mail', '@arki/auth', '@arki/payments', '@arki/ui', '@arki/design-systems',
-      '@arki/theme', '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
+      '@arki/failure', '@arki/lock', '@arki/queue', '@arki/schedule', '@arki/testing',
       '@arki/ai', '@arki/chat-ui', '@arki/live', '@arki/embeddings',
     ],
     libraries: [

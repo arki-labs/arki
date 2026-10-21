@@ -5,10 +5,10 @@ React component library for ARKI apps: Base UI primitives styled with Tailwind v
 ## Install
 
 ```sh
-bun add @arki/ui @arki/design-systems @arki/theme react react-dom
+bun add @arki/ui @arki/design-systems react react-dom
 ```
 
-`react` and `react-dom` 19 are peer dependencies. `@arki/design-systems` supplies the tokens the components read, and `@arki/theme` sets light and dark mode.
+`react` and `react-dom` 19 are peer dependencies. `@arki/design-systems` supplies the tokens the components read, and `@arki/ui/theme` sets light and dark mode.
 
 ## Quick start
 
@@ -70,6 +70,7 @@ There is no root import. Every component is its own subpath: `@arki/ui/button`, 
 | Layout and surfaces | `card`, `glass-card`, `panel`, `surface`, `separator`, `scroll-area`, `resizable`, `tool-panels`, `aspect-ratio`, `accordion`, `collapsible` |
 | Data display | `table`, `chart`, `badge`, `avatar`, `alert`, `callout`, `progress`, `skeleton`, `spinners`, `timeline`, `carousel`, `calendar`, `katex` |
 | Helpers | `cn`, `design-system`, `slot`, `as-child`, `scroll-to-top` |
+| Theme | `theme` (`ThemeProvider`, `useTheme`), `theme/script` (`themeScript`, `themeDetectionFn`, `THEME_STORAGE_KEY`) |
 | Hooks | `hooks/debounce`, `hooks/local-storage`, `hooks/media-query`, `hooks/hotkeys`, `hooks/copy-to-clipboard`, `hooks/timeout`, `hooks/toggle`, `hooks/pagination`, `hooks/async-memo`, `hooks/is-client`, `hooks/long-press`, `hooks/touch`, `hooks/use-viewport`, `hooks/use-swipe-gesture`, `hooks/use-touch-feedback` |
 
 ## Failure behaviour
@@ -78,7 +79,8 @@ Components do not return failure values. Mistakes in how you compose them show u
 
 - Some compound parts need their parent. These hooks throw a plain `Error` when the parent is missing: `useFormField` (inside `FormField`), `useSidebar` (inside `SidebarProvider`), and the hooks for `Chart`, `Carousel`, `ControlGroup` and `Timeline`. Fix the tree; do not catch the error.
 - A missing token gives a wrong colour, not an error. If a page looks unstyled, check the `@source` line and the token imports first.
-- `Toaster` reads the theme from `@arki/theme`. Without a `ThemeProvider` it uses `system`.
+- `Toaster` reads the theme from `@arki/ui/theme`. Without a `ThemeProvider` it uses `system`.
+- The theme never throws. `useTheme()` outside a `ThemeProvider` returns `theme: undefined` and a `setTheme` that does nothing. A blocked `localStorage` drops writes, so the theme lasts until reload. A stored name not in `themes` becomes `defaultTheme`. If system preference detection is missing or throws, `system` resolves to `light`.
 - Hooks under `hooks/*` do not throw for bad input. `useAsyncMemo` returns `undefined` (or your `initial`) until the promise resolves; a rejected promise is not caught, so catch inside the factory. On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop.
 
 ## Limits
@@ -90,6 +92,20 @@ Components do not return failure values. Mistakes in how you compose them show u
 - Some components rely on browser APIs (`matchMedia`, `ResizeObserver`). Render them on the client; in tests use a DOM environment.
 - `useViewport` calls anything under 640px mobile and under 1024px tablet. `useIsMobile` calls anything under 768px mobile. Boundary: at 700px, `useViewport().isMobile` is `false` and `useIsMobile()` is `true`. Pick one family per component.
 - `useAsyncMemo` drops a result when its dependencies change before it resolves. It does not cancel the request.
+- The server renders `defaultTheme`. `themeScript()` fixes the page before paint, but React state first matches the server render. Put `suppressHydrationWarning` on `<html>`.
+- The theme script and `ThemeProvider` are separate. Give both the same `storageKey`, `attribute`, `themes` and `defaultTheme`, or the page flashes.
+- `setTheme` only accepts a name in `themes`. Boundary: with the default themes, `setTheme('sepia')` stores `system`, not `sepia`. Add `'sepia'` to `themes` first.
+
+```ts run expect
+import { themeScript } from '@arki/ui/theme/script';
+
+const script = themeScript({ storageKey: 'app-theme', themes: ['light', 'dark', 'sepia'] });
+console.log(script.includes('"storageKey":"app-theme"'), script.includes('"sepia"'));
+```
+
+```text
+true true
+```
 
 ## Design-system rules
 
@@ -182,7 +198,6 @@ Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 ## Related packages
 
 - `@arki/design-systems`: tokens, Tailwind bridge and fonts for `atelier`, `workbench`, `arena`.
-- `@arki/theme`: light, dark and system provider and the no-flash script.
 - `@arki/icons`: icon sets behind one React entry point.
 
 ## Documentation

@@ -1,5 +1,0 @@
-import baseConfig from '@arki/eslint-config/base';
-import reactConfig from '@arki/eslint-config/react';
-
-/** @type {import('typescript-eslint').Config} */
-export default [...baseConfig, ...reactConfig];

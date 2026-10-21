@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 
 import type { ArkiTheme } from '@arki/design-systems/arki/themes';
-import { useTheme } from '@arki/theme';
+import { useTheme } from '@arki/ui/theme';
 
 type ModeTheme = Exclude<ArkiTheme, 'system'>;
 

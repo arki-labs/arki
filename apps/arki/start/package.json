@@ -36,7 +36,6 @@
     "@arki/offline": "workspace:*",
     "@arki/seo": "workspace:*",
     "@arki/tanstack-start": "workspace:*",
-    "@arki/theme": "workspace:*",
     "@arki/ui": "workspace:*",
     "@daveyplate/better-auth-tanstack": "catalog:better-auth",
     "@fleet/feedback": "workspace:*",

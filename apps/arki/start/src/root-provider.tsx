@@ -1,4 +1,4 @@
-import { ThemeProvider } from '@arki/theme';
+import { ThemeProvider } from '@arki/ui/theme';
 import { AppProvider } from '@fleet/sitekit/app-context.tsx';
 import { arkiThemeClasses, arkiThemes } from '@arki/design-systems/arki/themes';
 

@@ -8,7 +8,7 @@
 
 .marketing {
   /* The marketing pages use one strong accent (CTA, active marks, links). It is the brand dot colour:
-     the arki system's primary (cobalt in light, orange in dark), which @arki/theme switches with `.dark`. */
+     the arki system's primary (cobalt in light, orange in dark), which @arki/ui/theme switches with `.dark`. */
   --accent: var(--primary);
   --accent-foreground: var(--primary-foreground);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

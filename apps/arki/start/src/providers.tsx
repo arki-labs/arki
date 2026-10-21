@@ -8,7 +8,7 @@ import { useIsClient } from '@arki/ui/hooks/is-client';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
 import { clearCachesOnUserChange } from '@arki/tanstack-start/pwa/client';
 import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
-import { useTheme } from '@arki/theme';
+import { useTheme } from '@arki/ui/theme';
 import { Toaster } from '@arki/ui/sonner';
 import { TooltipProvider } from '@arki/ui/tooltip';
 

@@ -4,7 +4,7 @@ import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scri
 
 import { DevTools } from '@fleet/sitekit/devtools';
 import { arkiThemeClasses, arkiThemes } from '@arki/design-systems/arki/themes';
-import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/theme/script';
+import { THEME_STORAGE_KEY, themeDetectionFn } from '@arki/ui/theme/script';
 
 import { getLocale } from '../paraglide/runtime.js';
 import { RootProvider } from '../root-provider';

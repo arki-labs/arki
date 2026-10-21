@@ -4,7 +4,7 @@
 import type { ToasterProps } from 'sonner';
 import { Toaster as Sonner,  } from 'sonner';
 
-import { useTheme } from '@arki/theme';
+import { useTheme } from './theme/theme-context';
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = 'system' } = useTheme();

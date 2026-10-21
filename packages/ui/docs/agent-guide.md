@@ -103,6 +103,32 @@ export function useSearchTerm(raw: string): string {
 }
 ```
 
+### Add light and dark mode to an app
+
+Run `themeScript()` in `<head>` before React, so the first paint has the right class. Wrap the app in `ThemeProvider`.
+
+```tsx
+import type { ReactNode } from 'react';
+
+import { ThemeProvider } from '@arki/ui/theme';
+import { themeScript } from '@arki/ui/theme/script';
+
+export function Shell({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript() }} />
+      </head>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+`system` is a theme name, not a result: the provider turns it into `light` or `dark` with `prefers-color-scheme`. For a custom name such as `sepia`, pass the same `themes` list to `ThemeProvider` and `themeScript`. For `attribute="data-theme"`, pass it to both too; the `dark` class is still toggled, so Tailwind `dark:` keeps working.
+
 ### Add a component
 
 Create `src/<name>.tsx` with a one-line summary comment first. Wrap a Base UI primitive, use `cva` for variants, `cn` for classes and semantic tokens for colour. Add the `exports` row, regenerate `llms.txt`, add it to the README table. Check it in atelier, workbench and arena.
@@ -115,6 +141,8 @@ Create `src/<name>.tsx` with a one-line summary comment first. Wrap a Base UI pr
 - `katex` needs `katex/dist/katex.min.css` loaded by the app.
 - `useFormField`, `useSidebar` and the other compound hooks throw outside their parent.
 - Use semantic tokens only. A raw colour breaks in another system.
+- `useTheme()` outside a provider returns `theme: undefined`. That is not an error.
+- `ThemeProvider` and `themeScript` must get the same options, or the page flashes. `setTheme` of a name not in `themes` stores `defaultTheme`.
 
 ## Errors
 

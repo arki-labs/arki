@@ -193,14 +193,6 @@
     "pkg-engines",
     "files-ship-dist-docs"
   ],
-  "@arki/theme": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
-  ],
   "@arki/ts": [
     "file-llms-txt",
     "file-agents-md",

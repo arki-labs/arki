@@ -451,6 +451,15 @@
       "import": "./src/hooks/use-viewport.tsx",
       "browser": "./src/hooks/use-viewport.tsx"
     },
+    "./theme": {
+      "types": "./dist/src/theme/index.d.ts",
+      "import": "./src/theme/index.ts",
+      "browser": "./src/theme/index.ts"
+    },
+    "./theme/script": {
+      "types": "./dist/src/theme/script.d.ts",
+      "import": "./src/theme/script.ts"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -690,6 +699,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run --configLoader runner",
     "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -698,7 +708,6 @@
     "@arki/date": "workspace:*",
     "@arki/design-systems": "workspace:*",
     "@arki/icons": "workspace:*",
-    "@arki/theme": "workspace:*",
     "@base-ui/react": "catalog:",
     "@hookform/resolvers": "catalog:validation",
     "@mantine/hooks": "catalog:",
@@ -735,9 +744,15 @@
     "@arki/vitest-config": "workspace:*",
     "@tailwindcss/node": "^4.3.3",
     "@tailwindcss/oxide": "^4.3.3",
+    "@testing-library/react": "catalog:testing",
     "@types/debug": "catalog:",
+    "@types/node": "catalog:node",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:text-processing",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
     "vitest": "catalog:"
   },
   "peerDependencies": {

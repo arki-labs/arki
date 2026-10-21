@@ -12,8 +12,10 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 6. A compound part that needs its parent throws a plain `Error` that names the parent. Do not return a silent default.
 7. Hooks and components with state start with `'use client'`.
 8. Never delete an exported component. This package is a general-purpose product.
-9. Use `@arki/theme` for theme state, `@arki/icons` for icons, `@arki/ui/hooks/*` (this package) for hooks. Do not copy them in.
+9. Use `@arki/ui/theme` (this package) for theme state, `@arki/icons` for icons, `@arki/ui/hooks/*` (this package) for hooks. Do not copy them in.
 10. No `console.log`. Debug output goes through `debug`.
+11. `src/theme/script.ts` imports nothing. `themeScript()` turns `themeDetectionFn` into a string with `toString()`, so the function cannot use anything outside itself. It has no `'use client'`: it runs on the server.
+12. `ThemeProvider` and `themeDetectionFn` apply the theme the same way (the `dark` and `is-dark` classes, `color-scheme`). Change one, change the other in the same commit. Theme code never throws; every bad input falls back to a default.
 
 ## Changing this package
 
