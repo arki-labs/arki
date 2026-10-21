@@ -4,6 +4,14 @@ import * as React from 'react';
 import { MessagePrimitive } from '@assistant-ui/react';
 import { cn } from '@arki/ui/cn';
 
+/**
+ * Styled user message row for an assistant-ui thread.
+ *
+ * @example
+ * ```tsx
+ * <ThreadMessages components={{ UserMessage, AssistantMessage }} />
+ * ```
+ */
 function UserMessage({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <MessagePrimitive.Root>

@@ -1,0 +1,44 @@
+# @arki/chat-ui
+
+> Chat and agent UI for React: styled assistant-ui primitives, tool call cards, thinking blocks, approval cards, step indicators and a renderer for @arki/ai runtime streams. Ships TSX source; needs Tailwind and a bundler.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/chat-ui/thread`: `ThreadEmpty`, `ThreadMessages`, `ThreadRoot`, `ThreadScrollToBottom`, `ThreadViewport`.
+- `@arki/chat-ui/agent-panel`: `AgentPanel`; types `AgentPanelProps`.
+- `@arki/chat-ui/runtime-conversation`: `RuntimeConversation`, `runtimeStatusToAgentStatus`; types `RuntimeConversationProps`.
+- `@arki/chat-ui/message`: `AssistantMessage`, `AssistantMessageContent`, `MessageContent`, `SystemMessage`, `UserMessage`, `UserMessageContent`.
+- `@arki/chat-ui/composer`: `Composer`, `ComposerAttachments`, `ComposerCancel`, `ComposerInput`, `ComposerSend`.
+- `@arki/chat-ui/action-bar`: `ActionBar`, `ActionBarCopy`, `ActionBarEdit`, `ActionBarReload`.
+- `@arki/chat-ui/branch-picker`: `BranchPicker`, `BranchPickerNext`, `BranchPickerPrevious`.
+- `@arki/chat-ui/tool-call`: `ToolCall`, `ToolCallContent`, `ToolCallHeader`, `ToolCallResult`, `ToolCallStatusIcon`, `toolCallVariants`.
+- `@arki/chat-ui/thinking-block`: `ThinkingBlock`, `ThinkingBlockReasoning`, `ThinkingBlockTrigger`.
+- `@arki/chat-ui/approval-card`: `ApprovalActions`, `ApprovalCard`.
+- `@arki/chat-ui/step-indicator`: `Step`, `StepIndicator`.
+- `@arki/chat-ui/agent-status`: `AgentStatus`, `AgentStatusIcon`, `agentStatusVariants`.
+- `@arki/chat-ui/code-block`: `CodeBlock`.
+- `@arki/chat-ui/markdown-message`: `MarkdownMessage`.
+- `@arki/chat-ui/tool-registry`: `ToolRegistryProvider`, `createToolRegistry`, `useToolRegistry`; types `ToolComponent`.
+- `@arki/chat-ui/types`: Status of a tool call lifecycle. types `AgentStatusType`, `AgentStep`, `ApprovalAction`, `ApprovalResult`, `ToolCallMeta`, `ToolCallStatus`.
+- `@arki/chat-ui/styles/chat.css`
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [Components](docs/components.md): every component and its props.
+- [README](README.md): the overview and the limits.
+
+## By task
+- [Show a live agent run](docs/agent-guide.md#show-a-live-agent-run)
+- [Draw a custom widget for a tool](docs/agent-guide.md#draw-a-custom-widget-for-a-tool)
+- [Ask the user to approve an action](docs/agent-guide.md#ask-the-user-to-approve-an-action)
+- [Build a chat page](docs/agent-guide.md#build-a-chat-page)
+
+## Rules that bite
+- Import `@arki/chat-ui/styles/chat.css` once, or the animations are missing.
+- `useToolRegistry` throws outside `ToolRegistryProvider`.
+- `Thread`, `Composer` and message parts need an assistant-ui runtime provider above them.
+- `RuntimeConversation` prints text as is. Pass `renderText` for markdown.
+- `RuntimeConversation` and `AgentPanel` need `RuntimeUiState` from `@arki/ai`.

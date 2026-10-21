@@ -32,6 +32,11 @@ export type AgentPanelProps = Omit<React.ComponentProps<'section'>, 'title'> & {
  * its text — the per-agent unit for any multi-agent surface (a comparison race, a council, a
  * fan-out). Pure presentation over a {@link RuntimeUiState}; the body is a status-suppressed
  * {@link RuntimeConversation} (the status lives in the header instead).
+ *
+ * @example
+ * ```tsx
+ * <AgentPanel name="Researcher" state={state} />
+ * ```
  */
 function AgentPanel({
   name,

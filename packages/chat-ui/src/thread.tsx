@@ -5,6 +5,14 @@ import { ThreadPrimitive } from '@assistant-ui/react';
 import { ArrowDown } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
+/**
+ * Root of an assistant-ui backed chat thread. Place it inside the assistant-ui runtime provider.
+ *
+ * @example
+ * ```tsx
+ * <ThreadRoot><ThreadViewport><ThreadMessages /></ThreadViewport></ThreadRoot>
+ * ```
+ */
 function ThreadRoot({ className, ...props }: React.ComponentProps<typeof ThreadPrimitive.Root>) {
   return (
     <ThreadPrimitive.Root

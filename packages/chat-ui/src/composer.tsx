@@ -5,6 +5,14 @@ import { ComposerPrimitive } from '@assistant-ui/react';
 import { PaperPlaneTilt } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
+/**
+ * Message composer: input, send and cancel buttons.
+ *
+ * @example
+ * ```tsx
+ * <Composer><ComposerInput /><ComposerSend /></Composer>
+ * ```
+ */
 function Composer({ className, ...props }: React.ComponentProps<typeof ComposerPrimitive.Root>) {
   return (
     <ComposerPrimitive.Root

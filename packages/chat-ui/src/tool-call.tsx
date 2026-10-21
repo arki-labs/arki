@@ -27,6 +27,14 @@ type ToolCallProps = React.ComponentProps<'div'> &
     toolName: string;
   };
 
+/**
+ * Card for one tool call, with a status icon and optional result children.
+ *
+ * @example
+ * ```tsx
+ * <ToolCall toolName="search" status="running" />
+ * ```
+ */
 function ToolCall({ className, status, toolName, children, ...props }: ToolCallProps) {
   return (
     <div data-slot="chat-tool-call" className={cn(toolCallVariants({ status }), className)} {...props}>

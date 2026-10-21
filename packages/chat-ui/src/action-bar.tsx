@@ -5,6 +5,14 @@ import { ActionBarPrimitive } from '@assistant-ui/react';
 import { Check, Copy, Pencil, ArrowsClockwise } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
+/**
+ * Copy, reload and edit buttons for one message.
+ *
+ * @example
+ * ```tsx
+ * <ActionBar><ActionBarCopy /><ActionBarReload /></ActionBar>
+ * ```
+ */
 function ActionBar({ className, ...props }: React.ComponentProps<typeof ActionBarPrimitive.Root>) {
   return (
     <ActionBarPrimitive.Root

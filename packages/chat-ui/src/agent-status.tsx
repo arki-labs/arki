@@ -32,6 +32,14 @@ type AgentStatusProps = React.ComponentProps<'span'> &
     label?: string;
   };
 
+/**
+ * Status pill for the agent: idle, thinking, executing, waiting-for-input, complete or error.
+ *
+ * @example
+ * ```tsx
+ * <AgentStatus status="thinking" />
+ * ```
+ */
 function AgentStatus({ className, status, label, ...props }: AgentStatusProps) {
   const resolvedLabel = label ?? defaultLabel(status ?? 'idle');
 

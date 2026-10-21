@@ -18,6 +18,11 @@ type ApprovalCardProps = React.ComponentProps<'div'> & {
  * Renders an inline confirmation UI with Approve / Edit / Reject actions.
  * On reject, shows a feedback input for the user to explain why,
  * which is fed back to the agent as context.
+ *
+ * @example
+ * ```tsx
+ * <ApprovalCard title="Send 3 emails?" onAction={result => save(result)} />
+ * ```
  */
 function ApprovalCard({ className, title, description, onAction, children, ...props }: ApprovalCardProps) {
   const [feedback, setFeedback] = React.useState('');

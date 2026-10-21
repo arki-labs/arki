@@ -23,7 +23,13 @@ import { ToolCall, ToolCallResult } from './tool-call';
  * ```
  */
 /** Project a runtime status onto the chat-ui AgentStatus vocabulary. Exported so panels and
- *  other surfaces derive the same pill from a `RuntimeUiState`. */
+ *  other surfaces derive the same pill from a `RuntimeUiState`.
+ *
+ * @example
+ * ```ts
+ * runtimeStatusToAgentStatus('running', true); // 'executing'
+ * ```
+ */
 export function runtimeStatusToAgentStatus(status: RuntimeUiStatus, hasRunningTool: boolean): AgentStatusType {
   switch (status) {
     case 'running': {

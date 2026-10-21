@@ -5,6 +5,14 @@ import { BranchPickerPrimitive } from '@assistant-ui/react';
 import { CaretLeft, CaretRight } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
+/**
+ * Previous and next buttons to move between message branches.
+ *
+ * @example
+ * ```tsx
+ * <BranchPicker />
+ * ```
+ */
 function BranchPicker({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <BranchPickerPrimitive.Root

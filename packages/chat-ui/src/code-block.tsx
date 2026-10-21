@@ -15,6 +15,11 @@ type CodeBlockProps = React.ComponentProps<'div'> & {
  * Renders code within a styled container using a monospace font.
  * The copy button provides visual feedback (check icon) for 2 seconds
  * after copying.
+ *
+ * @example
+ * ```tsx
+ * <CodeBlock language="ts" code="const a = 1;" />
+ * ```
  */
 function CodeBlock({ className, code, language, ...props }: CodeBlockProps) {
   const [copied, setCopied] = React.useState(false);

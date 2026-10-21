@@ -17,6 +17,11 @@ type ThinkingBlockProps = React.ComponentProps<typeof ChainOfThoughtPrimitive.Ro
  *
  * Shows a "Thinking..." indicator during streaming, then collapses
  * to a summary with a chevron to expand the full reasoning.
+ *
+ * @example
+ * ```tsx
+ * <ThinkingBlock label="Thinking" duration={1200} />
+ * ```
  */
 function ThinkingBlock({ className, label, duration, ...props }: ThinkingBlockProps) {
   return (

@@ -20,6 +20,11 @@ type StepIndicatorProps = React.ComponentProps<'div'> & {
  *
  * Shows which steps are pending, active, complete, or errored. `vertical` suits a multi-tool
  * agent workflow where the user reads top-to-bottom; `horizontal` suits a compact stage rail.
+ *
+ * @example
+ * ```tsx
+ * <StepIndicator steps={[{ id: 'a', label: 'Plan', status: 'complete' }]} />
+ * ```
  */
 function StepIndicator({ className, steps, orientation = 'vertical', ...props }: StepIndicatorProps) {
   if (orientation === 'horizontal') {
