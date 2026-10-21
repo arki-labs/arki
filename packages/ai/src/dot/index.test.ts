@@ -1,16 +1,16 @@
 /**
- * The `vectorIndex` Dot plugin: a feature gets an embedder and an index at
- * boot, resolved ONCE from the env thunk; with nothing configured the app
- * still boots and both services say so; tests inject the runtime and the
- * provider and never pick real Qdrant.
+ * The `vectorIndex` Dot plugin: a feature gets an index sized by the embedding
+ * space at boot, resolved ONCE from the thunks; with no space the app still
+ * boots and the index says so; tests inject the provider and never pick real
+ * Qdrant. The embedder is `embeddings()` from `@arki/embeddings/dot`.
  */
 import { describe, expect, it, vi } from 'vitest';
 
 import { runDoctor, runExplain } from '@arki/dot/cli';
 import { defineApp } from '@arki/dot/plugin';
+import { fakeEmbedder } from '@arki/embeddings/testing';
 import { isFailure, orThrow } from '@arki/failure';
 
-import { createEmbeddingRuntime } from '../embeddings/runtime';
 import { ProviderUnavailable } from '../failures';
 import { createFakeLLMProvider } from '../testing';
 import { MockVectorProvider } from '../vector-search/providers/mock';
@@ -19,47 +19,57 @@ import { llm, vectorIndex } from './index';
 type Payload = { userId: string; kind: 'item'; model: string; dimensions: number };
 
 describe('vectorIndex()', () => {
-  it('boots an embedder and a mock index from the env thunk, reading it once', async () => {
-    const env = vi.fn(() => ({ EMBEDDING_PROVIDER: 'mock', EMBEDDING_DIMENSIONS: '4' }));
+  const space = {
+    provider: 'fake',
+    model: 'fake-4',
+    dimensions: 4,
+    normalized: true,
+    quantization: 'float32',
+    instructionVersion: 0,
+  } as const;
+
+  it('boots a mock index sized by the embedder space, reading the thunks once', async () => {
+    const env = vi.fn(() => ({}));
+    const embedder = fakeEmbedder({ dimensions: 4 });
+    const spaceOf = vi.fn(() => embedder);
     const app = await orThrow(
       defineApp('vi-mock')
-        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], env }))
+        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId', 'kind'], space: spaceOf, env }))
         .boot(),
     );
 
     expect(env).toHaveBeenCalledTimes(1);
+    expect(spaceOf).toHaveBeenCalledTimes(1);
     const index = app.services.vectorIndex;
     expect(index.provider).toBeInstanceOf(MockVectorProvider);
     expect(index.durable).toBe(false);
-    // The index is sized by the runtime's space, so stored and query vectors agree.
-    expect(index.provider?.space).toMatchObject({ provider: 'fake', dimensions: 4 });
-    const embedding = await app.services.embedder.embedQuery('q');
-    expect(embedding?.vector).toHaveLength(4);
+    // The index is sized by the embedder's space, so stored and query vectors agree.
+    expect(index.provider?.space).toEqual(embedder.space);
   });
 
-  it('boots with no provider configured: index provider null, embedder answers null', async () => {
+  it('no longer publishes embedder: that is embeddings() from @arki/embeddings/dot', async () => {
+    const app = await orThrow(
+      defineApp('vi-only-index')
+        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: [], space }))
+        .boot(),
+    );
+
+    expect(Object.keys(app.services)).not.toContain('embedder');
+    expect(app.services.vectorIndex.provider?.space).toEqual(space);
+  });
+
+  it('boots with no space (no embedding provider): index provider null', async () => {
     const app = await orThrow(
       defineApp('vi-none')
-        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], env: () => ({}) }))
+        .use(vectorIndex<Payload>({ collection: 'test', payloadIndexes: ['userId'], space: () => null }))
         .boot(),
     );
 
     expect(app.services.vectorIndex).toEqual({ provider: null, durable: false });
-    await expect(app.services.embedder.embedQuery('q')).resolves.toBeNull();
   });
 
-  it('takes an injected runtime and provider, never touching env', async () => {
+  it('takes an injected provider, never building one', async () => {
     const env = vi.fn(() => ({ QDRANT_URL: 'http://q:6333' }));
-    const runtime = await createEmbeddingRuntime({ EMBEDDING_PROVIDER: 'mock' });
-    if (!runtime) throw new Error('mock runtime expected');
-    const space = {
-      provider: 'fake',
-      model: runtime.selection.model,
-      dimensions: runtime.selection.dimensions,
-      normalized: false,
-      quantization: 'float32',
-      instructionVersion: 0,
-    } as const;
     const provider = new MockVectorProvider<Payload>({ space });
     const app = await orThrow(
       defineApp('vi-injected')
@@ -67,8 +77,8 @@ describe('vectorIndex()', () => {
           vectorIndex<Payload>({
             collection: 'test',
             payloadIndexes: ['userId'],
+            space,
             env,
-            runtime,
             provider,
             durable: true,
           }),
@@ -78,8 +88,7 @@ describe('vectorIndex()', () => {
 
     expect(app.services.vectorIndex.provider).toBe(provider);
     expect(app.services.vectorIndex.durable).toBe(true);
-    expect(app.services.embedder.runtime).toBe(runtime);
-    expect(env).toHaveBeenCalledTimes(1); // the thunk is read, but nothing of it is used
+    expect(env).not.toHaveBeenCalled();
   });
 });
 

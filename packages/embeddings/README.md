@@ -50,20 +50,22 @@ export async function embedForIndex(embedder: Embedder, texts: readonly string[]
 
 ## Runtime support
 
-The root, `./ollama`, `./openai-compatible`, `./env` and `./testing` use only `fetch` and run on Node, Bun, Deno, in the browser and on Hermes. `./openai` loads its AI SDK peers on the first call, not at import, and needs Node or Bun. The root imports no provider SDK, no `process.env` and no `node:*`.
+The root, `./ollama`, `./openai-compatible`, `./env`, `./kv` and `./testing` use only `fetch` and run on Node, Bun, Deno, in the browser and on Hermes. `./openai` loads its AI SDK peers on the first call, not at import, and needs Node or Bun. `./dot` needs `@arki/dot`, so Node or Bun. The root imports no provider SDK, no `process.env` and no `node:*`.
 
 Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embeddings`.
 
 ## Public imports
 
-| Entry                                | What it is                                                                                                                                                                                                                                      | Peers                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `withResilience`, `withMiddleware`, `resolveEmbeddingModel`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                              |
-| `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                               | none                              |
-| `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                               | `@ai-sdk/openai`, `ai` (optional) |
-| `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                 | none                              |
-| `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                               | none                              |
-| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                                                                      | none                              |
+| Entry                                | What it is                                                                                                                                                                                                                                                                                        | Peers                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `withResilience`, `withCache`, `memoryCacheStore`, `withTelemetry`, `withMiddleware`, `resolveEmbeddingModel`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                              |
+| `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                                                                                 | none                              |
+| `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                                                                                 | `@ai-sdk/openai`, `ai` (optional) |
+| `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                                                                   | none                              |
+| `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                                                                                 | none                              |
+| `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                     | none                              |
+| `@arki/embeddings/dot`               | `embeddings({ model?, cache?, resilience?, env? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                           | `@arki/dot` (optional)            |
+| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`                                                                                                                                                                                                                                        | none                              |
 
 `resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side.
 
@@ -99,6 +101,27 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 - `usage.requests` counts every attempt, failed ones included.
 - A timeout, an open circuit or a full bulkhead becomes `ModelUnavailable { reason: 'unreachable' }`. Nothing is thrown for them.
 - The default policy: 3 retries from 200 ms doubling to 5 s with 25% jitter, a circuit breaker (5 failures, 30 s), and 60 s per attempt. Pass your own policy built with `.while(RateLimited, ModelUnavailable)` on its backoff to change that.
+
+## Caching
+
+`withCache(embedder, store?, { strict?, namespace?, ttlMs? })` returns an embedder that answers repeated texts from a byte store.
+
+- The key is a sha256 of the value format version, the space id, the purpose, the size, the dtype, the truncation choice, the namespace and the exact text. A model, size or prompt change misses; it never answers a wrong vector in the right shape.
+- Cached inputs are filled from the store. The rest go to the provider as one call, in input order. `usage.cacheHits` counts the inputs the store answered; an all-hit call sends nothing and has `requests: 0`.
+- `strict: true` (default): a cached value whose length or dtype does not fit the space is `InvalidOutput`. `strict: false`: it counts as a miss and is embedded again. A strict failure lasts as long as the bad entry: until its TTL ends, or forever without one. Set `ttlMs` on a store other writers share.
+- Image inputs always go to the provider. A failure is never cached.
+- A store that throws is a miss (read) or skipped (write), logged at `warn`. Embedding still works.
+- Ollama learns its model digest on the first call, and the digest is part of the key, so the first call of a process always misses.
+
+`memoryCacheStore({ maxEntries? })` is an in-process LRU (default 10 000 entries) that copies on `set` and on `get`. `kvCacheStore(kv, { prefix? })` from `@arki/embeddings/kv` stores the bytes as base64 through an `@arki/kv` client, so processes share one cache; `ttlMs` becomes whole seconds, and a value that is not base64 reads as a miss.
+
+## Telemetry
+
+`withTelemetry(embedder, { log?, recordInputs? })` emits one `arki.embed` event per `embed` call, at `info`: `provider`, `model`, `dimensions`, `inputs` (the count), `tokenBasis`, `tokens`, `requests`, `cacheHits`, `durationMs` and `outcome` (`'ok'` or the failure's code). `@arki/log` has no span type, so the event is the span; `@arki/log/otel` adds the active trace. Input texts are left out unless `recordInputs: true`, because inputs carry emails, names and tokens. Wrap it outside `withCache` to see hits, inside to see only provider calls.
+
+## Dot plugin
+
+`embeddings({ model?, cache?, resilience?, env? })` from `@arki/embeddings/dot` publishes `embedder` (`Embedder | null`), built once at boot. `model` is a ref, a model record, an `Embedder`, or a function returning one of the last two or a failure; without it, `resolveEmbeddingModel` reads `env` (default `process.env`). `cache: true` adds `withCache` over a `memoryCacheStore()`, or pass a store; `resilience: true` adds `withResilience`, or pass a policy. The cache sits outside the retries. A configuration that does not resolve is logged once at `warn` and `embedder` is `null`, so the app boots and features degrade.
 
 `withMiddleware(embedder, ...middleware)` wraps `embed` with your own `EmbedMiddleware` functions. The first one is outermost: it sees the call first and the result last.
 

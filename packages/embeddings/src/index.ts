@@ -55,3 +55,5 @@ export { normalizeText } from './normalize.js';
 export type { NormalizeTextOptions } from './normalize.js';
 export { withMiddleware } from './middleware.js';
 export { withResilience } from './resilience.js';
+export { memoryCacheStore, withCache } from './cache.js';
+export { withTelemetry } from './telemetry.js';

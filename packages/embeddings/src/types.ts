@@ -147,7 +147,7 @@ export type Embedder = {
 /** Wraps an embedder's `embed`. `withMiddleware` composes them, the first outermost. */
 export type EmbedMiddleware = (next: Embedder['embed'], embedder: Embedder) => Embedder['embed'];
 
-/** Byte store behind `withCache` (slice 2). */
+/** Byte store behind `withCache`: `memoryCacheStore()` in process, `kvCacheStore(kv)` from `@arki/embeddings/kv` through Redis. */
 export type CacheStore = {
   get(key: string): Promise<Uint8Array | undefined>;
   set(key: string, value: Uint8Array, ttlMs?: number): Promise<void>;

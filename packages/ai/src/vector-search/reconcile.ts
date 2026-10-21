@@ -35,6 +35,10 @@
  * The runner takes injected deps so tests exercise the decision logic without
  * a database; the app builds the real store-backed deps.
  */
+import type { EmbeddingSpace, EmbedFailure } from '@arki/embeddings';
+import { spaceId } from '@arki/embeddings';
+import { isFailure } from '@arki/failure';
+
 import { debugVector } from '../debug.ts';
 
 // ── Batch caps (sized to fit under a 5-minute cron tick) ────
@@ -46,8 +50,11 @@ export const ROW_CAP_PER_RUN = 50;
 
 // ── Contracts ───────────────────────────────────────────────
 
-/** The two payload fields the runner owns: which model made the vector, and its observed length. */
-export type VectorPointPayload = { model: string; dimensions: number };
+/**
+ * The payload fields the runner owns: which model made the vector, its observed length, and (on a
+ * point the runner re-embedded) the `spaceId` of the space it was embedded in.
+ */
+export type VectorPointPayload = { model: string; dimensions: number; space?: string };
 
 /** A durable row mirrored (or to be mirrored) as one point. */
 export type ReconcileRow<P extends VectorPointPayload> = {
@@ -92,12 +99,14 @@ export type TombstoneStore<TId extends string = string> = {
 export type ReconcileDeps<P extends VectorPointPayload, TId extends string = string> = {
   /** Whether points in this index outlive the process (`VectorIndex.durable`). Gates Phase A. */
   durable: boolean;
-  /** The collection dimension (the embedding runtime's selection). */
-  targetDimensions: number;
-  /** Model the runtime embeds with (recorded on re-embedded points). */
-  model: string;
-  /** Embed one document text (raw — no query instruction on documents). */
-  embedText: (text: string) => Promise<number[]>;
+  /** The space the index holds: `space.dimensions` is the collection dimension. */
+  space: EmbeddingSpace;
+  /**
+   * Embed one document text (no query instruction on documents), with the space the vector came
+   * from. That space's `model` and `spaceId` are recorded on the point, so a revision the embedder
+   * learned on this call is part of it. A failure counts the row as failed.
+   */
+  embedText: (text: string) => Promise<{ vector: number[]; space: EmbeddingSpace } | EmbedFailure>;
   upsertPoint: (pointId: string, vector: number[], payload: P) => Promise<void>;
   deletePoints: (pointIds: readonly string[]) => Promise<void>;
   tombstones: TombstoneStore<TId>;
@@ -213,23 +222,38 @@ export async function runVectorReconciliation<P extends VectorPointPayload, TId 
 
     for (const row of rows) {
       try {
-        const vector = await deps.embedText(row.sourceText);
+        const embedded = await deps.embedText(row.sourceText);
+        if (isFailure(embedded)) {
+          counts.failed++;
+          debugVector.debug('[Reconcile] re-embed refused ({store}/{pointId}): {code}', {
+            store: store.name,
+            pointId: row.pointId,
+            code: embedded.code,
+          });
+          continue;
+        }
+        const { vector } = embedded;
         // Durable row first: observed dims are the truth even when the index
         // upsert fails afterwards (the re-upsert leg heals the point later).
         await row.persistReembedded(vector);
 
-        if (vector.length !== deps.targetDimensions) {
+        if (vector.length !== deps.space.dimensions) {
           // Model/config disagreement: the collection would reject this
           // vector — surface it instead of silently indexing garbage.
           counts.failed++;
           debugVector.debug(
             '[Reconcile] re-embedded vector has unexpected dimensions ({store}/{pointId}): {observed} vs {expected} — check EMBEDDING_DIMENSIONS',
-            { store: store.name, pointId: row.pointId, observed: vector.length, expected: deps.targetDimensions },
+            { store: store.name, pointId: row.pointId, observed: vector.length, expected: deps.space.dimensions },
           );
           continue;
         }
 
-        await deps.upsertPoint(row.pointId, vector, { ...row.payload, model: deps.model, dimensions: vector.length });
+        await deps.upsertPoint(row.pointId, vector, {
+          ...row.payload,
+          model: embedded.space.model,
+          dimensions: vector.length,
+          space: spaceId(embedded.space),
+        });
         upserted.push(row.pointId);
         counts.reembedded++;
       } catch (error) {

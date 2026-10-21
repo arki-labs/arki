@@ -74,6 +74,24 @@ if ('vectors' in batch) console.log(batch.usage.requests);
 
 Only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt. The default policy waits at least `retryAfterMs`; over 5 s it does not retry and returns the `RateLimited`. A policy you pass gets no such minimum: its backoff's `delay(attempt, reason)` must read `reason.data.retryAfterMs` itself.
 
+### Cache repeated texts
+
+```ts run
+import { embedMany, memoryCacheStore, withCache, withTelemetry } from '@arki/embeddings';
+import { fakeEmbedder } from '@arki/embeddings/testing';
+
+const embedder = withTelemetry(withCache(fakeEmbedder({ dimensions: 4 }), memoryCacheStore({ maxEntries: 1000 })));
+await embedMany(embedder, ['a', 'b']);
+const again = await embedMany(embedder, ['a', 'c']);
+if ('vectors' in again) console.log(again.usage.cacheHits); // 1
+```
+
+The key covers the space, purpose, size, dtype, truncation choice, namespace and exact text: a model or prompt change misses. Share a cache across processes with `kvCacheStore(kv)` from `@arki/embeddings/kv`. `withTelemetry` emits one `arki.embed` event per call and leaves input texts out unless `recordInputs: true`.
+
+### Give a Dot app its embedder
+
+`embeddings({ model, cache: true })` from `@arki/embeddings/dot` publishes `embedder: Embedder | null`. A configuration that does not resolve logs once at `warn` and publishes `null`: handle `null` in every feature that embeds. Size a vector index from the same space (`vectorIndex({ space })` in `@arki/ai/dot`).
+
 ## Rules that bite
 
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
@@ -84,6 +102,8 @@ Only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }` are retried.
 - `resolveEmbeddingModel` returns before the network is touched, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call.
 - Voyage and Google resolve to `ConfigurationFailure` in this release.
 - Never catch to hide a thrown error from a custom `embed`. It is a bug in that code.
+- `embeddings()` publishes `null` when nothing resolves. A feature that embeds must handle `null`, not assume a model.
+- `withTelemetry` never logs input text unless `recordInputs: true`. Keep it that way for user content.
 
 ## Errors
 

@@ -5,12 +5,14 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 39 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`, `SpaceMismatch`; and 42 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
 - `@arki/embeddings/env`: validates the embedding variables with `@arki/env`. `resolveEmbeddingConfig`.
 - `@arki/embeddings/testing`: a deterministic fake embedder for tests. `fakeEmbedder`; types `FakeEmbedderOptions`.
+- `@arki/embeddings/kv`: a `CacheStore` over an `@arki/kv` client (or anything with its `get` and `set`), so `withCache` shares vectors across processes through Redis. `kvCacheStore`.
+- `@arki/embeddings/dot`: the app's one embedder as a Dot plugin. `embeddings`.
 <!-- llms:end -->
 
 ## Start here
@@ -25,10 +27,13 @@
 - [Use a hosted or self-hosted server](docs/agent-guide.md#use-a-hosted-or-self-hosted-server)
 - [Test code that embeds](docs/agent-guide.md#test-code-that-embeds)
 - [Retry rate limits and outages](docs/agent-guide.md#retry-rate-limits-and-outages)
+- [Cache repeated texts](docs/agent-guide.md#cache-repeated-texts)
+- [Give a Dot app its embedder](docs/agent-guide.md#give-a-dot-app-its-embedder)
 
 ## Rules that bite
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
 - Store `spaceId(batch.space)` next to every index; a different space means re-embed.
 - The embedder never changes input text (call `normalizeText` yourself), and `fakeEmbedder` is not semantic.
 - Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
+- A cache key covers the space and the exact text; `embeddings()` from `./dot` publishes `null` when nothing resolves.
 - `resolveEmbeddingModel` never touches the network. Voyage and Google are `ConfigurationFailure` in this release.

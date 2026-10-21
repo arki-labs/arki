@@ -10,6 +10,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+import { ModelUnavailable, spaceId } from '@arki/embeddings';
+
 import type { MismatchedRow, ReconcileDeps, ReconcileRow, ReconcileStore } from './reconcile';
 import { runVectorReconciliation } from './reconcile';
 
@@ -24,8 +26,15 @@ type Payload = {
 };
 type TombstoneId = `vtmb_${string}`;
 
-const TARGET_DIMS = 4;
 const MODEL = 'qwen3-embedding:0.6b';
+const SPACE = {
+  provider: 'ollama',
+  model: MODEL,
+  dimensions: 4,
+  normalized: true,
+  quantization: 'float32',
+  instructionVersion: 0,
+} as const;
 
 function makeStore(overrides: Partial<ReconcileStore<Payload>> = {}): ReconcileStore<Payload> {
   return {
@@ -44,9 +53,8 @@ const done = () => vi.fn().mockResolvedValue(null);
 function makeDeps(overrides: Partial<Omit<ReconcileDeps<Payload, TombstoneId>, 'tombstones'>> = {}) {
   const deps = {
     durable: true,
-    targetDimensions: TARGET_DIMS,
-    model: MODEL,
-    embedText: vi.fn().mockResolvedValue([0.1, 0.2, 0.3, 0.4]),
+    space: SPACE,
+    embedText: vi.fn().mockResolvedValue({ vector: [0.1, 0.2, 0.3, 0.4], space: SPACE }),
     upsertPoint: done(),
     deletePoints: done(),
     stores: [] as ReconcileStore<Payload>[],
@@ -153,8 +161,9 @@ describe('runVectorReconciliation — Phase B1 (dimension migration)', () => {
     expect(deps.upsertPoint).toHaveBeenCalledWith('schk_1', [0.1, 0.2, 0.3, 0.4], {
       userId: 'u_1',
       kind: 'chunk',
-      model: MODEL, // the runtime model, not the stale row model
+      model: MODEL, // the space's model, not the stale row model
       dimensions: 4, // observed vector.length
+      space: spaceId(SPACE), // which space the point is now in
       itemDate: 1_750_000_000_000,
       contentType: 'newsletter',
       sourceId: 'nsrc_1',
@@ -165,7 +174,7 @@ describe('runVectorReconciliation — Phase B1 (dimension migration)', () => {
   it('persists but does not index a re-embedded vector whose dims still disagree with the collection', async () => {
     const row = mismatchedRow();
     const deps = makeDeps({
-      embedText: vi.fn().mockResolvedValue([1, 0, 0]),
+      embedText: vi.fn().mockResolvedValue({ vector: [1, 0, 0], space: SPACE }),
       stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([row]) })],
     });
 
@@ -176,11 +185,62 @@ describe('runVectorReconciliation — Phase B1 (dimension migration)', () => {
     expect(counts).toMatchObject({ reembedded: 0, failed: 1 });
   });
 
+  it('re-embedded points record the space of the vector, including a revision learned on the first call', async () => {
+    // `deps.space` was read before any call; Ollama only knows its digest after the first one.
+    const learned = { ...SPACE, revision: 'sha256:abc' };
+    const deps = makeDeps({
+      embedText: vi.fn().mockResolvedValue({ vector: [0.1, 0.2, 0.3, 0.4], space: learned }),
+      stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([mismatchedRow()]) })],
+    });
+
+    await runVectorReconciliation(deps);
+
+    expect(deps.upsertPoint).toHaveBeenCalledWith(
+      'citm_1',
+      [0.1, 0.2, 0.3, 0.4],
+      expect.objectContaining({ model: MODEL, space: spaceId(learned) }),
+    );
+  });
+
+  it('the collection dimension is the space dimension: a vector of another size is persisted, never indexed', async () => {
+    const row = mismatchedRow();
+    const deps = makeDeps({
+      space: { ...SPACE, dimensions: 3 },
+      stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([row]) })],
+    });
+
+    const counts = await runVectorReconciliation(deps);
+
+    expect(deps.upsertPoint).not.toHaveBeenCalled();
+    expect(counts).toMatchObject({ reembedded: 0, failed: 1 });
+  });
+
+  it('an embed failure value counts the row as failed and persists nothing for it', async () => {
+    const refused = mismatchedRow({ pointId: 'citm_refused' });
+    const fine = mismatchedRow({ pointId: 'citm_fine' });
+    const embedText = vi.fn<ReconcileDeps<Payload, TombstoneId>['embedText']>();
+    embedText.mockResolvedValueOnce(ModelUnavailable({ model: MODEL, reason: 'unreachable' }));
+    embedText.mockResolvedValueOnce({ vector: [0.1, 0.2, 0.3, 0.4], space: SPACE });
+    const deps = makeDeps({
+      embedText,
+      stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([refused, fine]) })],
+    });
+
+    const counts = await runVectorReconciliation(deps);
+
+    expect(refused.persistReembedded).not.toHaveBeenCalled();
+    expect(deps.upsertPoint).toHaveBeenCalledTimes(1);
+    expect(counts).toMatchObject({ reembedded: 1, failed: 1 });
+  });
+
   it('counts a failing row and keeps reconciling the rest', async () => {
     const bad = mismatchedRow({ pointId: 'citm_bad' });
     const good = mismatchedRow({ pointId: 'citm_good' });
     const deps = makeDeps({
-      embedText: vi.fn().mockRejectedValueOnce(new Error('embed failed')).mockResolvedValue([0.1, 0.2, 0.3, 0.4]),
+      embedText: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('embed failed'))
+        .mockResolvedValue({ vector: [0.1, 0.2, 0.3, 0.4], space: SPACE }),
       stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([bad, good]) })],
     });
 

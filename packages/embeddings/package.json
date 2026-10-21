@@ -54,6 +54,16 @@
       "import": "./dist/testing/index.js",
       "default": "./dist/testing/index.js"
     },
+    "./kv": {
+      "types": "./dist/kv/index.d.ts",
+      "import": "./dist/kv/index.js",
+      "default": "./dist/kv/index.js"
+    },
+    "./dot": {
+      "types": "./dist/dot/index.d.ts",
+      "import": "./dist/dot/index.js",
+      "default": "./dist/dot/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -95,11 +105,15 @@
   "devDependencies": {
     "@ai-sdk/openai": "catalog:ai",
     "@arki/bench": "workspace:*",
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/kv": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@langchain/classic": "1.0.52",
+    "@langchain/core": "catalog:",
     "@types/node": "catalog:node",
     "ai": "catalog:ai",
     "typescript": "catalog:",
@@ -107,10 +121,14 @@
   },
   "peerDependencies": {
     "@ai-sdk/openai": "catalog:ai",
+    "@arki/dot": "workspace:*",
     "ai": "catalog:ai"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/openai": {
+      "optional": true
+    },
+    "@arki/dot": {
       "optional": true
     },
     "ai": {

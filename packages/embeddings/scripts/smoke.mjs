@@ -2,7 +2,8 @@
 // bundled for the browser and Hermes targets. It drives the root with the fake embedder and the
 // `./ollama` record against an in-process fetch stub, so no server is needed on any runtime.
 
-import { cosine, createEmbedder, embed, embedMany, spaceId } from '../dist/index.js';
+import { cosine, createEmbedder, embed, embedMany, spaceId, withCache } from '../dist/index.js';
+import { kvCacheStore } from '../dist/kv/index.js';
 import { createOllamaModel } from '../dist/ollama/index.js';
 import { createOpenAICompatibleModel } from '../dist/openai-compatible/index.js';
 import { fakeEmbedder } from '../dist/testing/index.js';
@@ -42,7 +43,16 @@ async function main() {
   });
   const reordered = await embedMany(createEmbedder(compatible), ['p', 'q']);
 
+  // Web Crypto keys and base64 values: what the cache needs from every runtime.
+  const entries = new Map();
+  const kv = { get: async key => entries.get(key), set: async (key, value) => void entries.set(key, value) };
+  const cached = withCache(fakeEmbedder({ dimensions: 8, seed: 1 }), kvCacheStore(kv));
+  await embed(cached, 'a');
+  const hit = await embed(cached, 'a');
+
   const checks = [
+    ['cache answers the second call', hit.usage?.cacheHits, 1],
+    ['cached vector is the same vector', cosine(hit.vector, first.vector), 1],
     ['fake vector has 8 dims', first.vector?.length, 8],
     ['same text gives cosine 1', cosine(first.vector, second.vector), 1],
     ['ollama batch has 3 vectors', batch.vectors?.length, 3],

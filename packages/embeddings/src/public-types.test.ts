@@ -1,6 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
+import type { Provided } from '@arki/dot/plugin';
+import type { KV } from '@arki/kv';
+
 import type {
+  CacheStore,
   Embedder,
   Embedding,
   EmbeddingBatch,
@@ -11,6 +15,7 @@ import type {
   NormalizeTextOptions,
   TokenCount,
 } from './index.js';
+import type { embeddings } from './dot/index.js';
 import {
   Cancelled,
   cosine,
@@ -23,6 +28,7 @@ import {
   isEmbedFailure,
   isSameSpace,
   l2Normalize,
+  memoryCacheStore,
   NO_INSTRUCTION,
   NOMIC_INSTRUCTION,
   norm,
@@ -30,9 +36,12 @@ import {
   QWEN3_INSTRUCTION,
   resolveEmbeddingModel,
   spaceId,
+  withCache,
   withMiddleware,
   withResilience,
+  withTelemetry,
 } from './index.js';
+import { kvCacheStore } from './kv/index.js';
 
 describe('public types of the root entry', () => {
   it('embedMany and embed answer a value or an EmbedFailure, so a caller must narrow before reading vectors', () => {
@@ -81,6 +90,24 @@ describe('public types of the root entry', () => {
     expectTypeOf(withMiddleware).returns.toEqualTypeOf<Embedder>();
     expectTypeOf(withResilience).parameter(0).toEqualTypeOf<Embedder>();
     expectTypeOf(withResilience).returns.toEqualTypeOf<Embedder>();
+  });
+
+  it('withCache and withTelemetry are wrappers like withResilience: Embedder in, Embedder out', () => {
+    expectTypeOf(withCache).parameter(0).toEqualTypeOf<Embedder>();
+    expectTypeOf(withCache).parameter(1).toEqualTypeOf<CacheStore | undefined>();
+    expectTypeOf(withCache).returns.toEqualTypeOf<Embedder>();
+    expectTypeOf(withTelemetry).parameter(0).toEqualTypeOf<Embedder>();
+    expectTypeOf(withTelemetry).returns.toEqualTypeOf<Embedder>();
+  });
+
+  it('every store is a CacheStore, and an @arki/kv client fits kvCacheStore as it is', () => {
+    expectTypeOf(memoryCacheStore).returns.toEqualTypeOf<CacheStore>();
+    expectTypeOf(kvCacheStore).returns.toEqualTypeOf<CacheStore>();
+    expectTypeOf<KV>().toMatchTypeOf<Parameters<typeof kvCacheStore>[0]>();
+  });
+
+  it('the Dot plugin publishes Embedder | null, so a feature must handle an app with no model', () => {
+    expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder | null>();
   });
 
   it('normalizeText is a pure string → string helper the embedder never calls', () => {

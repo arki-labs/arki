@@ -171,7 +171,7 @@ export default defineSuite({
     '`@arki/embeddings` packs inputs by the model’s limits: qwen3 is 64 inputs per request, so a batch of 256 is 4 requests (2 in flight). The raw `fetch` row sends one request for the whole batch; the AI SDK row sends one request (its OpenAI limit is 2048).',
     '`@arki/embeddings` also checks every response (count, dimensions, finite values, non-zero norm) and converts each vector to a `Float32Array`. The raw `fetch` row checks nothing and returns plain arrays.',
     'The AI SDK row speaks the OpenAI wire format to the same stub, with the same vectors. Its retries are off (`maxRetries: 0`).',
-    'Hashing (the cache key of `withCache`) has no group yet: `withCache` arrives in slice 2.',
+    'The cache key and the cache stores have their own suite: `bench/cache.bench.ts`.',
   ],
   groups: [
     group(1),
