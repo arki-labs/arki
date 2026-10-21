@@ -97,12 +97,49 @@ export type EnvFilesReport = {
 const loadedSecrets = new Set<string>();
 
 /**
- * Keys a file may never set: they make a process started with this environment load other code
- * (interpreter options, preload and module paths, shell startup files) or trust another TLS
- * authority. A machine that needs one sets it in its own shell.
+ * Keys a file may never set: they make a process started with this environment run other code
+ * (PATH, interpreter options, preload and module paths, shell and git hooks) or change whom it
+ * trusts over TLS. A machine that needs one sets it in its own shell. This is defence in depth:
+ * a tracked env file is repository content, reviewed like code, not a security boundary.
  */
-const REFUSED_KEY =
-  /^(?:NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|BUN_OPTIONS|LD_\w+|DYLD_\w+|BASH_ENV|ENV|PERL5OPT|PERL5LIB|PYTHONPATH|PYTHONSTARTUP|RUBYOPT)$/i;
+const REFUSED_KEY = new RegExp(
+  `^(?:${[
+    'PATH',
+    'NODE_OPTIONS',
+    'NODE_PATH',
+    'NODE_EXTRA_CA_CERTS',
+    'NODE_TLS_REJECT_UNAUTHORIZED',
+    'NODE_REPL_EXTERNAL_MODULE',
+    'BUN_OPTIONS',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
+    'LD_\\w+',
+    'DYLD_\\w+',
+    'BASH_ENV',
+    'BASH_FUNC_.*',
+    'ENV',
+    'PROMPT_COMMAND',
+    'ZDOTDIR',
+    'GIT_\\w+',
+    'npm_config_\\w+',
+    'PERL5OPT',
+    'PERL5LIB',
+    'PERL5DB',
+    'PYTHONPATH',
+    'PYTHONHOME',
+    'PYTHONSTARTUP',
+    'PYTHONINSPECT',
+    'RUBYOPT',
+    'RUBYLIB',
+    'JAVA_TOOL_OPTIONS',
+    '_JAVA_OPTIONS',
+    'JDK_JAVA_OPTIONS',
+  ].join('|')})$`,
+  'i',
+);
+
+/** A portable variable name. Anything else is refused rather than passed to a child process. */
+const PLAIN_NAME = /^[_a-z]\w*$/i;
 
 /** Keys bundlers inline into browser code. */
 const PUBLIC_KEY = /^(?:VITE_|NEXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)/;
@@ -125,8 +162,9 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport 
   for (const file of files) {
     for (const [key, entry] of envValues(parseEnv(readFileSync(file, 'utf8')))) {
       if (isKeyName(key)) continue;
-      if (REFUSED_KEY.test(key)) {
-        refused.push({ key, file, line: entry.start + 1, reason: 'changes how every child process loads code' });
+      if (REFUSED_KEY.test(key) || !PLAIN_NAME.test(key)) {
+        const reason = PLAIN_NAME.test(key) ? 'it changes what code a process runs or whom it trusts' : 'it is not a portable variable name';
+        refused.push({ key, file, line: entry.start + 1, reason });
         continue;
       }
       winners.set(key, { file, line: entry.start + 1, raw: entry.value });
