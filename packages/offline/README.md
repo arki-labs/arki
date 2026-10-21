@@ -44,7 +44,7 @@ export function ORPCReactProvider({ children }) {
 
 ```ts
 // src/service-worker.ts
-import '@fleet/tanstack-start/pwa/sw';
+import '@arki/tanstack-start/pwa/sw';
 import { registerOfflineRoutes } from '@arki/offline/pwa';
 
 registerOfflineRoutes({
@@ -139,7 +139,7 @@ It acts only on procedures whose contract meta says `offlineSafe: true`; every o
 
 `IdempotencyRepository.store()` returns exact canonical failures. Direct table inserts now require an explicit `idempotencyKeyId.create()` result, narrowed with `isFailure` before SQL. Stored IDs keep their `idk_` prefix and 21-character URL-safe body. Cache writes emit an `offline.idempotency.store` OTel span under the active application context. See [typed cache-write migration](docs/upgrades/idempotency-writes.md).
 
-On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@fleet/tanstack-start/orpc/client`), so it carries the procedure's identity:
+On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@arki/tanstack-start/orpc/client`), so it carries the procedure's identity:
 
 ```tsx
 // lib/orpc/client.tsx

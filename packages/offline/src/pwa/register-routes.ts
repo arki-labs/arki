@@ -30,7 +30,7 @@ export interface RegisterOfflineRoutesOptions {
 /**
  * Registers Workbox fetch strategies for app shell, API routes, and static assets.
  *
- * Call this in your service worker file after `import '@fleet/tanstack-start/pwa/sw'`.
+ * Call this in your service worker file after `import '@arki/tanstack-start/pwa/sw'`.
  *
  * Invariant: `networkFirst` is the safe default for API routes — it always
  * tries the network, so queued mutations are never "answered" by a stale cache.
@@ -41,7 +41,7 @@ export interface RegisterOfflineRoutesOptions {
  * @example
  * ```ts
  * // src/service-worker.ts
- * import '@fleet/tanstack-start/pwa/sw';
+ * import '@arki/tanstack-start/pwa/sw';
  * import { registerOfflineRoutes } from '@arki/offline/pwa';
  *
  * registerOfflineRoutes({

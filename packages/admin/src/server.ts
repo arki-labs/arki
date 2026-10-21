@@ -52,7 +52,7 @@ export type CreateFleetHandlerOptions = {
  *
  * @remarks
  * Onboarding a TanStack Start app to the fleet (`GET /api/fleet` → this handler)
- * also requires adding `fleetVite()` from `@fleet/tanstack-start/vite` to the
+ * also requires adding `fleetVite()` from `@arki/tanstack-start/vite` to the
  * app's `vite.config.ts` plugins. This module is published `node`-only; without
  * the plugin, Vite's client dep-scan follows the route handler's import into
  * `@arki/admin/server` and aborts ("Failed to run dependency scan").

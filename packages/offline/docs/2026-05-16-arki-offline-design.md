@@ -15,7 +15,7 @@ This repo has roughly 20 apps. Offline support today is inconsistent:
 | `games-platform/start` | Pure-client persistence | `@tanstack/react-db` + `localStorageCollectionOptions` (2 collections) |
 | `avocabo/start` | Read offline + queued writes | Hand-rolled `OfflineMutationQueue` (idb-keyval) + `PersistQueryClientProvider` |
 | `loonyjobs/start` | Scaffold only | Empty TanStack DB barrels |
-| All other start apps | None beyond Workbox precache | `@fleet/tanstack-start/pwa` (precache only) |
+| All other start apps | None beyond Workbox precache | `@arki/tanstack-start/pwa` (precache only) |
 
 Two incompatible patterns are in production (`games-platform` and `avocabo`), and the rest are empty scaffolds. The goal is to extract a shared lib, formalize the contract, and make offline-by-default at every app's wire-up layer.
 
@@ -620,7 +620,7 @@ Apps in scope: `loonyjobs/start`, `sudoku/start`, `ekuation/start`, `manuscribed
 - Three usage tiers with copy-pasteable snippets.
 - The strict-idempotency contract (how to mark a procedure, how to write an idempotent handler).
 - Troubleshooting: SW not updating, queue stuck, dead-letter recovery, cache busting.
-- Link to relevant `@fleet/tanstack-start/pwa` docs for the precache layer.
+- Link to relevant `@arki/tanstack-start/pwa` docs for the precache layer.
 
 ## 10. Success criteria
 

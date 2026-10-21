@@ -16,7 +16,7 @@ The tiers describe supported product scope and commercial bundles. They do not p
 | Area           | Packages                        | Admission / remaining work                                                                                                               |
 | -------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Kernel         | `dot`, `cli`, `env`             | `cli` admitted by A-32; `feature` is an `@arki/dot` subpath. `dot new` must scaffold a deployable app.                                   |
-| HTTP / API     | `http`, `contracts`             | `@fleet/tanstack-start` is fleet infrastructure, not an admitted `@arki/tanstack-start` package.                                         |
+| HTTP / API     | `http`, `contracts`             | `@arki/tanstack-start` returned to Tier 1 on 2026-10-21 (A-28: "returns when it exists"); promoted from `fleet/`, see `research/16-tanstack-start/`.                                         |
 | Data           | `db`, `journal`, `kv`           | Supported Stack scope.                                                                                                                   |
 | Auth           | `auth`                          | Supported Stack scope; manifest is not private.                                                                                          |
 | Jobs           | `queue`, `schedule`             | Publication admitted by A-29, conditional on the docs standard and scorecard; Postgres queue option required by A-11.                    |
@@ -64,7 +64,7 @@ Plus finished workflows that are not packages yet: workspace onboarding, subscri
 
 Current private Arki packages outside the admitted Stack and Libraries lists: `code-editor`, `content`, `content-build`, `content-react`, `diff`, `domains`, `embeddings`, `formats`, `fs`, `geo`, `images`, `intl`, `mcp`, `md-to-pdf`, `native-ui`, `offline`, `payments-native`, `react-fullscreen`, `react-sounds`, `rich-text`, `rss`, `scraping`, `seo`, `text`, `text-embeddings`, `waitlist`. AI architecture and commercial candidates above do not independently grant publication admission.
 
-Fleet manifests are `books-import`, `dictionaries`, `dictionary`, `feedback`, `games`, `games-solitaire`, `games-solitaire-ui`, `games-sudoku`, `meter`, `mw-dictionary`, `poetry`, `sitekit`, `tanstack-start`, `text-bible`, `text-hyphen`. All use `@fleet/*` and `private: true`. They serve the founder's apps under the fleet RFC, outside the Arki release inventory.
+Fleet manifests are `books-import`, `dictionaries`, `dictionary`, `feedback`, `games`, `games-solitaire`, `games-solitaire-ui`, `games-sudoku`, `meter`, `mw-dictionary`, `poetry`, `sitekit`, `text-bible`, `text-hyphen`. All use `@fleet/*` and `private: true`. They serve the founder's apps under the fleet RFC, outside the Arki release inventory.
 
 Old inventory names such as `diff-engine`, `domains-*`, `usfm-to-json`, `html-to-md`, `html-to-text` and `md-to-html` are not current package manifests. `f04-config` moved to `apps/evervest/config`; app brand design systems live in each app's `design` workspace. Historical names do not establish current packages or admissions.
 

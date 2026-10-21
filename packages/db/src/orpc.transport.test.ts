@@ -1,5 +1,5 @@
 /**
- * The same transactional procedure through the two ways `@fleet/tanstack-start`
+ * The same transactional procedure through the two ways `@arki/tanstack-start`
  * serves oRPC: the fetch `RPCHandler` (HTTP) and `createRouterClient` (direct,
  * for SSR loaders).
  *

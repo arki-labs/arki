@@ -83,7 +83,7 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 
 1. **Write the contract once**, browser-safe (`@orpc/contract`, zod, `@arki/contracts`, model files): `export const rpcContract = { posts: { list: oc.input(pageInput(order)).output(page(post)) } }`.
 2. **Declare policy on the contract**, not on the client. Offline safety: `create: offlineSafe(oc.input(createPost).output(post))` (`@arki/offline/orpc`).
-3. **Build the client utils from the contract value**: `export const orpc = createOrpcUtils(rpcContract, client)` (`@fleet/tanstack-start/orpc/client`). Each leaf is oRPC's own utils plus `'~op'`.
+3. **Build the client utils from the contract value**: `export const orpc = createOrpcUtils(rpcContract, client)` (`@arki/tanstack-start/orpc/client`). Each leaf is oRPC's own utils plus `'~op'`.
 4. **Read the identity** with `operationOf(orpc.posts.create)`. It gives `{ path, name, meta }`. A typed consumer can read it too: `useOfflineMutation(orpc.posts.create)` compiles only when the meta says `offlineSafe: true`.
 
 | Export                                     | Contract                                                                                                                                                          |
