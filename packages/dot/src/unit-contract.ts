@@ -277,6 +277,16 @@ export type LoggingSlot<Result extends DotLoggingHandle | Failure> = {
   readonly logging?: (ctx: DotLoggingContext) => Result;
 };
 
+/** An authored unit's `boot` callback, which keeps the outcome it was written with.
+ * A named type on purpose: a package's emitted `.d.ts` names it instead of writing
+ * the member out, which would add `| undefined` and break apps that turn on
+ * `exactOptionalPropertyTypes`.
+ * @example type Slot = BootSlot<KernelCtx, undefined>;
+ */
+export type BootSlot<Ctx, Boot> = {
+  readonly boot?: (ctx: Ctx) => MaybePromise<Boot>;
+};
+
 /**
  * A capability handle: a token on the wire key `K`, stamped with the name
  * of the unit that provides it. `infra()` and `feature()` mint one per
@@ -645,9 +655,8 @@ export type AuthoredUnit<
   LoggingSlot<Logging> &
   FactoryContract<ProvidedValues<Values>> & {
     readonly factories: { readonly [Key in keyof Values]: (ctx: never) => Values[Key] };
-    readonly hooks: PhaseHooks<never, { readonly [Phase in keyof UnitPhases]: undefined | Phases[Phase] }> & {
-      readonly boot?: (ctx: CtxOf<Shape> & Provides & KernelCtx) => MaybePromise<Boot>;
-    };
+    readonly hooks: PhaseHooks<never, { readonly [Phase in keyof UnitPhases]: undefined | Phases[Phase] }> &
+      BootSlot<CtxOf<Shape> & Provides & KernelCtx, Boot>;
   };
 
 /** Wiring metadata for a unit whose unit contract was already checked. */

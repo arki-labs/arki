@@ -36,6 +36,7 @@ export type {
   UnitSourceGuard,
   UnitPreparation,
   LoggingSlot,
+  BootSlot,
   UnitRole,
   ActionSource,
   CtxOf,
