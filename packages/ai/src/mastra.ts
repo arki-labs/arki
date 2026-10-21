@@ -11,7 +11,7 @@ import { abortReason, runAgentTool } from './runtime/tool';
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK
  * backend — the runtime choice is swappable. Adopted per founder decision "b" for Mastra's
  * platform depth (memory / evals / MCP), which stays Mastra-specific and is NOT abstracted
- * here (see packages/ai/docs/adapter-layer-proposal.md — over-abstraction is the #1 risk).
+ * here (see docs/arki/research/ai/adapter-layer-proposal.md — over-abstraction is the #1 risk).
  *
  * `@mastra/core` is an OPTIONAL peer dependency: this module lives at the `@arki/ai/mastra`
  * subpath and is NOT re-exported from the main `@arki/ai` barrel, so consumers that don't use

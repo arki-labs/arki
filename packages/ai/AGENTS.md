@@ -25,7 +25,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 - A new export needs an entry in `package.json` `exports` and a line in `src/index.ts` when it belongs to the root.
 - Run `bun ../../tooling/library/src/llms.ts --write` after an export change.
 - Keep `README.md`, `llms.txt`, `docs/agent-guide.md` and `docs/recipes/set-up-ai.md` in step.
-- `docs/capabilities`, `docs/tech-radar`, `docs/ui`, `docs/adapter-layer-proposal.md` and `docs/publish-scope.md` are internal. They are not in the `files` list. Do not link them from shipped docs.
+- `docs/publish-scope.md` is internal: it is not in the `files` list. Do not link it from shipped docs. The research notes (capabilities, tech radar, UI research, adapter-layer proposal) live in `docs/arki/research/ai/`.
 - The package will be split into seven packages in later minor releases (`docs/arki/research/12-ai-split/naming.md`). Do not start the split inside an unrelated change.
 
 ## Verify

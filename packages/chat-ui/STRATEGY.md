@@ -4,7 +4,7 @@
 
 **Vercel AI SDK + assistant-ui + @arki/ui design system**
 
-All three research documents (`packages/ai/docs/ui/`) independently converge on this recommendation. The key insight: assistant-ui is "the shadcn of chat" — headless composable primitives where we own the rendering layer.
+All three research documents (`docs/arki/research/ai/ui/`) independently converge on this recommendation. The key insight: assistant-ui is "the shadcn of chat" — headless composable primitives where we own the rendering layer.
 
 ### Why assistant-ui over CopilotKit
 

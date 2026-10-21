@@ -211,7 +211,7 @@ export { Flow, FlowError, createFlow, type FlowConfig, type FlowEvent, type Flow
 
 // Agent-runtime adapter layer (swappable tool-loop backends behind one neutral contract).
 // P0 ships the AI-SDK backend; Mastra/LangGraph/TanStack adapters follow the same interface.
-// See packages/ai/docs/adapter-layer-proposal.md
+// See docs/arki/research/ai/adapter-layer-proposal.md
 export {
   createAiSdkRuntime,
   defineAgentTool,

@@ -8,7 +8,7 @@ import type { Failure } from '@arki/failure';
  * A bake-off across frameworks showed the
  * agentic tool-loop is a commodity across AI SDK / Mastra / LangChain / LangGraph / TanStack.
  * These types are the framework-neutral seam every backend adapts to, so the runtime choice
- * is swappable rather than load-bearing. See packages/ai/docs/adapter-layer-proposal.md.
+ * is swappable rather than load-bearing. See docs/arki/research/ai/adapter-layer-proposal.md.
  *
  * Scope discipline (the #1 failure mode is over-abstraction): this layer adapts ONLY the tool
  * contract and the run→event stream. It does NOT wrap framework-specific depth (memory, eval
