@@ -1,5 +1,35 @@
 # @arki/string
 
+## 0.3.0
+
+### Minor Changes
+
+- baecec3: Return canonical InvalidUtf8 and InvalidBase64 failures for malformed encoding input, with unwrapped successes and exact inferred unions. Encoding failures no longer throw StringError. Fluent codecs require failure narrowing before chaining. Breaking: tryFromBase64 aliases fromBase64 and returns its canonical failures instead of null; replace null checks and catches with isFailure. Add @arki/failure as the sole runtime dependency. Valid bytes and strict decoding rules are unchanged.
+- 1668156: Breaking: every deliberate failure is now a `StringError` with a stable code (`ARKI_STRING_E001` to `E005`, exported as `STRING_ERROR_CODES`, subpath `@arki/string/errors`) and a `remediation`. It replaces the built-in `TypeError`, `RangeError`, `SyntaxError` and `ReferenceError` these functions threw. Match on `error.code`.
+
+### Patch Changes
+
+- abffdfd: Docs standard: README sections, `AGENTS.md`, `llms.txt`, an agent guide, a tested `examples/describe-post.ts`, a runtimes table, and `@fix` / `@verify` notes on every error code. no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+- 6029b75: Faster `camelCase` and `pascalCase`: capitalizing a word no longer starts `Intl.Segmenter` when the first letter is plain Latin text (about 12× faster on mixed identifiers).
+
+  Faster case conversion on ASCII text: `caseWords` and every case function built on it split ASCII input in one pass instead of five regular expressions, with the same tokens.
+
+  Faster `truncate` and `length`: text below U+0300 (ASCII and Latin-1/Latin Extended letters) is counted without `Intl.Segmenter`, and `truncate` reads only the first `maxLength + 1` graphemes instead of segmenting the whole text.
+
+- Updated dependencies [57313a4]
+- Updated dependencies [f43d509]
+- Updated dependencies [232d3e8]
+- Updated dependencies [3f6d39f]
+- Updated dependencies [7f9b4bb]
+- Updated dependencies [86efafc]
+- Updated dependencies [d541df1]
+- Updated dependencies [f6a15d0]
+- Updated dependencies [4913009]
+- Updated dependencies [232d3e8]
+- Updated dependencies [73ef41b]
+- Updated dependencies [f796e5a]
+  - @arki/failure@0.1.0
+
 ## 0.2.0
 
 ### Minor Changes

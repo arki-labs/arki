@@ -1,5 +1,19 @@
 # @arki/log
 
+## 0.2.0
+
+### Minor Changes
+
+- c7720e1: A failure value from `@arki/failure` can be logged as a field: `log.warn('lookup failed', { failure })`. Every formatter and the OpenTelemetry sink print its `code`, `message`, `status`, `data` and `remediation`, plus `causes`: the cause chain, nearest first, through nested failures and thrown errors. The list stops at a cycle (`[Circular]`) or after 64 links (`[MaxDepth]`), the same limit as `findCause`. `redact()` paths reach into a failure's data and causes. `@arki/log` still has no dependencies: it knows a failure by its `'~failure'` brand. New exports: `serializeFailure` and the `FailureLike` type, which is now part of `Value`.
+- 4913009: Security: outside data can no longer pass as a failure. `isFailure` (and `@arki/log`'s failure check) now require the `~failure` brand on the value's prototype and refuse it as an own property. Before, JSON such as `{"~failure": true, "code": "x", "status": 500}` from an API response, queue message or tool result counted as a failure, so boundaries skipped output schemas and answered with an attacker-chosen status or code. Real failures, revived ones and failures from a second copy of the package are still recognised.
+- e61afc2: `configure(config, { owner })`: an app entry can now run again in the same process without `ARKI_LOG_E001`. Nitro's dev worker re-imports the server entry after an edit and never runs `import.meta.hot` dispose hooks, so the second `configure()` threw and every page returned 500. When both calls pass the same `owner` (use `import.meta.url`), the second call replaces the setup, closes the old sinks, and makes the old handle stale. Any other second `configure()` still throws `ARKI_LOG_E001`. New type: `ConfigureOptions`.
+
+### Patch Changes
+
+- fe5a391: README follows the docs standard (install, quick start from a tested example, limits, failure behaviour), with `llms.txt`, an agent guide, `AGENTS.md`, `test:docs` and the 0.1.0 to 0.2.0 upgrade guide. `ARKI_LOG_E001` to `E005` gain `@fix` and `@verify` tags.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
 ## 0.1.0
 
 ### Minor Changes

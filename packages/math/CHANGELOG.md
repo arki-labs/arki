@@ -1,5 +1,28 @@
 # @arki/math
 
+## 0.1.0
+
+### Minor Changes
+
+- 1668156: Every error class now carries a stable `code` (`ARKI_MATH_E001` to `E011`, exported as `MATH_ERROR_CODES`) and a `remediation` string. `MathError` is now abstract; catch it with `instanceof` as before.
+
+### Patch Changes
+
+- 7922fb5: Docs standard: README reordered with install, quick start, limits and failure behaviour, and the module reference moved to `docs/modules/<module>.md`; `AGENTS.md`, `llms.txt` and `docs/agent-guide.md` added; the eleven error codes carry `@fix` and `@verify` tags; doc examples compile under `test:docs`. Only JSDoc comments changed in `src/`. The polynomial page now shows the real `cubicRoots` result shape.
+
+  no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+
+- 6b10cdb: `formatFileSize` takes `system: 'jedec'`: powers of 1024 with `KB`, `MB`, `GB` labels (`1536` gives `'1.5 KB'`), the convention Windows and many file managers use. `'si'` (base 1000, `kB`) stays the default; `'iec'` gives `KiB`, `MiB`.
+- 4b496d6: Faster statistics, distributions and decimal parsing, with the same results and checks.
+
+  - `mean` and `sum` check and add the numbers in one pass, with two compensated running totals instead of one, so they keep their accuracy and run several times faster.
+  - `variance` and `stddev` use the corrected two-pass algorithm (mean, then squared deviations less a rounding correction) instead of Welford's update, which needed a division per value. It is at least as accurate and about three times faster.
+  - `percentile` and `quantile` copy the values into a typed array and pick the two ranks they need with quickselect instead of sorting the whole copy: about 20 times faster on 1,000 values.
+  - `erf`, `erfc` and every normal-distribution `cdf`, `sf` and `quantile` use W. J. Cody's rational approximations instead of the incomplete gamma function. They are about 5 times faster and slightly more accurate in the far tail.
+  - `decimal('…')` reads the text in a single scan and builds short coefficients (up to 15 digits) from a number, instead of a regular expression plus `BigInt` on the digit text.
+
+- 077baad: List the number-words locales as explicit entries (`./words/de`, `./words/es`, `./words/fr`, `./words/it`, `./words/ro`) instead of a `./words/*` wildcard, so a new file under `src/words/` is never published by accident. Import paths are unchanged.
+
 ## 0.0.10
 
 Proof and the numerical core.

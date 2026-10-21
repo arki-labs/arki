@@ -1,5 +1,22 @@
 # @arki/date
 
+## 0.3.0
+
+### Minor Changes
+
+- 13bb516: Rename the `@arki/date/serialize` entry to `@arki/date/orpc`. It holds the oRPC and SuperJSON codecs, which need optional peers, so it now has a name that says it is an adapter. Replace `from '@arki/date/serialize'` with `from '@arki/date/orpc'`. No alias is left behind.
+
+### Patch Changes
+
+- abffdfd: Docs standard: README sections, `AGENTS.md`, `llms.txt`, an agent guide, a tested `examples/delivery-estimate.ts`, and a runtimes table run under Node 26. no demo impact: documentation and doc-example changes only, runtime behaviour unchanged
+- d2be96e: Run on React Native's Hermes: `businessCalendar`, interval merging and parsing no longer call `Array.prototype.toSorted`, which Hermes V1 lacks. Each call sorted a fresh array, so behaviour is unchanged.
+- 4789c7e: Make `@arki/date` run on Hermes V1 (React Native). Its `Intl.DateTimeFormat#formatToParts` types a lone field (`{ month: 'long' }`) as one `literal` part, so stand-alone month and weekday names (`LLL`, `LLLL`, `EEE`, `EEEE`) now read the formatted text directly. `weekRulesFor` returns its fallback when `Intl.Locale` is missing. Zone names (`z`, `zzzz`), `formatRange` and `relative` need Intl APIs Hermes lacks: they throw a `RangeError` that names the missing API instead of "undefined is not a function".
+- Updated dependencies [12e7fa2]
+- Updated dependencies [1668156]
+- Updated dependencies [abffdfd]
+- Updated dependencies [9669a84]
+  - @arki/clock@0.1.0
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@arki/async",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Small, exact timing and concurrency helpers for every JavaScript runtime — an abortable sleep, debounce and throttle with the lodash contract, and scopes with structured concurrency on plain Promises and AbortSignal, all with coded errors.",
   "keywords": [
