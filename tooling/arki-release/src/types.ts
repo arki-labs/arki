@@ -26,6 +26,7 @@ import type { ReadinessResult } from './readiness';
  *   - ship               (T1.6): one command from a wave to a founder packet, then `--finish`
  *   - site               (T3.1): package docs + data files for apps/arki/start, from npm or the candidate
  *   - demo-check         (T4.2): one demo installed, typechecked, tested and built against a candidate
+ *   - demo               (T4.4): `demo issues` turns a demo's open lib-gaps rows into GitHub issues
  */
 export type ReleaseCommand =
   | 'inventory'
@@ -43,7 +44,8 @@ export type ReleaseCommand =
   | 'upgrade-guide'
   | 'ship'
   | 'site'
-  | 'demo-check';
+  | 'demo-check'
+  | 'demo';
 
 /**
  * Lifecycle status of a release command run.

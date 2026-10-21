@@ -281,11 +281,18 @@ function OpenGaps({ detail }: Section) {
         <p>No open gaps.</p>
       ) : (
         <>
-          <p>Release checks this package does not pass yet:</p>
+          <p>Release checks this package does not pass yet, and gaps found by the demos:</p>
           <ul>
             {gaps.map(gap => (
-              <li key={gap}>
-                <code>{gap}</code>
+              <li key={`${gap.kind}:${gap.foundBy ?? ''}:${gap.title}`}>
+                {gap.kind === 'readiness' ? (
+                  <code>{gap.title}</code>
+                ) : (
+                  <>
+                    {gap.url === null ? gap.title : <a href={gap.url}>{gap.title}</a>}
+                    {gap.url === null ? <> (found-by:{gap.foundBy})</> : null}
+                  </>
+                )}
               </li>
             ))}
           </ul>

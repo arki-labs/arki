@@ -61,6 +61,16 @@ export const snapshotMetaSchema = z.object({
   benchStatus: z.enum(BENCH_STATUSES),
 });
 
+/** A gap on a package page: a readiness check, or a demo's `lib-gaps.md` row (with its issue, once filed). */
+export const openGapSchema = z.object({
+  kind: z.enum(['readiness', 'demo']),
+  title: z.string(),
+  /** Issue on `arki-labs/arki`; null for readiness checks and rows not filed yet. */
+  url: z.string().nullable(),
+  /** Demo that found the gap; null for readiness checks. */
+  foundBy: z.string().nullable(),
+});
+
 export const packageEntrySchema = z.object({
   name: z.string(),
   /** Folder under `src/content/packages/`. */
@@ -84,8 +94,8 @@ export const packageEntrySchema = z.object({
   demos: z.array(z.object({ name: z.string(), pin: z.string().nullable() })),
   /** `https://github.com/arki-labs/<short>`, the read-only mirror `sync` maintains. */
   mirror: z.string(),
-  /** Readiness items still listed in `readiness-baseline.json`. */
-  openGaps: z.array(z.string()),
+  /** Readiness items still in `readiness-baseline.json`, and open rows of a demo's `lib-gaps.md` that name this package. */
+  openGaps: z.array(openGapSchema),
 });
 export const packagesFileSchema = z.array(packageEntrySchema);
 

@@ -45,13 +45,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/assert",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs",
-      "types"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "types",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -85,13 +120,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/async",
     "openGaps": [
-      "file-changelog",
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-changelog",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -111,11 +181,36 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/auth",
     "openGaps": [
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-keywords",
-      "pkg-homepage",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-keywords",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-homepage",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -153,11 +248,36 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/bench",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -177,12 +297,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/cas",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -263,12 +413,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/clock",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -337,9 +517,24 @@
     ],
     "mirror": "https://github.com/arki-labs/contracts",
     "openGaps": [
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -398,12 +593,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/date",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -489,9 +714,36 @@
     ],
     "mirror": "https://github.com/arki-labs/db",
     "openGaps": [
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "Queries are not spans",
+        "url": null,
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "Turning a drizzle-kit generate folder into a deployable module (and checking it is fresh)…",
+        "url": null,
+        "foundBy": "drop-studio"
+      }
     ]
   },
   {
@@ -540,13 +792,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/design-systems",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs",
-      "types"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "types",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -640,8 +927,42 @@
     ],
     "mirror": "https://github.com/arki-labs/dot",
     "openGaps": [
-      "file-agents-md",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "Plugin hook spans are created with tracer.startSpan (not startActiveSpan), so work done i…",
+        "url": null,
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "Plugins do not declare their source package",
+        "url": null,
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "Instrumentation scope version is hard-coded (0.1.0) while the package is 0.4.1, and plugi…",
+        "url": null,
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "Running app.boot() under context.with(ROOTCONTEXT.setValue(key, v), …) stalls boot under…",
+        "url": null,
+        "foundBy": "drop-studio"
+      }
     ]
   },
   {
@@ -730,12 +1051,48 @@
     ],
     "mirror": "https://github.com/arki-labs/env",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "@arki/tsconfig, eslint-config, prettier-config are private workspace packages",
+        "url": null,
+        "foundBy": "drop-studio"
+      }
     ]
   },
   {
@@ -755,12 +1112,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/expr",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -794,13 +1181,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/failure",
     "openGaps": [
-      "file-changelog",
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-changelog",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -851,12 +1273,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/http",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -900,12 +1352,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/icons",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -946,9 +1428,24 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/journal",
     "openGaps": [
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1019,12 +1516,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/kv",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1062,13 +1589,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/lock",
     "openGaps": [
-      "file-changelog",
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-changelog",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1127,12 +1689,42 @@
     ],
     "mirror": "https://github.com/arki-labs/log",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1152,11 +1744,36 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/mail",
     "openGaps": [
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-keywords",
-      "pkg-homepage",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-keywords",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-homepage",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1225,12 +1842,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/math",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1261,12 +1908,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/money",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1307,12 +1984,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/payments",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "Stripe Checkout hardcodes mode: 'subscription', one price, quantity 1 (stripe-provider.ts)",
+        "url": null,
+        "foundBy": "drop-studio"
+      }
     ]
   },
   {
@@ -1356,13 +2069,48 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/react-hooks",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs",
-      "types"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "types",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1411,12 +2159,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/resilience",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1450,10 +2228,30 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/schema",
     "openGaps": [
-      "file-changelog",
-      "file-agents-md",
-      "readme-h2-order",
-      "pkg-engines"
+      {
+        "kind": "readiness",
+        "title": "file-changelog",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1512,12 +2310,42 @@
     "demos": [],
     "mirror": "https://github.com/arki-labs/string",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1566,12 +2394,42 @@
     ],
     "mirror": "https://github.com/arki-labs/theme",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1625,12 +2483,42 @@
     ],
     "mirror": "https://github.com/arki-labs/ts",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      }
     ]
   },
   {
@@ -1689,12 +2577,48 @@
     ],
     "mirror": "https://github.com/arki-labs/ui",
     "openGaps": [
-      "file-llms-txt",
-      "file-agents-md",
-      "file-agent-guide",
-      "readme-h2-order",
-      "pkg-engines",
-      "files-ship-dist-docs"
+      {
+        "kind": "readiness",
+        "title": "file-llms-txt",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agents-md",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "file-agent-guide",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "readme-h2-order",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "pkg-engines",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "readiness",
+        "title": "files-ship-dist-docs",
+        "url": null,
+        "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "No portable Tailwind consumption contract: a consumer must @source the package's src by f…",
+        "url": null,
+        "foundBy": "drop-studio"
+      }
     ]
   }
 ]

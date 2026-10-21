@@ -45,6 +45,7 @@ import { demosUsing, loadDemos } from './demos';
 import { parseBenchProvenance } from './docs-fresh';
 import { createEnvelope } from './json-output';
 import { npmVersionLookup } from './order';
+import { gapTitle, loadOpenDemoGaps } from './demo-issues';
 import { loadReadinessBaseline, tierOf } from './readiness';
 import { defaultNpmRunner, execRunner } from './runners';
 import {
@@ -605,6 +606,7 @@ async function writeGenerated(
   const snapshots = await readSnapshots(contentRoot, errors);
   const registry = await loadDemos(cwd, config);
   const baseline = loadReadinessBaseline(path.join(cwd, READINESS_BASELINE));
+  const demoGaps = await loadOpenDemoGaps(cwd, config);
 
   const packages: PackageEntry[] = [];
   const errorRows: z.input<typeof errorsFileSchema> = [];
@@ -655,7 +657,12 @@ async function writeGenerated(
         examples === null ? null : { compiled: examples.compiled, run: examples.ran, skipped: examples.skipped },
       demos: demosUsing(registry, name).map(use => ({ name: use.demo, pin: use.pinned ?? null })),
       mirror: `${MIRROR_ORG}/${shortName(name)}`,
-      openGaps: [...(baseline[name] ?? [])],
+      openGaps: [
+        ...(baseline[name] ?? []).map(title => ({ kind: 'readiness' as const, title, url: null, foundBy: null })),
+        ...demoGaps
+          .filter(({ row }) => row.packages.includes(name))
+          .map(({ demo, row }) => ({ kind: 'demo' as const, title: gapTitle(row), url: row.issueUrl, foundBy: demo })),
+      ],
     });
   }
   const demos = registry.demos.map(demo => ({

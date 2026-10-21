@@ -17,6 +17,7 @@ import debugFactory from 'debug';
 import { CANDIDATES_DIR, lastShippedCommits, readCandidate, runCandidate, type CandidateTarget } from './candidate';
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
 import { runDemoCheck } from './demo-check';
+import { runDemoIssuesApply, runDemoIssuesPrepare } from './demo-issues';
 import { demosUsing, loadDemos } from './demos';
 import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 import {
@@ -154,6 +155,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'demo-check',
     task: 'T4.2',
     description: 'Install, typecheck, test and build one demo against a candidate: --demo <name> --candidate <dir>.',
+  },
+  {
+    name: 'demo',
+    task: 'T4.4',
+    description: 'Demo lib-gaps to GitHub issues: issues --demo <name> --prepare | --apply (apply is founder only).',
   },
 ];
 
@@ -380,6 +386,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runDemoCheckHandler(args);
   }
 
+  if (args.command === 'demo') {
+    return runDemoHandler(args);
+  }
+
   if (args.command === 'impact') {
     return runImpactHandler(args);
   }
@@ -602,6 +612,25 @@ async function runDemoCheckHandler(args: ParsedCliArgs): Promise<number> {
   if (demo === null || candidateDir === null) return usageError('demo-check', 'demo-check needs `--demo <name>` and `--candidate <dir>`.', args.json);
   return withConfig('demo-check', args.json, async config => {
     const envelope = await runDemoCheck({ cwd: process.cwd(), config, demo, candidateDir });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  });
+}
+
+/**
+ * `demo issues --demo <name> --prepare`: local, agent-safe; writes `.release/demo-issues/<name>.json`.
+ * `demo issues --demo <name> --apply`: founder only; creates the issues and links them in the demo's lib-gaps.md.
+ */
+async function runDemoHandler(args: ParsedCliArgs): Promise<number> {
+  const demo = extractOption(args.rest, 'demo');
+  const prepare = args.rest.includes('--prepare');
+  const apply = args.rest.includes('--apply');
+  if (args.rest[0] !== 'issues' || demo === null || prepare === apply) {
+    return usageError('demo', 'usage: demo issues --demo <name> (--prepare | --apply).', args.json);
+  }
+  return withConfig('demo', args.json, async config => {
+    const options = { cwd: process.cwd(), config, demo };
+    const envelope = apply ? await runDemoIssuesApply(options) : await runDemoIssuesPrepare(options);
     emitEnvelope(envelope, { json: args.json });
     return envelope.status === 'failure' ? 1 : 0;
   });
