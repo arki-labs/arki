@@ -5,7 +5,9 @@ import type { StandardSchemaV1 } from '@arki/schema';
  */
 
 /**
- * Base error class for all AI-related errors
+ * Base error class for all AI-related errors. Read `code` to tell them apart.
+ * @fix Read `code` and `cause`, then fix the call or the configuration that the subclass names.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class AIError extends Error {
   constructor(
@@ -21,6 +23,8 @@ export class AIError extends Error {
 
 /**
  * Error thrown when embedding generation fails
+ * @fix Check the embedding provider's key, model and dimensions, and that the service answers.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class EmbeddingError extends AIError {
   constructor(message: string, cause?: unknown) {
@@ -32,6 +36,8 @@ export class EmbeddingError extends AIError {
 
 /**
  * Error thrown when vector search operations fail
+ * @fix Check that the vector store (for example Qdrant at `QDRANT_URL`) is up and the collection exists.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class VectorSearchError extends AIError {
   constructor(message: string, cause?: unknown) {
@@ -43,6 +49,8 @@ export class VectorSearchError extends AIError {
 
 /**
  * Error thrown when AI generation fails
+ * @fix Check the provider's key and model, and that the service (for example Ollama) answers.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class GenerationError extends AIError {
   constructor(message: string, cause?: unknown) {
@@ -54,6 +62,8 @@ export class GenerationError extends AIError {
 
 /**
  * Error thrown when input validation fails
+ * @fix Read `validationErrors`, then change the input so each field passes its schema.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class ValidationError extends AIError {
   constructor(
@@ -68,6 +78,8 @@ export class ValidationError extends AIError {
 
 /**
  * Error thrown when API configuration is invalid
+ * @fix Set the environment variable or option the message names, then start again.
+ * @verify bun run test -- src/errors.test.ts
  */
 export class ConfigurationError extends AIError {
   constructor(message: string) {
@@ -80,6 +92,8 @@ export class ConfigurationError extends AIError {
 /**
  * A tool returned a result that does not match its `output` schema. The runtime throws it in
  * place of the result, so the model never sees the bad value.
+ * @fix Change the `execute` of the named tool so its result matches its `output` schema.
+ * @verify bun run test -- src/runtime/ai-sdk-runtime.test.ts
  */
 export class ToolOutputError extends AIError {
   /** What to do about it, in one sentence. */

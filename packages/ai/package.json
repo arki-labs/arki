@@ -2,7 +2,14 @@
   "name": "@arki/ai",
   "version": "0.1.3",
   "private": true,
+  "description": "Local-first AI for TypeScript apps: provider-agnostic generation, embeddings, a vector index with erasure, and a tool-loop runtime.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/ai"
+  },
   "license": "MIT",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -66,7 +73,8 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "test:docs": "arki-doc-examples",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false && tsc -p examples/tsconfig.json"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -170,5 +178,22 @@
     "vitest": "catalog:"
   },
   "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  "files": [
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "docs/agent-guide.md",
+    "docs/reference.md",
+    "docs/recipes/**",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

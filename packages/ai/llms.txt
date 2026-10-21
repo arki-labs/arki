@@ -1,0 +1,34 @@
+# @arki/ai
+
+> Local-first AI for TypeScript apps: Ollama by default, cloud providers by explicit setting, embeddings, a vector index with erasure, a tool-loop runtime and returned (not thrown) rate-limit and budget failures.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/ai`: Comprehensive AI, RAG, and Vector Search Library Provides reusable AI infrastructure for all Arki projects. `AIError`, `AnthropicService`, `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `ConfigurationError`, `ContentAnalysisSchema`, `CostCircuitBreaker`, `CostEstimator`; and 201 more.
+- `@arki/ai/react`: React components and hooks for AI functionality. `AIChat`, `SearchInterface`, `StreamingText`, `Typewriter`, `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`; types `AIChatProps`, `ChatMessage`, `GenerationOptions`, `GenerationResult`; and 12 more.
+- `@arki/ai/react/index`: React components and hooks for AI functionality. `AIChat`, `SearchInterface`, `StreamingText`, `Typewriter`, `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`; types `AIChatProps`, `ChatMessage`, `GenerationOptions`, `GenerationResult`; and 12 more.
+- `@arki/ai/cost`: Cost Management Module. `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `CostCircuitBreaker`, `CostEstimator`, `DEFAULT_BUDGET_LIMITS`, `DEFAULT_CIRCUIT_CONFIG`, `DEFAULT_PRICING`, `LLM_PRICING`; and 26 more.
+- `@arki/ai/safety`: Safety Module. `BASE_ISSUE_TYPES`, `BaseInputSanitizer`, `CONTENT_RATINGS`, `DEFAULT_INJECTION_PATTERNS`, `DEFAULT_OUTPUT_FILTER_CONFIG`, `DEFAULT_PII_PATTERNS`, `DEFAULT_SANITIZER_CONFIG`, `OutputContentFilter`, `PIIRedactor`, `PromptInjectionDetector`, `SANITIZATION_RESULTS`, `createInputSanitizer`; and 21 more.
+- `@arki/ai/dot`: `vectorIndex(...)` — the app's embedder and vector index as a Dot plugin. `vectorIndex`; types `VectorIndexPluginOptions`.
+- `@arki/ai/drizzle`: Erasure outbox for a vector index, on Drizzle + Postgres. `TOMBSTONE_DELETE_CHUNK`, `TOMBSTONE_INSERT_CHUNK`, `createTombstoneTable`, `tombstoneOutbox`; types `TombstoneDb`, `TombstoneTable`, `TombstoneTableOptions`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the overview.
+
+## By task
+- [Set up AI](docs/recipes/set-up-ai.md)
+- [Generate text or structured data](docs/agent-guide.md#generate-structured-data)
+- [Embed and search](docs/agent-guide.md#embed-and-search)
+- [Run a tool loop](docs/agent-guide.md#run-a-tool-loop)
+- [Handle a rate limit](docs/agent-guide.md#handle-a-rate-limit)
+
+## Rules that bite
+- With `LLM_PROVIDER` unset the provider is Ollama. A cloud key never overrides an Ollama signal.
+- `RateLimited` and `BudgetExceeded` are returned, not thrown. Check before you iterate a stream.
+- Embedding selection is read in one place and may be `null`. Handle `null`; never use a mock default.
+- A tool result is checked against its `output` schema. A tool returns a failure for an expected outcome.
+- The server entries are not browser-safe.

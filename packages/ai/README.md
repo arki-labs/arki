@@ -1,474 +1,141 @@
 # @arki/ai
 
-Comprehensive AI, RAG, and Vector Search library for Arki projects.
+Local-first AI for TypeScript apps. One provider setting picks Ollama (the default), OpenAI or another cloud model. You get structured generation, embeddings, a vector index that honours erasure, a tool-loop runtime with checked tool output, and an in-memory flow runner. Expected refusals such as a rate limit come back as values, not throws.
 
-## Types and validation
+## Install
 
-Search and service configuration types are inferred from their runtime schemas.
-`SearchSettings` contains query-less search settings; `SearchOptions` adds the required
-query and optional payload filters. `RAGServiceConfig` selects a RAG provider and its
-generation settings; `AIServiceConfig` configures a provider service's model, retries,
-and sanitization. Their schemas are `searchSettingsSchema`, `searchOptionsSchema`,
-`ragServiceConfigSchema`, and `aiServiceConfigSchema`.
-
-The former root exports `SearchOptionsType` and `AIServiceConfigType` are now
-`SearchSettings` and `RAGServiceConfig`, respectively. `ClassifiedIntent` and its
-`IntentType` category are inferred from the schema used for model responses.
-
-Sanitizer configuration is programmatic: custom injection and PII rules accept actual
-`RegExp` instances. The OpenAI service validates and preserves these rules before
-sanitizing prompts. `sanitizerConfigSchema` is available from `@arki/ai/safety` and
-`@arki/ai/validation`; `SanitizerConfig` is inferred from that schema.
-
-## Features
-
-- 🔍 **Vector Search**: Production-ready vector search with Qdrant, Pinecone (coming soon), and Weaviate (coming soon)
-- 🧠 **Embeddings**: Multiple embedding providers (OpenAI, Cohere, Anthropic)
-- 🔎 **Semantic Search**: Advanced search with caching, analytics, and hybrid modes
-- 🤖 **AI Services**: Structured generation, streaming, and conversation APIs
-- ⚛️ **React Components**: Ready-to-use AI chat, search, and streaming components
-- 📊 **Analytics**: Built-in search and usage analytics
-- 💾 **Caching**: Intelligent caching for improved performance
-
-## Installation
-
-```bash
-pnpm add @arki/ai
+```sh
+bun add @arki/ai @arki/failure
 ```
 
-## Quick Start
+`@arki/failure` gives you `isFailure`. Everything heavy is an optional peer: install `@arki/dot` for `@arki/ai/dot`, `drizzle-orm` and `@arki/db` for `@arki/ai/drizzle`, `react` and `@ai-sdk/react` for `@arki/ai/react`.
 
-### Embedding Provider
+To run a model on your machine, install [Ollama](https://ollama.com) and pull the default model: `ollama pull qwen3.6`.
 
-```typescript
-import { createEmbeddingProvider } from '@arki/ai';
+## Quick start
 
-const embedder = createEmbeddingProvider({
-  type: 'openai',
-  apiKey: process.env.OPENAI_API_KEY,
-  model: 'text-embedding-3-small',
-});
+Pick what the app will call. Nothing leaves your machine until you call a model, and the embedding choice is a pure function of the environment map you pass in.
 
-const embedding = await embedder.getEmbedding('Hello world');
-```
-
-### Vector Search
-
-```typescript
-import { createEmbeddingProvider, createQdrantProvider } from '@arki/ai';
-
-const embedder = createEmbeddingProvider({ type: 'openai' });
-const vectorStore = createQdrantProvider(
-  {
-    url: 'http://localhost:6333',
-    collectionName: 'documents',
-  },
-  embedder,
-);
-
-// Index documents
-await vectorStore.indexDocument('doc1', 'This is a test document');
-
-// Search
-const results = await vectorStore.searchSimilar('test query', 10);
-```
-
-### Semantic Search Service
-
-```typescript
-import { createEmbeddingProvider, createVectorProvider, SemanticSearchService } from '@arki/ai';
-
-const embedder = createEmbeddingProvider({ type: 'openai' });
-const vectorProvider = createVectorProvider({
-  type: 'qdrant',
-  embeddingProvider: embedder,
-  config: { url: 'http://localhost:6333', collectionName: 'docs' },
-});
-
-const searchService = new SemanticSearchService({
-  vectorProvider,
-  enableCache: true,
-  cacheTTL: 3600,
-});
-
-const results = await searchService.search({
-  query: 'machine learning',
-  mode: 'hybrid',
-  limit: 20,
-});
-```
-
-### AI Generation
-
-```typescript
-import { createLLMProvider, OpenAIService, RateLimited, StructuredGenerator } from '@arki/ai';
-
-const ai = new OpenAIService({ model: 'gpt-4o-mini' });
-const generator = new StructuredGenerator(createLLMProvider());
-
-// Generate structured data
-const summary = await generator.generateSummary('Long text to summarize...');
-
-// Stream responses: the call takes a rate-limit slot first, so check for RateLimited before iterating
-const stream = await ai.streamText('Tell me a story');
-if (RateLimited.is(stream)) return stream; // data: { retryAfterMs }
-for await (const chunk of stream) {
-  console.log(chunk);
+```ts from="examples/pick-provider.ts#pick-provider"
+/** What the app will call, given an environment map. Nothing is sent over the network. */
+export function describeSetup(environment: Readonly<Record<string, string | undefined>>) {
+  return {
+    // `LLM_PROVIDER` and `LLM_MODEL` come from the process environment; ollama is the default.
+    chatModel: resolveLlmModel(),
+    // The embedding choice is pure: pass the map in. `null` means nothing is configured.
+    embeddings: resolveEmbeddingSelection(environment),
+  };
 }
 ```
 
-### Orchestration (Flow)
+With Ollama configured, the embedding selection is:
 
-`createFlow` runs its nodes in memory, inside one request or one job. It is not durable: a restart loses the run. Work that must survive process death, or that waits for hours or days, belongs in a durable workflow of `@arki/journal` ([Workflows](../journal/README.md#workflows)).
+```ts run expect
+import { resolveEmbeddingSelection } from '@arki/ai';
 
-```typescript
-import { createFlow } from '@arki/ai';
+console.log(resolveEmbeddingSelection({ OLLAMA_BASE_URL: 'http://127.0.0.1:11434' }));
+```
 
-type StoryState = {
-  outline?: string;
-  draft?: string;
-  edited?: string;
-  status: 'planning' | 'writing' | 'editing' | 'complete';
+```text
+{
+  type: "ollama",
+  model: "qwen3-embedding:0.6b",
+  dimensions: 1024,
+}
+```
+
+Next: [Set up AI](docs/recipes/set-up-ai.md) takes you from nothing to a first model call.
+
+## When not to use this
+
+- You only need one provider's SDK and will never change it. Use that SDK (or the AI SDK, `ai`) directly.
+- You need work that survives a restart or waits for hours. `createFlow` runs in memory. Use an `@arki/journal` workflow.
+- You need browser or Hermes support for the server entries. They import `node:crypto` and Node clients.
+- You want a hosted agent platform with memory and evals. This package adapts the tool loop only.
+
+## Runtime support
+
+Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
+
+## Public imports
+
+| Import | What it is |
+| --- | --- |
+| `@arki/ai` | Providers and services (`OllamaService`, `OpenAIService`, `AnthropicService` and more), `createLLMProvider`, embeddings, vector index, semantic search, the tool-loop runtime, `createFlow`, failures and errors. |
+| `@arki/ai/cost` | Budgets, a circuit breaker and cost estimates. |
+| `@arki/ai/safety` | Prompt-injection checks, PII redaction, output filtering. |
+| `@arki/ai/dot` | `vectorIndex` plugin for a Dot app. |
+| `@arki/ai/drizzle` | The erasure tombstone table and outbox. |
+| `@arki/ai/react` | Chat, streaming text and search components and hooks. |
+
+`llms.txt` lists every export. The package also exposes a `./*` subpath pattern for files under `src/`; treat those as unstable.
+
+## Use it
+
+The long guides are in [the reference](docs/reference.md): [text and structured generation](docs/reference.md#generate-text-and-structured-data), [embeddings and the vector index](docs/reference.md#embeddings-and-the-vector-index), [the tool loop](docs/reference.md#the-tool-loop), [flows](docs/reference.md#flows) and [React](docs/reference.md#react).
+
+A flow in memory:
+
+```ts from="examples/draft-story.ts#draft-story"
+type StoryState = { outline?: string; draft?: string };
+
+type StoryContext = {
+  /** Calls a model. A test passes a plain function instead. */
+  write: (instruction: string) => Promise<string>;
 };
 
-type CouncilContext = {
-  planner: (input: string) => Promise<string>;
-  writer: (input: string) => Promise<string>;
-  editor: (input: string) => Promise<string>;
-};
-
-const flow = createFlow<StoryState, CouncilContext>({
-  start: 'plan',
+/** Two steps in memory: outline, then draft. A restart loses a run that is in flight. */
+const draftStory = createFlow<StoryState, StoryContext>({
+  start: 'outline',
   nodes: {
-    plan: {
-      id: 'plan',
-      run: async (state, ctx) => ({
-        outline: await ctx.planner('Create an outline'),
-        status: 'planning',
-      }),
-      next: 'write',
+    outline: {
+      id: 'outline',
+      run: async (_state, context) => ({ outline: await context.write('Outline a short story.') }),
+      next: 'draft',
     },
-    write: {
-      id: 'write',
-      run: async (state, ctx) => ({
-        draft: await ctx.writer(state.outline ?? ''),
-        status: 'writing',
-      }),
-      next: 'edit',
-    },
-    edit: {
-      id: 'edit',
-      run: async (state, ctx) => ({
-        edited: await ctx.editor(state.draft ?? ''),
-        status: 'complete',
-      }),
+    draft: {
+      id: 'draft',
+      run: async (state, context) => ({ draft: await context.write(`Write it from: ${state.outline ?? ''}`) }),
       next: undefined,
     },
   },
 });
-
-const result = await flow.run(
-  { status: 'planning' },
-  {
-    planner: async input => input,
-    writer: async input => input,
-    editor: async input => input,
-  },
-);
 ```
 
-Nodes can return canonical `@arki/failure` values. Use `createFlow<State, Context>()(config)` to infer the exact union of failures from every node; `flow.run(...)` returns the successful state or the original failure. A returned failure stops the flow before merging state, retrying, running the next node, or emitting success events.
-
-For separately declared nodes, use `satisfies FlowNode<State, Context, Failure>` (with `Failure` imported from `@arki/failure`) to validate the shape while retaining each concrete return type. A type annotation using the broad `Failure` type erases that precision. `FlowConfig` and `Flow` accept a third generic for the complete node output type when explicit typing is needed. Existing failure-free `createFlow<State, Context>(config)` calls remain supported.
-
-This returned-failure contract does not migrate Flow's existing thrown configuration, node, timeout, cancellation, checkpoint, or retry-wait errors. Those paths still reject.
-
-### Agents (AI SDK ToolLoopAgent)
-
-`@arki/ai` re-exports the AI SDK agent utilities for tool-based loops.
-
-```typescript
-import { stepCountIs, tool, ToolLoopAgent } from '@arki/ai';
-import { z } from '@arki/contracts';
-
-const lookupTool = tool({
-  description: 'Look up a story constraint by key',
-  inputSchema: z.object({ key: z.string() }),
-  execute: async ({ key }) => `value-for-${key}`,
-});
-
-const agent = new ToolLoopAgent({
-  model: 'gpt-4o-mini',
-  tools: { lookup: lookupTool },
-  maxSteps: 4,
-  stopWhen: stepCountIs(4),
-});
-
-const result = await agent.generate({
-  prompt: 'Check the universe rule for "magic".',
-});
-```
-
-### Agent runtime (`runToolLoop`)
-
-`createAiSdkRuntime` runs a tool loop behind the framework-neutral `AgentRuntime` contract.
-Define tools with `defineAgentTool`: `execute`'s input type comes from `inputSchema`, and its return
-type comes from `output`.
-
-```typescript
-import { createAiSdkRuntime, defineAgentTool } from '@arki/ai';
-import { z } from '@arki/contracts';
-
-const weather = defineAgentTool({
-  name: 'weather',
-  description: 'Current temperature for a city.',
-  inputSchema: z.object({ city: z.string() }),
-  output: z.object({ celsius: z.number() }),
-  async execute({ city }, { signal }) {
-    const response = await fetch(`https://example.com/weather/${city}`, { signal });
-    return { celsius: Number(await response.text()) };
-  },
-});
-
-const controller = new AbortController();
-const runtime = createAiSdkRuntime({ model });
-for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather], signal: controller.signal })) {
-  // run:start, text:delta, tool:start, tool:result, tool:failure, tool:error, run:finish
-}
-```
-
-- **Cancel with `signal`.** After it aborts, the run starts no new model call or tool call. The
-  model call in flight and every tool see the abort. The loop rejects with the signal's reason.
-- **`inputSchema` is any Standard Schema that can emit JSON Schema** (wrap one that cannot with `withJsonSchema` from `@arki/schema`).
-- **`output` is checked.** The runtime checks each result against `output` (Zod or any Standard
-  Schema) before the model sees it. The model gets the parsed value. A mismatch fails that tool
-  call with a `ToolOutputError` (code `TOOL_OUTPUT_ERROR`), which arrives as a `tool:error` event.
-- **Return a failure for an expected outcome.** `execute` may return a failure from
-  [`@arki/failure`](../failure), such as `CityNotFound({ city })`. The model gets
-  `{ error: { code, message, remediation, data } }` as the tool result, so the remediation sentence
-  can steer its next call. The `output` check is skipped, and the run emits
-  `{ type: 'tool:failure', tool, failure }`. `runtimeEventReducer` marks that call `failed`. A thrown
-  error is still a `tool:error`. Both runtimes (AI SDK and Mastra) behave the same.
-- **Spans.** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the AI SDK's own telemetry
-  (`@ai-sdk/otel`) records one `step N` span per model step and one `execute_tool <name>` span per
-  tool call. With no endpoint, or no OpenTelemetry SDK registered, nothing is recorded.
-
-### React Components
-
-```typescript
-import { useAIChat, AIChat, useSemanticSearch, SearchInterface } from '@arki/ai';
-
-function ChatComponent() {
-  const chat = useAIChat({
-    apiEndpoint: '/api/chat',
-    streamResponse: true,
-  });
-
-  return (
-    <AIChat
-      messages={chat.messages}
-      input={chat.input}
-      isLoading={chat.isLoading}
-      onInputChange={chat.setInput}
-      onSubmit={(e) => {
-        e.preventDefault();
-        chat.sendMessage();
-      }}
-    />
-  );
-}
-
-function SearchComponent() {
-  const search = useSemanticSearch({
-    apiEndpoint: '/api/search',
-    mode: 'semantic',
-    debounceMs: 300,
-  });
-
-  return (
-    <SearchInterface
-      query={search.query}
-      results={search.results}
-      suggestions={search.suggestions}
-      isSearching={search.isSearching}
-      onQueryChange={search.setQuery}
-      onSearch={search.search}
-    />
-  );
-}
-```
-
-## API Reference
-
-### Embedding Providers
-
-#### `createEmbeddingProvider(config)`
-
-Creates an embedding provider instance.
-
-**Config Options:**
-
-- `type`: 'openai' | 'mock' | 'cohere' | 'anthropic'
-- `apiKey`: API key for the provider
-- `model`: Model to use for embeddings
-- `batchSize`: Batch size for processing
-- `cache`: Enable caching
-
-### Vector Search
-
-#### `createVectorProvider(config)`
-
-Creates a vector search provider instance.
-
-**Config Options:**
-
-- `type`: 'qdrant' | 'mock' | 'pinecone' | 'weaviate'
-- `embeddingProvider`: Embedding provider instance
-- `config`: Provider-specific configuration
-
-### Semantic Search
-
-#### `SemanticSearchService`
-
-Advanced search service with caching and analytics.
-
-**Methods:**
-
-- `search(options)`: Perform search
-- `indexDocuments(documents)`: Index documents
-- `getSuggestions(prefix)`: Get search suggestions
-- `getMetrics()`: Get search analytics
-
-### AI Services
-
-#### `OpenAIService`
-
-OpenAI integration using Vercel AI SDK.
-
-**Methods:**
-
-- `generateStructuredData(prompt, schema)`: Generate structured data. `schema` is any Standard Schema (zod, valibot, arktype). The model is shown its input JSON Schema; you get its output type back (transforms have run). A schema that cannot emit JSON Schema throws a `ConfigurationError` that names `withJsonSchema`.
-- `generateText(prompt)`: Generate text
-- `streamText(prompt)`: Stream text generation. Resolves to the chunk generator, or `RateLimited`.
-- `generateConversation(messages)`: Generate conversation response
-
-Each method checks a local rate limiter first. When it has no free slot, the method returns the `RateLimited` failure (code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) instead of calling the model. It never throws for this. Provider faults still throw `GenerationError`.
-
-#### `StructuredGenerator`
-
-Helper for common generation tasks.
-
-**Methods:**
-
-- `generateSummary(text)`: Generate summary
-- `answerQuestion(question, context)`: Answer questions
-- `classifyText(text, categories)`: Classify text
-- `extractEntities(text)`: Extract entities
-- `analyzeSentiment(text)`: Analyze sentiment
-
-### React Hooks
-
-#### `useAIChat(options)`
-
-Hook for AI chat functionality.
-
-**Returns:**
-
-- `messages`: Chat messages
-- `input`: Current input
-- `isLoading`: Loading state
-- `sendMessage(text)`: Send message
-- `clearMessages()`: Clear chat
-
-#### `useSemanticSearch(options)`
-
-Hook for semantic search.
-
-**Returns:**
-
-- `query`: Search query
-- `results`: Search results
-- `isSearching`: Loading state
-- `search(query)`: Perform search
-- `getSuggestions(prefix)`: Get suggestions
-
-## Vector index (runtime, index, reconciler, Dot, Drizzle)
-
-One env reader, local-first. The core never reads `process.env` — pass the map in.
-
-```ts
-import { createEmbedder, createEmbeddingRuntime, createVectorIndex, runVectorReconciliation } from '@arki/ai';
-
-// EMBEDDING_PROVIDER → else Ollama (OLLAMA_BASE_URL / OLLAMA_HOST) → else OpenAI → else null.
-const runtime = await createEmbeddingRuntime(process.env); // { provider, selection: { type, model, dimensions } } | null
-const embedder = createEmbedder(runtime); // embedQuery(text, expectedDimensions?) → { vector, selection } | null
-
-type Payload = { userId: string; kind: 'item' | 'chunk'; model: string; dimensions: number };
-const index = runtime && createVectorIndex<Payload>(runtime, { collection: 'app_embeddings', payloadIndexes: ['userId', 'kind'], env: process.env });
-// index.provider: Qdrant when QDRANT_URL is set (durable: true), the in-memory mock otherwise (durable: false)
-
-// Cron: drain erasure tombstones (durable index only), migrate dimension mismatches, re-upsert current rows,
-// then delete the points whose rows stopped being current while they were upserted.
-const counts = await runVectorReconciliation({ durable: index.durable, targetDimensions, model, embedText, upsertPoint, deletePoints, tombstones, stores });
-```
-
-- `@arki/ai/dot` — `vectorIndex({ collection, payloadIndexes, env?, runtime?, provider? })` provides `embedder` and `vectorIndex` (`{ provider, durable }`, `provider` is `null` when nothing is configured). Resolved once at boot. Optional peer: `@arki/dot`.
-- `@arki/ai/drizzle` — `createTombstoneTable<UserId>(schema, { name, idPrefix })` and `tombstoneOutbox(table)` → `write(tx, userId, pointIds)` (in the delete's transaction), `clear(db, pointIds)` (after a direct erasure), `store(db)` (the reconciler's `TombstoneStore`). Optional peers: `drizzle-orm`, `@arki/db`.
-
-## Advanced Usage
-
-### Custom Embedding Provider
-
-```typescript
-import { EmbeddingProvider } from '@arki/ai';
-
-class CustomEmbeddingProvider implements EmbeddingProvider {
-  async getEmbedding(text: string): Promise<number[]> {
-    // Your implementation
-  }
-
-  async getEmbeddings(texts: string[]): Promise<number[][]> {
-    // Batch implementation
-  }
-
-  getDimensions(): number {
-    return 768; // Your model's dimensions
-  }
-}
-```
-
-### Custom Vector Provider
-
-```typescript
-import { VectorSearchProvider } from '@arki/ai';
-
-class CustomVectorProvider implements VectorSearchProvider {
-  async indexDocument(id, text, metadata) {
-    // Your implementation
-  }
-
-  async searchSimilar(query, limit) {
-    // Your implementation
-  }
-}
-```
-
-### Prompt Engineering
-
-```typescript
-import { PromptBuilder, PromptTemplates } from '@arki/ai';
-
-const prompt = PromptBuilder.fromTemplate(PromptTemplates.summarize)
-  .setVariable('contentType', 'article')
-  .setVariable('content', articleText)
-  .setVariable('focus', 'key takeaways')
-  .setVariable('maxLength', '200')
-  .build();
-
-const summary = await ai.generateText(prompt.prompt, {
-  systemPrompt: prompt.systemPrompt,
-});
-```
+## Failure behaviour
+
+| Result | When | What to do |
+| --- | --- | --- |
+| `RateLimited` (returned, code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) | The local limiter has no free slot. | Wait `retryAfterMs`, then retry. |
+| `BudgetExceeded` (returned, code `ai.budget_exceeded`, status 402) | The estimated cost passes the budget of one period. | Wait for the period to reset, or raise the limit. |
+| `ConfigurationError` (thrown) | A key, model or variable is missing or wrong. | Set what the message names. |
+| `GenerationError`, `EmbeddingError`, `VectorSearchError` (thrown) | The provider or the store is down or refused. | Read `cause`. Retry later. |
+| `ToolOutputError` (thrown, code `TOOL_OUTPUT_ERROR`) | A tool result did not match its `output` schema. The run emits `tool:error`. | Fix the tool's `execute`. |
+| A failure a tool returns | An expected outcome of that tool. | Nothing: the model reads the remediation and tries again. The run emits `tool:failure`. |
+
+Check a returned value with `isFailure` from `@arki/failure`, or a definition's `is`: `RateLimited.is(result)`.
+
+## Limits
+
+- **The package will be split.** It will become the seven packages named in `docs/arki/research/12-ai-split/naming.md` in later minor releases. Import paths may move; each release notes the move in `CHANGELOG.md`.
+- **Not cross-runtime.** Qdrant imports `node:crypto`. Do not import `@arki/ai`'s server entries in a browser bundle.
+- **Flow is not durable.** `createFlow` loses a run on restart. A run that waits for hours belongs in an `@arki/journal` workflow.
+- **Rate-limit check comes first.** `streamText` takes a limiter slot before it returns the stream. Check for `RateLimited` before you iterate: a `RateLimited` value is not a stream.
+- **Reconciliation is capped per run.** `runVectorReconciliation` handles at most `ROW_CAP_PER_RUN` (50) rows and `TOMBSTONE_CAP_PER_RUN` (200) tombstones per call. With 10 000 pending tombstones you need 50 calls (cron runs) to clear them.
+- **Only a durable index acknowledges erasure.** With no `QDRANT_URL` the index is in memory (`durable: false`), and tombstones stay pending.
+- **Small local models fail more often on structured output.** Ollama's constrained decoding keeps output on the schema; a model that is too small still gives weak content.
+- **`@mastra/core` is pinned** to `1.37.1` as an optional peer. Other versions are untested.
+
+## Documentation
+
+- [Set up AI](docs/recipes/set-up-ai.md)
+- [Reference](docs/reference.md)
+- [Agent guide](docs/agent-guide.md)
+- [Changelog](CHANGELOG.md)
+
+## Support
+
+Report bugs and ask questions on the [Arki issue tracker](https://github.com/arki-labs/arki/issues). Include the package version, your `LLM_PROVIDER`, and the error code.
 
 ## License
 

@@ -1,178 +1,38 @@
-# @arki/ai — Laws
+AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
-Canonical rules for code that uses `@arki/ai` and for any feature that
-adds AI capability to an Arki app. These rules apply at design time, at
-review time, and at runtime.
+# @arki/ai
 
-## LAW 1 — Local LLMs take priority over cloud LLMs
+## Laws
 
-When a feature needs an LLM, the default backend is a **locally-running
-model** (Ollama, llama.cpp, or any OpenAI-compatible local endpoint).
-Cloud providers (OpenAI, Anthropic) are explicit fall-throughs, never
-implicit defaults.
+1. Local models come first. With `LLM_PROVIDER` unset, the provider is Ollama. A cloud provider (OpenAI, Anthropic, Groq, Google, Mistral) needs an explicit signal: `LLM_PROVIDER` or a key. A key never overrides an Ollama signal. The auto-detect order is `ollama -> openai -> anthropic`.
+2. Never ship a stub as a runtime choice. No `'stub'` provider name. A missing key or an unreachable Ollama throws a `ConfigurationError` that names the fix. Test doubles are fine at the test boundary (`vi.mock`, an injected adapter).
+3. Cost telemetry names the resolved model. Never log a dollar value from a hardcoded model name. Log the model that served the call, or add `costEstimateBasis` next to the number.
+4. `src/embeddings/runtime.ts` is the only place that reads embedding selection from the environment (`EMBEDDING_PROVIDER`, else Ollama, else OpenAI, else `null`). The core takes the env map as an argument and never reads `process.env`. Only `@arki/ai/dot` passes `process.env`. There is no `mock` default.
+5. Apps never set their own embedding model or dimensions. `selection` carries them, and `createVectorIndex` sizes the collection from it.
+6. `runVectorReconciliation` acknowledges a tombstone only against a durable index (`VectorIndex.durable`). It re-checks every upserted batch with `stillCurrent(ids)`, so a point deleted during an upsert ends up deleted. `@arki/ai/drizzle` owns the tombstone table and outbox.
+7. Expected refusals are returned, never thrown: `RateLimited`, `BudgetExceeded`, and failures a tool returns. A provider that is down still throws.
+8. A tool result is checked against its `output` schema before the model sees it. A mismatch is a `ToolOutputError`.
+9. Feature code sees an adapter (`ctx.llm`), never `new OpenAIService(...)`. Defaults per capability live in the adapter file.
+10. `createFlow` runs in memory. Work that must survive a restart belongs in an `@arki/journal` workflow.
+11. The package is not cross-runtime yet: Qdrant imports `node:crypto`. Do not promise browser or Hermes support for the server entries.
 
-### Why
+## Changing this package
 
-- **No egress.** Prompts and outputs never leave the operator's machine
-  unless they explicitly opt in to a cloud provider.
-- **No cost.** A local run costs $0; a cloud run costs real money. For
-  development, debugging, soak-testing, and demos, that's the right
-  default.
-- **No rate limits.** Cloud APIs rate-limit per minute / per day; local
-  models are bounded only by hardware.
-- **No vendor lock-in by accident.** Code that defaults to a cloud
-  provider quietly couples the feature to that vendor's quirks
-  (response formatting, system-prompt behaviour, tool schemas).
-  Defaulting to local keeps the abstraction honest.
+- New provider service: `src/ai-service/<name>-service.ts`. Match `OllamaService`'s `generateStructured*` signatures, add the name to `LLMProviderConfig` in `src/ai-service/factory.ts` and to the model defaults there.
+- New embedding provider: `src/embeddings/`. Add it to the selection logic in `src/embeddings/runtime.ts` and nowhere else.
+- New failure: `src/failures.ts`, with JSDoc `@fix` and `@verify`.
+- New error class: `src/errors.ts`, with JSDoc `@fix` and `@verify`.
+- A new export needs an entry in `package.json` `exports` and a line in `src/index.ts` when it belongs to the root.
+- Run `bun ../../tooling/library/src/llms.ts --write` after an export change.
+- Keep `README.md`, `llms.txt`, `docs/agent-guide.md` and `docs/recipes/set-up-ai.md` in step.
+- `docs/capabilities`, `docs/tech-radar`, `docs/ui`, `docs/adapter-layer-proposal.md` and `docs/publish-scope.md` are internal. They are not in the `files` list. Do not link them from shipped docs.
+- The package will be split into seven packages in later minor releases (`docs/arki/research/12-ai-split/naming.md`). Do not start the split inside an unrelated change.
 
-### How to apply
+## Verify
 
-1. **Provider auto-detect order is fixed: `ollama → openai → anthropic`.**
-   When `LLM_PROVIDER` is unset, the resolver picks the first signal
-   present in env. Ollama is signaled by `OLLAMA_BASE_URL` or
-   `OLLAMA_HOST` being set, OR — at the resolver's discretion — by
-   `localhost:11434` reachability.
-
-2. **Cloud providers require explicit signal.** `OPENAI_API_KEY` /
-   `ANTHROPIC_API_KEY` activate their respective branches, but never
-   override an Ollama signal. To force a cloud provider, set
-   `LLM_PROVIDER=openai` or `LLM_PROVIDER=anthropic` explicitly.
-
-3. **Defaults per capability live in the adapter.** Text-only agents
-   default to a small model (e.g., `llama3.2:3b` on Ollama,
-   `gpt-4o-mini` on OpenAI). Vision agents default to a multimodal
-   model (e.g., `llama3.2-vision:11b` on Ollama, `gpt-4o` on OpenAI).
-   Per-feature overrides go through `CreateLlmAdapterOptions.model`.
-
-4. **The Ollama path uses the native `ollama` client through `OllamaService`.**
-   `OllamaService` from `@arki/ai` wraps the `ollama` package's chat
-   endpoint and uses Ollama's **native `format` parameter** with a
-   JSON-Schema (derived from the Zod schema via `z.toJSONSchema(...)`) for
-   token-level constrained decoding — outputs are guaranteed to match the
-   schema. Multimodal calls round-trip through Ollama vision models
-   (llama3.2-vision, llava) via the AI SDK's `{ type: 'image', image: <url
-   | Uint8Array | base64> }` message-part shape; the service downloads and
-   base64-encodes URL-form images for you.
-
-   *Why native, not the OpenAI-compat shim?* `chat({ format: jsonSchema })`
-   does grammar-constrained sampling at the token level. Going through
-   `@ai-sdk/openai`-against-`/v1` strips the `format` field and falls back
-   to prompt-engineered JSON, which fails much more often on small local
-   models.
-
-5. **Documentation says local first.** Every README / setup guide for an
-   AI-using feature must list Ollama as the default and cloud providers
-   as alternatives. Never invert this order.
-
-### Where this rule lives in code
-
-- `packages/ai/src/ai-service/ollama-service.ts` — `OllamaService`, the
-  canonical local-LLM primitive. Mirrors `OpenAIService` /
-  `AnthropicService` for the `generateStructured*` methods, so any caller
-  typed against those signatures is provider-agnostic.
-
-- `apps/games-platform/backend/src/features/historical-assets/content-discovery/llm-adapter.ts`
-  — the canonical *consumer*: `DiscoveryLlmAdapter` interface, default
-  models per capability, `resolveLlmProvider` auto-detect, and the
-  `createLlmAdapter` factory that returns `OllamaService` /
-  `OpenAIService` / `AnthropicService` based on the precedence rules
-  above.
-
-## LAW 2 — Never stub LLM calls in production code paths
-
-Stubs / canned responses MUST NOT be a runtime-selectable backend.
-
-### Why
-
-- **Silent failure.** A misconfigured deploy that silently selects a
-  stub will produce confident-looking fake data. Failing loudly when no
-  real provider is available is strictly better.
-- **No legitimate "free option."** With LAW 1 in place, Ollama already
-  covers the "I don't want to pay for a cloud LLM" use case with real
-  intelligence. Stubs add no value at runtime.
-
-### How to apply
-
-1. **No `'stub'` value in any `LlmProviderName` union.** If you find
-   one, delete it.
-2. **Test mocks are different and allowed.** `vi.mock('@arki/ai')` and
-   per-test injected adapter objects are valid — they substitute at the
-   test boundary, not in production. The line is: anything reachable by
-   a runtime env var or config value MUST be a real provider.
-3. **A missing API key / unreachable Ollama daemon should throw.**
-   `resolveLlmProvider` throws with a message that points the operator
-   at the canonical setup steps. It never falls back to fabricated
-   output.
-
-### Failure modes this prevents
-
-- "Why is the discovery pipeline producing the same canned candidates
-  every run?" — because someone shipped with `LLM_PROVIDER=stub` set in
-  prod env.
-- "Why are eval scores suspiciously consistent?" — because the agent
-  was hitting a stub during nightly evals.
-- "Why didn't CI catch this prompt regression?" — because CI was using
-  a stub instead of a real (or recorded) model call.
-
-## LAW 3 — Cost telemetry reflects the resolved provider, never a hardcoded model
-
-A consumer that hardcodes a model name for cost accounting will misreport spend
-whenever LAW 1 resolves a different provider.
-
-### Why
-
-- **Over-reporting.** `createLlmProvider()` auto-selects provider/model from env per
-  LAW 1. A consumer that hardcodes `const COST_MODEL = 'gpt-4o-mini'` and passes it to
-  `calculateLLMCost(COST_MODEL, …)` over-reports cost whenever Ollama is the resolved
-  provider — Ollama spend is $0, but the telemetry bills it at the OpenAI rate.
-- **Silent drift.** The dollar figure looks authoritative while being wrong; operators
-  make capacity and pricing decisions off a number that tracks a constant, not reality.
-
-### How to apply
-
-Never log a single dollar value without disclosing one of these two bases:
-
-1. **Resolved-model log** — log the actual provider/model returned by the call (when the
-   provider surface exposes it). The dollar figure then matches what was actually spent.
-2. **Estimate-basis disclaimer** — log a `costEstimateBasis: '<rate-source>'` field next
-   to the dollar figure so operators read it as a ceiling (e.g. "what we would have paid
-   on OpenAI's gpt-4o-mini rate"), not as actual spend.
-
-### Failure modes this prevents
-
-- "Why does our AI cost dashboard show $40/day when the bill is $3?" — because every
-  generation logged a hardcoded `gpt-4o-mini` rate while Ollama served the requests.
-- "Which of these cost numbers is real spend vs an estimate?" — answered by the presence
-  of `costEstimateBasis`; its absence implies a resolved-model log.
-
-## Embeddings and the vector index — one env reader
-
-`src/embeddings/runtime.ts` is the ONLY place embedding selection is read from
-env: `EMBEDDING_PROVIDER` explicit, else Ollama (`OLLAMA_BASE_URL` / `OLLAMA_HOST`),
-else OpenAI, else `null`. Never a `mock` default. The core takes `env` as an
-argument and never reads `process.env`; only `@arki/ai/dot` (`vectorIndex`
-plugin) supplies the `process.env` thunk. Apps must not redefine their own
-default model / dimensions — `selection` carries them, and
-`createVectorIndex` sizes the collection from it.
-
-Erasure: `runVectorReconciliation` acknowledges tombstones only against a
-durable index (`VectorIndex.durable`), and re-checks every upserted batch with
-the store's `stillCurrent(ids)` so a point deleted during an upsert ends up
-deleted. `@arki/ai/drizzle` owns the tombstone table + outbox.
-
-`@arki/ai` is not cross-runtime yet (Qdrant imports `node:crypto`); do not
-promise browser / Hermes support for these entries.
-
-## How to extend
-
-When adding a new AI-powered feature to Arki:
-
-1. Define an adapter interface that hides the provider choice from the
-   feature code. Agents see `ctx.llm`, never `new OpenAIService(...)`.
-2. Wire `createLlmAdapter` (or a feature-local equivalent that follows
-   the same precedence rules) at the context-factory level.
-3. Default to Ollama; add cloud providers as fall-throughs.
-4. Document per-capability default models in the adapter file, not in
-   ad-hoc constants scattered through agents.
-5. Add the model setup steps to the feature's README — Ollama first
-   (`ollama pull llama3.2-vision:11b`), then API-key paths.
+```sh
+bun run test
+bun run typecheck
+bun run test:docs
+bun ../../tooling/library/src/llms.ts --check
+```
