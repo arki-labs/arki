@@ -1,13 +1,15 @@
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
+import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
+
 import { contentPlugin } from '@arki/content-build/vite';
 import { devServer, printLocalhostUrl } from '@arki/dev-certs';
-import { nitro } from 'nitro/vite';
-import { paraglideVitePlugin } from '@inlang/paraglide-js';
+import { phosphorPerIcon } from '@arki/icons/vite';
 import { createPwaPlugin } from '@arki/tanstack-start/pwa';
-import { fleetVite } from '@arki/tanstack-start/vite';
+import { fleetVite, oneChunkPerRoute, reactCompiler, zodCompiled } from '@arki/tanstack-start/vite';
 
 export default defineConfig({
   server: {
@@ -113,12 +115,7 @@ export default defineConfig({
       // TanStack's default-entry stub.
       server: { entry: './entry-server.ts' },
       router: {
-        // Split each route's loader into the route's own lazy chunk, next to its component. By default loaders stay
-        // in the main entry, so every page downloaded every route's loader imports (content collections, zod
-        // validators, server-function stubs). Grouping loader + component keeps it one request per route.
-        codeSplittingOptions: {
-          defaultBehavior: [['loader', 'component'], ['pendingComponent'], ['errorComponent'], ['notFoundComponent']],
-        },
+        codeSplittingOptions: oneChunkPerRoute,
         routesDirectory: 'routes',
         generatedRouteTree: 'routeTree.gen.ts',
         quoteStyle: 'single',
@@ -128,5 +125,8 @@ export default defineConfig({
     createPwaPlugin(),
     fleetVite(),
     viteReact(),
+    reactCompiler(),
+    zodCompiled(),
+    phosphorPerIcon(),
   ],
 });
