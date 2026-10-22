@@ -200,11 +200,22 @@ function missingCapability(alias: string, handle: AnyHandle, where: string, reme
 }
 
 /**
+ * A provides factory receives only `{ usecases }` (plus kernel keys), so the
+ * capabilities `servicesOf` reads are never in it and it would throw
+ * `ARKI_DOT_E026` at boot. This type turns that into a compile error: a
+ * context that has a `usecases` key is rejected; any other object passes.
+ */
+export type RejectProvidesContext<C extends object> = [C] extends [{ readonly usecases: unknown }] ? never : C;
+
+/**
  * Read every capability the units (features or units) provide out of a hook context whose
  * `needs` spread {@link providesOf} — the bag a gateway passes to its
  * request context.
  */
-export function servicesOf<const T extends readonly HasProvides[]>(ctx: object, features: T): ServicesOf<T> {
+export function servicesOf<const T extends readonly HasProvides[], const C extends object>(
+  ctx: RejectProvidesContext<C>,
+  features: T,
+): ServicesOf<T> {
   const source = ctx as Readonly<Record<string, unknown>>;
   const bag: Record<string, unknown> = {};
   for (const f of features) {

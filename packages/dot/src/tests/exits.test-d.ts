@@ -13,7 +13,7 @@ import { expectTypeOf } from 'vitest';
 
 import type { DepsOf, EntrypointOnlyNeeds, EntrypointServices, ProvidesDeps, requestServices } from '../feature.js';
 import type { KernelCtx, Provided } from '../unit-contract.js';
-import { defineFeature, domainService, entrypointOnly } from '../feature.js';
+import { defineFeature, domainService, entrypointOnly, providesOf, servicesOf } from '../feature.js';
 import { infra } from '../index.js';
 
 /** One object type out of an intersection, so an exact equality compares keys and values, not intersection shape. */
@@ -91,3 +91,14 @@ expectTypeOf<Flat<Published>>().toEqualTypeOf<Flat<Services>>();
 
 // (5) `handles` (what `bind(logic)` types a handler's context from) has only `db` and `usecases`.
 expectTypeOf<keyof typeof logic.handles>().toEqualTypeOf<'db' | 'usecases'>();
+
+// (6) `servicesOf` rejects a provides-factory context at compile time. That context holds only the
+// usecases, so the capabilities it reads are never there and it would throw ARKI_DOT_E026 at boot.
+const peer = defineFeature('peer')
+  .usecases({ ping: () => () => 'pong' })
+  .provides({ ping: ({ usecases }) => usecases.ping })
+  .entrypoints();
+defineFeature('gateway')
+  .needs(providesOf([peer]))
+  // @ts-expect-error -- a provides factory receives `{ usecases }` only; servicesOf must not accept it
+  .provides({ rpc: ctx => servicesOf(ctx, [peer]) });

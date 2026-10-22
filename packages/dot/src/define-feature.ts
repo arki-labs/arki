@@ -1864,11 +1864,23 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
   };
 }
 
+/** The rebound handle with the flag `entrypointOnly(...)` sets, on it and on its lazy form; the clone keeps the handle under `origin`. */
+function markEntrypointOnly(handle: Service<unknown>): Service<unknown> {
+  const lazy = lazyFormOf(handle);
+  const flag = (w: object) => ({ entrypointOnly: true, origin: canonical(w) });
+  const lazyFlagged = typeof lazy === 'object' && lazy !== null ? { lazy: Object.assign({}, lazy, flag(lazy)) } : {};
+  return Object.assign({}, handle, flag(handle), lazyFlagged);
+}
+
 /** The witness after a rebind: the rebound handle (its lazy form for a lazy need), else the witness as written. */
 function followRebind(witness: Service<unknown>, follow: ReadonlyMap<object, Service<unknown>>): Service<unknown> {
   const base = canonical(witness);
   const direct = follow.get(base);
-  if (direct !== undefined) return direct;
+  // A rebound `entrypointOnly` need stays entrypoint-only: the flag belongs to the alias, not to the old handle.
+  if (direct !== undefined) {
+    const flagged = (witness as Provenance).entrypointOnly === true && (direct as Provenance).entrypointOnly !== true;
+    return flagged ? markEntrypointOnly(direct) : direct;
+  }
   for (const [from, to] of follow) {
     if (lazyFormOf(from) !== base) continue;
     const lazy = lazyFormOf(to);
