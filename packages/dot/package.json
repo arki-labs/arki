@@ -92,6 +92,11 @@
       "types": "./dist/telemetry.d.ts",
       "import": "./dist/telemetry.js",
       "default": "./dist/telemetry.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
     }
   },
   "bin": {
@@ -154,13 +159,18 @@
     "@types/node": "catalog:node",
     "awilix": "^13.0.5",
     "typescript": "catalog:",
+    "vite": "catalog:build-tools",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@orpc/server": "catalog:backend"
+    "@orpc/server": "catalog:backend",
+    "vite": "^7 || ^8"
   },
   "peerDependenciesMeta": {
     "@orpc/server": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   },

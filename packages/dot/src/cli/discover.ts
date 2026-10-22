@@ -201,7 +201,8 @@ function describeCause(err: unknown): string {
   return coded === undefined || text.includes(coded.code) ? text : `[${coded.code}] ${text}`;
 }
 
-function importFailed(filePath: string, exportName: string | null, error: unknown): Failure {
+/** `dot.app_import_failed` for an app module that threw while loading, naming the declaration error's own code when it has one. */
+export function importFailed(filePath: string, exportName: string | null, error: unknown): Failure {
   const coded = codedCause(error);
   return AppImportFailed(
     {
@@ -237,7 +238,20 @@ async function loadAppExport(
   } catch (error) {
     return importFailed(filePath, null, error);
   }
+  return appFromModule(mod, filePath, prefer);
+}
 
+/**
+ * Unwrap an already-imported app module into its app export. Shared by the
+ * CLI (which imports the file itself) and `@arki/dot/vite` (which imports it
+ * through Vite's module runner, so aliases and workspace packages resolve the
+ * way the app's own build resolves them).
+ */
+export async function appFromModule(
+  mod: unknown,
+  filePath: string,
+  prefer: 'default' | 'dev' = 'default',
+): Promise<{ readonly app: DiscoveredApp; readonly exportName: string } | Failure> {
   const exported = findAppExport(mod, prefer);
   if (!exported.found) {
     return AppInvalidExport({

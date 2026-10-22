@@ -38,6 +38,13 @@ export type ProjectionSource = {
   appFilePath: string;
   /** Per-invocation debug override for the selected projection module. */
   module?: string;
+  /**
+   * How to import the projection module. Default: resolve the specifier
+   * relative to the app file (Bun's resolver, else Node's) and `import()` it.
+   * `@arki/dot/vite` imports through Vite's module runner instead, so a
+   * workspace package distributed as TypeScript source loads under Node too.
+   */
+  importModule?: (specifier: string) => Promise<unknown>;
 };
 
 function isJsonPrimitive(value: unknown): value is string | number | boolean | null {
@@ -130,25 +137,41 @@ function hasProject(value: unknown): value is ProjectionModule {
   return is(value, recordSchema) && typeof value['project'] === 'function';
 }
 
+/** Resolve the specifier relative to the app file and `import()` it: the default importer. */
+function importRelativeToApp(appFilePath: string): (specifier: string) => Promise<unknown> {
+  return async specifier => {
+    let resolved: string;
+    try {
+      resolved = resolveProjectionSpecifier(specifier, appFilePath);
+    } catch (error) {
+      throw new ProjectionResolveError(error);
+    }
+    return import(importSpecifierFor(resolved));
+  };
+}
+
+/** Marks a failure of the resolve step, so the import failure names that stage. */
+class ProjectionResolveError extends Error {
+  constructor(override readonly cause: unknown) {
+    super(messageOf(cause), { cause });
+  }
+}
+
 async function loadProjectionModule(
   specifier: string,
-  appFilePath: string,
   registeringPlugin: string,
+  importModule: (specifier: string) => Promise<unknown>,
 ): Promise<ProjectionModule | Failure> {
-  let resolved: string;
-  try {
-    resolved = resolveProjectionSpecifier(specifier, appFilePath);
-  } catch (error) {
-    return ProjectionImportFailed(
-      { specifier, registeringPlugin, stage: 'resolve', causeMessage: messageOf(error) },
-      { cause: error },
-    );
-  }
-
   let imported: unknown;
   try {
-    imported = await import(importSpecifierFor(resolved));
+    imported = await importModule(specifier);
   } catch (error) {
+    if (error instanceof ProjectionResolveError) {
+      return ProjectionImportFailed(
+        { specifier, registeringPlugin, stage: 'resolve', causeMessage: error.message },
+        { cause: error.cause },
+      );
+    }
     return ProjectionImportFailed(
       { specifier, registeringPlugin, stage: 'import', causeMessage: messageOf(error) },
       { cause: error },
@@ -166,7 +189,8 @@ export async function renderProjection(source: ProjectionSource): Promise<Projec
   const projection = selectProjection(source.manifest, source.format);
   if (isFailure(projection)) return projection;
   const specifier = source.module ?? projection.module;
-  const loaded = await loadProjectionModule(specifier, source.appFilePath, projection.plugin);
+  const importModule = source.importModule ?? importRelativeToApp(source.appFilePath);
+  const loaded = await loadProjectionModule(specifier, projection.plugin, importModule);
   if (isFailure(loaded)) return loaded;
 
   try {

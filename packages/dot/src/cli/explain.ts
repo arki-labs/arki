@@ -28,16 +28,21 @@ export type ExplainOptions = {
 /** What `dot explain` returns: the manifest, or the `--graph` / `--as` payload. */
 export type ExplainData = DotAppManifest | GraphData | ProjectionData;
 
-/** Explain a discovered app. A builder is configured, never booted; a configured or booted app is read as is. */
-export async function runExplain(discovered: DiscoveredApp, opts: ExplainOptions = {}): Promise<ExplainData | Failure> {
-  let manifest: DotAppManifest;
+/** The manifest of a discovered app. A builder is configured, never booted; a configured or booted app is read as is. */
+export function manifestOf(discovered: DiscoveredApp): DotAppManifest | Failure {
   try {
     const configured = guards.isDotAppBuilder(discovered) ? discovered.configure() : discovered;
     if (isFailure(configured)) return configured;
-    manifest = configured.manifest;
+    return configured.manifest;
   } catch (error) {
     return lifecycleFailed(error, 'configure');
   }
+}
+
+/** Explain a discovered app: its manifest, or the `--graph` / `--as` payload derived from it. */
+export async function runExplain(discovered: DiscoveredApp, opts: ExplainOptions = {}): Promise<ExplainData | Failure> {
+  const manifest = manifestOf(discovered);
+  if (isFailure(manifest)) return manifest;
   if (opts.as !== undefined) {
     return renderProjection({
       manifest,
