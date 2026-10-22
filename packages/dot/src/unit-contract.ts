@@ -153,11 +153,15 @@ export type CtxOf<S extends NeedsShape> = { [K in keyof S]: WitnessContext<S[K]>
  * `{ cache: Token<KV, 'arki.kv'> }` → `{ 'arki.kv': KV }`.
  */
 export type WireNeeds<S extends NeedsShape> = {
+  // A parent-bound need (`domainService(fn)`) is bound by the parent feature at compile (ChildrenGuard checks it,
+  // ARKI_DOT_E034 at runtime otherwise), so the app never wires it.
   // The key alone: a handle carries `K` in `key`, `lazy.key` and `instance()`'s `${K}#${N}`; inferring through the
   // whole Token splits a key that holds `#` into two candidates.
-  [K in keyof S as S[K] extends { readonly key: infer WK extends string } ? WK : K]: S[K] extends Service<infer T>
-    ? T
-    : never;
+  [K in keyof S as S[K] extends { readonly parentBound: true }
+    ? never
+    : S[K] extends { readonly key: infer WK extends string }
+      ? WK
+      : K]: S[K] extends Service<infer T> ? T : never;
 };
 
 /**

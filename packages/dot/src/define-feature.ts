@@ -31,7 +31,7 @@
  * (`digest → digest/store → database`, `digest.compile → digest/store`).
  */
 import type { Failure, FailureIn } from '@arki/failure';
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { FeatureSlice } from './feature.js';
 import type { SupervisedUsecase } from './kernel/usecase.js';
@@ -485,7 +485,11 @@ export type ChildOverrides<TName extends string, C extends readonly AnyDefinedFe
     >;
 
 /** The wire key a declared need resolves to: a handle's own key, else the alias. */
-type WireKeyOfNeed<W, K> = W extends { readonly key: infer WK extends string } ? WK : K;
+type WireKeyOfNeed<W, K> = W extends { readonly parentBound: true }
+  ? never
+  : W extends { readonly key: infer WK extends string }
+    ? WK
+    : K;
 
 /**
  * An infra unit's needs shape once the feature owns it: an alias the
@@ -978,7 +982,7 @@ export type UsecaseGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] ex
 
 /* ---- domain services: built once per boot, above the children, seen by usecases only ---- */
 
-/** What a domain-service factory builds, as its readers see it: awaited, a creation Failure out, a `resource()` opened. */
+/** What a domain-service factory builds, as its readers see it: awaited, a `resource()` opened. */
 export type DomainServiceValue<Fn extends Factory> = ProvidedValue<Awaited<ReturnType<Fn>>>;
 
 /** The domain services `.domainServices(F)` declares, by key: what the feature's usecases see next to `DomainDeps`. */
@@ -986,20 +990,30 @@ export type DomainServiceValues<F extends UsecaseFactories> = { readonly [K in k
 
 /**
  * A child's need on a domain service its parent declares, named by the factory: `domainService(extras)`.
- * The parent binds it when it compiles (`remapNeeds`), never the app. So its wire key is `never` at the
- * type level: the wiring types (`WireNeeds`, `WireKeyOfNeed`) drop the need instead of asking the app for
- * a service under the alias. The runtime witness has no `key`; nothing reads one off it.
+ * It is parent-bound: the parent rewires it when it compiles (`remapNeeds`), never the app, so the wiring
+ * types (`WireNeeds`, `WireKeyOfNeed`) drop it. Both forms carry `parentBound: true` at runtime too.
  */
 export type DomainServiceHandle<Fn extends Factory> = Service<DomainServiceValue<Fn>> & {
   readonly domainService: Fn;
-  readonly key: never;
-  readonly lazy: LazyService<DomainServiceValue<Fn>> & { readonly domainService: Fn; readonly key: never };
+  readonly parentBound: true;
+  readonly lazy: LazyService<DomainServiceValue<Fn>> & { readonly domainService: Fn; readonly parentBound: true };
 };
 
 type DomainServiceCollision<N, I extends readonly AnyUnit[], F> = keyof F &
   (keyof N | keyof InfraProvides<I> | ReservedAlias);
-/** A domain-service key must not shadow a need alias, an infra key or a reserved name: usecases see all of them by key. */
-export type DomainServicesGuard<N, I extends readonly AnyUnit[], F> = [DomainServiceCollision<N, I, F>] extends [never]
+/** The domain services whose factory may return a Failure. */
+type FailingDomainServices<F> = {
+  [K in keyof F]: F[K] extends (deps: never) => infer Built
+    ? [Extract<Awaited<Built>, Failure>] extends [never]
+      ? never
+      : K
+    : never;
+}[keyof F];
+/**
+ * A domain-service key must not shadow a need alias, an infra key or a reserved name: usecases see all of
+ * them by key. A factory must not fail: it builds from deps already built and does no I/O.
+ */
+export type DomainServicesGuard<N, I extends readonly AnyUnit[], F> = ([DomainServiceCollision<N, I, F>] extends [never]
   ? unknown
   : {
       readonly 'DOT: a domain service key collides with a need alias, an infra service or a reserved name': DomainServiceCollision<
@@ -1007,7 +1021,12 @@ export type DomainServicesGuard<N, I extends readonly AnyUnit[], F> = [DomainSer
         I,
         F
       >;
-    };
+    }) &
+  ([FailingDomainServices<F>] extends [never]
+    ? unknown
+    : {
+        readonly 'DOT: a domain service factory cannot fail; a build step that can fail is an adapter: move it to .infra()': FailingDomainServices<F>;
+      });
 
 /** Names each domain service whose factory asks for a dep not declared above it, and the deps it lacks. */
 type DomainServiceDepsGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] extends [never]
@@ -1112,7 +1131,9 @@ export type DomainServicesStage<
    * The feature's domain services, one plain factory per key, built once per boot before the
    * children: `{ extras }`, each `(deps: Pick<DomainDeps, …>) => value` (a function, an object or a
    * class instance). `DomainDeps` is `DepsOf` of the stage above (needs + infra), so a factory cannot
-   * ask for a peer, itself or anything below. Usecases see each value by key; a child names one with
+   * ask for a peer, itself or anything below. A factory cannot fail: it builds from deps already built
+   * and does no I/O, so a step that can fail is an adapter and belongs in `.infra()` (a Failure that
+   * gets past the types fails boot as a defect). Usecases see each value by key; a child names one with
    * `domainService(fn)`; `provides` and entrypoints never see them.
    *
    * Two overloads, as for `.usecases()`: the first infers inline factories, the second prints the
@@ -1278,14 +1299,8 @@ export function entrypointOnly<H extends AnyHandle & { readonly lazy: object }>(
   return { ...handle, entrypointOnly: true as const, origin: canonical(handle), lazy } as unknown as EntrypointOnly<H>;
 }
 
-/** What `domainService(fn)` builds at runtime: the factory, and a lazy form that names it too. No `key`: the parent binds it. */
-type DomainServiceWitness = {
-  readonly domainService: Factory;
-  readonly lazy: { readonly lazy: true; readonly domainService: Factory };
-};
-
 /** One witness per factory, so a child's need and its parent's declaration meet by identity. */
-const domainServiceWitnesses = new WeakMap<Factory, DomainServiceWitness>();
+const domainServiceWitnesses = new WeakMap<Factory, DomainServiceHandle<Factory>>();
 
 /**
  * Need a domain service the parent feature declares: `needs({ extras: domainService(extras) })` in a
@@ -1295,10 +1310,16 @@ const domainServiceWitnesses = new WeakMap<Factory, DomainServiceWitness>();
  * (`ARKI_DOT_E034` otherwise). The same factory always gives the same witness.
  */
 export function domainService<Fn extends Factory>(fn: Fn): DomainServiceHandle<Fn> {
-  const known = domainServiceWitnesses.get(fn) ?? { domainService: fn, lazy: { lazy: true, domainService: fn } };
-  domainServiceWitnesses.set(fn, known);
-  // Erasure seam: one witness per factory, typed by the factory that keys it; `key: never` is type-only (see DomainServiceHandle).
-  return known as DomainServiceHandle<Fn>;
+  const known = domainServiceWitnesses.get(fn);
+  // Erasure seam: the map is keyed by the factory itself, so the witness stored under `fn` was made for `Fn`.
+  if (known !== undefined) return known as DomainServiceHandle<Fn>;
+  const made: DomainServiceHandle<Fn> = {
+    domainService: fn,
+    parentBound: true,
+    lazy: { lazy: true, domainService: fn, parentBound: true },
+  };
+  domainServiceWitnesses.set(fn, made);
+  return made;
 }
 
 /** The factory a `domainService(fn)` witness names, or `undefined` for any other witness. */
@@ -1568,6 +1589,19 @@ async function prepareUsecases<Values extends ServiceRecord>(
   return { usecases };
 }
 
+/**
+ * Build the domain services. The types refuse a factory that can fail (`DomainServicesGuard`); one that
+ * fails anyway, past erased types, fails boot as a defect: no reader's type expects that Failure.
+ */
+async function prepareDomainServices(
+  feature: string,
+  factories: Readonly<Record<string, Factory>>,
+  deps: never,
+): Promise<BuiltDomainServices | Failure> {
+  const built = await prepareUsecases(feature, factories, deps, traceUsecase);
+  return creationFailed(built) ? UnexpectedDefect({ cause: built }) : built;
+}
+
 /** The context a domain-service unit's factories read: what `prepareUsecases` built, by local key. */
 type BuiltDomainServices = { readonly usecases: Readonly<Record<string, unknown>> };
 
@@ -1670,7 +1704,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
       ? undefined
       : {
           runtime: createUnitRuntime<BuiltDomainServices | Failure>(undefined, ctx =>
-            prepareUsecases(state.name, domainServices, ctx, traceUsecase),
+            prepareDomainServices(state.name, domainServices, ctx),
           ),
           name: domainUnitName,
           needs: {

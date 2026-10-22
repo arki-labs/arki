@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * `domainService(fn)`) see the one instance; `provides` and entrypoints never
  * do. These are the smoke checks of that promise; the full matrix is B6.
  */
-import { orThrow } from '@arki/failure';
+import { findCause, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { defineFeature, domainService, entrypointOnly, FEATURE_ERROR_CODES, FeatureError } from '../feature.js';
 import { defineApp, infra } from '../index.js';
@@ -115,5 +115,18 @@ describe('domainServices()', () => {
         // @ts-expect-error -- `db` is already a need alias
         .domainServices({ db: () => 1 });
     expect(collide).toThrow(expect.objectContaining({ code: FEATURE_ERROR_CODES.keyCollision }));
+  });
+
+  it('refuses a factory that can fail; one that fails past the types fails boot as a defect', async () => {
+    const broken = () => UnexpectedDefect({ cause: 'no I/O at construction' });
+    const failing = defineFeature('failing')
+      // @ts-expect-error -- a domain service factory cannot fail: move the step to .infra()
+      .domainServices({ broken })
+      .usecases({})
+      .provides({ failing: () => 'never built' })
+      .entrypoints();
+    const result = await defineApp('failing-app').features([failing]).start();
+    expect(isFailure(result)).toBe(true);
+    expect(findCause(result, UnexpectedDefect)).toBeDefined();
   });
 });
