@@ -1,7 +1,7 @@
 # RFC: one way to define middleware in Dot
 
 - Date: 2026-10-21 (revised 2026-10-22)
-- Status: Proposed. Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI), 3 (handler events), 4 (auth steps, keyed `derive` deleted) and 5 (app guards) built; step 6 open.
+- Status: Implemented (2026-10-22). Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI), 3 (handler events), 4 (auth steps, keyed `derive` deleted), 5 (app guards) and 6 (docs) built.
 - Designer: Fable (survey, design, two placement passes, `around` check). File references come from those passes; recheck them when a step starts.
 
 ## 1. The shape in one sentence
@@ -48,7 +48,7 @@ Nothing is shared at runtime, so nothing needs a home. A step's types come from 
 | D7 | Schedules and CLI commands | **Yes**: `with: [...]` takes steps and arounds on `@arki/schedule` schedules and `@arki/cli` commands. |
 | D8 | Where `derive` / `Step` live | **Nowhere.** Not `@arki/dot` (cli cycle; `arki-layers` L003 for schedule and auth), not `@arki/failure/step` (founder), not a new package (not needed once a step is a plain function). |
 | D9 | Wrapping that does not inspect the result | **`around`**, transport-neutral (2026-10-22). Events cannot run a handler in a transaction or retry it. |
-| D10 | What an around sees when the call fails with a `Failure` (a step refuses, or the handler returns one) | **A value** (2026-10-22): `next()` resolves to the `Failure`; an around that must roll back checks `isFailure`. A thrown error still rejects `next()`. oRPC is the exception: there a refusal *is* a thrown `ORPCError`, so `next()` rejects. |
+| D10 | What an around sees when the call fails with a `Failure` (a step refuses, or the handler returns one) | **A value** (2026-10-22): `next()` resolves to the `Failure` (on HTTP, to the refusal's `Response`, since the stage loop has already turned it into the envelope); an around that must roll back checks `isFailure` (on HTTP, the status). A thrown error still rejects `next()`. oRPC is the exception: there a refusal *is* a thrown `ORPCError`, so `next()` rejects. |
 | D11 | How a handler event reads an outcome | **Reuse the observer's `starting` / `completed` / `failed`** (2026-10-22). A returned `Failure`, a step's refusal and an oRPC error below 500 are `completed` with `outcome: 'refused'` and the `failure`; `failed` means thrown, so an error reporter watches one status. |
 | D12 | Names | **`transport`** on the event, **`$handlers`** on the kernel context, observers **`reportErrors({ report })`** and **`logHandlers()`** (2026-10-22). |
 | D13 | Per-handler logging | **Opt-in**: `logHandlers()` in `defineApp(name, { observers })`. No observer, no cost. |
@@ -103,7 +103,7 @@ Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24,
 3. **Handler events** — done: see § 12.
 4. **Auth** — done: see § 13. Auth core steps as plain functions; delete `guards()`, `withPrincipal`, `authorize`. Delete `@arki/http`'s keyed `derive(key, fn)` in the same change: `withPrincipal` / `withOptionalPrincipal` are its main users, so it goes when they become steps (plus one novelette call site, `apps/novelette/server/src/plugins/server-info.ts`).
 5. **Apps** — done: see § 14. Migrate apps, one app per commit. Novelette's legacy `publicProcedure` / `protectedProcedure` go with its move to `defineFeature`.
-6. Docs: `packages/dot/docs/di.md`, `@arki/auth`, `@arki/http`, `@arki/queue`, `@arki/schedule`, `@arki/cli` READMEs; changesets (0.x: minor).
+6. **Docs** — done: the concept page is `packages/dot/docs/middleware.md` (steps, arounds, handler events, the refusal table per transport, D1–D14 with reasons); `di.md`, `observability.md` and the dot, queue, schedule and cli READMEs and agent guides point to it. Docs: `packages/dot/docs/di.md`, `@arki/auth`, `@arki/http`, `@arki/queue`, `@arki/schedule`, `@arki/cli` READMEs; changesets (0.x: minor).
 
 ## 9. Risks
 
