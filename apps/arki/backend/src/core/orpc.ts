@@ -6,7 +6,7 @@
  */
 import { ORPCError, os } from '@orpc/server';
 
-import { authed, AuthenticationRequired } from '@arki/auth';
+import { AccessDenied, authed, AuthenticationRequired } from '@arki/auth';
 import { ZodError } from '@arki/contracts';
 import { step } from '@arki/dot/orpc';
 import { errorMap } from '@arki/failure/orpc';
@@ -72,58 +72,30 @@ const errorHandlingMiddleware = o.middleware(async ({ next }) => {
   }
 });
 
+/** What a step after `protectedProcedure` reads: the signed-in caller and the repositories. */
+type SignedInContext = Pick<ORPCContext, 'repo'> & { readonly principal: NonNullable<ORPCContext['principal']> };
+
 /**
- * Authorization middleware factory — checks if user has a required permission.
+ * Step: the caller holds `action` on `resource` (the permission tables), or `auth.forbidden` (403).
  */
-const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPermission) => {
-  return o.middleware(async ({ context, next }) => {
-    if (!context.principal) {
-      throw new ORPCError('UNAUTHORIZED', {
-        message: 'You must be logged in to access this resource',
-      });
-    }
+const permitted = (resource: RestrictedResource, action: UserPermission) => async (ctx: SignedInContext) =>
+  (await ctx.repo.auth.hasPermission(ctx.principal.user.id, resource, action))
+    ? { principal: ctx.principal }
+    : AccessDenied();
 
-    const hasPermission = await context.repo.auth.hasPermission(context.principal.user.id, resource, action);
-
-    if (!hasPermission) {
-      throw new ORPCError('FORBIDDEN', {
-        message: `Insufficient permissions. Required: ${action} on ${resource}`,
-      });
-    }
-
-    return next();
-  });
+/**
+ * Step: the caller has at least one of `roles` (the role tables), or `auth.forbidden` (403).
+ */
+const anyRole = (roles: readonly string[]) => async (ctx: SignedInContext) => {
+  const userRoles = await ctx.repo.auth.getUserRoles(ctx.principal.user.id);
+  const userRoleNames = new Set(userRoles.map(r => r?.name).filter(Boolean));
+  return roles.some(role => userRoleNames.has(role)) ? { principal: ctx.principal } : AccessDenied();
 };
 
 /**
- * Role authorization middleware factory — checks if user has at least one of the given roles.
+ * Step: the caller has the seeded "Admin" role.
  */
-const createRoleMiddleware = (roles: readonly string[]) => {
-  return o.middleware(async ({ context, next }) => {
-    if (!context.principal) {
-      throw new ORPCError('UNAUTHORIZED', {
-        message: 'You must be logged in to access this resource',
-      });
-    }
-
-    const userRoles = await context.repo.auth.getUserRoles(context.principal.user.id);
-    const userRoleNames = new Set(userRoles.map(r => r?.name).filter(Boolean));
-    const hasRole = roles.some(role => userRoleNames.has(role));
-
-    if (!hasRole) {
-      throw new ORPCError('FORBIDDEN', {
-        message: 'You do not have the required role to access this resource',
-      });
-    }
-
-    return next();
-  });
-};
-
-/**
- * Admin middleware — checks if user has the seeded "Admin" role.
- */
-const adminMiddleware = createRoleMiddleware([ADMIN_ROLE_NAME]);
+const admin = anyRole([ADMIN_ROLE_NAME]);
 
 // ---------------------------------------------------------------------------
 // Procedure builders
@@ -156,7 +128,7 @@ export const protectedProcedure = o
  *
  * Use this for procedures accessible only to admin users.
  */
-export const adminProcedure = protectedProcedure.use(adminMiddleware);
+export const adminProcedure = protectedProcedure.errors(errorMap(AccessDenied)).use(step(admin));
 
 /**
  * Permission-based procedure factory
@@ -164,7 +136,7 @@ export const adminProcedure = protectedProcedure.use(adminMiddleware);
  * Creates a procedure that requires the user to have a specific permission.
  */
 export const permissionProcedure = (resource: RestrictedResource, action: UserPermission) => {
-  return protectedProcedure.use(createAuthorizeMiddleware(resource, action));
+  return protectedProcedure.errors(errorMap(AccessDenied)).use(step(permitted(resource, action)));
 };
 
 /**
@@ -173,7 +145,7 @@ export const permissionProcedure = (resource: RestrictedResource, action: UserPe
  * Creates a procedure that requires the user to have at least one of the specified roles.
  */
 export const roleProcedure = (roles: UserRole[]) => {
-  return protectedProcedure.use(createRoleMiddleware(roles));
+  return protectedProcedure.errors(errorMap(AccessDenied)).use(step(anyRole(roles)));
 };
 
 // ---------------------------------------------------------------------------
