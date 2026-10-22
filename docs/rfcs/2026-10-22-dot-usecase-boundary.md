@@ -1,7 +1,7 @@
 # RFC: the usecase boundary in Dot
 
 - Date: 2026-10-22
-- Status: Proposed. Founder decisions D1–D9 below; D1 decided (`domainServices`), D9 open. Nothing implemented.
+- Status: Proposed. Founder decisions D1–D9 below; D1 decided (`domainServices`), D9 decided (forbidden). Implementation started 2026-10-22; see `docs/plans/2026-10-22-dot-usecase-boundary.md`.
 - Designer: Fable. Three brainstorm rounds, twelve agents (hexagonal, DDD, framework prior art, Dot type level, contrarian, cross-examination, unification, reader and lint, rename, private-usecase design, readability, cycle adversary). File references come from those passes on 2026-10-22; recheck them when a step starts.
 - Supersedes one line of `2026-10-15-dot-feature-builder.md`: "Domain logic is a feature, even when it is small. No `domainUnit` constructor" (line 54). The founder reopened it on 2026-10-22.
 - Companion: `.agents/skills/domain-driven-design/` (vocabulary and placement test). The skill describes today's rules; it changes when this RFC lands.
@@ -70,7 +70,7 @@ The one rule, for every step: **a step sees only what is written above it, never
 | D6 | **Import-loop lint for feature folders.** Usecase and domain-service files take only `import type` from `feature.ts`, and no value import from a sibling usecase or domain-service file. A value import of a domain-service file is allowed only in the feature's `feature.ts` and a child's `feature.ts`. This closes the hoisted-function bypass and guarantees one instance per boot. Align `infra-runtime-imports` with nesting decision 10, unless D9 keeps the exception. | Proposed |
 | D7 | **`provides` sees `usecases` only.** `ProvidesDeps = { usecases: UsecaseValues<U> }`. A trivial read becomes a one-line usecase: `export const listByItem = ({ repos }: Pick<Deps, 'repos'>) => repos.highlights.listByItem`. Every cross-feature call is then traced and supervised. A feature that hosts an app-level adapter and re-publishes it moves that adapter to app infra. | Proposed |
 | D8 | **`entrypoints` see `usecases`, the request keys (`session`, `headers`, `principal`), and `entrypointOnly` needs.** Infra and plain needs leave `CoreServices` for entrypoints. `entrypointOnly` stays as the named exception: the gateway opens the transaction and takes the lock with it (36 `db`, 6 `locks` uses). The two leak sites are fixed. | Proposed |
-| D9 | **May feature infra need another feature's `provides`?** The lint allows it today; nesting decision 10 forbids it; `composition-doctrine.md:293` says infra never depends on the domain. Allowing it is how domain objects crept into infra. Forbidding it means an adapter that genuinely translates another feature's output (an anti-corruption layer) must receive that output through a domain service or a usecase instead of a handle. | **Open. Founder.** |
+| D9 | **May feature infra need another feature's `provides`?** The lint allows it today; nesting decision 10 forbids it; `composition-doctrine.md:293` says infra never depends on the domain. Allowing it is how domain objects crept into infra. Forbidding it means an adapter that genuinely translates another feature's output (an anti-corruption layer) must receive that output through a domain service or a usecase instead of a handle. | **Decided 2026-10-22: forbidden.** `infra-runtime-imports` bans any runtime import of a `feature.ts`, as nesting decision 10 says. Another feature's output reaches this feature through `needs` into a domain service or a usecase, never into an adapter. |
 
 Rejected on the way:
 
