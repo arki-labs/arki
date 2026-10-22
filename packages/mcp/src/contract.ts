@@ -27,7 +27,7 @@ export function asTool<
   O extends AnySchema,
   E extends ErrorMap,
   Mt extends Meta,
-  const M extends McpMeta & { remediation?: Partial<Record<keyof E & string, string>> },
+  const M extends McpMeta & { remediation?: { readonly [K in keyof E as K & string]?: string } },
 >(
   procedure: ContractProcedure<I, O, E, Mt>,
   mcp: M & {

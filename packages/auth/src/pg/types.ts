@@ -186,7 +186,7 @@ type SessionInsert<T extends AuthTables> = InferInsertModel<T['Session']>;
 
 /** The app's own session columns (from `createAuthTables(..., { columns: { session } })`), as `sessionCreating` returns them. */
 export type SessionValues<T extends AuthTables> = {
-  readonly [K in Exclude<keyof SessionInsert<T>, EngineSessionColumn>]?: SessionInsert<T>[K];
+  readonly [K in keyof SessionInsert<T> as Exclude<K, EngineSessionColumn>]?: SessionInsert<T>[K];
 };
 
 /**

@@ -29,7 +29,7 @@ export type OrpcUtils<C, TCtx extends ClientContext> =
     ? ProcedureUtils<TCtx, InferSchemaInput<I>, InferSchemaOutput<O>, ErrorFromErrorMap<E>> &
         GeneralUtils<InferSchemaInput<I>> &
         Identified<OperationOf<C>>
-    : { readonly [K in keyof C & string]: OrpcUtils<C[K], TCtx> } & GeneralUtils<unknown>;
+    : { readonly [K in keyof C as K & string]: OrpcUtils<C[K], TCtx> } & GeneralUtils<unknown>;
 
 type AnyClient = Client<ClientContext, unknown, unknown, unknown>;
 

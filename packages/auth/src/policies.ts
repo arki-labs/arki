@@ -29,7 +29,7 @@ export type Policy<P, K extends string, S> = (args: PolicyArgs<P, K, S>) => bool
 
 /** One group per subject. A group named `principal` does not compile: it would hide the principal. */
 export type PolicyTree<Subjects, P> = {
-  readonly [K in keyof Subjects & string]: Readonly<Record<string, Policy<P, K, Subjects[K]>>>;
+  readonly [K in keyof Subjects as K & string]: Readonly<Record<string, Policy<P, K & string, Subjects[K]>>>;
 } & { readonly principal?: never };
 
 /** The policies `definePolicies` returns: the tree, plus the types it was written for. */

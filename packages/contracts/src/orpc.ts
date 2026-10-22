@@ -48,7 +48,7 @@ export type OperationOf<C> =
 export type Operations<C> =
   C extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
     ? OperationOf<C>
-    : { readonly [K in keyof C & string]: Operations<C[K]> };
+    : { readonly [K in keyof C as K & string]: Operations<C[K]> };
 
 export type InputOf<Op extends AnyOperation> = NonNullable<Op['~types']>['input'];
 export type OutputOf<Op extends AnyOperation> = NonNullable<Op['~types']>['output'];

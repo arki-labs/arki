@@ -233,17 +233,17 @@ export type ScopedHandle<
 
 /** The handles a feature unit publishes: public provides scoped to the parent; usecases/services/slice internal. */
 type UnitHandles<TName extends string, Pub extends ServiceRecord, Own extends ServiceRecord> = {
-  readonly [K in keyof Pub & string]: ScopedHandle<Pub[K], K, TName, ScopeFor<TName>>;
-} & { readonly [K in keyof Own & string]: ScopedHandle<Own[K], K, TName, TName, true> };
+  readonly [K in keyof Pub as K & string]: ScopedHandle<Pub[K], K & string, TName, ScopeFor<TName>>;
+} & { readonly [K in keyof Own as K & string]: ScopedHandle<Own[K], K & string, TName, TName, true> };
 
 /** The handles a qualified infra unit publishes: scoped to the feature. */
 type InfraUnitHandles<TName extends string, P extends ServiceRecord> = {
-  readonly [K in keyof P & string]: ScopedHandle<P[K], K, `${TName}/${string}`, TName>;
+  readonly [K in keyof P as K & string]: ScopedHandle<P[K], K & string, `${TName}/${string}`, TName>;
 };
 
 /** One handle per provided key (local key → handle on the published wire key). */
 export type ScopedHandles<P extends ServiceRecord, TName extends string> = {
-  readonly [K in keyof P & string]: ScopedHandle<P[K], PublishKey<TName, K>, TName, ScopeFor<TName>>;
+  readonly [K in keyof P as K & string]: ScopedHandle<P[K], PublishKey<TName, K & string>, TName, ScopeFor<TName>>;
 };
 
 /** The children's public handles, merged, by local key. */
@@ -574,9 +574,9 @@ export type CoreHandles<
   U,
 > = N & {
   // Infra handles are scoped to this feature; the usecases handle is internal: nothing may need it.
-  readonly [K in keyof InfraProvides<I> & string]: ScopedHandle<
+  readonly [K in keyof InfraProvides<I> as K & string]: ScopedHandle<
     InfraProvides<I>[K],
-    `${TName}.${K}`,
+    `${TName}.${K & string}`,
     `${TName}/${string}`,
     TName
   >;

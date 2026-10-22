@@ -165,8 +165,8 @@ type Respond<B extends CronSpecs, F extends readonly AnyDefinedFeature[], K exte
  * missing in respond"), and the mapping that makes it exact is written there.
  */
 export type CronPolicy<B extends CronSpecs, F extends readonly AnyDefinedFeature[]> = OutcomePolicy & {
-  readonly respond: { readonly [K in NeedsRespond<B, F>]: Respond<B, F, K> } & {
-    readonly [K in Exclude<keyof B & string, NeedsRespond<B, F>>]?: Respond<B, F, K>;
+  readonly respond: { readonly [K in keyof B as Extract<K & string, NeedsRespond<B, F>>]: Respond<B, F, K & string> } & {
+    readonly [K in keyof B as Exclude<K & string, NeedsRespond<B, F>>]?: Respond<B, F, K & string>;
   };
 };
 

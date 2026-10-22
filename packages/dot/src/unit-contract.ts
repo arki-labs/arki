@@ -348,7 +348,7 @@ export type LazyHandle<T, K extends string, O extends string = string> = Token<T
 
 /** One handle per published key — what `unit.provides` holds. */
 export type Handles<TProvides extends ServiceRecord, O extends string = string> = {
-  readonly [K in keyof TProvides & string]: Handle<TProvides[K], K, O>;
+  readonly [K in keyof TProvides as K & string]: Handle<TProvides[K], K & string, O>;
 };
 
 /** The value type behind a handle — for the one alias an app names (`type Db = Provided<typeof database.provides.db>`). */
