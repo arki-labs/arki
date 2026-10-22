@@ -68,21 +68,23 @@ export const sessions = infra({
 ```
 
 Orders are not infrastructure. They are what the shop does, so they are a
-feature. The smallest feature only needs and provides. The empty
+feature. The smallest feature needs `db`, builds a usecase from it, and
+provides it. A `provides` factory sees only the usecases. The empty
 `.entrypoints()` finishes it:
 
 ```ts from="docs/examples/quickstart.ts#orders"
 export const orders = defineFeature('orders')
   .needs({ db: database.provides.db })
-  .provides({
-    orders: ({ db }) => ({
-      place: (cents: number): Order => {
+  .usecases({
+    place:
+      ({ db }) =>
+      (cents: number): Order => {
         const order = { id: db.count('orders') + 1, cents };
         db.insert('orders', order);
         return order;
       },
-    }),
   })
+  .provides({ orders: ({ usecases }) => ({ place: usecases.place }) })
   .entrypoints(); // nothing calls orders from outside yet
 ```
 

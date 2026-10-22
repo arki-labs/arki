@@ -38,16 +38,17 @@ describe('a feature with no provides', () => {
     orThrow(await again.dispose());
   });
 
-  it('publishes only through provides factories, built from the feature needs', async () => {
+  it('publishes only through provides factories, which read the usecases built from the feature needs', async () => {
     const order: string[] = [];
     const search = defineFeature('search')
       .needs({ db: service<Db>() })
-      .provides({
+      .usecases({
         search: ({ db: handle }) => {
           order.push('factory');
           return { index: handle.name };
         },
       })
+      .provides({ search: ({ usecases }) => usecases.search })
       .entrypoints();
     const app = orThrow(await defineApp('provides').infra(db).features([search]).boot());
     expect(app.services.search).toEqual({ index: 'pglite' });

@@ -23,7 +23,7 @@ import { orThrow } from '@arki/failure';
 
 import type { ServicesBag } from '../feature.js';
 import type { RequestContext } from './fixtures/rpc-app/orpc.js';
-import { defineFeature, FEATURE_ERROR_CODES, routerFor } from '../feature.js';
+import { defineFeature, entrypointOnly, FEATURE_ERROR_CODES, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
 import { needsMiddleware, rpc } from '../orpc.js';
 import { digest, digestLogic } from './fixtures/rpc-app/digest/feature.js';
@@ -68,7 +68,10 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
       .use(bind(digestLogic))
       .preview.handler(({ context }) => {
         expectTypeOf<NonNullable<SuccessOf<typeof context.usecases.preview>>>().toHaveProperty('items');
-        expectTypeOf(context.plans.planOf).parameter(0).toEqualTypeOf<string>();
+        // The handler sees the entrypoint-only `db` and the usecases; the plain need `plans` stays below them.
+        expectTypeOf(context).toHaveProperty('db');
+        // @ts-expect-error TS2339: `plans` is a plain need, so it never reaches the handler context
+        void context.plans;
         expectTypeOf(context.session).toEqualTypeOf<RequestContext['session']>();
         return null;
       });
@@ -86,7 +89,8 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
   it('refuses at compile time an alias that would shadow a request-context key', () => {
     type TracedContext = RequestContext & { readonly requestId: string };
     const tracedBind = needsMiddleware<TracedContext>();
-    const shadowing = defineFeature('traced').needs({ requestId: billing.provides.entitlements });
+    // Only entrypoint-only needs reach the handler context, so only they can shadow a request key.
+    const shadowing = defineFeature('traced').needs({ requestId: entrypointOnly(billing.provides.entitlements) });
     // @ts-expect-error -- the bound `requestId` would replace the request's own
     const refused = () => tracedBind(shadowing);
     expect(refused).toBeTypeOf('function');

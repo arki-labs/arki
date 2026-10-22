@@ -110,6 +110,11 @@ export type UsecaseNeeds<N extends NeedsShape> = {
   [K in keyof N as N[K] extends { readonly entrypointOnly: true } ? never : K]: N[K];
 };
 
+/** The aliases of the needs declared with `entrypointOnly(...)`. */
+type EntrypointOnlyKeys<N extends NeedsShape> = {
+  [K in keyof N]: N[K] extends { readonly entrypointOnly: true } ? K : never;
+}[keyof N];
+
 /**
  * What `.usecases(create)` receives: the usecase-visible needs by alias, the infra services, the domain
  * services `S` and the children's services by local key. With `C = []` and no `S` it is what a domain
@@ -122,13 +127,26 @@ export type CoreDeps<
   S = EmptyShape,
 > = CtxOf<UsecaseNeeds<N>> & InfraProvides<I> & S & ChildProvides<C>;
 
-/** What `.provides` factories and every entrypoint receive: every need (entrypoint-only included), infra, children and the usecases object. */
-export type CoreServices<
-  N extends NeedsShape,
-  I extends readonly AnyUnit[],
-  C extends readonly AnyDefinedFeature[],
-  U,
-> = CtxOf<N> & InfraProvides<I> & ChildProvides<C> & { readonly usecases: UsecaseValues<U> };
+/** The needs only entrypoints receive: the complement of {@link UsecaseNeeds}. */
+export type EntrypointOnlyNeeds<N extends NeedsShape> = Pick<N, EntrypointOnlyKeys<N>>;
+
+/**
+ * What a `.provides` factory receives (with the kernel's `$` keys): the usecases, nothing else.
+ * A trivial read becomes a one-line usecase, so every cross-feature call is traced and supervised.
+ */
+export type ProvidesDeps<U> = { readonly usecases: UsecaseValues<U> };
+
+/**
+ * What every entrypoint receives (with the kernel's `$` keys) and `<feature>.services` holds: the
+ * entrypoint-only needs and the usecases. Infra, plain needs, children and domain services stay below
+ * the usecases; request keys (`session`, `headers`) come from the request context. Most features have
+ * no entrypoint-only need, so that case skips `CtxOf` (the 50-feature typecheck probe drops by ~25k).
+ */
+export type EntrypointServices<N extends NeedsShape, U> = ([EntrypointOnlyKeys<N>] extends [never]
+  ? EmptyShape
+  : CtxOf<EntrypointOnlyNeeds<N>>) & {
+  readonly usecases: UsecaseValues<U>;
+};
 
 /**
  * An entrypoint descriptor — the protocol adapter packages implement
@@ -565,7 +583,7 @@ export type FeatureUnit<
       >,
     PublishRecord<TName, ProvidedValues<P>> &
       Readonly<Record<`${TName}.usecases`, UsecaseValues<U>>> &
-      Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
+      Readonly<Record<`${TName}.services`, EntrypointServices<N, U>>> &
       Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
     // The feature's own needs are the only ones a parent may remap; infra and child keys are already qualified (dotted).
     N,
@@ -581,33 +599,21 @@ export type FeatureUnit<
       TName,
       PublishRecord<TName, ProvidedValues<P>>,
       Readonly<Record<`${TName}.usecases`, UsecaseValues<U>>> &
-        Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
+        Readonly<Record<`${TName}.services`, EntrypointServices<N, U>>> &
         Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>
     >;
   };
 
 /**
- * Every handle a request resolves for this feature: its needs, its infra
- * services (local key → qualified handle), its children's provides and its
- * usecases. `bind(logic)` hands a request the feature's `<name>.services`
+ * Every handle a request resolves for this feature: its entrypoint-only needs
+ * and its usecases. `bind(logic)` hands a request the feature's `<name>.services`
  * record, which holds exactly these, resolved — so the handler sees
- * `context.usecases`, `context.store`, `context.plans`.
+ * `context.usecases`, and `context.db` for an `entrypointOnly` `db`.
  */
-export type CoreHandles<
-  TName extends string,
-  N extends NeedsShape,
-  I extends readonly AnyUnit[],
-  C extends readonly AnyDefinedFeature[],
-  U,
-> = N & {
-  // Infra handles are scoped to this feature; the usecases handle is internal: nothing may need it.
-  readonly [K in keyof InfraProvides<I> as K & string]: ScopedHandle<
-    InfraProvides<I>[K],
-    `${TName}.${K & string}`,
-    `${TName}/${string}`,
-    TName
-  >;
-} & ChildHandles<C> & { readonly usecases: ScopedHandle<UsecaseValues<U>, `${TName}.usecases`, TName, TName, true> };
+export type CoreHandles<TName extends string, N extends NeedsShape, U> = EntrypointOnlyNeeds<N> & {
+  // The usecases handle is internal: nothing may need it.
+  readonly usecases: ScopedHandle<UsecaseValues<U>, `${TName}.usecases`, TName, TName, true>;
+};
 
 declare const CoreServicesTag: unique symbol;
 
@@ -616,16 +622,10 @@ declare const CoreServicesTag: unique symbol;
  * services its entrypoints receive. Entrypoint files take it as a typed
  * parameter (`import type`), so they never import the feature at runtime.
  */
-export type FeatureCore<
-  TName extends string,
-  N extends NeedsShape,
-  I extends readonly AnyUnit[],
-  C extends readonly AnyDefinedFeature[],
-  U,
-> = {
+export type FeatureCore<TName extends string, N extends NeedsShape, U> = {
   readonly name: TName;
-  readonly handles: CoreHandles<TName, N, I, C, U>;
-  readonly [CoreServicesTag]?: CoreServices<N, I, C, U>;
+  readonly handles: CoreHandles<TName, N, U>;
+  readonly [CoreServicesTag]?: EntrypointServices<N, U>;
 };
 
 /** Any feature logic stage — the constraint entrypoint factories take (`schedules(logic, defs)`). */
@@ -635,7 +635,7 @@ export type AnyFeatureCore = { readonly name: string; readonly handles: NeedsSha
  * The services a stage hands its next step — types code declared in another
  * file. Before `.usecases()` it is what a usecase may ask for (needs + infra
  * + children, minus entrypoint-only needs); after, it is what entrypoints get
- * (every need + infra + children + `usecases`).
+ * (entrypoint-only needs + `usecases`).
  */
 export type DepsOf<C> = C extends { readonly [CoreServicesTag]?: infer D } ? D : never;
 
@@ -738,7 +738,7 @@ export type DefinedFeature<
   U,
   P extends ServiceRecord,
   E extends readonly AnyEntrypoint[],
-> = FeatureCore<TName, N, I, C, U> & {
+> = FeatureCore<TName, N, U> & {
   readonly [FeatureParamsTag]?: FeatureParams<TName, N, I, C, U, P, E>;
   /** Public handles, one per provided key — what other features name in their `needs`. Inside a parent they are scoped (`<name>.<key>`). */
   readonly provides: ScopedHandles<ProvidedValues<P>, TName>;
@@ -1046,9 +1046,9 @@ export type EntrypointsStage<
   C extends readonly AnyDefinedFeature[],
   U,
   P extends ServiceRecord,
-> = FeatureCore<TName, N, I, C, U> & {
+> = FeatureCore<TName, N, U> & {
   /** Finish the feature. Call it with no argument for a feature nothing reaches directly. */
-  entrypoints<const E extends readonly Entrypoint<CoreServices<N, I, C, U> & KernelCtx>[]>(
+  entrypoints<const E extends readonly Entrypoint<EntrypointServices<N, U> & KernelCtx>[]>(
     ...entrypoints: E & EntrypointGuard<P, E> & ChildContractGuard<C, E>
   ): DefinedFeature<TName, N, I, C, U, P, E>;
 };
@@ -1060,12 +1060,10 @@ export type ProvidesStage<
   C extends readonly AnyDefinedFeature[],
   U,
 > = EntrypointsStage<TName, N, I, C, U, EmptyShape> & {
-  /** Public services, one factory per key; each gets needs, infra, the children's services and usecases. */
+  /** Public services, one factory per key; each gets the usecases only (and the kernel's `$` keys). */
   provides<P extends ServiceRecord & NoReservedKeys & NoKeys<ReservedAlias> = EmptyShape>(
     factories: {
-      readonly [K in keyof P]: (
-        services: CoreServices<N, I, C, U> & KernelCtx,
-      ) => P[K] & NoInfer<CheckedProvider<P[K]>>;
+      readonly [K in keyof P]: (services: ProvidesDeps<U> & KernelCtx) => P[K] & NoInfer<CheckedProvider<P[K]>>;
     } & ProvidesGuard<TName, I, P>,
   ): EntrypointsStage<TName, N, I, C, U, P>;
 };
@@ -1203,9 +1201,12 @@ type RuntimeFeature<out Owned extends UnitOwnership = UnitOwnership> = {
   instance(name: string, rebind?: Readonly<Record<string, Service<unknown>>>): RuntimeFeature<Owned>;
   /** Recompile under another name, needs following `follow` (handle → handle). Internal: `instance()` drives it for the children. */
   [REPARENT](name: string, follow: ReadonlyMap<object, Service<unknown>>): RuntimeFeature<Owned>;
+  /** The needs as declared, by alias. Internal: a parent's `.features()` checks a child's `domainService(...)` needs. */
+  readonly [NEEDS]: NeedsShape;
 };
 
 const REPARENT: unique symbol = Symbol('dot.feature.reparent');
+const NEEDS: unique symbol = Symbol('dot.feature.needs');
 
 type RuntimeStage<in out P extends ServiceRecord = ServiceRecord, in out U extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
@@ -1354,11 +1355,13 @@ export type RequestHandles<T extends readonly AnyDefinedFeature[]> = UnionToInte
  * `<name>.services` bag of every node (nested children included), which
  * `bind(core)` reads per request. The bags are published public here on
  * purpose — serving requests is the assembly's job, not a feature's — so a
- * gateway may spread them into `.needs()`:
+ * gateway may spread them into its needs. The gateway is a driving adapter,
+ * not a feature (a feature's `provides` sees only its usecases), mounted with
+ * the app's `.entrypoints(gateway)`:
  *
  * ```ts
  * const units = [...legacy, requestServices(converted)];
- * defineFeature('gateway').needs({ db, ...providesOf(units) }).provides({ rpc: ctx => servicesOf(ctx, units) … })
+ * entrypoint({ name: 'gateway', needs: { ...providesOf(units) }, provides: { rpc: ctx => servicesOf(ctx, units) … } })
  * ```
  */
 export function requestServices<const T extends readonly AnyDefinedFeature[]>(
@@ -1657,24 +1660,22 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     ownedInfra.set(witness.lazy, target);
   }
   // Entrypoint-only needs: in the unit's needs (boot order, explain), out of the usecases' deps.
-  const doorKeys = new Set(
-    Object.entries(state.needs)
-      .filter(([, w]) => (w as Provenance).entrypointOnly === true)
-      .map(([k]) => k),
-  );
+  const doorKeys = new Set(Object.keys(entrypointOnlyNeeds(state.needs)));
 
   // Preparation enriches the owned kernel context once before any provider can run.
   const usecasesOf = (ctx: object): unknown => ('usecases' in ctx ? ctx.usecases : undefined);
-  // Domain services stay below the usecases: `provides` factories, entrypoints and `<name>.services` never see them.
-  const domainKeys = new Set(Object.keys(domainServices));
+  // The exits: `provides` factories get the usecases; entrypoints get the entrypoint-only needs and the
+  // usecases. Both keep the kernel's `$` keys. Infra, plain needs, children and domain services stay below.
+  const kernelOf = (ctx: object): object => Object.fromEntries(Object.entries(ctx).filter(([k]) => k.startsWith('$')));
+  const providesDepsOf = (ctx: object): object => Object.freeze({ ...kernelOf(ctx), usecases: usecasesOf(ctx) });
   const servicesOf = (ctx: object): object => ({
-    ...(domainKeys.size === 0 ? ctx : Object.fromEntries(Object.entries(ctx).filter(([k]) => !domainKeys.has(k)))),
+    ...Object.fromEntries(Object.entries(ctx).filter(([k]) => doorKeys.has(k) || k.startsWith('$'))),
     usecases: usecasesOf(ctx),
   });
 
   const factories: Record<string, (ctx: object) => unknown> = {
     [usecasesKey]: usecasesOf,
-    // The resolved services (needs + infra + children + usecases, by local key) — what `bind(logic)` hands a request.
+    // The resolved services (entrypoint-only needs + usecases, by local key) — what `bind(logic)` hands a request.
     // One key per feature, read by the feature's own name: no per-handle resolution, so a remapped need just works.
     // The kernel's `$` keys stay out: a handler context carries the feature's services, not the kernel's.
     // The one exception is `$handlers`: transport adapters read it to emit handler events, then strip it.
@@ -1689,7 +1690,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
   };
   for (const [key, factory] of Object.entries(state.provides)) {
     // Erasure seam: each factory was typed against these services by `.provides()`.
-    factories[publishKey(key)] = ctx => factory(servicesOf(ctx));
+    factories[publishKey(key)] = ctx => factory(providesDepsOf(ctx));
   }
 
   // The unit's published handles keep ownership too: provides scoped to the parent, generated keys internal.
@@ -1779,7 +1780,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     const children = state.children.map(c => c[REPARENT](`${name}.${c.name.slice(state.name.length + 1)}`, follow));
     const next: FeatureState<P, U> = { ...state, name, needs, children };
     const nextInfra = qualifyInfra(name, needs, next.infra);
-    return compile(next, nextInfra, handlesOf(next, nextInfra), root ? ownContract(entrypoints) : entrypoints);
+    return compile(next, nextInfra, handlesOf(next), root ? ownContract(entrypoints) : entrypoints);
   };
 
   return {
@@ -1859,6 +1860,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
       return reparent(`${state.name}#${suffix}`, follow, true);
     },
     [REPARENT]: (name, follow) => reparent(name, follow, false),
+    [NEEDS]: state.needs,
   };
 }
 
@@ -1889,19 +1891,22 @@ function ownContract(entrypoints: readonly AnyEntrypoint[]): readonly AnyEntrypo
   });
 }
 
-/** The handles a feature's entrypoints and `bind(logic)` see: needs, qualified infra, children's provides, usecases. */
-function handlesOf(state: FeatureState, infra: ReturnType<typeof qualifyInfra>): NeedsShape {
+/** The handles a feature's entrypoints and `bind(logic)` see: entrypoint-only needs and usecases. */
+function handlesOf(state: FeatureState): NeedsShape {
   return {
-    ...state.needs,
-    ...infra.handles,
-    ...childHandles(state.children),
+    ...entrypointOnlyNeeds(state.needs),
     usecases: scopedHandleOf(`${state.name}.usecases`, state.name, state.name, true),
   };
 }
 
+/** The needs declared with `entrypointOnly(...)`: the only needs that pass the usecases to the exits. */
+function entrypointOnlyNeeds(needs: NeedsShape): NeedsShape {
+  return Object.fromEntries(Object.entries(needs).filter(([, w]) => (w as Provenance).entrypointOnly === true));
+}
+
 function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureState<P, U>): RuntimeStage<P, U> {
   const infra = qualifyInfra(state.name, state.needs, state.infra);
-  const handles = handlesOf(state, infra);
+  const handles = handlesOf(state);
   return {
     name: state.name,
     handles,
@@ -1953,7 +1958,7 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
             remediation: `Name the child "${state.name}.${child.name.split('.').at(-1)}" (its folder sits under this feature's).`,
           });
         }
-        for (const [alias, witness] of Object.entries(child.handles)) {
+        for (const [alias, witness] of Object.entries(child[NEEDS])) {
           const fn = domainServiceIn(witness);
           if (fn === undefined || declared.has(fn)) continue;
           throw new FeatureError({

@@ -11,8 +11,17 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Provided, ServicesBag, ServicesOf } from '../feature.js';
+import type { SupervisedUsecase } from '../kernel/usecase.js';
 import { defineFeature } from '../define-feature.js';
-import { entrypoint, FEATURE_ERROR_CODES, providesOf, resolveNeeds, servicesOf, sliceOf } from '../feature.js';
+import {
+  entrypoint,
+  entrypointOnly,
+  FEATURE_ERROR_CODES,
+  providesOf,
+  resolveNeeds,
+  servicesOf,
+  sliceOf,
+} from '../feature.js';
 import { defineApp, infra, service } from '../index.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { unit } from '../unit-contract.js';
@@ -33,7 +42,8 @@ const billing = defineFeature('billing').entrypoints();
 
 const authish = defineFeature('authish')
   .needs({ db: service<FakeDb>() })
-  .provides({ identity: ({ db }) => ({ via: db.tag }) })
+  .usecases({ identity: ({ db }) => ({ via: db.tag }) })
+  .provides({ identity: ({ usecases }) => usecases.identity })
   .entrypoints();
 
 const slice = (key: string) => ({ kind: key, key, actions: [], resolve: () => ({}) });
@@ -78,10 +88,10 @@ describe('mounting features (.features)', () => {
     expect(manifest.plugins.map(p => p.name)).toEqual(['db', 'orders', 'billing']);
   });
 
-  it('resolves endpoint-style slices with the feature needs at boot', async () => {
+  it('resolves endpoint-style slices with the entrypoint-only needs at boot', async () => {
     const dbUnit = infra({ name: 'db', provides: { db: () => fakeDb } });
     const serving = defineFeature('serving')
-      .needs({ db: service<FakeDb>() })
+      .needs({ db: entrypointOnly(dbUnit.provides.db) })
       .entrypoints({
         kind: 'routes',
         key: 'routes',
@@ -107,8 +117,9 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
 
   const plans = defineFeature('plans')
     .needs({ db: service<FakeDb>() })
+    .usecases({ entitlements: ({ db }) => createEntitlements(db) })
     .provides({
-      entitlements: ({ db }) => createEntitlements(db),
+      entitlements: ({ usecases }) => usecases.entitlements,
       warmedAt: async () => {
         await Promise.resolve();
         return 42;
@@ -118,12 +129,13 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
 
   const digest = defineFeature('digest')
     .needs({ access: plans.provides.entitlements })
-    .provides({
+    .usecases({
       digestPlan:
         ({ access }) =>
         (userId: string) =>
           access.planOf(userId),
     })
+    .provides({ digestPlan: ({ usecases }) => usecases.digestPlan })
     .entrypoints();
 
   it('the graph is data: handle keys equal the factory keys and carry their provider before anything boots', () => {
@@ -139,8 +151,11 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
     expectTypeOf(plans.provides.entitlements.key).toEqualTypeOf<'entitlements'>();
     // An async factory's handle carries the resolved value, not the promise.
     expectTypeOf<Provided<typeof plans.provides.warmedAt>>().toEqualTypeOf<number>();
-    // The consumer's factory saw the provider's type through the handle: its result is computed from `access`.
-    expectTypeOf<Provided<typeof digest.provides.digestPlan>>().toEqualTypeOf<(userId: string) => 'free' | 'pro'>();
+    // The consumer's usecase saw the provider's type through the handle: its result is computed from `access`.
+    // Published through `provides`, it is the supervised usecase: an invocation defect comes back as a Failure.
+    expectTypeOf<Provided<typeof digest.provides.digestPlan>>().toEqualTypeOf<
+      SupervisedUsecase<(userId: string) => 'free' | 'pro'>
+    >();
   });
 
   it('wires the consumer to the instance the provider built, on the same wire key', async () => {
@@ -186,7 +201,9 @@ describe('services in the request context (gateway → bag → resolveNeeds)', (
 
   const gateway = defineFeature('gateway')
     .needs({ ...providesOf(features) })
-    .provides({ bag: ctx => servicesOf(ctx, features) as ServicesBag })
+    // `provides` sees only the usecases, so the bag is read where the needs are: in a usecase (an object, not wrapped).
+    .usecases({ bag: deps => servicesOf(deps, features) as ServicesBag })
+    .provides({ bag: ({ usecases }) => usecases.bag })
     .entrypoints();
 
   it('ServicesOf is the merged provides of the tuple — named once, never restated', () => {
@@ -298,7 +315,8 @@ describe('the hexagon: .infra → .features → .entrypoints', () => {
   it('lets a later feature need what an earlier feature provides', async () => {
     const profile = defineFeature('profile')
       .needs({ identity: service<{ via: 'db' }>() })
-      .provides({ profile: ({ identity }) => `profile:${identity.via}` })
+      .usecases({ profile: ({ identity }: { readonly identity: { via: 'db' } }) => `profile:${identity.via}` })
+      .provides({ profile: ({ usecases }) => usecases.profile })
       .entrypoints();
     const app = orThrow(await defineApp('chain').infra(dbUnit).features([authish, profile]).boot());
     expectTypeOf(app.services.profile).toEqualTypeOf<string>();
@@ -327,7 +345,8 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
   it('sees the final feature list, boots before the features, and serves them as a dependency', async () => {
     const writer = defineFeature('writer')
       .needs({ registry: service<{ handlers: readonly string[] }>() })
-      .provides({ seenAtBoot: ({ registry: r }) => r.handlers })
+      .usecases({ seenAtBoot: ({ registry: r }) => r.handlers })
+      .provides({ seenAtBoot: ({ usecases }) => usecases.seenAtBoot })
       .entrypoints();
     const app = orThrow(await defineApp('driven-binding').infra(registry).features([orders, writer]).boot());
     expect(app.services.seenAtBoot).toEqual(['orders:queue']);

@@ -24,7 +24,11 @@ const digestDeps = defineFeature('digest')
   .features(compile, deliver);
 export type DigestDeps = DepsOf<typeof digestDeps>;
 
-export const digestLogic = digestDeps.usecases({ run });
+// `compiler` hands the child's service up as is (an object, so it is not wrapped): `provides` sees only the usecases.
+export const digestLogic = digestDeps.usecases({
+  run,
+  compiler: ({ compiler }: Pick<DigestDeps, 'compiler'>) => compiler,
+});
 export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(digestLogic));
 
 /** A stand-in for `schedules(digestLogic, [...])`: the parent declares only its own schedules. */
@@ -32,5 +36,5 @@ const digestSchedules = { kind: 'schedules', key: 'schedules', actions: [], reso
 
 export const digest = digestLogic
   // `digests` is public (bare key). `compile` is the child's service, re-exported under the parent's name.
-  .provides({ digests: ({ usecases, compiler }) => ({ run: usecases.run, compile: compiler.compile }) })
+  .provides({ digests: ({ usecases }) => ({ run: usecases.run, compile: usecases.compiler.compile }) })
   .entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures), digestSchedules);

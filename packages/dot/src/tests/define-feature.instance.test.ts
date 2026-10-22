@@ -11,6 +11,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { UnitNeeds } from '../unit-contract.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineFeature, instanceOf, mountFeatures, routerFor } from '../feature.js';
@@ -24,6 +25,14 @@ const regionDb = (region: string) =>
   infra({ name: 'database', provides: { db: (): Region => ({ region, rows: [] }) } });
 const database = regionDb('us');
 const databaseEu = rename(regionDb('eu'), { db: 'dbEu' }, 'databaseEu');
+
+/**
+ * The wire keys a feature's unit needs: the rebind shows here. (`handles` holds only entrypoint-only
+ * needs and `usecases`, so a plain need like `db` is not on it.)
+ */
+type NeedKeysOf<F extends { units(): readonly unknown[] }, I extends number> = keyof UnitNeeds<
+  ReturnType<F['units']>[I]
+>;
 
 const store = infra({
   name: 'store',
@@ -49,7 +58,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     const us = reports.instance('us');
     expectTypeOf(eu.name).toEqualTypeOf<'reports#eu'>();
     expectTypeOf(eu.provides.summary.key).toEqualTypeOf<'reports#eu.summary'>();
-    expectTypeOf(eu.handles.db.key).toEqualTypeOf<'dbEu'>();
+    expectTypeOf<NeedKeysOf<typeof eu, 1>>().toEqualTypeOf<'dbEu' | 'reports#eu.repos'>();
     expect(eu.units().map(u => u.name)).toEqual(['reports#eu/store', 'reports#eu']);
 
     const app = orThrow(await defineApp('t').infra(database).infra(databaseEu).features([eu, us]).boot());
@@ -99,7 +108,7 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     const eu = parent.instance('eu', { db: databaseEu.provides.dbEu });
     expect(eu.features.map(c => c.name)).toEqual(['reports#eu.audit']);
     expectTypeOf(eu.features[0].name).toEqualTypeOf<'reports#eu.audit'>();
-    expectTypeOf(eu.features[0].handles.db.key).toEqualTypeOf<'dbEu'>();
+    expectTypeOf<NeedKeysOf<(typeof eu.features)[0], 0>>().toEqualTypeOf<'dbEu'>();
     const childNeeds = eu
       .units()
       .filter(u => u.name === 'reports#eu.audit')
@@ -132,7 +141,9 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
       .provides({})
       .entrypoints();
     const eu = parent.instance('eu', { db: databaseEu.provides.dbEu });
-    expectTypeOf(eu.features[0].handles.db).toEqualTypeOf<typeof databaseEu.provides.dbEu.lazy>();
+    // The child's need is the EU handle, still in its lazy form.
+    expectTypeOf<NeedKeysOf<(typeof eu.features)[0], 0>>().toEqualTypeOf<'dbEu'>();
+    expect(eu.features[0].units()[0].needs['db']).toBe(databaseEu.provides.dbEu.lazy);
     const app = orThrow(await defineApp('t').infra(databaseEu).features([eu]).boot());
     try {
       // The kernel awaits a provides factory, so the resolved trail is the EU region string.

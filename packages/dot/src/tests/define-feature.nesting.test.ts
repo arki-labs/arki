@@ -280,14 +280,20 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
     });
     const peek = peekDeps
       .usecases({ sees: (deps: Record<string, unknown>) => () => Object.keys(deps) })
-      .provides({ door: ({ db }) => db.transaction(() => Promise.resolve('opened')) })
-      .entrypoints();
+      .entrypoints({
+        kind: 'door',
+        key: 'door',
+        actions: [],
+        resolve: ({ db }) => db.transaction(() => Promise.resolve('opened')),
+      });
     const app = orThrow(await defineApp('peek').infra(database).features([peek]).start());
     const seen = app.services['peek.usecases'].sees();
     expect(seen).toContain('raw');
     expect(seen).not.toContain('db');
     expect('db' in app.services['peek.services']).toBe(true);
-    expect(app.services.door).toBe('opened');
+    expect(await app.services['feature.peek'].door).toBe('opened');
+    // @ts-expect-error TS2339: a provides factory sees only the usecases, never `db`
+    peekDeps.usecases({}).provides({ door: ({ db }) => db });
     // @ts-expect-error a usecase cannot ask for the entrypoint-only `db`
     peekDeps.usecases({
       bad:
@@ -399,7 +405,9 @@ describe('ownership metadata (Astra rounds 1–3 #1): every minted handle, unit 
       /private to "digest"/,
     );
     // @ts-expect-error an outsider cannot need a feature's private infra through its qualified handle
-    expect(() => defineFeature('other').needs({ repos: digest.handles.repos })).toThrow(/private to "digest"/);
+    expect(() => defineFeature('other').needs({ repos: digest.units()[0].provides['digest.repos'] })).toThrow(
+      /private to "digest"/,
+    );
     // @ts-expect-error a cousin outside the parent cannot either
     expect(() => defineFeature('reports.x').needs({ compiler: compile.provides.compiler })).toThrow(
       /private to "digest"/,
@@ -408,7 +416,7 @@ describe('ownership metadata (Astra rounds 1–3 #1): every minted handle, unit 
     expect(() =>
       defineFeature('digest.deliver.x').needs({
         compiler: compile.provides.compiler,
-        repos: digest.handles.repos.lazy,
+        repos: digest.units()[0].provides['digest.repos'].lazy,
       }),
     ).not.toThrow();
     expect(() =>
@@ -550,9 +558,8 @@ describe('deps: a parent sees its children, never their infra; a child sees only
     parent.usecases({ bad: (deps: { ranker: unknown }) => deps });
     // @ts-expect-error `delivery` was not needed by `compile`
     void compileLogic.handles.delivery;
-    expectTypeOf<keyof typeof digestLogic.handles>().toEqualTypeOf<
-      'db' | 'repos' | 'compiler' | 'delivery' | 'usecases'
-    >();
+    // A request sees the entrypoint-only `db` and the usecases; infra (`repos`) and children stay below.
+    expectTypeOf<keyof typeof digestLogic.handles>().toEqualTypeOf<'db' | 'usecases'>();
   });
 });
 
@@ -643,8 +650,9 @@ describe('requestServices: what a gateway needs to serve the tree', () => {
     const units = [request] as const;
     const gateway = defineFeature('gateway')
       .needs({ ...providesOf(units) })
-      .usecases({})
-      .provides({ bag: ctx => servicesOf(ctx, units) })
+      // `provides` sees only the usecases, so the bag is read where the needs are: in a usecase (an object, not wrapped).
+      .usecases({ bag: deps => servicesOf(deps, units) })
+      .provides({ bag: ({ usecases }) => usecases.bag })
       .entrypoints();
     const app = orThrow(await defineApp('gateway-app').infra(database).features([digest, gateway]).start());
     try {

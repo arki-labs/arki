@@ -46,15 +46,16 @@ export const sessions = infra({
 // #region orders
 export const orders = defineFeature('orders')
   .needs({ db: database.provides.db })
-  .provides({
-    orders: ({ db }) => ({
-      place: (cents: number): Order => {
+  .usecases({
+    place:
+      ({ db }) =>
+      (cents: number): Order => {
         const order = { id: db.count('orders') + 1, cents };
         db.insert('orders', order);
         return order;
       },
-    }),
   })
+  .provides({ orders: ({ usecases }) => ({ place: usecases.place }) })
   .entrypoints(); // nothing calls orders from outside yet
 // #endregion orders
 

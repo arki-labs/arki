@@ -31,13 +31,15 @@ describe('A1: a child need is remapped onto the parent only when it names the pa
 
   const readsGlobal = defineFeature('parent.child')
     .needs({ db: database.provides.db })
-    .provides({ reader: ({ db }) => ({ run: () => db.query('x') }) })
+    .usecases({ reader: ({ db }) => ({ run: () => db.query('x') }) })
+    .provides({ reader: ({ usecases }) => usecases.reader })
     .entrypoints();
   const parent = defineFeature('parent').infra(privateDb).features(readsGlobal).entrypoints();
 
   const readsOwn = defineFeature('owner.child')
     .needs({ db: privateDb.provides.db })
-    .provides({ reader: ({ db }) => ({ run: () => db.query('x') }) })
+    .usecases({ reader: ({ db }) => ({ run: () => db.query('x') }) })
+    .provides({ reader: ({ usecases }) => usecases.reader })
     .entrypoints();
   const owner = defineFeature('owner').infra(privateDb).features(readsOwn).entrypoints();
 

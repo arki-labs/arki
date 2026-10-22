@@ -36,7 +36,8 @@ describe('lifecycle authoring', () => {
                 },
               }),
             )
-            .provides({ value: ({ value }) => value })
+            .usecases({ value: ({ value }: { readonly value: number }) => value })
+            .provides({ value: ({ usecases }) => usecases.value })
             .entrypoints(),
         ])
         .entrypoints(

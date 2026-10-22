@@ -58,7 +58,8 @@ describe('unit handles are data before boot', () => {
     const database = makeDb('pg://main', opened);
     const reports = defineFeature('reports')
       .needs({ db: database.provides.db })
-      .provides({ report: ({ db }) => db.query('select 1') })
+      .usecases({ report: ({ db }) => db.query('select 1') })
+      .provides({ report: ({ usecases }) => usecases.report })
       .entrypoints();
     const app = orThrow(await defineApp('handles').infra(database).features([reports]).boot());
     expectTypeOf(app.services.report).toEqualTypeOf<readonly string[]>();
@@ -198,7 +199,8 @@ describe('fake(handle, value) and providesOf over units', () => {
     const database = makeDb('pg://main');
     const reports = defineFeature('reports')
       .needs({ db: database.provides.db })
-      .provides({ report: ({ db }) => db.query('q') })
+      .usecases({ report: ({ db }) => db.query('q') })
+      .provides({ report: ({ usecases }) => usecases.report })
       .entrypoints();
     const fakeDb: Rows = { url: 'fake', query: () => ['faked'] };
     const app = orThrow(await defineApp('faked').infra(fake(database.provides.db, fakeDb)).features([reports]).boot());

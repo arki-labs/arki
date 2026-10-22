@@ -13,7 +13,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DepsOf } from '../feature.js';
 import type { UnitNeeds } from '../unit-contract.js';
-import type { Db } from './fixtures/nested-digest/db.js';
+import type { Db, Tx } from './fixtures/nested-digest/db.js';
 import type { Repos } from './fixtures/nested-digest/digest/infra/store.js';
 import { defineFeature, entrypointOnly, mountFeatures } from '../feature.js';
 import { defineApp, infra, service } from '../index.js';
@@ -41,8 +41,8 @@ const locks = (options: { readonly namespace: string }) =>
 const compile = defineFeature('digest.compile')
   .needs({ repos: store.provides.repos })
   .infra(ranker)
-  .usecases({})
-  .provides({ compiler: ({ ranker: ranking }) => ({ stored: ranking.stored }) })
+  .usecases({ compiler: ({ ranker: ranking }) => ({ stored: ranking.stored }) })
+  .provides({ compiler: ({ usecases }) => usecases.compiler })
   .entrypoints();
 
 /** `digest`: `db` declared ONCE, entrypoint-only. `store` and `locks` take it by alias at `.infra()`. */
@@ -51,13 +51,13 @@ const digestDeps = defineFeature('digest')
   .infra(store, locks({ namespace: 'probe' }))
   .features(compile);
 const digest = digestDeps
-  .usecases({})
-  .provides({
-    digests: ({ db, locks: locker, repos }) => ({
-      count: () => db.transaction(tx => repos.withTx(tx).digests.count()),
+  .usecases({
+    digests: ({ locks: locker, repos }) => ({
+      count: (tx: Tx) => repos.withTx(tx).digests.count(),
       namespace: locker.namespace,
     }),
   })
+  .provides({ digests: ({ usecases }) => usecases.digests })
   .entrypoints();
 
 describe('binding: the feature need is what every infra unit gets', () => {
@@ -89,8 +89,8 @@ describe('binding: the feature need is what every infra unit gets', () => {
   it('boots on the real db: the store builds on the bound handle, the child reads through the parent store', async () => {
     const app = orThrow(await defineApp('probe').infra(database).features([digest]).start());
     expect(app.services.digests.namespace).toBe('probe');
-    expect(await app.services.digests.count()).toBe(0);
     const db = app.services.db;
+    expect(await db.transaction(tx => app.services.digests.count(tx))).toBe(0);
     await db.transaction(tx =>
       app.services['digest.repos'].withTx(tx).digests.create({ id: 'd1', userId: 'u', status: 'compiled', items: [] }),
     );
@@ -110,7 +110,10 @@ describe('binding: the feature need is what every infra unit gets', () => {
       .infra(infra({ name: 'fake-db', provides: { db: () => fakeDb } }))
       .features([digest])
       .start());
-    await app.services.digests.count();
+    // The entrypoint side gets the same fake through the one need; it opens the transaction.
+    const { db } = app.services['digest.services'];
+    expect(db).toBe(fakeDb);
+    await db.transaction(tx => app.services.digests.count(tx));
     expect(calls).toBe(1);
     orThrow(await app.dispose());
   });
@@ -129,7 +132,7 @@ describe('binding: the feature need is what every infra unit gets', () => {
     const overridden = digest.override({ repos: fakeRepos });
     expect(canonical(overridden.units()[0].needs['db'] as Witness)).toBe(database.provides.db);
     const app = orThrow(await defineApp('o').infra(database).features([overridden]).start());
-    expect(await app.services.digests.count()).toBe(42);
+    expect(await app.services.db.transaction(tx => app.services.digests.count(tx))).toBe(42);
     orThrow(await app.dispose());
   });
 });
@@ -217,17 +220,21 @@ describe('positives', () => {
     expect(aliased.units()[0].needs['main']).toMatchObject({ key: 'db' });
   });
 
-  it('entrypoint-only db: the usecases deps have repos and locks and no db; provides and entrypoints see db', () => {
+  it('entrypoint-only db: the usecases deps have repos and locks and no db; entrypoints see db, provides do not', () => {
     const deps = defineFeature('h')
       .needs({ db: entrypointOnly(database.provides.db) })
       .infra(store);
     type Deps = DepsOf<typeof deps>;
     expectTypeOf<'db' extends keyof Deps ? true : false>().toEqualTypeOf<false>();
     expectTypeOf<'repos' extends keyof Deps ? true : false>().toEqualTypeOf<true>();
-    deps
-      .usecases({})
-      .provides({ open: ({ db }) => db.transaction(() => Promise.resolve(1)) })
-      .entrypoints();
+    deps.usecases({}).entrypoints({
+      kind: 'probe',
+      key: 'probe',
+      actions: [],
+      resolve: ({ db }) => ({ open: () => db.transaction(() => Promise.resolve(1)) }),
+    });
+    // @ts-expect-error TS2339: a provides factory sees only the usecases, not the entrypoint-only db
+    deps.usecases({}).provides({ open: ({ db }) => db });
     // @ts-expect-error a usecase asking for db: the feature does not provide it to usecases
     deps.usecases({ bad: ({ db }: { db: Db }) => db });
   });

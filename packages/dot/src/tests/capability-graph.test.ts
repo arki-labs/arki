@@ -31,11 +31,13 @@ describe('configure-time capability checks', () => {
     // are exactly that erased shape.
     const summarization = defineFeature('ai-summarization')
       .needs({ scorer: token<Scorer>()('scorer') })
-      .provides({ intelligence: ({ scorer }): Intelligence => ({ summarize: text => `${scorer.score(text)}` }) })
+      .usecases({ intelligence: ({ scorer }): Intelligence => ({ summarize: text => `${scorer.score(text)}` }) })
+      .provides({ intelligence: ({ usecases }) => usecases.intelligence })
       .entrypoints();
     const scoring = defineFeature('relevance-scoring')
       .needs({ intelligence: token<Intelligence>()('intelligence') })
-      .provides({ scorer: ({ intelligence }): Scorer => ({ score: text => intelligence.summarize(text).length }) })
+      .usecases({ scorer: ({ intelligence }): Scorer => ({ score: text => intelligence.summarize(text).length }) })
+      .provides({ scorer: ({ usecases }) => usecases.scorer })
       .entrypoints();
     // @ts-expect-error -- the tuple guard rejects it too: scorer is provided after its consumer
     const ring = defineApp('ring').infra(db).features([summarization, scoring]);

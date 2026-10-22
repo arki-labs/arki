@@ -145,19 +145,17 @@ const procedures = (c: typeof digestLogic) => ({
   preview: async (services: ServicesBag, userId: string) => resolveNeeds(services, c.handles).usecases.preview(userId),
 });
 
-const digest = digestLogic
-  .provides({ digests: ({ usecases, store }) => ({ previewFor: usecases.preview, raw: store.pendingFor }) })
-  .entrypoints(
-    rpc(digestContract, procedures(digestLogic)),
-    schedules(digestLogic, [{ name: 'nightly-preview', handler: ({ usecases }) => usecases.preview('u1') }]),
-    effects(digestLogic, [
-      {
-        name: 'send-on-request',
-        events: ['DigestRequested'],
-        run: async ({ usecases }) => orThrow(await usecases.sendDue('u1')),
-      },
-    ]),
-  );
+const digest = digestLogic.provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) }).entrypoints(
+  rpc(digestContract, procedures(digestLogic)),
+  schedules(digestLogic, [{ name: 'nightly-preview', handler: ({ usecases }) => usecases.preview('u1') }]),
+  effects(digestLogic, [
+    {
+      name: 'send-on-request',
+      events: ['DigestRequested'],
+      run: async ({ usecases }) => orThrow(await usecases.sendDue('u1')),
+    },
+  ]),
+);
 
 type Runnable = { readonly name: string; readonly run: () => Promise<unknown> };
 function runnables(value: unknown): readonly Runnable[] {
@@ -214,11 +212,9 @@ describe('the chain: each step typed from the earlier ones', () => {
   it('types the usecases deps, the handles and the entrypoint services from the chain', () => {
     expectTypeOf<Provided<typeof digestLogic.handles.usecases>>().toEqualTypeOf<SupervisedUsecases<DigestUsecases>>();
     type HandlerContext = ReturnType<typeof resolveNeeds<typeof digestLogic.handles>>;
-    expectTypeOf<HandlerContext>().toHaveProperty('mailer');
-    expectTypeOf<HandlerContext>().toHaveProperty('plans');
-    expectTypeOf<HandlerContext['store']>().toEqualTypeOf<Store>();
-    // `db` is the feature's own need (the store takes it from the feature), so a handler sees it too.
-    expectTypeOf<HandlerContext['db']>().toEqualTypeOf<Db>();
+    // A request sees the usecases only: plain needs (`db`, `plans`) and infra (`store`, `mailer`) stay below them.
+    expectTypeOf<keyof HandlerContext>().toEqualTypeOf<'usecases'>();
+    expectTypeOf<keyof DepsOf<typeof digestLogic>>().toEqualTypeOf<'usecases'>();
     expectTypeOf<DepsOf<typeof digestLogic>['usecases']>().toEqualTypeOf<SupervisedUsecases<DigestUsecases>>();
     // Before `.usecases()`, `DepsOf` is what a usecase may ask for: needs + infra, and no `usecases` yet.
     expectTypeOf<keyof DepsOf<typeof digestDeps>>().toEqualTypeOf<'db' | 'plans' | 'store' | 'stats' | 'mailer'>();
@@ -409,7 +405,8 @@ describe('compilation into kernel units', () => {
     const other = defineFeature('other')
       .needs({ db: database.provides.db })
       .infra(store)
-      .provides({ n: ({ stats }) => stats })
+      .usecases({ n: ({ stats }) => stats })
+      .provides({ n: ({ usecases }) => usecases.n })
       .entrypoints();
     const app = orThrow(await defineApp('two').infra(database, billing).features([digest, other]).start());
     expect(app.services['digest.store']).not.toBe(app.services['other.store']);

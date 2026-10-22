@@ -56,10 +56,11 @@ const _keys = keyed.infra({
 const _witness = keyed.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
 const _chain = defineFeature('chain')
   .needs({ count: service<number>() })
+  .usecases({ count: ({ count }: { readonly count: number }) => count })
   .provides({
-    db: ({ count }) =>
+    db: ({ usecases }) =>
       resource(
-        () => (branch() ? Open() : { value: count }),
+        () => (branch() ? Open() : { value: usecases.count }),
         () => Close(),
       ),
   })
@@ -126,7 +127,8 @@ defineFeature('bad').provides({ db: () => erasedResource });
 defineFeature('bad').provides({ db: unknownClose });
 const _plain = defineFeature('plain')
   .needs({ count: service<number>() })
-  .provides({ next: ({ count }) => count + 1 })
+  .usecases({ next: ({ count }: { readonly count: number }) => count + 1 })
+  .provides({ next: ({ usecases }) => usecases.next })
   .entrypoints();
 expectTypeOf<Provided<typeof _plain.provides.next>>().toEqualTypeOf<number>();
 const createEntitlements = (db: { tag: string }) => ({
@@ -135,8 +137,9 @@ const createEntitlements = (db: { tag: string }) => ({
 });
 const _mixed = defineFeature('mixed')
   .needs({ db: service<{ tag: string }>() })
+  .usecases({ entitlements: ({ db }) => createEntitlements(db) })
   .provides({
-    entitlements: ({ db }) => createEntitlements(db),
+    entitlements: ({ usecases }) => usecases.entitlements,
     warmedAt: async () => {
       await Promise.resolve();
       return 42;
