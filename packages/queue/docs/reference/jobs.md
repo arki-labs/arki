@@ -110,6 +110,16 @@ const authMiddleware = q.middleware<AppContext & { user: User }>(async ({ ctx, d
 });
 ```
 
+**Steps and arounds.** `.use(step(fn))` adds a plain function that reads the context and returns keys to add, or a failure to refuse the job.
+`.use(around(fn))` wraps everything declared after it, the handler included. Both run in the order you write them.
+
+- A refusal is the job's outcome, as if the handler had returned that failure. The handler does not run.
+- Inside an around, a refusal (a later step's, or a failure the handler returns) is the value `next()` resolves to. A
+  rollback checks `isFailure`. A thrown error rejects `next()`.
+- Write an around's `next` as a plain parameter: `(ctx, next) => ...`.
+
+The model is shared by every transport: [Steps and arounds](../../../dot/docs/middleware.md).
+
 **Middleware wraps the handler.** The handler is the innermost `next()`: a
 middleware's `await next()` resolves only after everything inside it, handler
 included, has finished; it rejects with the handler's error; and its result

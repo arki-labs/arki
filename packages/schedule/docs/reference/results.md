@@ -21,6 +21,20 @@ lock failures must be recorded as failed business execution; successful message
 delivery alone does not make a schedule successful. Skips and unavailable runs
 are separate scheduling decisions. The schedule runtime does not retry handlers.
 
+## Steps and arounds
+
+`with: [...]` on `defineSchedule` lists plain functions that run before the handler, in order. A step
+`(ctx) => object | Failure` adds the keys it returns to the context of what follows. An around
+`(ctx, next) => Promise<T>` wraps everything after it and the handler.
+
+- A step that returns a failure refuses the run. The handler does not run and the result is `refused`, with that
+  failure, as if the handler had returned it. It is counted in `handlerFailures`.
+- Inside an around, a refusal is the value `next()` resolves to. A thrown error rejects `next()`.
+- A step and an around are told apart by `fn.length >= 2`. Declare `next` as a plain second parameter: no default
+  value, no rest parameter. Otherwise the around runs as a step.
+
+The model is shared by every transport: [Steps and arounds](../../../dot/docs/middleware.md).
+
 ## Upgrade: typed business outcomes
 
 Handle `refused` in an exhaustive status switch and read `outcome.failure`.

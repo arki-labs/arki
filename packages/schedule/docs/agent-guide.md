@@ -9,6 +9,7 @@ Read this file first. [`llms.txt`](../llms.txt) is the index. The [README](../RE
 3. In a Dot app, `schedules([...])` declares a feature's schedules and `schedule({ needs, context })` serves them.
 4. In process (the default) a timer in each process fires the tick. `durable: true` hands the tick to a queue backend (`@arki/queue/dot`'s `durableScheduler`).
 5. Every run reports a `ScheduleRunResult` with one `status`.
+6. `with: [step, around]` runs plain functions before the handler. A step that returns a failure makes the run `refused`. An around must declare `next` as a plain second parameter. See [Run results](reference/results.md#steps-and-arounds).
 
 ## Task map
 

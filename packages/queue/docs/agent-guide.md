@@ -5,7 +5,7 @@ Read this file first. [`llms.txt`](../llms.txt) is the index. The [README](../RE
 ## The model
 
 1. A job is a name, an input schema and a handler. `q.job.name(...).input(schema).handler(fn)` builds one.
-2. `initQueue.context<...>().create()` gives `q`. Middleware wraps handlers and adds to the context.
+2. `initQueue.context<...>().create()` gives `q`. Middleware wraps handlers and adds to the context. `.use(step(fn))` adds keys or refuses with a failure; `.use(around(fn))` wraps the handler. See [jobs.md](reference/jobs.md#middleware).
 3. `q.registry({ ... })` groups jobs by feature.
 4. The BullMQ lane stores jobs in Redis. `trigger()` and `queue().enqueue()` start them. `queueWorker` runs them.
 5. The outbox lane stores jobs in your database, in the `journal_jobs` table of `@arki/journal`. `schedule.runAfter(tx, job, args)` starts them. The journal worker runs them.

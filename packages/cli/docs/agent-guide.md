@@ -9,7 +9,8 @@ Read [llms.txt](../llms.txt) first for the index. When this guide and `llms.txt`
 3. `program.main(argv, io)` returns the exit code and never exits. `run(program)` is the process boundary: argv, stdio, terminal, signals, `process.exit`.
 4. Output is a JSON envelope (`arki.cli/1`) when stdout is not a terminal, text when it is. `-o`, `--json` and `ARKI_OUTPUT` override.
 5. `run` returns data or an `@arki/failure` value. A returned failure exits 3, or 4 when its status is 429 or 503. A throw is a bug: exit 1.
-6. Help and `--version` never call `run` or `services`. Help imports one lazy level below the path asked; command help imports that command's module (and its schema library).
+6. `with: [step, around]` on a command runs plain functions before `run` and `preview`. A step that returns a failure is the command's failure. An around must declare `next` as a plain second parameter. See [Steps and arounds](#steps-and-arounds).
+7. Help and `--version` never call `run` or `services`. Help imports one lazy level below the path asked; command help imports that command's module (and its schema library).
 
 ## Task map
 
@@ -77,6 +78,14 @@ Read [llms.txt](../llms.txt) first for the index. When this guide and `llms.txt`
      run: ({ input }) => (input.id === 'usr_1' ? { id: input.id, name: 'Ada' } : UserNotFound({ id: input.id })),
    });
    ```
+
+### Steps and arounds
+
+1. List plain functions in `with: [...]`, in the order they run. They also wrap `preview`.
+2. A step `(ctx) => object | Failure` adds the keys it returns to the context of what follows. A returned failure is the command's failure: same exit code and error output as a failure returned from `run`, and `run` never starts.
+3. An around `(ctx, next) => Promise<T>` wraps everything after it and `run`, and returns what `next()` returns.
+4. Runtime tells them apart by `fn.length >= 2`. Declare `next` as a plain second parameter: no default value, no rest parameter. Otherwise an around runs as a step.
+5. Model shared by all transports: [Steps and arounds](../../dot/docs/middleware.md).
 
 ### Offer a dry run
 

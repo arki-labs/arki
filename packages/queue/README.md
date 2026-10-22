@@ -55,6 +55,43 @@ Welcome, usr_1
 
 To run the same job on Redis, build the queue with `q.createQueue({ connection: 'redis://localhost:6379', createContext })` instead. The job does not change.
 
+## Steps and arounds
+
+`.use(step(fn))` and `.use(around(fn))` run plain functions around a job's handler. A step reads the context and returns keys to add, or a failure to refuse the job. An around wraps everything after it.
+
+```ts
+import { z } from 'zod';
+
+import { defineFailure, isFailure } from '@arki/failure';
+import { around, initQueue, step } from '@arki/queue';
+
+const Paused = defineFailure('billing.paused', { status: 409, message: 'billing is paused' });
+
+const q = initQueue.context<{ paused: boolean }>().create();
+
+const unlessPaused = (ctx: { paused: boolean }) => (ctx.paused ? Paused() : { billing: 'on' as const });
+let refusals = 0;
+const countRefusals = async <T>(_ctx: object, next: () => Promise<T>) => {
+  const result = await next();
+  if (isFailure<unknown>(result)) refusals += 1; // a refusal arrives as a value, not a throw
+  return result;
+};
+
+export const charge = q.job
+  .use(step(unlessPaused))
+  .use(around(countRefusals))
+  .name('billing.charge.v1')
+  .input(z.object({ invoiceId: z.string() }))
+  .handler(async (data, ctx) => ({ invoiceId: data.invoiceId, billing: ctx.billing }));
+```
+
+- **Order matters.** Each one runs in the order you write it. A step sees the keys added before it.
+- **A refusal is the job's outcome,** as if the handler had returned that failure. The handler does not run.
+- **Inside an around, a refusal is the value `next()` resolves to.** Nothing throws, so nothing rolls back on its own. Check `isFailure`. A thrown error rejects `next()`.
+- **The old standard middleware is gone:** `timingMiddleware`, `loggingMiddleware`, `errorHandlingMiddleware`, `validationMiddleware`. Timing and logging are `logHandlers()` from `@arki/dot`. Error reports are `reportErrors()` from `@arki/dot`. Validation is `.input(schema)`. A time limit is `options.timeoutMs`. A per-job logger is a `step`.
+
+See [Steps and arounds](../dot/docs/middleware.md) for the full model, shared by every transport.
+
 ## When not to use this
 
 - You need a job to start only if your database write commits, and you do not want Redis. Use the outbox lane (`@arki/queue/outbox`). It is part of this package.

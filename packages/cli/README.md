@@ -111,6 +111,43 @@ export default defineCommand({
 
 `args` names the keys taken as positionals, in order. Booleans take `--yes` and `--no-yes`. Numbers are coerced, and `2junk` fails. An array key takes a repeated flag or a comma list. Unknown flags fail, and so does a scalar given twice.
 
+## Steps and arounds
+
+`with: [...]` on `defineCommand` lists plain functions that run before `run`, in order. A step reads the context and returns keys to add, or a failure to refuse the command. An around wraps everything after it. They also wrap `preview`.
+
+```ts
+import { z } from 'zod';
+
+import { defineCommand } from '@arki/cli';
+import { defineFailure } from '@arki/failure';
+
+const NotOperator = defineFailure('auth.not_operator', { status: 403, message: 'operators only' });
+
+const asOperator = (_ctx: object) => (process.env.OPERATOR === '1' ? { operator: 'ada' } : NotOperator());
+let lastRunMs = 0;
+const timed = async <T>(_ctx: object, next: () => Promise<T>) => {
+  const started = Date.now();
+  try {
+    return await next();
+  } finally {
+    lastRunMs = Date.now() - started; // a refusal is timed too: it resolves, it does not throw
+  }
+};
+
+export default defineCommand({
+  describe: 'Reindex the search',
+  input: z.object({ full: z.boolean().default(false) }),
+  with: [asOperator, timed],
+  run: ({ operator, input }) => ({ operator, full: input.full }),
+});
+```
+
+- **A refusal is the command's failure.** It has the same exit code and error output as a failure returned from `run`, and `run` never starts.
+- **A step and an around are told apart by `fn.length >= 2`.** An around declares `next` as a plain second parameter. Do not give it a default value or a rest parameter, or it runs as a step.
+- **Order matters.** Each element sees the keys added before it.
+
+See [Steps and arounds](../dot/docs/middleware.md) for the full model, shared by every transport.
+
 ## Programs
 
 Register each command in the tree with one line. A lazy entry (`() => import(...)`) is loaded only when its branch is taken.

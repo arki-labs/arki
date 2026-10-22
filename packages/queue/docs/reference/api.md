@@ -33,7 +33,7 @@ Chainable builder for creating jobs:
 
 ```ts skip="excerpt: it uses names this page does not define"
 q.job
-  .use(middleware)              // Add middleware
+  .use(middleware)              // Add middleware, a step(fn) or an around(fn)
   .name(string)                 // Set name
   .input(schema)                // Set input schema
   .options(options)             // Set job options

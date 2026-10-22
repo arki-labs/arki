@@ -40,6 +40,41 @@ await runtime.stop();
 ran: 3 rows
 ```
 
+## Steps and arounds
+
+`with: [...]` lists plain functions that run before the handler, in order. A step reads the context and returns keys to add, or a failure to refuse the run. An around wraps everything after it.
+
+```ts
+import { defineFailure } from '@arki/failure';
+import { defineSchedule } from '@arki/schedule';
+
+const Paused = defineFailure('billing.paused', { status: 409, message: 'billing is paused' });
+
+const unlessPaused = (_ctx: object) => (process.env.BILLING_PAUSED === 'true' ? Paused() : { billing: 'on' as const });
+let lastRunMs = 0;
+const timed = async <T>(_ctx: object, next: () => Promise<T>) => {
+  const started = Date.now();
+  try {
+    return await next();
+  } finally {
+    lastRunMs = Date.now() - started; // a refusal is timed too: it resolves, it does not throw
+  }
+};
+
+export const invoice = defineSchedule({
+  name: 'invoice',
+  every: '1h',
+  with: [unlessPaused, timed],
+  handler: async ctx => ({ billing: ctx.billing }),
+});
+```
+
+- **A refusal makes the run `refused`,** with that failure, as if the handler had returned it. The handler does not run.
+- **A step and an around are told apart by `fn.length >= 2`.** An around declares `next` as a plain second parameter. Do not give it a default value or a rest parameter, or it runs as a step.
+- **Order matters.** Each element sees the keys added before it.
+
+See [Steps and arounds](../dot/docs/middleware.md) for the full model, shared by every transport.
+
 ## When not to use this
 
 - You need a job queue with retries, priorities and flows. Use `@arki/queue`. A schedule only decides when something starts.
