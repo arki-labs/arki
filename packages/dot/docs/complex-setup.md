@@ -36,7 +36,7 @@ type CacheHandle = { quit(): Promise<void> };
 type MessageBus = { publish(topic: string, body: unknown): Promise<void> };
 type SearchClient = { close(): Promise<void> };
 type Catalog = { list(): Promise<unknown[]> };
-type Checkout = { pay(orderId: string): Promise<void> };
+type Checkout = { pay(orderId: string): Promise<undefined> };
 type Reporting = { daily(): Promise<unknown[]> };
 declare function parseEnv(config: unknown): AppEnv;
 declare function makeMetrics(endpoint: string): Metrics;
@@ -46,7 +46,7 @@ declare function connectElastic(url: string): Promise<SearchClient>;
 declare function makeInMemoryBus(): MessageBus;
 declare function makeCatalog(deps: object): Catalog;
 declare function makeCheckout(deps: object): Checkout;
-declare function makeReporting(replica: DbHandle, catalog: Catalog): Reporting;
+declare function makeReporting(replica: DbHandle, catalog: object): Reporting;
 declare function makeOutbox(db: DbHandle, bus: MessageBus): { startPolling(): void; drain(): Promise<void> };
 declare function buildServer(options: object): { listen(): Promise<void>; close(): Promise<void> };
 declare const PRIMARY_URL: string;
@@ -119,21 +119,35 @@ const catalog = defineFeature('catalog')
     cache: Cache,
     search: service.lazy<SearchClient>(), // eager or lazy provider — same code
   })
-  .provides({
-    catalog: ({ db, cache, search }) => makeCatalog({ db, cache, search }),
+  .usecases({
+    list:
+      ({ db, cache, search }) =>
+      () =>
+        makeCatalog({ db, cache, search }).list(),
   })
+  .provides({ catalog: ({ usecases }) => ({ list: usecases.list }) })
   .entrypoints();
 
 const checkout = defineFeature('checkout')
-  .needs({ db: Db, bus: Bus, catalog: service<Catalog>() })
-  .provides({
-    checkout: ({ db, bus, catalog }) => makeCheckout({ db, bus, catalog }),
+  .needs({ db: Db, bus: Bus, catalog: catalog.provides.catalog })
+  .usecases({
+    pay:
+      ({ db, bus, catalog }) =>
+      (orderId: string) =>
+        makeCheckout({ db, bus, catalog }).pay(orderId),
   })
+  .provides({ checkout: ({ usecases }) => ({ pay: usecases.pay }) })
   .entrypoints();
 
 const reporting = defineFeature('reporting')
-  .needs({ replica: ReportsDb, catalog: service<Catalog>() })
-  .provides({ reporting: ({ replica, catalog }) => makeReporting(replica, catalog) })
+  .needs({ replica: ReportsDb, catalog: catalog.provides.catalog })
+  .usecases({
+    daily:
+      ({ replica, catalog }) =>
+      () =>
+        makeReporting(replica, catalog).daily(),
+  })
+  .provides({ reporting: ({ usecases }) => ({ daily: usecases.daily }) })
   .entrypoints();
 
 // ── entrypoints — real work happens in start/stop ─────────────────────
@@ -155,9 +169,9 @@ const http = entrypoint({
   name: 'http',
   needs: {
     env: Env,
-    catalog: service<Catalog>(),
-    checkout: service<Checkout>(),
-    reporting: service<Reporting>(),
+    catalog: catalog.provides.catalog,
+    checkout: checkout.provides.checkout,
+    reporting: reporting.provides.reporting,
   },
   provides: {
     server: ({ env, catalog, checkout, reporting }) => buildServer({ port: env.PORT, catalog, checkout, reporting }),

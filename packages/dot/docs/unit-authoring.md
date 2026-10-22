@@ -505,13 +505,14 @@ type Db = { query(sql: string): Promise<string> };
 const database = infra({ name: 'database', provides: { db: (): Db => ({ query: async () => 'real' }) } });
 const reports = defineFeature('reports')
   .needs({ db: database.provides.db })
-  .provides({ report: ({ db }) => db.query('select 1') })
+  .usecases({ report: ({ db }) => () => db.query('select 1') })
+  .provides({ reports: ({ usecases }) => ({ report: usecases.report }) })
   .entrypoints();
 
 const fakeDb: Db = { query: async () => 'fake' };
 const app = await defineApp('t').infra(fake(database.provides.db, fakeDb)).features([reports]).boot();
 if (isFailure(app)) throw new Error(app.code);
-if (app.services.report !== 'fake') throw new Error('the fake did not replace the database');
+if ((await app.services.reports.report()) !== 'fake') throw new Error('the fake did not replace the database');
 await app.dispose();
 ```
 

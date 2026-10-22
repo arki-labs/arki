@@ -51,7 +51,7 @@ import type { DotAppManifest, DotLifecycleHook, JsonObject } from '@arki/dot';
 
 type UnitManifest = {
   name: string;
-  role?: 'infra' | 'feature' | 'entrypoint'; // the role the unit was built with
+  role?: 'infra' | 'feature' | 'domain-service' | 'entrypoint'; // the role the unit was built with
   dependencies: readonly string[];
   provides: readonly string[];
 };
@@ -63,7 +63,7 @@ type ActionManifest = {
   direction: 'in' | 'out';
   address?: string;
   summary?: string;
-  meta?: JsonObject;
+  meta?: Readonly<JsonObject>;
   metaSchema?: string;
 };
 
@@ -163,7 +163,13 @@ import { isFailure } from '@arki/failure';
 const database = infra({ name: 'database', provides: { db: () => ({ ready: true }) } });
 const billing = defineFeature('billing')
   .needs({ db: database.provides.db })
-  .provides({ billing: ({ db }) => ({ ready: db.ready }) })
+  .usecases({
+    ready:
+      ({ db }) =>
+      () =>
+        db.ready,
+  })
+  .provides({ billing: ({ usecases }) => ({ ready: usecases.ready }) })
   .entrypoints();
 
 const app = await defineApp('my-app').infra(database).features([billing]).boot();
