@@ -84,7 +84,11 @@ export function errorMap(...definitions: readonly DefinitionShape[]): unknown {
 }
 
 /** One oRPC error constructor, as the handler's `errors` object holds them. */
-type ErrorConstructor<Data> = (options: { readonly message: string; readonly data: Data }) => Error;
+type ErrorConstructor<Data> = (options: {
+  readonly message: string;
+  readonly data: Data;
+  readonly cause?: unknown;
+}) => Error;
 
 /**
  * The handler's `errors` must hold a constructor for every failure code the
@@ -150,11 +154,17 @@ export function rpcError(failure: Failure, errors: LooseErrors): Error {
 
 function declaredError(failure: Failure, errors: LooseErrors): Error {
   const declared = errors[failure.code];
+  // `cause` keeps the failure itself on the server (observers read it); oRPC never sends `cause` to the client.
   // Reached only when the types were bypassed: the client sees an undeclared error (`defined: false`).
   if (declared === undefined) {
-    return new ORPCError(failure.code, { status: failure.status, message: failure.message, data: failure.data });
+    return new ORPCError(failure.code, {
+      status: failure.status,
+      message: failure.message,
+      data: failure.data,
+      cause: failure,
+    });
   }
-  return declared({ message: failure.message, data: failure.data });
+  return declared({ message: failure.message, data: failure.data, cause: failure });
 }
 
 /** The parts of a definition {@link reviveRpcError} needs: the same as `revive`. */

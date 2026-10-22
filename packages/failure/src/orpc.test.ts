@@ -103,6 +103,15 @@ describe('orThrowRpc in a procedure', () => {
     await expect(call(procedure, { id: 'locked' })).rejects.toMatchObject({ code: 'post.locked', defined: true });
   });
 
+  // Observers on the server (error reporters, handler events) need the failure itself; the client must not get it twice.
+  it('keeps the failure as the error cause on the server, and out of what the client receives', async () => {
+    const error = await call(procedure, { id: 'nope' }).catch((error_: unknown) => error_);
+    if (!(error instanceof ORPCError)) throw new Error('expected an ORPCError');
+    expect(isFailure(error.cause)).toBe(true);
+    expect(error.cause).toMatchObject({ code: 'post.not_found', data: { id: 'nope' } });
+    expect(Object.keys(error.toJSON())).not.toContain('cause');
+  });
+
   it('makes a failure the contract does not list a compile error, so the client never meets an untyped error', () => {
     const compileOnly = () =>
       implement(byId).handler(({ input, errors }) =>
