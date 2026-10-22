@@ -1,5 +1,7 @@
 import { packageDocHref } from '~/features/site-data/package-urls';
 import { WAVES } from './build-steps';
+import { Code } from './code';
+import { MODEL_HEADLINE, MODEL_PARTS } from './model-excerpts';
 
 type AppCard = {
   name: string;
@@ -45,6 +47,33 @@ const NOT_FOR = [
   'The program has one or two services. A function with try/finally is shorter.',
   'You need a scope per request. Dot has one service graph per app.',
 ] as const;
+
+/** The mental model: what a function returns, what a unit needs, and who owns running work. */
+export function MentalModel() {
+  return (
+    <section className="home-band" aria-labelledby="home-model">
+      <p className="home-kicker">
+        <b>Structure</b> · the mental model
+      </p>
+      <h2 id="home-model">{MODEL_HEADLINE}</h2>
+      <p className="home-step-text">
+        Most code is now written by an agent and read by one. So the rules live in the compiler, the lint rule and the
+        test, not in a convention someone has to remember. A function returns its value or a failure. A unit declares
+        what it needs. Work runs in a scope that owns it. The explicit form is the point: no magic, nothing to unwrap,
+        no runtime to learn.
+      </p>
+      <div className="home-model">
+        {MODEL_PARTS.map(part => (
+          <div key={part.name}>
+            <b>{part.name}</b>
+            <p>{part.text}</p>
+            <Code excerpt={part.excerpt} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 /** "Built with arki": the apps behind the code on this page. */
 export function BuiltWith() {

@@ -174,8 +174,8 @@ export function BuildPath() {
       <Step step={FEATURE_STEP} index={2}>
         <p className="home-step-text">
           A feature holds one part of your app, like the waitlist. It says what it needs. Its own infra talks to the
-          database. Its usecases, the rules, get only the services they ask for by name, so a test can swap each one for
-          a fake.
+          database. Its usecases, the rules, get only the services they ask for by name, so a test builds one with the
+          real store on a real database and nothing else.
         </p>
         <ul className="home-rooms" aria-label="The four rooms of a feature">
           {FEATURE_ROOMS.map(room => (

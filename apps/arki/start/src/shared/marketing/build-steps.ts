@@ -14,6 +14,7 @@ import {
   REFUND_STEPS,
   WRITE_ORDER,
 } from './journal-excerpts';
+import { MODEL_EXCERPTS } from './model-excerpts';
 
 const APP_FILE = 'apps/avocabo/backend/src/app.ts';
 const DOT_README = 'packages/dot/README.md';
@@ -559,6 +560,7 @@ export const ALL_EXCERPTS = [
   EXPLAIN_COMMAND,
   DOCTOR_COMMAND,
   START_IN_TEST,
+  ...MODEL_EXCERPTS,
 ] as const satisfies readonly Excerpt[];
 
 /** The names of the steps, foundation first. One list feeds the type and the order. */
