@@ -3,6 +3,7 @@
  */
 
 import type { EmbeddingSpace } from '@arki/embeddings';
+import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
 import type { RAGServiceConfig } from './validation';
 
@@ -54,15 +55,20 @@ export type VectorScrollPage<TMetadata = Record<string, unknown>> = {
 /**
  * Vector search provider interface. Vectors in, vectors out: the caller embeds
  * (`@arki/embeddings`) and the store only stores and ranks. `space` is the one
- * embedding space every vector in this store belongs to.
+ * embedding space every vector in this store belongs to; `sparseSpace`, when set, is the space of
+ * the one sparse vector (`@arki/embeddings/sparse`) a document may carry next to it. The store checks
+ * only sizes against an existing collection; `requireSparseSpace` / `isSameSpace` before writing is the
+ * caller's gate against mixing vocabularies or models.
  */
 export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
   readonly space: EmbeddingSpace;
+  readonly sparseSpace?: SparseSpace;
 
   /**
-   * Upsert a document by its precomputed vector.
+   * Upsert a document by its precomputed vector, plus its sparse vector when the store has a
+   * `sparseSpace`.
    */
-  upsertVector(id: string, vector: ArrayLike<number>, metadata?: TMetadata): Promise<void>;
+  upsertVector(id: string, vector: ArrayLike<number>, metadata?: TMetadata, sparse?: SparseVector): Promise<void>;
 
   /**
    * Search by a precomputed query vector.
@@ -70,6 +76,16 @@ export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
    */
   searchByVector(
     vector: ArrayLike<number>,
+    limit?: number,
+    filter?: Record<string, unknown>
+  ): Promise<VectorSearchResult<TMetadata>[]>;
+
+  /**
+   * Search by a precomputed sparse query vector, ranked by dot product. Only stores with a
+   * `sparseSpace` have it. Same flat filter as `searchByVector`.
+   */
+  searchBySparseVector?(
+    vector: SparseVector,
     limit?: number,
     filter?: Record<string, unknown>
   ): Promise<VectorSearchResult<TMetadata>[]>;

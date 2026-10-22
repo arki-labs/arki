@@ -14,6 +14,7 @@ export const EMBEDDING_PROVIDERS = [
   'bedrock',
   'transformers',
   'openai-compatible',
+  'tei',
   'fake',
 ] as const;
 export type EmbeddingProviderName = (typeof EMBEDDING_PROVIDERS)[number];
@@ -71,6 +72,17 @@ export type EmbeddingSpace = {
 export type Int8Calibration = { readonly min: Float32Array; readonly max: Float32Array };
 
 /** What a model record's native call answers: one raw vector per text, unchecked, plus what the provider said it cost. */
+/**
+ * One input as `embedInputs` receives it, in input order: text (its prefix already applied), an
+ * image with its media type (`image/png`, …, read from the bytes when the caller gave none), or both.
+ */
+export type NativeInput =
+  | { readonly text: string; readonly image?: undefined }
+  | { readonly text?: string; readonly image: Uint8Array; readonly mimeType: string };
+
+/** A call with at least one image: `NativeRequest` with typed parts in place of `texts`. */
+export type NativeInputsRequest = Omit<NativeRequest, 'texts'> & { readonly inputs: readonly NativeInput[] };
+
 export type NativeEmbeddings = {
   readonly vectors: readonly ArrayLike<unknown>[];
   readonly tokens: TokenCount;
@@ -125,6 +137,11 @@ export type EmbeddingModel = {
   readonly countTokens?: (text: string) => number;
   /** One native request, at most `maxBatch` texts, no retry. Output is validated by `createEmbedder`, not here. */
   readonly embedTexts: (request: NativeRequest) => Promise<NativeEmbeddings | EmbedFailure>;
+  /**
+   * Embeds a call that holds any image. Only models whose `inputs` include `'image'` have it; text-only
+   * calls always go to `embedTexts`.
+   */
+  readonly embedInputs?: (request: NativeInputsRequest) => Promise<NativeEmbeddings | EmbedFailure>;
   /** Frees an in-process session (Transformers.js). */
   dispose?(): Promise<void>;
 };

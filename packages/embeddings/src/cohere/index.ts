@@ -1,14 +1,15 @@
 /**
  * `@arki/embeddings/cohere`: Cohere over plain `fetch` (`POST /v2/embed`). No SDK and no peer, so
- * it runs on every runtime that has `fetch`. Text only; images come in a later slice.
+ * it runs on every runtime that has `fetch`. `embed-v4.0` also takes images, through the v2 `inputs` field.
  */
 import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
-import type { EmbeddingModel, NativeRequest, Purpose, TokenCount } from '../types.js';
+import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
+import { toBase64 } from '../base64.js';
 import { providerInputTooLong } from '../tokens.js';
 
 export type CohereModelOptions = {
@@ -23,16 +24,21 @@ export type CohereModelOptions = {
 type CohereFacts = Pick<
   EmbeddingModel,
   'dimensions' | 'matryoshka' | 'maxInputTokens' | 'maxBatch' | 'maxBatchTokens'
->;
+> & {
+  /** Takes images through `inputs`. v3 models take one image per call and no text with it, so they stay text only. */
+  readonly images: boolean;
+};
 
 /**
  * From https://docs.cohere.com/docs/cohere-embed (sizes, context) and /reference/embed (96 texts per
- * call). Cohere states no tokens-per-request limit, so `maxBatchTokens` is our own cap.
+ * call). Cohere states no tokens-per-request limit, so `maxBatchTokens` is our own cap. Images:
+ * https://docs.cohere.com/reference/embed (read 2026-10-22): `inputs` holds up to 96 items, each a
+ * `content` array of text and `image_url` data-URI parts; v4.0 and newer take images, combined size at most 20MB.
  */
 const COHERE_FACTS: Readonly<Record<string, CohereFacts>> = {
-  'embed-v4.0': { dimensions: 1536, matryoshka: [1536, 1024, 512, 256], maxInputTokens: 128_000, maxBatch: 96, maxBatchTokens: 200_000 },
-  'embed-english-v3.0': { dimensions: 1024, matryoshka: [], maxInputTokens: 512, maxBatch: 96, maxBatchTokens: 49_152 },
-  'embed-multilingual-v3.0': { dimensions: 1024, matryoshka: [], maxInputTokens: 512, maxBatch: 96, maxBatchTokens: 49_152 },
+  'embed-v4.0': { dimensions: 1536, matryoshka: [1536, 1024, 512, 256], maxInputTokens: 128_000, maxBatch: 96, maxBatchTokens: 200_000, images: true },
+  'embed-english-v3.0': { dimensions: 1024, matryoshka: [], maxInputTokens: 512, maxBatch: 96, maxBatchTokens: 49_152, images: false },
+  'embed-multilingual-v3.0': { dimensions: 1024, matryoshka: [], maxInputTokens: 512, maxBatch: 96, maxBatchTokens: 49_152, images: false },
 };
 
 /**
@@ -57,6 +63,19 @@ function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
   return typeof count === 'number' && Number.isFinite(count) ? { basis: 'reported', count } : { basis: 'unknown' };
 }
 
+/** One input as a v2 `inputs` item: its text part, then its image as a data URI. Both parts make ONE embedding. */
+function contentOf(input: NativeInput) {
+  const content: (
+    | { readonly type: 'text'; readonly text: string }
+    | { readonly type: 'image_url'; readonly image_url: { readonly url: string } }
+  )[] = [];
+  if (input.text !== undefined) content.push({ type: 'text', text: input.text });
+  if (input.image !== undefined) {
+    content.push({ type: 'image_url', image_url: { url: `data:${input.mimeType};base64,${toBase64(input.image)}` } });
+  }
+  return { content };
+}
+
 /**
  * A Cohere model record. Cohere versions its models by name, so `assurance` is `immutable`.
  *
@@ -73,7 +92,12 @@ export function createCohereModel(options: CohereModelOptions) {
   const baseURL = (options.baseURL ?? 'https://api.cohere.com').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 
-  const embedTexts = async ({ texts, purpose, dimensions, quantization, truncate, signal }: NativeRequest) => {
+  /** One `POST /v2/embed`. `body` holds the inputs (`texts` or `inputs`); the rest is the same for both. */
+  const post = async (
+    body: Readonly<Record<string, unknown>>,
+    { purpose, dimensions, quantization, truncate, signal }: Pick<NativeRequest, 'purpose' | 'dimensions' | 'quantization' | 'truncate' | 'signal'>,
+    texts: readonly string[],
+  ) => {
     const type = EMBEDDING_TYPE[quantization ?? 'float'];
     let response: Response;
     try {
@@ -82,7 +106,7 @@ export function createCohereModel(options: CohereModelOptions) {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${options.apiKey}` },
         body: JSON.stringify({
           model: id,
-          texts,
+          ...body,
           input_type: inputType(purpose),
           embedding_types: [type],
           // Cohere cuts by default (`END`); ask for an error unless the caller chose to truncate.
@@ -109,34 +133,45 @@ export function createCohereModel(options: CohereModelOptions) {
       return InvalidOutput({ reason: `cohere answered ${response.status}: ${text.slice(0, 200)}` });
     }
 
-    let body: unknown;
+    let answer: unknown;
     try {
-      body = await response.json();
+      answer = await response.json();
     } catch {
       return signal?.aborted ? Cancelled() : InvalidOutput({ reason: 'cohere answered malformed JSON' });
     }
-    const embeddings = is(body, recordSchema) ? body['embeddings'] : undefined;
+    const embeddings = is(answer, recordSchema) ? answer['embeddings'] : undefined;
     const vectors = is(embeddings, recordSchema) ? embeddings[type] : undefined;
     // Cohere rows carry no index: they come in input order, so the count is the only check possible here.
-    if (!is(body, recordSchema) || !Array.isArray(vectors) || !vectors.every(item => Array.isArray(item))) {
+    if (!is(answer, recordSchema) || !Array.isArray(vectors) || !vectors.every(item => Array.isArray(item))) {
       return InvalidOutput({ reason: `cohere answered without embeddings.${type}` });
     }
-    return { vectors, tokens: reportedTokens(body) };
+    return { vectors, tokens: reportedTokens(answer) };
   };
+
+  const embedTexts = (request: NativeRequest) => post({ texts: request.texts }, request, request.texts);
+
+  /** Text and images in one `inputs` list: one item per input, so vectors come back in input order. */
+  const embedInputs = (request: NativeInputsRequest) =>
+    post({ inputs: request.inputs.map(input => contentOf(input)) }, request, request.inputs.map(input => input.text ?? ''));
 
   const model: EmbeddingModel = {
     provider: 'cohere',
     id,
     assurance: 'immutable',
     local: false,
-    ...facts,
+    dimensions: facts.dimensions,
+    matryoshka: facts.matryoshka,
+    maxInputTokens: facts.maxInputTokens,
+    maxBatch: facts.maxBatch,
+    maxBatchTokens: facts.maxBatchTokens,
     // Cohere does not document unit-length output, so we do not claim it.
     normalized: false,
     // Cohere takes the purpose as `input_type`, so no text prefix here.
     instruction: NO_INSTRUCTION,
-    inputs: ['text'],
+    inputs: facts.images ? ['text', 'image'] : ['text'],
     quantizations: ['int8', 'binary'],
     embedTexts,
+    ...(facts.images ? { embedInputs } : {}),
   };
   return model;
 }

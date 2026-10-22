@@ -19,7 +19,17 @@
         "GOOGLE_LIVE",
         "GOOGLE_GENERATIVE_AI_API_KEY",
         "MISTRAL_LIVE",
-        "MISTRAL_API_KEY"
+        "MISTRAL_API_KEY",
+        "JINA_LIVE",
+        "JINA_API_KEY",
+        "BEDROCK_LIVE",
+        "AWS_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "SPARSE_LIVE",
+        "SPARSE_BASE_URL"
       ]
     },
     "test:runtimes": {

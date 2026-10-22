@@ -64,6 +64,15 @@ describe('bm25', () => {
     expect(search('Dog sat', 2)[0]).toBe('dog');
   });
 
+  // Otherwise a grading pool fills up with passages ranked only by their place in the file.
+  it('returns nothing for a passage that shares no word with the query', () => {
+    const search = bm25([
+      { id: 'cat', text: 'the cat sat' },
+      { id: 'rain', text: 'rain falls' },
+    ]);
+    expect(search('cat', 2)).toEqual(['cat']);
+  });
+
   it('treats cedilla and comma diacritics as different words, so the RO slice can show it', () => {
     const search = bm25([
       { id: 'comma', text: 'școală' },
@@ -113,5 +122,8 @@ describe('loadRetrievalSet', () => {
     const set = await loadRetrievalSet(folder);
     expect(set.corpus).toEqual([{ id: 'd1', text: 'T body' }]);
     expect(set.queries.map(item => item.id)).toEqual(['q1']);
+    // A grading pool needs the queries nobody has graded yet.
+    const all = await loadRetrievalSet(folder, { unjudged: true });
+    expect(all.queries.map(item => item.id)).toEqual(['q1', 'q2']);
   });
 });

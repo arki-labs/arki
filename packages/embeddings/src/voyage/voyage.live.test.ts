@@ -8,6 +8,12 @@ import { hamming, quantize } from '../quantize.js';
 import { norm } from '../vector.js';
 import { createVoyageModel } from './index.js';
 
+// A 1x1 white PNG.
+const PIXEL = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='),
+  char => char.codePointAt(0) ?? 0,
+);
+
 // Opt-in: spends a few tokens on the real API. Run with VOYAGE_LIVE=1 and VOYAGE_API_KEY set.
 describe.skipIf(process.env['VOYAGE_LIVE'] !== '1')('./voyage live', () => {
   it('one real embed of two strings returns 1024 dims, unit norm', async () => {
@@ -41,5 +47,16 @@ describe.skipIf(process.env['VOYAGE_LIVE'] !== '1')('./voyage live', () => {
     const ours = quantize(float.vector, 'binary');
     if (isFailure(ours)) throw new Error(ours.message);
     expect(hamming(ours, packed.vector)).toBeLessThanOrEqual(1024 * 0.02);
+  });
+
+  it('one real image embeds with voyage-multimodal-3.5', async () => {
+    const model = createVoyageModel({ id: 'voyage-multimodal-3.5', apiKey: process.env['VOYAGE_API_KEY'] ?? '' });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const batch = await embedder.embed(['a white pixel', { image: PIXEL }], { purpose: 'document' });
+    if (isFailure(batch)) throw new Error(batch.message);
+    expect(batch.vectors).toHaveLength(2);
+    expect(batch.vectors[1]).toHaveLength(1024);
   });
 });

@@ -6,7 +6,7 @@ import { getLogger } from '@arki/log';
 
 import type { SCHEDULE_RUNTIME_FAILURES } from './errors.js';
 import type { ScheduleDef, ScheduleLock } from './index.js';
-import { SCHEDULE_ERROR_CODES, ScheduleError, ScheduleLockFailed } from './errors.js';
+import { lockCodeSchema, SCHEDULE_ERROR_CODES, ScheduleError, ScheduleLockFailed } from './errors.js';
 import { DEFAULT_LOCK_HOLD_MS, parseEveryInterval } from './index.js';
 import { observe, observeSchedule } from './telemetry.js';
 
@@ -286,9 +286,9 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
       }
       if (code === 'lost') lockLost += 1;
       else lockFailures += 1;
-      const parsed = ScheduleLockFailed.dataSchema.safeParse({ lockCode: code });
-      const cause = parsed.success
-        ? ScheduleLockFailed(parsed.data, { cause: error })
+      const lockCode = lockCodeSchema.safeParse(code);
+      const cause = lockCode.success
+        ? ScheduleLockFailed({ lockCode: lockCode.data }, { cause: error })
         : UnexpectedDefect({ cause: error });
       observe(() => log.error('schedule lock failed', { schedule: schedule.name, code: cause.code }));
       return { name: schedule.name, status: 'lock-failed', cause };

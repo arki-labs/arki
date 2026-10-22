@@ -161,71 +161,6 @@
       "reason": "Now-tier baseline 2026-10-17"
     },
     {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./env\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./ollama\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./openai-compatible\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./openai\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./testing\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./voyage\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./cohere\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./google\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./mistral\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./kv\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
-      "package": "@arki/embeddings",
-      "error": "TYPES_E001 export \"./transformers\" exposes Zod types: ZodCustom, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Same cause as the other @arki/embeddings entries: every @arki/failure type carries its Zod schema, so an entry that returns a failure exposes Zod. Fix belongs in @arki/failure (founder, 2026-10-21)."
-    },
-    {
       "package": "@arki/env",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
@@ -264,11 +199,6 @@
       "package": "@arki/journal",
       "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodObject, ZodString",
       "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./errors\" exposes Zod types: ZodObject, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
     },
     {
       "package": "@arki/journal",
@@ -319,56 +249,6 @@
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./testing\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./http/cloudflare\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./http/mailpit\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./http/resend\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./http/unosend\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./node/ses\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./pg\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./templates/auth\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./testing\" exposes Zod types: ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "Now-tier baseline 2026-10-17"
     },
     {
       "package": "@arki/payments",
@@ -429,11 +309,6 @@
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/providers/base-provider\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
-    },
-    {
-      "package": "@arki/payments",
-      "error": "TYPES_E001 export \"./core/providers/provider-error\" exposes Zod types: ZodEnum, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
     },
     {
       "package": "@arki/payments",

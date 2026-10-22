@@ -49,6 +49,8 @@ const { values: args } = parseArgs({
     dataset: { type: 'string', multiple: true },
     'self-check': { type: 'boolean', default: false },
     'harrier-url': { type: 'string', default: 'http://localhost:8091/v1' },
+    /** A folder: each `--dataset` set's grading pool is written there as `<set>.pool.jsonl`. */
+    pool: { type: 'string' },
   },
 });
 
@@ -76,14 +78,7 @@ const CANDIDATES: readonly Candidate[] = [
   {
     key: 'qwen3-4b',
     label: 'ollama qwen3-embedding:4b (GPU tier)',
-    // Not in ./ollama's facts table yet: its card's size and Qwen3's prefixes.
-    build: () =>
-      createOllamaModel({
-        id: 'qwen3-embedding:4b',
-        baseURL: OLLAMA,
-        dimensions: 2560,
-        instruction: QWEN3_INSTRUCTION,
-      }),
+    build: () => createOllamaModel({ id: 'qwen3-embedding:4b', baseURL: OLLAMA }),
   },
   {
     key: 'harrier-0.6b',
@@ -147,8 +142,20 @@ async function vectors(
 
 type SetResult = { readonly overall: GroupScores; readonly groups: Readonly<Record<string, GroupScores>> };
 
+/** How deep each ranking feeds a grading pool: TREC-style pooling over BM25 and every model. */
+const POOL_DEPTH = 20;
+/** Set name → query id → passage ids some ranking put in its top POOL_DEPTH. */
+const pools = new Map<string, Map<string, Set<string>>>();
+
 /** Overall, then one group per domain and per stress slice the set tags. */
 async function scoreSet(set: RetrievalSet, rankings: ReadonlyMap<string, readonly string[]>): Promise<SetResult> {
+  const pool = pools.get(set.name) ?? new Map<string, Set<string>>();
+  for (const [query, ranked] of rankings) {
+    const passages = pool.get(query) ?? new Set<string>();
+    for (const id of ranked.slice(0, POOL_DEPTH)) passages.add(id);
+    pool.set(query, passages);
+  }
+  pools.set(set.name, pool);
   const overall = await scoreGroup(set, rankings);
   const groups: Record<string, GroupScores> = {};
   for (const domain of new Set(set.queries.flatMap(query => (query.domain === undefined ? [] : [query.domain])))) {
@@ -243,10 +250,13 @@ async function selfCheck(
 }
 
 const only = args.models?.split(',');
+const extraSets = await Promise.all(
+  (args.dataset ?? []).map(folder => loadRetrievalSet(path.resolve(folder), { unjudged: args.pool !== undefined })),
+);
 const sets = [
   await loadRetrievalSet(await ensureDataset('scifact')),
   await loadRetrievalSet(await ensureDataset('nfcorpus')),
-  ...(await Promise.all((args.dataset ?? []).map(folder => loadRetrievalSet(path.resolve(folder))))),
+  ...extraSets,
 ];
 const stsFile = path.join(await ensureDataset('ro-sts'), 'test.tsv');
 
@@ -312,7 +322,10 @@ const metric = (result: GroupScores | undefined, name: string): string => {
   return value === undefined ? '–' : value.toFixed(3);
 };
 
-const scored = sets.filter(set => set.queries.length > 0);
+/** Queries with a relevant passage: with `--pool`, a set also holds queries nobody graded yet. */
+const graded = (set: RetrievalSet): number =>
+  set.queries.filter(query => [...(set.qrels.get(query.id)?.values() ?? [])].some(grade => grade > 0)).length;
+const scored = sets.filter(set => graded(set) > 0);
 out(`| Model | ${scored.map(set => `${set.name} nDCG@10 | R@10 | R@50 | MRR@10`).join(' | ')} | RO-STS ρ |`);
 out(`| --- |${' ---: |'.repeat(scored.length * 4 + 1)}`);
 for (const row of rows) {
@@ -326,7 +339,7 @@ for (const row of rows) {
   out(`| ${row.label} | ${cells.join(' | ')} | ${row.roSts === undefined ? '–' : row.roSts.toFixed(3)} |`);
 }
 for (const set of sets) {
-  if (set.queries.length === 0) out(`\n${set.name}: 0 graded queries, not scored.`);
+  if (graded(set) === 0) out(`\n${set.name}: 0 graded queries, not scored.`);
 }
 
 for (const set of scored) {
@@ -377,6 +390,25 @@ if (args['self-check']) {
       `\nSelf-check (wrapper vs raw /api/embed, SciFact nDCG@10): ${wrapped.toFixed(4)} vs ${check.raw.toFixed(4)} → ${check.pass ? 'PASS' : 'FAIL'}`,
     );
     failed = !check.pass;
+  }
+}
+
+// Passages in id order, never rank order, so an annotator cannot tell which ranking found them.
+if (args.pool !== undefined) {
+  await mkdir(args.pool, { recursive: true });
+  for (const set of extraSets) {
+    const texts = new Map(set.corpus.map(passage => [passage.id, passage.text]));
+    const lines = set.queries
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .map(query => {
+        const judged = set.qrels.get(query.id);
+        const ids = [...(pools.get(set.name)?.get(query.id) ?? [])].toSorted();
+        const passages = ids.map(id => ({ id, text: texts.get(id) ?? '', grade: judged?.get(id) ?? null }));
+        return JSON.stringify({ query, passages });
+      });
+    const target = path.join(args.pool, `${set.name}.pool.jsonl`);
+    await writeFile(target, lines.length === 0 ? '' : `${lines.join('\n')}\n`);
+    progress(`pool: ${target} (${lines.length} queries)`);
   }
 }
 

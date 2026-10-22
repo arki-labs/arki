@@ -8,7 +8,7 @@ import { is, recordSchema } from '@arki/schema';
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
 import { resolveSpace } from '../resolve.js';
-import { NO_INSTRUCTION } from '../instructions.js';
+import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { createOllamaModel } from './index.js';
 
 /** Real answers recorded from Ollama 2026-10-17 (`qwen3-embedding:0.6b`, inputs "hello" and "world"). */
@@ -133,6 +133,14 @@ describe('./ollama', () => {
     if (isFailure(embedder)) throw new Error(embedder.message);
     const result = await embedMany(embedder, ['a']);
     expect(isFailure(result) && result.data).toEqual({ model: 'qwen3-embedding:0.6b', reason: 'unreachable' });
+  });
+
+  // The fleet's GPU tier (everseek) must not need its size and prefixes passed by hand, or a missed
+  // prefix silently lowers recall.
+  it('qwen3-embedding:4b is known: 2560 dims and the Qwen3 prefixes', () => {
+    const model = createOllamaModel({ id: 'qwen3-embedding:4b' });
+    if (isFailure(model)) throw new Error(model.message);
+    expect(model).toMatchObject({ dimensions: 2560, maxInputTokens: 32_768, instruction: QWEN3_INSTRUCTION });
   });
 
   it('an unknown model id without dimensions is ConfigurationFailure', () => {

@@ -52,6 +52,8 @@ describe('resolveEmbeddingModel', () => {
     expect(!isFailure(cohere) && cohere.provider).toBe('cohere');
     const mistral = resolveEmbeddingModel(undefined, { EMBEDDING_MODEL: 'mistral:mistral-embed', MISTRAL_API_KEY: 'm-test' });
     expect(!isFailure(mistral) && mistral.provider).toBe('mistral');
+    const jina = resolveEmbeddingModel('jina:jina-embeddings-v3', { JINA_API_KEY: 'j-test' });
+    expect(!isFailure(jina) && jina.provider).toBe('jina');
     const noKey = resolveEmbeddingModel('mistral:mistral-embed', {});
     expect(ConfigurationFailure.is(noKey) && noKey.data.message).toContain('MISTRAL_API_KEY');
     const compatible = resolveEmbeddingModel('openai-compatible:Qwen/Qwen3-Embedding-8B', {
@@ -117,6 +119,20 @@ describe('resolveEmbeddingModel', () => {
     };
     const model = resolveEmbeddingModel(undefined, { OPENAI_API_KEY: 'sk-test' }, { requiredSpace: stored });
     expect(!isFailure(model) && model.id).toBe('text-embedding-3-small');
+  });
+
+  // Bedrock is named only, and reads AWS settings from the env passed in, so resolve stays pure.
+  it('a named bedrock ref needs AWS_REGION and credentials from the passed env', () => {
+    const noRegion = resolveEmbeddingModel('bedrock:amazon.titan-embed-text-v2:0', {});
+    expect(ConfigurationFailure.is(noRegion) && noRegion.data.message).toContain('AWS_REGION');
+    // Without credentials in the passed env the SDK would fall back to process.env, so resolve refuses.
+    const noCredentials = resolveEmbeddingModel('bedrock:amazon.titan-embed-text-v2:0', { AWS_REGION: 'eu-west-1' });
+    expect(ConfigurationFailure.is(noCredentials) && noCredentials.data.message).toContain('AWS_BEARER_TOKEN_BEDROCK');
+    const bedrock = resolveEmbeddingModel('bedrock:amazon.titan-embed-text-v2:0', {
+      AWS_REGION: 'eu-west-1',
+      AWS_BEARER_TOKEN_BEDROCK: 'b-test',
+    });
+    expect(!isFailure(bedrock) && bedrock.provider).toBe('bedrock');
   });
 
   it('nothing configured is ConfigurationFailure', () => {

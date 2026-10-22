@@ -1,0 +1,9 @@
+{
+  "model": "jina-embeddings-v3",
+  "object": "list",
+  "usage": { "total_tokens": 12, "prompt_tokens": 12 },
+  "data": [
+    { "object": "embedding", "index": 0, "embedding": [0.5, 0.5] },
+    { "object": "embedding", "index": 1, "embedding": [0.5, -0.5] }
+  ]
+}

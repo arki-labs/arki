@@ -1,14 +1,15 @@
 /**
- * `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`). No SDK and no
- * peer, so it runs on every runtime that has `fetch`.
+ * `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`; the multimodal
+ * models use `POST /v1/multimodalembeddings`). No SDK and no peer, so it runs on every runtime that has `fetch`.
  */
 import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
-import type { EmbeddingModel, NativeRequest, Purpose, TokenCount } from '../types.js';
+import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { mentionsContextLength, retryAfterMs, vectorsByIndex } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
+import { toBase64 } from '../base64.js';
 import { providerInputTooLong } from '../tokens.js';
 
 export type VoyageModelOptions = {
@@ -23,17 +24,26 @@ export type VoyageModelOptions = {
 type VoyageFacts = Pick<
   EmbeddingModel,
   'dimensions' | 'matryoshka' | 'maxInputTokens' | 'maxBatch' | 'maxBatchTokens'
->;
+> & {
+  /** Answers on `/multimodalembeddings` and takes image parts. The text models do not. */
+  readonly multimodal: boolean;
+};
 
 /** Sizes every listed model can make besides its native 1024. */
 const VOYAGE_SIZES = [2048, 1024, 512, 256] as const;
 
 /** From https://docs.voyageai.com/docs/embeddings: 32k context, 1000 texts, tokens per request differ by model. */
 const VOYAGE_FACTS: Readonly<Record<string, VoyageFacts>> = {
-  'voyage-3.5': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 320_000 },
-  'voyage-3.5-lite': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 1_000_000 },
-  'voyage-3-large': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 120_000 },
-  'voyage-code-3': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 120_000 },
+  'voyage-3.5': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 320_000, multimodal: false },
+  'voyage-3.5-lite': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 1_000_000, multimodal: false },
+  'voyage-3-large': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 120_000, multimodal: false },
+  'voyage-code-3': { dimensions: 1024, matryoshka: VOYAGE_SIZES, maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 120_000, multimodal: false },
+  // https://docs.voyageai.com/docs/multimodal-embeddings and /reference/multimodal-embeddings-api (read
+  // 2026-10-22): 32k tokens per input, 1000 inputs and 320k tokens per request, images at most 16M pixels
+  // and 20 MB. Sizes other than 1024 and `output_dtype` are not documented for this endpoint, so none is
+  // offered (`matryoshka: []`, no `quantizations`): the call is refused before the request.
+  'voyage-multimodal-3.5': { dimensions: 1024, matryoshka: [], maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 320_000, multimodal: true },
+  'voyage-multimodal-3': { dimensions: 1024, matryoshka: [], maxInputTokens: 32_000, maxBatch: 1000, maxBatchTokens: 320_000, multimodal: true },
 };
 
 /** Voyage prepends its own prompt for `query` and `document`; any other purpose sends no `input_type`. */
@@ -53,6 +63,19 @@ function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
 
 /** Voyage's wording for a text over the context window when `truncation` is false. Not documented, so matched loosely. */
 
+/** One input as a multimodal `inputs` item: its text, then its image as a base64 data URI. Both parts make ONE embedding. */
+function itemOf(input: NativeInput) {
+  const content: (
+    | { readonly type: 'text'; readonly text: string }
+    | { readonly type: 'image_base64'; readonly image_base64: string }
+  )[] = [];
+  if (input.text !== undefined) content.push({ type: 'text', text: input.text });
+  if (input.image !== undefined) {
+    content.push({ type: 'image_base64', image_base64: `data:${input.mimeType};base64,${toBase64(input.image)}` });
+  }
+  return { content };
+}
+
 /**
  * A Voyage model record. Voyage versions its models by name, so `assurance` is `immutable`.
  *
@@ -69,15 +92,22 @@ export function createVoyageModel(options: VoyageModelOptions) {
   const baseURL = (options.baseURL ?? 'https://api.voyageai.com/v1').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 
-  const embedTexts = async ({ texts, purpose, dimensions, quantization, truncate, signal }: NativeRequest) => {
+  /** One native call. `body` holds the inputs; the endpoint and the text options differ for the multimodal models. */
+  const post = async (
+    path: string,
+    body: Readonly<Record<string, unknown>>,
+    { purpose, dimensions, quantization, truncate, signal }: Pick<NativeRequest, 'purpose' | 'dimensions' | 'quantization' | 'truncate' | 'signal'>,
+    texts: readonly string[],
+  ) => {
+    const count = texts.length;
     let response: Response;
     try {
-      response = await send(`${baseURL}/embeddings`, {
+      response = await send(`${baseURL}/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${options.apiKey}` },
         body: JSON.stringify({
           model: id,
-          input: texts,
+          ...body,
           input_type: inputType(purpose),
           // Voyage cuts silently by default; ask for an error unless the caller chose to truncate.
           truncation: truncate === true,
@@ -104,33 +134,52 @@ export function createVoyageModel(options: VoyageModelOptions) {
       return InvalidOutput({ reason: `voyage answered ${response.status}: ${text.slice(0, 200)}` });
     }
 
-    let body: unknown;
+    let answer: unknown;
     try {
-      body = await response.json();
+      answer = await response.json();
     } catch {
       return signal?.aborted ? Cancelled() : InvalidOutput({ reason: 'voyage answered malformed JSON' });
     }
-    const data = is(body, recordSchema) ? body['data'] : undefined;
-    if (!is(body, recordSchema) || !Array.isArray(data)) {
+    const data = is(answer, recordSchema) ? answer['data'] : undefined;
+    if (!is(answer, recordSchema) || !Array.isArray(data)) {
       return InvalidOutput({ reason: 'voyage answered without a data array' });
     }
-    const vectors = vectorsByIndex(data, texts.length);
+    const vectors = vectorsByIndex(data, count);
     if (typeof vectors === 'string') return InvalidOutput({ reason: `voyage: ${vectors}` });
-    return { vectors, tokens: reportedTokens(body) };
+    return { vectors, tokens: reportedTokens(answer) };
   };
+
+  const embedTexts = (request: NativeRequest) =>
+    facts.multimodal
+      ? post(
+          'multimodalembeddings',
+          { inputs: request.texts.map(text => itemOf({ text })) },
+          request,
+          request.texts,
+        )
+      : post('embeddings', { input: request.texts }, request, request.texts);
+
+  /** Text and images in one `inputs` list: one item per input, so rows come back at their input's index. */
+  const embedInputs = (request: NativeInputsRequest) =>
+    post('multimodalembeddings', { inputs: request.inputs.map(input => itemOf(input)) }, request, request.inputs.map(input => input.text ?? ''));
 
   const model: EmbeddingModel = {
     provider: 'voyage',
     id,
     assurance: 'immutable',
     local: false,
-    ...facts,
+    dimensions: facts.dimensions,
+    matryoshka: facts.matryoshka,
+    maxInputTokens: facts.maxInputTokens,
+    maxBatch: facts.maxBatch,
+    maxBatchTokens: facts.maxBatchTokens,
     normalized: true,
     // Voyage prepends its own prompt from `input_type`, so no text prefix here.
     instruction: NO_INSTRUCTION,
-    inputs: ['text'],
-    quantizations: ['int8', 'binary'],
+    inputs: facts.multimodal ? ['text', 'image'] : ['text'],
+    quantizations: facts.multimodal ? [] : ['int8', 'binary'],
     embedTexts,
+    ...(facts.multimodal ? { embedInputs } : {}),
   };
   return model;
 }

@@ -31,7 +31,7 @@ export type Qrels = ReadonlyMap<string, ReadonlyMap<string, number>>;
 export type RetrievalSet = {
   readonly name: string;
   readonly corpus: readonly Passage[];
-  /** Only queries with at least one relevant passage in the split, as BEIR evaluates them. */
+  /** Queries with a relevant passage in the split, as BEIR evaluates them; every query with `unjudged`. */
   readonly queries: readonly Query[];
   readonly qrels: Qrels;
 };
@@ -43,7 +43,10 @@ async function lines(file: string): Promise<string[]> {
   return content.split(/\r?\n/).filter(line => line.trim() !== '');
 }
 
-export async function loadRetrievalSet(folder: string, split = 'test'): Promise<RetrievalSet> {
+export async function loadRetrievalSet(
+  folder: string,
+  { split = 'test', unjudged = false }: { readonly split?: string; readonly unjudged?: boolean } = {},
+): Promise<RetrievalSet> {
   const qrels = new Map<string, Map<string, number>>();
   const [header, ...rows] = await lines(path.join(folder, 'qrels', `${split}.tsv`));
   if (header !== 'query-id\tcorpus-id\tscore') throw new Error(`${folder}: unexpected qrels header ${header ?? ''}`);
@@ -64,7 +67,8 @@ export async function loadRetrievalSet(folder: string, split = 'test'): Promise<
   for (const line of await lines(path.join(folder, 'queries.jsonl'))) {
     const row = queryRowSchema.parse(JSON.parse(line));
     const judged = qrels.get(row._id);
-    if (judged === undefined || ![...judged.values()].some(grade => grade > 0)) continue;
+    const relevant = judged !== undefined && [...judged.values()].some(grade => grade > 0);
+    if (!relevant && !unjudged) continue;
     queries.push({
       id: row._id,
       text: row.text,

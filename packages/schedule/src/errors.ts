@@ -70,9 +70,12 @@ export class ScheduleError extends Error {
  * @fix Inspect the lock provider before triggering this schedule again.
  * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
  */
+/** The lock provider codes a schedule reports; any other provider code stays a private defect. */
+export const lockCodeSchema = z.enum(['lost', 'store']);
+
 export const ScheduleLockFailed = defineFailure('schedule.lock_failed', {
   status: 503,
-  data: z.object({ lockCode: z.enum(['lost', 'store']) }),
+  data: z.object({ lockCode: lockCodeSchema }),
   message: 'The schedule lock failed ({lockCode}).',
   remediation: 'Inspect the lock provider before triggering this schedule again.',
 });

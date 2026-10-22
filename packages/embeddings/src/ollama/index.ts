@@ -44,6 +44,16 @@ const OLLAMA_FACTS: Readonly<Record<string, OllamaFacts>> = {
     normalized: true,
     instruction: QWEN3_INSTRUCTION,
   },
+  // The GPU tier: the card allows any size from 32 to 2560; these are the useful steps.
+  'qwen3-embedding:4b': {
+    dimensions: 2560,
+    matryoshka: [2560, 2048, 1536, 1024, 768, 512, 256],
+    maxInputTokens: 32_768,
+    maxBatch: 64,
+    maxBatchTokens: 65_536,
+    normalized: true,
+    instruction: QWEN3_INSTRUCTION,
+  },
   embeddinggemma: {
     dimensions: 768,
     matryoshka: [768, 512, 256, 128],

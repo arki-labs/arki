@@ -1,6 +1,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+
 import type { DataOf, Failure, FailureOf, Stoppable, SuccessOf } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
 import { defineFailure, isFailure, orThrow, stoppable, UnexpectedFailure } from './failure.js';
@@ -108,6 +110,13 @@ describe('defineFailure', () => {
       ];
     };
     expectTypeOf(mustNotCompile).toBeFunction();
+  });
+
+  // Otherwise every exported failure prints `z.ZodObject<…>` into its package's .d.ts, tying consumers to Zod.
+  it('a definition names its schema by input and output only, never the schema library', () => {
+    const Moved = defineFailure('post.moved', { data: z.object({ to: z.string().transform(Number) }) });
+    expectTypeOf(Moved.dataSchema).toEqualTypeOf<StandardSchemaV1<{ to: string }, { to: number }>>();
+    expectTypeOf(defineFailure('post.gone').dataSchema).toEqualTypeOf<undefined>();
   });
 
   it('types data as the schema output: a failure carries the live value, not the wire form', () => {

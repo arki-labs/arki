@@ -58,6 +58,7 @@ export function bm25(
   });
   const average = lengths.reduce((sum, length) => sum + length, 0) / Math.max(lengths.length, 1);
   const ids = passages.map(passage => passage.id);
+  const indexOf = new Map(ids.map((id, index) => [id, index]));
   return (query, k) => {
     const scores = new Float64Array(passages.length);
     for (const word of new Set(tokens(query))) {
@@ -69,7 +70,8 @@ export function bm25(
         scores[index] = (scores[index] ?? 0) + (idf * count * (k1 + 1)) / (count + norm);
       }
     }
-    return topK(ids, scores, k);
+    // A passage sharing no word with the query is no candidate: only corpus order would rank it.
+    return topK(ids, scores, k).filter(id => (scores[indexOf.get(id) ?? -1] ?? 0) > 0);
   };
 }
 

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-rest';
 
 import type { EmbeddingSpace } from '@arki/embeddings';
+import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
 import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { debugVector } from '../../debug.ts';
@@ -21,6 +22,12 @@ import { getErrorMessage, VectorSearchError } from '../../errors';
  */
 const SOURCE_ID_KEY = '_sourceId';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The named sparse vector a point carries next to its dense one. The dense vector stays the
+ * collection's unnamed default (`''`), so collections without sparse vectors are unchanged.
+ */
+const SPARSE_VECTOR_NAME = 'sparse';
 
 function toPointId(id: string | number): string | number {
   if (typeof id === 'number') return id;
@@ -94,6 +101,7 @@ export type QdrantSearchFilter = {
 
 export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
   readonly space: EmbeddingSpace;
+  readonly sparseSpace?: SparseSpace;
   private client: QdrantClient | null = null;
   private collectionName: string;
   private vectorSize: number;
@@ -103,9 +111,10 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
   constructor(
     private config: QdrantConfig,
-    { space }: { space: EmbeddingSpace },
+    { space, sparseSpace }: { space: EmbeddingSpace; sparseSpace?: SparseSpace },
   ) {
     this.space = space;
+    if (sparseSpace !== undefined) this.sparseSpace = sparseSpace;
     this.collectionName = config.collectionName;
     // The collection size IS the space's size: one source for index-time and query-time vectors.
     this.vectorSize = space.dimensions;
@@ -114,10 +123,11 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     this.payloadIndexes = config.payloadIndexes ?? [];
 
     debugVector.debug(
-      '[Qdrant] Provider initialized (collection: {collection}, vectorSize: {vectorSize}, autoCreate: {autoCreate}, url: {url})',
+      '[Qdrant] Provider initialized (collection: {collection}, vectorSize: {vectorSize}, sparse: {sparse}, autoCreate: {autoCreate}, url: {url})',
       {
         collection: this.collectionName,
         vectorSize: this.vectorSize,
+        sparse: sparseSpace?.vocabulary ?? 'none',
         autoCreate: this.createIfNotExists,
         url: config.url,
       },
@@ -181,6 +191,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
               size: this.vectorSize,
               distance: 'Cosine', // Best for normalized embeddings
             },
+            ...(this.sparseSpace === undefined ? {} : { sparse_vectors: { [SPARSE_VECTOR_NAME]: {} } }),
             optimizers_config: {
               default_segment_number: 2,
               indexing_threshold: 20_000,
@@ -223,6 +234,29 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
           `A model/dimension change requires a fresh collection + re-embed — refusing to read/write a mismatched collection.`,
       );
     }
+    if (this.sparseSpace !== undefined && info.config.params.sparse_vectors?.[SPARSE_VECTOR_NAME] === undefined) {
+      throw new VectorSearchError(
+        `Qdrant collection "${this.collectionName}" has no sparse vector "${SPARSE_VECTOR_NAME}", but this provider is configured for one. ` +
+          `Adding sparse vectors requires a fresh collection + re-embed — refusing to read/write a mismatched collection.`,
+      );
+    }
+  }
+
+  /** A sparse vector as Qdrant takes it, refused when it cannot belong to this store's sparse space. */
+  private sparseOf(sparse: SparseVector, where: string): QdrantSchemas['SparseVector'] {
+    if (this.sparseSpace === undefined) {
+      throw new VectorSearchError(`${where}: this provider has no sparseSpace; pass one to store sparse vectors.`);
+    }
+    if (sparse.indices.length !== sparse.values.length) {
+      throw new VectorSearchError(
+        `${where}: sparse vector has ${sparse.indices.length} indices but ${sparse.values.length} values.`,
+      );
+    }
+    const vocabularySize = this.sparseSpace.dimensions;
+    if (sparse.indices.some(index => index >= vocabularySize)) {
+      throw new VectorSearchError(`${where}: sparse index outside the vocabulary of ${vocabularySize}.`);
+    }
+    return { indices: [...sparse.indices], values: [...sparse.values] };
   }
 
   /** Create keyword payload indexes for every configured field. Idempotent. */
@@ -247,19 +281,34 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     }
   }
 
-  async upsertVector(id: string, values: ArrayLike<number>, metadata?: TMetadata): Promise<void> {
+  async upsertVector(
+    id: string,
+    values: ArrayLike<number>,
+    metadata?: TMetadata,
+    sparse?: SparseVector,
+  ): Promise<void> {
     const vector = Array.from(values);
     if (vector.length !== this.vectorSize) {
       throw new VectorSearchError(
         `upsertVector dimension mismatch for "${id}": got ${vector.length}, collection is ${this.vectorSize}.`,
       );
     }
-    debugVector.debug('[Qdrant] Upserting precomputed vector (id: {id}, dims: {dims})', { id, dims: vector.length });
+    // Qdrant replaces the whole point: a dense-only upsert here would erase its stored sparse vector.
+    if (this.sparseSpace !== undefined && sparse === undefined) {
+      throw new VectorSearchError(`upsertVector "${id}": this store holds a sparse vector per point; pass one.`);
+    }
+    const sparseVector = sparse === undefined ? undefined : this.sparseOf(sparse, `upsertVector "${id}"`);
+    debugVector.debug('[Qdrant] Upserting precomputed vector (id: {id}, dims: {dims}, sparseTerms: {sparseTerms})', {
+      id,
+      dims: vector.length,
+      sparseTerms: sparseVector?.indices.length ?? 0,
+    });
     const client = await this.getClient();
 
     const point: QdrantSchemas['PointStruct'] = {
       id: toPointId(id),
-      vector,
+      // With a sparse vector the dense one goes under the default name `''`.
+      vector: sparseVector === undefined ? vector : { '': vector, [SPARSE_VECTOR_NAME]: sparseVector },
       payload: {
         ...metadata,
         [SOURCE_ID_KEY]: id,
@@ -300,7 +349,35 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     ).points;
 
     debugVector.debug('[Qdrant] searchByVector completed (results: {results})', { results: searchResult.length });
-    return searchResult.map(result => ({
+    return this.toResults(searchResult);
+  }
+
+  async searchBySparseVector(
+    sparse: SparseVector,
+    limit = 10,
+    filter?: Record<string, unknown>,
+  ): Promise<VectorSearchResult<TMetadata>[]> {
+    const query = this.sparseOf(sparse, 'searchBySparseVector');
+    debugVector.debug('[Qdrant] Searching by sparse vector (terms: {terms}, limit: {limit}, hasFilter: {hasFilter})', {
+      terms: query.indices.length,
+      limit,
+      hasFilter: !!filter,
+    });
+    const client = await this.getClient();
+    const { points } = await client.query(this.collectionName, {
+      query,
+      using: SPARSE_VECTOR_NAME,
+      limit,
+      filter: this.flatFilter(filter),
+      with_payload: true,
+    });
+    debugVector.debug('[Qdrant] searchBySparseVector completed (results: {results})', { results: points.length });
+    return this.toResults(points);
+  }
+
+  /** Scored points as results, each with the caller's original ID. */
+  private toResults(points: QdrantSchemas['ScoredPoint'][]): VectorSearchResult<TMetadata>[] {
+    return points.map(result => ({
       id: sourceId(result),
       score: result.score,
       metadata: result.payload as TMetadata,

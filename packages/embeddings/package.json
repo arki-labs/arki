@@ -64,6 +64,21 @@
       "import": "./dist/mistral/index.js",
       "default": "./dist/mistral/index.js"
     },
+    "./jina": {
+      "types": "./dist/jina/index.d.ts",
+      "import": "./dist/jina/index.js",
+      "default": "./dist/jina/index.js"
+    },
+    "./sparse": {
+      "types": "./dist/sparse/index.d.ts",
+      "import": "./dist/sparse/index.js",
+      "default": "./dist/sparse/index.js"
+    },
+    "./bedrock": {
+      "types": "./dist/bedrock/index.d.ts",
+      "import": "./dist/bedrock/index.js",
+      "default": "./dist/bedrock/index.js"
+    },
     "./env": {
       "types": "./dist/env/index.d.ts",
       "import": "./dist/env/index.js",
@@ -129,6 +144,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@ai-sdk/google": "catalog:ai",
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
@@ -151,6 +167,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@ai-sdk/google": "catalog:ai",
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
@@ -159,6 +176,9 @@
     "ai": "catalog:ai"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/amazon-bedrock": {
+      "optional": true
+    },
     "@ai-sdk/google": {
       "optional": true
     },

@@ -19,6 +19,8 @@ export type {
   Instruction,
   Int8Calibration,
   NativeEmbeddings,
+  NativeInput,
+  NativeInputsRequest,
   NativeRequest,
   Purpose,
   Quantization,

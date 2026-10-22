@@ -7,6 +7,12 @@ import { createEmbedder } from '../embedder.js';
 import { hamming, quantize } from '../quantize.js';
 import { createCohereModel } from './index.js';
 
+// A 1x1 white PNG.
+const PIXEL = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='),
+  char => char.codePointAt(0) ?? 0,
+);
+
 // Opt-in: spends a few tokens on the real API. Run with COHERE_LIVE=1 and COHERE_API_KEY set.
 describe.skipIf(process.env['COHERE_LIVE'] !== '1')('./cohere live', () => {
   it('one real embed of two strings returns 1536 dims', async () => {
@@ -37,5 +43,16 @@ describe.skipIf(process.env['COHERE_LIVE'] !== '1')('./cohere live', () => {
     const ours = quantize(float.vector, 'binary');
     if (isFailure(ours)) throw new Error(ours.message);
     expect(hamming(ours, packed.vector)).toBeLessThanOrEqual(1536 * 0.02);
+  });
+
+  it('one real image embeds with embed-v4.0', async () => {
+    const model = createCohereModel({ apiKey: process.env['COHERE_API_KEY'] ?? '' });
+    if (isFailure(model)) throw new Error(model.message);
+    const embedder = createEmbedder(model);
+    if (isFailure(embedder)) throw new Error(embedder.message);
+    const batch = await embedder.embed(['a white pixel', { image: PIXEL }], { purpose: 'document' });
+    if (isFailure(batch)) throw new Error(batch.message);
+    expect(batch.vectors).toHaveLength(2);
+    expect(batch.vectors[1]).toHaveLength(1536);
   });
 });

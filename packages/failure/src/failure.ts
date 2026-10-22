@@ -45,6 +45,15 @@ export type Failure<Code extends string = string, Data = unknown> = {
  */
 export type DataOf<Schema> = Schema extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<Schema> : undefined;
 
+/**
+ * A data schema as a definition's public type names it: its input and output, not the library that
+ * built it. Otherwise every exported failure prints `z.ZodObject<…>` into its package's `.d.ts`, and
+ * each consumer's types depend on that schema library.
+ */
+export type PortableSchema<Schema> = Schema extends StandardSchemaV1
+  ? StandardSchemaV1<StandardSchemaV1.InferInput<Schema>, StandardSchemaV1.InferOutput<Schema>>
+  : undefined;
+
 /** What making one failure may take besides its data. */
 export type MakeOptions = {
   /** What caused this failure: a lower-level failure or a caught error. */
@@ -121,7 +130,7 @@ export function defineFailure<
   const Code extends string,
   Schema extends StandardSchemaV1 | undefined = undefined,
   const Message extends string = string,
->(code: Code, options?: FailureOptions<Schema, Message>): FailureDefinition<Code, Schema>;
+>(code: Code, options?: FailureOptions<Schema, Message>): FailureDefinition<Code, PortableSchema<Schema>>;
 export function defineFailure(code: string, options: LooseOptions = {}): unknown {
   if (code === '' || code === 'ok') {
     throw new FailureError(

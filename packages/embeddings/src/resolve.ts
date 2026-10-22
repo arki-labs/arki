@@ -4,8 +4,10 @@ import { isFailure } from '@arki/failure';
 
 import type { Embedder, EmbeddingModelRef, EmbeddingProviderName, EmbeddingSpace, EnvSource } from './types.js';
 import { Cancelled, ConfigurationFailure, SpaceMismatch } from './failures.js';
+import { createBedrockModel } from './bedrock/index.js';
 import { createCohereModel } from './cohere/index.js';
 import { createGoogleModel } from './google/index.js';
+import { createJinaModel } from './jina/index.js';
 import { createMistralModel } from './mistral/index.js';
 import { createOllamaModel } from './ollama/index.js';
 import { createOpenAICompatibleModel } from './openai-compatible/index.js';
@@ -26,6 +28,7 @@ const KEYS = {
   cohere: 'COHERE_API_KEY',
   google: 'GOOGLE_GENERATIVE_AI_API_KEY',
   mistral: 'MISTRAL_API_KEY',
+  jina: 'JINA_API_KEY',
 } as const;
 
 /** Founder decision B1: local first, then hosted `openai → voyage → google`. Nothing set chooses nothing. */
@@ -55,7 +58,7 @@ function buildModel(provider: EmbeddingProviderName, id: string | undefined, env
       ...(baseURL === undefined ? {} : { baseURL }),
     });
   }
-  if (provider === 'voyage' || provider === 'cohere' || provider === 'google' || provider === 'mistral') {
+  if (provider === 'voyage' || provider === 'cohere' || provider === 'google' || provider === 'mistral' || provider === 'jina') {
     const name = KEYS[provider];
     const apiKey = read(env, name);
     if (apiKey === undefined) return ConfigurationFailure({ message: `${provider} needs ${name}` });
@@ -63,7 +66,31 @@ function buildModel(provider: EmbeddingProviderName, id: string | undefined, env
     if (provider === 'voyage') return createVoyageModel(options);
     if (provider === 'cohere') return createCohereModel(options);
     if (provider === 'google') return createGoogleModel(options);
+    if (provider === 'jina') return createJinaModel(options);
     return createMistralModel(options);
+  }
+  if (provider === 'bedrock') {
+    // Region and credentials come from the env passed in, so this function never depends on process.env.
+    const region = read(env, 'AWS_REGION');
+    if (region === undefined) return ConfigurationFailure({ message: 'bedrock needs AWS_REGION' });
+    const apiKey = read(env, 'AWS_BEARER_TOKEN_BEDROCK');
+    const accessKeyId = read(env, 'AWS_ACCESS_KEY_ID');
+    const secretAccessKey = read(env, 'AWS_SECRET_ACCESS_KEY');
+    const sessionToken = read(env, 'AWS_SESSION_TOKEN');
+    // The SDK would read missing credentials from process.env itself, and has no instance-profile chain.
+    if (apiKey === undefined && (accessKeyId === undefined || secretAccessKey === undefined)) {
+      return ConfigurationFailure({
+        message: 'bedrock needs AWS_BEARER_TOKEN_BEDROCK, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY',
+      });
+    }
+    return createBedrockModel({
+      region,
+      ...(id === undefined ? {} : { id }),
+      ...(apiKey === undefined ? {} : { apiKey }),
+      ...(accessKeyId === undefined ? {} : { accessKeyId }),
+      ...(secretAccessKey === undefined ? {} : { secretAccessKey }),
+      ...(sessionToken === undefined ? {} : { sessionToken }),
+    });
   }
   if (provider === 'openai-compatible') {
     const baseURL = read(env, 'OPENAI_COMPATIBLE_BASE_URL');
@@ -76,6 +103,9 @@ function buildModel(provider: EmbeddingProviderName, id: string | undefined, env
     }
     const apiKey = read(env, 'OPENAI_COMPATIBLE_API_KEY');
     return createOpenAICompatibleModel({ id, baseURL, dimensions: dimensions.data, ...(apiKey === undefined ? {} : { apiKey }) });
+  }
+  if (provider === 'tei') {
+    return ConfigurationFailure({ message: 'a TEI sparse model is built with createSparseModel from @arki/embeddings/sparse' });
   }
   if (provider === 'fake') {
     return ConfigurationFailure({ message: 'the fake model is built with fakeEmbedder from @arki/embeddings/testing' });

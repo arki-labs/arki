@@ -1,19 +1,24 @@
 /**
- * `@arki/embeddings/google`: Gemini embedding models through the AI SDK.
+ * `@arki/embeddings/google`: Gemini embedding models. Text goes through the AI SDK; a call with an
+ * image goes straight to the REST `batchEmbedContents` endpoint with `fetch`, because the SDK's
+ * `embedMany` takes strings only.
  *
  * The SDK peers (`@ai-sdk/google`, `ai`) are loaded with a dynamic `import()` on the first call, not
  * at import, exactly like `./openai`. A missing peer is the value
  * `ModelUnavailable { reason: 'peer-missing' }`, returned by that first call.
  */
 import { isFailure } from '@arki/failure';
+import { is } from '@arki/schema';
+import { z } from 'zod';
 
-import type { EmbeddingModel, Instruction, NativeRequest, Purpose } from '../types.js';
+import type { EmbeddingModel, Instruction, NativeInput, NativeInputsRequest, NativeRequest, Purpose } from '../types.js';
 import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
 import { mentionsContextLength, retryAfterMs } from '../http.js';
 import { GEMINI_EMBEDDING_2_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
 import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
 import { l2Normalize } from '../vector.js';
+import { toBase64 } from '../base64.js';
 
 export type GoogleModelOptions = {
   /** Default `'gemini-embedding-001'`. */
@@ -31,10 +36,13 @@ type GoogleFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputT
   /** `embedding-2` unit-normalises every size itself. `001` only does at 3072. */
   readonly normalizesTruncated: boolean;
   readonly instruction: Instruction;
+  /** Takes image parts. Only `embedding-2` does. */
+  readonly images: boolean;
 };
 
-// https://ai.google.dev/gemini-api/docs/embeddings (checked 2026-10-21): both models are Stable,
-// output 128-3072 (default 3072), recommended sizes 768 / 1536 / 3072.
+// https://ai.google.dev/gemini-api/docs/embeddings (checked 2026-10-21, images re-read 2026-10-22): both
+// models are Stable, output 128-3072 (default 3072), recommended sizes 768 / 1536 / 3072. Only
+// `gemini-embedding-2` is multimodal ("the first multimodal embedding model in the Gemini API"); `001` is text only.
 const GOOGLE_FACTS: Readonly<Record<string, GoogleFacts>> = {
   'gemini-embedding-001': {
     dimensions: 3072,
@@ -43,6 +51,7 @@ const GOOGLE_FACTS: Readonly<Record<string, GoogleFacts>> = {
     taskType: true,
     normalizesTruncated: false,
     instruction: NO_INSTRUCTION,
+    images: false,
   },
   'gemini-embedding-2': {
     dimensions: 3072,
@@ -52,6 +61,7 @@ const GOOGLE_FACTS: Readonly<Record<string, GoogleFacts>> = {
     normalizesTruncated: true,
     // The docs' own task prefixes for this model; same strings as EmbeddingGemma's.
     instruction: GEMINI_EMBEDDING_2_INSTRUCTION,
+    images: true,
   },
 };
 
@@ -63,6 +73,20 @@ const TASK_TYPE = {
   classification: 'CLASSIFICATION',
   clustering: 'CLUSTERING',
 } as const satisfies Record<Purpose, string>;
+
+/** `batchEmbedContents` answer: one `{ values }` per request, in request order. */
+const batchResponseSchema = z.object({ embeddings: z.array(z.object({ values: z.array(z.number()) })) });
+
+/**
+ * One input as Gemini `parts`: its text, then its image as `inlineData`. Parts of one `content`
+ * become ONE embedding (docs, 2026-10-22), so a text+image input stays one vector.
+ */
+function partsOf(input: NativeInput) {
+  const parts: ({ readonly text: string } | { readonly inlineData: { readonly mimeType: string; readonly data: string } })[] = [];
+  if (input.text !== undefined) parts.push({ text: input.text });
+  if (input.image !== undefined) parts.push({ inlineData: { mimeType: input.mimeType, data: toBase64(input.image) } });
+  return parts;
+}
 
 /** Loads both peers and builds the SDK model once. Any import failure means the peer is not installed. */
 async function loadSdk(id: string, options: GoogleModelOptions) {
@@ -158,6 +182,67 @@ export function createGoogleModel(options: GoogleModelOptions) {
     }
   };
 
+  const baseURL = (options.baseURL ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '');
+  const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
+
+  /**
+   * Text and images in one `batchEmbedContents` call: one request per input, so the answer holds one
+   * vector per input in input order. No `taskType` (embedding-2 rejects it); the purpose is in the text prefix.
+   */
+  const embedInputs = async ({ inputs, dimensions, truncate, signal }: NativeInputsRequest) => {
+    const texts = inputs.map(input => input.text ?? '');
+    let response: Response;
+    try {
+      response = await send(`${baseURL}/models/${id}:batchEmbedContents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': options.apiKey },
+        body: JSON.stringify({
+          requests: inputs.map(input => ({
+            model: `models/${id}`,
+            content: {
+              parts: partsOf(
+                truncate && input.text !== undefined ? { ...input, text: truncateByEstimate(input.text, facts.maxInputTokens) } : input,
+              ),
+            },
+            ...(dimensions === undefined ? {} : { outputDimensionality: dimensions }),
+          })),
+        }),
+        ...(signal ? { signal } : {}),
+      });
+    } catch {
+      return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      if (response.status === 429) {
+        const wait = retryAfterMs(name => response.headers.get(name));
+        return RateLimited(wait === undefined ? {} : { retryAfterMs: wait });
+      }
+      if (response.status === 401 || response.status === 403) {
+        return ConfigurationFailure({ message: `google refused the API key (${response.status})` });
+      }
+      if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
+      if (response.status === 400 && mentionsContextLength(text)) return providerInputTooLong(model, texts);
+      return InvalidOutput({ reason: `google answered ${response.status}: ${text.slice(0, 200)}` });
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      return signal?.aborted ? Cancelled() : InvalidOutput({ reason: 'google answered malformed JSON' });
+    }
+    if (!is(body, batchResponseSchema)) return InvalidOutput({ reason: 'google answered without embeddings[].values' });
+    if (body.embeddings.length !== inputs.length) {
+      return InvalidOutput({ reason: `google: expected ${inputs.length} embeddings, got ${body.embeddings.length}` });
+    }
+    const needsNormalizing = dimensions !== undefined && dimensions !== facts.dimensions && !facts.normalizesTruncated;
+    const vectors = body.embeddings.map(row => (needsNormalizing ? l2Normalize(Float32Array.from(row.values)) : row.values));
+    // The REST answer carries no usage, as with the SDK path.
+    return { vectors, tokens: { basis: 'unknown' as const } };
+  };
+
   const model: EmbeddingModel = {
     provider: 'google',
     id,
@@ -171,9 +256,10 @@ export function createGoogleModel(options: GoogleModelOptions) {
     maxBatchTokens: 100 * facts.maxInputTokens,
     normalized: true,
     instruction: facts.instruction,
-    inputs: ['text'],
+    inputs: facts.images ? ['text', 'image'] : ['text'],
     quantizations: [],
     embedTexts,
+    ...(facts.images ? { embedInputs } : {}),
   };
   return model;
 }

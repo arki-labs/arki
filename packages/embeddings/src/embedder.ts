@@ -12,11 +12,13 @@ import type {
   EmbeddingsLogger,
   Int8Calibration,
   NativeEmbeddings,
+  NativeInput,
   Quantization,
 } from './types.js';
 import { Cancelled, InputTooLong, InvalidOutput, UnsupportedInput } from './failures.js';
 import { calibrationId, quantize } from './quantize.js';
 import { spaceOf } from './space.js';
+import { IMAGE_MIME_TYPES, imageMimeType } from './image.js';
 import { countTokens } from './tokens.js';
 
 /** Output options an embedder is created with. */
@@ -113,34 +115,54 @@ export function buildEmbedder(
     if (inputs.length > model.maxBatch) return UnsupportedInput({ index: model.maxBatch, part: 'batch' });
 
     const prefix = options.purpose === undefined ? '' : (model.instruction[options.purpose] ?? '');
+    // Every input as the provider sees it; `texts` is the same list for a call without images.
+    const parts: NativeInput[] = [];
     const texts: string[] = [];
     for (const [index, input] of inputs.entries()) {
       if (typeof input === 'string') {
+        parts.push({ text: prefix + input });
         texts.push(prefix + input);
         continue;
       }
-      if (input.image !== undefined && !model.inputs.includes('image')) return UnsupportedInput({ index, part: 'image' });
-      if (input.text === undefined) return UnsupportedInput({ index, part: 'text' });
-      texts.push(prefix + input.text);
+      if (input.image === undefined) {
+        if (input.text === undefined) return UnsupportedInput({ index, part: 'text' });
+        parts.push({ text: prefix + input.text });
+        texts.push(prefix + input.text);
+        continue;
+      }
+      // Refused before any request: a text-only model would otherwise drop the image and embed the rest.
+      if (!model.inputs.includes('image') || model.embedInputs === undefined) return UnsupportedInput({ index, part: 'image' });
+      const mimeType = input.mimeType ?? imageMimeType(input.image);
+      // A type the providers reject would come back as a 400 after the request; refuse it here instead.
+      if (mimeType === undefined || !IMAGE_MIME_TYPES.has(mimeType)) {
+        return UnsupportedInput({ index, part: 'image' });
+      }
+      // Prefixes are written for text; an image goes in as it is.
+      parts.push(input.text === undefined ? { image: input.image, mimeType } : { text: prefix + input.text, image: input.image, mimeType });
+      if (input.text !== undefined) texts.push(prefix + input.text);
     }
     if (!truncate) {
       // The prefix is sent too, so it counts against the model's limit.
-      for (const [index, text] of texts.entries()) {
-        const tokens = countTokens(model, text);
+      for (const [index, part] of parts.entries()) {
+        if (part.text === undefined) continue;
+        const tokens = countTokens(model, part.text);
         if (tokens.basis !== 'unknown' && tokens.count > model.maxInputTokens) {
           return InputTooLong({ index, tokens, max: model.maxInputTokens });
         }
       }
     }
 
-    const native = await model.embedTexts({
-      texts,
+    const request = {
       ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
       ...(callDimensions === model.dimensions ? {} : { dimensions: callDimensions }),
       ...(plan.native === undefined ? {} : { quantization: plan.native }),
       ...(truncate ? { truncate } : {}),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
+    };
+    // Set only when an image is present; a model without it was refused above.
+    const embedInputs = parts.some(part => part.image !== undefined) ? model.embedInputs : undefined;
+    const native =
+      embedInputs === undefined ? await model.embedTexts({ ...request, texts }) : await embedInputs({ ...request, inputs: parts });
     if (isFailure(native)) {
       log.debug('{provider}:{model} refused {count} inputs: {code}', {
         provider: model.provider,

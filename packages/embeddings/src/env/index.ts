@@ -13,7 +13,7 @@ import { isModelRef } from '../ref.js';
 
 /**
  * Reads and checks `EMBEDDING_MODEL`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
- * `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY` and
+ * `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`, `JINA_API_KEY` and
  * `OPENAI_COMPATIBLE_{BASE_URL,API_KEY,DIMENSIONS}` from `env`. A bad value is `ConfigurationFailure`.
  *
  * `OLLAMA_BASE_URL` has no default here: its presence is what picks Ollama in the provider order.
@@ -35,6 +35,7 @@ export function resolveEmbeddingConfig(env: EnvSource) {
       GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
       COHERE_API_KEY: z.string().min(1).optional(),
       MISTRAL_API_KEY: z.string().min(1).optional(),
+      JINA_API_KEY: z.string().min(1).optional(),
       OPENAI_COMPATIBLE_BASE_URL: z.url().optional(),
       OPENAI_COMPATIBLE_API_KEY: z.string().min(1).optional(),
       // Kept as text: the record goes straight to `resolveEmbeddingModel`, which reads strings.
@@ -61,6 +62,7 @@ export function resolveEmbeddingConfig(env: EnvSource) {
       GOOGLE_GENERATIVE_AI_API_KEY: parsed.GOOGLE_GENERATIVE_AI_API_KEY,
       COHERE_API_KEY: parsed.COHERE_API_KEY,
       MISTRAL_API_KEY: parsed.MISTRAL_API_KEY,
+      JINA_API_KEY: parsed.JINA_API_KEY,
       OPENAI_COMPATIBLE_BASE_URL: parsed.OPENAI_COMPATIBLE_BASE_URL,
       OPENAI_COMPATIBLE_API_KEY: parsed.OPENAI_COMPATIBLE_API_KEY,
       OPENAI_COMPATIBLE_DIMENSIONS: parsed.OPENAI_COMPATIBLE_DIMENSIONS,

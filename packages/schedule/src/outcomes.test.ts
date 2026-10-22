@@ -9,6 +9,7 @@ import { memoryStore } from '@arki/lock/memory';
 
 import type { DurableScheduleRegistration } from './runtime.js';
 import { composeSchedules, schedule, schedules } from './dot.js';
+import { lockCodeSchema } from './errors.js';
 import { defineSchedule, initSchedule, ScheduleLockFailed } from './index.js';
 import { createScheduleRuntime } from './runtime.js';
 
@@ -152,7 +153,7 @@ describe('business outcomes', () => {
   });
 
   it('classifies only known lock provider codes and keeps arbitrary diagnostic text private', async () => {
-    for (const code of [...ScheduleLockFailed.dataSchema.shape.lockCode.options, 'private-unrecognized-code']) {
+    for (const code of [...lockCodeSchema.options, 'private-unrecognized-code']) {
       const error = Object.assign(new Error('private store detail'), { code });
       const report = {
         ...defineSchedule({ name: 'locked', every: '1h', handler: () => Promise.resolve(1) }),
