@@ -23,6 +23,7 @@ import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
+import { orThrow } from '@arki/failure';
 import { http } from '@arki/http/dot';
 import { liveQueries } from '@arki/live/dot';
 import { live, snapshot } from '@arki/live/drizzle';
@@ -31,7 +32,8 @@ import { liveRead } from '@arki/live/orpc';
 const posts = pgTable('posts', { id: text('id').primaryKey(), title: text('title').notNull() });
 
 type Db = NodePgDatabase;
-type Database = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+type Database = Db | Transaction;
 const postRepository = (db: Database) => ({
   all: () => db.select().from(posts).orderBy(posts.id),
   add: (id: string, title: string) => db.insert(posts).values({ id, title }),
@@ -60,12 +62,22 @@ const postsDeps = defineFeature('posts')
   .needs({ db: entrypointOnly(database.provides.db) })
   .infra(store);
 type Deps = DepsOf<typeof postsDeps>;
-const postsLogic = postsDeps.usecases({});
+const postsLogic = postsDeps.usecases({
+  /** The readers bound to a snapshot's transaction: a handler reaches the repos only through a usecase. */
+  readers:
+    ({ repos: bound }: Pick<Deps, 'repos'>) =>
+    (tx: Transaction) =>
+      bound.withTx(tx),
+  add:
+    ({ repos: bound }: Pick<Deps, 'repos'>) =>
+    (id: string, title: string) =>
+      bound.posts.add(id, title),
+});
 const impl = implement(postsContract).$context<RequestContext>().use(needsMiddleware<RequestContext>()(postsLogic));
 
 /** One snapshot per call: every read of the handler sees one point in time. */
-const readSnapshot = liveRead((context: { readonly db: Db; readonly repos: Deps['repos'] }) =>
-  snapshot(context.db, tx => context.repos.withTx(tx)),
+const readSnapshot = liveRead((context: DepsOf<typeof postsLogic>) =>
+  snapshot(context.db, tx => orThrow(context.usecases.readers(tx))),
 );
 
 const postsFeature = postsLogic.entrypoints(
@@ -73,7 +85,7 @@ const postsFeature = postsLogic.entrypoints(
     list: o => o.list.use(readSnapshot).handler(({ context }) => context.liveRead.posts.all()),
     create: o =>
       o.create.handler(async ({ context, input }) => {
-        await context.repos.posts.add(input.id, input.title);
+        orThrow(await context.usecases.add(input.id, input.title));
       }),
   }),
 );

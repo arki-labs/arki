@@ -19,6 +19,7 @@ import { repos } from '@arki/db/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { needsMiddleware, rpc } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
+import { orThrow } from '@arki/failure';
 
 import type { LiveMeta } from '../index.js';
 import { live, snapshot, tableTag } from '../drizzle/index.js';
@@ -88,6 +89,11 @@ const postsDeps = defineFeature('posts')
   .infra(store);
 type Deps = DepsOf<typeof postsDeps>;
 const postsLogic = postsDeps.usecases({
+  /** The readers bound to the snapshot's transaction: the one place a live read touches the repos. */
+  readers:
+    ({ repos: bound }: Pick<Deps, 'repos'>) =>
+    (tx: Transaction) =>
+      bound.withTx(tx),
   title:
     ({ repos: bound }: Pick<Deps, 'repos'>) =>
     async () => {
@@ -100,9 +106,9 @@ const rpcImplementer = implement(postsRpcContract).$context<RequestContext>().us
 /** What a live handler reads: the repos bound to the snapshot's transaction. */
 type Readers = RepoSet<{ posts: typeof postRepository; users: typeof userRepository }>;
 
-/** The app's one-liner: readers from the feature's repos, bound to one snapshot per call. */
-const readSnapshot = liveRead((context: { readonly db: Db; readonly repos: Deps['repos'] }) =>
-  snapshot(context.db, tx => context.repos.withTx(tx)),
+/** The app's one-liner: the `readers` usecase binds the repos to one snapshot per call. */
+const readSnapshot = liveRead((context: DepsOf<typeof postsLogic>) =>
+  snapshot(context.db, tx => orThrow(context.usecases.readers(tx))),
 );
 
 const postsProcedures = {

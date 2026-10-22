@@ -21,9 +21,10 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 ### Give a procedure one snapshot
 
-1. `liveRead((context: { readonly db: Db; readonly repos: Deps['repos'] }) => snapshot(context.db, tx => context.repos.withTx(tx)))`, once per feature.
-2. `impl.list.use(thatMiddleware).handler(({ context }) => context.liveRead.posts.page(1))`.
-3. Library files: `src/drizzle/snapshot.ts`, `src/orpc/read.ts`.
+1. Add a usecase that takes the transaction: `readers: ({ repos }) => (tx: Transaction) => repos.withTx(tx)`. Make `db` an `entrypointOnly` need.
+2. `liveRead((context: DepsOf<typeof logic>) => snapshot(context.db, tx => orThrow(context.usecases.readers(tx))))`, once per feature.
+3. `impl.list.use(thatMiddleware).handler(({ context }) => context.liveRead.posts.page(1))`.
+4. Library files: `src/drizzle/snapshot.ts`, `src/orpc/read.ts`.
 
 ```ts
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -97,7 +98,7 @@ export { both };
 
 - Read only through `context.liveRead` inside a `liveRead` handler; the root `db` is another snapshot.
 - `snapshot(tx, ...)` is refused (types and E001): pass the root database.
-- A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with the handler context.
+- A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with `DepsOf` of the feature after `.usecases(...)`. A handler never reads `repos`; the `readers` usecase does.
 - Never reuse an epoch: a custom `epoch()` must return a new 12-character `[a-z0-9]` value each call (E001 otherwise).
 - A stream that falls `subscriberFrames` behind gets `bye`; reconnect with the cursor.
 - Never evict replay hints by count or make resume depend on what happened since a cursor: hidden-table hints would leak. Never filter by grant after a stream's window or queue: a hidden write would then change its timing or cause its `bye`. Resume or reset depends on the cursor's age only; the `replayEnvelopes` and `replayBytes` caps start a new epoch for everyone.

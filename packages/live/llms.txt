@@ -34,7 +34,7 @@
 - Declare every table a live procedure reads. An undeclared table never refetches.
 - Inside a `liveRead` handler read only through `context.liveRead`. The root `db` is a second snapshot.
 - `snapshot()` takes the root database, never a `tx`: a nested transaction is a savepoint.
-- Type the `liveRead` select with the handler context (`{ db, repos }`), not `Deps`: an `entrypointOnly` db is not in `Deps`.
+- Type the `liveRead` select with `DepsOf` of the feature after `.usecases(...)`, not `Deps`: an `entrypointOnly` db is not in `Deps`. Bind the repos in a usecase that takes the transaction: `snapshot(ctx.db, tx => orThrow(ctx.usecases.readers(tx)))`.
 - Never declare `live()` on a per-request table (sessions, counters): it refetches constantly. Do declare auth tables the answer depends on (memberships, roles).
 - Never parse a cursor: it is sealed. Send it back as received.
 - No `initialData` on a live query (a type error); use `placeholderData`.

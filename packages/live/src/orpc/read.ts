@@ -47,9 +47,11 @@ function requireLiveMeta(procedure: object, meta: Meta, path: readonly string[])
 /**
  * Runs `next()` inside one snapshot and adds `context.liveRead`: every read
  * through those readers sees the same Postgres snapshot. Throws E001 when the
- * procedure's contract has no live meta.
+ * procedure's contract has no live meta. The `readers` usecase takes the
+ * transaction and returns the readers (for `repos()`: `repos.withTx(tx)`), so a
+ * handler never reaches the repos itself.
  *
- *   p.list.use(liveRead((ctx: Deps) => snapshot(ctx.db, tx => ctx.repos.withTx(tx))))
+ *   p.list.use(liveRead((ctx: DepsOf<typeof logic>) => snapshot(ctx.db, tx => orThrow(ctx.usecases.readers(tx)))))
  */
 export function liveRead<Context extends object, Readers>(
   select: (context: Context) => SnapshotRunner<Readers>,
