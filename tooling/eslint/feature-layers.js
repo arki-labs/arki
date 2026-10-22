@@ -465,10 +465,100 @@ const noTableBarrel = {
   },
 };
 
+/**
+ * A file directly in `usecases/` or `domain-services/` imports no sibling file at
+ * runtime (`./other`). Shared logic is a domain service the feature declares, and
+ * a usecase reaches it through its deps. Subfolders (`./lib/x`) and `import type` are fine.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const siblingImports = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      sibling:
+        'a usecase (or domain service) never imports a sibling at runtime: shared logic is a domain service the feature declares, and a usecase reaches it through its deps',
+    },
+  },
+  create(context) {
+    const located = featureRootOf(context.filename.replace(/\\/g, '/'));
+    const isDirectChild =
+      located !== undefined &&
+      located.rest.length === 2 &&
+      (located.rest[0] === 'usecases' || located.rest[0] === 'domain-services');
+    if (!isDirectChild) return {};
+    const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
+      if (typeof source === 'string' && /^\.\/[^/]+$/.test(source)) context.report({ node, messageId: 'sibling' });
+    };
+    return {
+      ImportDeclaration(node) {
+        if (!isTypeOnly(node, 'importKind')) check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source && !isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (!isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        if (node.source.type === 'Literal') check(node, node.source.value);
+      },
+    };
+  },
+};
+
+/**
+ * A runtime import that lands in `<feature>/domain-services/**` is allowed only
+ * from that feature's `feature.ts` or a child's `features/<child>/feature.ts`.
+ * Everything else gets the service through its deps. `import type` is fine.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const domainServiceImports = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      runtime:
+        "only feature.ts (or a child's feature.ts) imports a domain service at runtime; usecases receive it through their deps",
+    },
+  },
+  create(context) {
+    const filename = context.filename.replace(/\\/g, '/');
+    const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
+      if (typeof source !== 'string' || !source.startsWith('.')) return;
+      const target = featureRootOf(moduleId(resolveRelative(filename, source)));
+      if (target === undefined || target.rest[0] !== 'domain-services') return;
+      const isOwnFeature = filename === `${target.root}/feature.ts`;
+      const childPrefix = `${target.root}/features/`;
+      const childRest = filename.startsWith(childPrefix) ? filename.slice(childPrefix.length).split('/') : [];
+      const isChildFeature = childRest.length === 2 && childRest[1] === 'feature.ts';
+      if (!isOwnFeature && !isChildFeature) context.report({ node, messageId: 'runtime' });
+    };
+    return {
+      ImportDeclaration(node) {
+        if (!isTypeOnly(node, 'importKind')) check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source && !isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (!isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        if (node.source.type === 'Literal') check(node, node.source.value);
+      },
+    };
+  },
+};
+
 const plugin = {
   rules: {
     'usecase-runtime-imports': usecaseRuntimeImports,
     'feature-runtime-imports': featureRuntimeImports,
+    'sibling-imports': siblingImports,
+    'domain-service-imports': domainServiceImports,
     'procedures-call-usecases': proceduresCallUsecases,
     'infra-runtime-imports': infraRuntimeImports,
     'feature-boundaries': featureBoundaries,
@@ -479,7 +569,7 @@ const plugin = {
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 
 /**
- * @param {{ root: string, src?: string, legacy?: string[], clients?: string[], pure?: string[] }} options
+ * @param {{ root: string, src?: string, legacy?: string[], clients?: string[], pure?: string[], siblingImports?: 'error' | 'warn' }} options
  *   `root`: the backend's folder, absolute — pass `import.meta.dirname` from its `eslint.config.js`.
  *   The table-barrel check resolves imports to real paths, so it must know where the app is
  *   wherever ESLint runs from (the app folder, the repo root, an editor).
@@ -492,8 +582,9 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
  *   `pure`: regex sources under an `infra/` path that hold no plugin — pure modules
  *   such as email templates (e.g. `['/infra/mail/templates/']`) — which a usecase
  *   may still runtime-import.
+ *   `siblingImports`: severity of `sibling-imports` (default `'error'`); `'warn'` while a backend migrates.
  */
-export function featureLayers({ root, src = 'src', legacy = [], clients = [], pure = [] }) {
+export function featureLayers({ root, src = 'src', legacy = [], clients = [], pure = [], siblingImports = 'error' }) {
   if (typeof root !== 'string' || !nodePath.isAbsolute(root)) {
     throw new TypeError(
       `featureLayers({ root }): root must be the backend's absolute folder (import.meta.dirname); got ${String(root)}.`,
@@ -573,11 +664,27 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
       plugins: { 'arki-feature-layers': plugin },
       rules: {
         ...rule([SERVER, CONTRACT, USECASES_INWARD]),
+        'arki-feature-layers/sibling-imports': siblingImports,
         'arki-feature-layers/usecase-runtime-imports': [
           'error',
           { patterns: [...USECASE_BANNED, ...clients], allow: pure },
         ],
       },
+    },
+    {
+      // Domain-service files: sibling ban only; the rest of their coverage is task B9.
+      name: 'arki/feature-layers/domain-services',
+      files: [`${features}/domain-services/**/*.ts`],
+      ignores: TESTS,
+      plugins: { 'arki-feature-layers': plugin },
+      rules: { 'arki-feature-layers/sibling-imports': siblingImports },
+    },
+    {
+      name: 'arki/feature-layers/domain-service-imports',
+      files: [`${features}/*.ts`, `${features}/**/*.ts`],
+      ignores: TESTS,
+      plugins: { 'arki-feature-layers': plugin },
+      rules: { 'arki-feature-layers/domain-service-imports': 'error' },
     },
     {
       name: 'arki/feature-layers/no-feature-back-import',

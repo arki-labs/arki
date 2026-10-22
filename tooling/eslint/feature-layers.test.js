@@ -12,6 +12,8 @@ const RESTRICT = 'no-restricted-imports';
 const CALLS_USECASES = 'arki-feature-layers/procedures-call-usecases';
 const INFRA = 'arki-feature-layers/infra-runtime-imports';
 const BOUNDARY = 'arki-feature-layers/feature-boundaries';
+const SIBLING = 'arki-feature-layers/sibling-imports';
+const DS = 'arki-feature-layers/domain-service-imports';
 const BARREL = 'arki-feature-layers/no-table-barrel';
 
 const linter = new Linter();
@@ -270,4 +272,19 @@ test('featureLayers needs the app folder, or the barrel check would silently loo
   // @ts-expect-error -- `root` is required; a config without it must fail at load, not pass every file.
   assert.throws(() => featureLayers({}), /root must be the backend's absolute folder/);
   assert.throws(() => featureLayers({ root: 'apps/demo/backend' }), /root must be the backend's absolute folder/);
+});
+
+test('a usecase never imports a sibling file at runtime', () => {
+  assert.deepEqual(ruleIds(USECASE, `import { x } from './other';`), [SIBLING]);
+  assert.deepEqual(ruleIds(USECASE, `export { y } from './other';`), [SIBLING]);
+  assert.deepEqual(ruleIds(USECASE, `import type { X } from './other';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { x } from './lib/x';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/usecases/email/section.ts', `import { t } from './types';`), []);
+});
+
+test('only feature.ts imports a domain service at runtime', () => {
+  assert.deepEqual(ruleIds('src/features/demo/features/child/feature.ts', `import { e } from '../../domain-services/extras';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/feature.ts', `import { e } from './domain-services/extras';`), []);
+  assert.deepEqual(ruleIds(USECASE, `import { e } from '../domain-services/extras';`), [DS]);
+  assert.deepEqual(ruleIds(USECASE, `import type { E } from '../domain-services/extras';`), []);
 });
