@@ -1,7 +1,7 @@
 # RFC: one way to define middleware in Dot
 
 - Date: 2026-10-21
-- Status: Proposed. Founder decisions D1–D7 taken 2026-10-21. Step 1 (spike) in progress.
+- Status: Proposed. Founder decisions D1–D7 taken 2026-10-21. Step 1 (spike) passed 2026-10-21, not committed; see § 10.
 - Designer: Fable (survey + design, two read-only passes). File references below come from those passes and need a recheck when work starts.
 
 ## 1. The shape in one sentence
@@ -95,3 +95,17 @@ Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24,
 - oRPC may not accept a generic `Out` without a cast (step 1 tests this first).
 - One `Failure` means three different refusals (thrown RPC error, HTTP envelope, job outcome). Each needs a test and a doc line.
 - Long `.use` chains can still hit TS7056; unchanged from today.
+
+## 10. Spike result (step 1)
+
+Passed: `derive` and the oRPC `fromDerive` work with **no cast**.
+
+- `packages/dot/src/middleware.ts`: `derive` (keyed and object forms), `Step`, `StepResult`.
+- `packages/dot/src/orpc.ts`: `fromDerive`. It returns a generic function shaped like an oRPC middleware, as `PrincipalGuard` does. oRPC checks `IntersectPick` at the `.use()` call, where the types are concrete. Its `errors` parameter is `DeclaredErrors<F>`: oRPC passes the procedure's whole error map in, so a missing code is a compile error.
+- Two changes from § 6 were needed:
+  - A step returns a tagged `StepResult` (`{ ok: true, added } | { ok: false, failure }`), not `Out | F`. `Exclude<Out | F, Failure>` does not reduce to `Out` while `Out` is generic.
+  - `@arki/failure/orpc` gains `rpcError(failure, errors)`: the declared `ORPCError` for a failure already in hand. `orThrowRpc` now shares its private helper.
+- Tests: `src/tests/middleware.test-d.ts` (exact handler context for both forms, chained steps, async step, contract-first; four `@ts-expect-error` cases, each checked to fail for the intended reason) and `src/tests/middleware.test.ts` (declared 401/403 with `defined: true`, handler not run on refusal, keys added).
+- Known cost: a refused `.use(fromDerive(step))` gives a long oRPC `MiddlewareOptions` error. Readable at its first line only. Worth a branded error message later, as `ShadowGuard` does for `bind`.
+- `@arki/dot/middleware` is not in `package.json` `exports` yet.
+

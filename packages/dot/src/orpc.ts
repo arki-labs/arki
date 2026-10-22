@@ -37,15 +37,28 @@
  * `@orpc/server` is an optional peer. Import this module only in an app that
  * serves oRPC; the rest of Dot never loads it.
  */
-import type { ContractProcedure, ContractRouter, IntersectPick, Meta, Router } from '@orpc/server';
+import type {
+  Context,
+  ContractProcedure,
+  ContractRouter,
+  IntersectPick,
+  Meta,
+  MiddlewareNextFn,
+  MiddlewareResult,
+  Router,
+} from '@orpc/server';
 import { ORPCError, os, traverseContractProcedures } from '@orpc/server';
 
+import type { Failure } from '@arki/failure';
+import type { DeclaredErrors } from '@arki/failure/orpc';
+import { rpcError } from '@arki/failure/orpc';
 import { getLogger } from '@arki/log';
 import { is, recordSchema } from '@arki/schema';
 
 import type { RpcEntrypoint } from './define-feature.js';
 import type { HandleEntries, ServicesBag } from './feature.js';
 import type { JsonObject } from './manifest.js';
+import type { Step } from './middleware.js';
 import type { ActionDeclaration, CtxOf, NeedsShape } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { toJsonObject } from './manifest.js';
@@ -102,6 +115,28 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
         context: services as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
       });
     });
+}
+
+/**
+ * Attach a `derive` step to an oRPC procedure: `impl.refund.use(fromDerive(authed))`.
+ *
+ * What the step adds lands on the handler's context. A failure it returns is
+ * thrown as the typed `ORPCError` the procedure declares, so a procedure that
+ * does not list the step's failures (the contract's errors, or
+ * `.errors(errorMap(...))`) does not compile. oRPC hands a middleware the
+ * procedure's whole error map; the `errors` parameter asks only for the codes
+ * the step can refuse with.
+ */
+export function fromDerive<In extends Context, Out extends Context, F extends Failure>(step: Step<In, Out, F>) {
+  return async <TOutput>(options: {
+    readonly context: In;
+    readonly next: MiddlewareNextFn<TOutput>;
+    readonly errors: DeclaredErrors<F>;
+  }): Promise<MiddlewareResult<Out, TOutput>> => {
+    const result = await step.run(options.context);
+    if (!result.ok) throw rpcError(result.failure, options.errors);
+    return options.next({ context: result.added });
+  };
 }
 
 /** What `errorCaptureMiddleware` hands its reporter with the error. */

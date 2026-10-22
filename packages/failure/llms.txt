@@ -6,7 +6,7 @@
 <!-- llms:start -->
 - `@arki/failure`: typed failures returned as plain values, with no wrapper. `AsyncSchema`, `FAILURE_ERROR_CODES`, `FailureError`, `InvalidEnvelope`, `InvalidInput`, `REVIVAL_FAILURES`, `SCHEMA_FAILURES`, `UnexpectedDefect`, `UnexpectedFailure`, `ValidatorDefect`, `attempt`, `collect`; and 32 more.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules. `default`, `mustUse`, `noBlindAccept`.
-- `@arki/failure/orpc`: failures at an oRPC boundary. `RPC_FAILURE_DEFINITION`, `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcFailureDefinitions`; types `DeclaredErrors`, `ErrorMapOf`.
+- `@arki/failure/orpc`: failures at an oRPC boundary. `RPC_FAILURE_DEFINITION`, `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcError`, `rpcFailureDefinitions`; types `DeclaredErrors`, `ErrorMapOf`.
 - `@arki/failure/schema`: Minimal Standard Schema execution shared by schema parsing and failure revival. `SCHEMA_FAILURES`, `executeSchema`, `isAsyncSchemaFailure`, `isSchemaFailure`, `parse`, `parseAsync`; types `AsyncSchemaFailure`, `SchemaFailure`.
 <!-- llms:end -->
 

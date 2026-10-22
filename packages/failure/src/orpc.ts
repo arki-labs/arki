@@ -134,12 +134,27 @@ export function orThrowRpc(value: unknown, errors: LooseErrors, ...success: read
 /** Throw the failure, or answer `success` when one was passed, else the value. */
 function orThrowRpcNow(value: unknown, errors: LooseErrors, success: readonly [] | readonly [unknown]): unknown {
   if (!isFailure(value)) return success.length === 0 ? value : success[0];
-  const declared = errors[value.code];
+  throw declaredError(value, errors);
+}
+
+/**
+ * The typed `ORPCError` the contract declares for a failure you already hold
+ * (same code, status, message and data), to throw: `throw rpcError(failure, errors)`.
+ * Pass the handler's `errors`: a failure the contract does not list is a
+ * compile error. For a value that may or may not be a failure, use {@link orThrowRpc}.
+ */
+export function rpcError<F extends Failure>(failure: F, errors: NoInfer<DeclaredErrors<F>>): Error;
+export function rpcError(failure: Failure, errors: LooseErrors): Error {
+  return declaredError(failure, errors);
+}
+
+function declaredError(failure: Failure, errors: LooseErrors): Error {
+  const declared = errors[failure.code];
   // Reached only when the types were bypassed: the client sees an undeclared error (`defined: false`).
   if (declared === undefined) {
-    throw new ORPCError(value.code, { status: value.status, message: value.message, data: value.data });
+    return new ORPCError(failure.code, { status: failure.status, message: failure.message, data: failure.data });
   }
-  throw declared({ message: value.message, data: value.data });
+  return declared({ message: failure.message, data: failure.data });
 }
 
 /** The parts of a definition {@link reviveRpcError} needs: the same as `revive`. */
