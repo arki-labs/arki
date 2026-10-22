@@ -15,7 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 import type { DotApp } from '@arki/dot';
 import type { Failure } from '@arki/failure';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { defineApp, infra } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { createLocks } from '@arki/lock';
@@ -59,7 +59,11 @@ async function replica(name: string, work: Work) {
   pools.push(pool);
   const db: NodePgDatabase = drizzle({ client: pool });
   const lockService = createLocks({ store: pgLease(db, { ttl: TTL, table: TABLE }), namespace: 'cluster' });
-  const core = defineFeature('reports').infra(infra({ name: 'locks', provides: { locks: () => lockService } }));
+  const lockUnit = infra({ name: 'locks', provides: { locks: () => lockService } });
+  // The scheduler takes the lock around the run; the handler never touches it.
+  const core = defineFeature('reports')
+    .needs({ locks: entrypointOnly(lockUnit.provides.locks) })
+    .usecases({});
   const reports = core.entrypoints(
     schedules(core, [
       { name: 'nightly-report', cron: '0 3 * * *', lock: { holdAtLeast: 0 }, handler: (_deps, run) => work(name, run) },
@@ -67,6 +71,7 @@ async function replica(name: string, work: Work) {
   );
   const started = await orThrow(
     defineApp(`reports-${name}`)
+      .infra(lockUnit)
       .features([reports])
       .entrypoints(schedule({ clock: 'host' }))
       .start(),

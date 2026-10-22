@@ -17,7 +17,7 @@ import type { MemoryStore } from '@arki/lock/memory';
 import type { PgSessionGuarantees, pgTransaction } from '@arki/lock/pg';
 import type { PgLeasePollGuarantees, PgLeaseStore, PgLeaseWakeGuarantees } from '@arki/lock/pg/lease';
 import type { RedisStore } from '@arki/lock/redis';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { createLocks, LockError, LockHeld } from '@arki/lock';
@@ -44,8 +44,10 @@ async function settle(): Promise<void> {
 function buildApp(lockService: Locker) {
   let calls = 0;
   const seen: { signal?: AbortSignal; fence?: bigint | undefined } = {};
+  const lockUnit = infra({ name: 'locks', provides: { locks: () => lockService } });
+  // The handler never holds the lock: the scheduler takes it around the run. So the need is entrypoint-only.
   const core = defineFeature('clustering')
-    .infra(infra({ name: 'locks', provides: { locks: () => lockService } }))
+    .needs({ locks: entrypointOnly(lockUnit.provides.locks) })
     .usecases({
       assign: () => () => {
         calls += 1;
@@ -75,6 +77,7 @@ function buildApp(lockService: Locker) {
     ]),
   );
   const app = defineApp('locks-app')
+    .infra(lockUnit)
     .features([clustering])
     .entrypoints(schedule({ clock: 'host' }));
   return { app, seen, calls: () => calls };
@@ -266,20 +269,25 @@ describe('schedules(core, [{ lock }])', () => {
     schedules(bare, [{ name: 'b', every: '1m', lock: 'k', handler: ({ usecases }) => usecases.run() }]);
     // @ts-expect-error no locks service
     schedules(bare, [{ name: 'c', every: '1m', lock: { key: 'k' }, handler: ({ usecases }) => usecases.run() }]);
+    // A plain need is not enough: a `locks` the usecases could also read is not what the scheduler takes.
+    const plain = defineFeature('plain').needs({ locks: service<Locker>() }).usecases({ run: () => () => 1 });
+    // @ts-expect-error a plain `locks` need is below the entrypoint; it must be `entrypointOnly`
+    schedules(plain, [{ name: 'job', every: '1m', lock: true, handler: ({ usecases }) => usecases.run() }]);
     // Without `lock`, the same feature is fine.
     schedules(bare, [{ name: 'job', every: '1m', handler: ({ usecases }) => usecases.run() }]);
     expect(true).toBe(true);
   });
 
   it('a lock with a `locks` service from locks() of @arki/lock/dot works end to end', async () => {
-    const needs = { locks: service<Locker>() };
+    const lockPlugin = locks({ namespace: 'billing', store: () => memoryStore() });
+    const needs = { locks: entrypointOnly(lockPlugin.provides.locks) };
     const billingCore = defineFeature('billing').needs(needs).usecases({});
     const billing = billingCore.entrypoints(
       schedules(billingCore, [{ name: 'bill', every: '1m', lock: { holdAtLeast: 0 }, handler: () => 'done' }]),
     );
     const started = await orThrow(
       defineApp('plugin-app')
-        .infra(locks({ namespace: 'billing', store: () => memoryStore() }))
+        .infra(lockPlugin)
         .features([billing])
         .entrypoints(schedule({ clock: 'host' }))
         .start(),
@@ -438,14 +446,15 @@ const summaryOf = (actions: readonly { id: string; summary?: string }[]) =>
 
 describe('booted lock summary', () => {
   it('shows the whole lock line after boot, once the store is known, and keeps the short line in the static manifest', async () => {
-    const needs = { locks: service<Locker>() };
+    const lockPlugin = locks({ namespace: 'ns', store: () => memoryStore() });
+    const needs = { locks: entrypointOnly(lockPlugin.provides.locks) };
     const billingCore = defineFeature('billing').needs(needs).usecases({});
     const billing = billingCore.entrypoints(
       schedules(billingCore, [{ name: 'job', every: '1m', lock: true, handler: () => 'done' }]),
     );
     const configured = orThrow(
       defineApp('boot-summary')
-        .infra(locks({ namespace: 'ns', store: () => memoryStore() }))
+        .infra(lockPlugin)
         .features([billing])
         .entrypoints(schedule({ clock: 'host' }))
         .configure(),

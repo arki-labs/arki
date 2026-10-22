@@ -3,7 +3,7 @@
  *
  * Why these tests exist: a schedules file sits next to the feature, not in
  * it, so its handlers must be typed from the core alone (no annotation, no
- * restated deps) and must run on the feature's own private infra and
+ * restated deps) and must reach the feature's private infra through its
  * usecases. And one scheduler and one typed client must serve an app that
  * mounts several features.
  */
@@ -45,9 +45,11 @@ const digest = core.entrypoints(digestSchedules(core));
 
 /** A second feature with only a need and no private infra, mounted next to it. */
 const ledgerNeeds = { ledger: service<Ledger>() };
-const billingCore = defineFeature('billing').needs(ledgerNeeds).usecases({});
+const billingCore = defineFeature('billing')
+  .needs(ledgerNeeds)
+  .usecases({ close: ({ ledger }) => () => ledger.close() });
 const billing = billingCore.entrypoints(
-  schedules(billingCore, [{ name: 'close-books', every: '1h', handler: ({ ledger }) => ledger.close() }]),
+  schedules(billingCore, [{ name: 'close-books', every: '1h', handler: ({ usecases }) => usecases.close() }]),
 );
 
 const boot = () =>
@@ -58,24 +60,25 @@ const boot = () =>
     .start();
 
 describe('schedules(core, defs)', () => {
-  it('types each handler from the core: usecases and private infra yes, anything else no', () => {
+  it('types each handler from the core: usecases yes, private infra and anything else no', () => {
     schedules(core, [
       {
         name: 'typed',
         every: '1m',
         handler: services => {
           expectTypeOf<SuccessOf<typeof services.usecases.sendDue>>().toEqualTypeOf<string>();
-          expectTypeOf(services.outbox.pending).returns.toEqualTypeOf<number>();
           return null;
         },
       },
     ]);
+    // @ts-expect-error -- private infra stays below the usecases; a handler calls one
+    schedules(core, [{ name: 'below', every: '1m', handler: ({ outbox }) => outbox.pending() }]);
     // @ts-expect-error -- `ledger` belongs to another feature, not to this core
     schedules(core, [{ name: 'leaky', every: '1m', handler: ({ ledger }) => ledger }]);
     expect(true).toBe(true);
   });
 
-  it("runs the handler on the feature's private infra and usecases, next to another feature", async () => {
+  it("runs the handler through the feature's usecases on its private infra, next to another feature", async () => {
     const app = await orThrow(boot());
     await expect(app.services.scheduler.trigger('send-digest')).resolves.toEqual({
       name: 'send-digest',
@@ -104,7 +107,7 @@ describe('composeSchedules over several features', () => {
     const sent = await client.trigger('send-digest');
     const closed = await client.trigger('close-books');
     if (sent.status === 'ran') expectTypeOf(orThrow(sent.value)).toEqualTypeOf<string>();
-    if (closed.status === 'ran') expectTypeOf(closed.value).toEqualTypeOf<string>();
+    if (closed.status === 'ran') expectTypeOf(orThrow(closed.value)).toEqualTypeOf<string>();
     expect([sent, closed]).toMatchObject([
       { status: 'ran', value: 'sent 3' },
       { status: 'ran', value: 'closed' },

@@ -9,7 +9,7 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { defineApp, infra, rename } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -38,9 +38,10 @@ function recordingLocker() {
 
 function build(lock: true | string | undefined) {
   const { keys, locker } = recordingLocker();
+  const lockUnit = infra({ name: 'locks', provides: { locks: () => locker } });
+  // The scheduler takes the lock around the run; no handler uses it, so it is entrypoint-only.
   const base = defineFeature('reports')
-    .needs({ db: database.provides.db })
-    .infra(infra({ name: 'locks', provides: { locks: () => locker } }))
+    .needs({ db: database.provides.db, locks: entrypointOnly(lockUnit.provides.locks) })
     .usecases({
       region:
         ({ db }) =>
@@ -60,11 +61,11 @@ function build(lock: true | string | undefined) {
   const eu = reports.instance('eu', { db: databaseEu.provides.dbEu });
   const us = reports.instance('us');
   const instances = defineApp('instances')
-    .infra(database, databaseEu)
+    .infra(database, databaseEu, lockUnit)
     .features([eu, us])
     .entrypoints(schedule({ clock: 'host' }));
   const plain = defineApp('plain')
-    .infra(database)
+    .infra(database, lockUnit)
     .features([reports])
     .entrypoints(schedule({ clock: 'host' }));
   return { keys, instances, plain, reports };

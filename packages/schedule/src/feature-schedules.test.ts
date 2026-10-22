@@ -23,14 +23,20 @@ type Ledger = { readonly close: () => string };
 const mailerNeeds = { mailer: service<Mailer>() };
 const ledgerNeeds = { ledger: service<Ledger>() };
 
-const digestCore = defineFeature('digest').needs(mailerNeeds).usecases({});
+const digestCore = defineFeature('digest')
+  .needs(mailerNeeds)
+  .usecases({ send: ({ mailer }) => (to: string) => mailer.send(to) });
 const digest = digestCore.entrypoints(
-  schedules(digestCore, [{ name: 'send-digest', every: '1m', handler: ({ mailer }) => mailer.send('subscribers') }]),
+  schedules(digestCore, [
+    { name: 'send-digest', every: '1m', handler: ({ usecases }) => usecases.send('subscribers') },
+  ]),
 );
 
-const billingCore = defineFeature('billing').needs(ledgerNeeds).usecases({});
+const billingCore = defineFeature('billing')
+  .needs(ledgerNeeds)
+  .usecases({ close: ({ ledger }) => () => ledger.close() });
 const billing = billingCore.entrypoints(
-  schedules(billingCore, [{ name: 'close-books', cron: '* * * * *', handler: ({ ledger }) => ledger.close() }]),
+  schedules(billingCore, [{ name: 'close-books', cron: '* * * * *', handler: ({ usecases }) => usecases.close() }]),
 );
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
@@ -98,25 +104,27 @@ describe('schedules(core, defs) — feature-owned schedules', () => {
     await orThrow(app.dispose());
   });
 
-  it("types the handler parameter from the core's needs, with no annotation", () => {
+  it("types the handler parameter from the core's usecases, with no annotation", () => {
     schedules(digestCore, [
       {
         name: 'typed',
         every: '1h',
         handler: services => {
-          expectTypeOf(services.mailer).toEqualTypeOf<Mailer>();
+          expectTypeOf<keyof typeof services>().toEqualTypeOf<'usecases'>();
+          expectTypeOf(services.usecases.send).parameter(0).toEqualTypeOf<string>();
         },
       },
     ]);
   });
 
-  it('rejects, at compile time, a schedule whose needs the feature does not declare', () => {
+  it('rejects, at compile time, a schedule that calls a usecase the feature does not declare', () => {
     const forgetful = defineFeature('forgetful').usecases({});
-    // @ts-expect-error the schedule needs `mailer`, which this feature's `needs` does not list.
-    schedules(forgetful, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }]);
-    // Control: the same schedule compiles once the feature declares the need.
-    const declared = defineFeature('declared').needs(mailerNeeds).usecases({});
-    schedules(declared, [{ name: 'orphan', every: '1h', handler: ({ mailer }) => mailer.send('x') }]);
+    // @ts-expect-error the schedule calls `send`, which this feature's usecases do not list.
+    schedules(forgetful, [{ name: 'orphan', every: '1h', handler: ({ usecases }) => usecases.send('x') }]);
+    // @ts-expect-error a plain need is below the usecases: a handler cannot read `mailer` itself.
+    schedules(digestCore, [{ name: 'direct', every: '1h', handler: ({ mailer }) => mailer.send('x') }]);
+    // Control: the same schedule compiles once the feature declares the usecase.
+    schedules(digestCore, [{ name: 'orphan', every: '1h', handler: ({ usecases }) => usecases.send('x') }]);
   });
 
   // A durable tick runs in another process that does not hold these services.
@@ -124,7 +132,7 @@ describe('schedules(core, defs) — feature-owned schedules', () => {
     try {
       schedules(digestCore, [
         // @ts-expect-error feature-owned schedules cannot be durable.
-        { name: 'durable-digest', every: '1h', durable: true, handler: ({ mailer }) => mailer.send('x') },
+        { name: 'durable-digest', every: '1h', durable: true, handler: ({ usecases }) => usecases.send('x') },
       ]);
       throw new Error('Expected schedules() to throw.');
     } catch (error) {
@@ -136,7 +144,7 @@ describe('schedules(core, defs) — feature-owned schedules', () => {
 
   it('validates cron and every at declaration, like defineSchedule', () => {
     expect(() =>
-      schedules(digestCore, [{ name: 'bad', cron: 'not a cron', handler: ({ mailer }) => mailer.send('x') }]),
+      schedules(digestCore, [{ name: 'bad', cron: 'not a cron', handler: ({ usecases }) => usecases.send('x') }]),
     ).toThrow(expect.objectContaining({ code: SCHEDULE_ERROR_CODES.invalidDefinition }));
   });
 });

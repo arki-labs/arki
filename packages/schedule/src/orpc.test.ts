@@ -10,8 +10,8 @@ import { implement } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { defineFeature } from '@arki/dot/feature';
-import { service } from '@arki/dot/unit';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
+import { infra } from '@arki/dot/unit';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScheduleOutcome } from './dot.js';
@@ -20,7 +20,9 @@ import { schedules } from './dot.js';
 import { checkOnly, cronErrorBody, cronRouterFor, defineCronContract, fail, ok, rethrow, skipped } from './orpc.js';
 
 type Clock = { readonly now: () => number };
-const needs = { clock: service<Clock>() };
+/** The handlers only read a number to pick a result shape, so the clock is an entrypoint-only need: no usecase wraps it. */
+const clockUnit = infra({ name: 'clock', provides: { clock: (): Clock => ({ now: () => 1 }) } });
+const needs = { clock: entrypointOnly(clockUnit.provides.clock) };
 const DeliveryRefused = defineFailure('schedule.delivery_refused', { status: 409 });
 
 /** Three value shapes: exactly the body, a value that needs a mapping, and one with a legacy lock-held body. */
