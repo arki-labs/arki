@@ -79,7 +79,7 @@ const core = base.usecases({
     () =>
       repos.counts.count(),
 });
-const feature = core.provides({ noteReader: ({ repos }) => reader(repos.notes, ['get']) }).entrypoints();
+const feature = core.entrypoints();
 
 const createTable = (handle: Db) => handle.execute(sql`create table notes (id text primary key, body text not null)`);
 
@@ -279,13 +279,15 @@ describe('reader(): cross-feature reads', () => {
     const app = await bootNotes();
     try {
       orThrow(await app.services['notes.usecases'].write('x', 'shared'));
-      const { get } = app.services.noteReader;
+      // A provides factory sees only usecases, so a reader is made where the repository is in hand.
+      const published = reader(new NoteRepository(app.services.db), ['get']);
+      const { get } = published;
       expect(await get('x')).toBe('shared');
       // The trap reader() avoids: an unbound copy loses `this`.
       // eslint-disable-next-line @typescript-eslint/unbound-method -- the trap under test: the copy loses `this`
       const unbound = { get: app.services['notes.repos'].notes.get };
       await expect(unbound.get('x')).rejects.toThrow(TypeError);
-      expectTypeOf(app.services.noteReader).toEqualTypeOf<Pick<NoteRepository, 'get'>>();
+      expectTypeOf(published).toEqualTypeOf<Pick<NoteRepository, 'get'>>();
     } finally {
       await orThrow(app.dispose());
     }

@@ -5,7 +5,7 @@ import type { Database } from '../../../core/database.js';
 import { repos } from '../../../../../../dot.js';
 import { accounts } from '../model/tables.js';
 
-function accountRepository(db: Database) {
+export function accountRepository(db: Database) {
   return {
     async balance(id: string): Promise<number | null> {
       const [row] = await db.select({ balance: accounts.balance }).from(accounts).where(eq(accounts.id, id));

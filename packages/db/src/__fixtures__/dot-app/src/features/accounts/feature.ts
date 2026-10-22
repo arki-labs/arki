@@ -3,7 +3,7 @@ import { implement } from '@orpc/server';
 
 import type { DepsOf } from '@arki/dot/feature';
 import { rename } from '@arki/dot';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 
 import type { TransactionScopeOf } from '../../../../../orpc.js';
@@ -19,7 +19,7 @@ import { balance } from './usecases/balance.js';
 import { transfer } from './usecases/transfer.js';
 
 const accountsDeps = defineFeature('accounts')
-  .needs({ db: database.provides.db })
+  .needs({ db: entrypointOnly(database.provides.db) })
   .infra(rename(repository, { repos: 'repositories' }));
 
 export type Deps = DepsOf<typeof accountsDeps>;
