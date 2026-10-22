@@ -34,3 +34,4 @@ export { run } from './run.js';
 export type { CommandTree, Group, TreeEntry, TreeNode } from './tree.js';
 export { group } from './tree.js';
 export type { Ui } from './ui.js';
+export type { AddedBy, AroundFn, CtxAfter, StepFn, WithFn } from './with.js';

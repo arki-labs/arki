@@ -8,6 +8,7 @@ import type { Logger } from '@arki/log';
 import type { SchemaInput, SchemaOutput, SchemaWithJson } from '@arki/schema';
 
 import type { Ui } from './ui.js';
+import type { Checked, CtxAfter, ErasedWith, WithFn } from './with.js';
 
 /** What a command does to the world: `read` changes nothing, `idempotent` is safe to repeat. */
 export type Effects = 'read' | 'idempotent' | 'write';
@@ -48,7 +49,12 @@ export type Success<TResult> = Exclude<Awaited<TResult>, Failure>;
  * One command. `TResult` is what `run` returns as written (a value,
  * failures, maybe a promise); `OutputOf` is its success value.
  */
-export type Command<TInput extends SchemaWithJson | undefined, TResult, TServices> = {
+export type Command<
+  TInput extends SchemaWithJson | undefined,
+  TResult,
+  TServices,
+  TWith extends readonly WithFn[] = readonly [],
+> = {
   /** One line: what the command does. Shown in help. */
   readonly describe: string;
   /** An object schema with JSON Schema (Zod 4, Valibot, ArkType): it drives flags, coercion and validation. */
@@ -65,14 +71,21 @@ export type Command<TInput extends SchemaWithJson | undefined, TResult, TService
   readonly confirm?: string;
   /** What `--dry-run` runs instead of `run`: the same input, the same success type, no changes. `NoInfer`: `run` alone decides the type. */
   preview?(
-    ctx: RunContext<TInput, TServices>,
+    ctx: CtxAfter<RunContext<TInput, TServices>, TWith>,
   ): NoInfer<Success<TResult>> | Failure | Promise<NoInfer<Success<TResult>> | Failure>;
   /*
    * Method syntax on purpose: method parameters are compared bivariantly, so
    * a tree can hold any command and the framework can call `run` with the
    * input it has just validated against this command's own schema.
    */
-  run(ctx: RunContext<TInput, TServices>): TResult;
+  run(ctx: CtxAfter<RunContext<TInput, TServices>, TWith>): TResult;
+  /**
+   * Steps and arounds that run before `run` (and `preview`), in order: `with: [asOperator, inTransaction]`.
+   * A step `(ctx) => object | Failure` adds the keys it returns to the context of what follows, or
+   * refuses with a Failure, which is the command's failure. An around `(ctx, next) => Promise<T>` wraps
+   * everything after it and `run`. Each element is checked against the context built before it.
+   */
+  readonly with?: readonly [...TWith] & Checked<RunContext<TInput, TServices>, TWith>;
   /** Text mode only. Without it, an object prints as `key: value` lines and an array of objects as a table. */
   render?(data: Success<TResult>, ui: Ui): void;
   /** Command lines shown under "Examples" in help. */
@@ -105,6 +118,7 @@ export type AnyCommand<TServices = unknown> = {
   readonly confirm?: string;
   preview?(ctx: AnyRunContext<TServices>): unknown;
   run(ctx: AnyRunContext<TServices>): unknown;
+  readonly with?: readonly ErasedWith[];
   render?(data: unknown, ui: Ui): void;
   readonly examples?: readonly string[];
   readonly aliases?: readonly string[];
@@ -142,14 +156,20 @@ export type ServicesOf<C> = ContextOf<C> extends { readonly services: infer S } 
  *   run: ({ input }) => ({ greeting: `Hello, ${input.name}` }),
  * });
  */
-export function defineCommand<TResult, TServices = NoServices>(
-  def: Command<undefined, TResult, TServices> & { readonly input?: undefined },
-): Command<undefined, TResult, TServices>;
-export function defineCommand<TInput extends SchemaWithJson, TResult, TServices = NoServices>(
-  def: Command<TInput, TResult, TServices>,
-): Command<TInput, TResult, TServices>;
-export function defineCommand<TInput extends SchemaWithJson | undefined, TResult, TServices>(
-  def: Command<TInput, TResult, TServices>,
-): Command<TInput, TResult, TServices> {
+export function defineCommand<TResult, TServices = NoServices, const TWith extends readonly WithFn[] = readonly []>(
+  def: Command<undefined, TResult, TServices, TWith> & { readonly input?: undefined },
+): Command<undefined, TResult, TServices, TWith>;
+export function defineCommand<
+  TInput extends SchemaWithJson,
+  TResult,
+  TServices = NoServices,
+  const TWith extends readonly WithFn[] = readonly [],
+>(def: Command<TInput, TResult, TServices, TWith>): Command<TInput, TResult, TServices, TWith>;
+export function defineCommand<
+  TInput extends SchemaWithJson | undefined,
+  TResult,
+  TServices,
+  const TWith extends readonly WithFn[],
+>(def: Command<TInput, TResult, TServices, TWith>): Command<TInput, TResult, TServices, TWith> {
   return def;
 }

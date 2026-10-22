@@ -6,7 +6,7 @@
 
 ## Import paths
 <!-- llms:start -->
-- `@arki/cli`: Typed command-line programs from one `defineCommand`: flags from the input schema, a JSON envelope when piped, stable exit codes. `Cancelled`, `ConfirmationRequired`, `ExitCode`, `InputRequired`, `InvalidInput`, `PreviewUnsupported`, `UnknownCommand`, `defineCli`, `defineCommand`, `group`, `run`; types `AnyCommand`; and 28 more.
+- `@arki/cli`: Typed command-line programs from one `defineCommand`: flags from the input schema, a JSON envelope when piped, stable exit codes. `Cancelled`, `ConfirmationRequired`, `ExitCode`, `InputRequired`, `InvalidInput`, `PreviewUnsupported`, `UnknownCommand`, `defineCli`, `defineCommand`, `group`, `run`; types `AddedBy`; and 33 more.
 <!-- llms:end -->
 
 ## Start here

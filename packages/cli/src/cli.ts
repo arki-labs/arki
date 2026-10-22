@@ -25,6 +25,7 @@ import { isOutputChoice, parseFields, pickFields, resolveMode, writeEnvelope } f
 import { parse } from './parse.js';
 import { group, isGroup, resolvePath } from './tree.js';
 import { createUi } from './ui.js';
+import { runWith } from './with.js';
 
 /** What `main` reads and writes instead of the process. Tests pass their own. */
 export type Io = {
@@ -294,7 +295,12 @@ export function defineCli(def: Cli): Program {
       };
       let result: unknown;
       try {
-        result = dryRun && node.preview !== undefined ? await node.preview(ctx) : await node.run(ctx);
+        // `with` wraps `preview` too: it receives the same context type as `run`.
+        const steps = node.with ?? [];
+        result =
+          dryRun && node.preview !== undefined
+            ? await runWith(steps, ctx, node.preview.bind(node))
+            : await runWith(steps, ctx, node.run.bind(node));
       } catch (error) {
         if (aborted()) return fail(Cancelled());
         throw error;
