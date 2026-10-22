@@ -1490,6 +1490,7 @@ An entity table needs a string key column that is primary or unique (`id` by def
 | `@arki/journal`               | the portable core: `initJournal`, `need`, `jobId`, the command failures                                           |
 | `@arki/journal/pg`            | `journalTables()`, the table definitions                                                                          |
 | `@arki/journal/errors`        | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
+| `@arki/journal/contract`      | browser-safe, for oRPC contracts: `COMMAND_FAILURES`, the command and workflow failures, `CommandFailure`         |
 | `@arki/journal/dot`           | the optional `@arki/dot` unit and feature slice (see Dot)                                                       |
 | `@arki/journal/orpc`          | the optional oRPC error mapping (see Rejected rules)                                                              |
 | `@arki/journal/http`          | `responseCache`, the Postgres cache for HTTP idempotency                                                          |

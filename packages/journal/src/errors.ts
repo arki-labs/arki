@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { TRANSACTION_FAILURES } from '@arki/db/transaction';
+import { TRANSACTION_FAILURES } from '@arki/db/contract';
 
 import { defineFailure, SCHEMA_FAILURES } from '@arki/failure';
 

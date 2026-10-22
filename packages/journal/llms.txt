@@ -5,13 +5,14 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/journal`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowReadMismatch`, `WorkflowStranded`, `backoff`, `combineRunners`, `initJournal`, `isJournalError`; and 110 more.
-- `@arki/journal/pg`: `journalTables`; types `ExportsEveryJournalTable`, `JournalTables`.
+- `@arki/journal`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowReadMismatch`, `WorkflowStranded`, `backoff`, `combineRunners`, `initJournal`, `isJournalError`; and 114 more.
+- `@arki/journal/pg`: `journalTables`; types `ExportsEveryJournalTable`, `JournalTables`, `WorkflowShape`.
 - `@arki/journal/foreman`: @arki/journal/foreman. `ArchivedSummary`, `AttemptSummary`, `JOURNAL_JOBS_ERROR_CODES`, `JOURNAL_WORKFLOWS_ERROR_CODES`, `JobSummary`, `OperationSummary`, `foremanReceiptTables`, `journalJobsModule`, `journalReceiptStore`, `journalWorkflowsModule`; types `ForemanReceiptTables`, `JournalJobsModuleOptions`; and 2 more.
 - `@arki/journal/http`: The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `responseCache`.
 - `@arki/journal/http/webhooks`: Outgoing webhooks on the journal's job table: @arki/journal/http/webhooks. `WEBHOOK_ERROR_CODES`, `WebhookError`, `webhookSender`, `webhookTables`; types `DispatchInput`, `SubscribeInput`, `WebhookSender`, `WebhookSenderOptions`, `WebhookTables`, `WebhookTx`.
 - `@arki/journal/dot`: `@arki/dot` adapter, in two parts:. `JOURNAL_ACTION_META_SCHEMA`, `JOURNAL_PLUGIN_ERROR_CODES`, `JOURNAL_PROJECTIONS_KIND`, `journal`, `journalEffects`, `journalHandlers`, `journalProjections`, `journalWorker`, `journalWorkflows`; types `JobsSource`, `JournalDeclarations`, `JournalDirectOptions`; and 9 more.
 - `@arki/journal/errors`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowReadMismatch`, `WorkflowStranded`, `isJournalError`; types `CommandFailure`, `JournalErrorCode`.
+- `@arki/journal/contract`: Everything an oRPC contract needs from the journal, browser-safe: the failures a command or a workflow operation returns (for the contract's error map). `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `WorkflowReadMismatch`, `WorkflowStranded`; types `CommandFailure`.
 - `@arki/journal/orpc`: `@orpc/server` adapter: what an oRPC client sees when a command fails, and who runs it. `actorRun`, `commandErrors`, `idempotent`, `toORPCError`; types `ActorRunContext`, `IdempotentOptions`, `RunContext`.
 - `@arki/journal/projection`: `dot explain --as journal-flow`: which event starts which effect. `project`; types `JournalFlowDocument`, `JournalFlowEdge`.
 - `@arki/journal/testing`: Test helper: an in-memory PGlite with a schema pushed, the fixture every journal test rebuilds by hand. `openJournalDb`, `workflowHarness`.
