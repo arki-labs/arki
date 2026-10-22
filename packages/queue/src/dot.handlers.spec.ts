@@ -66,13 +66,13 @@ const charge = q.job
 
 const billing = defineFeature('billing')
   .needs({ schedule: scheduling.provides.schedule, db: database.provides.db })
-  .usecases({})
-  .provides({
-    billers: ({ db: root, schedule }) => ({
-      charge: (key: string, mode: 'ok' | 'refuse' | 'flaky') =>
+  .usecases({
+    charge:
+      ({ db: root, schedule }) =>
+      (key: string, mode: 'ok' | 'refuse' | 'flaky') =>
         root.transaction(tx => schedule.runAfter(tx, charge, { key, mode })),
-    }),
   })
+  .provides({ billers: ({ usecases }) => ({ charge: usecases.charge }) })
   .entrypoints(jobs(q.registry({ charge })));
 
 // The slice keeps the registry type the feature declared, so callers infer from it.

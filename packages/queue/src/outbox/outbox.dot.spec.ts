@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vit
 
 import { z } from '@arki/contracts';
 import { defineApp } from '@arki/dot';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { infra, rename, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { initJournal } from '@arki/journal';
@@ -66,12 +66,13 @@ const welcome = q.job
 
 const signup = defineFeature('signup')
   .needs({ db: database.provides.db, schedule: scheduling.provides.schedule })
-  .usecases({})
-  .provides({
-    signups: ({ db: root, schedule }) => ({
-      register: (userId: string) => root.transaction(tx => schedule.runAfter(tx, welcome, { userId })),
-    }),
+  .usecases({
+    register:
+      ({ db: root, schedule }) =>
+      (userId: string) =>
+        root.transaction(tx => schedule.runAfter(tx, welcome, { userId })),
   })
+  .provides({ signups: ({ usecases }) => ({ register: usecases.register }) })
   .entrypoints(jobs(q.registry({ welcome })));
 
 // Two copies of one feature, each on its own region: the copy's rows must carry its name and run its job.
@@ -92,7 +93,7 @@ const remind = rq.job
     return Promise.resolve({ sent: true });
   });
 const reminders = defineFeature('reminders')
-  .needs({ db: database.provides.db, schedule: scheduling.provides.schedule, region: regionUs.provides.region })
+  .needs({ db: database.provides.db, schedule: scheduling.provides.schedule, region: entrypointOnly(regionUs.provides.region) })
   .infra(outboxProducers({ remind }))
   .usecases({
     remind:

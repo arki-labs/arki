@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, infra, rename, service } from '@arki/dot/unit';
 
 import type { FeatureJobContext, QueueClient } from './dot.ts';
@@ -74,7 +74,7 @@ function reportsFeature(name: string) {
   const nightly = q.schedule.cron('0 3 * * *').name(`${name}-nightly`).job(sendMail).data({ to: 'cron' });
   const once = q.schedule.timeout(3_600_000).name(`${name}-once`).job(sendMail).data({ to: 'later' });
   const reports = defineFeature('reports')
-    .needs({ db: database.provides.db, queue: service<QueueClient>() })
+    .needs({ db: entrypointOnly(database.provides.db), queue: service<QueueClient>() })
     .infra(jobProducers({ sendMail }))
     .usecases({
       notify:
