@@ -5,6 +5,7 @@
  * Must not import `journal`, `command` or `worker`.
  */
 import { and, eq, sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
@@ -15,9 +16,10 @@ import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
 import type { History } from './history.js';
-import type { JournalTables } from './pg.js';
+import type { JournalTables, StoredEventRow } from './pg.js';
 import type {
   AnyEventDef,
+  DbHandle,
   Effect,
   EntityDef,
   EntityId,
@@ -116,6 +118,25 @@ export function createWriter<
   const { decodeStoredEvent, highestVersion, assertLogSaysGone } = deps.history;
 
   /**
+   * The stamps a transient entity's events get instead of a log row: `seq` from the events table's
+   * own sequence and `recordedAt` from the transaction's `now()`, in one round trip, decoded by the
+   * columns themselves. The seq is spent without a row, so it stays the global write order;
+   * `causeSeq` has no foreign key, so a seq with no row is safe to point at.
+   */
+  const eventsTableConfig = getTableConfig(eventsTable);
+  const eventsTableName =
+    eventsTableConfig.schema === undefined
+      ? `"${eventsTableConfig.name}"`
+      : `"${eventsTableConfig.schema}"."${eventsTableConfig.name}"`;
+  const stampTransient = (db: DbHandle, count: number) =>
+    db
+      .select({
+        seq: sql`nextval(pg_get_serial_sequence(${eventsTableName}, ${eventsTable.seq.name}))`.mapWith(eventsTable.seq),
+        recordedAt: sql`now()`.mapWith(eventsTable.recordedAt),
+      })
+      .from(sql`generate_series(1, ${count}::int)`);
+
+  /**
    * `write` with `getValidatedMeta` giving the parsed and checked meta. `journal.write`
    * parses per call; `journal.run` parses once for every write of a command.
    * `getValidatedMeta` runs inside the one-at-a-time guard, so a bad meta on a busy
@@ -137,6 +158,7 @@ export function createWriter<
     opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
   ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure> => {
     const adopting = opts?.mode === 'adopt';
+    const transient = entity.eventStorage === 'transient';
     const expectedVersion = opts?.expectedVersion;
     if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
       throw new Error(`journal: expectedVersion must be a whole number, zero or more, got ${String(expectedVersion)}`);
@@ -189,8 +211,10 @@ export function createWriter<
         // before the journal: its history starts at 2, so version 1 stays the mark of a
         // real create and replay can tell the two apart. A row at version 0 whose log is
         // not empty lags the log; the unique index would not catch a start at 2.
+        // A transient entity has no log: the row's version is the base, 0 when there is no row.
         const stored = row?.version ?? 0;
-        const latestLogVersion = row === null || stored === 0 ? await highestVersion(sp, entity.kind, id) : 0;
+        const latestLogVersion =
+          !transient && (row === null || stored === 0) ? await highestVersion(sp, entity.kind, id) : 0;
         if (row !== null && stored === 0 && latestLogVersion > 0) {
           throw new JournalError(
             'CONFLICT',
@@ -211,7 +235,15 @@ export function createWriter<
           throw new Error(`journal: adopt ${entity.kind} ${id} needs exactly one create event, got ${pending.length}`);
         }
         // Adopt records the create as version 1, so the history is complete from then on.
-        const baseVersion = adopting ? 0 : row === null ? latestLogVersion : stored === 0 ? 1 : stored;
+        const baseVersion = adopting
+          ? 0
+          : transient
+            ? stored
+            : row === null
+              ? latestLogVersion
+              : stored === 0
+                ? 1
+                : stored;
         if (row === null && latestLogVersion > 0) {
           const checked = await assertLogSaysGone(sp, entity, id, latestLogVersion);
           if (isFailure(checked)) return refusal.settle(checked);
@@ -221,7 +253,7 @@ export function createWriter<
         // (for example a non-create event after a reducer returned null).
         // Data is parsed here too: a hand-built `{ type, data }` skips the constructor,
         // and a schema that changes its own output would replay to a different value.
-        const validated: { readonly data: unknown; readonly schemaVersion: number }[] = [];
+        const validated: { readonly type: string; readonly data: unknown; readonly schemaVersion: number }[] = [];
         for (const [index, event] of pending.entries()) {
           const def = entity.events.get(event.type);
           if (def === undefined)
@@ -235,7 +267,7 @@ export function createWriter<
           if (isSchemaFailure(data)) return refusal.settle(data);
           const checked = assertRoundTrips(def.schema, data, entity.kind, id, `event "${event.type}"`);
           if (isFailure(checked)) return refusal.settle(checked);
-          validated.push({ data, schemaVersion: def.version });
+          validated.push({ type: event.type, data, schemaVersion: def.version });
         }
         const firstType = pending[0]?.type ?? '';
         const firstAt = `event "${firstType}" at version ${baseVersion + 1}`;
@@ -251,7 +283,7 @@ export function createWriter<
         }
 
         const eventRows = [];
-        for (const [index, event] of pending.entries()) {
+        for (const [index, checked] of validated.entries()) {
           const generated = eventId();
           if (isFailure(generated)) return refusal.settle(generated);
           eventRows.push({
@@ -259,30 +291,44 @@ export function createWriter<
             kind: entity.kind,
             entityId: id,
             version: baseVersion + index + 1,
-            type: event.type,
-            data: validated[index]?.data,
-            schemaVersion: validated[index]?.schemaVersion,
+            type: checked.type,
+            data: checked.data,
+            schemaVersion: checked.schemaVersion,
             meta,
             commandId: trace.commandId,
             causeSeq: trace.causeSeq,
             correlationId: trace.correlationId,
           });
         }
-        const inserted = await sp
-          .insert(eventsTable)
-          .values(eventRows)
-          .returning()
-          .catch((error: unknown) => {
-            if (isUniqueViolation(error))
-              throw new JournalError(
-                'CONFLICT',
-                entity.kind,
-                id,
-                `version ${baseVersion + 1} is already in the log: another writer appended it first, or the row is behind its history`,
-                { cause: error },
-              );
-            throw error;
+        let inserted: readonly StoredEventRow[];
+        if (transient) {
+          // No log row. The stamped events have the stored row's shape, so the rest of the write
+          // (decode, fold, projections, effect jobs) is the same in both modes. They live in this
+          // write's result and in the effect jobs' `args`, nowhere else.
+          const stamps = await stampTransient(sp, eventRows.length);
+          inserted = eventRows.map((eventRow, index) => {
+            const stamp = stamps[index];
+            if (stamp === undefined)
+              throw new Error(`journal: ${stamps.length} stamps for ${eventRows.length} transient events`);
+            return { ...eventRow, seq: stamp.seq, recordedAt: stamp.recordedAt, erasedAt: null };
           });
+        } else {
+          inserted = await sp
+            .insert(eventsTable)
+            .values(eventRows)
+            .returning()
+            .catch((error: unknown) => {
+              if (isUniqueViolation(error))
+                throw new JournalError(
+                  'CONFLICT',
+                  entity.kind,
+                  id,
+                  `version ${baseVersion + 1} is already in the log: another writer appended it first, or the row is behind its history`,
+                  { cause: error },
+                );
+              throw error;
+            });
+        }
 
         // The log must hold the id as given: a cut or changed `entity_id` would split the history.
         // This throw rolls the savepoint back with the inserted events.
@@ -338,7 +384,19 @@ export function createWriter<
             throw new Error(`journal: ${entity.kind} ${id} update returned a partial row`);
           saved = updatedRow;
         } else if (row === null && next !== null) {
-          saved = await saveReplayed(sp, entity, id, null, next);
+          saved = await saveReplayed(sp, entity, id, null, next).catch((error: unknown) => {
+            // A transient entity has no log index to catch two creates of one id. The row's own key
+            // does, and the loser gets the code a stored entity's loser gets.
+            if (transient && isUniqueViolation(error))
+              throw new JournalError(
+                'CONFLICT',
+                entity.kind,
+                id,
+                'the row insert hit a unique constraint: another writer created this row first, or a column value is already taken',
+                { cause: error },
+              );
+            throw error;
+          });
         } else if (row !== null && next !== null && recreated) {
           // A reducer deleted the row and a create followed in the same write. Delete
           // then insert, so columns the create omits get their defaults, not the old values.
@@ -382,8 +440,9 @@ export function createWriter<
           }
         }
 
-        // Every effect job carries its event: `args` is the stored row as inserted, so the worker
-        // runs it without reading `journal_events` back.
+        // Every effect job carries its event: `args` is the stored row as inserted (or as stamped in
+        // memory), so the worker runs it without reading `journal_events` back. `eventSeq` points at
+        // a log row, so a transient entity's job leaves it null.
         const storedBySeq = new Map(inserted.map(stored => [stored.seq, stored]));
         const jobs = [];
         for (const event of recorded) {
@@ -399,7 +458,7 @@ export function createWriter<
               if (stored === undefined) throw new Error(`journal: no stored row for event seq ${event.seq}`);
               jobs.push({
                 id: generated,
-                eventSeq: event.seq,
+                eventSeq: transient ? null : event.seq,
                 effect: effect.name,
                 args: stored,
                 priority: effect.schedule.priority ?? 0,
@@ -475,6 +534,14 @@ export function createWriter<
     id: EntityId<Tbl, Key>,
     input: WriteInput<Tbl, E, Meta, Tx>,
   ): Promise<WriteResult<Tbl, E, MetaOut, Key> | SchemaFailure | IdGenerationFailure> => {
+    // Adopt exists to complete a history. A transient entity has none to complete.
+    if (entity.eventStorage === 'transient')
+      throw new JournalError(
+        'NO_HISTORY',
+        entity.kind,
+        id,
+        `adopt: entity "${entity.kind}" is declared with events: 'transient' and keeps no events`,
+      );
     const chainId = correlationId();
     if (isFailure(chainId)) return Promise.resolve(chainId);
     return writeWithValidatedMeta(

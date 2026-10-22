@@ -242,6 +242,14 @@ export type Reducers<Tbl extends EntityTable, Meta, Key extends string = 'id'> =
   readonly on?: OnReducer<Tbl, Meta, Key>;
 };
 
+/**
+ * Whether an entity's events are kept. `'stored'`: every write appends its events to
+ * `journal_events`, and replay, verify, repair, forget, rerun, async projections and taps
+ * work. `'transient'`: the events exist only inside the write (inline projections, the
+ * write's result) and in the effect jobs they queue; nothing reads them back later.
+ */
+export type EventStorage = 'stored' | 'transient';
+
 /** An entity: a kind, its table and key column, and the events and reducers declared so far. */
 export type EntityDef<
   K extends string,
@@ -260,6 +268,8 @@ export type EntityDef<
   readonly uuidKey: boolean;
   /** The longest id the key holds, in code points, decided once when the entity is defined. */
   readonly keyLimit: KeyLimit;
+  /** Resolved once when the entity is defined: the entity's own setting, else the journal's default. */
+  readonly eventStorage: EventStorage;
   readonly events: ReadonlyMap<string, AnyEventDef>;
   readonly reducers: ReadonlyMap<string, Reducers<Tbl, Meta, Key>>;
   /** Phantom: the union of event definitions this entity accepts. Never set at runtime. */

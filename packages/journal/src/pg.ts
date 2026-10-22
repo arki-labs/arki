@@ -68,7 +68,7 @@ export function journalTables(schema?: PgSchema) {
       id: varchar('id').primaryKey(),
       /** `effect`: an effect's job for one event. `queue`: a job scheduled by a runner (`@arki/queue/outbox`). */
       kind: varchar('kind', { length: 8 }).notNull().default('effect').$type<'effect' | 'queue'>(),
-      /** Set on `effect` rows only: the seq of the stored event. The worker never reads the event by it; `args` holds the copy it runs. */
+      /** `effect` rows of a stored event: its seq. Null for a transient entity's event, which has no row. The worker never reads the event by it; `args` holds the copy it runs. */
       eventSeq: bigint('event_seq', { mode: 'number' }).references(() => events.seq),
       /** Set on `effect` rows only. */
       effect: varchar('effect', { length: 128 }),
@@ -102,13 +102,19 @@ export function journalTables(schema?: PgSchema) {
     },
     t => [
       unique('journal_jobs_event_seq_effect_unique').on(t.eventSeq, t.effect),
+      // One job per event and effect for transient events too, whose `event_seq` is null: an archive
+      // replay of such a job cannot run the effect twice.
+      uniqueIndex('journal_jobs_effect_event_id_unique')
+        .on(sql`(${t.args}->>'id')`, t.effect)
+        .where(sql`${t.kind} = 'effect'`),
       index('journal_jobs_due_idx')
         .on(t.priority.desc(), t.availableAt)
         .where(sql`${t.deadAt} is null`),
-      // Each kind sets its own columns and leaves the other kind's empty.
+      // Each kind sets its own columns and leaves the other kind's empty. An effect row's `event_seq`
+      // is optional: a transient entity's event has no row to point at.
       check(
         'journal_jobs_kind_check',
-        sql`(${t.kind} = 'effect' and ${t.eventSeq} is not null and ${t.effect} is not null and ${t.args} is not null and ${t.jobName} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
+        sql`(${t.kind} = 'effect' and ${t.effect} is not null and ${t.args} is not null and ${t.jobName} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
       ),
       uniqueIndex('journal_jobs_queue_dedupe_unique')
         .on(t.jobName, t.dedupeKey)

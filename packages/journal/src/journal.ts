@@ -36,6 +36,7 @@ import type {
   Effect,
   EffectHookContext,
   EntityTable,
+  EventStorage,
   IdTable,
   KeyName,
   Needs,
@@ -78,24 +79,25 @@ const emptyMeta: StandardSchemaV1<Record<string, never>, Record<string, never>> 
 };
 type EmptyMeta = typeof emptyMeta;
 
+/** `initJournal` options other than `meta`. `events` is the journal default; each entity may override it. */
+type InitOptions = {
+  readonly tables: JournalTables;
+  readonly retention?: JobRetention;
+  readonly events?: EventStorage;
+};
+
 function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
-  function init(options: {
-    readonly tables: JournalTables;
-    readonly retention?: JobRetention;
-  }): JournalDefinitions<EmptyMeta, Tx, AppDb>;
-  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
-    readonly tables: JournalTables;
-    readonly retention?: JobRetention;
-    readonly meta: Meta;
-  }): JournalDefinitions<Meta, Tx, AppDb>;
-  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(options: {
-    readonly tables: JournalTables;
-    readonly retention?: JobRetention;
-    readonly meta?: Meta;
-  }): JournalDefinitions<Meta, Tx, AppDb> | JournalDefinitions<EmptyMeta, Tx, AppDb> {
+  function init(options: InitOptions): JournalDefinitions<EmptyMeta, Tx, AppDb>;
+  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
+    options: InitOptions & { readonly meta: Meta },
+  ): JournalDefinitions<Meta, Tx, AppDb>;
+  function init<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
+    options: InitOptions & { readonly meta?: Meta },
+  ): JournalDefinitions<Meta, Tx, AppDb> | JournalDefinitions<EmptyMeta, Tx, AppDb> {
+    const eventStorage = options.events ?? 'stored';
     return options.meta === undefined
-      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta, options.tables, options.retention)
-      : createInit<Meta, Tx, AppDb>(options.meta, options.tables, options.retention);
+      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta, options.tables, options.retention, eventStorage)
+      : createInit<Meta, Tx, AppDb>(options.meta, options.tables, options.retention, eventStorage);
   }
   return init;
 }
@@ -110,6 +112,9 @@ function initFor<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
  * `retention` says how long finished jobs are kept, where they go and how often the sweeper runs. It is the one
  * place for it: archive at ack, the job operations, the sweeper, Foreman and workflow timers all read it.
  * Defaults: completed 7 days, dead 90 days.
+ * `events` is the journal's default for whether an entity's events are stored (`'stored'`, the
+ * default) or only passed through the write (`'transient'`); `j.entity(kind, table, { events })`
+ * overrides it per entity. Workflow runs always store their events.
  */
 export const initJournal = Object.assign(initFor<DbHandle, RootDb>(), {
   tx: <Tx extends TransactionSource<Tx>>() => ({
@@ -132,20 +137,32 @@ function createInit<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(metaSchema: Meta, tables: JournalTables, retention: JobRetention | undefined): JournalDefinitions<Meta, Tx, AppDb> {
+>(
+  metaSchema: Meta,
+  tables: JournalTables,
+  retention: JobRetention | undefined,
+  defaultEventStorage: EventStorage,
+): JournalDefinitions<Meta, Tx, AppDb> {
   type MetaOut = SchemaOutput<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
     table: Tbl,
+    options?: { readonly events?: EventStorage },
   ): EntityBuilder<K, Tbl, never, MetaOut, 'id'>;
   function entity<K extends string, Tbl extends EntityTable, Key extends KeyName<Tbl>>(
     kind: K,
     table: Tbl,
-    options: { readonly key: Key & SingleKey<Key> },
+    options: { readonly key: Key & SingleKey<Key>; readonly events?: EventStorage },
   ): EntityBuilder<K, Tbl, never, MetaOut, Key>;
-  function entity<K extends string, Tbl extends EntityTable>(kind: K, table: Tbl, options?: { readonly key: string }) {
-    if (options !== undefined) {
-      return defineEntity<K, Tbl, MetaOut, string>(kind, table, options.key);
+  function entity<K extends string, Tbl extends EntityTable>(
+    kind: K,
+    table: Tbl,
+    options?: { readonly key?: string; readonly events?: EventStorage },
+  ) {
+    // Resolved here, the one place that sees both the entity's setting and the journal's default.
+    const eventStorage = options?.events ?? defaultEventStorage;
+    if (options?.key !== undefined) {
+      return defineEntity<K, Tbl, MetaOut, string>(kind, table, options.key, eventStorage);
     }
     if (!hasIdColumn(table)) {
       throw new JournalError(
@@ -155,7 +172,7 @@ function createInit<
         `journal: entity "${kind}": table "${getTableName(table)}" has no "id" column; pass { key: 'columnName' }`,
       );
     }
-    return defineEntity<K, Tbl, MetaOut, 'id'>(kind, table, 'id');
+    return defineEntity<K, Tbl, MetaOut, 'id'>(kind, table, 'id', eventStorage);
   }
   const command: JournalDefinitions<Meta, Tx, AppDb>['command'] = (name, input, handler, options) => {
     const authorize = options?.authorize;
@@ -226,6 +243,22 @@ function assertUniqueNames(
   }
 }
 
+/** Throws when a handler that reads the log back names an entity whose events are transient. */
+function assertStoredEntities(
+  kind: 'projection' | 'tap',
+  handler: { readonly name: string; readonly entities: readonly Pick<AnyEntity, 'kind' | 'eventStorage'>[] },
+): void {
+  const transient = handler.entities.find(entity => entity.eventStorage === 'transient');
+  if (transient === undefined) return;
+  const what = kind === 'projection' ? 'async projection' : 'tap';
+  throw new JournalError(
+    'BAD_DEFINITION',
+    kind,
+    handler.name,
+    `journal: ${what} "${handler.name}" reads stored events, but entity "${transient.kind}" is declared with events: 'transient' and keeps none; use an inline projection or an effect, or store the entity's events`,
+  );
+}
+
 function createJournal<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -246,6 +279,12 @@ function createJournal<
   },
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
+  // Async projections and taps read `journal_events` after the commit. A transient entity never
+  // writes there, so they would see nothing, silently. Refused at setup instead.
+  for (const projection of projections) {
+    if (projection.lane === 'async') assertStoredEntities('projection', projection);
+  }
+  for (const tap of taps) assertStoredEntities('tap', tap);
   const retention = resolveRetention(retentionOption);
   assertRetention(retention, effects);
   const effectOverride = effectOverrides(effects);

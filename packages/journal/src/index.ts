@@ -50,6 +50,7 @@ export type {
   EntityIdOf,
   EntityInfo,
   EntityTable,
+  EventStorage,
   EventDef,
   EventOptions,
   Upcaster,

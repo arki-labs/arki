@@ -6,6 +6,7 @@ import type {
   EntityDef,
   EntityId,
   EntityTable,
+  EventStorage,
   KeyColumn,
   KeyLimit,
   Patch,
@@ -203,10 +204,15 @@ function keyColumnOf(kind: string, table: EntityTable, key: string): KeyColumn {
   return column;
 }
 
+/**
+ * Standalone, it cannot see a journal default, so `eventStorage` is `'stored'` unless given.
+ * `journal.entity` resolves the journal's default and passes it here.
+ */
 export function defineEntity<Kind extends string, Tbl extends EntityTable, Meta, Key extends string>(
   kind: Kind,
   table: Tbl,
   key: Key,
+  eventStorage: EventStorage = 'stored',
 ): EntityBuilder<Kind, Tbl, never, Meta, Key> {
   assertStoredName('entity kind', kind);
   const keyColumn = keyColumnOf(kind, table, key);
@@ -219,6 +225,7 @@ export function defineEntity<Kind extends string, Tbl extends EntityTable, Meta,
     keyColumn,
     uuidKey,
     keyLimit,
+    eventStorage,
     new Map(),
     new Map(),
     null,
@@ -239,6 +246,7 @@ function builder<
   keyColumn: KeyColumn,
   uuidKey: boolean,
   keyLimit: KeyLimit,
+  eventStorage: EventStorage,
   events: ReadonlyMap<string, AnyEventDef>,
   reducers: ReadonlyMap<string, Reducers<Tbl, Meta, Key>>,
   /** The first `.on` event type, once one is declared. `.create` is refused after it. */
@@ -256,6 +264,7 @@ function builder<
       keyColumn,
       uuidKey,
       keyLimit,
+      eventStorage,
       new Map([...events, [event.type, event]]),
       new Map([...reducers, [event.type, next]]),
       sealedBy,
@@ -301,7 +310,7 @@ function builder<
     }
     return declare<AddedEvent, CreateResults>(event, { ...current, on: reduce }, firstOn ?? event.type);
   };
-  return { kind, table, key, keyColumn, uuidKey, keyLimit, events, reducers, create, on };
+  return { kind, table, key, keyColumn, uuidKey, keyLimit, eventStorage, events, reducers, create, on };
 }
 
 /**

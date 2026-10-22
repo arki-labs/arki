@@ -18,6 +18,7 @@ import type {
   EntityDef,
   EntityId,
   EntityTable,
+  EventStorage,
   Projection,
   Recorded,
   Row,
@@ -81,6 +82,21 @@ function assertRowNotAhead(kind: string, id: string, folded: object | null, top:
       `the row is at version ${current.version} but the log ends at version ${top}`,
     );
   }
+}
+
+/** The history verbs read the log back. A transient entity keeps none, so the verb is refused up front. */
+function assertStoredEvents(
+  entity: { readonly kind: string; readonly eventStorage: EventStorage },
+  id: string,
+  verb: string,
+): void {
+  if (entity.eventStorage === 'stored') return;
+  throw new JournalError(
+    'NO_HISTORY',
+    entity.kind,
+    id,
+    `${verb}: entity "${entity.kind}" is declared with events: 'transient' and keeps no events`,
+  );
 }
 
 export function createHistory<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
@@ -273,6 +289,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     id: EntityId<Tbl, Key>,
     opts?: { readonly throughVersion?: number },
   ): Promise<ReplayResult<Tbl, E, MetaOut, Key> | SchemaFailure> => {
+    assertStoredEvents(entity, id, 'replay');
     assertExactId(entity, id);
     const current = await loadRow(db, entity, id, false);
     return replayFrom(db, entity, id, current, opts?.throughVersion);
@@ -283,6 +300,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<VerifyResult<Tbl, Key> | SchemaFailure> => {
+    assertStoredEvents(entity, id, 'verify');
     assertExactId(entity, id);
     const loaded = await loadRow(db, entity, id, false);
     assertStoredId(entity, loaded, id);
@@ -306,6 +324,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<Row<Tbl> | null | SchemaFailure> => {
+    assertStoredEvents(entity, id, 'repair');
     assertExactId(entity, id);
     return db.transaction(async tx => {
       const current = await loadRow(tx, entity, id, true);
@@ -330,6 +349,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<ForgetResult<Tbl> | SchemaFailure> => {
+    assertStoredEvents(entity, id, 'forget');
     assertExactId(entity, id);
     const refusal = rollbackOnFailure<ForgetResult<Tbl> | SchemaFailure>();
     return db
@@ -394,6 +414,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
   ): Promise<{ readonly events: number } | SchemaFailure> => {
     const batchSize = opts?.batchSize ?? 100;
+    for (const entity of projection.entities) assertStoredEvents(entity, projection.name, 'rerun');
     const kinds = projection.entities.map(entity => entity.kind);
     let cursor = opts?.afterSeq ?? 0;
     let count = 0;

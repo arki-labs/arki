@@ -62,7 +62,7 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   },
   NO_HISTORY: {
     what: 'a complete history that starts at version 1 is not available',
-    next: 'Replay and repair cannot rebuild this row. Check whether the row existed before the journal, or restore the missing events',
+    next: "Replay and repair cannot rebuild this row. Check whether the row existed before the journal, or restore the missing events. An entity declared with events: 'transient' keeps none, and the history verbs never apply to it",
   },
   HISTORY_GAP: {
     what: 'the log has a hole, or the row is newer than a log that says it is alive',

@@ -11,6 +11,7 @@ import { z } from 'zod';
 
 import { isFailure, orThrow } from '@arki/failure';
 
+import type { OrderId } from './test-support.js';
 import { defineEntity } from './entity.js';
 import { initJournal } from './journal.js';
 import {
@@ -88,7 +89,11 @@ const eventRowsOf = (kind: string, id: string) =>
     .from(tables.events)
     .where(sql`${tables.events.kind} = ${kind} and ${tables.events.entityId} = ${id}`)
     .orderBy(asc(tables.events.seq));
-const rowOf = async (id: string) => (await db.select().from(orders).where(eq(orders.id, id)))[0] ?? null;
+const rowOf = async (id: OrderId) => {
+  const rows = await db.select().from(orders).where(eq(orders.id, id));
+  return rows[0] ?? null;
+};
+const place = () => [OrderPlaced({ customerId: 'c', total: 1 })];
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -133,12 +138,10 @@ describe('a transient entity', () => {
       ),
     );
     const later = orThrow(
-      await db.transaction(tx =>
-        journal.write(tx, draft, a, { meta, events: () => [OrderPaid({ amount: 1 })] }),
-      ),
+      await db.transaction(tx => journal.write(tx, draft, a, { meta, events: () => [OrderPaid({ amount: 1 })] })),
     );
     const seqs = [transient.events[0]?.seq, kept.events[0]?.seq, later.events[0]?.seq];
-    expect(seqs).toEqual([...seqs].sort((x, y) => (x ?? 0) - (y ?? 0)));
+    expect(seqs).toEqual(seqs.toSorted((x, y) => (x ?? 0) - (y ?? 0)));
     expect(new Set(seqs).size).toBe(3);
   });
 
@@ -153,10 +156,7 @@ describe('a transient entity', () => {
       ),
     );
     expect(projected).toEqual([{ id, seq: placed.events[0]?.seq, type: 'OrderPlaced' }]);
-    const [count] = await db
-      .select()
-      .from(customerOrderCounts)
-      .where(eq(customerOrderCounts.customerId, 'proj-c'));
+    const [count] = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, 'proj-c'));
     expect(count?.placed).toBe(1);
   });
 
@@ -182,7 +182,8 @@ describe('a transient entity', () => {
     expect(job).toMatchObject({ kind: 'effect', effect: 'draft-mail', eventSeq: null });
     expect(job?.args).toMatchObject({ seq: event.seq, id: event.id, kind: 'draft', entityId: id, version: 2 });
     expect(orThrow(await journal.drain(db))).toBeGreaterThan(0);
-    expect(effected).toEqual([{ id, seq: event.seq, jobId: job?.id }]);
+    // Jobs from earlier tests drain too; only this id's job matters here.
+    expect(effected.filter(ran => ran.id === id)).toEqual([{ id, seq: event.seq, jobId: job?.id }]);
   });
 
   it('still refuses a stale expectedVersion with CONFLICT', async () => {
@@ -211,9 +212,10 @@ describe('a transient entity', () => {
     // Why: with no log, nothing remembers the deleted row. `version` counts one row's lifetime, not
     // the id's. Documented behaviour; this test pins it next to the stored entity's.
     const id = orderId(++next);
-    const place = () => [OrderPlaced({ customerId: 'c', total: 1 })];
     orThrow(await db.transaction(tx => journal.write(tx, draft, id, { meta, events: place })));
-    orThrow(await db.transaction(tx => journal.write(tx, draft, id, { meta, events: () => [OrderPaid({ amount: 1 })] })));
+    orThrow(
+      await db.transaction(tx => journal.write(tx, draft, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+    );
     orThrow(
       await db.transaction(tx =>
         journal.write(tx, draft, id, { meta, events: () => [OrderCancelled({ reason: 'test' })] }),
@@ -257,7 +259,8 @@ describe('the setting', () => {
       ),
     );
     expect(await eventRowsOf('quick-order', quickId)).toHaveLength(0);
-    expect((await rowOf(quickId))?.version).toBe(1);
+    const quickRow = await rowOf(quickId);
+    expect(quickRow?.version).toBe(1);
   });
 
   it('defaults to stored for a standalone defineEntity, which cannot see a journal default', () => {
@@ -276,27 +279,48 @@ describe('the setting', () => {
     }
     const [run] = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
     expect(run?.state).toBe('completed');
-    expect((await eventRowsOf('workflow.run', id)).length).toBeGreaterThan(1);
+    const runEvents = await eventRowsOf('workflow.run', id);
+    expect(runEvents.length).toBeGreaterThan(1);
   });
 });
 
 describe('refusals', () => {
-  const place = () => [OrderPlaced({ customerId: 'c', total: 1 })];
-
   it('compose refuses an async projection and a tap on a transient entity with BAD_DEFINITION', () => {
     // Why: both read `journal_events` after the commit. On a transient entity they would see
     // nothing, silently. A setup error is better than a read model that never fills.
-    const lagging = jt.projection('lagging', draft, { OrderPlaced: () => undefined }, { lane: 'async' });
+    const lagging = jt.projection(
+      'lagging',
+      draft,
+      {
+        OrderPlaced: () => {
+          /* only the refusal matters */
+        },
+      },
+      { lane: 'async' },
+    );
     expect(() => jt.compose({ projections: [lagging] })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION', message: expect.stringContaining('transient') }),
     );
-    const watching = jt.tap('watching', draft, { OrderPlaced: () => undefined });
+    const watching = jt.tap('watching', draft, {
+      OrderPlaced: () => {
+        /* only the refusal matters */
+      },
+    });
     expect(() => jt.compose({ taps: [watching] })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION', message: expect.stringContaining('transient') }),
     );
     // The inline lane and a stored entity are fine.
     expect(() => jt.compose({ projections: [draftStats] })).not.toThrow();
-    const laggingKept = jt.projection('lagging-kept', keptDraft, { OrderPlaced: () => undefined }, { lane: 'async' });
+    const laggingKept = jt.projection(
+      'lagging-kept',
+      keptDraft,
+      {
+        OrderPlaced: () => {
+          /* only the refusal matters */
+        },
+      },
+      { lane: 'async' },
+    );
     expect(() => jt.compose({ projections: [laggingKept] })).not.toThrow();
   });
 
@@ -315,6 +339,7 @@ describe('refusals', () => {
       db.transaction(tx => journal.adopt(tx, draft, orderId(++next), { meta, events: place })),
     ).rejects.toEqual(noHistory);
     // The row is untouched by the refusals.
-    expect((await rowOf(id))?.version).toBe(1);
+    const row = await rowOf(id);
+    expect(row?.version).toBe(1);
   });
 });

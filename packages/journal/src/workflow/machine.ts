@@ -162,7 +162,8 @@ export function workflowMachine<
   });
 
   const run = j
-    .entity('workflow.run', workflowRuns)
+    // Always stored, whatever the journal default: the runner replays these events to resume a run.
+    .entity('workflow.run', workflowRuns, { events: 'stored' })
     .create(RunStarted, e => ({
       name: e.data.name,
       workflowVersion: e.data.workflowVersion,

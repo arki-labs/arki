@@ -7,7 +7,7 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { eq } from 'drizzle-orm';
+import { count, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -49,12 +49,21 @@ afterAll(async () => {
   await container.stop();
 });
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => {
-    resolve = done;
-  });
-  return { promise, resolve };
+const place = () => [OrderPlaced({ customerId: 'c', total: 1 })];
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Resolves once some session waits on an advisory lock: the other writer is queued behind the append lock. */
+async function untilAWriterWaits(db: Pick<NodePgDatabase, 'select'>) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const [waiting] = await db
+      .select({ n: count() })
+      .from(sql`pg_locks`)
+      .where(sql`locktype = 'advisory' and not granted`);
+    if ((waiting?.n ?? 0) > 0) return;
+    if (Date.now() > deadline) throw new Error('no writer queued behind the append lock');
+    await sleep(20);
+  }
 }
 
 describe('two creates of one transient id on real Postgres', () => {
@@ -66,16 +75,14 @@ describe('two creates of one transient id on real Postgres', () => {
     // Repeatable read: B takes its snapshot while it waits on the append lock, so after A commits B
     // still loads "no row" and inserts. (At read committed B would see A's row and get ROW_EXISTS.)
     const id = orderId(++next);
-    const place = () => [OrderPlaced({ customerId: 'c', total: 1 })];
-    const release = deferred();
-    const entered = deferred();
+    // A holds the append lock inside `events` until B is queued behind it, then commits. B's first
+    // statement (the lock) started before A's commit, so B's snapshot never shows A's row.
     const writerA = dbA.transaction(
       async tx => {
         const result = await journal.write(tx, draft, id, {
           meta,
-          events: async () => {
-            entered.resolve();
-            await release.promise;
+          events: async (_row, { tx: sp }) => {
+            await untilAWriterWaits(sp);
             return place();
           },
         });
@@ -83,13 +90,11 @@ describe('two creates of one transient id on real Postgres', () => {
       },
       { isolationLevel: 'repeatable read' },
     );
-    await entered.promise;
     const writerB = dbB.transaction(tx => journal.write(tx, draft, id, { meta, events: place }), {
       isolationLevel: 'repeatable read',
     });
-    // B is now waiting on the append lock. Let A finish; B then runs against its old snapshot.
-    release.resolve();
-    expect((await writerA).row?.version).toBe(1);
+    const won = await writerA;
+    expect(won.row?.version).toBe(1);
     await expect(writerB).rejects.toSatisfy((error: unknown) => isJournalError(error, 'CONFLICT'));
     const rows = await dbA.select().from(orders).where(eq(orders.id, id));
     expect(rows).toHaveLength(1);

@@ -1,7 +1,7 @@
 # @arki/journal
 
 A journal keeps two things and writes them together.
-Every change is one immutable row in `journal_events`.
+Every change is one immutable row in `journal_events`, unless the entity is declared `events: 'transient'` (see Transient events).
 Each entity also has a normal row in its own Drizzle table.
 A command is the way to write: `j.command` defines one, `journal.run` runs it.
 `journal.bind` is the door for a request or a job: it fixes the database and the actor once.
@@ -239,6 +239,30 @@ export const journal = j.compose({ effects: [closeAfterPayment] });
 `expectedVersion` is the row version the caller saw. If the stored version differs (0 for no row), the write is refused with `CONFLICT` before `events` runs. A command passes it on: `write(order, id, events, { expectedVersion: input.version })`. The client sends the version it rendered; `commandErrors()` turns the refusal into a 409 that asks it to reload. This is how concurrent editors and stale game moves are caught without a hand-written version compare.
 
 `write` returns `{ row, events }`, or the failure `events` returned: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` the trace `commandId`, `causeSeq`, `correlationId` (see Tracing), and `erasedAt` (see Erasure). An entity can be created again after a delete; its version continues from the last event.
+
+### Transient events
+
+By default every entity keeps its events: `initJournal({ tables })` means `initJournal({ tables, events: 'stored' })`. An entity whose history is worth nothing (a draft, a cursor, a row that is rebuilt anyway) can skip the log. The setting is a journal default with a per-entity override, either way:
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+const j = initJournal({ tables, events: 'stored' }); // the journal default; 'transient' flips every entity
+const draft = j.entity('draft', drafts, { events: 'transient' }); // this entity keeps no events
+const order = j.entity('order', orders, { events: 'stored' }); // stored, even under a transient default
+```
+
+A transient write does everything a stored write does except the `journal_events` insert: the append lock, the row lock, `expectedVersion`, the rules in `events`, the reducers, the row save, inline projections and effect jobs. The recorded events exist in memory. They get a real `seq` from the events table's own sequence, so `seq` stays the global write order across both kinds, and `recordedAt` from the transaction's `now()`; the write returns them as usual. An effect job for such an event has `event_seq` null and the event's copy in `args`, as every effect job does. Two creates of one id that race are `CONFLICT`, caught by the row's own key instead of the log's index.
+
+| Feature                                                              | `stored` | `transient`                                                  |
+| -------------------------------------------------------------------- | -------- | ------------------------------------------------------------ |
+| Row, version check, `expectedVersion`, inline projections, receipts | works    | works                                                        |
+| Effects                                                              | works    | works; `event_seq` null, the event in `args`                 |
+| `replay`, `verify`, `repair`, `forget`, `adopt`                      | works    | `NO_HISTORY`                                                 |
+| Async projections, taps                                              | works    | refused at `compose` with `BAD_DEFINITION`                   |
+| `rerun`                                                              | works    | `NO_HISTORY`                                                 |
+| Durable workflows                                                    | works    | works: `workflow.run` always stores its events               |
+| Audit by command or correlation id, an event browser                 | works    | nothing to show                                              |
+
+Two things to know. `version` counts one row's lifetime, not the id's: a transient entity created again after a delete starts at version 1, where a stored entity continues from its last event. And `forget` is refused, so personal data in a transient event lives only in the effect jobs' `args`, until the job leaves the archive (`retention.archive`).
 
 ### Rows that existed before the journal
 
@@ -696,7 +720,7 @@ The two lanes side by side:
 | -------------- | --------------------------------------------------- | -------------------------------------------- |
 | `kind`         | `effect`                                            | `queue`                                      |
 | Written by     | a journal write                                     | `runAfter(tx, job, args)` in any transaction |
-| Needs an event | yes: its copy in `args` (and `event_seq`, `effect`) | no (`job_name`, `args`)                      |
+| Needs an event | yes: its copy in `args` (and `effect`; `event_seq` when the event is stored) | no (`job_name`, `args`)                      |
 | Run by         | the effect handler in the journal                   | the `jobs` runner                            |
 | Retry          | the effect's `retry`                                | the runner's `retryDelay`                    |
 | Dedupe         | one row per event and effect                        | optional `dedupe_key`, per job name          |
@@ -1406,7 +1430,7 @@ journal_cursors
 journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key
   kind          varchar(8) not null default 'effect' -- 'effect' or 'queue'
-  event_seq     bigint references journal_events(seq) -- effect rows only
+  event_seq     bigint references journal_events(seq) -- effect rows of a stored event; null for a transient entity's event
   effect        varchar(128)                          -- effect rows only
   job_name      varchar(128)                          -- queue rows only
   args          jsonb                                 -- queue rows: the input (JSON null is allowed); effect rows: the job's copy of its journal_events row
@@ -1421,8 +1445,9 @@ journal_jobs
   enqueued_at   timestamptz not null default now() -- when the row was written; the archive needs the age
   replay_of     text                      -- the archived job id a replay came from
   unique (event_seq, effect)
+  unique ((args->>'id'), effect) where kind = 'effect' -- one job per event and effect, transient events included
   unique (job_name, dedupe_key) where dedupe_key is not null
-  check journal_jobs_kind_check             -- an effect row has event_seq, effect and args and no job_name or dedupe_key;
+  check journal_jobs_kind_check             -- an effect row has effect and args (and event_seq when the event is stored) and no job_name or dedupe_key;
                                             -- a queue row has job_name and args and no event_seq or effect
   index (priority desc, available_at) where dead_at is null
 
@@ -1465,7 +1490,7 @@ journal_job_operations
   gin index (job_ids)
 ```
 
-`kind = 'effect'` rows are the rows the journal always had. `unique (event_seq, effect)` stays. NULLs are distinct, so queue rows never collide on it. The due index serves both kinds. A dedupe key is scoped to its `job_name`.
+`kind = 'effect'` rows are the rows the journal always had. `unique (event_seq, effect)` stays. NULLs are distinct, so queue rows never collide on it. A transient entity's effect rows have no `event_seq`; `unique ((args->>'id'), effect) where kind = 'effect'` keeps one job per event and effect for them too, archive replay included. The due index serves both kinds. A dedupe key is scoped to its `job_name`.
 
 **Effect rows carry their event.** `args` holds the `journal_events` row the write inserted, as JSON. The worker, `journal.job` and the workflow runner read the event from there and never join `journal_events`, so a job runs the same whether or not its entity keeps event rows. The copy is decoded as replay decodes a row, so upcasters apply to a job queued before a release. `StoredEventRow` from `@arki/journal/pg` parses `args` back to the row type (its timestamps come back as `Date`). The copy is also in `journal_job_archive` for as long as the archive keeps the job (7 days by default): `forget` rewrites both copies in the same transaction as the event row.
 

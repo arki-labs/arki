@@ -6,7 +6,7 @@ A journal for Drizzle entities: events, projections and effects with one write p
 
 ## Laws
 
-1. One change is one immutable event row and one normal table row, written in one transaction. Never write an entity row without its event.
+1. One change is one table row and, when the entity's events are stored, one immutable event row, written in one transaction. Never write an entity row outside a journal write.
 2. A rule that rejects a request returns a failure. It does not throw. The command rolls back either way.
 3. Match errors on `error.code` (`isJournalError(error, 'CONFLICT')`). Never on the message.
 4. Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.

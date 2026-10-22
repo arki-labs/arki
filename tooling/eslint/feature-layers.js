@@ -2,9 +2,10 @@
  * Lint preset for Dot feature layers and contract-first oRPC (RFC
  * `docs/rfcs/2026-10-15-dot-feature-builder.md`, R1.7 and Part C).
  *
- * A converted feature is four folders and a chain file:
+ * A converted feature is five folders and a chain file:
  *
  *   features/<name>/model/        schemas, tables, ids, pure rules
+ *   features/<name>/domain-services/  logic with dependencies that usecases share; built once per boot; never leaves the feature
  *   features/<name>/usecases/     what the feature does
  *   features/<name>/infra/        its private plugins (store, clients)
  *   features/<name>/entrypoints/  rpc.ts (the browser-safe contract) + procedures.ts
@@ -47,7 +48,8 @@
  *   its own, and every layer rule above applies there first. Across roots,
  *   a file may RUNTIME-import another feature's `feature.ts`,
  *   `entrypoints/rpc.ts` (its contract) and `model/**` only — plus an
- *   ANCESTOR's `infra/**` for a nested child
+ *   ANCESTOR's `infra/**` for a nested child, and an ANCESTOR's `domain-services/**`
+ *   for a nested child's `feature.ts` only
  *   (`arki-feature-layers/feature-boundaries`). Services cross a boundary
  *   through `.needs()`, never by import. `import type` is fine.
  *
@@ -324,7 +326,7 @@ const infraRuntimeImports = {
   create: usecaseRuntimeImports.create,
 };
 
-const LAYERS = new Set(['model', 'usecases', 'infra', 'entrypoints']);
+const LAYERS = new Set(['model', 'domain-services', 'usecases', 'infra', 'entrypoints']);
 
 /** A module path without its extension or trailing `/index`. */
 const moduleId = (/** @type {string} */ path) => path.replace(/\.[cm]?[jt]sx?$/, '').replace(/\/index$/, '');
@@ -363,7 +365,8 @@ const literalSource = (/** @type {import('estree').Expression} */ source) => {
  * One feature never reaches into another's layers. From a layer file (or
  * `feature.ts`) of feature A, a RUNTIME import that lands inside feature B is
  * allowed only when it is B's `feature.ts`, its contract (`entrypoints/rpc`),
- * or its `model/**` — plus `infra/**` of an ancestor, for a nested child.
+ * or its `model/**` — plus `infra/**` of an ancestor, for a nested child, and
+ * `domain-services/**` of an ancestor, for a nested child's `feature.ts` only.
  * Legacy shapes (an importer outside a layer folder, a target outside one)
  * are not checked: they are still waiting to convert.
  *
@@ -396,7 +399,9 @@ const featureBoundaries = {
       if (targetLayer === undefined || !LAYERS.has(targetLayer) || targetBelow.length === 0) return;
       if (targetLayer === 'model') return;
       if (targetLayer === 'entrypoints' && targetBelow.join('/') === 'rpc') return;
-      if (targetLayer === 'infra' && importer.root.startsWith(`${target.root}/features/`)) return;
+      const targetIsAncestor = importer.root.startsWith(`${target.root}/features/`);
+      if (targetLayer === 'infra' && targetIsAncestor) return;
+      if (targetLayer === 'domain-services' && targetIsAncestor && importer.rest.join('/') === 'feature.ts') return;
       context.report({ node, messageId: 'crosses', data: { importer: `"${importer.root}"`, target: `"${source}"` } });
     };
     return {
@@ -672,12 +677,19 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
       },
     },
     {
-      // Domain-service files: sibling ban only; the rest of their coverage is task B9.
+      // Domain-service files: same runtime bans as usecases, no sibling files, no value import of their own feature.ts.
       name: 'arki/feature-layers/domain-services',
       files: [`${features}/domain-services/**/*.ts`],
       ignores: TESTS,
       plugins: { 'arki-feature-layers': plugin },
-      rules: { 'arki-feature-layers/sibling-imports': siblingImports },
+      rules: {
+        'arki-feature-layers/sibling-imports': siblingImports,
+        'arki-feature-layers/usecase-runtime-imports': [
+          'error',
+          { patterns: [...USECASE_BANNED, ...clients], allow: pure },
+        ],
+        'arki-feature-layers/feature-runtime-imports': ['error', { patterns: [OWN_FEATURE] }],
+      },
     },
     {
       name: 'arki/feature-layers/domain-service-imports',

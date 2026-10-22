@@ -28,6 +28,7 @@ import type {
   EventDef,
   EventOptions,
   EventsOf,
+  EventStorage,
   HandlerServices,
   IdTable,
   JobRunner,
@@ -573,10 +574,16 @@ export type JournalDefinitions<
     schema: S,
     opts?: EventOptions<S, U>,
   ): EventDef<T, S>;
-  /** The key column is `id`. */
+  /**
+   * The key column is `id`. `options.events` says whether this entity's events are stored
+   * (`'stored'`) or only passed through the write (`'transient'`); it overrides the journal's
+   * `events` default. A transient entity has no history: replay, verify, repair, forget, rerun,
+   * adopt, async projections and taps are refused for it.
+   */
   entity<K extends string, Tbl extends IdTable>(
     kind: K,
     table: Tbl,
+    options?: { readonly events?: EventStorage },
   ): EntityBuilder<K, Tbl, never, SchemaOutput<Meta>, 'id'>;
   /**
    * The key column is the one `table` holds under the property name `options.key`:
@@ -585,7 +592,7 @@ export type JournalDefinitions<
   entity<K extends string, Tbl extends EntityTable, Key extends KeyName<Tbl>>(
     kind: K,
     table: Tbl,
-    options: { readonly key: Key & SingleKey<Key> },
+    options: { readonly key: Key & SingleKey<Key>; readonly events?: EventStorage },
   ): EntityBuilder<K, Tbl, never, SchemaOutput<Meta>, Key>;
   /**
    * A command: `input` (any Standard Schema) is parsed async (`parseAsync`) before

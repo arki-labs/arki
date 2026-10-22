@@ -1,6 +1,6 @@
 # @arki/journal
 
-> A journal for Drizzle entities. Every change is one immutable event row and one normal table row, written in one transaction. Projections run inside that transaction. Effects run after the commit, from a job table.
+> A journal for Drizzle entities. Every change is one normal table row and, when the entity's events are stored (the default), one immutable event row, written in one transaction. Projections run inside that transaction. Effects run after the commit, from a job table.
 
 ## Import paths
 

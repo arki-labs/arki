@@ -288,3 +288,29 @@ test('only feature.ts imports a domain service at runtime', () => {
   assert.deepEqual(ruleIds(USECASE, `import { e } from '../domain-services/extras';`), [DS]);
   assert.deepEqual(ruleIds(USECASE, `import type { E } from '../domain-services/extras';`), []);
 });
+
+test('domain-services/ is a feature layer: cross-feature import, runtime bans, no feature.ts value import', () => {
+  const DOMAIN_SERVICE = 'src/features/demo/domain-services/x.ts';
+  assert.deepEqual(
+    ruleIds('src/features/other/usecases/run.ts', `import { x } from '../../demo/domain-services/x';`).sort(),
+    [BOUNDARY, DS].sort(),
+  );
+  assert.deepEqual(ruleIds(DOMAIN_SERVICE, `import { s } from '../infra/store';`), [NEW_RULE]);
+  assert.deepEqual(ruleIds(DOMAIN_SERVICE, `import { eq } from 'drizzle-orm';`), [NEW_RULE]);
+  assert.deepEqual(ruleIds(DOMAIN_SERVICE, `import type { S } from '../infra/store';`), []);
+  assert.deepEqual(ruleIds(DOMAIN_SERVICE, `import { f } from '../feature';`), [BACK]);
+  assert.deepEqual(ruleIds(DOMAIN_SERVICE, `import type { DomainDeps } from '../feature';`), []);
+});
+
+test('a nested child feature.ts may import its ancestor domain service; nothing else may', () => {
+  const EXTRAS = '../../domain-services/extras';
+  assert.deepEqual(ruleIds('src/features/demo/features/child/feature.ts', `import { extras } from '${EXTRAS}';`), []);
+  assert.deepEqual(
+    ruleIds('src/features/demo/features/child/usecases/run.ts', `import { extras } from '../../../domain-services/extras';`).sort(),
+    [BOUNDARY, DS].sort(),
+  );
+  assert.deepEqual(
+    ruleIds('src/features/other/feature.ts', `import { extras } from '../demo/domain-services/extras';`).sort(),
+    [BOUNDARY, DS].sort(),
+  );
+});
