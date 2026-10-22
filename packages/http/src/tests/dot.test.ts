@@ -109,9 +109,11 @@ describe('http() plugin', () => {
   // `.features()`, and `.entrypoints(http())` serves their routes. A second list
   // inside http() would drift from the first.
   it('serves the routes of every mounted feature without the app listing them again', async () => {
-    const ordersCore = defineFeature('orders').needs({ ordersDb: service<OrdersDb>() }).usecases({});
+    const ordersCore = defineFeature('orders')
+      .needs({ ordersDb: service<OrdersDb>() })
+      .usecases({ list: ({ ordersDb }) => () => ordersDb.list() });
     const orders = ordersCore.entrypoints(
-      coreEndpoints(ordersCore, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()), {
+      coreEndpoints(ordersCore, ({ usecases }) => routes().bind(listOrders, () => orThrow(usecases.list())), {
         contracts: [listOrders],
       }),
     );
