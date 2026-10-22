@@ -369,7 +369,7 @@ if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not co
 
 Declare `transactionErrorMap` on the contract: `oc.errors(transactionErrorMap)`.
 The middleware requires these canonical definitions at compile time. Browser-shared
-contracts import `TRANSACTION_FAILURES` from `@arki/db/errors` and declare
+contracts import `TRANSACTION_FAILURES` from `@arki/db/contract` and declare
 `oc.errors(errorMap(...TRANSACTION_FAILURES))` using `@arki/failure/orpc`;
 `@arki/db/orpc` remains the native executor convenience entry.
 
@@ -759,6 +759,7 @@ first null
 - `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()` for Dot apps.
 - `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
 - `@arki/db/transaction` — `runTransaction`, `runTransactionOnce`, `TRANSACTION_FAILURES`: typed rollback outcomes and serializable retry on `40001` / `40P01`. Portable.
+- `@arki/db/contract` — browser-safe, for oRPC contracts. `TRANSACTION_FAILURES`, the six transaction failures and the type `TransactionFailure`. Never loads drizzle-orm or a Postgres driver.
 - `@arki/db/orpc` — `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`: the oRPC middleware. Portable; needs the optional peer `@orpc/server`.
 - `@arki/db/eslint` — the `db/no-effects-in-transaction` rule. Tooling only; needs `eslint`, `@typescript-eslint/utils` and `typescript`.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
@@ -796,7 +797,7 @@ rolls back returned failures and restores the complete result wrapper with its
 context. Native oRPC errors and output-validation errors retain their identity.
 
 Browser-shared contracts use `errorMap(...TRANSACTION_FAILURES)` from
-`@arki/failure/orpc` and `@arki/db/errors`. Keep the native middleware import at
+`@arki/failure/orpc` and `@arki/db/contract`. Keep the native middleware import at
 the adapter boundary.
 
 For uncertain commits, reconcile using an idempotency key or durable receipt.

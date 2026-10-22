@@ -19,7 +19,7 @@ The README has the setup. This page has the rules an agent needs to get them rig
 
 ### Make a procedure transactional
 
-1. Browser-shared contracts use `oc.errors(errorMap(...TRANSACTION_FAILURES))` with `TRANSACTION_FAILURES` from `@arki/db/errors` and `errorMap` from `@arki/failure/orpc`. Native contracts may use `transactionErrorMap` from `@arki/db/orpc`. Then build the middleware once: `const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 })`.
+1. Browser-shared contracts use `oc.errors(errorMap(...TRANSACTION_FAILURES))` with `TRANSACTION_FAILURES` from `@arki/db/contract` (browser-safe: never loads drizzle-orm or a driver) and `errorMap` from `@arki/failure/orpc`. Native contracts may use `transactionErrorMap` from `@arki/db/orpc`. Then build the middleware once: `const transact = transactionalProcedure(db, { repos: () => repositories, retries: 3 })`.
 2. Implement the contract with `implement(contract, transactionalProcedureConfig)`.
 3. Put `.use(transact)` last. Read `context.tx` and `context.repos` in the handler.
 4. See `README.md` ("Transactional procedures").

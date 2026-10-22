@@ -120,6 +120,11 @@
       "import": "./dist/errors.js",
       "default": "./dist/errors.js"
     },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js",
+      "default": "./dist/contract.js"
+    },
     "./orpc": {
       "types": "./dist/orpc.d.ts",
       "import": "./dist/orpc.js",
