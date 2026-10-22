@@ -2,12 +2,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 
-import type { Excerpt } from '../src/shared/marketing/build-steps';
+import type { Excerpt } from '../src/shared/marketing/excerpt';
 import {
   ALL_EXCERPTS,
   BUILD_STEPS,
   DEFINE_APP,
-  gapBefore,
   WAVES,
   WIRE_ERROR,
   WIRE_ERROR_SOURCE,
@@ -15,7 +14,15 @@ import {
   WIRE_MISTAKE,
   WIRE_MISTAKE_MARK,
 } from '../src/shared/marketing/build-steps';
-import { COMMAND_START, commandView, REFUND_START, refundRows } from '../src/shared/marketing/journal-model';
+import { gapBefore } from '../src/shared/marketing/excerpt';
+import { JOURNAL_PROOFS, JOURNAL_VERBS } from '../src/shared/marketing/journal-excerpts';
+import {
+  JOURNAL_NPM_VERSION,
+  ORDER_EVENTS,
+  RUN_START,
+  SIGNAL,
+  WORKFLOW_EVENTS,
+} from '../src/shared/marketing/journal-lab';
 
 const workspaceRoot = new URL('../../../../', import.meta.url);
 const workspaceFile = (path: string) => readFileSync(new URL(path, workspaceRoot), 'utf8');
@@ -28,6 +35,8 @@ const expectExcerptShown = async (scope: Locator, excerpt: Excerpt) => {
   for (const line of linesOf(excerpt)) await expect(scope).toContainText(line);
 };
 
+/** A journal sheet by its number, such as `J-102`. */
+const sheet = (page: Page, number: string) => page.locator(`#${number.toLowerCase()}`);
 const tip = (page: Page) => page.locator('#glossary-tip');
 const word = (page: Page, text: string) => page.locator('.home-code button.tk-term', { hasText: text }).first();
 
@@ -69,25 +78,24 @@ test.describe('/ build path', () => {
     expect(workspaceFile('packages/dot/src/lifecycle.ts')).toContain("ProviderMountedLater: 'ARKI_DOT_E020'");
   });
 
-  // WHY: the simulation may only show events the workflow engine really writes, and only steps the refund workflow
-  // really has; a made-up name would teach readers something false.
-  test('journal rows use real event, step, signal and command names', () => {
+  // WHY: the simulation may only show names the journal really has, and every quote and proof must still be on the
+  // line it names; a made-up name or a moved test would teach readers something false.
+  test('journal benches use real names, quotes and test names', () => {
     const machine = workspaceFile('packages/journal/src/workflow/machine.ts');
-    const refund = workspaceFile('packages/payments/src/refunds/workflow.ts');
-    const finished = refundRows({ stage: 'done', path: 'signal', retried: true, last: null });
-    const timedOut = refundRows({ stage: 'done', path: 'timeout', retried: false, last: null });
-    for (const row of [...finished, ...timedOut]) {
-      if (row.kind === 'workflow') expect(machine, row.event).toContain(`'${row.event}'`);
-      else expect(refund, row.event).toContain(row.event);
-      if (row.event === 'NodeCompleted' || row.event === 'JobRetried')
-        expect(refund, row.detail).toContain(`'${row.detail}'`);
-      if (row.event === 'SignalReceived') expect(refund, row.detail).toContain(`'${row.detail}'`);
+    for (const event of WORKFLOW_EVENTS) expect(machine, event).toContain(`'${event}'`);
+    const readme = workspaceFile('packages/journal/README.md');
+    for (const event of Object.keys(ORDER_EVENTS)) expect(readme, event).toContain(`j.event('${event}'`);
+    expect(fileLines('packages/journal/README.md')[856]).toContain(`signal: '${SIGNAL}'`);
+    expect(fileLines('packages/journal/README.md')[92]).toContain("j.projection('customer-stats'");
+    const tables = workspaceFile('packages/journal/src/pg.ts');
+    for (const name of ['journal_events', 'journal_jobs', 'journal_receipts', 'erased_at', 'event_seq', 'command_id'])
+      expect(tables, name).toContain(`'${name}'`);
+    expect(tables).toContain("attempts: integer('attempts')");
+    for (const quote of [...JOURNAL_VERBS, ...Object.values(JOURNAL_PROOFS)]) {
+      expect(fileLines(quote.path)[quote.line - 1], `${quote.path}:${quote.line}`).toContain(quote.text);
     }
-    const readme = fileLines('packages/journal/README.md');
-    expect(readme[75]).toContain('.on(OrderPaid');
-    expect(readme[92]).toContain('customerStats');
-    expect(readme[105]).toContain('orderMail');
-    expect(fileLines('packages/payments/src/refunds/workflow.ts')[183]).toContain('completeRefund');
+    const catalog = workspaceFile('apps/arki/start/src/generated/packages.json');
+    expect(catalog).toMatch(new RegExp(`"short": "journal",[^}]*"npmVersion": "${JOURNAL_NPM_VERSION}"`));
   });
 
   // WHY: "Built with arki" and the materials strip are claims about the repo; they must match it.
@@ -287,16 +295,15 @@ test.describe('/ build path', () => {
     expect(top).toBeGreaterThan(-5);
   });
 
-  // WHY: motion must stop for readers who ask the system for less of it; the journal row flash is the loudest motion.
-  test('reduced motion stills the journal row highlight', async ({ page }) => {
+  // WHY: motion must stop for readers who ask the system for less of it; the journal panes fade as they fill.
+  test('reduced motion stills the journal pane fade', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
-    const part = page.getByRole('group', { name: /A refund that waits/ });
-    await part.getByRole('button', { name: 'Reset' }).click();
-    await part.getByRole('button', { name: 'Approve refund' }).click();
-    const fresh = part.locator('tbody tr.is-new td').first();
-    await expect(fresh).toBeVisible();
-    await expect(fresh).toHaveCSS('animation-name', 'none');
+    const pane = page.locator('.home-chapter .home-pane').first();
+    await expect(pane).toBeVisible();
+    // A global rule may shorten transitions to a hair above zero instead of none; either way nothing visibly fades.
+    const seconds = await pane.evaluate(element => Number.parseFloat(getComputedStyle(element).transitionDuration));
+    expect(seconds).toBeLessThan(0.01);
   });
 
   // WHY: a phone is the narrowest reader; code and the journal table must scroll inside their boxes, not the page.
@@ -324,9 +331,11 @@ test.describe('/ build path', () => {
     await expect(nav.getByRole('link', { name: 'GitHub' })).toBeFocused();
   });
 
-  // WHY: on a phone the title block sits under the drawing, the toggle is a thumb-sized full-width button, and the
-  // journal table turns into cards, or the sheet and the table would need sideways scrolling.
-  test('on a phone: title block below the drawing, full-width toggle, ledger as cards', async ({ page }) => {
+  // WHY: on a phone the title blocks sit under the drawings, the buttons are thumb-sized, and the journal tables
+  // scroll inside their own boxes instead of widening the page.
+  test('on a phone: title blocks below the drawings, thumb-sized buttons, tables scroll in their boxes', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     const draw = await page.locator('.home-draw').boundingBox();
@@ -335,11 +344,14 @@ test.describe('/ build path', () => {
     const toggle = await page.getByRole('button', { name: 'Put the database first' }).boundingBox();
     expect(toggle?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(toggle?.width ?? 0).toBeGreaterThan((draw?.width ?? 1) * 0.8);
-    await expect(page.locator('.home-ledger tbody tr').first()).toHaveCSS('display', 'grid');
-    for (const button of await page
-      .getByRole('group', { name: /Run a command/ })
-      .locator('.home-act')
-      .all()) {
+    const sheet = page.locator('#j-104');
+    const body = await sheet.locator('.home-jbody').boundingBox();
+    const sheetBlock = await sheet.locator('.home-jblock').boundingBox();
+    expect(sheetBlock?.y ?? 0).toBeGreaterThan((body?.y ?? 0) + (body?.height ?? 0) - 2);
+    const ledger = sheet.locator('.home-ledger');
+    const widths = await ledger.evaluate(box => ({ scroll: box.scrollWidth, client: box.clientWidth }));
+    expect(widths.scroll).toBeGreaterThan(widths.client);
+    for (const button of await page.locator('#j-101 .home-act').all()) {
       const box = await button.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
@@ -451,88 +463,123 @@ test.describe('/ build path', () => {
   });
 
   test.describe('journal chapter', () => {
-    // WHY: Part 1 teaches "four writes or nothing": a run that commits must fill all four panes together.
-    test('Part 1: Run, then Commit, fills the four panes together', async ({ page }) => {
+    // WHY: J-100's promise: the row is its events replayed. A patch changes only its columns, and the replay pane
+    // rebuilds an older version while the live row stays where it is.
+    test('J-100: events patch the row, and the slider replays an older version', async ({ page }) => {
       await page.goto('/');
-      const part = page.getByRole('group', { name: /Run a command/ });
-      const box = part.getByRole('group', { name: 'One transaction' });
-      await part.getByRole('button', { name: 'Reset' }).click();
-      await expect(box.locator('.home-pane.is-empty')).toHaveCount(4);
-      await part.getByRole('button', { name: 'Run payOrder' }).click();
-      await part.getByRole('button', { name: 'Next line' }).click();
-      await expect(box.locator('.home-pane.is-staged')).toHaveCount(4);
-      await expect(part.locator('.home-ln.is-on')).toContainText('return [OrderPaid({ amount: input.amount })]');
-      await part.getByRole('button', { name: 'Commit' }).click();
-      await expect(box.locator('.home-pane.is-committed')).toHaveCount(4);
-      await expect(box).toContainText('OrderPaid { amount: input.amount }');
-      await expect(box).toContainText('one transaction · committed');
+      const bench = sheet(page, 'J-100');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await expect(bench.locator('.home-ledger tbody')).toContainText('No events yet');
+      await bench.getByRole('button', { name: 'OrderPlaced' }).click();
+      await bench.getByRole('button', { name: 'OrderPaid' }).click();
+      const live = bench.locator('.home-pane').first();
+      await expect(live.locator('td.is-hot')).toHaveText(['paid', '2']);
+      const slider = bench.getByRole('slider', { name: /replay through version/ });
+      await slider.focus();
+      await page.keyboard.press('ArrowLeft');
+      await expect(bench.locator('.home-status')).toHaveText(
+        'Replaying through version 1 of 2. The live row stays at version 2.',
+      );
+      await expect(bench.locator('.home-pane').nth(1)).toContainText('placed');
+      await expect(live).toContainText('paid');
     });
 
-    // WHY: the other half of the promise: a rule that says no returns a typed failure, and nothing is written.
-    test('Part 1: Make it fail writes nothing and returns CommandConflict as a value', async ({ page }) => {
+    // WHY: J-101's first promise: cut the power before the commit and none of the four writes exist.
+    test('J-101: pulling the plug mid-write leaves nothing, and no job to run', async ({ page }) => {
       await page.goto('/');
-      const part = page.getByRole('group', { name: /Run a command/ });
-      const box = part.getByRole('group', { name: 'One transaction' });
-      await part.getByRole('button', { name: 'Make it fail' }).click();
-      await part.getByRole('button', { name: 'Run payOrder' }).click();
-      await part.getByRole('button', { name: 'Next line' }).click();
-      await expect(part.locator('.home-fail')).toContainText("CommandConflict({ detail: 'Order is already paid' })");
-      await expect(part.locator('.home-ln.is-bad')).toContainText('CommandConflict');
-      await expect(box.locator('.home-pane.is-empty')).toHaveCount(4);
-      await expect(box).not.toContainText('OrderPaid {');
-      await expect(part.getByRole('button', { name: 'Commit' })).toHaveCount(0);
+      const bench = sheet(page, 'J-101');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await bench.getByRole('button', { name: 'Run payOrder' }).click();
+      await bench.getByRole('button', { name: 'Pull the plug now' }).click();
+      await expect(bench.locator('.home-tx-label')).toHaveText('one transaction · never committed');
+      await expect(bench.locator('.home-tx .home-pane.is-empty')).toHaveCount(4);
+      await expect(bench.locator('.home-fail')).toContainText('Postgres never got a commit');
+      await expect(bench.getByRole('button', { name: 'Run the worker' })).toHaveCount(0);
     });
 
-    // WHY: Part 2's claim is that a workflow is rows in the same table as the domain: after the webhook, one table
-    // must hold both kinds, in the order the engine wrote them.
-    test('Part 2: Approve to the Stripe webhook ends with domain and workflow rows in one table', async ({ page }) => {
+    // WHY: J-101's second promise: the job exists only after the commit, and a worker killed after the send runs it
+    // again under the same id, so the inbox still holds one email.
+    test('J-101: commit, kill the worker after the send, rerun: one email', async ({ page }) => {
       await page.goto('/');
-      const part = page.getByRole('group', { name: /A refund that waits/ });
-      const rows = part.locator('tbody tr');
-      await part.getByRole('button', { name: 'Reset' }).click();
-      await expect(rows).toHaveText([/No rows yet/]);
-      await part.getByRole('button', { name: 'Approve refund' }).click();
-      await expect(rows).toHaveCount(2);
-      await part.getByRole('button', { name: 'Run step payBack' }).click();
-      await part.getByRole('button', { name: "waitFor('settled')" }).click();
-      await expect(part).toContainText('parked · timeout 3d');
-      await part.getByRole('button', { name: 'Stripe webhook arrives' }).click();
-      await expect(rows.last()).toContainText('SignalReceived · stripe.refund.settled');
-      await part.getByRole('button', { name: 'Run step record' }).click();
-      await expect(part).toContainText("RunCompleted · outcome: 'completed'");
-      await expect(rows).toHaveCount(refundRows(REFUND_START).length);
-      await expect(part.locator('tbody .home-kind span', { hasText: 'domain' }).first()).toBeVisible();
-      await expect(part.locator('tbody .home-kind span', { hasText: 'workflow' }).first()).toBeVisible();
-      await expect(rows.first()).toContainText('RefundApproved');
-      await expect(rows.last()).toContainText('RunCompleted');
+      const bench = sheet(page, 'J-101');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await bench.getByRole('button', { name: 'Run payOrder' }).click();
+      await expect(bench.locator('.home-tx-label')).toHaveText('one transaction · committed', { timeout: 10_000 });
+      await expect(bench.locator('.home-tx .home-pane.is-committed')).toHaveCount(4);
+      await bench.getByRole('button', { name: 'Kill the worker after the email went out' }).click();
+      await bench.getByRole('button', { name: 'Worker restarts, job runs again' }).click();
+      await expect(bench).toContainText('attempts: 2');
+      await expect(bench.locator('.home-mail')).toHaveCount(1);
+      await expect(bench.locator('.home-okbox')).toContainText('same job id, one email');
     });
 
-    // WHY: a retried step is only safe because the key is the same on every try; the page must show the retry reuse it.
-    test('Part 2: Retry keeps the same idempotency key', async ({ page }) => {
+    // WHY: J-102's promise: three deliveries of one webhook run the handler once, write one event and get three
+    // identical replies; the same key with another body is refused.
+    test('J-102: three deliveries, one run, one event, identical replies', async ({ page }) => {
       await page.goto('/');
-      const part = page.getByRole('group', { name: /A refund that waits/ });
-      await part.getByRole('button', { name: 'Reset' }).click();
-      await part.getByRole('button', { name: 'Approve refund' }).click();
-      await part.getByRole('button', { name: 'Run step payBack' }).click();
-      await expect(part.locator('.home-ln.is-on', { hasText: 'idempotencyKey: key' })).toBeVisible();
-      await part.getByRole('button', { name: 'Retry this step' }).click();
-      await expect(part.locator('tbody tr', { hasText: 'JobRetried · payBack' })).toContainText('same idempotencyKey');
-      await expect(part.locator('.home-status')).toContainText('same key');
-      await expect(part.getByRole('button', { name: 'Retry this step' })).toHaveCount(0);
+      const bench = sheet(page, 'J-102');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await expect(bench).toContainText('runs: 0');
+      for (let delivery = 0; delivery < 3; delivery += 1) {
+        await bench.getByRole('button', { name: 'Deliver the webhook' }).click();
+      }
+      await expect(bench.locator('.home-num')).toHaveText('runs: 1');
+      await expect(bench.locator('.home-evlist li')).toHaveCount(1);
+      const replies = bench.locator('.home-ledger tbody tr td:nth-child(2)');
+      await expect(replies).toHaveCount(3);
+      expect(new Set(await replies.allTextContents()).size).toBe(1);
+      await bench.getByRole('button', { name: 'Same key, different body' }).click();
+      await expect(bench.locator('.home-fail')).toContainText('CommandConflict');
+      await expect(bench.locator('.home-num')).toHaveText('runs: 1');
     });
 
-    // WHY: the timeout path is the other way out of a parked run; it must end at the same done state through `record`.
-    test('Part 2: letting 3 days pass fires the timer and finishes through record', async ({ page }) => {
+    // WHY: J-103's promise: a hand edit is caught by verify, undone by repair, and forget keeps verify green.
+    test('J-103: verify shows the drift, repair fixes it, forget stays green', async ({ page }) => {
       await page.goto('/');
-      const part = page.getByRole('group', { name: /A refund that waits/ });
-      await part.getByRole('button', { name: 'Reset' }).click();
-      await part.getByRole('button', { name: 'Approve refund' }).click();
-      await part.getByRole('button', { name: 'Run step payBack' }).click();
-      await part.getByRole('button', { name: "waitFor('settled')" }).click();
-      await part.getByRole('button', { name: 'Let 3 days pass' }).click();
-      await expect(part.locator('tbody tr').last()).toContainText('TimerFired · settled');
-      await part.getByRole('button', { name: 'Run step record' }).click();
-      await expect(part.locator('tbody')).toContainText('no signal: record asks Stripe with findRefund');
+      const bench = sheet(page, 'J-103');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await bench.getByRole('button', { name: "set status = 'shipped'" }).click();
+      await bench.getByRole('button', { name: /journal\.verify/ }).click();
+      await expect(bench.locator('.home-pane').nth(1).locator('td.is-red')).toHaveText('shipped');
+      await bench.getByRole('button', { name: /journal\.repair/ }).click();
+      await expect(bench.locator('.home-pane').nth(1)).toContainText('{ ok: true }');
+      await bench.getByRole('button', { name: /journal\.forget/ }).click();
+      await expect(bench.locator('.home-ledger tbody tr').first()).toContainText('2026-10-21 14:02');
+      await bench.getByRole('button', { name: /journal\.verify/ }).click();
+      await expect(bench.locator('.home-status')).toHaveText(
+        'Green after forget: the erased history still rebuilds the row.',
+      );
+    });
+
+    // WHY: J-104's promise: a restart mid-step reruns it with the same key, so the provider refunds once; the sheet
+    // is marked as not released yet.
+    test('J-104: a restart during payBack still makes one refund, then the signal finishes the run', async ({
+      page,
+    }) => {
+      await page.goto('/');
+      const bench = sheet(page, 'J-104');
+      await expect(bench.locator('.home-badge')).toContainText('not on npm yet');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await bench.getByRole('button', { name: 'Start the refund' }).click();
+      await bench.getByRole('button', { name: 'Restart the server now' }).click({ timeout: 10_000 });
+      await expect(bench.locator('tr.is-srv')).toContainText('Nothing was written');
+      await bench.getByRole('button', { name: 'Provider webhook: settled' }).click({ timeout: 10_000 });
+      await expect(bench).toContainText('refund calls: 2');
+      await expect(bench.locator('.home-val.is-hot')).toHaveText('1');
+      await expect(bench.locator('.home-ledger tbody tr').last()).toContainText('RunCompleted');
+    });
+
+    // WHY: with the README's defaults a timeout parks the run for an operator; a cancel then undoes newest first.
+    test('J-104: three days without a signal leave the run stuck; cancel undoes hold', async ({ page }) => {
+      await page.goto('/');
+      const bench = sheet(page, 'J-104');
+      await bench.getByRole('button', { name: 'Reset' }).click();
+      await bench.getByRole('button', { name: 'Start the refund' }).click();
+      await bench.getByRole('button', { name: 'Wait 3 days' }).click({ timeout: 10_000 });
+      await expect(bench.locator('.home-status')).toContainText('stuck until an operator');
+      await bench.getByRole('button', { name: 'Cancel the run' }).click();
+      await expect(bench.locator('.home-ledger tbody tr').last()).toContainText('RunCancelled');
+      await expect(bench.locator('.home-undo li')).toHaveText([/payBack · no undo/, /hold · undo ran/]);
     });
   });
 
@@ -540,8 +587,10 @@ test.describe('/ build path', () => {
     test.use({ javaScriptEnabled: false });
 
     // WHY: the page is the build path; a reader without JavaScript (or before it loads) must still read every
-    // floor, the A-101 sheet with its mistake and error, and the finished journal run.
-    test('every floor, the sheet with its error and the finished journal run are on the page', async ({ page }) => {
+    // floor, the A-101 sheet with its mistake and error, and every journal bench in a finished state.
+    test('every floor, the sheet with its error and the five finished journal benches are on the page', async ({
+      page,
+    }) => {
       await page.goto('/');
       const steps = page.locator('section[data-floor]');
       await expect(steps).toHaveCount(6);
@@ -556,10 +605,13 @@ test.describe('/ build path', () => {
       await expect(sheet).toContainText(WIRE_ERROR_SOURCE.message);
       await expect(sheet.getByRole('button')).toHaveCount(0);
       const journal = page.getByRole('region', { name: 'The journal chapter' });
-      await expect(journal.locator('.home-pane.is-committed')).toHaveCount(4);
-      await expect(journal.locator('tbody tr')).toHaveCount(refundRows(REFUND_START).length);
+      await expect(journal.locator('section.home-jsheet')).toHaveCount(5);
       await expect(journal.getByRole('button')).toHaveCount(0);
-      expect(commandView(COMMAND_START).panes).toBe('committed');
+      await expect(journal.getByRole('slider')).toHaveCount(0);
+      await expect(journal.locator('#j-101 .home-tx .home-pane.is-committed')).toHaveCount(4);
+      await expect(journal.locator('#j-102 .home-num')).toHaveText('runs: 1');
+      await expect(journal.locator('#j-103 td.is-red')).toHaveText(['shipped', 'shipped']);
+      await expect(journal.locator('#j-104 .home-ledger tbody tr')).toHaveCount(RUN_START.rows.length);
       await expect(page.getByRole('img', { name: /^Side elevation/ })).toBeVisible();
       await expect(page.locator('.home-floor')).toHaveCount(6);
     });

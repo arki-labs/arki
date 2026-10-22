@@ -3,7 +3,6 @@ import { createFileRoute, notFound } from '@tanstack/react-router';
 import { getDefaultMeta } from '~/shared-metadata';
 import { DrawingSet } from '~/shared/marketing/drawing-set';
 import { JournalChapter } from '~/shared/marketing/journal-chapter';
-
 import { getPackageDetailFn } from '../-package-data';
 import { PackageDetailPage, packageMeta } from '../-package-detail';
 
@@ -28,7 +27,7 @@ function JournalPackagePage() {
       inVersion={false}
       walkthrough={
         <DrawingSet>
-          <JournalChapter />
+          <JournalChapter headline />
         </DrawingSet>
       }
     />

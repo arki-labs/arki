@@ -2,10 +2,8 @@ import type { ReactNode } from 'react';
 import { Fragment, useState } from 'react';
 
 import {
-  excerptCaption,
   FEATURE_NEEDS,
   FEATURE_USECASE,
-  gapBefore,
   WIRE_ERROR,
   WIRE_ERROR_SOURCE,
   WIRE_FIX,
@@ -14,6 +12,7 @@ import {
   WIRE_UNITS,
 } from './build-steps';
 import { Code, HighlightedText } from './code';
+import { excerptCaption, gapBefore } from './excerpt';
 import { useHydrated } from './use-hydrated';
 
 type Point = readonly [x: number, y: number];

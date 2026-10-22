@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
-import type { BuildStep, Excerpt } from './build-steps';
+import type { BuildStep } from './build-steps';
+import type { Excerpt } from './excerpt';
 import {
   DEFINE_APP,
   DEFINE_STEP,
@@ -159,7 +160,7 @@ export function BuildPath() {
       </Step>
 
       <Step step={REMEMBER_STEP} index={3}>
-        <JournalChapter />
+        <JournalChapter headline={false} />
       </Step>
 
       <Step step={SERVE_STEP} index={4}>

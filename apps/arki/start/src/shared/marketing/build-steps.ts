@@ -4,58 +4,16 @@
  * exactly where this data says it is, so a refactor of the source breaks the test and not the reader.
  */
 
-/** A run of consecutive lines copied from one file. */
-export type ExcerptPart = {
-  /** Names the part, so a stepper can light it. */
-  id: string;
-  /** The file, relative to the workspace root. */
-  path: string;
-  /** The line number, in that file, of the first line. */
-  from: number;
-  /** Import lines from the top of the file. No blank line is drawn between two import parts. */
-  imports?: true;
-  lines: readonly string[];
-};
-
-/** Parts shown one after another. A gap between parts of one file is drawn as a blank line. */
-export type Excerpt = {
-  /** What the reader should notice, added to the caption. */
-  note?: string;
-  parts: readonly ExcerptPart[];
-};
-
-/** Whether a blank line is drawn before `part`: it is, when lines between it and the part before are left out. */
-export function gapBefore(before: ExcerptPart | undefined, part: ExcerptPart): boolean {
-  if (before === undefined) return false;
-  if (before.imports === true && part.imports === true) return false;
-  return before.path !== part.path || before.from + before.lines.length !== part.from;
-}
-
-type LineRange = { from: number; to: number };
-type CaptionGroup = { path: string; ranges: LineRange[] };
-
-const range = ({ from, to }: LineRange) => (from === to ? `${from}` : `${from}–${to}`);
-
-/** "path · lines 39–42", with one range per run of lines and one group per file. */
-export function excerptCaption({ note, parts }: Excerpt): string {
-  const groups: CaptionGroup[] = [];
-  for (const part of parts) {
-    const to = part.from + part.lines.length - 1;
-    const group = groups.at(-1);
-    if (group === undefined || group.path !== part.path) {
-      groups.push({ path: part.path, ranges: [{ from: part.from, to }] });
-      continue;
-    }
-    const last = group.ranges.at(-1);
-    if (last !== undefined && last.to + 1 === part.from) last.to = to;
-    else group.ranges.push({ from: part.from, to });
-  }
-  const files = groups.map(({ path, ranges }) => {
-    const count = ranges.reduce((sum, { from, to }) => sum + (to - from + 1), 0);
-    return `${path} · ${count === 1 ? 'line' : 'lines'} ${ranges.map(item => range(item)).join(', ')}`;
-  });
-  return [...files, ...(note === undefined ? [] : [note])].join(' · ');
-}
+import type { Excerpt } from './excerpt';
+import {
+  CLAIM_RECEIPT,
+  JOURNAL_HEADLINE,
+  ORDER_ENTITY,
+  ORDER_REDUCERS,
+  PAY_ORDER,
+  REFUND_STEPS,
+  WRITE_ORDER,
+} from './journal-excerpts';
 
 const APP_FILE = 'apps/avocabo/backend/src/app.ts';
 const DOT_README = 'packages/dot/README.md';
@@ -65,8 +23,6 @@ const QUICKSTART_WRONG = 'packages/dot/docs/examples/quickstart-wrong-order.mjs'
 const WAITLIST = 'apps/avocabo/backend/src/features/waitlist';
 const SERVER_FILE = 'apps/avocabo/start/src/server.ts';
 const UNSUBSCRIBE_ROUTE = 'apps/avocabo/start/src/routes/waitlist/unsubscribe.tsx';
-const README_FILE = 'packages/journal/README.md';
-const REFUND_WORKFLOW_FILE = 'packages/payments/src/refunds/workflow.ts';
 
 /** The whole idea in one runnable file: a unit, the chain that starts it, and the shutdown. */
 export const DEFINE_UNIT = {
@@ -343,98 +299,6 @@ export const FEATURE_USECASE = {
   ],
 } as const satisfies Excerpt;
 
-/** `@arki/journal` README, lines 81–90. Each part is a line a stepper can light. */
-export const PAY_ORDER = {
-  parts: [
-    {
-      id: 'head',
-      path: README_FILE,
-      from: 81,
-      lines: [
-        'export const payOrder = j.command(',
-        "  'payOrder',",
-        '  z.object({ orderId: orderIdSchema, amount: z.int().positive() }),',
-        '  (input, { write }) =>',
-      ],
-    },
-    { id: 'write', path: README_FILE, from: 85, lines: ['    write(order, input.orderId, row => {'] },
-    {
-      id: 'not-found',
-      path: README_FILE,
-      from: 86,
-      lines: ["      if (!row) return CommandNotFound({ detail: 'Order not found' });"],
-    },
-    {
-      id: 'conflict',
-      path: README_FILE,
-      from: 87,
-      lines: [
-        "      if (row.status !== 'placed') return CommandConflict({ detail: `Order is already ${row.status}` });",
-      ],
-    },
-    {
-      id: 'event',
-      path: README_FILE,
-      from: 88,
-      lines: ['      return [OrderPaid({ amount: input.amount })]; // [] means: write nothing'],
-    },
-    { id: 'close', path: README_FILE, from: 89, lines: ['    }),'] },
-    { id: 'end', path: README_FILE, from: 90, lines: [');'] },
-  ],
-} as const satisfies Excerpt;
-
-/** Where the refund workflow starts, retries and waits, then the webhook that sends its signal. */
-export const REFUND_WORKFLOW = {
-  parts: [
-    {
-      id: 'start',
-      path: REFUND_WORKFLOW_FILE,
-      from: 124,
-      lines: [
-        '        startOn: {',
-        '          entity: refund,',
-        '          event: refundsJournal.events.RefundApproved,',
-        '          id: e => refundRunId(e.entityId),',
-        '          input: e => ({ refundId: e.entityId }),',
-        '        },',
-      ],
-    },
-    {
-      id: 'key',
-      path: REFUND_WORKFLOW_FILE,
-      from: 175,
-      lines: [
-        '              // The same on every try of this step: Stripe answers a repeat with the first refund',
-        '              idempotencyKey: key,',
-        '              amount: fromMinorColumn(amountMinor, currency),',
-      ],
-    },
-    {
-      id: 'wait',
-      path: REFUND_WORKFLOW_FILE,
-      from: 201,
-      lines: [
-        "      .waitFor('settled', {",
-        "        signal: 'stripe.refund.settled',",
-        '        schema: settledSchema,',
-        "        timeout: '3d',",
-      ],
-    },
-    {
-      id: 'timeout',
-      path: REFUND_WORKFLOW_FILE,
-      from: 205,
-      lines: ['        // No signal in 3 days: `record` asks Stripe', "        onTimeout: 'continue',"],
-    },
-    {
-      id: 'signal',
-      path: 'apps/kapodopera/backend/src/features/_shared/payments/services.ts',
-      from: 121,
-      lines: ["    { signal: input => runCommand(refundWorkflow.signal('stripe.refund.settled'), input) },"],
-    },
-  ],
-} as const satisfies Excerpt;
-
 /** The process's front door: one call starts the app and hands every request to TanStack Start. */
 export const SERVE_SERVER = {
   parts: [
@@ -683,8 +547,12 @@ export const ALL_EXCERPTS = [
   WIRE_FIX,
   FEATURE_NEEDS,
   FEATURE_USECASE,
+  ORDER_ENTITY,
   PAY_ORDER,
-  REFUND_WORKFLOW,
+  WRITE_ORDER,
+  CLAIM_RECEIPT,
+  ORDER_REDUCERS,
+  REFUND_STEPS,
   SERVE_SERVER,
   SERVE_APP,
   SERVE_ROUTE,
@@ -740,10 +608,10 @@ const STEP_LIST = [
     id: 'remember',
     number: 'F4',
     verb: 'Remember',
-    kicker: '@arki/journal · its own chapter',
-    title: 'One transaction. Domain history and workflow history in one log.',
-    sheet: 'J-001',
-    excerpts: [PAY_ORDER, REFUND_WORKFLOW],
+    kicker: '@arki/journal · five things you can try',
+    title: JOURNAL_HEADLINE,
+    sheet: 'J-100',
+    excerpts: [ORDER_ENTITY, PAY_ORDER, WRITE_ORDER, CLAIM_RECEIPT, ORDER_REDUCERS, REFUND_STEPS],
   },
   {
     id: 'serve',

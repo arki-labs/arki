@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test';
 
 import { packagesFileSchema } from '@arki/arki-release/site-schema';
 
+import { JOURNAL_HEADLINE } from '../src/shared/marketing/journal-excerpts';
+
 // The generated list is the source of truth: the page must show every admitted package, no more, no less.
 const packages = packagesFileSchema.parse(
   JSON.parse(readFileSync(new URL('../src/generated/packages.json', import.meta.url), 'utf8')),
@@ -25,7 +27,9 @@ test.describe('/packages', () => {
     const archived = packages.filter(entry => entry.status === 'archive');
     await page.goto('/packages?status=archive');
     await expect(page.getByRole('button', { name: /^archive/ })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('table', { name: 'Packages' }).locator('tr[data-package]')).toHaveCount(archived.length);
+    await expect(page.getByRole('table', { name: 'Packages' }).locator('tr[data-package]')).toHaveCount(
+      archived.length,
+    );
 
     // Enter in the search box submits the form's first button, which carries the status on screen.
     await page.getByRole('searchbox').fill('a');
@@ -53,9 +57,9 @@ test.describe('/packages', () => {
     await expect(page.getByText(`for @arki/dot@${dot?.nextVersion}`).first()).toBeVisible();
     // The version list lives in a closed <details> picker; open it as a reader would.
     await page.locator('details.vpick > summary').click();
-    await expect(page.getByRole('list', { name: 'Versions of @arki/dot' }).locator('a[aria-current="page"]')).toHaveText(
-      new RegExp(`^${dot?.nextVersion}`),
-    );
+    await expect(
+      page.getByRole('list', { name: 'Versions of @arki/dot' }).locator('a[aria-current="page"]'),
+    ).toHaveText(new RegExp(`^${dot?.nextVersion}`));
     await expect(page.getByRole('region', { name: /^Release health/ })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Public imports' })).toBeVisible();
   });
@@ -83,15 +87,15 @@ test.describe('/packages', () => {
       '#walkthrough',
     );
     const chapter = page.locator('#walkthrough').getByRole('region', { name: 'The journal chapter' });
-    const part = chapter.getByRole('group', { name: /A refund that waits/ });
-    const rows = part.locator('tbody tr');
-    await part.getByRole('button', { name: 'Reset' }).click();
-    await expect(rows).toHaveText([/No rows yet/]);
-    await part.getByRole('button', { name: 'Approve refund' }).click();
-    await expect(rows).toHaveCount(2);
-    await expect(rows.first()).toContainText('RefundApproved');
+    await expect(chapter.locator('.home-jlead')).toHaveText(JOURNAL_HEADLINE);
+    const bench = chapter.getByRole('region', { name: /The webhook arrives three times/ });
+    await bench.getByRole('button', { name: 'Reset' }).click();
+    await expect(bench.locator('.home-ledger tbody tr')).toHaveText([/Nothing delivered yet/]);
+    await bench.getByRole('button', { name: 'Deliver the webhook' }).click();
+    await bench.getByRole('button', { name: 'Deliver the webhook' }).click();
+    await expect(bench.locator('.home-num')).toHaveText('runs: 1');
     // site.css's base table look (12px cells) must not reach into the drawing.
-    await expect(rows.first().locator('td').first()).toHaveCSS('padding-left', '10px');
+    await expect(bench.locator('.home-ledger tbody td').first()).toHaveCSS('padding-left', '10px');
 
     await page.goto('/packages/dot');
     await expect(page.locator('.home-chapter')).toHaveCount(0);

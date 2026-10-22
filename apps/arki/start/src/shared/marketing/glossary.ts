@@ -55,46 +55,34 @@ export const GLOSSARY = {
     where: 'F6 · Inspect',
   },
   write: {
-    text: 'Reads the row in a new transaction, then writes the events the rule returns, with the reducer, inline projections and queued jobs in the same transaction.',
-    where: 'F4 · Remember · J-001',
+    text: 'Locks the row, then writes the events the rule returns. The row, the inline projections and the queued jobs follow in the same transaction.',
+    where: 'F4 · Remember · J-101',
   },
   CommandConflict: {
-    text: 'A typed failure for a rule that says no, here "already paid". The command returns it as a value and nothing is written.',
-    where: 'F4 · Remember · J-001',
+    text: 'A typed failure for a rule that says no, such as "already paid", or for an idempotency key reused with another input. It is returned as a value, and nothing is written.',
+    where: 'F4 · Remember · J-101, J-102',
   },
   CommandNotFound: {
     text: 'A typed failure for a row that does not exist. Returned, not thrown.',
-    where: 'F4 · Remember · J-001',
-  },
-  startOn: {
-    text: "Starts the workflow run from a domain event, inside that event's transaction. The run id comes from the entity id.",
-    where: 'F4 · Remember · J-001',
+    where: 'F4 · Remember · J-101',
   },
   step: {
-    text: 'One checkpoint of a workflow. Every completed step is a row in journal_events.',
-    where: 'F4 · Remember · J-001',
+    text: 'One step of a workflow. A checkpoint event is written before and after it runs, so after a restart the run goes on from there.',
+    where: 'F4 · Remember · J-104',
     method: true,
   },
   idempotencyKey: {
-    text: 'The same on every try of this step, so a repeated call gets the first refund back.',
-    where: 'F4 · Remember · J-001',
+    text: 'The key the mail provider dedupes on. Here it is the job id, the same on every try of the job.',
+    where: 'F4 · Remember · J-101',
   },
   waitFor: {
     text: 'Parks the run until the named signal arrives, at most three days here. No worker is busy while it waits.',
-    where: 'F4 · Remember · J-001',
+    where: 'F4 · Remember · J-104',
     method: true,
   },
   signal: {
-    text: "The name of the signal that wakes the run. Stripe's refund-settled webhook sends it, as a command.",
-    where: 'F4 · Remember · J-001',
-  },
-  onTimeout: {
-    text: "What happens when no signal comes in time. 'continue' runs the next step, which asks Stripe.",
-    where: 'F4 · Remember · J-001',
-  },
-  runCommand: {
-    text: 'Runs a journal command. The webhook uses it to send the signal, so the signal is a row like any other.',
-    where: 'F4 · Remember · J-001',
+    text: "The name of the signal that wakes the run. The provider's webhook sends it.",
+    where: 'F4 · Remember · J-104',
   },
 } as const satisfies Record<string, GlossaryEntry>;
 

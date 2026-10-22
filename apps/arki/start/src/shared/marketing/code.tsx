@@ -1,11 +1,10 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment } from 'react';
 
 import { cn } from '@arki/ui/cn';
 
-import type { Excerpt } from './build-steps';
+import type { Excerpt } from './excerpt';
 import type { Token } from './highlight';
-import type { Lit } from './journal-model';
-import { excerptCaption, gapBefore } from './build-steps';
+import { excerptCaption, gapBefore } from './excerpt';
 import { glossaryEntry } from './glossary';
 import { GlossaryTerm } from './glossary-term';
 import { tokenizeLines } from './highlight';
@@ -33,6 +32,9 @@ export function HighlightedText({ text }: Readonly<{ text: string }>) {
   return <Tokens tokens={tokens} />;
 }
 
+/** How a stepper lights a line: the line it is on, or the line that refused. */
+export type Lit = 'on' | 'bad';
+
 type CodeProps = {
   excerpt: Excerpt;
   /** Parts to light, by part id. */
@@ -43,23 +45,8 @@ type CodeProps = {
 
 /** An excerpt in a box: the file and lines it was copied from, then the lines. */
 export function Code({ excerpt, lit, caption }: Readonly<CodeProps>) {
-  const figure = useRef<HTMLElement>(null);
-  const litKey = lit === undefined ? '' : Object.keys(lit).join(',');
-  const shownKey = useRef(litKey);
-  // When a stepper lights another line, keep that line in view: on a phone the code sits above the controls.
-  // Compare with the lines already shown, not "first run or not": StrictMode runs effects twice on mount, and a
-  // scroll then would pull the whole page down to this code on load.
-  useEffect(() => {
-    if (shownKey.current === litKey) return;
-    shownKey.current = litKey;
-    const line = figure.current?.querySelector('.home-ln.is-on, .home-ln.is-bad');
-    if (!(line instanceof HTMLElement)) return;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    line.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-  }, [litKey]);
-
   return (
-    <figure className="home-code" ref={figure}>
+    <figure className="home-code">
       <figcaption>{caption ?? excerptCaption(excerpt)}</figcaption>
       <pre>
         <code>
