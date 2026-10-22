@@ -16,7 +16,7 @@ One way to write middleware (RFC `docs/rfcs/2026-10-21-dot-middleware.md`, steps
 Each transport attaches the same functions:
 
 - `@arki/dot/orpc`: `impl.refund.use(step(authed)).use(around(inTransaction))`. A refusal is thrown as the typed error the procedure declares; a procedure that does not declare the step's failure does not compile.
-- `@arki/http`: `routes().use(step(authed)).use(around(inTransaction))`. A refusal answers with the same envelope as a refused `derive`; every route bound after the step must declare its failures.
+- `@arki/http`: `routes().use(step(authed)).use(around(inTransaction))`. A refusal answers with the same envelope as a refused `derive`; every route bound after the step must declare its failures. `step(fn, { failureHeaders })` adds response headers to a refusal (a `www-authenticate` challenge, say), typed by the step's own failures.
 - `@arki/queue`: `q.job.use(step(actorFromData)).use(around(inTransaction))`. A refusal is the job's outcome, as if the handler had returned it.
 - `@arki/schedule`: `defineSchedule({ …, with: [asSystem, inTransaction], handler })`. A refusal makes the run `refused`.
 - `@arki/cli`: `defineCommand({ …, with: [asOperator], run })`. `with` also wraps `preview`. A refusal is the command's failure: same exit code and error output as a failure returned from `run`.
