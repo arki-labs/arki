@@ -1,17 +1,8 @@
 {
   "name": "@arki/icons",
   "version": "0.1.2",
+  "private": false,
   "description": "Icon sets for ARKI apps — Iconify, Phosphor, Simple Icons and flag packs behind one React entry point.",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/icons"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -20,27 +11,18 @@
     "iconify",
     "phosphor"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/icons"
+  },
+  "license": "MIT",
+  "sideEffects": false,
   "type": "module",
-  "private": false,
-  "files": [
-    "dist/**",
-    "!dist/**/*.spec.*",
-    "!dist/**/*.test.*",
-    "src/**",
-    "!src/**/*.test.*",
-    "!src/**/*.spec.*",
-    "!src/**/tests/**",
-    "!src/**/test/**",
-    "!src/**/__tests__/**",
-    "docs/agent-guide.md",
-    "llms.txt",
-    "README.md",
-    "LICENSE",
-    "package.json"
-  ],
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -71,6 +53,10 @@
       "types": "./dist/src/phosphor-defaults.d.ts",
       "import": "./src/phosphor-defaults.tsx",
       "browser": "./src/phosphor-defaults.tsx"
+    },
+    "./vite": {
+      "types": "./dist/src/vite.d.ts",
+      "default": "./dist/src/vite.js"
     },
     "./spinners": {
       "types": "./dist/src/spinners/index.d.ts",
@@ -114,6 +100,7 @@
     },
     "./package.json": "./package.json"
   },
+  "types": "./dist/src/index.d.ts",
   "typesVersions": {
     "*": {
       "flags": [
@@ -130,6 +117,9 @@
       ],
       "phosphor/defaults": [
         "src/phosphor-defaults.tsx"
+      ],
+      "vite": [
+        "src/vite.ts"
       ],
       "spinners": [
         "src/spinners/index.ts"
@@ -157,13 +147,30 @@
       ]
     }
   },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "docs/agent-guide.md",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "bench": "bun run build && arki-bench",
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.vite.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run",
     "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -186,12 +193,21 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "vite": "catalog:build-tools",
+    "vitest": "catalog:"
   },
-  "module:jsx": "src",
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false,
   "peerDependencies": {
-    "react": "catalog:react"
-  }
+    "react": "catalog:react",
+    "vite": "^7 || ^8"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "module:jsx": "src"
 }
