@@ -130,8 +130,24 @@ export type MountMeta = {
   readonly transport?: MountTransport;
 };
 
+/**
+ * Lets an outside observer (the Dot adapter's handler events) bracket one
+ * request's whole pipeline. `watching` says whether anyone listens right now;
+ * when not, the engine takes its plain path and never calls `run`. `run`
+ * calls `work` once and returns its value unchanged; `failureOf` names the
+ * Failure a settled value stands for (a refusal Response), so the observer
+ * can report `refused`. A throw is a failure. The transport core knows no
+ * observer type: this is all it is given.
+ */
+export type ObserveBinding = {
+  readonly watching: () => boolean;
+  readonly run: <T>(work: () => T, failureOf: (value: unknown) => Failure | undefined) => T;
+};
+
 /** A contract bound to its (generics-erased) handler. */
 export type RouteBinding = FailureHeaders<Failure> & {
+  /** Set by an adapter that watches this route; the engine skips all of it when absent. */
+  readonly observe?: ObserveBinding;
   readonly derivers?: readonly ErasedStage[];
   readonly contract: ContractLike;
   /**
@@ -200,6 +216,8 @@ export type RpcMountHandlers<TDerived extends BaseRequestCtx, TRpcCtx> = {
 
 /** Erased rpc binding a bundle stores — same seam as {@link RouteBinding}. */
 export type RpcBinding = {
+  /** Set by an adapter that watches this mount; see {@link ObserveBinding}. */
+  readonly observe?: ObserveBinding;
   readonly contract?: RpcMountContract;
   readonly derivers?: readonly ErasedStage[];
   readonly id: string;

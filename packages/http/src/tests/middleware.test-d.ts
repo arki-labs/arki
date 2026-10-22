@@ -99,3 +99,17 @@ routes().use(step(fromHeaders)).use(around(needsPrincipalAround));
 // A step returns an object or a failure, nothing else.
 // @ts-expect-error -- a string is not an object
 routes().use(step(notAnObject));
+
+// `failureHeaders` sees the step's own failures, typed: a header per refusal code.
+step(authed, {
+  failureHeaders: failure => {
+    expectTypeOf(failure.code).toEqualTypeOf<'test.step.sign_in'>();
+    return { 'www-authenticate': 'Bearer' };
+  },
+});
+
+// A header callback for a failure the step never returns does not compile.
+step(authed, {
+  // @ts-expect-error -- `test.step.not_admin` is not one of `authed`'s failures
+  failureHeaders: (failure: ReturnType<typeof NotAdmin>) => ({ 'x-code': failure.code }),
+});

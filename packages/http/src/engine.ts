@@ -19,7 +19,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, serialize } from '@arki/failure';
 import { formatIssues } from '@arki/schema';
 
-import type { MountBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
+import type { MountBinding, ObserveBinding, RouteBinding, RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike, ErasedInput } from './contract.js';
 import type { BaseRequestCtx } from './derive.js';
 import type { Field, Job, Ran, Where, Wire } from './wire.js';
@@ -213,18 +213,19 @@ async function executeRpc(
 ): Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
-  return scope(base, async () => {
-    try {
-      return await runRpcFrom(bundle, rpc, req, 0, base);
-    } catch (error) {
-      return toErrorResponse(error);
-    }
-  });
+  const observe = rpc.observe;
+  if (observe?.watching() !== true) return scope(base, () => runRpcFrom(bundle, rpc, req, 0, base));
+  // Observed: the stages rethrow, so the observer sees the throw; the envelope is made here.
+  return scope(base, () =>
+    observe.run(() => runRpcFrom(bundle, rpc, req, 0, base, false), refusalOf).catch(toErrorResponse),
+  );
 }
 
 /**
- * Run an rpc mount's stages from `from`, then its handler. Throws: an
- * around must see an error to roll back; `executeRpc` makes the envelope.
+ * Run an rpc mount's stages from `from`, then its handler. The outer call
+ * (`from === 0`) turns a thrown error into the envelope; a call made by an
+ * around's `next` (`from > 0`) rethrows it, so the around sees it and can
+ * roll back. One async frame per request, as before arounds existed.
  */
 async function runRpcFrom(
   bundle: RouteBundle,
@@ -232,32 +233,40 @@ async function runRpcFrom(
   req: Request,
   from: number,
   start: BaseRequestCtx & Record<string, unknown>,
+  envelope = true,
 ): Promise<Response> {
-  let ctx = start;
-  const stages = rpc.derivers ?? bundle.derivers;
-  for (let i = from; i < stages.length; i++) {
-    const stage = stages[i];
-    if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
-    if ('around' in stage) {
-      const rest = i + 1;
-      const here = ctx;
-      return await stage.around(here as never, () => runRpcFrom(bundle, rpc, req, rest, here));
+  try {
+    let ctx = start;
+    const stages = rpc.derivers ?? bundle.derivers;
+    for (let i = from; i < stages.length; i++) {
+      const stage = stages[i];
+      if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
+      if ('around' in stage) {
+        const rest = i + 1;
+        const here = ctx;
+        return await stage.around(here as never, () => runRpcFrom(bundle, rpc, req, rest, here));
+      }
+      if ('step' in stage) {
+        // Same erasure boundary as executeBinding.
+        const added = await stage.step(ctx as never);
+        if (isFailure(added))
+          return refusalResponse(rpc, added, rpc.contract?.failures ?? [], stage.failureHeaders?.(added));
+        ctx = { ...ctx, ...added };
+        continue;
+      }
+      const value = await stage.derive(req, ctx as never);
+      if (isFailure(value))
+        return refusalResponse(rpc, value, rpc.contract?.failures ?? [], stage.failureHeaders?.(value));
+      ctx = { ...ctx, [stage.key]: value };
     }
-    if ('step' in stage) {
-      // Same erasure boundary as executeBinding.
-      const added = await stage.step(ctx as never);
-      if (isFailure(added)) return failureResponse(added, rpc.contract?.failures ?? []);
-      ctx = { ...ctx, ...added };
-      continue;
-    }
-    const value = await stage.derive(req, ctx as never);
-    if (isFailure(value)) return failureResponse(value, rpc.contract?.failures ?? [], stage.failureHeaders?.(value));
-    ctx = { ...ctx, [stage.key]: value };
+    const rpcCtx = await rpc.context(req, ctx as never);
+    // The rpc handler owns its subtree's responses (including its own
+    // error format); only THROWN errors fall through to the envelope.
+    return await rpc.handle(req, rpcCtx as never);
+  } catch (error) {
+    if (from > 0 || !envelope) throw error;
+    return toErrorResponse(error);
   }
-  const rpcCtx = await rpc.context(req, ctx as never);
-  // The rpc handler owns its subtree's responses (including its own
-  // error format); only THROWN errors fall through to the envelope.
-  return await rpc.handle(req, rpcCtx as never);
 }
 
 /**
@@ -311,8 +320,27 @@ export function executeBinding(
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
-  if ((binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined) {
-    return scope(base, () => executeBindingAsync(bundle, binding, req, base, params));
+  const staged = (binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined;
+  const observe = binding.observe;
+  if (observe?.watching() === true) {
+    // Observed: nothing below envelopes a throw, so the observer sees it; the envelope is made here.
+    return scope(base, () => {
+      try {
+        const response = observe.run(
+          () =>
+            staged
+              ? runBindingFrom(bundle, binding, req, base, params, 0, base, false)
+              : andThen(decodeInput(binding.contract, params, base), input => respond(binding, input, base)),
+          refusalOf,
+        );
+        return response instanceof Promise ? response.catch(toErrorResponse) : response;
+      } catch (error) {
+        return toErrorResponse(error);
+      }
+    });
+  }
+  if (staged) {
+    return scope(base, () => runBindingFrom(bundle, binding, req, base, params, 0, base));
   }
   return scope(base, () => {
     try {
@@ -324,21 +352,12 @@ export function executeBinding(
   });
 }
 
-function executeBindingAsync(
-  bundle: RouteBundle,
-  binding: RouteBinding,
-  req: Request,
-  base: BaseRequestCtx,
-  params: Readonly<Record<string, string>>,
-): Promise<Response> {
-  return runBindingFrom(bundle, binding, req, base, params, 0, base).catch(toErrorResponse);
-}
-
 /**
  * Run a route's stages from `from`, then read the body and call the handler.
- * It throws: an around must see a handler error to roll back, and
- * `executeBindingAsync` makes the envelope. A closure is only built when an
- * around is met, so a route with none allocates nothing extra.
+ * The outer call (`from === 0`) turns a thrown error into the envelope; a
+ * call made by an around's `next` (`from > 0`) rethrows it, so the around sees
+ * it and can roll back. One async frame per request, and a closure only when
+ * an around is met, so a route with none costs what it did before arounds.
  */
 async function runBindingFrom(
   bundle: RouteBundle,
@@ -348,35 +367,43 @@ async function runBindingFrom(
   params: Readonly<Record<string, string>>,
   from: number,
   start: BaseRequestCtx & Record<string, unknown>,
+  envelope = true,
 ): Promise<Response> {
-  let ctx = start;
-  const stages = binding.derivers ?? bundle.derivers;
-  for (let i = from; i < stages.length; i++) {
-    const stage = stages[i];
-    if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
-    if ('around' in stage) {
-      const rest = i + 1;
-      const here = ctx;
-      return await stage.around(here as never, () => runBindingFrom(bundle, binding, req, base, params, rest, here));
+  try {
+    let ctx = start;
+    const stages = binding.derivers ?? bundle.derivers;
+    for (let i = from; i < stages.length; i++) {
+      const stage = stages[i];
+      if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
+      if ('around' in stage) {
+        const rest = i + 1;
+        const here = ctx;
+        return await stage.around(here as never, () => runBindingFrom(bundle, binding, req, base, params, rest, here));
+      }
+      if ('step' in stage) {
+        // Erasure boundary: steps were stored with `never` context, like derivers.
+        const added = await stage.step(ctx as never);
+        if (isFailure(added))
+          return refusalResponse(binding, added, binding.contract.failures ?? [], stage.failureHeaders?.(added));
+        ctx = { ...ctx, ...added };
+        continue;
+      }
+      // Erasure boundary: derivers were stored with `never` context (see
+      // ErasedDeriver); the accumulated ctx is the value they were typed
+      // against at composition time.
+      const value = await stage.derive(req, ctx as never);
+      if (isFailure(value))
+        return refusalResponse(binding, value, binding.contract.failures ?? [], stage.failureHeaders?.(value));
+      ctx = { ...ctx, [stage.key]: value };
     }
-    if ('step' in stage) {
-      // Erasure boundary: steps were stored with `never` context, like derivers.
-      const added = await stage.step(ctx as never);
-      if (isFailure(added)) return failureResponse(added, binding.contract.failures ?? []);
-      ctx = { ...ctx, ...added };
-      continue;
-    }
-    // Erasure boundary: derivers were stored with `never` context (see
-    // ErasedDeriver); the accumulated ctx is the value they were typed
-    // against at composition time.
-    const value = await stage.derive(req, ctx as never);
-    if (isFailure(value)) return failureResponse(value, binding.contract.failures ?? [], stage.failureHeaders?.(value));
-    ctx = { ...ctx, [stage.key]: value };
-  }
 
-  const body = binding.contract.body === undefined ? undefined : await readJson(req);
-  const input = await decodeInput(binding.contract, params, base, body);
-  return await respond(binding, input, ctx);
+    const body = binding.contract.body === undefined ? undefined : await readJson(req);
+    const input = await decodeInput(binding.contract, params, base, body);
+    return await respond(binding, input, ctx);
+  } catch (error) {
+    if (from > 0 || !envelope) throw error;
+    return toErrorResponse(error);
+  }
 }
 
 /** Call the handler and turn what it returns into a Response. Throws on a bad output. */
@@ -393,13 +420,37 @@ function respond(binding: RouteBinding, input: ErasedInput, ctx: BaseRequestCtx)
 
   const returned = binding.handler(input as never, ctx as never);
   if (isPromiseLike(returned)) return settle(binding, returned);
-  return toResponse(binding.contract, returned, binding.failureHeaders);
+  return toResponse(binding, returned);
 }
 
 // Errors propagate: every caller makes the envelope itself (`.catch(toErrorResponse)`),
 // and an around must see a handler error to roll back.
 async function settle(binding: RouteBinding, pending: PromiseLike<unknown>): Promise<Response> {
-  return toResponse(binding.contract, await pending, binding.failureHeaders);
+  return toResponse(binding, await pending);
+}
+
+/**
+ * Which Failure each refusal Response was built from. Only an observed
+ * route writes here: by the time a refusal is a Response, an observer can no
+ * longer see the Failure, so `refusalOf` reads it back from this map.
+ */
+const refusals = new WeakMap<Response, Failure>();
+
+/** `failureResponse` for a route or mount; an observed one also remembers the Failure. */
+function refusalResponse(
+  watched: { readonly observe?: ObserveBinding },
+  failure: Failure,
+  definitions: NonNullable<ContractLike['failures']>,
+  headers?: Readonly<Record<string, string>>,
+): Response {
+  const response = failureResponse(failure, definitions, headers);
+  if (watched.observe !== undefined) refusals.set(response, failure);
+  return response;
+}
+
+/** The Failure a refusal Response was built from, for an observer; `undefined` for any other value. */
+function refusalOf(value: unknown): Failure | undefined {
+  return value instanceof Response ? refusals.get(value) : undefined;
 }
 
 function failureResponse(
@@ -422,12 +473,11 @@ function failureResponse(
   });
 }
 
-function toResponse(
-  contract: ContractLike,
-  result: unknown,
-  failureHeaders?: RouteBinding['failureHeaders'],
-): Response | Promise<Response> {
-  if (isFailure(result)) return failureResponse(result, contract.failures ?? [], failureHeaders?.(result));
+function toResponse(binding: RouteBinding, result: unknown): Response | Promise<Response> {
+  const { contract } = binding;
+  if (isFailure(result)) {
+    return refusalResponse(binding, result, contract.failures ?? [], binding.failureHeaders?.(result));
+  }
   // `raw()` is the only way to send a Response, and the only way to skip the
   // schemas: in raw mode the handler owns the bytes, so nothing is checked.
   const rawMode = isRawOutput(contract.output);

@@ -93,7 +93,7 @@ export type ErasedDeriver = ErasedFailureHeaders & {
  * spread into the context (see `step` in `middleware.ts`). Stored erased, like
  * {@link ErasedDeriver}.
  */
-export type ErasedStep = {
+export type ErasedStep = ErasedFailureHeaders & {
   readonly step: (ctx: never) => object | PromiseLike<object>;
 };
 

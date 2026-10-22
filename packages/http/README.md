@@ -327,6 +327,14 @@ The published `httpServer` service carries the composed
 `fetch: (Request) => Promise<Response>` — also the unit-test seam: call
 your whole app without a socket.
 
+Every route and `rpc()` mount a feature mounts this way also emits Dot handler
+events (`transport: 'http'`, `feature`, `name: 'METHOD /path'`; a mount's name is
+its path). A returned or step-refused `Failure` ends as `completed/refused`
+with that Failure; a throw ends as `failed` while the client still gets the 500
+envelope. Read them with `logHandlers()` or `reportErrors()` from `@arki/dot`,
+or your own `app.subscribe`. A bundle served outside a feature, or without Dot,
+emits nothing.
+
 ## Request scope — derivers, not containers
 
 Per-request values are typed context keys derived by plain functions.

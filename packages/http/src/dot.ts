@@ -41,11 +41,11 @@
  */
 
 import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder } from '@arki/dot/feature';
-import type { Deferred, DotConfigureContext, EmptyShape, Unit, Token } from '@arki/dot/unit';
-import { entrypoint, instanceOf, sliceOf } from '@arki/dot/feature';
+import type { Deferred, DotConfigureContext, EmptyShape, Token, Unit } from '@arki/dot/unit';
+import { entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, resolveDeferred, unit } from '@arki/dot/unit';
 
-import type { RouteBundle, RpcBinding } from './bundle.js';
+import type { ObserveBinding, RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
 import type { Engine, HttpMiddleware } from './engine.js';
 import type { ListenHandle } from './listen.js';
@@ -210,6 +210,39 @@ function drained(gauge: InflightGauge, timeoutMs: number): Promise<void> {
   });
 }
 
+type HandlerObserver = ReturnType<typeof handlerObserverOf>;
+
+function observeWith(observer: HandlerObserver, ref: Parameters<HandlerObserver['run']>[0]): ObserveBinding {
+  return { watching: observer.watching, run: (work, failureOf) => observer.run(ref, work, { returned: failureOf }) };
+}
+
+/**
+ * The same bundle with every route and rpc mount bracketed by the feature's
+ * handler observer, named as the manifest names its action (`METHOD /path`;
+ * a mount's path). Only a Dot feature goes through here, so a bundle used
+ * without Dot carries no observer at all.
+ */
+function observedBundle(bundle: RouteBundle, services: unknown): RouteBundle {
+  // A bag that is not an object (a hand-made test value) has no observer: serve the bundle as is.
+  if (typeof services !== 'object' || services === null) return bundle;
+  const observer = handlerObserverOf(services);
+  return {
+    ...bundle,
+    bindings: bundle.bindings.map(binding => {
+      const ref = { transport: 'http', name: `${binding.contract.method} ${binding.contract.path}` } as const;
+      return { ...binding, observe: observeWith(observer, ref) };
+    }),
+    ...(bundle.rpcs === undefined
+      ? {}
+      : {
+          rpcs: bundle.rpcs.map(rpc => {
+            const ref = { transport: 'http', name: rpc.path } as const;
+            return { ...rpc, observe: observeWith(observer, ref) };
+          }),
+        }),
+  };
+}
+
 function isRouteBundle(value: unknown): value is RouteBundle {
   return (
     typeof value === 'object' &&
@@ -275,7 +308,12 @@ export function endpoints<C extends AnyFeatureCore>(
   options: { readonly contracts?: readonly ContractLike[] } = {},
 ): EndpointsEntrypoint<DepsOf<C>> {
   // `_core` is a type witness: the feature hands its own services to `resolve` when it boots.
-  return { kind: 'routes', key: 'routes', actions: options.contracts ?? [], resolve: build };
+  return {
+    kind: 'routes',
+    key: 'routes',
+    actions: options.contracts ?? [],
+    resolve: services => observedBundle(build(services), services),
+  };
 }
 
 /**
@@ -384,9 +422,7 @@ function bindHttp(
           port: () => state.handle?.port,
           url: () => {
             const handle = state.handle;
-            return handle === undefined
-              ? undefined
-              : `http://${displayHost(handle.hostname)}:${String(handle.port)}`;
+            return handle === undefined ? undefined : `http://${displayHost(handle.hostname)}:${String(handle.port)}`;
           },
           inflight: () => gauge.count,
         };

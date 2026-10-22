@@ -3,9 +3,10 @@
  * `routes().use(...)`. Nothing is shared at runtime; the types come from the
  * function itself.
  */
+import type { FailureHeaders } from './derive.js';
 
 /** What {@link step} makes: reads `In`, returns `R` (an object to add, or a failure). */
-export type HttpStep<In, R extends object | PromiseLike<object>> = {
+export type HttpStep<In, R extends object | PromiseLike<object>> = FailureHeaders<R> & {
   readonly step: (context: In) => R;
 };
 
@@ -28,9 +29,15 @@ export type HttpAround<In> = {
  * route bound after the step must declare the step's failures. The return must
  * be an object (or a failure), sync or async. The same function attaches to
  * the other transports with their own `step`.
+ *
+ * `failureHeaders` adds response headers to a refusal, typed by the step's
+ * own failures (a `www-authenticate` challenge on a 401, say), as on `derive`.
  */
-export function step<In, R extends object | PromiseLike<object>>(fn: (context: In) => R): HttpStep<In, R> {
-  return { step: fn };
+export function step<In, R extends object | PromiseLike<object>>(
+  fn: (context: In) => R,
+  options: FailureHeaders<R> = {},
+): HttpStep<In, R> {
+  return { step: fn, ...options };
 }
 
 /**

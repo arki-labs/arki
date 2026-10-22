@@ -95,6 +95,20 @@ describe('step', () => {
     expect(response.status).toBe(401);
     expect(later).toBe(0);
   });
+
+  // A 401 without a challenge leaves the client no way to sign in: the header must reach the wire.
+  it('adds its failure headers to a refusal, and only to a refusal', async () => {
+    const challenged = step(authed, { failureHeaders: () => ({ 'www-authenticate': 'Bearer' }) });
+    const engine = buildEngine([
+      routes()
+        .use(challenged)
+        .bind(mine, () => 'ok'),
+    ]);
+    const refused = await engine.fetch(anonymous());
+    const allowed = await engine.fetch(signedIn());
+    expect(refused.headers.get('www-authenticate')).toBe('Bearer');
+    expect(allowed.headers.get('www-authenticate')).toBeNull();
+  });
 });
 
 describe('around', () => {
