@@ -39,11 +39,14 @@
  *
  * - `infra/` makes no RUNTIME import of its own (or an ancestor's)
  *   `feature.ts`, nor of `usecases/` / `entrypoints/`
- *   (`arki-feature-layers/infra-runtime-imports`). An infra plugin names the
- *   handles it needs (`needs: { db: database.provides.db }`) — the app's
- *   adapters and other features' `feature.ts` are fine — or declares a need
- *   unbound (`service<T>()`) for the feature to bind at `.infra()`. Its own
- *   `feature.ts` imports it, so a value import back is a module cycle.
+ *   (`arki-feature-layers/infra-runtime-imports`), nor of ANY other
+ *   feature's `feature.ts`: infra adapts the outside world and never depends
+ *   on the domain (RFC 2026-10-22-dot-usecase-boundary, D9). An infra plugin
+ *   names the app's adapter handles it needs (`needs: { db: database.provides.db }`)
+ *   or declares a need unbound (`service<T>()`) for the feature to bind at
+ *   `.infra()`. Another feature's output reaches this feature through
+ *   `.needs()` into a domain service or a usecase. Its own `feature.ts`
+ *   imports it, so a value import back is also a module cycle.
  * - Features nest: `features/<name>/features/<child>/` is a feature root of
  *   its own, and every layer rule above applies there first. Across roots,
  *   a file may RUNTIME-import another feature's `feature.ts`,
@@ -303,15 +306,19 @@ const OWN_FEATURE = '^(\\.\\./)+feature(\\.[jt]s)?$';
 // The layers an infra plugin never reaches into.
 const INFRA_INWARD = '^\\.{1,2}/(.*/)?(usecases|entrypoints)(/|$)';
 
-const INFRA_BANNED = [OWN_FEATURE, INFRA_INWARD];
+// Any feature's chain file, own, ancestor or another feature's: infra never depends on the domain (D9).
+const ANY_FEATURE = '^(\\.\\./)+([a-z0-9-]+/)*feature(\\.[jt]s)?$';
+
+const INFRA_BANNED = [ANY_FEATURE, INFRA_INWARD];
 
 /**
- * The same check again for `infra/`. A plugin may name the handles it needs
- * (`needs: { db: database.provides.db }`): the app's adapters and other
- * features' `feature.ts` are fair imports, and the feature builder checks the
- * feature declares those same handles. Its own `feature.ts` (or an ancestor's)
- * imports it, so a value import back is a module cycle that dies with a TDZ
- * error; and infra never reaches into `usecases/` or `entrypoints/`.
+ * The same check again for `infra/`. A plugin may name the app's adapter
+ * handles it needs (`needs: { db: database.provides.db }`), and the feature
+ * builder checks the feature declares those same handles. It makes no runtime
+ * import of any `feature.ts`: its own (or an ancestor's) imports it, so a
+ * value import back is a module cycle that dies with a TDZ error, and another
+ * feature's is the domain, which infra never depends on (D9). Infra never
+ * reaches into `usecases/` or `entrypoints/` either.
  *
  * @type {import('eslint').Rule.RuleModule}
  */
@@ -320,7 +327,7 @@ const infraRuntimeImports = {
     ...usecaseRuntimeImports.meta,
     messages: {
       runtime:
-        'An infra plugin never runtime-imports its own feature.ts (a module cycle), usecases/ or entrypoints/: no runtime import of {{source}}. `import type` is fine.',
+        "An infra plugin never runtime-imports a feature.ts (its own is a module cycle; another feature is the domain, which infra never depends on), usecases/ or entrypoints/: no runtime import of {{source}}. Take another feature's output through .needs() into a domain service or a usecase. `import type` is fine.",
     },
   },
   create: usecaseRuntimeImports.create,

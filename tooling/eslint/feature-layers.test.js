@@ -176,7 +176,8 @@ test('an infra plugin names the handles it needs, but never imports its own feat
   assert.deepEqual(ruleIds(store, `import { database } from '../../../db';`), []);
   assert.deepEqual(ruleIds(store, `import { cache } from '../../../kv';`), []);
   assert.deepEqual(ruleIds(store, `import type { Database } from '../../../db';`), []);
-  assert.deepEqual(ruleIds(store, `import { otherLogic } from '../../other/feature';`), []);
+  // Another feature is the domain: infra never depends on it (D9). Its output comes through .needs().
+  assert.deepEqual(ruleIds(store, `import { otherLogic } from '../../other/feature';`), [INFRA]);
   assert.deepEqual(ruleIds(store, `import type { Repos } from '../../other/feature';`), []);
   // Its own feature.ts imports it: a value import back is a module cycle.
   assert.deepEqual(ruleIds(store, `import { demoLogic } from '../feature';`), [INFRA]);
