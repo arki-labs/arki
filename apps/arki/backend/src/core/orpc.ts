@@ -6,9 +6,9 @@
  */
 import { ORPCError, os } from '@orpc/server';
 
-import { AuthenticationRequired } from '@arki/auth';
-import { guards } from '@arki/auth/orpc';
+import { authed, AuthenticationRequired } from '@arki/auth';
 import { ZodError } from '@arki/contracts';
+import { step } from '@arki/dot/orpc';
 import { errorMap } from '@arki/failure/orpc';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
@@ -71,11 +71,6 @@ const errorHandlingMiddleware = o.middleware(async ({ next }) => {
     });
   }
 });
-
-/**
- * Principal guards from `@arki/auth/orpc`. `authed` refuses a guest with `auth.unauthenticated` and narrows `context.principal` to non-null.
- */
-const { authed } = guards<ORPCContext>();
 
 /**
  * Authorization middleware factory — checks if user has a required permission.
@@ -153,7 +148,7 @@ export const protectedProcedure = o
   .use(timingMiddleware)
   .use(errorHandlingMiddleware)
   .errors(errorMap(AuthenticationRequired))
-  .use(authed)
+  .use(step(authed))
   .use(({ context, next }) => next({ context: { user: context.principal.user } }));
 
 /**
