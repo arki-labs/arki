@@ -36,7 +36,7 @@
 import type { AnyDefinedFeature, AnyFeatureCore, AnyFeatureSlice, DepsOf, EntrypointBinder } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Unit, WireNeeds } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
-import { allFeatures, entrypoint, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { allFeatures, entrypoint, handlerObserverOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
 import { token } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -399,14 +399,35 @@ function featureOwnedSchedules<TServices, const TDefs extends readonly FeatureSc
     key: 'schedules',
     // The driver's clock is not known yet: a host-clock driver rewrites the unlocked text at configure.
     actions: validated.map(({ definition, lockPlan }) => actionForSchedule(definition, 'internal', lockPlan)),
-    resolve: services =>
-      validated.map(({ definition, lockPlan }) => ({
+    resolve: services => {
+      const observer = observerOf(services);
+      return validated.map(({ definition, lockPlan }) => ({
         ...definition,
-        handler: (_context, run) => definition.handler(services, run),
+        handler: (_context, run) =>
+          observer.run({ transport: 'schedule', name: definition.name }, () => definition.handler(services, run)),
         ...(lockPlan === undefined ? {} : { lock: boundLock(definition.name, lockPlan, services) }),
-      })),
+      }));
+    },
     definitions: defs,
   };
+}
+
+/** The unit's handler observer; a bag that is not an object (a hand-made test value) just runs the call. */
+function observerOf(services: unknown): ReturnType<typeof handlerObserverOf> {
+  return handlerObserverOf(is(services, recordSchema) ? services : {});
+}
+
+/** The same schedules, each run bracketed by handler events from the declaring unit's observer. */
+function observedSchedules<TContext>(
+  defs: readonly ScheduleDef<TContext>[],
+  services: unknown,
+): readonly ScheduleDef<TContext>[] {
+  const observer = observerOf(services);
+  return defs.map(definition => ({
+    ...definition,
+    handler: (context, run) =>
+      observer.run({ transport: 'schedule', name: definition.name }, () => definition.handler(context, run)),
+  }));
 }
 
 /** The plan joined to the feature's `locks` service. */
@@ -456,7 +477,8 @@ export function schedules<
       kind: 'schedules',
       key: 'schedules',
       actions: scheduleActions(coreOrDefs),
-      resolve: () => coreOrDefs,
+      // The declaring unit's observer: runs emit handler events as that feature (or as `schedule` for app-level lists).
+      resolve: (services: unknown) => observedSchedules(coreOrDefs, services),
       definitions: coreOrDefs,
     };
   }
@@ -612,7 +634,7 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
         scheduler: ctx => {
           const durable = durableBackend(ctx);
           const all: readonly (ScheduleDef<TContext> & { readonly declaredName?: string })[] = [
-            ...own,
+            ...observedSchedules(own, ctx),
             ...collectFeatureSchedules(ctx, features),
           ];
           for (const definition of all) {

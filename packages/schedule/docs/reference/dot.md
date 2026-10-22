@@ -139,6 +139,13 @@ another process that does not hold these services. It is a type error and
 fails at declaration with `ARKI_SCHEDULE_E006`. The handler may return a
 value; a `ran` result keeps it.
 
+Every run of a Dot schedule also emits handler events (`starting`, then
+`completed` or `failed`), owned by the feature that declared it (`schedule`
+for app-level schedules). A returned failure, such as a `with` step refusal,
+is `completed` with outcome `refused`; a throw is `failed`. Turn them into
+logs and error reports with `logHandlers()` and `reportErrors()` from
+`@arki/dot`. The events only watch: the run result is unchanged.
+
 ### The host clock: `schedule({ clock: 'host' })`
 
 By default (`clock: 'internal'`) the runtime fires schedules on its own
