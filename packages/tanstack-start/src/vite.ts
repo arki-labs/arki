@@ -1,7 +1,5 @@
 import type { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import type { Plugin } from 'vite';
-import babel from '@rolldown/plugin-babel';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
 
 /**
  * Packages whose server-only subpaths are reached from the client module graph
@@ -41,26 +39,6 @@ export function fleetVite(): Plugin {
       };
     },
   };
-}
-
-type ReactCompilerOptions = Parameters<typeof reactCompilerPreset>[0];
-
-/**
- * React Compiler for the app: every component and hook is memoized at build
- * time, so a render re-runs only what its inputs changed. Place it after
- * `viteReact()`. Runs the stable Babel plugin (`babel-plugin-react-compiler`)
- * through `@rolldown/plugin-babel`, on the files the preset's filter selects.
- *
- * A component that breaks the rules of React is skipped by the compiler; the
- * `react-compiler/react-compiler` lint rule in `@arki/eslint-config` reports it
- * as an error first, so lint is where such a component shows up.
- *
- * `@vitejs/plugin-react` also ships a Rust port (`viteReact({ compiler: true })`
- * with `oxc-transform-react`), marked experimental by Vite. Switch this helper
- * to it when that flag goes; every app changes at once.
- */
-export function reactCompiler(options?: ReactCompilerOptions): ReturnType<typeof babel> {
-  return babel({ presets: [reactCompilerPreset(options)] });
 }
 
 type StartRouterOptions = NonNullable<NonNullable<Parameters<typeof tanstackStart>[0]>['router']>;

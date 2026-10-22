@@ -124,22 +124,22 @@ Build-time helpers for an app's `vite.config.ts`. Each one moves work from reque
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 
-import { fleetVite, oneChunkPerRoute, reactCompiler, zodCompiled } from '@arki/tanstack-start/vite';
+import { fleetVite, oneChunkPerRoute, zodCompiled } from '@arki/tanstack-start/vite';
 
 export default defineConfig({
   plugins: [
     tanstackStart({ router: { codeSplittingOptions: oneChunkPerRoute } }),
-    viteReact(),
-    reactCompiler(),
+    viteReact({ compiler: true }),
     zodCompiled(),
     fleetVite(),
   ],
 });
 ```
 
+React Compiler is not a helper here: it is `@vitejs/plugin-react`'s own option, `viteReact({ compiler: true })`, which runs the Rust port (`oxc-transform-react`, a dev dependency of the app). It replaces the plugin's JSX and Fast Refresh step, so it cannot be a separate plugin.
+
 | Export             | What it does                                                                                                                                                                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reactCompiler()`  | React Compiler on every component and hook, through `@rolldown/plugin-babel`. A render re-runs only what its inputs changed. Place it after `viteReact()`. A component that breaks the rules of React is reported by the `react-compiler` lint rule first.         |
 | `zodCompiled()`    | Server bundle only: prepends `import 'zod/compile'` to the server entry, so every schema the server constructs (oRPC inputs, server function validators, env) parses through a compiled validator. Schemas the compiler cannot model fall back to the interpreter. |
 | `oneChunkPerRoute` | `codeSplittingOptions` that keeps a route's loader in the route's own chunk. The default leaves every loader in the entry chunk, so the first page downloads every route's validators and server-function stubs.                                                   |
 | `fleetVite()`      | Excludes `@arki/admin` from the client dev dep-scan for apps that mount the `/api/fleet` snapshot route.                                                                                                                                                           |
