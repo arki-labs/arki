@@ -80,6 +80,7 @@
     "@types/react-dom": "catalog:react",
     "@vitejs/plugin-react": "catalog:",
     "nitro": "catalog:tanstack/start",
+    "oxc-transform-react": "catalog:",
     "vite": "catalog:build-tools",
     "vitest": "catalog:"
   }

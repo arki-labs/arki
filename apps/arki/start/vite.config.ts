@@ -9,7 +9,7 @@ import { contentPlugin } from '@arki/content-build/vite';
 import { devServer, printLocalhostUrl } from '@arki/dev-certs';
 import { phosphorPerIcon } from '@arki/icons/vite';
 import { createPwaPlugin } from '@arki/tanstack-start/pwa';
-import { fleetVite, oneChunkPerRoute, reactCompiler, zodCompiled } from '@arki/tanstack-start/vite';
+import { fleetVite, oneChunkPerRoute, zodCompiled } from '@arki/tanstack-start/vite';
 
 export default defineConfig({
   server: {
@@ -124,8 +124,7 @@ export default defineConfig({
     }),
     createPwaPlugin(),
     fleetVite(),
-    viteReact(),
-    reactCompiler(),
+    viteReact({ compiler: true }),
     zodCompiled(),
     phosphorPerIcon(),
   ],
