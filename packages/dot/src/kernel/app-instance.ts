@@ -51,6 +51,7 @@ import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../unit-contract.js';
 import { telemetryFor } from '../telemetry.js';
+import { handlerObserverFor } from './handler-events.js';
 import { nowMs } from './now.js';
 import { withPhaseSpan, withUnitHookSpan } from './otel.js';
 
@@ -1133,6 +1134,12 @@ export class DotAppImpl<
       $app: this.#appName,
       $unit: record.plugin.name,
       $telemetry: telemetryFor(record.plugin),
+      $handlers: handlerObserverFor({
+        appName: this.#appName,
+        feature: record.plugin.name,
+        hasObservers: () => this.#observers.size > 0,
+        emit: event => this.#emit(event),
+      }),
       $config: this.#config,
       $signal: signal,
       $describeAction: (actionId: string, patch: { readonly summary: string }) =>

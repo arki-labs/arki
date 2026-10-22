@@ -26,6 +26,7 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { AnyDefinedFeature } from './define-feature.js';
 import type { Lazy } from './lazy.js';
+import type { DotHandlerTransport } from './lifecycle-observer.js';
 import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
 import type { DotTelemetry } from './telemetry.js';
 import { isLazy } from './lazy.js';
@@ -170,6 +171,41 @@ export type WireNeeds<S extends NeedsShape> = {
  */
 export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
+/** Identity of one handler call, as a transport adapter names it. */
+export type DotHandlerRef = { readonly transport: DotHandlerTransport; readonly name: string };
+
+/** The kernel context key that carries {@link DotHandlerObserver}; a feature's services bag keeps it for adapters. */
+export const HANDLERS_KEY = '$handlers';
+
+/** How a transport reads its own outcomes, where Dot's default rule does not fit it. */
+export type DotHandlerOutcome = {
+  /**
+   * Which throws are refusals: an object means `completed/refused` (the error is
+   * still rethrown); `undefined` means `failed`. Default: every throw is `failed`.
+   */
+  readonly thrown?: (error: unknown) => { readonly failure?: Failure } | undefined;
+  /**
+   * The Failure a returned (settled) value stands for, if any: `completed/refused`
+   * when there is one. Default: the value itself when it is a Failure.
+   */
+  readonly returned?: (value: unknown) => Failure | undefined;
+};
+
+/** What a transport adapter calls around one handler to make its lifecycle events. */
+export type DotHandlerObserver = {
+  /**
+   * Whether any observer listens right now. Observers can be added after boot,
+   * so ask per call; a hot path uses it to skip building what it would hand to `run`.
+   */
+  readonly watching: () => boolean;
+  /**
+   * Run one handler call: emits `starting`, then `completed` or `failed`. Returns
+   * `run()`'s value unchanged: a promise is observed, not wrapped. `outcome`
+   * overrides how a throw or a returned value is read (see {@link DotHandlerOutcome}).
+   */
+  readonly run: <T>(ref: DotHandlerRef, run: () => T, outcome?: DotHandlerOutcome) => T;
+};
+
 /**
  * Kernel-supplied context keys, present in every service-carrying hook
  * context. The `$` prefix is a reserved namespace: `infra()` rejects
@@ -184,6 +220,8 @@ export type KernelCtx = {
   readonly $unit: string;
   /** Custom spans, events, metrics and correlated logs scoped to this mounted unit or feature. */
   readonly $telemetry: DotTelemetry;
+  /** Handler lifecycle events for transport adapters (rpc, http, job, schedule): see {@link DotHandlerObserver}. */
+  readonly $handlers: DotHandlerObserver;
   /** Read-only runtime config bag from `defineApp(name, { config })`. */
   readonly $config: Readonly<Record<string, unknown>>;
   /**

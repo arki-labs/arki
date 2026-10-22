@@ -118,10 +118,10 @@ The adapter entries need more:
 
 | Import                   | What it gives you                                                                                              |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `@arki/dot`              | `defineApp`, `infra`, `entrypoint`, `service`, `token`, `lazy`, `rename`, `hookSignals`, the errors and the manifest types. |
+| `@arki/dot`              | `defineApp`, `infra`, `entrypoint`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `reportErrors`, `logHandlers`, the errors and the manifest types. |
 | `@arki/dot/unit`       | The unit author's surface: `infra`, `entrypoint`, `unit`, handles, tokens, `rename` and the contract types.                       |
 | `@arki/dot/feature`      | `defineFeature`, `unit` (for `fromFeatures`), `routerFor`, `entrypointOnly` and the services bag for domain modules.                        |
-| `@arki/dot/orpc`         | `rpc`, `needsMiddleware`, `errorCaptureMiddleware`. Needs the optional peer `@orpc/server`.                    |
+| `@arki/dot/orpc`         | `rpc`, `needsMiddleware`, `step`, `around`. Needs the optional peer `@orpc/server`.                    |
 | `@arki/dot/log`          | `log()`, the logging unit. Mount it first.                                                                   |
 | `@arki/dot/runtime`      | `createAppRuntime`: one started app per server process, safe under Vite hot updates.                           |
 | `@arki/dot/test-harness` | `testUnit`, `testApp`, `bootTestApp`, `fake`.                                                                |

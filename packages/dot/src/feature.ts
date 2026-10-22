@@ -32,13 +32,14 @@ import type {
   AnyHandle,
   AnyUnit,
   CtxOf,
+  DotHandlerObserver,
   NeedsShape,
   Service,
   Token,
   UnitBinder,
 } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
-import { isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
+import { HANDLERS_KEY, isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
 
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 export type { FeatureErrorCode } from './feature-error.js';
@@ -295,6 +296,21 @@ export function sliceOf(ctx: object, f: AnyDefinedFeature): Readonly<Record<stri
     });
   }
   return record as Readonly<Record<string, unknown>>;
+}
+
+const passThroughObserver: DotHandlerObserver = { watching: () => false, run: (_ref, run) => run() };
+
+/**
+ * The handler observer a feature's services bag carries (its `$handlers`), for
+ * transport adapters that emit handler events. A bag without one — an adapter
+ * used outside Dot, a hand-made test bag — gets a pass-through that just runs the call.
+ */
+export function handlerObserverOf(services: object): DotHandlerObserver {
+  const observer: unknown = Reflect.get(services, HANDLERS_KEY);
+  if (observer === undefined) return passThroughObserver;
+  // Erasure seam: the kernel wrote this key (`#buildHookCtx`) and the feature's services factory
+  // copied it through; nothing else writes `$` keys (`ARKI_DOT_E014`).
+  return observer as DotHandlerObserver;
 }
 
 export { telemetryFor } from './telemetry.js';

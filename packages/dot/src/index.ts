@@ -119,9 +119,18 @@ export type {
   DotLifecycleEvent,
   DotLifecycleEventStatus,
   DotLifecycleObserver,
+  DotHandlerCompletedEvent,
+  DotHandlerFailedEvent,
+  DotHandlerLifecycleEvent,
+  DotHandlerStartingEvent,
+  DotHandlerTransport,
   DotPhaseLifecycleEvent,
   DotUnitHookLifecycleEvent,
 } from './lifecycle-observer.js';
+
+export type { DotHandlerObserver, DotHandlerOutcome, DotHandlerRef } from './unit-contract.js';
+export { logHandlers, reportErrors } from './handler-observers.js';
+export type { ReportErrorsOptions } from './handler-observers.js';
 
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';

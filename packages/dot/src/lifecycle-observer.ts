@@ -17,6 +17,8 @@
  * @see packages/dot/docs/principles.md — principle 5 (zero optional deps)
  */
 
+import type { Failure } from '@arki/failure';
+
 import type { DotLifecycleHook } from './lifecycle.js';
 
 /**
@@ -25,6 +27,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  *
  *   - `'phase'`     — boundary of a top-level lifecycle phase
  *   - `'unit-hook'`  — boundary of a single unit's hook execution
+ *   - `'handler'`   — one handler call (an rpc procedure, an http route, a job, a schedule)
  *
  * Status discriminates the boundary itself:
  *
@@ -35,7 +38,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  * `starting` events never carry `durationMs` / `error`. `completed` events
  * carry `durationMs`. `failed` events carry both `durationMs` and `error`.
  */
-export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotUnitHookLifecycleEvent;
+export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotUnitHookLifecycleEvent | DotHandlerLifecycleEvent;
 
 /** Possible event statuses. See {@link DotLifecycleEvent}. */
 export type DotLifecycleEventStatus = 'starting' | 'completed' | 'failed';
@@ -71,6 +74,55 @@ export type DotUnitHookLifecycleEvent = {
   readonly error?: unknown;
   readonly timestamp: number;
 };
+
+/** The transport a handler call came in on. */
+export type DotHandlerTransport = 'rpc' | 'http' | 'job' | 'schedule';
+
+/** Identity of a handler call: who ran, over which transport, as which entry. */
+type DotHandlerEventBase = {
+  readonly kind: 'handler';
+  readonly transport: DotHandlerTransport;
+  /** The unit that owns the handler: its `$unit` (the feature name, `name#instance` for an instance). */
+  readonly feature: string;
+  /** rpc: `path.join('.')`; http: `METHOD /path`; job: the job name; schedule: the schedule name. */
+  readonly name: string;
+  readonly appName: string;
+  readonly timestamp: number;
+};
+
+/** A handler call is about to run. */
+export type DotHandlerStartingEvent = DotHandlerEventBase & {
+  readonly status: 'starting';
+  readonly durationMs?: never;
+  readonly outcome?: never;
+  readonly failure?: never;
+  readonly error?: never;
+};
+
+/**
+ * A handler call ended without throwing. `outcome` is `'refused'` when it
+ * returned a `Failure` (or its transport counts the throw as a refusal, as an
+ * oRPC error below 500 is); `failure` carries the refusal when there is one.
+ */
+export type DotHandlerCompletedEvent = DotHandlerEventBase & {
+  readonly status: 'completed';
+  readonly durationMs: number;
+  readonly outcome: 'ok' | 'refused';
+  readonly failure?: Failure;
+  readonly error?: never;
+};
+
+/** A handler call threw or rejected with something that is not a refusal: a bug, not traffic. */
+export type DotHandlerFailedEvent = DotHandlerEventBase & {
+  readonly status: 'failed';
+  readonly durationMs: number;
+  readonly error: unknown;
+  readonly outcome?: never;
+  readonly failure?: never;
+};
+
+/** One handler call, bracketed like a phase: `starting`, then `completed` or `failed`. */
+export type DotHandlerLifecycleEvent = DotHandlerStartingEvent | DotHandlerCompletedEvent | DotHandlerFailedEvent;
 
 /**
  * Observer function signature. Synchronous by contract — observers MUST

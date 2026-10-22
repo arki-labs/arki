@@ -321,6 +321,41 @@ Each event carries `kind` (`'phase'` or `'unit-hook'`), `phase`, `status`
 since epoch), and on completion `durationMs`. Failed events also carry
 `error`.
 
+### Handler events
+
+A handler call is a third kind of event, `kind: 'handler'`. Transport adapters
+wrap each call (an rpc procedure today; routes, jobs and schedules as their
+adapters adopt it), so the stream shows `starting`, then `completed` or
+`failed`, per call.
+
+Each handler event adds `transport` (`'rpc' | 'http' | 'job' | 'schedule'`),
+`feature` (the owning unit's name, `name#instance` for an instance) and `name`
+(rpc: the procedure path, `orders.pay.card`; http: `METHOD /path`; job and
+schedule: their name). A `completed` event has `outcome`: `'ok'`, or
+`'refused'` when the call returned a `Failure` or an oRPC error below 500
+passed through (`failure` is set when the error carries one). `failed` means a
+bug: the call threw anything else, and the event carries `error`. The error is
+rethrown unchanged either way.
+
+Two observers ship in `@arki/dot`:
+
+```ts skip="fragment: shows the two observers, not a runnable app"
+import { defineApp, logHandlers, reportErrors } from '@arki/dot';
+
+defineApp('shop', {
+  observers: [reportErrors({ report: (error, ref) => captureException(error, ref) }), logHandlers()],
+});
+```
+
+- `reportErrors({ report })` calls `report(error, { transport, feature, name })`
+  for `failed` events only. A reporter that throws is logged at warn on
+  `arki:dot:handlers` and ignored.
+- `logHandlers()` logs one DEBUG line per ended call on `arki:dot:handlers`:
+  `rpc orders.orders.pay.card ok 12ms`. It is opt-in: with no observer
+  registered, the kernel runs the handler and emits nothing.
+
+A rpc procedure emits events only when it goes through `bind(logic)`.
+
 Observers may also be added post-hoc:
 
 ```ts continue

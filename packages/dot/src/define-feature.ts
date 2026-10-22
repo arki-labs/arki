@@ -66,7 +66,7 @@ import type {
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { traceUsecase } from './kernel/otel.js';
 import { superviseUsecase } from './kernel/usecase.js';
-import { createUnitRuntime, handleOf, isLazyWitness, rename } from './unit-contract.js';
+import { createUnitRuntime, handleOf, HANDLERS_KEY, isLazyWitness, rename } from './unit-contract.js';
 
 type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer I) => void
   ? I
@@ -1465,7 +1465,9 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     // The resolved services (needs + infra + children + usecases, by local key) — what `bind(logic)` hands a request.
     // One key per feature, read by the feature's own name: no per-handle resolution, so a remapped need just works.
     // The kernel's `$` keys stay out: a handler context carries the feature's services, not the kernel's.
-    [servicesKey]: ctx => Object.fromEntries(Object.entries(servicesOf(ctx)).filter(([k]) => !k.startsWith('$'))),
+    // The one exception is `$handlers`: transport adapters read it to emit handler events, then strip it.
+    [servicesKey]: ctx =>
+      Object.fromEntries(Object.entries(servicesOf(ctx)).filter(([k]) => !k.startsWith('$') || k === HANDLERS_KEY)),
     // One record under `feature.<name>`, keyed by entrypoint key — what `sliceOf` reads.
     [sliceKey]: ctx => {
       const services = servicesOf(ctx);

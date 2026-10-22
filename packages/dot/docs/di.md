@@ -315,40 +315,37 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
   the kind of cycle no amount of coffee fixes).
 
-### Error capture: `errorCaptureMiddleware`
+### Error capture: `reportErrors`
 
-One middleware in front of the app router sends a procedure's unexpected
-failures to your error tracker, so no procedure needs its own try/catch:
+Every rpc call made through `bind` emits handler events (see
+[In-process observers](observability.md#in-process-observers)). One observer
+sends the unexpected failures to your error tracker, so no procedure needs its
+own try/catch:
 
 ```ts
-import { oc } from '@orpc/contract';
-import { implement } from '@orpc/server';
-import { z } from 'zod';
+import { defineApp, reportErrors } from '@arki/dot';
 
-import { errorCaptureMiddleware } from '@arki/dot/orpc';
-
-// Stand-ins for your tracker's capture call, your contract and your request context.
+// Stand-in for your tracker's capture call.
 const captured: unknown[] = [];
 const captureException = (error: unknown, context: { tags: Record<string, string> }) => {
   captured.push({ error, context });
 };
-const rpcContract = { ping: oc.output(z.string()) };
-type RequestContext = { readonly requestId: string };
 
-// core/orpc.ts — once per app
-export const errorCapture = errorCaptureMiddleware({
-  report: (error, { path }) => captureException(error, { tags: { procedure: path.join('.') } }),
+export const app = defineApp('shop', {
+  observers: [
+    reportErrors({
+      report: (error, { transport, feature, name }) => captureException(error, { tags: { transport, feature, name } }),
+    }),
+  ],
 });
-
-// router.ts
-const os = implement(rpcContract).$context<RequestContext>().use(errorCapture);
-export const router = os.router({ ping: os.ping.handler(() => 'pong') });
 ```
 
-Every error is rethrown unchanged: capture never changes the response. An
-`ORPCError` below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, …) is normal traffic and
-is not reported. `report` runs synchronously; if it throws, that is logged at
-warn on `arki:dot:orpc` and the caller still gets the procedure's own error.
+Capture never changes the response: the error is rethrown unchanged. An
+`ORPCError` below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, a step's refusal) is
+normal traffic and is not reported. `report` runs synchronously; if it throws,
+that is logged at warn on `arki:dot:handlers` and the caller still gets the
+procedure's own error. The same observer reports jobs, schedules and routes
+once their adapters emit handler events.
 
 ### Spans for every usecase
 

@@ -53,7 +53,6 @@ import type { Failure, FailureOf, SuccessOf } from '@arki/failure';
 import type { DeclaredErrors } from '@arki/failure/orpc';
 import { isFailure } from '@arki/failure';
 import { rpcError } from '@arki/failure/orpc';
-import { getLogger } from '@arki/log';
 import { is, recordSchema } from '@arki/schema';
 
 import type { RpcEntrypoint } from './define-feature.js';
@@ -61,7 +60,9 @@ import type { HandleEntries, ServicesBag } from './feature.js';
 import type { JsonObject } from './manifest.js';
 import type { ActionDeclaration, CtxOf, NeedsShape } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
+import { handlerObserverOf } from './feature.js';
 import { toJsonObject } from './manifest.js';
+import { HANDLERS_KEY } from './unit-contract.js';
 
 /** The least a request context carries for `bind`: the services bag the gateway built for this request. */
 export type RequestContextShape = { readonly services: ServicesBag };
@@ -96,10 +97,10 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
 export function needsMiddleware<Ctx extends RequestContextShape>() {
   const builder = os.$context<Ctx>();
   return <H extends NeedsShape>(logic: { readonly name: string; readonly handles: H } & ShadowGuard<Ctx, H>) =>
-    builder.middleware(({ context, next }) => {
+    builder.middleware(({ context, next, path }) => {
       const key = `${logic.name}.services`;
       const services = context.services[key];
-      if (services === undefined) {
+      if (typeof services !== 'object' || services === null) {
         throw new FeatureError({
           code: FEATURE_ERROR_CODES.missingCapability,
           message: `[feature] "${logic.name}": its services ("${key}") are not in the request context's bag.`,
@@ -107,14 +108,32 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
             "Spread providesOf(units) over the features' units() into the gateway's needs and pass servicesOf(ctx, units) to createContext.",
         });
       }
-      return next({
-        // Erasure seam: the kernel built this record from the unit's needs, which the
-        // chain typed as the feature's handles. oRPC asks that new context keys agree
-        // with the current ones (`IntersectPick`); no alias is a request key — the
-        // guard above proves it — but TypeScript cannot see that through a generic `H`.
-        context: services as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
-      });
+      // The bag carries the kernel's `$handlers` for this adapter; the handler's context stays kernel-free.
+      const handlerServices = Object.fromEntries(Object.entries(services).filter(([name]) => name !== HANDLERS_KEY));
+      return handlerObserverOf(services).run(
+        { transport: 'rpc', name: path.join('.') },
+        () =>
+          next({
+            // Erasure seam: the kernel built this record from the unit's needs, which the
+            // chain typed as the feature's handles. oRPC asks that new context keys agree
+            // with the current ones (`IntersectPick`); no alias is a request key — the
+            // guard above proves it — but TypeScript cannot see that through a generic `H`.
+            context: handlerServices as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
+          }),
+        { thrown: refusalOf },
+      );
     });
+}
+
+/**
+ * An oRPC error below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, a declared failure, a step's refusal)
+ * is normal traffic: the call was refused, not broken. Anything else thrown is a bug.
+ */
+function refusalOf(thrown: unknown): { readonly failure?: Failure } | undefined {
+  if (!(thrown instanceof ORPCError) || thrown.status >= 500) return undefined;
+  // `rpcError` keeps the failure as `cause`; a hand-thrown error may carry one as `data`.
+  if (isFailure<unknown>(thrown.cause)) return { failure: thrown.cause };
+  return isFailure<unknown>(thrown.data) ? { failure: thrown.data } : {};
 }
 
 /** The oRPC middleware {@link step} makes: reads `In`, adds `Added`, or refuses with `Refused`. */
@@ -179,44 +198,6 @@ export function around<In extends Context>(
   fn: <T>(context: In, next: () => Promise<T>) => Promise<T>,
 ): AroundMiddleware<In> {
   return async options => fn(options.context, async () => options.next());
-}
-
-/** What `errorCaptureMiddleware` hands its reporter with the error. */
-export type ErrorCaptureInfo = { readonly path: readonly string[] };
-
-/**
- * Make the app's error capture, once:
- * `export const errorCapture = errorCaptureMiddleware({ report: (error, { path }) => captureException(error) })`.
- *
- * The middleware reports a procedure's unexpected failures, then rethrows them
- * unchanged: capture never changes the response. An `ORPCError` below 500
- * (`UNAUTHORIZED`, `BAD_REQUEST`, …) is normal traffic, not an incident, and
- * is not reported. `report` is called synchronously; a reporter that throws is
- * logged at warn and ignored, so the caller still gets the procedure's own error.
- * Written on an empty context, it fits any app's implementer.
- */
-export function errorCaptureMiddleware(options: {
-  readonly report: (error: unknown, info: ErrorCaptureInfo) => void;
-}) {
-  const logger = getLogger('arki:dot:orpc');
-  return os.middleware(async ({ next, path }) => {
-    try {
-      return await next();
-    } catch (error) {
-      const isClientError = error instanceof ORPCError && error.status < 500;
-      if (!isClientError) {
-        try {
-          options.report(error, { path });
-        } catch (reportError) {
-          logger.warn('errorCapture: the reporter threw on {procedure}; the error was not reported', {
-            procedure: path.join('.'),
-            reportError: String(reportError),
-          });
-        }
-      }
-      throw error;
-    }
-  });
 }
 
 /**
