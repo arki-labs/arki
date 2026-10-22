@@ -249,6 +249,20 @@ binding, direction, address })` in `configure`. `rpc()` from
    unit.
 3. `npx dot doctor --json | jq '.data.actions'`: its `status` is `"ok"`.
 
+### Wrap a handler (auth, a transaction)
+
+1. Write a step (`(ctx) => object | Failure`) or an around
+   (`<T>(ctx, next: () => Promise<T>) => Promise<T>`) as a plain function.
+   Auth checks already exist: `authed`, `verified`, `role(name)` from `@arki/auth`.
+2. Attach it with the transport's `step()` / `around()` (`@arki/dot/orpc`,
+   `@arki/http`, `@arki/queue`) or list it in `with: [...]` (schedule, CLI).
+3. Declare the step's failures on the procedure or route. Missing ones are a
+   compile error.
+4. App-wide logging and error reports are observers, not steps: `logHandlers()`,
+   `reportErrors({ report })` in `defineApp(name, { observers })`.
+
+Full model: [Steps and arounds](middleware.md).
+
 ### Add an env var
 
 1. Add the key to the env schema of the env unit (`@arki/dot/env`).
@@ -310,6 +324,11 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 - `dot doctor` never calls `start()`. Workers and servers in `start` are not
   checked by doctor; test them in your app's tests.
 - `@orpc/server` is an optional peer. Only `@arki/dot/orpc` loads it.
+- A step must not return `{}` on success: TypeScript folds `{} | Failure` into
+  `{}`, so the failure drops out of the type and nobody has to declare it.
+  Return a non-empty object (`{ isAdmin: true }`).
+- Handler events come only from handlers Dot mounts (oRPC through `bind`,
+  HTTP routes, jobs, schedules). A procedure built from plain `os` emits none.
 - Adapters (`@arki/dot/env`, `@arki/db/dot`, `@arki/kv/dot`,
   `@arki/journal/dot`) live in their own packages. `@arki/dot` never imports
   them.
@@ -404,6 +423,7 @@ checks that every `jq` path in this guide exists in the real CLI output.
 - [Unit authoring](unit-authoring.md): write a unit.
 - [Adapter authoring](adapter-authoring.md): expose a package as a `./dot` unit.
 - [Observability](observability.md): OpenTelemetry, observers, `app.timeline()`.
+- [Steps and arounds](middleware.md): wrap a handler once for every transport.
 - [Quickstart](quickstart.md): build an app, break it, read the error.
 - [Dependency injection](di.md): needs, provides, tokens, `rename`, features.
 - [The `dot` command](cli.md): every command and its side effects.

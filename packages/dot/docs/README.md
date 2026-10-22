@@ -22,6 +22,8 @@ organised by job. Pick the one that matches what you are about to do.
   error, inspect it with `dot explain` and `dot doctor`.
 - [Dependency injection](./di.md): needs, provides, handles, tokens, `rename`,
   lazy services and `defineFeature`.
+- [Steps and arounds](./middleware.md): wrap a handler once for every
+  transport, and watch every handler with handler events.
 - [A complex setup](./complex-setup.md): a many-unit app and the order it
   boots in.
 - [Unit authoring](./unit-authoring.md): write your own unit.

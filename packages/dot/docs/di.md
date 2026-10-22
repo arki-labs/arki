@@ -216,27 +216,29 @@ units with `f.units()`.
 
 ```ts
 import { oc } from '@orpc/contract';
-import { implement, ORPCError, os } from '@orpc/server';
+import { implement } from '@orpc/server';
 import { z } from 'zod';
 
 import type { DepsOf, ServicesBag } from '@arki/dot/feature';
 import { infra } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { needsMiddleware, rpc } from '@arki/dot/orpc';
-import { orThrow } from '@arki/failure';
+import { needsMiddleware, rpc, step } from '@arki/dot/orpc';
+import { defineFailure, orThrow } from '@arki/failure';
+import { errorMap } from '@arki/failure/orpc';
 
 // core/orpc.ts — once per app
 type Session = { readonly user: { readonly id: string } };
 export type RequestContext = { session: Session | null; headers: Headers; services: ServicesBag };
 export const bind = needsMiddleware<RequestContext>();
-export const authed = os.$context<RequestContext>().middleware(({ context, next }) => {
-  if (!context.session) throw new ORPCError('UNAUTHORIZED');
-  return next({ context: { session: context.session } });
-});
+// A step: a plain function, attached with `step()` (see Steps and arounds).
+// With `@arki/auth`, use its `authed` and `AuthenticationRequired` instead.
+export const SignInRequired = defineFailure('auth.unauthenticated', { status: 401, message: 'Sign in to continue.' });
+export const authed = (ctx: { readonly session: Session | null }) =>
+  ctx.session === null ? SignInRequired() : { session: ctx.session };
 
-// features/daily-digest/entrypoints/rpc.ts — browser-safe: oRPC contract and zod only
+// features/daily-digest/entrypoints/rpc.ts — browser-safe: oRPC contract, zod and failure definitions
 export const digestRpcContract = oc.router({
-  preview: oc.output(z.array(z.string())),
+  preview: oc.errors(errorMap(SignInRequired)).output(z.array(z.string())),
   admin: { purge: oc.output(z.number()) },
 });
 
@@ -270,7 +272,7 @@ export const rpcImplementer = implement(digestRpcContract).$context<RequestConte
 export const digestProcedures = {
   preview: (impl: typeof rpcImplementer) =>
     impl.preview
-      .use(authed)
+      .use(step(authed))
       .handler(async ({ context }) => orThrow(await context.usecases.preview(context.session.user.id))),
   admin: {
     purge: (impl: typeof rpcImplementer) =>
@@ -289,6 +291,9 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
   the store needs `db`. An alias equal to a request-context key does not
   compile either; a handle missing from the bag throws `ARKI_DOT_E026`, naming
   the alias.
+- **`step(authed)`** runs a plain function before the handler. It adds
+  `session` to the context, or refuses with `SignInRequired`, which the
+  contract must declare. See [Steps and arounds](middleware.md).
 - **`rpc(contract, implementer, factories)`** builds the router from one factory per
   procedure. The factories object is shaped like the contract — a group
   (`admin.purge`) is a nested object in the same file. Keys
@@ -344,8 +349,8 @@ Capture never changes the response: the error is rethrown unchanged. An
 `ORPCError` below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, a step's refusal) is
 normal traffic and is not reported. `report` runs synchronously; if it throws,
 that is logged at warn on `arki:dot:handlers` and the caller still gets the
-procedure's own error. The same observer reports jobs, schedules and routes
-once their adapters emit handler events.
+procedure's own error. The same observer reports HTTP routes, jobs and
+schedules too: their Dot adapters emit handler events.
 
 ### Spans for every usecase
 

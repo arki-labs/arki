@@ -293,6 +293,7 @@ const app = await defineApp('my-app', {
 if (isFailure(app)) throw new Error(app.code);
 
 for (const event of events) {
+  if (event.kind === 'handler') continue; // handler events have no phase; see below
   const who = event.kind === 'unit-hook' ? ` ${event.plugin}` : '';
   console.log(`${event.kind} ${event.phase} ${event.status}${who}`);
 }
@@ -324,9 +325,9 @@ since epoch), and on completion `durationMs`. Failed events also carry
 ### Handler events
 
 A handler call is a third kind of event, `kind: 'handler'`. Transport adapters
-wrap each call (an rpc procedure today; routes, jobs and schedules as their
-adapters adopt it), so the stream shows `starting`, then `completed` or
-`failed`, per call.
+wrap each call (an rpc procedure through `bind`, an HTTP route, a job, a
+schedule run), so the stream shows `starting`, then `completed` or `failed`,
+per call. CLI commands emit none: Dot does not mount them.
 
 Each handler event adds `transport` (`'rpc' | 'http' | 'job' | 'schedule'`),
 `feature` (the owning unit's name, `name#instance` for an instance) and `name`

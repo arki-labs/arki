@@ -37,6 +37,7 @@ Wrong wiring is a compile error at `.infra()`, `.features()` or `.entrypoints()`
 - [Add a unit](docs/agent-guide.md#add-a-unit)
 - [Add a feature](docs/agent-guide.md#add-a-feature)
 - [Add an action](docs/agent-guide.md#add-an-action)
+- [Wrap a handler: a step or an around, on every transport](docs/middleware.md)
 - [Debug a boot failure](docs/agent-guide.md#debug-a-boot-failure)
 - [Look up an error code](docs/agent-guide.md#errors)
 - [Write a unit](docs/unit-authoring.md)

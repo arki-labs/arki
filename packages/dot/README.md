@@ -132,6 +132,41 @@ The adapter entries need more:
 
 Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy retries and cancellation.
 
+## Steps and arounds
+
+A step and an around are plain functions, written once. A step reads the
+context and returns keys to add, or a failure to refuse the call. An around
+wraps everything declared after it, for a transaction or a retry. Each
+transport attaches them with its own `step()` and `around()`: `@arki/dot/orpc`,
+`@arki/http`, `@arki/queue`, or `with: [...]` on schedules and CLI commands.
+
+```ts
+import { os } from '@orpc/server';
+
+import { around, step } from '@arki/dot/orpc';
+import { defineFailure } from '@arki/failure';
+import { errorMap } from '@arki/failure/orpc';
+
+type Db = { transaction<T>(work: () => Promise<T>): Promise<T> };
+const SignInRequired = defineFailure('shop.sign_in_required', { status: 401 });
+
+const authed = (ctx: { readonly userId: string | null }) =>
+  ctx.userId === null ? SignInRequired() : { userId: ctx.userId };
+const inTransaction = <T>(ctx: { readonly db: Db }, next: () => Promise<T>) => ctx.db.transaction(next);
+
+export const refund = os
+  .$context<{ userId: string | null; db: Db }>()
+  .errors(errorMap(SignInRequired)) // drop this line and `.use(step(authed))` does not compile
+  .use(step(authed))
+  .use(around(inTransaction))
+  .handler(({ context }) => ({ refundedBy: context.userId }));
+```
+
+A refusal is the declared `ORPCError` here, an error envelope on HTTP, a job
+outcome on the queue. `logHandlers()` and `reportErrors({ report })` in
+`defineApp(name, { observers })` watch every handler Dot mounts. Read
+[Steps and arounds](./docs/middleware.md).
+
 ## Failure behaviour
 
 Every managed phase returns typed `@arki/failure` values. Check `isFailure(builder.configure())` before reading the manifest, and inspect awaited boot, start, stop and dispose outcomes. Concrete callback refusals remain inferred; unknown exceptions become canonical `UnexpectedDefect` values. Static declaration helpers can still throw outside a managed boundary. See [Upgrade typed phases](./docs/upgrade-phases.md) for the breaking changes and exact phase outcomes.
@@ -217,6 +252,7 @@ is measured against. Then pick the page for your task. The full index is
 | ------------------------------------------------------ | ------------------------------------------------------------------- |
 | [Quickstart](./docs/quickstart.md)                     | build an app, break it, and read the error.                         |
 | [Dependency injection](./docs/di.md)                   | wire needs and provides, tokens, `rename`, lazy services, features. |
+| [Steps and arounds](./docs/middleware.md)              | wrap a handler once (auth, a transaction) for every transport.      |
 | [A complex setup](./docs/complex-setup.md)             | see a many-unit app and the order it boots in.                    |
 | [Testing units](./docs/testing.md)                   | test a unit against fakes, or several units together.           |
 | [Logging, shutdown and timeouts](./docs/operations.md) | run an app under a process manager.                                 |
