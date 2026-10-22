@@ -214,11 +214,26 @@ await shop.dispose();
 
 Rules the types enforce (each is also a coded runtime check):
 
-- Steps run in order; a step out of order does not compile.
+- Steps run in order; a step out of order does not compile. The order is
+  `.needs()`, `.infra()`, `.domainServices()`, `.features()` (children),
+  `.usecases()`, `.provides()`, `.entrypoints()`.
+- Each step sees only what is written above it. That is why a cycle cannot be
+  written: a domain service cannot ask for a usecase, and infra cannot ask for
+  a domain service.
 - `.usecases({ name: factory })` takes one factory per usecase; each gets
-  `{ ...needs, ...infra }` (and may `Pick` a subset); asking for a dep the
-  feature lacks is a compile error. `.provides` factories and entrypoints get
-  the same plus `usecases`, built once per boot.
+  `{ ...needs, ...infra, ...domainServices }` (and may `Pick` a subset);
+  asking for a dep the feature lacks is a compile error. Each factory gets its
+  own frozen copy, built once per boot.
+- `.provides` factories get `{ usecases }` and nothing else. Entrypoints get
+  the usecases, the request keys, and the needs marked `entrypointOnly(...)`.
+  Neither sees repos, infra, plain needs or domain services. To publish data
+  behind a repository, provide a usecase that reads it.
+- Something is a domain service when two or more usecases need it, or one
+  child feature does. With one consumer in the same feature, build it in that
+  usecase's factory body. A domain service lives in `domain-services/`, one
+  per file, registered with `.domainServices({ name: factory })`. Its factory
+  asks for `Pick<DomainDeps, …>` and cannot return a `Failure`. Peers in one
+  call never see each other. A child names it with `domainService(fn)`.
 - `rpc(contract, implementer, factories)` takes one factory per procedure
   (the whole tree in one `entrypoints/procedures.ts`), shaped like the contract; an extra, missing or wrong procedure does not compile.
 - Feature infra is private: `.infra(store)` publishes `daily-digest.store`
@@ -291,7 +306,8 @@ await app.dispose();
 ```
 
 Infrastructure never depends on the domain: nothing in `.infra()` can need a
-feature service, and `.infra()` is closed once `.features()` is called.
+feature service, a domain service or a usecase, and `.infra()` is closed once
+`.features()` is called. A feature's own infra never imports any `feature.ts`.
 Adapter authors pick the side with the constructor: `entrypoint.fromFeatures(features => unit(...))`
 is accepted only by `.entrypoints()`; `infra.fromFeatures(features => unit(...))` — an infra
 unit that reads the features' static declarations, like the journal — only

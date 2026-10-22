@@ -20,8 +20,8 @@ this guide and in the README is compiled by `bun run test:docs`.
    coded errors (`ARKI_DOT_E012`, `E013`, `E020`).
 4. A unit has five hooks: `configure` (sync, no I/O), `boot` (side effects,
    returns undefined, a refusal or an ownership plan), `start`, `stop`, `dispose`.
-5. A feature is one chain: `defineFeature(name).needs(...).infra(...).usecases(...).provides(...).entrypoints(...)`
-   from `@arki/dot/feature`. The app mounts it with `.features([...])`.
+5. A feature is one chain: `defineFeature(name).needs(...).infra(...).domainServices(...).features(...).usecases(...).provides(...).entrypoints(...)`
+   from `@arki/dot/feature`. `.domainServices()` and `.features()` are optional. The app mounts it with `.features([...])`.
 6. `app.manifest` is the static graph (units, services, actions,
    dependencies, lifecycle, projections). `app.diagnostics` is the runtime
    snapshot (per-unit status, lifecycle, issues).
@@ -163,7 +163,8 @@ import { isFailure } from '@arki/failure';
 const database = infra({ name: 'database', provides: { db: () => ({ query: async (sql: string) => [sql] }) } });
 const reports = defineFeature('reports')
   .needs({ db: database.provides.db })
-  .provides({ reports: ({ db }) => ({ daily: () => db.query('daily') }) })
+  .usecases({ daily: ({ db }) => () => db.query('daily') })
+  .provides({ reports: ({ usecases }) => ({ daily: usecases.daily }) })
   .entrypoints();
 
 // `dot explain --json` prints this manifest under `.data`. No boot hook runs.
@@ -231,13 +232,21 @@ as Mermaid.
 ### Add a feature
 
 1. Write the chain in `features/<name>/feature.ts` with `defineFeature` from
-   `@arki/dot/feature`. Order: `needs`, `infra`, `usecases`, `provides`,
-   `entrypoints`. The README section "Features as a chain" has the full shape.
+   `@arki/dot/feature`. Order: `needs`, `infra`, `domainServices`, `features`
+   (children), `usecases`, `provides`, `entrypoints`. The section "Features as a chain" in
+   [Dependency injection](di.md) has the full shape.
 2. One file per usecase in `usecases/`. It imports `type Deps` from
    `../feature` and asks for `Pick<Deps, ...>`. (A factory written inline in
    `feature.ts` needs no annotation: `({ store }) => …` gets the deps type.)
-3. Mount it with `.features([myFeature])`.
-4. `npx dot explain --json | jq '.data.dependencies'`: the feature's edges
+3. When two or more usecases share logic that needs a port, or a child feature
+   needs it, write one file in `domain-services/` and register it with
+   `.domainServices({ name: factory })`. The factory asks for
+   `Pick<DomainDeps, ...>`, where `DomainDeps` is what a domain service may
+   ask for. A child names it with `domainService(fn)`.
+4. `provides` factories get `{ usecases }` and nothing else. Entrypoints get
+   usecases, the request keys and needs marked `entrypointOnly(...)`.
+5. Mount it with `.features([myFeature])`.
+6. `npx dot explain --json | jq '.data.dependencies'`: the feature's edges
    show, with the capability `key`.
 
 ### Add an action
@@ -312,6 +321,13 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
   See [Upgrade typed phases](upgrade-phases.md).
 - Providers come before consumers in `.infra()`, `.features([...])` and `.entrypoints()`. The
   wrong order is a compile error, and `ARKI_DOT_E020` for erased code.
+- A step sees only what is written above it. `.domainServices()` goes once,
+  right after `.infra()` (`ARKI_DOT_E035` otherwise). `provides` sees only
+  `{ usecases }`. Entrypoints see usecases, request keys and `entrypointOnly`
+  needs. To publish data behind a repository, write a usecase and provide it;
+  the consumer gets `Value | Failure<'failure.unexpected_defect'>`.
+- A domain service factory cannot return a `Failure`, and it reads env when it
+  is used, not at boot. Feature infra never imports a `feature.ts`.
 - Two providers of one wire key collide. Use `rename(unit, { key: 'newKey' }, 'new-name')`
   for a second instance.
 - `$`-prefixed keys are reserved for the kernel (`$app`, `$unit`,

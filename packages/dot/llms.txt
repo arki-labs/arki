@@ -52,9 +52,15 @@ Wrong wiring is a compile error at `.infra()`, `.features()` or `.entrypoints()`
 - `dot explain` only configures. `dot doctor` boots and disposes; it never calls `start()`.
 - `configure` is sync and does no I/O. `boot` returns nothing; values go in `provides`.
 - Providers come before consumers. The wrong order is a compile error, or `ARKI_DOT_E020`.
+- A feature chain runs `needs`, `infra`, `domainServices`, `features`, `usecases`, `provides`, `entrypoints`. Each step sees only what is above it.
+- `provides` sees only `{ usecases }`. Entrypoints see usecases, request keys and `entrypointOnly` needs. Neither reads repos, infra or domain services.
 - A second instance of a unit needs `rename`, or its keys collide (`ARKI_DOT_E013`).
 - Do not cast an app to read its manifest. Call `.configure().manifest`.
 - `@arki/dot` never imports its adapters (`@arki/env/dot`, `@arki/db/dot`, `@arki/kv/dot`, `@arki/journal/dot`).
+
+## Words
+- domain service: logic with dependencies that two or more usecases share, or that a child feature needs. One file in `domain-services/`, registered with `.domainServices({ name: factory })`, built once per boot. A child names it with `domainService(fn)`.
+- `DomainDeps`: what a domain service may ask for (needs and infra). `Deps` is what a usecase may ask for: the same plus the domain services.
 
 ## Optional
 - [Lifecycle](docs/lifecycle.md): state machine, failure order, every error code.

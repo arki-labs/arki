@@ -143,8 +143,12 @@ consume.
 ## Features as a chain: `defineFeature`
 
 A feature is one chain; each step has its folder (`model/` has no step).
-Each step's type offers only the later steps, and each step's input is typed
-from the earlier ones (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`).
+The order is `.needs()`, `.infra()`, `.domainServices()`, `.features()` (children),
+`.usecases()`, `.provides()`, `.entrypoints()`. Each step's type offers only the
+later steps. Each step's input is typed from the steps above it, and only from
+them (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, RFC
+`docs/rfcs/2026-10-22-dot-usecase-boundary.md`). `.domainServices()` and
+`.features()` are optional.
 
 ```ts skip="the app wiring uses log(config), schedule() and a gateway from other @arki packages; the oRPC example below compiles the same chain"
 import type { DepsOf } from '@arki/dot/feature';
@@ -182,15 +186,28 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
   asks for a dep the feature lacks is a compile error naming it
   (`'DOT: a usecase asks for a dep the feature does not provide': { sendDue: 'mailer' }`).
   Built once per boot and handed to every `provides` factory and entrypoint.
+  `Deps` is what a usecase may ask for: needs, infra, domain services.
   A helper that is not a usecase (a mail template, a sender) is a plain
   function its usecases call; it is not listed in `.usecases()`. `dailyDigestLogic.handles` (needs + infra +
   `usecases`) is what a request middleware resolves from the services bag
   (`resolveNeeds(bag, dailyDigestLogic.handles)`): the handler sees `context.usecases`,
   `context.store`, `context.plans`, and not `context.db`.
+- **Domain services** are logic with dependencies that two or more usecases
+  share, or that a child feature needs. See the next section.
+- **Provides** factories get `{ usecases }` and nothing else. To publish data
+  that lives behind a repository, write a usecase that reads it and provide the
+  usecase. A consumer in another feature gets
+  `Value | Failure<'failure.unexpected_defect'>`, because usecases are
+  supervised. It calls `orThrow` when a throw is the right outcome, and
+  branches with `isFailure` when it must not throw.
 - **Entrypoints** are descriptors `{ kind, key, actions, resolve }` built by
-  adapter packages; `resolve` gets needs + infra + usecases, its payload is
+  adapter packages; `resolve` gets the usecases, the request keys, and the
+  needs marked `entrypointOnly(...)`. Its payload is
   published under `feature.<name>` (read with `sliceOf`), and `actions` are
-  in the manifest before boot. An entrypoint file types its handlers with
+  in the manifest before boot. `entrypointOnly` is for what only a driving
+  adapter should hold: the `db` a transaction middleware opens, a lock a
+  schedule takes. A mailer or a repository is not one of those; reach it
+  through a usecase. An entrypoint file types its handlers with
   `DepsOf<typeof dailyDigestLogic>`.
 - **Collisions are compile errors**: steps out of order; `session`,
   `headers`, `services`, `usecases` as aliases or keys; an infra key equal to a
@@ -204,6 +221,76 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
   `.infra(...dailyDigest.units())` and `.features([dailyDigest])` are checked
   by the builder guard. `dot explain` shows
   `daily-digest --[daily-digest.store]--> daily-digest/store --[db]--> database`.
+
+### Domain services: `.domainServices()`
+
+A domain service decides something but needs a port to do it. When one usecase
+needs it, build it in that usecase's factory body. When two or more usecases
+need it, or a child feature must see it, give it a file in `domain-services/`
+and register it with `.domainServices({ … })`.
+
+```ts skip="a shape sketch: the stores and the compile and deliver children are not defined here"
+import type { DepsOf } from '@arki/dot/feature';
+import { defineFeature, domainService } from '@arki/dot/feature';
+
+// domain-services/extras.ts: ONE service per file, the factory named after the file
+import type { DomainDeps } from '../feature';
+
+type DigestExtrasDeps = Pick<DomainDeps, 'clusterContext' | 'syntheses'>;
+export class DigestExtrasService {
+  constructor(private readonly deps: DigestExtrasDeps) {}
+  /* … */
+}
+export const extras = (deps: DigestExtrasDeps) => new DigestExtrasService(deps);
+
+// feature.ts
+const digestBase = defineFeature('daily-digest').needs({/* … */}).infra(store);
+export type DomainDeps = DepsOf<typeof digestBase>; // what a domain service may ask for
+const digestDeps = digestBase.domainServices({ extras }).features(compile, deliver);
+export type Deps = DepsOf<typeof digestDeps>; // what a usecase may ask for
+
+// usecases/get-section-extras.ts: reads it by key, never imports or builds it
+export const getSectionExtras =
+  ({ extras }: Pick<Deps, 'extras'>) =>
+  async () =>
+    extras.forSection();
+
+// features/deliver/feature.ts: a child names the parent's service by handle
+// defineFeature('deliver').needs({ extras: domainService(extras) })
+```
+
+- **`DomainDeps` and `Deps` are two types.** `DomainDeps` is what a domain
+  service may ask for: needs and infra, as they stand above `.domainServices()`.
+  `Deps` is what a usecase may ask for: the same, plus the domain services.
+- **Each step sees only what is above it.** So a domain service cannot ask for
+  a usecase, and a cycle cannot be written.
+- **Built once per boot**, after infra and before the children. Each factory
+  gets its own frozen copy of its deps.
+- **Peers never see each other.** A service in one `.domainServices()` call
+  sees `DomainDeps`, never another entry of the same call. If one service needs
+  another, keep the inner one inside the outer one's file, or push the shared
+  rule down to `model/`.
+- **One service per file.** A file in `domain-services/` may not import a
+  sibling.
+- **The factory cannot fail.** A factory that returns a `Failure` is a type
+  error. A misconfiguration throws at boot, once and loud.
+- **Read env on use, not at boot.** When the service needs a client resolved
+  per run (an LLM client, a base URL), it takes the client factory or the
+  infra handle and calls it inside its methods.
+- **Private to the feature.** `provides` and entrypoints never see domain
+  services. A child sees one only through `domainService(fn)`, and only when it
+  is mounted under the feature that registers it. Otherwise boot fails with
+  `ARKI_DOT_E034`. Calling `.domainServices()` twice, or after `.features()`,
+  `.usecases()` or `.provides()`, fails with `ARKI_DOT_E035`.
+- **Feature infra never imports a `feature.ts`.** Infra sits above domain
+  services, so it cannot know them.
+
+### What Dot cannot promise
+
+The types see what a step is given. They do not see what happens at call
+time. If one usecase calls another through a mutable bus or a registry that is
+filled after boot, the types cannot see that loop. Keep such calls out of
+usecases, or break the loop in the design.
 
 Adapter authors: `entrypoint.fromFeatures` and `infra.fromFeatures` units receive the features as mounted
 (`AnyDefinedFeature`). Read a feature's declarations from
@@ -389,7 +476,13 @@ import { rpc } from '@arki/dot/orpc';
 export const orders = defineFeature('orders')
   .needs({ db: service<Db>() })
   .infra(store) // repos({ orders: createOrdersRepository }) from @arki/db/dot
-  .provides({ ordersIndex: ({ db }) => openIndex(db) })
+  .usecases({
+    search:
+      ({ repos }) =>
+      (term: string) =>
+        repos.orders.search(term),
+  })
+  .provides({ ordersIndex: ({ usecases }) => ({ search: usecases.search }) })
   .entrypoints(rpc(ordersRpcContract, ordersImplementer, ordersProcedures), jobs({ syncOrders }));
 ```
 
@@ -413,29 +506,41 @@ numbered in boot order.
 
 A feature depends on a capability another feature provides, not on the whole
 feature. A feature publishes through `provides`: one factory per capability,
-each receiving the feature's needs. Consumers name the capability by handle —
+each receiving the feature's `usecases`. Consumers name the capability by handle —
 the type comes from the provider's factory, so it is written once:
 
 ```ts
 import { defineApp, infra } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
+import { isFailure } from '@arki/failure';
 
 // Stand-ins for your own modules.
 type Db = { query(sql: string): Promise<unknown[]> };
-type Entitlements = { planOf(userId: string): Promise<string> };
 declare function openDb(): Db;
-declare function createEntitlements(db: Db): Entitlements;
-declare function createDigest(access: Entitlements): { previewFor(userId: string): Promise<string[]> };
 const database = infra({ name: 'database', provides: { db: () => openDb() } });
 
 export const billing = defineFeature('billing')
   .needs({ db: database.provides.db })
-  .provides({ entitlements: ({ db }) => createEntitlements(db) })
+  .usecases({
+    planOf:
+      ({ db }) =>
+      async (userId: string) =>
+        (await db.query(userId)).length > 0 ? 'pro' : 'free',
+  })
+  .provides({ entitlements: ({ usecases }) => ({ planOf: usecases.planOf }) })
   .entrypoints();
 
 export const digest = defineFeature('daily-digest')
-  .needs({ access: billing.provides.entitlements }) // typed from createEntitlements
-  .provides({ digest: ({ access }) => createDigest(access) })
+  .needs({ access: billing.provides.entitlements }) // typed from the planOf usecase
+  .usecases({
+    previewFor:
+      ({ access }) =>
+      async (userId: string) => {
+        const plan = await access.planOf(userId); // a usecase result: a value or a Failure
+        return isFailure(plan) ? [] : [`${plan} digest for ${userId}`];
+      },
+  })
+  .provides({ digest: ({ usecases }) => ({ previewFor: usecases.previewFor }) })
   .entrypoints();
 
 export const app = defineApp('app').infra(database).features([billing, digest]); // provider first: boot order
@@ -457,7 +562,7 @@ data before anything boots:
   `daily-digest --[entitlements]--> billing`, without booting.
   A feature's slice record (`feature.<name>`) is one of its unit's provides.
 
-A `provides` factory builds a service value. Side effects (seed, warm-up) belong in a unit's `boot`, which returns `undefined`, a concrete failure or an ownership plan.
+A `provides` factory publishes usecases. Side effects (seed, warm-up) belong in a unit's `boot`, which returns `undefined`, a concrete failure or an ownership plan.
 
 ### Capabilities in the request context
 
@@ -468,15 +573,16 @@ the gateway and for a procedure that reads another feature's capability.
 A request context cannot name the merged service type — the routers that read
 the context are part of it, so the type loops. The context carries an opaque
 `ServicesBag` instead, and each procedure narrows it with its feature's own
-`needs`. A gateway feature, mounted last, spreads every handle into its needs
-(so the builder proves every provider boots first) and builds the bag:
+`needs`. A gateway is an `entrypoint({ name, needs, provides })` unit, mounted
+with `.entrypoints()`. It spreads every handle into its needs (so the builder
+proves every provider boots first) and builds the bag:
 
 ```ts
 import { os } from '@orpc/server';
 
 import type { NeedsShape } from '@arki/dot';
 import type { ServicesBag } from '@arki/dot/feature';
-import { service } from '@arki/dot';
+import { entrypoint, service } from '@arki/dot';
 import { defineFeature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
 
 // Stand-ins for your own modules.
@@ -489,14 +595,15 @@ export const billing = defineFeature('billing')
   .entrypoints();
 const features = [billing] as const;
 
-export const gateway = defineFeature('gateway')
-  .needs({ db: service<Db>(), ...providesOf(features) })
-  .provides({
+export const gateway = entrypoint({
+  name: 'gateway',
+  needs: { db: service<Db>(), ...providesOf(features) },
+  provides: {
     rpc: ctx => ({
       context: (headers: Headers) => ({ headers, db: ctx.db, services: servicesOf(ctx, features) }),
     }),
-  })
-  .entrypoints();
+  },
+});
 
 // core/orpc.ts — the one app-side middleware
 const o = os.$context<{ services: ServicesBag }>();
@@ -541,7 +648,13 @@ export const reports = defineFeature('reports')
     db: database.provides.db, // typed from the provider
     cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager
   })
-  .provides({ reports: ({ db }) => makeReports(db) })
+  .usecases({
+    daily:
+      ({ db }) =>
+      () =>
+        makeReports(db).daily(),
+  })
+  .provides({ reports: ({ usecases }) => ({ daily: usecases.daily }) })
   .entrypoints();
 ```
 

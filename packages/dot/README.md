@@ -132,6 +132,17 @@ The adapter entries need more:
 
 Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy retries and cancellation.
 
+## Features as a chain
+
+A feature is one chain, and each step sees only what is above it:
+`defineFeature(name).needs(…).infra(…).domainServices(…).features(…).usecases(…).provides(…).entrypoints(…)`.
+`.domainServices()` and `.features()` are optional. A domain service is logic
+with dependencies that two or more usecases share, or that a child feature
+needs. `DomainDeps` is what a domain service may ask for; `Deps` is what a
+usecase may ask for. `provides` sees only `{ usecases }`. Entrypoints see
+usecases, request keys and needs marked `entrypointOnly(...)`. Read
+[Dependency injection](./docs/di.md#features-as-a-chain-definefeature).
+
 ## Steps and arounds
 
 A step and an around are plain functions, written once. A step reads the
