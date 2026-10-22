@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const commonContracts = {
+export const commonPresets = {
   string: (defaultValue?: string) => {
     const schema = z.string();
     return defaultValue ? schema.default(defaultValue) : schema;

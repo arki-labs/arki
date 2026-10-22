@@ -6,7 +6,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 1. `defineEnv({ server, client, shared, runtimeEnv })` returns a typed object. It validates on the first read.
 2. A schema is any Standard Schema. Each value is typed as the schema's output, so defaults and coercions apply.
-3. `contracts` holds ready-made shapes: ports, URLs, comma lists and JSON.
+3. `presets` holds ready-made shapes: ports, URLs, comma lists and JSON.
 4. `secret(schema)` makes a `Redacted` value. It prints as `[redacted]`. `reveal(value)` returns the raw string.
 5. `env()` from `@arki/dot/env` turns the same options into a Dot plugin that validates at boot.
 6. The package reads no environment at import and does not need `process`.
@@ -17,17 +17,17 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 ### Define the environment of an app
 
 1. Create one `env.ts`.
-2. Declare each variable with a contract or your own schema.
+2. Declare each variable with a preset or your own schema.
 3. Import `env` where you need a value.
 
 ```ts
-import { contracts } from '@arki/env/contracts';
+import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
 
 export const env = defineEnv({
   server: {
-    PORT: contracts.port(3000),
-    DATABASE_URL: contracts.databaseUrl(),
+    PORT: presets.port(3000),
+    DATABASE_URL: presets.databaseUrl(),
   },
 });
 ```

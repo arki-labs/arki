@@ -86,29 +86,29 @@ experimental__runtimeEnv: {
 - Less repetitive
 - Auto-handles `VITE_` prefix for client vars
 
-### 2. Schema Contracts Library
+### 2. Schema Presets Library
 
-Pre-built, reusable schema builders called **"contracts"**:
+Pre-built, reusable schema builders called **"presets"**:
 
 ```typescript
-import { defineEnv, serverEnv, clientEnv, contracts } from '@arki/env/nextjs';
+import { defineEnv, serverEnv, clientEnv, presets } from '@arki/env/nextjs';
 
 export const env = defineEnv({
   server: {
-    // Common contracts with sensible defaults
-    DB_URL: contracts.databaseUrl(),        // postgres:// validation
-    REDIS_URL: contracts.redisUrl(),              // redis:// validation
-    PORT: contracts.port(3000),                   // number, 1-65535, default 3000
-    NODE_ENV: contracts.nodeEnv(),                // enum + default
-    LOG_LEVEL: contracts.logLevel('info'),        // debug|info|warn|error
+    // Common presets with sensible defaults
+    DB_URL: presets.databaseUrl(),        // postgres:// validation
+    REDIS_URL: presets.redisUrl(),              // redis:// validation
+    PORT: presets.port(3000),                   // number, 1-65535, default 3000
+    NODE_ENV: presets.nodeEnv(),                // enum + default
+    LOG_LEVEL: presets.logLevel('info'),        // debug|info|warn|error
 
-    // Advanced contracts
-    ENABLE_FEATURE_X: contracts.boolean(false),   // coerced boolean
-    JSON_CONFIG: contracts.json(z.object({...})), // JSON string parser
-    ALLOWED_ORIGINS: contracts.csvArray(z.url()), // CSV parser
+    // Advanced presets
+    ENABLE_FEATURE_X: presets.boolean(false),   // coerced boolean
+    JSON_CONFIG: presets.json(z.object({...})), // JSON string parser
+    ALLOWED_ORIGINS: presets.csvArray(z.url()), // CSV parser
   },
   client: {
-    API_URL: contracts.url('https://api.example.com'),
+    API_URL: presets.url('https://api.example.com'),
   },
   experimental__runtimeEnv: {
     ...serverEnv(['DB_URL', 'REDIS_URL', 'PORT', 'NODE_ENV', 'LOG_LEVEL', 'ENABLE_FEATURE_X', 'JSON_CONFIG', 'ALLOWED_ORIGINS']),
@@ -117,9 +117,9 @@ export const env = defineEnv({
 });
 ```
 
-**Available Contracts (Organized by Category):**
+**Available Presets (Organized by Category):**
 
-**Common (`contracts/common.ts`):**
+**Common (`presets/common.ts`):**
 
 - `string(defaultValue?)` - Basic string
 - `number(defaultValue?)` - Coerced number
@@ -128,19 +128,19 @@ export const env = defineEnv({
 - `nodeEnv()` - 'development' | 'production' | 'test'
 - `logLevel(defaultValue = 'info')` - 'debug' | 'info' | 'warn' | 'error'
 
-**URLs (`contracts/urls.ts`):**
+**URLs (`presets/urls.ts`):**
 
 - `url(defaultValue?)` - URL validation
 - `databaseUrl()` - postgres:// or postgresql:// validation
 - `redisUrl()` - redis:// or rediss:// validation
 
-**Auth (`contracts/auth.ts`):**
+**Auth (`presets/auth.ts`):**
 
 - `authSecret()` - Min 32 chars
 - `googleClientId()` - Google OAuth client ID
 - `resendApiKey()` - Resend API key format
 
-**Parsing (`contracts/parsing.ts`):**
+**Parsing (`presets/parsing.ts`):**
 
 - `json(schema)` - Parse JSON string into Zod schema
 - `csvArray(itemSchema)` - Parse comma-separated values
@@ -153,11 +153,11 @@ Clear separation between Next.js and non-Next.js usage:
 ```typescript
 // For Next.js apps (requires explicit runtimeEnv)
 
-// For importing just contracts
-import { contracts } from '@arki/env/contracts';
+// For importing just presets
+import { presets } from '@arki/env/presets';
 // For backend/server packages (can use simplified API)
-import { contracts, defineEnv } from '@arki/env/core';
-import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
+import { presets, defineEnv } from '@arki/env/core';
+import { clientEnv, presets, defineEnv, serverEnv } from '@arki/env/nextjs';
 ```
 
 **Package Exports Structure:**
@@ -165,7 +165,7 @@ import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
 - `@arki/env/nextjs` → Next.js-specific (wraps `@t3-oss/env-nextjs`)
 - `@arki/env/nextjs/client` → Browser-safe exports only
 - `@arki/env/core` → Framework-agnostic (wraps `@t3-oss/env-core`)
-- `@arki/env/contracts` → The contracts library only
+- `@arki/env/presets` → The presets library only
 
 ### 4. Enhanced Error Messages & Validation
 
@@ -174,7 +174,7 @@ Better error formatting with descriptions:
 ```typescript
 export const env = defineEnv({
   server: {
-    DB_URL: contracts.databaseUrl().describe('PostgreSQL connection string from Vercel/Supabase dashboard'),
+    DB_URL: presets.databaseUrl().describe('PostgreSQL connection string from Vercel/Supabase dashboard'),
   },
   options: {
     // Different validation modes
@@ -200,23 +200,23 @@ Share common configs across apps:
 
 ```typescript
 // apps/app1/src/env.ts
-import { baseServerEnv } from '@arki/env/contracts/base';
+import { baseServerEnv } from '@arki/env/presets/base';
 import { clientEnv, defineEnv, extendEnv, serverEnv } from '@arki/env/nextjs';
 
-// packages/env/src/contracts/base.ts
+// packages/env/src/presets/base.ts
 export const baseServerEnv = {
-  NODE_ENV: contracts.nodeEnv(),
-  LOG_LEVEL: contracts.logLevel('info'),
+  NODE_ENV: presets.nodeEnv(),
+  LOG_LEVEL: presets.logLevel('info'),
 } as const;
 
 export const env = defineEnv(
   extendEnv(baseServerEnv, {
     server: {
-      DB_URL: contracts.databaseUrl(),
+      DB_URL: presets.databaseUrl(),
       // Inherits NODE_ENV and LOG_LEVEL from baseServerEnv
     },
     client: {
-      API_URL: contracts.url(),
+      API_URL: presets.url(),
     },
     experimental__runtimeEnv: {
       ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DB_URL']),
@@ -251,9 +251,9 @@ export const env = defineEnv(
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
-    "./contracts": {
-      "types": "./dist/contracts/index.d.ts",
-      "default": "./dist/contracts/index.js"
+    "./presets": {
+      "types": "./dist/presets/index.d.ts",
+      "default": "./dist/presets/index.js"
     }
   },
   "scripts": {
@@ -299,14 +299,14 @@ import baseConfig from '@arki/eslint-config/base';
 export default [...baseConfig];
 ```
 
-### Phase 2: Contracts Library
+### Phase 2: Presets Library
 
-**File: `src/contracts/common.ts`**
+**File: `src/presets/common.ts`**
 
 ```typescript
 import { z } from '@arki/contracts';
 
-export const commonContracts = {
+export const commonPresets = {
   string: (defaultValue?: string) => {
     const schema = z.string();
     return defaultValue ? schema.default(defaultValue) : schema;
@@ -334,12 +334,12 @@ export const commonContracts = {
 };
 ```
 
-**File: `src/contracts/urls.ts`**
+**File: `src/presets/urls.ts`**
 
 ```typescript
 import { z } from '@arki/contracts';
 
-export const urlContracts = {
+export const urlPresets = {
   url: (defaultValue?: string) => {
     const schema = z.url();
     return defaultValue ? schema.default(defaultValue) : schema;
@@ -363,12 +363,12 @@ export const urlContracts = {
 };
 ```
 
-**File: `src/contracts/parsing.ts`**
+**File: `src/presets/parsing.ts`**
 
 ```typescript
 import { z } from '@arki/contracts';
 
-export const parseContracts = {
+export const parsePresets = {
   json: <T extends z.ZodType>(schema: T) =>
     z
       .string()
@@ -389,22 +389,22 @@ export const parseContracts = {
 };
 ```
 
-**File: `src/contracts/index.ts`**
+**File: `src/presets/index.ts`**
 
 ```typescript
-import { commonContracts } from './common';
-import { parseContracts } from './parsing';
-import { urlContracts } from './urls';
+import { commonPresets } from './common';
+import { parsePresets } from './parsing';
+import { urlPresets } from './urls';
 
-// Unified contracts export
-export const contracts = {
-  ...commonContracts,
-  ...urlContracts,
-  ...parseContracts,
+// Unified presets export
+export const presets = {
+  ...commonPresets,
+  ...urlPresets,
+  ...parsePresets,
 };
 
 // Individual category exports
-export { commonContracts, urlContracts, parseContracts };
+export { commonPresets, urlPresets, parsePresets };
 ```
 
 ### Phase 3: Runtime Helpers (Next.js)
@@ -483,7 +483,7 @@ export function defineEnv(config: EnvConfig) {
 ```typescript
 export { defineEnv } from './define-env';
 export { serverEnv, clientEnv } from './runtime-helpers';
-export { contracts } from '../contracts';
+export { presets } from '../presets';
 ```
 
 **File: `src/nextjs/client.ts`** (Browser-safe)
@@ -491,7 +491,7 @@ export { contracts } from '../contracts';
 ```typescript
 // Only export client-safe utilities
 export { clientEnv } from './runtime-helpers';
-export { contracts } from '../contracts';
+export { presets } from '../presets';
 ```
 
 ### Phase 5: Core Package (Non-Next.js)
@@ -534,7 +534,7 @@ export function defineEnv(config: CoreEnvConfig) {
 
 ```typescript
 export { defineEnv } from './define-env';
-export { contracts } from '../contracts';
+export { presets } from '../presets';
 ```
 
 ### Phase 6: Main Package Export
@@ -542,8 +542,8 @@ export { contracts } from '../contracts';
 **File: `src/index.ts`**
 
 ```typescript
-// Re-export contracts for convenience
-export { contracts } from './contracts';
+// Re-export presets for convenience
+export { presets } from './presets';
 ```
 
 ## File Structure
@@ -551,8 +551,8 @@ export { contracts } from './contracts';
 ```
 packages/env/
 ├── src/
-│   ├── contracts/
-│   │   ├── index.ts          # Unified contracts export
+│   ├── presets/
+│   │   ├── index.ts          # Unified presets export
 │   │   ├── common.ts         # port, boolean, nodeEnv, string, number, logLevel
 │   │   ├── urls.ts           # url, databaseUrl, redisUrl
 │   │   ├── auth.ts           # authSecret, googleClientId, resendApiKey
@@ -582,35 +582,35 @@ packages/env/
 
 ```typescript
 // apps/my-app/web/src/env.ts
-import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
+import { clientEnv, presets, defineEnv, serverEnv } from '@arki/env/nextjs';
 
 export const env = defineEnv({
   server: {
     // Database
-    DB_URL: contracts.databaseUrl(),
+    DB_URL: presets.databaseUrl(),
 
     // Redis
-    REDIS_URL: contracts.redisUrl(),
+    REDIS_URL: presets.redisUrl(),
 
     // Common
-    PORT: contracts.port(3000),
-    NODE_ENV: contracts.nodeEnv(),
-    LOG_LEVEL: contracts.logLevel('info'),
+    PORT: presets.port(3000),
+    NODE_ENV: presets.nodeEnv(),
+    LOG_LEVEL: presets.logLevel('info'),
 
     // Auth
-    AUTH_SECRET: contracts.string(),
-    GOOGLE_CLIENT_ID: contracts.string().optional(),
+    AUTH_SECRET: presets.string(),
+    GOOGLE_CLIENT_ID: presets.string().optional(),
 
     // Feature flags
-    ENABLE_ANALYTICS: contracts.boolean(false),
+    ENABLE_ANALYTICS: presets.boolean(false),
 
     // Complex configs
-    ALLOWED_ORIGINS: contracts.csvArray(z.url()),
+    ALLOWED_ORIGINS: presets.csvArray(z.url()),
   },
   client: {
-    API_URL: contracts.url('https://api.example.com'),
-    APP_NAME: contracts.string(),
-    SENTRY_DSN: contracts.url().optional(),
+    API_URL: presets.url('https://api.example.com'),
+    APP_NAME: presets.string(),
+    SENTRY_DSN: presets.url().optional(),
   },
   experimental__runtimeEnv: {
     ...serverEnv([
@@ -633,15 +633,15 @@ export const env = defineEnv({
 
 ```typescript
 // apps/my-app/backend/src/env.ts
-import { contracts, defineEnv } from '@arki/env/core';
+import { presets, defineEnv } from '@arki/env/core';
 
 export const env = defineEnv({
   server: {
-    DB_URL: contracts.databaseUrl(),
-    REDIS_URL: contracts.redisUrl(),
-    PORT: contracts.port(3001),
-    NODE_ENV: contracts.nodeEnv(),
-    LOG_LEVEL: contracts.logLevel('info'),
+    DB_URL: presets.databaseUrl(),
+    REDIS_URL: presets.redisUrl(),
+    PORT: presets.port(3001),
+    NODE_ENV: presets.nodeEnv(),
+    LOG_LEVEL: presets.logLevel('info'),
   },
   // runtimeEnv auto-generated for non-Next.js packages!
 });
@@ -651,12 +651,12 @@ export const env = defineEnv({
 
 ```typescript
 // packages/kv/src/env.ts
-import { contracts, defineEnv } from '@arki/env/core';
+import { presets, defineEnv } from '@arki/env/core';
 
 export const env = defineEnv({
   server: {
-    KV_URL: contracts.redisUrl(),
-    KV_TOKEN: contracts.string().optional(),
+    KV_URL: presets.redisUrl(),
+    KV_TOKEN: presets.string().optional(),
   },
 });
 ```
@@ -664,26 +664,26 @@ export const env = defineEnv({
 ### Example 4: Config Composition
 
 ```typescript
-// packages/env/src/contracts/base.ts
-import { baseServerEnv } from '@arki/env/contracts/base';
+// packages/env/src/presets/base.ts
+import { baseServerEnv } from '@arki/env/presets/base';
 // apps/app1/src/env.ts
 import { clientEnv, defineEnv, extendEnv, serverEnv } from '@arki/env/nextjs';
 
-import { contracts } from './index';
+import { presets } from './index';
 
 export const baseServerEnv = {
-  NODE_ENV: contracts.nodeEnv(),
-  LOG_LEVEL: contracts.logLevel('info'),
+  NODE_ENV: presets.nodeEnv(),
+  LOG_LEVEL: presets.logLevel('info'),
 } as const;
 
 export const env = defineEnv(
   extendEnv(baseServerEnv, {
     server: {
-      DB_URL: contracts.databaseUrl(),
+      DB_URL: presets.databaseUrl(),
       // Inherits NODE_ENV and LOG_LEVEL
     },
     client: {
-      API_URL: contracts.url(),
+      API_URL: presets.url(),
     },
     experimental__runtimeEnv: {
       ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DB_URL']),
@@ -703,20 +703,20 @@ export const env = defineEnv(
 
 2. **Zero Schema Duplication**
    - Before: Copy-paste PORT, NODE_ENV, DB_URL across 10+ apps
-   - After: Single `contracts.port()` reused everywhere
+   - After: Single `presets.port()` reused everywhere
 
 3. **Improved Type Safety**
    - Type-checked variable arrays in `serverEnv()`/`clientEnv()`
-   - Auto-complete for contract names
+   - Auto-complete for preset names
    - Compile-time validation of env var names
 
 4. **Consistent Validation**
    - Standardized `skipValidation` logic
    - Consistent error messages across apps
-   - Shared validation rules via contracts
+   - Shared validation rules via presets
 
 5. **Better Developer Experience**
-   - Clear, semantic API (`contracts.databaseUrl()`)
+   - Clear, semantic API (`presets.databaseUrl()`)
    - Framework-specific imports
    - Composable configs with `extendEnv()`
 
@@ -762,20 +762,20 @@ export const env = createEnv({
 **After (35 lines - 56% reduction):**
 
 ```typescript
-import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
+import { clientEnv, presets, defineEnv, serverEnv } from '@arki/env/nextjs';
 
 export const env = defineEnv({
   server: {
-    DB_URL: contracts.databaseUrl(),
-    PORT: contracts.port(3000),
-    NODE_ENV: contracts.nodeEnv(),
-    REDIS_URL: contracts.redisUrl(),
-    LOG_LEVEL: contracts.logLevel('info'),
-    AUTH_SECRET: contracts.string(),
-    ENABLE_ANALYTICS: contracts.boolean(false),
+    DB_URL: presets.databaseUrl(),
+    PORT: presets.port(3000),
+    NODE_ENV: presets.nodeEnv(),
+    REDIS_URL: presets.redisUrl(),
+    LOG_LEVEL: presets.logLevel('info'),
+    AUTH_SECRET: presets.string(),
+    ENABLE_ANALYTICS: presets.boolean(false),
   },
   client: {
-    API_URL: contracts.url('https://api.example.com'),
+    API_URL: presets.url('https://api.example.com'),
   },
   experimental__runtimeEnv: {
     ...serverEnv(['DB_URL', 'PORT', 'NODE_ENV', 'REDIS_URL', 'LOG_LEVEL', 'AUTH_SECRET', 'ENABLE_ANALYTICS']),

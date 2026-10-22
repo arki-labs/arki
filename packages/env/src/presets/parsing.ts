@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const parseContracts = {
+export const parsePresets = {
   json: <T extends z.ZodType>(schema: T) =>
     z.string().transform(str => {
       const parsed = JSON.parse(str);

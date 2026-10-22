@@ -17,7 +17,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 ## Changing this package
 
 - Edit `src/core/define-env.ts` for validation behaviour and `src/core/secret.ts` for secrets.
-- Edit `src/contracts/*` to add a variable shape. Export it from `src/contracts/index.ts`.
+- Edit `src/presets/*` to add a variable shape. Export it from `src/presets/index.ts`.
 - Edit `src/dot.ts` for the plugin. Keep `ENV_PLUGIN_ERROR_CODES` JSDoc with `@fix` and `@verify`.
 - A change to validation defaults is breaking. Write a minor changeset and an upgrade guide in `docs/upgrades/`.
 - Keep `README.md`, `llms.txt` and `docs/agent-guide.md` in step. Run `bun ../../tooling/library/src/llms.ts --write` after an export change.

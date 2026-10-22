@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const urlContracts = {
+export const urlPresets = {
   url: (defaultValue?: string) => {
     const schema = z.url();
     return defaultValue ? schema.default(defaultValue) : schema;

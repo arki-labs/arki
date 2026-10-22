@@ -3,4 +3,4 @@ export { defineEnv, formatIssues } from './define-env.js';
 export { isSecretSchema, Redacted, reveal, secret, SECRET_SCHEMA } from './secret.js';
 export { describeEnv } from './describe.js';
 export type { EnvDescription, EnvKeyDescription } from './describe.js';
-export { contracts } from '../contracts/index.js';
+export { presets } from '../presets/index.js';

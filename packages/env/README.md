@@ -13,13 +13,13 @@ bun add @arki/env
 Declare the variables once. Read them anywhere. A bad value throws on the first read, never at import.
 
 ```ts run expect
-import { contracts } from '@arki/env/contracts';
+import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
 
 const env = defineEnv({
   server: {
-    PORT: contracts.port(3000),
-    DATABASE_URL: contracts.url(),
+    PORT: presets.port(3000),
+    DATABASE_URL: presets.url(),
   },
   runtimeEnv: { PORT: '8080', DATABASE_URL: 'https://db.example.com' },
 });
@@ -43,15 +43,15 @@ Leave out `runtimeEnv` in a server app. `defineEnv` then reads `globalThis.proce
 
 ## Runtime support
 
-`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. The Dot adapter lives in `@arki/dot/env`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
+`@arki/env/core` and `@arki/env/presets` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. On an engine with no `process`, pass `runtimeEnv`. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. The Dot adapter lives in `@arki/dot/env`. `bun run test:runtimes` runs a smoke test of the built package on each runtime. The Hermes leg needs `HERMES_BIN`.
 
 `@arki/env/node` (encrypted env files) runs on Node, Bun and Deno only. It reads files and starts provider CLIs.
 
 ## Public imports
 
 - `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`, `describeEnv`, `isSecretSchema`, `formatIssues`.
-- `@arki/env/contracts`: `contracts` and the per-category namespaces `commonContracts`, `urlContracts`, `parseContracts`.
-- `@arki/env`: re-exports `contracts`.
+- `@arki/env/presets`: `presets` and the per-category namespaces `commonPresets`, `urlPresets`, `parsePresets`.
+- `@arki/env`: re-exports `presets`.
 - `@arki/env/node`: `loadEnvFiles`, `secretValues`, `formatEnvFilesErrors`, `ENV_FILES_ERROR_CODES`, the codec (`encryptValue`, `decryptValue`, `generateKeypair`, `parseEnv`, …), the file edits behind `dot env`, `findPrivateKey` and `DEFAULT_RESOLVERS`.
 - `@arki/env/node/register`: a side-effect import that loads the env files into `process.env`.
 
@@ -120,9 +120,9 @@ configure({ processors: [maskSecrets(secretValues)] });
 
 Messages name the file and the key, never a value.
 
-## Contracts
+## Presets
 
-The `contracts` namespace holds common variable shapes:
+The `presets` namespace holds common variable shapes:
 
 - Common: `string`, `number`, `boolean`, `port`, `nodeEnv`, `logLevel`.
 - URLs: `url`, `databaseUrl`, `redisUrl`.
@@ -131,13 +131,13 @@ The `contracts` namespace holds common variable shapes:
 ```ts run expect
 import { z } from 'zod';
 
-import { contracts } from '@arki/env/contracts';
+import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
 
 const env = defineEnv({
   server: {
-    ALLOWED_ORIGINS: contracts.csvArray(z.string()),
-    FEATURES: contracts.json(z.object({ beta: z.boolean() })),
+    ALLOWED_ORIGINS: presets.csvArray(z.string()),
+    FEATURES: presets.json(z.object({ beta: z.boolean() })),
   },
   runtimeEnv: { ALLOWED_ORIGINS: 'a,b,c', FEATURES: '{"beta":true}' },
 });
@@ -158,11 +158,11 @@ console.log(env.FEATURES);
 `defineEnv` throws an `Error` on the first read of a bad environment. The message starts with your `name` and lists one `path: message` line per issue. Set `options.onValidationError` to throw something else.
 
 ```ts run expect
-import { contracts } from '@arki/env/contracts';
+import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
 
 const env = defineEnv({
-  server: { PORT: contracts.port(), DATABASE_URL: contracts.url() },
+  server: { PORT: presets.port(), DATABASE_URL: presets.url() },
   runtimeEnv: { PORT: 'abc' },
 });
 
@@ -241,7 +241,7 @@ The hot path: `env.PORT` after the environment exists.
 | envalid cleanEnv()                     |   83.8 ns |     10.34× |
 | zod parsed plain object                |    8.1 ns |    fastest |
 
-Read the rows with the contracts in mind:
+Read the rows with the presets in mind:
 
 - `defineEnv()` is lazy: it builds and validates the environment on the first property read, so "define + first read" is the fair row for it. The "define only" group shows what declaring an env costs before anything reads it.
 - Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, so the numbers do not depend on `SKIP_ENV_VALIDATION`.

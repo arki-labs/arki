@@ -1,7 +1,7 @@
 {
   "name": "@arki/env",
   "version": "0.1.0",
-  "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
+  "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod presets for common variable shapes.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -40,10 +40,10 @@
       "import": "./dist/core/index.js",
       "default": "./dist/core/index.js"
     },
-    "./contracts": {
-      "types": "./dist/contracts/index.d.ts",
-      "import": "./dist/contracts/index.js",
-      "default": "./dist/contracts/index.js"
+    "./presets": {
+      "types": "./dist/presets/index.d.ts",
+      "import": "./dist/presets/index.js",
+      "default": "./dist/presets/index.js"
     },
     "./node": {
       "types": "./dist/node/index.d.ts",
