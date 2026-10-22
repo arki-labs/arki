@@ -10,6 +10,7 @@ import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { RequestCancelled } from '../failures.js';
+import { step } from '../middleware.js';
 import {
   hmac,
   standardWebhooks,
@@ -188,13 +189,13 @@ describe('webhook crypto boundaries', () => {
     expectTypeOf<Extract<Awaited<ReturnType<typeof subject.verify>>, { readonly code: string }>>().toEqualTypeOf<
       ReturnType<(typeof WEBHOOK_VERIFY_FAILURES)[number]>
     >();
-    const _derive = verifyWebhook({ scheme: subject });
-    expectTypeOf<Extract<Awaited<ReturnType<typeof _derive>>, { readonly code: string }>>().toEqualTypeOf<
+    const _verify = verifyWebhook({ scheme: subject });
+    expectTypeOf<Extract<Awaited<ReturnType<typeof _verify>>, { readonly code: string }>>().toEqualTypeOf<
       ReturnType<(typeof WEBHOOK_FAILURES)[number]>
     >();
     const unprotected = route.post('/unprotected', { id: 'webhooks.unprotected' });
-    const protectedRoutes = routes().derive('webhook', _derive);
-    // @ts-expect-error Every protected contract must admit the exact deriver failure union.
+    const protectedRoutes = routes().use(step(_verify));
+    // @ts-expect-error Every protected contract must admit the exact step failure union.
     protectedRoutes.bind(unprotected, () => { /* Type admission must reject this contract. */ });
     expect(WEBHOOK_SIGN_FAILURES).toEqual(expect.arrayContaining([...ID_GENERATION_FAILURES]));
   });
@@ -220,7 +221,7 @@ describe('webhook request ownership', () => {
           duplex: 'half',
         }),
       );
-    expect(await verifyWebhook({ scheme: scheme() })(req)).toMatchObject({
+    expect(await verifyWebhook({ scheme: scheme() })({ req })).toMatchObject({
       code: WebhookBodyUnreadable.code,
       cause,
     });
@@ -230,11 +231,13 @@ describe('webhook request ownership', () => {
     const subject = scheme();
     const verify = vi.spyOn(subject, 'verify');
     const req = new Request('https://test/hook', { method: 'POST', body: 'payload' });
-    expect(WebhookBodyTooLarge.is(await verifyWebhook({ scheme: subject, maxBodyBytes: 1 })(req))).toBe(true);
+    expect(WebhookBodyTooLarge.is(await verifyWebhook({ scheme: subject, maxBodyBytes: 1 })({ req }))).toBe(true);
     const abort = new AbortController();
     abort.abort();
     expect(
-      RequestCancelled.is(await verifyWebhook({ scheme: subject })(new Request(req, { signal: abort.signal }))),
+      RequestCancelled.is(
+        await verifyWebhook({ scheme: subject })({ req: new Request(req, { signal: abort.signal }) }),
+      ),
     ).toBe(true);
     expect(verify).not.toHaveBeenCalled();
   });
@@ -248,9 +251,9 @@ describe('webhook request ownership', () => {
     });
     expect(
       RequestCancelled.is(
-        await verifyWebhook({ scheme: subject })(
-          new Request('https://test/hook', { method: 'POST', body: 'payload', signal: abort.signal }),
-        ),
+        await verifyWebhook({ scheme: subject })({
+          req: new Request('https://test/hook', { method: 'POST', body: 'payload', signal: abort.signal }),
+        }),
       ),
     ).toBe(true);
   });
@@ -259,14 +262,17 @@ describe('webhook request ownership', () => {
     const subject = scheme();
     const refusal = WebhookSignatureMismatch({ cause: new Error('private refusal') });
     const verify = vi.spyOn(subject, 'verify').mockResolvedValue(refusal);
-    const _derive = verifyWebhook({ scheme: subject });
-    expect(await _derive(new Request('https://test/hook'))).toBe(refusal);
+    const verifyStep = verifyWebhook({ scheme: subject });
+    expect(await verifyStep({ req: new Request('https://test/hook') })).toBe(refusal);
     const cause = new Error('private custom scheme');
     verify.mockRejectedValue(cause);
-    expect(await _derive(new Request('https://test/hook'))).toMatchObject({ code: UnexpectedDefect.code, cause });
+    expect(await verifyStep({ req: new Request('https://test/hook') })).toMatchObject({
+      code: UnexpectedDefect.code,
+      cause,
+    });
   });
 
-  it('declares deriver failures on the matched route and redacts private causes before the handler', async () => {
+  it('declares step failures on the matched route and redacts private causes before the handler', async () => {
     const endpoint = route.post('/hook', { id: 'webhooks.outcomes', failures: WEBHOOK_FAILURES });
     const handler = vi.fn(() => {
       /* The refusal must prevent dispatch. */
@@ -275,7 +281,7 @@ describe('webhook request ownership', () => {
     vi.spyOn(subject, 'verify').mockRejectedValue(new Error('private webhook credential'));
     const engine = buildEngine([
       routes()
-        .derive('webhook', verifyWebhook({ scheme: subject }))
+        .use(step(verifyWebhook({ scheme: subject })))
         .bind(endpoint, handler),
     ]);
     const response = await engine.fetch(

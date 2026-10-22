@@ -16,6 +16,7 @@ import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES } from '../error.js';
+import { step } from '../middleware.js';
 import { contractMeta, toOpenApi, toOpenApiFromManifest } from '../openapi.js';
 import { raw } from '../raw.js';
 import { codec, optional } from '../wire.js';
@@ -138,10 +139,10 @@ describe('params and headers', () => {
     expect(calls).not.toHaveBeenCalled();
   });
 
-  it('validates params on the async path too (a deriver makes the route async)', async () => {
+  it('validates params on the async path too (a step makes the route async)', async () => {
     const derived = buildEngine([
       routes()
-        .derive('who', () => 'ada')
+        .use(step(() => ({ who: 'ada' })))
         .bind(getOrder, () => ({ id: 'x' })),
     ]);
     const res = await derived.fetch(new Request(`${BASE}/orders/nope`, { headers: { 'x-tenant': 't1' } }));
@@ -190,7 +191,7 @@ describe('responses and reply', () => {
     const loose = route.get('/loose', { id: 'loose', output: Order });
     const erased = buildEngine([
       {
-        derivers: [],
+        stages: [],
         mounts: [],
         bindings: [{ contract: loose, handler: () => reply(418, {}) }],
       },
@@ -206,7 +207,7 @@ describe('responses and reply', () => {
     const bad = route.get('/bad', { id: 'bad', responses: { 410: Gone } });
     const e = buildEngine([
       {
-        derivers: [],
+        stages: [],
         mounts: [],
         bindings: [{ contract: bad, handler: () => reply(410, { reason: 5 }) }],
       },
@@ -230,7 +231,7 @@ describe('no output means 204', () => {
 
   it('answers 500 E511 when a no-output handler returns a value', async () => {
     const erased = buildEngine([
-      { derivers: [], mounts: [], bindings: [{ contract: nothing, handler: () => ({ oops: true }) }] },
+      { stages: [], mounts: [], bindings: [{ contract: nothing, handler: () => ({ oops: true }) }] },
     ]);
     const res = await erased.fetch(new Request(`${BASE}/things/1`, { method: 'DELETE' }));
     expect(res.status).toBe(500);
@@ -265,19 +266,19 @@ describe('raw()', () => {
 
     it('rejects a Response without raw(), and a value from a raw route, on the sync and async path', async () => {
       process.env.NODE_ENV = env;
-      const erased = (contract: typeof file | typeof plain, handler: () => unknown, derivers = false) =>
+      const erased = (contract: typeof file | typeof plain, handler: () => unknown, staged = false) =>
         buildEngine([
           {
-            derivers: derivers ? [{ key: 'k', derive: () => 1 }] : [],
+            stages: staged ? [{ step: () => ({ k: 1 }) }] : [],
             mounts: [],
             bindings: [{ contract, handler }],
           },
         ]);
-      for (const derivers of [false, true]) {
-        const response = await erased(plain, () => new Response('x'), derivers).fetch(new Request(`${BASE}/plain`));
+      for (const staged of [false, true]) {
+        const response = await erased(plain, () => new Response('x'), staged).fetch(new Request(`${BASE}/plain`));
         expect(response.status).toBe(500);
         expect(await response.json()).toMatchObject({ error: { code: HTTP_ERROR_CODES.rawResponseMismatch } });
-        const value = await erased(file, () => ({ id: 'a' }), derivers).fetch(new Request(`${BASE}/file`));
+        const value = await erased(file, () => ({ id: 'a' }), staged).fetch(new Request(`${BASE}/file`));
         expect(value.status).toBe(500);
         expect(await value.json()).toMatchObject({ error: { code: HTTP_ERROR_CODES.rawResponseMismatch } });
       }

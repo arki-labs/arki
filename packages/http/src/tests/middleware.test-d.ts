@@ -73,7 +73,7 @@ routes()
     return '';
   });
 
-// A step refusal must be declared by the route, like a keyed deriver's.
+// A step refusal must be declared by the route.
 routes()
   .use(step(fromHeaders))
   .use(step(authed))

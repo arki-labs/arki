@@ -1,8 +1,9 @@
 /**
  * `step` and `around` (`@arki/http`) at runtime.
  *
- * Why these tests exist: a step is the new way to do what a keyed `derive` did, so its refusal must
- * be byte-for-byte the same response as a `derive` refusal, and the handler must not run. What a step
+ * Why these tests exist: a step replaced the keyed `derive`, so its refusal must answer with the
+ * exact coded envelope a `derive` refusal answered with (status and bytes, pinned as a literal), and
+ * the handler must not run. What a step
  * returns must reach the handler and later steps. An around must wrap every step declared after it
  * and the handler, pass the response through unchanged, and see a refusal and a handler error, so a
  * transaction can commit or roll back.
@@ -15,7 +16,6 @@ import { defineFailure } from '@arki/failure';
 import { routes } from '../bundle.js';
 import { buildEngine } from '../compiled.js';
 import { route } from '../contract.js';
-import { derive } from '../derive.js';
 import { around, step } from '../middleware.js';
 
 const SignInRequired = defineFailure('test.step.sign_in', { status: 401 });
@@ -54,16 +54,13 @@ describe('step', () => {
       handled += 1;
       return 'ok';
     };
-    const viaStep = buildEngine([routes().use(step(authed)).bind(mine, handler)]);
-    const viaDerive = buildEngine([
-      routes()
-        .derive('principal', (req: Request) => (req.headers.has('authorization') ? { id: 'u1' } : SignInRequired()))
-        .bind(mine, handler),
-    ]);
-    const a = await viaStep.fetch(anonymous());
-    const b = await viaDerive.fetch(anonymous());
-    expect(a.status).toBe(401);
-    expect({ status: a.status, body: await a.text() }).toEqual({ status: b.status, body: await b.text() });
+    const engine = buildEngine([routes().use(step(authed)).bind(mine, handler)]);
+    const response = await engine.fetch(anonymous());
+    // The wire envelope a keyed `derive` refusal answered with, byte for byte: clients match on it.
+    expect({ status: response.status, body: await response.text() }).toEqual({
+      status: 401,
+      body: '{"error":{"code":"test.step.sign_in","message":"test.step.sign_in"}}',
+    });
     expect(handled).toBe(0);
   });
 
@@ -94,6 +91,18 @@ describe('step', () => {
     const response = await engine.fetch(anonymous());
     expect(response.status).toBe(401);
     expect(later).toBe(0);
+  });
+
+  // `url` and `signal` are lazy getters on the base context; a later step must still see them.
+  it('keeps url and signal for steps after the first', async () => {
+    const engine = buildEngine([
+      routes()
+        .use(step(() => ({ first: true })))
+        .use(step(ctx => ({ seen: `${ctx.url.pathname}:${String(ctx.signal.aborted)}` })))
+        .bind(mine, (_input, ctx) => ctx.seen),
+    ]);
+    const response = await engine.fetch(anonymous());
+    expect(await response.json()).toBe('/mine:false');
   });
 
   // A 401 without a challenge leaves the client no way to sign in: the header must reach the wire.
@@ -179,11 +188,11 @@ describe('around', () => {
     expect(events).toEqual(['open', 'rollback']);
   });
 
-  it('works with a keyed derive in the same bundle', async () => {
+  it('passes what a step declared before it added through to the handler', async () => {
     const { events, inTransaction } = recorder();
     const engine = buildEngine([
       routes()
-        .derive(derive('n', () => 1))
+        .use(step(() => ({ n: 1 })))
         .use(around(inTransaction))
         .bind(mine, (_input, ctx) => String(ctx.n)),
     ]);

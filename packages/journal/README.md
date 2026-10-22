@@ -777,14 +777,14 @@ const orderPlaced = route.post('/hooks/orders', {
 
 const engine = buildEngine([
   routes()
-    .derive('webhook', verifyWebhook({ scheme }))
+    .use(step(verifyWebhook({ scheme })))
     .bind(orderPlaced, async ({ body }, { webhook }) => {
       await journal.run(db, placeOrder, body, { actorId: 'partner' }, { idempotencyKey: `hook:${webhook.id}` });
     }),
 ]);
 ```
 
-`WEBHOOK_FAILURES` comes from `@arki/http/webhooks` and declares the exact deriver failures on the route. `verifyWebhook` returns a canonical failure for an unsigned or wrongly signed request before it reaches the journal. Scope the key by sender if you take events from more than one (`${partner}:${webhook.id}`). The test `src/webhooks-inbox.test.ts` runs this end to end: a resent event writes one event row and keeps one receipt.
+`WEBHOOK_FAILURES` comes from `@arki/http/webhooks` and declares the exact step failures on the route. `verifyWebhook` returns a canonical failure for an unsigned or wrongly signed request before it reaches the journal. Scope the key by sender if you take events from more than one (`${partner}:${webhook.id}`). The test `src/webhooks-inbox.test.ts` runs this end to end: a resent event writes one event row and keeps one receipt.
 
 ## Relay recipe
 

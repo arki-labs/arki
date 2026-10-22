@@ -1,6 +1,6 @@
 /**
  * Engine behavior through the composed fetch handler — no sockets.
- * Validation envelopes, deriver pipeline, params/query/body delivery,
+ * Validation envelopes, step pipeline, params/query/body delivery,
  * raw-Response passthrough, output-contract enforcement, mounts, 404s,
  * ambient context.
  */
@@ -14,6 +14,7 @@ import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
+import { step } from '../middleware.js';
 import { raw } from '../raw.js';
 import { codec, optional } from '../wire.js';
 
@@ -84,23 +85,27 @@ describe('buildEngine', () => {
     expect(badShapeError.message).toContain('sku');
   });
 
-  it('runs derivers in order and short-circuits HttpError into the envelope', async () => {
+  it('runs steps in order and short-circuits HttpError into the envelope', async () => {
     const secret = route.get('/secret', { id: 'secret', output: z.object({ who: z.string() }) });
     const trace: string[] = [];
     const engine = buildEngine([
       routes()
-        .derive('principal', req => {
-          trace.push('auth');
-          const who = req.headers.get('x-user');
-          if (who === null) {
-            throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');
-          }
-          return { who };
-        })
-        .derive('audit', (_req, ctx) => {
-          trace.push(`audit:${ctx.principal.who}`);
-          return true;
-        })
+        .use(
+          step(({ req }: { readonly req: Request }) => {
+            trace.push('auth');
+            const who = req.headers.get('x-user');
+            if (who === null) {
+              throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');
+            }
+            return { principal: { who } };
+          }),
+        )
+        .use(
+          step((ctx: { readonly principal: { readonly who: string } }) => {
+            trace.push(`audit:${ctx.principal.who}`);
+            return { audit: true };
+          }),
+        )
         .bind(secret, (_input, ctx) => ({ who: ctx.principal.who })),
     ]);
 
@@ -195,14 +200,16 @@ describe('buildEngine', () => {
     const admin = route.get('/admin', { id: 'admin', output: z.object({ ok: z.boolean() }) });
     const engine = buildEngine([
       routes()
-        .derive('operator', req => {
-          if (req.headers.get('authorization') === null) {
-            throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'credentials required', {
-              headers: { 'www-authenticate': 'Basic realm="admin"' },
-            });
-          }
-          return true;
-        })
+        .use(
+          step(({ req }: { readonly req: Request }) => {
+            if (req.headers.get('authorization') === null) {
+              throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'credentials required', {
+                headers: { 'www-authenticate': 'Basic realm="admin"' },
+              });
+            }
+            return { operator: true };
+          }),
+        )
         .bind(admin, () => ({ ok: true })),
     ]);
 
@@ -262,7 +269,7 @@ describe('buildEngine', () => {
     expect(requestContext()).toBeUndefined();
   });
 
-  // A route with no derivers and no body runs its handler synchronously; one
+  // A route with no steps and no body runs its handler synchronously; one
   // with either goes through the async path. Both must answer identically.
   describe('sync and async paths answer the same', () => {
     const item = z.object({ id: z.string() });
@@ -281,7 +288,7 @@ describe('buildEngine', () => {
           return { id: requestContext()?.requestId === 'r-1' ? params.id : 'lost-context' };
         }),
       routes()
-        .derive('tag', () => 'x')
+        .use(step(() => ({ tag: 'x' })))
         .bind(derivedGet, ({ params }) => {
           if (params.id === 'boom') throw new HttpError(409, HTTP_ERROR_CODES.badRequest, 'nope');
           return { id: params.id };

@@ -1,6 +1,6 @@
 # Webhook outcomes
 
-`scheme.sign()`, `scheme.verify()` and the `verifyWebhook()` deriver return
+`scheme.sign()`, `scheme.verify()` and the `verifyWebhook()` step return
 canonical failures. They no longer reject for ordinary verification refusals.
 Successful values remain `Headers` and `VerifiedWebhook<TId>`.
 
@@ -25,7 +25,7 @@ await signedExample();
 ```
 
 For HTTP routes, declare `failures: WEBHOOK_FAILURES` on every contract using
-the deriver. The existing route builder checks admission; the engine encodes
+the step (`routes().use(step(verifyWebhook({ scheme })))`). The existing route builder checks admission; the engine encodes
 the matched route's exact definitions and stops the handler on refusal.
 Direct callers can use `WEBHOOK_SIGN_FAILURES` and `WEBHOOK_VERIFY_FAILURES`.
 All aliases are inferred from these original definition tuples.
@@ -36,7 +36,7 @@ All aliases are inferred from these original definition tuples.
 | `WebhookBodyUnreadable` | 400 |
 | `WebhookBodyTooLarge` | 413 |
 | `WebhookCryptoUnavailable` | 503 |
-| `RequestCancelled` (request deriver) | 499 |
+| `RequestCancelled` (request step) | 499 |
 | `UnexpectedDefect` (broken provider/callback/protocol) | 500 |
 
 Signing also returns the original ID-generation failures. Automatic IDs use

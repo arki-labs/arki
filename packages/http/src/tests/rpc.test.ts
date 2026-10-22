@@ -1,7 +1,7 @@
 /**
  * RPC mounts through the composed fetch handler — no sockets.
  * The static/boot split (contract at module level, handlers bound in
- * boot), deriver-fed context factories, dispatch, error envelopes,
+ * boot), step-fed context factories, dispatch, error envelopes,
  * mount-prefix collisions, and the manifest declaration (`toDotAction`).
  */
 
@@ -10,16 +10,17 @@ import { describe, expect, it } from 'vitest';
 import { routes, rpcMount } from '../bundle.js';
 import { buildEngine } from '../compiled.js';
 import { HTTP_ERROR_CODES, HttpConfigError, HttpError } from '../error.js';
+import { step } from '../middleware.js';
 
 const BASE = 'http://test.local';
 
 describe('rpc mounts', () => {
-  it('runs bundle derivers before dispatch and feeds the typed context factory', async () => {
+  it('runs bundle steps before dispatch and feeds the typed context factory', async () => {
     const ordersRpc = rpcMount('/rpc/orders', { id: 'orders.rpc' });
 
     const engine = buildEngine([
       routes()
-        .derive('principal', req => req.headers.get('x-user') ?? 'anonymous')
+        .use(step(({ req }: { readonly req: Request }) => ({ principal: req.headers.get('x-user') ?? 'anonymous' })))
         .rpc(ordersRpc, {
           context: (_req, ctx) => ({ user: ctx.principal, scope: 'orders' }),
           handle: (_req, ctx) => Response.json({ dispatchedAs: ctx.user, scope: ctx.scope }),

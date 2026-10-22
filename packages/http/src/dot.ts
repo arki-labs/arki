@@ -96,7 +96,7 @@ export type HttpOptions<TBundles extends readonly BundleToken[] = readonly []> =
   readonly bundles?: TBundles;
   /**
    * App-wide fetch-shaped middleware (first = outermost): CORS, request
-   * logging, compression. For per-request values use bundle derivers —
+   * logging, compression. For per-request values use bundle steps —
    * they are typed into handler contexts; middleware is not.
    */
   readonly middleware?: readonly HttpMiddleware[];
@@ -247,8 +247,8 @@ function isRouteBundle(value: unknown): value is RouteBundle {
   return (
     typeof value === 'object' &&
     value !== null &&
-    'derivers' in value &&
-    Array.isArray(value.derivers) &&
+    'stages' in value &&
+    Array.isArray(value.stages) &&
     'bindings' in value &&
     Array.isArray(value.bindings) &&
     'mounts' in value &&

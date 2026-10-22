@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { orThrow } from '@arki/failure';
-import { buildEngine, route, routes } from '@arki/http';
+import { buildEngine, route, routes, step } from '@arki/http';
 import { standardWebhooks, verifyWebhook, WEBHOOK_FAILURES } from '@arki/http/webhooks';
 
 import { j, openDb, order, OrderPlaced, tables } from './test-support.js';
@@ -43,7 +43,7 @@ const orderPlaced = route.post('/hooks/orders', {
 });
 const engine = buildEngine([
   routes()
-    .derive('webhook', verifyWebhook({ scheme }))
+    .use(step(verifyWebhook({ scheme })))
     .bind(orderPlaced, async ({ body }, { webhook }) => {
       orThrow(
         await journal.run(db, placeOrder, body, { actorId: 'partner' }, { idempotencyKey: `hook:${webhook.id}` }),

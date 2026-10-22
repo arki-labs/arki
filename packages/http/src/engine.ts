@@ -168,7 +168,7 @@ function registerRpc(
   claimed.set(key, rpc.id);
   // `replaceRequest: false` — the bound handler must see the ORIGINAL
   // request. oRPC/tRPC fetch adapters take the mount path as their own
-  // `prefix`/`endpoint` option, and derivers/`context` read `req.url`;
+  // `prefix`/`endpoint` option, and steps/`context` read `req.url`;
   // Hono's default mount rewrite (prefix-stripped URL) breaks both.
   app.mount(rpc.path, req => executeRpc(bundle, rpc, req, scope), { replaceRequest: false });
 }
@@ -188,6 +188,15 @@ class RequestCtx implements BaseRequestCtx {
   get signal(): AbortSignal {
     return this.req.signal;
   }
+}
+
+/**
+ * The context after a step. `RequestCtx` keeps `url` and `signal` as prototype getters, which a
+ * spread drops, so they are copied as own keys (this reads `url`, so only routes with stages pay
+ * for the URL parse).
+ */
+function extendCtx(ctx: BaseRequestCtx, added: object): BaseRequestCtx {
+  return { ...ctx, url: ctx.url, signal: ctx.signal, ...added };
 }
 
 function createBaseCtx(req: Request): BaseRequestCtx | IdGenerationFailure {
@@ -237,7 +246,7 @@ async function runRpcFrom(
 ): Promise<Response> {
   try {
     let ctx = start;
-    const stages = rpc.derivers ?? bundle.derivers;
+    const stages = rpc.stages ?? bundle.stages;
     for (let i = from; i < stages.length; i++) {
       const stage = stages[i];
       if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
@@ -246,18 +255,11 @@ async function runRpcFrom(
         const here = ctx;
         return await stage.around(here as never, () => runRpcFrom(bundle, rpc, req, rest, here));
       }
-      if ('step' in stage) {
-        // Same erasure boundary as executeBinding.
-        const added = await stage.step(ctx as never);
-        if (isFailure(added))
-          return refusalResponse(rpc, added, rpc.contract?.failures ?? [], stage.failureHeaders?.(added));
-        ctx = { ...ctx, ...added };
-        continue;
-      }
-      const value = await stage.derive(req, ctx as never);
-      if (isFailure(value))
-        return refusalResponse(rpc, value, rpc.contract?.failures ?? [], stage.failureHeaders?.(value));
-      ctx = { ...ctx, [stage.key]: value };
+      // Same erasure boundary as runBindingFrom.
+      const added = await stage.step(ctx as never);
+      if (isFailure(added))
+        return refusalResponse(rpc, added, rpc.contract?.failures ?? [], stage.failureHeaders?.(added));
+      ctx = extendCtx(ctx, added);
     }
     const rpcCtx = await rpc.context(req, ctx as never);
     // The rpc handler owns its subtree's responses (including its own
@@ -303,7 +305,7 @@ function registerBinding(
 }
 
 /**
- * Run one bound route. A route with no derivers and no body has nothing to
+ * Run one bound route. A route with no stages and no body has nothing to
  * await before its handler, so when its schemas answer synchronously it runs
  * synchronously and returns the Response itself when the handler does — no
  * promise, no extra microtask. Anything that needs an await goes through
@@ -320,7 +322,7 @@ export function executeBinding(
 ): Response | Promise<Response> {
   const base = createBaseCtx(req);
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
-  const staged = (binding.derivers ?? bundle.derivers).length > 0 || binding.contract.body !== undefined;
+  const staged = (binding.stages ?? bundle.stages).length > 0 || binding.contract.body !== undefined;
   const observe = binding.observe;
   if (observe?.watching() === true) {
     // Observed: nothing below envelopes a throw, so the observer sees it; the envelope is made here.
@@ -371,7 +373,7 @@ async function runBindingFrom(
 ): Promise<Response> {
   try {
     let ctx = start;
-    const stages = binding.derivers ?? bundle.derivers;
+    const stages = binding.stages ?? bundle.stages;
     for (let i = from; i < stages.length; i++) {
       const stage = stages[i];
       if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
@@ -380,21 +382,13 @@ async function runBindingFrom(
         const here = ctx;
         return await stage.around(here as never, () => runBindingFrom(bundle, binding, req, base, params, rest, here));
       }
-      if ('step' in stage) {
-        // Erasure boundary: steps were stored with `never` context, like derivers.
-        const added = await stage.step(ctx as never);
-        if (isFailure(added))
-          return refusalResponse(binding, added, binding.contract.failures ?? [], stage.failureHeaders?.(added));
-        ctx = { ...ctx, ...added };
-        continue;
-      }
-      // Erasure boundary: derivers were stored with `never` context (see
-      // ErasedDeriver); the accumulated ctx is the value they were typed
+      // Erasure boundary: steps were stored with `never` context (see
+      // ErasedStep); the accumulated ctx is the value they were typed
       // against at composition time.
-      const value = await stage.derive(req, ctx as never);
-      if (isFailure(value))
-        return refusalResponse(binding, value, binding.contract.failures ?? [], stage.failureHeaders?.(value));
-      ctx = { ...ctx, [stage.key]: value };
+      const added = await stage.step(ctx as never);
+      if (isFailure(added))
+        return refusalResponse(binding, added, binding.contract.failures ?? [], stage.failureHeaders?.(added));
+      ctx = extendCtx(ctx, added);
     }
 
     const body = binding.contract.body === undefined ? undefined : await readJson(req);
@@ -669,7 +663,7 @@ function jsonResponse(value: unknown, status = 200, headers?: Readonly<Record<st
  * list runs outermost. Use for cross-cutting concerns that must see or
  * touch the raw request/response — CORS, request logging, compression.
  * For per-request *values* (auth principals, tenant handles), use
- * derivers — they are typed into handler contexts; middleware is not.
+ * bundle steps — they are typed into handler contexts; middleware is not.
  */
 export type HttpMiddleware = (req: Request, next: (req: Request) => Promise<Response>) => Response | Promise<Response>;
 

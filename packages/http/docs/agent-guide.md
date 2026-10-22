@@ -7,7 +7,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 1. A route has two halves. The **contract** is plain data at module scope: method, path, schemas and a stable id. The **binding** is the handler, attached with `routes().bind(contract, handler)`.
 2. Any Standard Schema validates input and output (zod, valibot, arktype). Input is checked before the handler. Output is checked on the way out.
 3. `buildEngine([bundles])` composes bundles into one engine (`fetch` + `routeIds` + `bunRoutes`). `listen(engine, { port })` serves it. Routing is the compiled router for plain routes, Hono for mounts, `:x?` and `*` paths; `buildHonoEngine` is Hono alone. No Hono type is public.
-4. Derivers build the request scope (the user, the tenant). They run before the handler. Throwing an `HttpError` from one short-circuits the request.
+4. Steps build the request scope (the user, the tenant): `routes().use(step(fn))`, where `fn` returns an object to add or a failure. They run before the handler. A returned failure, or a thrown `HttpError`, short-circuits the request. `around(fn)` wraps the rest of the bundle and the handler.
 5. Failures are values or `HttpError`s. Both become a coded envelope: `{ "error": { "code", "message", ... } }`.
 6. `@arki/http/dot` is the Dot driver. It mounts the bundles of every feature and drains requests on shutdown.
 7. It does not hold state. Idempotency keys use a store you give it.
@@ -26,12 +26,12 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 1. Declare the failure with `defineFailure` from `@arki/failure` and list it in the contract `failures`.
 2. Return it from the handler. It becomes a response with the failure code.
 
-### Add a deriver
+### Add a step
 
-1. Write `derive(key, callback, { failureHeaders })`; return the success value or an inferred canonical failure.
-2. List every accumulated deriver failure in each contract's `failures`; `bind` and typed `rpc` mounts reject omitted or partial lists. Failure values never enter successful context fields.
+1. Write a plain function `(ctx) => object | Failure` (sync or async) and attach it with `routes().use(step(fn, { failureHeaders }))`. Its parameter is the least context it reads. Return `{ key: value }` to add `key`, or an inferred canonical failure: `isFailure(p) ? p : { principal: p }`.
+2. List every accumulated step failure in each contract's `failures`; `bind` and typed `rpc` mounts reject omitted or partial lists. Failure values never enter successful context fields.
 3. Use `failureHeaders` for challenges and retry headers. Handler-owned failures can supply the same callback as the third `bind` argument.
-4. Keys must be unique (`ARKI_HTTP_E007`). Each binding runs only the derivers present when it was bound.
+4. Each binding runs only the steps present when it was bound. Do not return `{}` on success next to a failure: TypeScript reduces `{} | Failure` to `{}` and the failure leaves the type.
 
 ### Make a write safe to repeat
 
@@ -54,7 +54,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 ### Receive a signed webhook
 
 1. Create a scheme from `@arki/http/webhooks` with the sender secrets.
-2. Declare `failures: WEBHOOK_FAILURES` on each protected route, then derive `verifyWebhook({ scheme })`. A returned failure stops the handler.
+2. Declare `failures: WEBHOOK_FAILURES` on each protected route, then add the step: `routes().use(step(verifyWebhook({ scheme })))`. It adds `webhook` to the context; a returned failure stops the handler.
 3. Narrow direct `sign()`/`verify()` results with `isFailure`. Missing crypto or provider defects are refusals, never successful verification.
 4. Default sign/verify/request spans inherit caller context and record safe codes only. See [migration guidance](upgrade-webhooks.md).
 
@@ -75,7 +75,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 - A handler that returns a `Response` needs `output: raw()`, or the engine answers 500 (`ARKI_HTTP_E510`).
 - A contract must agree with itself: params match the path (`ARKI_HTTP_E011`, thrown at declaration).
 - `public-fetch` refuses private addresses, also after DNS and redirects. Do not work around it.
-- Do not read the ambient context (`@arki/http/context`) when a deriver would do.
+- Do not read the ambient context (`@arki/http/context`) when a step would do.
 - Unexpected error messages are redacted when `NODE_ENV=production`.
 - Boot-time codes (`E0NN`) surface in `app.diagnostics`. Wire codes (`E4xx`, `E5xx`) surface in the envelope.
 

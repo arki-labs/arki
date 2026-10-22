@@ -2,9 +2,9 @@
  * `@arki/http` — typed HTTP for ARKI.
  *
  * Route contracts as data ({@link route}), Standard-Schema-validated handlers bound in
- * a typed bundle builder ({@link routes}), request-scope derivers
- * ({@link derive}), SSE streaming, and deterministic OpenAPI generation
- * ({@link toOpenApi}).
+ * a typed bundle builder ({@link routes}), request-scope steps and arounds
+ * ({@link step}, {@link around}), SSE streaming, and deterministic OpenAPI
+ * generation ({@link toOpenApi}).
  *
  * The framework-agnostic core lives here — {@link buildEngine} +
  * {@link listen} run a server without any framework. The DOT adapter (the
@@ -56,16 +56,7 @@ export type {
   SseHandler,
 } from './bundle.js';
 
-export { BASE_CTX_KEYS, derive } from './derive.js';
-export type {
-  BaseRequestCtx,
-  Deriver,
-  ErasedAround,
-  ErasedDeriver,
-  ErasedStage,
-  ErasedStep,
-  FailureHeaders,
-} from './derive.js';
+export type { BaseRequestCtx, ErasedAround, ErasedStage, ErasedStep, FailureHeaders } from './derive.js';
 export { around, step } from './middleware.js';
 export type { HttpAround, HttpStep } from './middleware.js';
 export { requestId } from './ids.js';

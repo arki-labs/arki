@@ -19,7 +19,7 @@ and supplied request-header strings.
 - Generation uses native UUIDs or secure fallback bytes. Missing providers return
   `RandomSourceUnavailable`; defective providers return `UnexpectedDefect`.
   An existing native provider fault never triggers a second entropy attempt.
-  Bound request setup stops before derivers/handlers/RPC context. Idempotency
+  Bound request setup stops before steps/handlers/RPC context. Idempotency
   owner refusal stops before hashing, cache acquisition and handler execution.
 
 The native middleware protocol still uses the existing validated HTTP exception

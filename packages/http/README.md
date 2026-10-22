@@ -2,7 +2,7 @@
 
 Typed HTTP for ARKI — route contracts as data, handlers validated by any
 Standard Schema (zod, valibot, arktype, your own),
-request-scope derivers, SSE streaming, and deterministic OpenAPI
+request-scope steps, SSE streaming, and deterministic OpenAPI
 generation. Ships a DOT adapter (`@arki/http/dot`) whose `http()` entrypoint unit
 turns a composed app into a running server with correct drain-on-shutdown
 semantics.
@@ -335,15 +335,17 @@ envelope. Read them with `logHandlers()` or `reportErrors()` from `@arki/dot`,
 or your own `app.subscribe`. A bundle served outside a feature, or without Dot,
 emits nothing.
 
-## Request scope — derivers, not containers
+## Request scope — steps, not containers
 
-Per-request values are typed context keys derived by plain functions.
-Derivers run in declaration order; each adds a key later handlers (and
-later derivers) see typed. A deriver that throws `HttpError` is the whole
-"guard" story:
+Per-request values are typed context keys added by plain functions.
+A step is `(ctx) => object | Failure`, attached with `routes().use(step(fn))`.
+Steps run in declaration order; each adds the keys of the object it returns,
+and later steps and handlers see them typed. A step that returns a failure
+(or throws `HttpError`) is the whole "guard" story:
 
 ```ts run
-import { buildEngine, derive, route, routes } from '@arki/http';
+import type { BaseRequestCtx } from '@arki/http';
+import { buildEngine, route, routes, step } from '@arki/http';
 import { defineFailure } from '@arki/failure';
 
 import { auth, dbForTenant, listOrders } from './fixture.ts';
@@ -355,15 +357,17 @@ const securedOrders = route.get(listOrders.path, {
 });
 
 // inside a `provides` factory — `auth` is an injected singleton
-const withPrincipal = derive('principal', async req => {
+const withPrincipal = step(async ({ req }: BaseRequestCtx) => {
   const p = await auth.verify(req.headers.get('authorization'));
-  if (!p) return SignIn();
-  return p;
+  return p ? { principal: p } : SignIn();
 }, { failureHeaders: () => ({ 'www-authenticate': 'Bearer' }) });
+const withDb = (ctx: { readonly principal: { readonly tenantId: string } }) => ({
+  db: dbForTenant(ctx.principal.tenantId),
+});
 
 const orderRoutes = routes()
-  .derive(withPrincipal)
-  .derive('db', (_req, ctx) => dbForTenant(ctx.principal.tenantId))
+  .use(withPrincipal)
+  .use(step(withDb))
   .bind(securedOrders, async (_input, ctx) => ctx.db.orders.list());
 ```
 
@@ -400,7 +404,7 @@ http({ port: 3000, bundles: [OrdersRoutes], middleware: [requestLog(logger), cor
 ```
 
 Middleware wraps the whole engine and is untyped by design; anything that
-produces a per-request *value* belongs in a deriver instead. Standalone
+produces a per-request *value* belongs in a step instead. Standalone
 users compose the same way with `composeMiddleware(engine, [...])`, which returns an engine for `listen`.
 
 ## Idempotency keys
@@ -446,7 +450,7 @@ http({
 import { standardWebhooks, verifyWebhook, WEBHOOK_FAILURES } from '@arki/http/webhooks';
 
 const partnerEvents = routes()
-  .derive('webhook', verifyWebhook({ scheme: standardWebhooks({ secrets: [env.PARTNER_WEBHOOK_SECRET] }) }))
+  .use(step(verifyWebhook({ scheme: standardWebhooks({ secrets: [env.PARTNER_WEBHOOK_SECRET] }) })))
   // orderShipped declares failures: WEBHOOK_FAILURES in its route contract.
   .bind(orderShipped, async ({ body }, { webhook }) => {
     // The event id is the journal key: a resent event commits nothing the second time,
@@ -456,12 +460,12 @@ const partnerEvents = routes()
 ```
 
 - **Schemes.** `standardWebhooks({ secrets })` ([Standard Webhooks](https://www.standardwebhooks.com/): `webhook-id`, `webhook-timestamp`, `webhook-signature: v1,…`). `stripe({ secrets })` (`stripe-signature: t=…,v1=…`; the id is the event's `id`). `hmac({ secrets, header, headerPrefix?, algorithm?, encoding?, idHeader?, timestampHeader?, bodyPrefix? })` for the rest: GitHub is `{ header: 'x-hub-signature-256', headerPrefix: 'sha256=', idHeader: 'x-github-delivery' }`; Slack adds `timestampHeader: 'x-slack-request-timestamp'` and `` bodyPrefix: ({ timestamp }) => `v0:${timestamp}:` ``.
-- **The deriver reads a clone of the body.** The route's `body` schema still parses the same bytes after the check. A body over `maxBodyBytes` (default 1 MiB) answers 413 before any check.
+- **`verifyWebhook` is a step.** It adds `webhook` to the context, or refuses. It reads a clone of the body. The route's `body` schema still parses the same bytes after the check. A body over `maxBodyBytes` (default 1 MiB) answers 413 before any check.
 - **Rotation.** Pass several secrets, the new one first. Any one may match; `sign` uses the first.
 - **Replays.** The signed time must be within `tolerance` seconds of now, either way (default 300). Only a signed time stops a replay, so with `hmac` put the time in `bodyPrefix`. Past the window, the journal key stops a resent event.
 - **`webhook.id`** only ever comes from signed bytes, because it becomes the journal key. `standardWebhooks`: the signed `webhook-id`. `stripe`: the event's `id` in the body (`string | undefined`). `hmac`: the SHA-256 of the body, because those senders put their id in a header the signature does not cover (GitHub's `x-github-delivery`), and a resend under a forged id would otherwise run twice.
 - Every scheme also has `verify({ headers, body })` for use outside a route, and `sign(body, { id?, timestamp? })` for senders and tests.
-- `sign()` and `verify()` return their ordinary success value or exact canonical failures. Protected routes declare `WEBHOOK_FAILURES` so deriver failures are encoded and inferred by clients. Authentication refusals answer 401; unreadable/oversized bodies answer 400/413, unavailable crypto answers 503, and unexpected provider defects answer 500. See [migration guidance](docs/upgrade-webhooks.md). Static scheme definitions with no secret, an empty secret or invalid base64 still throw `E012`; owned application boot supervises definition defects.
+- `sign()` and `verify()` return their ordinary success value or exact canonical failures. Protected routes declare `WEBHOOK_FAILURES` so step failures are encoded and inferred by clients. Authentication refusals answer 401; unreadable/oversized bodies answer 400/413, unavailable crypto answers 503, and unexpected provider defects answer 500. See [migration guidance](docs/upgrade-webhooks.md). Static scheme definitions with no secret, an empty secret or invalid base64 still throw `E012`; owned application boot supervises definition defects.
 - Default `http.webhook.sign`, `http.webhook.verify` and `http.webhook.request` spans inherit caller context and record only safe failure codes. Libraries do not configure an SDK; failed reporting cannot change outcomes or repeat work.
 
 ## Streaming
@@ -655,7 +659,7 @@ Bun's natively matched routes run the same layers as `fetch`; the Dot
 
 | Import | What it holds |
 | --- | --- |
-| `@arki/http` | `route`, `routes`, `buildEngine`, `buildHonoEngine`, `listen`, `composeMiddleware`, `derive`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
+| `@arki/http` | `route`, `routes`, `buildEngine`, `buildHonoEngine`, `listen`, `composeMiddleware`, `step`, `around`, `HttpError`, `toOpenApi`, `raw`, `reply`, `codec`, `optional` |
 | `@arki/http/dot` | `http()`, the Dot entrypoint unit, and `endpoints()` |
 | `@arki/http/client` | the typed fetch client |
 | `@arki/http/idempotency` | `idempotent(...)`, an idempotency-key middleware |
@@ -666,7 +670,7 @@ Bun's natively matched routes run the same layers as `fetch`; the Dot
 
 ## Failure behaviour
 
-Handlers and derivers fail with an `HttpError` or return a failure. The engine turns both into a coded envelope on the wire:
+Handlers and steps fail with an `HttpError` or return a failure. The engine turns both into a coded envelope on the wire:
 
 ```text
 { "error": { "code", "message", "remediation?", "docsUrl?", "data?" } }
@@ -692,13 +696,12 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E002` | duplicate route: two bindings claim the same method+path (or a bundle token is listed twice) |
 | `ARKI_HTTP_E005` | `stop` exceeded `drainTimeoutMs` with requests in flight |
 | `ARKI_HTTP_E006` | malformed mount path |
-| `ARKI_HTTP_E007` | deriver key duplicates an earlier deriver or a base context key |
 | `ARKI_HTTP_E008` | a bundle token's service was missing at boot (erased composition only) |
 | `ARKI_HTTP_E011` | a route contract is inconsistent (params vs path, headers, responses). Thrown by `route.*()` |
 | `ARKI_HTTP_E012` | a webhook scheme has no secret, an empty one, or one it cannot decode. Thrown when the scheme is created |
 | `ARKI_HTTP_E013` | a contract schema cannot describe itself as JSON Schema (no `~standard.jsonSchema`, or the conversion threw). Thrown by `toOpenApi` / `contractMeta`; fix with `withJsonSchema` |
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
-| `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
+| `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your steps) |
 | `ARKI_HTTP_E404` | no route matches |
 | `http.request_timeout` | client request deadline exceeded (408); replaces the client exception E408 |
 | `http.network_failure` / `http.request_cancelled` | client network failure (503) / caller cancellation (499) |
@@ -819,14 +822,14 @@ same boundary only when that route uses them. A handler or middleware adapter ca
 the bridge validates JSON data and preserves status and headers. Returned handler failures
 also pass through `serialize` before crossing the wire. Private causes remain local.
 
-Deriver callbacks may return canonical failures alongside their successful value. The builder
+Steps may return canonical failures instead of the object they add. The builder
 accumulates these inferred failures and requires every later bound HTTP, SSE or typed RPC
 contract to declare them. Successful context fields exclude failures. A returned failure stops
-later derivers and the handler; the matched contract validates its serialized data.
-`derive(key, callback, { failureHeaders })` preserves challenge or retry headers.
+later steps and the handler; the matched contract validates its serialized data.
+`step(fn, { failureHeaders })` preserves challenge or retry headers.
 Handler-owned refusals use `bind(contract, handler, { failureHeaders })`.
 
-Bindings snapshot their derivers: adding a guard later in a chain cannot change a route bound
+Bindings snapshot their steps: adding a guard later in a chain cannot change a route bound
 earlier. Typed RPC mounts declare their guard failures with `rpcMount(path, { id, failures })`.
 Idempotency `routes` accepts canonical descriptors, not method/path strings, and checks all
 definitions in `IDEMPOTENCY_FAILURES` on every descriptor. Foreign fetch middleware remains an untyped
@@ -838,7 +841,7 @@ transport edge.
 definition. Every present `x-request-id` string, including an empty string, keeps
 its bytes and bypasses entropy. Otherwise HTTP generates a UUID through
 `@arki/contracts`: native `randomUUID`, or secure `getRandomValues` when the native
-method is absent. Provider failures stop bound handlers, derivers and RPC context
+method is absent. Provider failures stop bound handlers, steps and RPC context
 creation. Typed clients admit these framework failures automatically.
 
 Idempotency cache owners use a separate `IdempotencyOwnerId`, exported with

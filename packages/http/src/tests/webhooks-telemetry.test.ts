@@ -64,7 +64,7 @@ describe('webhook telemetry', () => {
       await context.with(trace.setSpan(context.active(), parent), () => subject.sign(body, { id: 'private-id' })),
     );
     await context.with(trace.setSpan(context.active(), parent), () =>
-      verifyWebhook({ scheme: subject })(new Request('https://test/hook', { method: 'POST', body, headers })),
+      verifyWebhook({ scheme: subject })({ req: new Request('https://test/hook', { method: 'POST', body, headers }) }),
     );
     const spans = exporter.getFinishedSpans();
     expect(spans.map(span => span.name).toSorted()).toEqual([

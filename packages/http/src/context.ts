@@ -7,7 +7,7 @@
  * {@link BaseRequestCtx} via `AsyncLocalStorage`.
  *
  * Ambient context is a smell — prefer the explicit `ctx` parameter and
- * derivers everywhere a signature is yours to change. Note that OTel
+ * steps everywhere a signature is yours to change. Note that OTel
  * trace context already propagates this way, so span/log correlation
  * needs none of this.
  *

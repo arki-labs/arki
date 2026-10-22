@@ -16,6 +16,7 @@ import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { HttpConfigError } from '../error.js';
+import { step } from '../middleware.js';
 import {
   hmac,
   standardWebhooks,
@@ -232,7 +233,7 @@ const post = (headers: Headers, body: string): Request => {
   return new Request('http://test.local/hooks/orders', { method: 'POST', headers, body });
 };
 
-describe('verifyWebhook as a deriver', () => {
+describe('verifyWebhook as a step', () => {
   const secret = 'whsec_c2VjcmV0LWtleS1vbmU=';
   const scheme = standardWebhooks({ secrets: [secret] });
   const orderEvent = route.post('/hooks/orders', {
@@ -247,7 +248,7 @@ describe('verifyWebhook as a deriver', () => {
     const seen: string[] = [];
     const engine = buildEngine([
       routes()
-        .derive('webhook', verifyWebhook({ scheme, ...(maxBodyBytes === undefined ? {} : { maxBodyBytes }) }))
+        .use(step(verifyWebhook({ scheme, ...(maxBodyBytes === undefined ? {} : { maxBodyBytes }) })))
         .bind(orderEvent, ({ body }, { webhook }) => {
           seen.push(body.orderId);
           return { id: webhook.id, orderId: body.orderId };

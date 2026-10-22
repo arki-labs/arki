@@ -25,13 +25,13 @@ export type HttpAround<In> = {
  *   const authed = (ctx: { principal: Principal | null }) =>
  *     ctx.principal === null ? SignInRequired() : { principal: ctx.principal };
  *
- * A refusal answers with the same envelope as a refused `derive`, so every
- * route bound after the step must declare the step's failures. The return must
+ * A refusal answers with the coded failure envelope, so every route bound
+ * after the step must declare the step's failures. The return must
  * be an object (or a failure), sync or async. The same function attaches to
  * the other transports with their own `step`.
  *
  * `failureHeaders` adds response headers to a refusal, typed by the step's
- * own failures (a `www-authenticate` challenge on a 401, say), as on `derive`.
+ * own failures (a `www-authenticate` challenge on a 401, say).
  */
 export function step<In, R extends object | PromiseLike<object>>(
   fn: (context: In) => R,

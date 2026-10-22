@@ -10,6 +10,7 @@ import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { HTTP_SERVER_FAILURES } from '../failures.js';
 import { idempotencyOwnerId, requestId } from '../ids.js';
+import { step } from '../middleware.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -63,7 +64,7 @@ describe('request identities', () => {
     const engine = buildEngine([
       routes().bind(sync, (_input, ctx) => ctx.requestId),
       routes()
-        .derive('marker', () => 'ready')
+        .use(step(() => ({ marker: 'ready' })))
         .bind(async, async (_input, ctx) => {
           await Promise.resolve();
           expect(requestContext()?.requestId).toBe(ctx.requestId);
@@ -84,19 +85,19 @@ describe('request identities', () => {
   });
 
   it.each([null, undefined, {}])(
-    'refuses every bound execution path before handlers, derivers or RPC context with unusable crypto %j',
+    'refuses every bound execution path before handlers, steps or RPC context with unusable crypto %j',
     async cryptoProvider => {
       vi.stubGlobal('crypto', cryptoProvider);
       const handler = vi.fn(() => {
         throw new Error('The handler must not run without request entropy.');
       });
-      const derive = vi.fn(() => 'ready');
+      const marker = vi.fn(() => ({ marker: 'ready' }));
       const context = vi.fn(() => ({}));
       const handle = vi.fn(() => new Response('unreachable'));
       const engine = buildEngine([
         routes().bind(route.get('/sync', { id: 'sync' }), handler),
         routes()
-          .derive('marker', derive)
+          .use(step(marker))
           .bind(route.get('/derived', { id: 'derived' }), handler),
         routes().bind(route.post('/body', { id: 'body', body: requestId.schema }), handler),
         routes().rpc(rpcMount('/rpc', { id: 'rpc' }), { context, handle }),
@@ -109,7 +110,7 @@ describe('request identities', () => {
         expect(response.status).toBe(500);
         expect(await response.json()).toMatchObject({ error: { code: RandomSourceUnavailable.code } });
       }
-      for (const callback of [handler, derive, context, handle]) expect(callback).not.toHaveBeenCalled();
+      for (const callback of [handler, marker, context, handle]) expect(callback).not.toHaveBeenCalled();
       expect(requestContext()).toBeUndefined();
     },
   );

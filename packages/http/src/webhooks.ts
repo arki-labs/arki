@@ -8,7 +8,7 @@
  * ```ts
  * // stripeEvent declares failures: WEBHOOK_FAILURES in its route contract.
  * const stripeEvents = routes()
- *   .derive('webhook', verifyWebhook({ scheme: stripe({ secrets: [env.STRIPE_WEBHOOK_SECRET] }) }))
+ *   .use(step(verifyWebhook({ scheme: stripe({ secrets: [env.STRIPE_WEBHOOK_SECRET] }) })))
  *   .bind(stripeEvent, async ({ body }, { webhook }) => {
  *     // The event id is the journal key: a resent event commits nothing the second time.
  *     await journal.run(recordStripeEvent, body, { idempotencyKey: webhook.id });
@@ -443,15 +443,16 @@ export type VerifyWebhookOptions<TId extends string | undefined = string | undef
 };
 
 /**
- * A deriver that checks the request's signature: `.derive('webhook', verifyWebhook({ scheme }))`.
+ * A step that checks the request's signature and adds `webhook` to the context:
+ * `routes().use(step(verifyWebhook({ scheme })))`.
  * It reads a clone of the body, so the route's `body` schema still parses the same bytes after it.
  * A request that fails never reaches the handler: 401 (or 413 when the body is too large).
  */
 export function verifyWebhook<TId extends string | undefined>(
   options: VerifyWebhookOptions<TId>,
-): (req: Request) => Promise<VerifiedWebhook<TId> | WebhookFailure> {
+): (ctx: { readonly req: Request }) => Promise<{ readonly webhook: VerifiedWebhook<TId> } | WebhookFailure> {
   const { scheme, maxBodyBytes = DEFAULT_MAX_BODY_BYTES, tolerance } = options;
-  return req =>
+  return ({ req }) =>
     observeWebhook('http.webhook.request', async () => {
       if (cancelled(req)) return RequestCancelled();
       if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)
@@ -484,6 +485,6 @@ export function verifyWebhook<TId extends string | undefined>(
         !(verified.body instanceof Uint8Array)
       )
         throw new TypeError('Webhook scheme returned an invalid result.');
-      return verified;
+      return { webhook: verified };
     });
 }

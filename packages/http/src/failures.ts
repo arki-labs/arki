@@ -2,7 +2,7 @@
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure, InvalidInput, REVIVAL_FAILURES } from '@arki/failure';
 
-/** Framework request setup can refuse before a route handler or deriver runs. */
+/** Framework request setup can refuse before a route handler or step runs. */
 export const HTTP_SERVER_FAILURES = ID_GENERATION_FAILURES;
 
 /** A fetch attempt failed to reach its destination.

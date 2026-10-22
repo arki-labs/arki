@@ -309,7 +309,7 @@ Well-known slice keys, each owned by the adapter that consumes it:
 
 | Key         | Value                                                                 | Consuming activator |
 | ----------- | --------------------------------------------------------------------- | ------------------- |
-| `routes`    | an HTTP route bundle (bindings + derivers + rpc mounts)               | `@arki/http`        |
+| `routes`    | an HTTP route bundle (bindings + steps + rpc mounts)                  | `@arki/http`        |
 | `queue`     | a queue definition registry (jobs, queue-schedules, flows)            | `@arki/queue`       |
 | `schedules` | in-process schedule definitions                                       | `@arki/schedule`    |
 | `journal`   | a journal bundle (projections + effects, from `journalHandlers(...)`) | `@arki/journal`     |

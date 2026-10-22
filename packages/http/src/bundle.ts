@@ -5,7 +5,7 @@ import type { Failure } from '@arki/failure';
  *
  * A bundle binds contracts to handlers. It is assembled inside a plugin's
  * `provides` factory — where the plugin's `needs` are already injected — so
- * handlers and derivers close over typed singletons:
+ * handlers and steps close over typed singletons:
  *
  * ```ts
  * export const OrdersRoutes = token<RouteBundle>()('orders.routes');
@@ -23,9 +23,9 @@ import type { Failure } from '@arki/failure';
  * });
  * ```
  *
- * The builder accumulates deriver-added context keys in its type — a
- * handler bound after `.derive('principal', …)` sees `ctx.principal`
- * typed. Same accumulation idiom as `defineApp().infra()`.
+ * The builder accumulates step-added context keys in its type — a
+ * handler bound after `.use(step(ctx => …({ principal })))` sees
+ * `ctx.principal` typed. Same accumulation idiom as `defineApp().infra()`.
  */
 
 import type {
@@ -40,11 +40,10 @@ import type {
   SseContract,
   SseDef,
 } from './contract.js';
-import type { BaseRequestCtx, Deriver, ErasedAround, ErasedStage, ErasedStep, FailureHeaders } from './derive.js';
+import type { BaseRequestCtx, ErasedAround, ErasedStage, ErasedStep, FailureHeaders } from './derive.js';
 import type { HttpAround, HttpStep } from './middleware.js';
 import type { RawOutput } from './raw.js';
 import type { Wire, WireValue } from './wire.js';
-import { BASE_CTX_KEYS } from './derive.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { HTTP_ACTION_META_SCHEMA } from './openapi.js';
 
@@ -148,7 +147,7 @@ export type ObserveBinding = {
 export type RouteBinding = FailureHeaders<Failure> & {
   /** Set by an adapter that watches this route; the engine skips all of it when absent. */
   readonly observe?: ObserveBinding;
-  readonly derivers?: readonly ErasedStage[];
+  readonly stages?: readonly ErasedStage[];
   readonly contract: ContractLike;
   /**
    * Stored erased (`never` parameters) — typed handlers are assignable
@@ -219,7 +218,7 @@ export type RpcBinding = {
   /** Set by an adapter that watches this mount; see {@link ObserveBinding}. */
   readonly observe?: ObserveBinding;
   readonly contract?: RpcMountContract;
-  readonly derivers?: readonly ErasedStage[];
+  readonly stages?: readonly ErasedStage[];
   readonly id: string;
   readonly path: string;
   readonly transport: MountTransport;
@@ -263,12 +262,13 @@ export function rpcMount(path: MountPath, options: RpcMountOptions): RpcMountCon
 }
 
 /**
- * A plain value: derivers + bound contracts + mounts. Published as an
+ * A plain value: stages + bound contracts + mounts. Published as an
  * ordinary DOT service under a token and collected by the `http()` entrypoint —
  * no new kernel concept.
  */
 export type RouteBundle = {
-  readonly derivers: readonly ErasedStage[];
+  /** The steps and arounds, in declaration order. */
+  readonly stages: readonly ErasedStage[];
   readonly bindings: readonly RouteBinding[];
   readonly mounts: readonly MountBinding[];
   /** Typed RPC mounts — optional so hand-rolled bundles stay valid. */
@@ -276,34 +276,18 @@ export type RouteBundle = {
 };
 
 /**
- * Immutable bundle builder. Every method returns a new builder; deriver
+ * Immutable bundle builder. Every method returns a new builder; step-added
  * keys accumulate in `TCtx` so later `bind` handlers see them typed.
  */
 export type RouteBundleBuilder<
   TCtx extends BaseRequestCtx = BaseRequestCtx,
   TFailures extends Failure = never,
 > = RouteBundle & {
-  /** Add a reusable deriver (see {@link Deriver}). */
-  derive<K extends string, V>(
-    deriver: Deriver<K, V, TCtx>,
-  ): RouteBundleBuilder<
-    TCtx & Readonly<Record<K, Exclude<Awaited<V>, Failure>>>,
-    TFailures | Extract<Awaited<V>, Failure>
-  >;
-  /** Add an inline deriver. */
-  derive<K extends string, V>(
-    key: K,
-    fn: (req: Request, ctx: TCtx) => V | Promise<V>,
-    options?: FailureHeaders<NoInfer<V>>,
-  ): RouteBundleBuilder<
-    TCtx & Readonly<Record<K, Exclude<Awaited<V>, Failure>>>,
-    TFailures | Extract<Awaited<V>, Failure>
-  >;
   /**
    * Run a step before the handler: `routes().use(step(authed))`. The step's
    * object is added to the context; its failures join the bundle's failures,
    * so every route bound after it must declare them. A refusal answers with the
-   * same envelope as a refused {@link derive}. See `step`.
+   * coded failure envelope. See `step`.
    */
   use<R extends object | PromiseLike<object>>(
     step: HttpStep<TCtx, R>,
@@ -332,7 +316,7 @@ export type RouteBundleBuilder<
   /**
    * Mount a foreign fetch handler under a path prefix — an oRPC router, a
    * tRPC fetch adapter, a static-file handler. One manifest route, no
-   * schemas, derivers do NOT run for mounted handlers.
+   * schemas, steps and arounds do NOT run for mounted handlers.
    */
   mount(
     path: MountPath,
@@ -341,9 +325,9 @@ export type RouteBundleBuilder<
   ): RouteBundleBuilder<TCtx, TFailures>;
   /**
    * Bind a static {@link RpcMountContract} to its boot-time handlers.
-   * Unlike `mount`, the bundle's derivers RUN before dispatch, and the
-   * context factory receives the accumulated derived ctx — derivers
-   * added before `.rpc()` are typed into it.
+   * Unlike `mount`, the bundle's steps and arounds RUN before dispatch, and
+   * the context factory receives the accumulated ctx — keys steps added
+   * before `.rpc()` are typed into it.
    */
   rpc<TRpcCtx, const Contract extends RpcMountContract>(
     contract: Contract & CoversFailures<NoInfer<Contract>, TFailures>,
@@ -352,7 +336,7 @@ export type RouteBundleBuilder<
 };
 
 type BundleState = {
-  readonly derivers: readonly ErasedStage[];
+  readonly stages: readonly ErasedStage[];
   readonly bindings: readonly RouteBinding[];
   readonly mounts: readonly MountBinding[];
   readonly rpcs: readonly RpcBinding[];
@@ -368,49 +352,15 @@ function assertMountPath(path: string, id: string): void {
   }
 }
 
-function assertFreshDeriverKey(key: string, existing: readonly ErasedStage[]): void {
-  const reserved = (BASE_CTX_KEYS as readonly string[]).includes(key);
-  const duplicate = existing.some(d => 'derive' in d && d.key === key);
-  if (!reserved && !duplicate) return;
-  throw new HttpConfigError({
-    code: HTTP_ERROR_CODES.duplicateDeriverKey,
-    message: reserved
-      ? `[http] deriver key "${key}" shadows a base request-context key.`
-      : `[http] deriver key "${key}" is already derived in this bundle.`,
-    remediation: `Pick a different key — base keys (${BASE_CTX_KEYS.join(', ')}) and earlier deriver keys are reserved.`,
-  });
-}
-
 function makeBuilder(state: BundleState): RouteBundleBuilder;
 function makeBuilder(state: BundleState): unknown {
   const impl = {
-    derivers: state.derivers,
+    stages: state.stages,
     bindings: state.bindings,
     mounts: state.mounts,
     rpcs: state.rpcs,
-    derive(
-      keyOrDeriver: string | Exclude<ErasedStage, ErasedStep | ErasedAround>,
-      fn?: (req: Request, ctx: never) => unknown,
-      options: FailureHeaders<Failure> = {},
-    ): RouteBundleBuilder {
-      let deriver: Exclude<ErasedStage, ErasedStep | ErasedAround>;
-      if (typeof keyOrDeriver === 'string') {
-        if (fn === undefined) {
-          throw new HttpConfigError({
-            code: HTTP_ERROR_CODES.duplicateDeriverKey,
-            message: `[http] derive("${keyOrDeriver}") is missing its deriver function.`,
-            remediation: 'Pass derive(key, fn) or derive(deriverObject).',
-          });
-        }
-        deriver = { key: keyOrDeriver, derive: fn, ...options };
-      } else {
-        deriver = keyOrDeriver;
-      }
-      assertFreshDeriverKey(deriver.key, state.derivers);
-      return makeBuilder({ ...state, derivers: [...state.derivers, deriver] });
-    },
     use(stage: ErasedStep | ErasedAround): RouteBundleBuilder {
-      return makeBuilder({ ...state, derivers: [...state.derivers, stage] });
+      return makeBuilder({ ...state, stages: [...state.stages, stage] });
     },
     bind(
       contract: ContractLike,
@@ -419,7 +369,7 @@ function makeBuilder(state: BundleState): unknown {
     ): RouteBundleBuilder {
       return makeBuilder({
         ...state,
-        bindings: [...state.bindings, { contract, handler, derivers: state.derivers, ...options }],
+        bindings: [...state.bindings, { contract, handler, stages: state.stages, ...options }],
       });
     },
     mount(
@@ -440,7 +390,7 @@ function makeBuilder(state: BundleState): unknown {
           ...state.rpcs,
           {
             contract,
-            derivers: state.derivers,
+            stages: state.stages,
             id: contract.id,
             path: contract.path,
             transport: contract.transport,
@@ -458,5 +408,5 @@ function makeBuilder(state: BundleState): unknown {
 
 /** Start an empty bundle. See the module docs for the authoring pattern. */
 export function routes(): RouteBundleBuilder {
-  return makeBuilder({ derivers: [], bindings: [], mounts: [], rpcs: [] });
+  return makeBuilder({ stages: [], bindings: [], mounts: [], rpcs: [] });
 }

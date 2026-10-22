@@ -8,7 +8,7 @@
  *    `stop`; the kernel wraps them and their `code`/`remediation`/`docsUrl`
  *    propagate into `app.diagnostics.issues`.
  *  - {@link HttpError} — per-request failures. Thrown from handlers,
- *    derivers, or validation; serialized onto the wire as the coded
+ *    steps, or validation; serialized onto the wire as the coded
  *    envelope `{ error: { code, message, remediation?, docsUrl?, data? } }`.
  *    A handler that returns an `@arki/failure` failure gets the same
  *    envelope, with the failure's status, code, message and data.
@@ -62,13 +62,6 @@ export const HTTP_ERROR_CODES = {
    * @verify bun run test -- src/tests/engine.test.ts
    */
   invalidMount: 'ARKI_HTTP_E006',
-  /**
-   * A deriver key duplicates an earlier deriver or a base context key.
-   *
-   * @fix Rename the deriver key. Each key is set once per request scope.
-   * @verify bun run test -- src/tests/engine.test.ts
-   */
-  duplicateDeriverKey: 'ARKI_HTTP_E007',
   /**
    * `requestContext()` was called, but every engine in this process was built without `requestContext: true`.
    *
@@ -175,14 +168,14 @@ export const HTTP_ERROR_CODES = {
    */
   webhookStale: 'ARKI_HTTP_E422',
   /**
-   * A deriver rejected the request credentials.
+   * A step rejected the request credentials.
    *
    * @fix Send valid credentials.
    * @verify bun run test -- src/tests/engine.test.ts
    */
   unauthorized: 'ARKI_HTTP_E401',
   /**
-   * A deriver rejected the request permissions.
+   * A step rejected the request permissions.
    *
    * @fix Use an account that has the permission.
    * @verify bun run test -- src/tests/engine.test.ts
@@ -222,7 +215,7 @@ const docsUrlFor = (code: string): string => `https://arki.dev/http/errors/${cod
 
 /**
  * A per-request failure with an HTTP status and a stable code. Throw from
- * a handler or deriver to short-circuit into the wire envelope:
+ * a handler or step to short-circuit into the wire envelope:
  *
  * ```ts
  * throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');

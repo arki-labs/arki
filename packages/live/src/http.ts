@@ -39,8 +39,8 @@
  */
 import { z } from 'zod';
 
-import type { RouteBundle, SseContract } from '@arki/http';
-import { buildEngine, HttpError, optional, route, routes } from '@arki/http';
+import type { BaseRequestCtx, RouteBundle, SseContract } from '@arki/http';
+import { buildEngine, HttpError, optional, route, routes, step } from '@arki/http';
 
 import type { LiveFeed, LiveGrant, LiveHub, LiveView } from './hub.js';
 import type { LiveEvent, LiveManifest, LiveScopes, TableTag } from './types.js';
@@ -479,23 +479,25 @@ export function liveEndpoint<Dimension extends string = never>(options: {
     return framesFor(feed, view, { expired: () => expired, closed: () => closed, end, recheck: stream.recheck });
   }
 
+  const grant = async ({ req, url }: BaseRequestCtx) => {
+    checkCursor(url);
+    // Read before `authorize` reads anything: a later `reauthorize` write is one the grant may miss.
+    const seen = reauthorizeWrites;
+    const view = await authorized(req);
+    if (view === undefined) {
+      throw new HttpError(401, LIVE_ERROR_CODES.auth, 'the live stream refused this request', {
+        remediation: 'Sign in again; the client stops reconnecting until its headers or session change.',
+      });
+    }
+    return { liveGrant: { view, seen } };
+  };
+  // Attaching waits for the hub to open the cursor, so it runs here, before any header.
+  const attach = async (ctx: BaseRequestCtx & Awaited<ReturnType<typeof grant>>) => ({
+    liveFeed: await open(ctx.liveGrant, ctx.url.searchParams.get('cursor') ?? undefined, ctx.req, ctx.signal),
+  });
   const bundle = routes()
-    .derive('liveGrant', async (request, ctx) => {
-      checkCursor(ctx.url);
-      // Read before `authorize` reads anything: a later `reauthorize` write is one the grant may miss.
-      const seen = reauthorizeWrites;
-      const view = await authorized(request);
-      if (view === undefined) {
-        throw new HttpError(401, LIVE_ERROR_CODES.auth, 'the live stream refused this request', {
-          remediation: 'Sign in again; the client stops reconnecting until its headers or session change.',
-        });
-      }
-      return { view, seen };
-    })
-    // Attaching waits for the hub to open the cursor, so it runs here, before any header.
-    .derive('liveFeed', (request, ctx) =>
-      open(ctx.liveGrant, ctx.url.searchParams.get('cursor') ?? undefined, request, ctx.signal),
-    )
+    .use(step(grant))
+    .use(step(attach))
     .bind(liveRoute, (_input, ctx) => ctx.liveFeed);
 
   return { contract: liveRoute, routes: bundle, fetch: buildEngine([bundle]).fetch, close };
