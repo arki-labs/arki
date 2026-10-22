@@ -40,7 +40,8 @@ import type {
   SseContract,
   SseDef,
 } from './contract.js';
-import type { BaseRequestCtx, Deriver, ErasedDeriver, FailureHeaders } from './derive.js';
+import type { BaseRequestCtx, Deriver, ErasedAround, ErasedStage, ErasedStep, FailureHeaders } from './derive.js';
+import type { HttpAround, HttpStep } from './middleware.js';
 import type { RawOutput } from './raw.js';
 import type { Wire, WireValue } from './wire.js';
 import { BASE_CTX_KEYS } from './derive.js';
@@ -131,7 +132,7 @@ export type MountMeta = {
 
 /** A contract bound to its (generics-erased) handler. */
 export type RouteBinding = FailureHeaders<Failure> & {
-  readonly derivers?: readonly ErasedDeriver[];
+  readonly derivers?: readonly ErasedStage[];
   readonly contract: ContractLike;
   /**
    * Stored erased (`never` parameters) — typed handlers are assignable
@@ -200,7 +201,7 @@ export type RpcMountHandlers<TDerived extends BaseRequestCtx, TRpcCtx> = {
 /** Erased rpc binding a bundle stores — same seam as {@link RouteBinding}. */
 export type RpcBinding = {
   readonly contract?: RpcMountContract;
-  readonly derivers?: readonly ErasedDeriver[];
+  readonly derivers?: readonly ErasedStage[];
   readonly id: string;
   readonly path: string;
   readonly transport: MountTransport;
@@ -249,7 +250,7 @@ export function rpcMount(path: MountPath, options: RpcMountOptions): RpcMountCon
  * no new kernel concept.
  */
 export type RouteBundle = {
-  readonly derivers: readonly ErasedDeriver[];
+  readonly derivers: readonly ErasedStage[];
   readonly bindings: readonly RouteBinding[];
   readonly mounts: readonly MountBinding[];
   /** Typed RPC mounts — optional so hand-rolled bundles stay valid. */
@@ -280,6 +281,20 @@ export type RouteBundleBuilder<
     TCtx & Readonly<Record<K, Exclude<Awaited<V>, Failure>>>,
     TFailures | Extract<Awaited<V>, Failure>
   >;
+  /**
+   * Run a step before the handler: `routes().use(step(authed))`. The step's
+   * object is added to the context; its failures join the bundle's failures,
+   * so every route bound after it must declare them. A refusal answers with the
+   * same envelope as a refused {@link derive}. See `step`.
+   */
+  use<R extends object | PromiseLike<object>>(
+    step: HttpStep<TCtx, R>,
+  ): RouteBundleBuilder<TCtx & Exclude<Awaited<R>, Failure>, TFailures | Extract<Awaited<R>, Failure>>;
+  /**
+   * Wrap everything declared after it and the handler:
+   * `routes().use(around(inTransaction))`. Adds nothing to the context. See `around`.
+   */
+  use(around: HttpAround<TCtx>): RouteBundleBuilder<TCtx, TFailures>;
   /**
    * Bind a JSON contract to its handler. `NoInfer` pins the input/result
    * types to the contract — without it, a handler returning the wrong
@@ -319,7 +334,7 @@ export type RouteBundleBuilder<
 };
 
 type BundleState = {
-  readonly derivers: readonly ErasedDeriver[];
+  readonly derivers: readonly ErasedStage[];
   readonly bindings: readonly RouteBinding[];
   readonly mounts: readonly MountBinding[];
   readonly rpcs: readonly RpcBinding[];
@@ -335,9 +350,9 @@ function assertMountPath(path: string, id: string): void {
   }
 }
 
-function assertFreshDeriverKey(key: string, existing: readonly ErasedDeriver[]): void {
+function assertFreshDeriverKey(key: string, existing: readonly ErasedStage[]): void {
   const reserved = (BASE_CTX_KEYS as readonly string[]).includes(key);
-  const duplicate = existing.some(d => d.key === key);
+  const duplicate = existing.some(d => 'derive' in d && d.key === key);
   if (!reserved && !duplicate) return;
   throw new HttpConfigError({
     code: HTTP_ERROR_CODES.duplicateDeriverKey,
@@ -356,11 +371,11 @@ function makeBuilder(state: BundleState): unknown {
     mounts: state.mounts,
     rpcs: state.rpcs,
     derive(
-      keyOrDeriver: string | ErasedDeriver,
+      keyOrDeriver: string | Exclude<ErasedStage, ErasedStep | ErasedAround>,
       fn?: (req: Request, ctx: never) => unknown,
       options: FailureHeaders<Failure> = {},
     ): RouteBundleBuilder {
-      let deriver: ErasedDeriver;
+      let deriver: Exclude<ErasedStage, ErasedStep | ErasedAround>;
       if (typeof keyOrDeriver === 'string') {
         if (fn === undefined) {
           throw new HttpConfigError({
@@ -375,6 +390,9 @@ function makeBuilder(state: BundleState): unknown {
       }
       assertFreshDeriverKey(deriver.key, state.derivers);
       return makeBuilder({ ...state, derivers: [...state.derivers, deriver] });
+    },
+    use(stage: ErasedStep | ErasedAround): RouteBundleBuilder {
+      return makeBuilder({ ...state, derivers: [...state.derivers, stage] });
     },
     bind(
       contract: ContractLike,

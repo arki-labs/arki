@@ -57,7 +57,17 @@ export type {
 } from './bundle.js';
 
 export { BASE_CTX_KEYS, derive } from './derive.js';
-export type { BaseRequestCtx, Deriver, ErasedDeriver, FailureHeaders } from './derive.js';
+export type {
+  BaseRequestCtx,
+  Deriver,
+  ErasedAround,
+  ErasedDeriver,
+  ErasedStage,
+  ErasedStep,
+  FailureHeaders,
+} from './derive.js';
+export { around, step } from './middleware.js';
+export type { HttpAround, HttpStep } from './middleware.js';
 export { requestId } from './ids.js';
 export type { RequestId } from './ids.js';
 

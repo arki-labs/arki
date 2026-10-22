@@ -87,3 +87,23 @@ export type ErasedDeriver = ErasedFailureHeaders & {
   readonly key: string;
   readonly derive: (req: Request, ctx: never) => unknown;
 };
+
+/**
+ * A step in the bundle's stage list: a plain function whose returned object is
+ * spread into the context (see `step` in `middleware.ts`). Stored erased, like
+ * {@link ErasedDeriver}.
+ */
+export type ErasedStep = {
+  readonly step: (ctx: never) => object | PromiseLike<object>;
+};
+
+/**
+ * An around in the bundle's stage list: wraps every stage declared after it and
+ * the handler (see `around` in `middleware.ts`). Stored erased.
+ */
+export type ErasedAround = {
+  readonly around: (ctx: never, next: () => Promise<Response>) => Promise<Response>;
+};
+
+/** Everything a bundle runs before the handler, in declaration order. */
+export type ErasedStage = ErasedDeriver | ErasedStep | ErasedAround;

@@ -31,7 +31,7 @@ describe('routes() builder', () => {
       .derive(derive('b', () => 2))
       .mount('/rpc', () => new Response('rpc'), { id: 'rpc', transport: 'orpc' });
 
-    expect(bundle.derivers.map(d => d.key)).toEqual(['a', 'b']);
+    expect(bundle.derivers.map(d => ('key' in d ? d.key : undefined))).toEqual(['a', 'b']);
     expect(bundle.mounts[0]).toMatchObject({ id: 'rpc', path: '/rpc', transport: 'orpc' });
   });
 

@@ -215,22 +215,49 @@ async function executeRpc(
   if (isFailure(base)) return failureResponse(base, HTTP_SERVER_FAILURES);
   return scope(base, async () => {
     try {
-      let ctx: BaseRequestCtx & Record<string, unknown> = base;
-      for (const deriver of rpc.derivers ?? bundle.derivers) {
-        // Same erasure boundary as executeBinding.
-        const value = await deriver.derive(req, ctx as never);
-        if (isFailure(value))
-          return failureResponse(value, rpc.contract?.failures ?? [], deriver.failureHeaders?.(value));
-        ctx = { ...ctx, [deriver.key]: value };
-      }
-      const rpcCtx = await rpc.context(req, ctx as never);
-      // The rpc handler owns its subtree's responses (including its own
-      // error format); only THROWN errors fall through to the envelope.
-      return await rpc.handle(req, rpcCtx as never);
+      return await runRpcFrom(bundle, rpc, req, 0, base);
     } catch (error) {
       return toErrorResponse(error);
     }
   });
+}
+
+/**
+ * Run an rpc mount's stages from `from`, then its handler. Throws: an
+ * around must see an error to roll back; `executeRpc` makes the envelope.
+ */
+async function runRpcFrom(
+  bundle: RouteBundle,
+  rpc: RpcBinding,
+  req: Request,
+  from: number,
+  start: BaseRequestCtx & Record<string, unknown>,
+): Promise<Response> {
+  let ctx = start;
+  const stages = rpc.derivers ?? bundle.derivers;
+  for (let i = from; i < stages.length; i++) {
+    const stage = stages[i];
+    if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
+    if ('around' in stage) {
+      const rest = i + 1;
+      const here = ctx;
+      return await stage.around(here as never, () => runRpcFrom(bundle, rpc, req, rest, here));
+    }
+    if ('step' in stage) {
+      // Same erasure boundary as executeBinding.
+      const added = await stage.step(ctx as never);
+      if (isFailure(added)) return failureResponse(added, rpc.contract?.failures ?? []);
+      ctx = { ...ctx, ...added };
+      continue;
+    }
+    const value = await stage.derive(req, ctx as never);
+    if (isFailure(value)) return failureResponse(value, rpc.contract?.failures ?? [], stage.failureHeaders?.(value));
+    ctx = { ...ctx, [stage.key]: value };
+  }
+  const rpcCtx = await rpc.context(req, ctx as never);
+  // The rpc handler owns its subtree's responses (including its own
+  // error format); only THROWN errors fall through to the envelope.
+  return await rpc.handle(req, rpcCtx as never);
 }
 
 /**
@@ -297,31 +324,59 @@ export function executeBinding(
   });
 }
 
-async function executeBindingAsync(
+function executeBindingAsync(
   bundle: RouteBundle,
   binding: RouteBinding,
   req: Request,
   base: BaseRequestCtx,
   params: Readonly<Record<string, string>>,
 ): Promise<Response> {
-  try {
-    let ctx: BaseRequestCtx & Record<string, unknown> = base;
-    for (const deriver of binding.derivers ?? bundle.derivers) {
-      // Erasure boundary: derivers were stored with `never` context (see
-      // ErasedDeriver); the accumulated ctx is the value they were typed
-      // against at composition time.
-      const value = await deriver.derive(req, ctx as never);
-      if (isFailure(value))
-        return failureResponse(value, binding.contract.failures ?? [], deriver.failureHeaders?.(value));
-      ctx = { ...ctx, [deriver.key]: value };
-    }
+  return runBindingFrom(bundle, binding, req, base, params, 0, base).catch(toErrorResponse);
+}
 
-    const body = binding.contract.body === undefined ? undefined : await readJson(req);
-    const input = await decodeInput(binding.contract, params, base, body);
-    return await respond(binding, input, ctx);
-  } catch (error) {
-    return toErrorResponse(error);
+/**
+ * Run a route's stages from `from`, then read the body and call the handler.
+ * It throws: an around must see a handler error to roll back, and
+ * `executeBindingAsync` makes the envelope. A closure is only built when an
+ * around is met, so a route with none allocates nothing extra.
+ */
+async function runBindingFrom(
+  bundle: RouteBundle,
+  binding: RouteBinding,
+  req: Request,
+  base: BaseRequestCtx,
+  params: Readonly<Record<string, string>>,
+  from: number,
+  start: BaseRequestCtx & Record<string, unknown>,
+): Promise<Response> {
+  let ctx = start;
+  const stages = binding.derivers ?? bundle.derivers;
+  for (let i = from; i < stages.length; i++) {
+    const stage = stages[i];
+    if (stage === undefined) break; // unreachable: i < stages.length (indexed read is typed possibly undefined)
+    if ('around' in stage) {
+      const rest = i + 1;
+      const here = ctx;
+      return await stage.around(here as never, () => runBindingFrom(bundle, binding, req, base, params, rest, here));
+    }
+    if ('step' in stage) {
+      // Erasure boundary: steps were stored with `never` context, like derivers.
+      const added = await stage.step(ctx as never);
+      if (isFailure(added)) return failureResponse(added, binding.contract.failures ?? []);
+      ctx = { ...ctx, ...added };
+      continue;
+    }
+    // Erasure boundary: derivers were stored with `never` context (see
+    // ErasedDeriver); the accumulated ctx is the value they were typed
+    // against at composition time.
+    const value = await stage.derive(req, ctx as never);
+    if (isFailure(value)) return failureResponse(value, binding.contract.failures ?? [], stage.failureHeaders?.(value));
+    ctx = { ...ctx, [stage.key]: value };
   }
+
+  const body = binding.contract.body === undefined ? undefined : await readJson(req);
+  const input = await decodeInput(binding.contract, params, base, body);
+  return await respond(binding, input, ctx);
 }
 
 /** Call the handler and turn what it returns into a Response. Throws on a bad output. */
@@ -341,12 +396,10 @@ function respond(binding: RouteBinding, input: ErasedInput, ctx: BaseRequestCtx)
   return toResponse(binding.contract, returned, binding.failureHeaders);
 }
 
+// Errors propagate: every caller makes the envelope itself (`.catch(toErrorResponse)`),
+// and an around must see a handler error to roll back.
 async function settle(binding: RouteBinding, pending: PromiseLike<unknown>): Promise<Response> {
-  try {
-    return await toResponse(binding.contract, await pending, binding.failureHeaders);
-  } catch (error) {
-    return toErrorResponse(error);
-  }
+  return toResponse(binding.contract, await pending, binding.failureHeaders);
 }
 
 function failureResponse(
