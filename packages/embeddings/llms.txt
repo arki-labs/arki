@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`, `RateLimited`; and 52 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_2_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`; and 53 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.

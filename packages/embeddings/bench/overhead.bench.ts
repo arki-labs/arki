@@ -7,7 +7,6 @@
 // position, so every row must return exactly the same vectors for the same inputs.
 
 import { readFileSync } from 'node:fs';
-
 import { createOpenAI } from '@ai-sdk/openai';
 import { embedMany as aiEmbedMany } from 'ai';
 
@@ -66,8 +65,10 @@ function stubFetch(input: string | URL | Request, init?: RequestInit): Promise<R
 // ---- @arki/embeddings: the Ollama record (qwen3 facts: 64 inputs per request, 2 chunks in flight).
 const ollamaModel = createOllamaModel({ baseURL: STUB, fetch: stubFetch });
 if (isEmbedFailure(ollamaModel)) throw new Error(ollamaModel.message);
-const arki = createEmbedder(ollamaModel);
-if (isEmbedFailure(arki)) throw new Error(arki.message);
+const created = createEmbedder(ollamaModel);
+if (isEmbedFailure(created)) throw new Error(created.message);
+// A narrowed `const` does not stay narrowed inside the hoisted `rows` function; this one is `Embedder`.
+const arki = created;
 
 // ---- AI SDK: @ai-sdk/openai pointed at the same stub, SDK retries off.
 const openai = createOpenAI({ apiKey: 'sk-bench', baseURL: `${STUB}/v1`, fetch: stubFetch });
@@ -102,7 +103,9 @@ function fingerprint(vectors: unknown): string {
 
 /** Three different text sets of `size` inputs, so timing cycles through varying inputs. */
 function batches(size: number): string[][] {
-  return [0, 1, 2].map(set => Array.from({ length: size }, (_, index) => `set ${set} document ${index}: ${'lorem '.repeat(8)}`));
+  return [0, 1, 2].map(set =>
+    Array.from({ length: size }, (_, index) => `set ${set} document ${index}: ${'lorem '.repeat(8)}`),
+  );
 }
 
 function rows(c: CaseBuilder<string[]>): Record<string, CaseSpec<string[], unknown, unknown>> {

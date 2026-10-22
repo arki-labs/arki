@@ -37,6 +37,22 @@ export const EMBEDDINGGEMMA_INSTRUCTION: Instruction = {
 };
 
 /**
+ * EmbeddingGemma 2's task prompts (huggingface.co/google/embeddinggemma-2, read 2026-10-21). Today
+ * they equal EmbeddingGemma's; its own `version` lets one card change without re-embedding the other.
+ *
+ * @example
+ * createTransformersModel({ id: 'onnx-community/embeddinggemma-2-ONNX' }); // instruction: EMBEDDINGGEMMA_2_INSTRUCTION
+ */
+export const EMBEDDINGGEMMA_2_INSTRUCTION: Instruction = {
+  query: 'task: search result | query: ',
+  document: 'title: none | text: ',
+  classification: 'task: classification | query: ',
+  clustering: 'task: clustering | query: ',
+  similarity: 'task: sentence similarity | query: ',
+  version: 1,
+};
+
+/**
  * Gemini Embedding 2's prefixes (ai.google.dev/gemini-api/docs/embeddings, read 2026-10-21). Today
  * they equal EmbeddingGemma's, but each model keeps its own `version`, so one model card changing a
  * prefix re-embeds only that model's corpora.

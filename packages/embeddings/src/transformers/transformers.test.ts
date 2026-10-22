@@ -5,6 +5,7 @@ import { isFailure } from '@arki/failure';
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
 import { InvalidOutput, ModelUnavailable } from '../failures.js';
+import { EMBEDDINGGEMMA_2_INSTRUCTION } from '../instructions.js';
 import { countTokens } from '../tokens.js';
 import { createTransformersModel } from './index.js';
 
@@ -83,6 +84,20 @@ describe('createTransformersModel', () => {
     expect(model.matryoshka).toEqual([]);
     expect(model.assurance).toBe('immutable');
     expect(model.revision).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  // A known id gets its own pinned commit and card facts, or its space would drift with `main`.
+  it('EmbeddingGemma 2 is pinned, with its own limits and prefixes', async () => {
+    mock.dims = 768;
+    const model = await createTransformersModel({ ...fresh(), id: 'onnx-community/embeddinggemma-2-ONNX' });
+    if (isFailure(model)) throw new Error(model.message);
+    expect(model).toMatchObject({
+      revision: 'daa72c51243991dfcaf9f9137d2c573d8f7790c0',
+      assurance: 'immutable',
+      matryoshka: [768, 512, 256, 128],
+      maxInputTokens: 8192,
+      instruction: EMBEDDINGGEMMA_2_INSTRUCTION,
+    });
   });
 
   // Two records over one session: the session is freed once, after the last record lets go.

@@ -48,12 +48,12 @@ const qwen: EmbeddingModel = {
 };
 
 /** Bytes → one comparable string: FNV-1a over every byte, in order. */
-function fingerprintBytes(chunks: readonly ArrayLike<number>[]): string {
+function fingerprintBytes(chunks: readonly Iterable<number>[]): string {
   let hash = 2_166_136_261;
   let length = 0;
   for (const chunk of chunks) {
     for (const element of chunk) {
-      hash = Math.imul(hash ^ ((element ?? 0) & 0xFF), 16_777_619) >>> 0;
+      hash = Math.imul(hash ^ (element & 0xFF), 16_777_619) >>> 0;
       length++;
     }
   }
@@ -125,9 +125,7 @@ const CALIBRATION = calibrateInt8(CORPUS);
 
 /** The `k` smallest scores' indexes; a sort is fine at 10 000. */
 function topK(scores: Float64Array, k: number): number[] {
-  return [...scores.keys()]
-    .toSorted((a, b) => (scores[a] ?? 0) - (scores[b] ?? 0))
-    .slice(0, k);
+  return [...scores.keys()].toSorted((a, b) => (scores[a] ?? 0) - (scores[b] ?? 0)).slice(0, k);
 }
 
 export default defineSuite({
@@ -166,7 +164,10 @@ export default defineSuite({
     compare<Float32Array>({
       id: 'truncate-1000',
       title: 'Matryoshka 1 024 → 256 with re-normalisation, 1 000 vectors',
-      contract: { id: 'embeddings-truncate-256/v1', description: 'the first 256 values over their norm, within 1e-6 of a float64 reference' },
+      contract: {
+        id: 'embeddings-truncate-256/v1',
+        description: 'the first 256 values over their norm, within 1e-6 of a float64 reference',
+      },
       inputs: [FLAT],
       expected: () => `within ${TOLERANCE}`,
       baseline: 'arki',
@@ -206,7 +207,11 @@ export default defineSuite({
       cases: {
         hamming: {
           label: 'hamming over packed bits',
-          run: () => topK(Float64Array.from(STORED_BITS, bits => hamming(bits, QUERY_BITS)), 10),
+          run: () =>
+            topK(
+              Float64Array.from(STORED_BITS, bits => hamming(bits, QUERY_BITS)),
+              10,
+            ),
         },
         float: {
           label: 'dot product over float32',

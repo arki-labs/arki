@@ -12,14 +12,14 @@ import { getLogger } from '@arki/log';
 
 import type { EmbeddingModel, Instruction, NativeRequest } from '../types.js';
 import { Cancelled, InvalidOutput, ModelUnavailable } from '../failures.js';
-import { EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
+import { EMBEDDINGGEMMA_2_INSTRUCTION, EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
 import { l2Normalize } from '../vector.js';
 
 export type TransformersModelOptions = {
   /** Hugging Face model id. Default `'onnx-community/embeddinggemma-300m-ONNX'`. */
   readonly id?: string;
   /**
-   * Commit, branch or tag. Default: the pinned commit for the default id, `'main'` for any other id.
+   * Commit, branch or tag. Default: the pinned commit for an id listed below, `'main'` for any other id.
    * A 40-hex commit makes the model `immutable`; anything else is `mutable`.
    */
   readonly revision?: string;
@@ -36,23 +36,36 @@ export type TransformersModelOptions = {
 };
 
 const EMBEDDINGGEMMA_ID = 'onnx-community/embeddinggemma-300m-ONNX';
-/** `sha` of `huggingface.co/api/models/onnx-community/embeddinggemma-300m-ONNX`, read on 2026-10-21. */
-const EMBEDDINGGEMMA_REVISION = '5090578d9565bb06545b4552f76e6bc2c93e4a66';
 const COMMIT = /^[0-9a-f]{40}$/;
 /** What a tokenizer with no stated limit gets. */
 const DEFAULT_MAX_INPUT_TOKENS = 512;
 const MAX_BATCH = 32;
 const PROBE = 'probe';
 
-/** Facts the observed output does not tell: limits, Matryoshka sizes and prefixes. */
+/**
+ * Facts the observed output does not tell: the pinned commit (`sha` of `huggingface.co/api/models/<id>`,
+ * read on 2026-10-21), limits, Matryoshka sizes and prefixes.
+ */
 const TRANSFORMERS_FACTS: Readonly<
-  Record<string, Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens' | 'instruction'>>
+  Record<
+    string,
+    Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens' | 'instruction'> & { readonly revision: string }
+  >
 > = {
   [EMBEDDINGGEMMA_ID]: {
+    revision: '5090578d9565bb06545b4552f76e6bc2c93e4a66',
     dimensions: 768,
     matryoshka: [768, 512, 256, 128],
     maxInputTokens: 2048,
     instruction: EMBEDDINGGEMMA_INSTRUCTION,
+  },
+  // Apache-2.0. Transformers.js loads its vision and audio encoders too (about 850 MB in q8).
+  'onnx-community/embeddinggemma-2-ONNX': {
+    revision: 'daa72c51243991dfcaf9f9137d2c573d8f7790c0',
+    dimensions: 768,
+    matryoshka: [768, 512, 256, 128],
+    maxInputTokens: 8192,
+    instruction: EMBEDDINGGEMMA_2_INSTRUCTION,
   },
 };
 
@@ -205,8 +218,8 @@ async function load(
  */
 export async function createTransformersModel(options: TransformersModelOptions = {}) {
   const id = options.id ?? EMBEDDINGGEMMA_ID;
-  const revision = options.revision ?? (id === EMBEDDINGGEMMA_ID ? EMBEDDINGGEMMA_REVISION : 'main');
   const facts = TRANSFORMERS_FACTS[id];
+  const revision = options.revision ?? facts?.revision ?? 'main';
   const key = JSON.stringify([id, revision, options.dtype ?? 'q8', options.device ?? '', options.cacheDir ?? '']);
 
   let shared = loads.get(key);
