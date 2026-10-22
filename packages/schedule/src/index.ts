@@ -2,7 +2,9 @@ import { CronPattern } from 'croner';
 
 import type { Failure } from '@arki/failure';
 
+import type { CheckedStages, ContextAfter, StageRefusals, WideStage } from './with.js';
 import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
+import { foldStages } from './with.js';
 
 export type ScheduleInterval = `${number}${'s' | 'm' | 'h'}`;
 export type ScheduleOverlap = 'skip' | 'concurrent';
@@ -47,15 +49,25 @@ type BaseScheduleOptionsWithContext<TContext, TResult, TName extends string> = O
   readonly handler: ScheduleHandler<TContext, TResult>;
 };
 
-export type DefineScheduleOptions<TContext = undefined, TResult = unknown, TName extends string = string> =
-  | (BaseScheduleOptionsWithContext<TContext, TResult, TName> & {
+/** The definition options for a handler that receives `THandlerContext`. */
+type ScheduleOptionsOf<THandlerContext, TResult, TName extends string> =
+  | (BaseScheduleOptionsWithContext<THandlerContext, TResult, TName> & {
       readonly cron: string;
       readonly every?: never;
     })
-  | (BaseScheduleOptionsWithContext<TContext, TResult, TName> & {
+  | (BaseScheduleOptionsWithContext<THandlerContext, TResult, TName> & {
       readonly every: ScheduleInterval;
       readonly cron?: never;
     });
+
+export type DefineScheduleOptions<
+  TContext = undefined,
+  TResult = unknown,
+  TName extends string = string,
+> = ScheduleOptionsOf<TContext, TResult, TName> & {
+  /** Steps and arounds to run before the handler. See the `with` overload of {@link defineSchedule}. */
+  readonly with?: never;
+};
 
 /** A number of milliseconds, or a string with unit `ms`, `s`, `m` or `h`: the same shape `@arki/lock` takes. */
 export type LockDuration = number | `${number}${'ms' | 's' | 'm' | 'h'}`;
@@ -156,8 +168,32 @@ export function parseEveryInterval(value: ScheduleInterval): number {
 
 export function defineSchedule<TContext = undefined, TResult = unknown, const TName extends string = string>(
   options: DefineScheduleOptions<TContext, TResult, TName>,
-): ScheduleDef<TContext, TResult, TName> {
+): ScheduleDef<TContext, TResult, TName>;
+/**
+ * With `with: [...]`: steps and arounds, plain functions listed directly, run in
+ * declaration order before the handler (an around wraps everything after it and
+ * the handler). Each element is checked against the context built so far; the
+ * handler's context is `TContext` plus every step's additions. A step that
+ * returns a `Failure` refuses the run: the handler does not run and the run is
+ * `refused`, with that failure, like a handler that returned it.
+ */
+export function defineSchedule<
+  TContext = undefined,
+  TResult = unknown,
+  const TName extends string = string,
+  const TWith extends readonly unknown[] = readonly [],
+>(
+  options: ScheduleOptionsOf<ContextAfter<TContext, TWith>, TResult, TName> & {
+    readonly with: TWith & CheckedStages<TContext, TWith>;
+  },
+): ScheduleDef<TContext, TResult | StageRefusals<TWith>, TName>;
+// Erasure seam: the fold's types depend on the tuple `TWith`, which a runtime loop cannot
+// follow, so the body is written against the widest shapes and the overloads carry the types.
+export function defineSchedule(
+  options: ScheduleOptionsOf<object | undefined, unknown, string> & { readonly with?: readonly WideStage[] },
+): ScheduleDef<object | undefined, unknown, string> {
   const name = options.name;
+  const handler = options.with === undefined ? options.handler : foldStages(options.with, options.handler);
   if (name.trim() === '' || name !== name.trim()) {
     throw invalid('[schedule] schedule name must be a non-empty string without surrounding spaces.');
   }
@@ -190,7 +226,7 @@ export function defineSchedule<TContext = undefined, TResult = unknown, const TN
       ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
       overlap: options.overlap ?? 'skip',
       durable,
-      handler: options.handler,
+      handler,
     };
   }
 
@@ -201,7 +237,7 @@ export function defineSchedule<TContext = undefined, TResult = unknown, const TN
     ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
     overlap: options.overlap ?? 'skip',
     durable,
-    handler: options.handler,
+    handler,
   };
 }
 
@@ -216,10 +252,17 @@ export type {
   ScheduleRunStatus,
 } from './runtime.js';
 
+export type { ScheduleAround, ScheduleStage, ScheduleStep } from './with.js';
+
 export type ScheduleBuilder<TContext> = {
   define<TResult, const TName extends string>(
     options: DefineScheduleOptions<TContext, TResult, TName>,
   ): ScheduleDef<TContext, TResult, TName>;
+  define<TResult, const TName extends string, const TWith extends readonly unknown[]>(
+    options: ScheduleOptionsOf<ContextAfter<TContext, TWith>, TResult, TName> & {
+      readonly with: TWith & CheckedStages<TContext, TWith>;
+    },
+  ): ScheduleDef<TContext, TResult | StageRefusals<TWith>, TName>;
 };
 
 export const initSchedule = {
@@ -227,7 +270,7 @@ export const initSchedule = {
     return {
       create(): ScheduleBuilder<TContext> {
         return {
-          define: options => defineSchedule(options),
+          define: defineSchedule,
         };
       },
     };

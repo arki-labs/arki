@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/schedule`: `DEFAULT_LOCK_HOLD_MS`, `SCHEDULE_ERROR_CODES`, `SCHEDULE_RUNTIME_FAILURES`, `ScheduleError`, `ScheduleLockFailed`, `defineSchedule`, `initSchedule`, `lockDurationMs`, `parseEveryInterval`; types `DefineScheduleOptions`, `DurableScheduleRegistration`, `DurableScheduler`; and 14 more.
+- `@arki/schedule`: `DEFAULT_LOCK_HOLD_MS`, `SCHEDULE_ERROR_CODES`, `SCHEDULE_RUNTIME_FAILURES`, `ScheduleError`, `ScheduleLockFailed`, `defineSchedule`, `initSchedule`, `lockDurationMs`, `parseEveryInterval`; types `DefineScheduleOptions`, `DurableScheduleRegistration`, `DurableScheduler`; and 17 more.
 - `@arki/schedule/dot`: DOT adapter for @arki/schedule — the `schedule()` entrypoint. `DurableSchedules`, `SCHEDULE_ACTION_META_SCHEMA`, `composeSchedules`, `lockSummary`, `schedule`, `scheduleActions`, `schedules`; types `DurableSchedulesToken`, `FeatureLockOption`, `FeatureScheduleOptions`, `FeatureScheduleSlice`, `ScheduleClient`; and 13 more.
 - `@arki/schedule/projection`: `project`; types `ScheduleTableDocument`.
 - `@arki/schedule/runtime`: `assertDurableBackend`, `assertSingleClock`, `createScheduleRuntime`; types `DurableScheduleRegistration`, `DurableScheduler`, `ScheduleClock`, `ScheduleOutcome`, `ScheduleRefusal`, `ScheduleRunResult`, `ScheduleRunStatus`, `ScheduleRuntime`, `ScheduleRuntimeOptions`.
