@@ -88,6 +88,8 @@ Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
 
 - `@arki/queue`: the core. `initQueue`, `step`, `around`, `QUEUE_PRIORITIES`, `backoff`, `CronPatterns`, `queueJobId`, `JOB_TRIGGER_FAILURES`, `FLOW_ENQUEUE_FAILURES`, `createDurableScheduler`, and the types.
 - `@arki/queue/types`: the types only.
+- `@arki/queue/errors`: browser-safe failures. `JOB_TRIGGER_FAILURES`, `QueueUnavailable`, `QueueAcceptanceUnknown` and the declaration error codes.
+- `@arki/queue/contract`: browser-safe, for oRPC contracts. `JOB_TRIGGER_FAILURES`, the two trigger failures, `queueJobId`, and the types `JobTriggerFailure`, `JobTriggerResult`, `QueueJobId`.
 - `@arki/queue/runtime-local`: the same builders on pg-boss and PGlite. `initQueue`, `createRuntimeLocalQueueInstance`.
 - `@arki/queue/dot`: Dot adapters. `queue`, `queueWorker`, `jobs`, `durableScheduler`, `outboxPlugin`, `outboxJobs`.
 - `@arki/queue/outbox`: jobs as database rows. `outbox`, `outboxRunner`, `isOutboxError`, `OUTBOX_ERROR_CODES`.

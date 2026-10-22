@@ -19,7 +19,8 @@ import { withEnqueueSpan } from './enqueue-span.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
 import { createRuntimeLocalQueueInstance } from './runtime-local/create-queue.ts';
-import { QueueAcceptanceUnknown, QueueUnavailable, triggerValidated } from './trigger.ts';
+import { QueueAcceptanceUnknown, QueueUnavailable } from './errors.ts';
+import { triggerValidated } from './trigger.ts';
 
 const transport = vi.hoisted(() => ({
   add: vi.fn<

@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { z } from '@arki/contracts';
 
 import { initQueue } from '../init.ts';
-import { QueueAcceptanceUnknown } from '../trigger.ts';
+import { QueueAcceptanceUnknown } from '../errors.ts';
 import { createRuntimeLocalQueueInstance } from './create-queue.ts';
 import { pgBossJobId } from './identity.ts';
 

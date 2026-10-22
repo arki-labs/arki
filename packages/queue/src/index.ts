@@ -133,8 +133,9 @@ export type { DurableScheduler, DurableSchedulerOptions } from './durable-schedu
 export { executeJob, JOB_SYSTEM_FAILURES } from './job-outcome.ts';
 export type { JobExecutionFailure, JobSystemFailure } from './job-outcome.ts';
 
-export { QueueUnavailable, QueueAcceptanceUnknown, JOB_TRIGGER_FAILURES } from './trigger.ts';
-export type { JobTriggerFailure, JobTriggerResult } from './trigger.ts';
+export { QueueUnavailable, QueueAcceptanceUnknown, JOB_TRIGGER_FAILURES } from './errors.ts';
+export type { JobTriggerFailure } from './errors.ts';
+export type { JobTriggerResult } from './trigger.ts';
 
 export { FLOW_ENQUEUE_FAILURES } from './flow-jobs.ts';
 export type { FlowEnqueueFailure } from './flow-jobs.ts';

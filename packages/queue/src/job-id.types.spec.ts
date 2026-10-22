@@ -4,7 +4,8 @@ import type { ID_GENERATION_FAILURES, IdGenerationFailure, IdOf } from '@arki/co
 import type { FailureOf } from '@arki/failure';
 
 import type { QueueJobId } from './job-id.ts';
-import type { JOB_TRIGGER_FAILURES, JobTriggerResult } from './trigger.ts';
+import type { JOB_TRIGGER_FAILURES } from './errors.ts';
+import type { JobTriggerResult } from './trigger.ts';
 import type { queueJobId } from './job-id.ts';
 
 it('keeps generated failure and branded success types exact at the acknowledgement boundary', () => {

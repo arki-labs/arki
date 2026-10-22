@@ -113,7 +113,7 @@ Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 
 `executeJob` preserves the exact handler return union plus canonical input/cancel/deadline/defect failures. BullMQ and pg-boss both persist refusals as failed deliveries. Default retry never repeats a returned refusal, but it does retry a thrown error (it is reported as `UnexpectedDefect`, judged as the throw); use `.options({ retry: backoff.constant(100).upTo(2).while(TransientFailure) })` for selected definitions. Outbox passes returned outcomes directly to Journal before acknowledgement.
 
-`trigger` and job `enqueue` return an id or `JobTriggerFailure`; export `JOB_TRIGGER_FAILURES` into the calling transport's error map. A lost enqueue acknowledgement is `QueueAcceptanceUnknown`, so inspect the idempotency key before replay. See the README upgrade section before changing runtime-local persisted messages.
+`trigger` and job `enqueue` return an id or `JobTriggerFailure`; export `JOB_TRIGGER_FAILURES` into the calling transport's error map (a contract that reaches the browser imports it, and `queueJobId`, from `@arki/queue/contract`: the root pulls in bullmq). A lost enqueue acknowledgement is `QueueAcceptanceUnknown`, so inspect the idempotency key before replay. See the README upgrade section before changing runtime-local persisted messages.
 
 Use `timeoutMs` and honor `ctx.signal`. Deadline/cancellation waits for settlement; external effects still require idempotency after a crash. Telemetry configuration belongs in the app; the worker restores producer context and records an execution span by default.
 

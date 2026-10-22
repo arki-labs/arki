@@ -18,7 +18,8 @@ import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts'
 import { jobRetryOptions } from './job-options.ts';
 import { defaultJobRetry, jobAttempts } from './job-retry.ts';
 import { jobTraceOptions } from './job-trace.ts';
-import { QueueUnavailable, triggerValidated } from './trigger.ts';
+import { QueueUnavailable } from './errors.ts';
+import { triggerValidated } from './trigger.ts';
 
 /** The characters both BullMQ and pg-boss accept in a queue name; a job name is its queue name. */
 const JOB_NAME_PATTERN = /^[\w\-./]+$/;

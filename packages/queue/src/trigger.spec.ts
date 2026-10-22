@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import { QueueAcceptanceUnknown, triggerValidated } from './trigger.ts';
+import { QueueAcceptanceUnknown } from './errors.ts';
+import { triggerValidated } from './trigger.ts';
 
 const input = z.object({ n: z.number() });
 

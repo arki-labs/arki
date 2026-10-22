@@ -33,7 +33,7 @@ import { jobDefaultOptions } from './job-options.ts';
 import { executeJob } from './job-outcome.ts';
 import { defaultJobRetry, jobAttempts, throwIfReturnedFailure, workerBackoffStrategy } from './job-retry.ts';
 import { parseRedisConnection } from './redis-connection.ts';
-import { QueueUnavailable } from './trigger.ts';
+import { QueueUnavailable } from './errors.ts';
 
 /**
  * Registry type - nested structure of jobs, schedules, and flows

@@ -28,6 +28,16 @@
       "import": "./src/types/index.ts",
       "node": "./src/types/index.ts"
     },
+    "./errors": {
+      "types": "./dist/src/errors.d.ts",
+      "import": "./src/errors.ts",
+      "node": "./src/errors.ts"
+    },
+    "./contract": {
+      "types": "./dist/src/contract.d.ts",
+      "import": "./src/contract.ts",
+      "node": "./src/contract.ts"
+    },
     "./runtime-local": {
       "types": "./dist/src/runtime-local/index.d.ts",
       "import": "./src/runtime-local/index.ts",

@@ -1,11 +1,17 @@
 /**
- * Coded errors for mistakes in job, schedule, flow and cron declarations.
+ * Coded errors for mistakes in job, schedule, flow and cron declarations,
+ * and the typed failures a job trigger returns.
  *
  * Most builder-order mistakes are already compile errors; these throws are
  * the runtime backstop for plain JS, casts, and the checks types cannot
  * express (unknown step ids, dependency cycles, out-of-range cron values,
  * duplicate schedule names).
+ *
+ * Browser-safe (`@arki/queue/errors`): an oRPC contract can list
+ * `JOB_TRIGGER_FAILURES` in its error map without bundling the queue runtime.
  */
+import { ID_GENERATION_FAILURES } from '@arki/contracts';
+import { defineFailure, InvalidInput, ValidatorDefect } from '@arki/failure';
 
 export const QUEUE_DEFINITION_ERROR_CODES = {
   /**
@@ -113,3 +119,31 @@ export class QueueInputError extends Error {
     this.remediation = args.remediation;
   }
 }
+
+/**
+ * @fix Register and start the queue before triggering this job.
+ * @verify bun run test -- src/trigger.spec.ts
+ */
+export const QueueUnavailable = defineFailure('queue.unavailable', {
+  status: 503,
+  message: 'The job has no active queue transport.',
+  remediation: 'Register and start the queue before triggering this job.',
+});
+/**
+ * @fix Inspect the job by its idempotency key before enqueueing it again.
+ * @verify bun run test -- src/trigger.spec.ts
+ */
+export const QueueAcceptanceUnknown = defineFailure('queue.acceptance_unknown', {
+  status: 503,
+  message: 'The queue could not confirm whether the job was accepted.',
+  remediation: 'Inspect the job by its idempotency key before enqueueing it again.',
+});
+/** Every failure a job trigger can return — spread it into a contract's error map. */
+export const JOB_TRIGGER_FAILURES = [
+  InvalidInput,
+  ValidatorDefect,
+  QueueUnavailable,
+  QueueAcceptanceUnknown,
+  ...ID_GENERATION_FAILURES,
+] as const;
+export type JobTriggerFailure = ReturnType<(typeof JOB_TRIGGER_FAILURES)[number]>;

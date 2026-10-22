@@ -20,7 +20,7 @@ import { debugFlow, observeQueue } from './debug.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
 import { jobDefaultOptions, jobRetryOptions } from './job-options.ts';
 import { jobTraceOptions } from './job-trace.ts';
-import { QueueAcceptanceUnknown } from './trigger.ts';
+import { QueueAcceptanceUnknown } from './errors.ts';
 
 export const FLOW_ENQUEUE_FAILURES = [InvalidInput, ValidatorDefect, UnexpectedDefect, QueueAcceptanceUnknown] as const;
 export type FlowEnqueueFailure = ReturnType<(typeof FLOW_ENQUEUE_FAILURES)[number]>;

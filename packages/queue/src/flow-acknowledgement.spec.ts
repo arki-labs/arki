@@ -8,7 +8,7 @@ import type { FlowEnqueueFailure } from './flow-jobs.ts';
 import type { FlowEnqueueResult } from './types/builder.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
-import { QueueAcceptanceUnknown } from './trigger.ts';
+import { QueueAcceptanceUnknown } from './errors.ts';
 
 const addBulk = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 vi.mock('bullmq', async original => ({
