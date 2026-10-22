@@ -1410,6 +1410,15 @@ export function mountFeatures(features: readonly AnyDefinedFeature[]): {
   for (const unit of units) {
     const feature = unit.name.split('/')[0] ?? unit.name;
     for (const [alias, witness] of Object.entries(unit.needs)) {
+      // Only a parent binds `domainService(fn)` (it rewires the need when it compiles); one still raw here
+      // belongs to a child mounted without its parent, and must not bind by alias to whatever publishes the key.
+      if (domainServiceIn(witness) !== undefined) {
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.domainServiceNotAbove,
+          message: `[feature] "${unit.name}": need "${alias}" is domainService(...), which only the parent feature binds, but "${feature}" is mounted without its parent.`,
+          remediation: `Mount the parent feature "${parentOf(feature) ?? feature}"; it mounts this child with .features().`,
+        });
+      }
       // A remapped need (or an entrypointOnly clone) keeps the handle it was written with under `origin`.
       const scopes = owned.get(canonical(witness));
       if (scopes !== undefined && ![...scopes].some(owner => within(feature, owner))) {
