@@ -64,14 +64,14 @@ export const AUTH_ERROR_CODES = {
    * No principal, or a cookie and a bearer token on one request.
    *
    * @fix Sign in, and send either the cookie or the bearer token, not both.
-   * @verify bun run test -- src/orpc-guards.test.ts
+   * @verify bun run test -- src/steps.test.ts
    */
   unauthenticated: 'ARKI_AUTH_E401',
   /**
    * A `role()` or `verified` check refused the principal.
    *
    * @fix Verify the email, or give the user the required role.
-   * @verify bun run test -- src/orpc-guards.test.ts
+   * @verify bun run test -- src/steps.test.ts
    */
   forbidden: 'ARKI_AUTH_E403',
   /**

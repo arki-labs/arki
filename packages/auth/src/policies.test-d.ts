@@ -8,13 +8,14 @@ import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { errorMap } from '@arki/failure/orpc';
-import { route, routes } from '@arki/http';
+import { route, routes, step } from '@arki/http';
 
 import type { AnyPrincipal } from './principal.js';
 import { AUTH_FAILURES, AuthenticationRequired } from './boundary-failures.js';
-import { authFailureHeaders, authorize, withOptionalPrincipal, withPrincipal } from './http.js';
-import { guards } from './orpc.js';
+import { authFailureHeaders, authorize, principalFromHeaders } from './http.js';
+import { can } from './orpc.js';
 import { definePolicies } from './policies.js';
+import { authed } from './steps.js';
 
 type Order = { readonly id: string; readonly customerId: string; readonly status: 'open' | 'shipped' };
 type User = { readonly id: string; readonly email: string };
@@ -30,7 +31,6 @@ const orderPolicies = definePolicies<{ order: Order }>()({
   },
 });
 
-const { can } = guards<Context>();
 const refund = os
   .$context<Context>()
   .errors(errorMap(...AUTH_FAILURES))
@@ -95,7 +95,7 @@ describe('policy typing', () => {
 
   it('authorize: the bundle must derive principal, and the handler sees the subject', () => {
     routes()
-      .derive(withOptionalPrincipal(source))
+      .use(step(principalFromHeaders(source), { failureHeaders: authFailureHeaders }))
       .bind(
         refundRoute,
         authorize(orderPolicies)(
@@ -114,25 +114,28 @@ describe('policy typing', () => {
   });
 });
 
-it('HTTP auth derivers require their inferred failures on the selected route', () => {
+it('HTTP auth steps require their inferred failures on the selected route', () => {
   const privateRoute = route.get('/private', { id: 'private', output: z.string() });
   routes()
-    .derive(withPrincipal(source))
-    // @ts-expect-error the required principal deriver emits undeclared auth failures.
-    .bind(privateRoute, () => 'unreachable');
-  routes()
-    .derive(withOptionalPrincipal(source))
-    // @ts-expect-error optional principal resolution can still refuse invalid credentials.
+    .use(step(principalFromHeaders(source)))
+    // @ts-expect-error the principal step emits undeclared auth failures.
     .bind(privateRoute, () => 'unreachable');
   const partial = route.get('/partial', { id: 'partial', failures: [AuthenticationRequired], output: z.string() });
   routes()
-    .derive(withPrincipal(source))
+    .use(step(principalFromHeaders(source)))
+    .use(step(authed))
     // @ts-expect-error resolving the principal can also return limiter/store/defect failures.
     .bind(partial, () => 'unreachable');
   const declared = route.get('/declared', { id: 'declared', failures: AUTH_FAILURES });
   routes()
-    .derive(withPrincipal(source))
+    .use(step(principalFromHeaders(source)))
+    .use(step(authed))
     .bind(declared, (_input, context) => {
       expectTypeOf(context.principal).toEqualTypeOf<AnyPrincipal>();
+    });
+  routes()
+    .use(step(principalFromHeaders(source)))
+    .bind(declared, (_input, context) => {
+      expectTypeOf(context.principal).toEqualTypeOf<AnyPrincipal | null>();
     });
 });

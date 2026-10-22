@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { buildEngine, route, routes } from '@arki/http';
+import { buildEngine, route, routes, step } from '@arki/http';
 
 import type { Order } from './__fixtures__/orders.js';
 import type { TestAuth } from './testing/index.js';
@@ -14,7 +14,7 @@ import { orderPolicies, ordersOf } from './__fixtures__/orders.js';
 import { authTables } from './__fixtures__/tables.js';
 import { AccessDenied, AUTH_FAILURES, AuthenticationRequired, ResourceMissing } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
-import { authFailureHeaders, authorize, withOptionalPrincipal } from './http.js';
+import { authFailureHeaders, authorize, principalFromHeaders } from './http.js';
 import { actingAs, testAuth } from './testing/index.js';
 
 const definition = defineAuth({
@@ -43,7 +43,7 @@ beforeAll(async () => {
   load.mockImplementation(id => orders.get(id) ?? null);
   const engine = buildEngine([
     routes()
-      .derive(withOptionalPrincipal(auth))
+      .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
       .bind(
         refundOrder,
         authorize(orderPolicies)(

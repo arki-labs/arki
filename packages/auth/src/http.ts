@@ -1,21 +1,22 @@
 /**
- * `@arki/auth/http` — the principal as an `@arki/http` deriver, and policy checks as a handler
+ * `@arki/auth/http` — the principal as an `@arki/http` step, and policy checks as a handler
  * wrapper. Node and Bun.
  *
  * @example
- * routes().derive(withPrincipal(auth)).bind(getProfile, (_input, ctx) => repo.byUser(ctx.principal.user.id));
+ * routes()
+ *   .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
+ *   .use(step(authed, { failureHeaders: authFailureHeaders }))
+ *   .bind(getProfile, (_input, ctx) => repo.byUser(ctx.principal.user.id));
  */
 import type { BaseRequestCtx } from '@arki/http';
-import { derive } from '@arki/http';
 
-import type { AUTH_POLICY_FAILURES, PrincipalChecks, PrincipalSource } from './boundary-failures.js';
+import type { AUTH_POLICY_FAILURES, PrincipalSource } from './boundary-failures.js';
 import type { AnyPolicies, GroupOf, Loaded, PolicyName, PrincipalOfPolicies, SubjectOf } from './policies.js';
 import type { AnyPrincipal } from './principal.js';
 import {
   AccessDenied,
   AuthenticationRateLimited,
   AuthenticationRequired,
-  checkPrincipal,
   isAuthBoundaryFailure,
   resolvePrincipal,
   ResourceMissing,
@@ -24,10 +25,7 @@ import { authorizePolicy, groupOf, keyed } from './policies.js';
 
 export type { PrincipalSource } from './boundary-failures.js';
 
-/** Checks applied to the resolved principal. */
-export type WithPrincipalOptions = PrincipalChecks;
-
-/** Response headers for canonical auth refusals returned by a deriver or policy handler. */
+/** Response headers for canonical auth refusals returned by a step or policy handler. */
 export function authFailureHeaders<Value>(failure: Value): Readonly<Record<string, string>> | undefined {
   if (AuthenticationRequired.is(failure)) return { 'www-authenticate': 'Bearer' };
   if (AuthenticationRateLimited.is(failure) && failure.data.retryAfter !== undefined) {
@@ -36,24 +34,16 @@ export function authFailureHeaders<Value>(failure: Value): Readonly<Record<strin
   return undefined;
 }
 
-/** `ctx.principal` for signed-in callers; a guest gets 401, a refused check 403. */
-export function withPrincipal<P extends AnyPrincipal>(auth: PrincipalSource<P>, options: WithPrincipalOptions = {}) {
-  return derive(
-    'principal',
-    async request => {
-      const principal = await resolvePrincipal(auth, request.headers);
-      if (isAuthBoundaryFailure(principal)) return principal;
-      return checkPrincipal(principal, options);
-    },
-    { failureHeaders: authFailureHeaders },
-  );
-}
-
-/** `ctx.principal` for any caller: the principal, or `null` for a guest. */
-export function withOptionalPrincipal<P extends AnyPrincipal>(auth: PrincipalSource<P>) {
-  return derive('principal', request => resolvePrincipal(auth, request.headers), {
-    failureHeaders: authFailureHeaders,
-  });
+/**
+ * A step that reads the request's credentials: `ctx.principal` is the principal, or `null` for a
+ * guest. Bad credentials, a rate limit or a store outage refuse the call. Follow it with
+ * `step(authed)` (or `verified`, `role(name)`) on routes that need a signed-in caller.
+ */
+export function principalFromHeaders<P extends AnyPrincipal>(auth: PrincipalSource<P>) {
+  return async (ctx: { readonly req: Request }) => {
+    const principal = await resolvePrincipal(auth, ctx.req.headers);
+    return isAuthBoundaryFailure(principal) ? principal : { principal };
+  };
 }
 
 /** The handler context after a policy check: a signed-in principal, and the subject under its group's name. */
@@ -63,7 +53,7 @@ type SignedIn<Ctx extends { readonly principal: unknown }> = Ctx & {
 
 /**
  * Wrap a handler in a policy check. It runs after the input is decoded, so `load` reads the typed
- * `params` and `body`. The bundle must derive `principal` first (`withOptionalPrincipal(auth)`).
+ * `params` and `body`. The bundle must add `principal` first (`step(principalFromHeaders(auth))`).
  *
  * - a guest → 401 `auth.unauthenticated`; the loader does not run;
  * - no such subject, or the group's `view` refuses → 404 `auth.not_found` (it looks missing);
@@ -71,7 +61,7 @@ type SignedIn<Ctx extends { readonly principal: unknown }> = Ctx & {
  *
  * @example
  * routes()
- *   .derive(withOptionalPrincipal(auth))
+ *   .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
  *   .bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => ctx.orders.byId(params.id), (_input, { order }) => refund(order)));
  */
 export function authorize<T extends AnyPolicies>(

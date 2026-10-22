@@ -1,6 +1,6 @@
 /**
- * The principal: the one "who is calling" value that oRPC guards, `@arki/http` derivers and
- * policies read. `null` means a guest. Its `user` is the app's own user row type (branded id),
+ * The principal: the one "who is calling" value that the principal steps (`authed`, `verified`,
+ * `role`) and policies read. `null` means a guest. Its `user` is the app's own user row type (branded id),
  * narrowed to the core columns plus the extra columns the definition exposes.
  *
  * This module is pure: types and one narrowing function, no engine and no database code.

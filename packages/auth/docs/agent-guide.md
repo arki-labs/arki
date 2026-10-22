@@ -76,39 +76,38 @@ export type Principal = PrincipalOf<Auth>;
 
 ### Protect a procedure or a route
 
-1. oRPC: `export const { authed, verified, role } = guards<RequestContext>()` from `@arki/auth/orpc` (`src/orpc.ts`). Each guard narrows `context.principal` to non-null.
-2. `@arki/http`: `routes().derive(withPrincipal(auth))` from `@arki/auth/http` (`src/http.ts`). Options: `{ verified: true }`, `{ role: 'admin' }`.
+1. oRPC: `import { authed, verified, role } from '@arki/auth'` (`src/steps.ts`), then `impl.x.use(step(authed))` with `step` from `@arki/dot/orpc`. Each step narrows `context.principal` to non-null and keeps the app's own principal type.
+2. `@arki/http`: `routes().use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders })).use(step(authed, { failureHeaders: authFailureHeaders }))` (`src/http.ts`). Use `verified` or `role('admin')` in place of `authed` for the other checks.
 3. A guest or expired session gets 401 `auth.unauthenticated`. A missing role or unverified email gets 403 `auth.forbidden`. Declare these with `.errors(errorMap(...AUTH_FAILURES))` or HTTP `failures: AUTH_FAILURES`.
 
 ```ts
 import { os } from '@orpc/server';
 
 import type { AnyPrincipal } from '@arki/auth';
-import { AUTH_FAILURES } from '@arki/auth';
-import { guards } from '@arki/auth/orpc';
+import { AUTH_FAILURES, authed, role } from '@arki/auth';
+import { step } from '@arki/dot/orpc';
 import { errorMap } from '@arki/failure/orpc';
 
 type RequestContext = { readonly principal: AnyPrincipal | null };
-const { authed, role } = guards<RequestContext>();
 
 export const whoAmI = os
   .$context<RequestContext>()
   .errors(errorMap(...AUTH_FAILURES))
-  .use(authed)
+  .use(step(authed))
   .handler(({ context }) => context.principal.user.id);
 export const adminOnly = os
   .$context<RequestContext>()
   .errors(errorMap(...AUTH_FAILURES))
-  .use(role('admin'))
+  .use(step(role('admin')))
   .handler(() => 'ok');
 ```
 
 ### Authorize with a policy
 
 1. Write the rules in the feature's `model/policies.ts`: `export const orderPolicies = definePolicies<{ order: Order }>()({ order: { view: …, refund: … } })` (`src/policies.ts`). `view` is optional: `false` answers like a missing row (404). The action `false` answers 403.
-2. oRPC: `export const { can } = guards<RequestContext>()`, then `impl.refund.use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))`. The handler reads `context.order` and `context.principal`.
+2. oRPC: `import { can } from '@arki/auth/orpc'`, then `impl.refund.use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))`. The handler reads `context.order` and `context.principal`.
 3. Name the policy in the contract too: `oc.$meta<{ policy?: string }>({})…meta({ policy: 'order.refund' })`. A missing or different name is `ARKI_AUTH_E008` on the first call. `dot explain` shows it as `↳ policy: order.refund`.
-4. `@arki/http`: use `routes().derive(withOptionalPrincipal(auth)).bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => load(params.id), (_input, { order }) => refund(order)), { failureHeaders: authFailureHeaders })`. Import `authFailureHeaders` from `@arki/auth/http`; the route declares `failures: AUTH_FAILURES`.
+4. `@arki/http`: use `routes().use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders })).bind(refundOrder, authorize(orderPolicies)('order.refund', ({ params }, ctx) => load(params.id), (_input, { order }) => refund(order)), { failureHeaders: authFailureHeaders })`. Import `authFailureHeaders` and `principalFromHeaders` from `@arki/auth/http`; the route declares `failures: AUTH_FAILURES`.
 5. The loader returns `null` for a missing row. It may check workspace membership; the policy never queries.
 
 ```ts
@@ -117,7 +116,7 @@ import { z } from 'zod';
 
 import type { AnyPrincipal } from '@arki/auth';
 import { AUTH_FAILURES, definePolicies } from '@arki/auth';
-import { guards } from '@arki/auth/orpc';
+import { can } from '@arki/auth/orpc';
 import { errorMap } from '@arki/failure/orpc';
 
 type Insight = { readonly id: string; readonly userId: string };
@@ -129,7 +128,6 @@ type RequestContext = {
 const insightPolicies = definePolicies<{ insight: Insight }>()({
   insight: { view: ({ principal, insight }) => insight.userId === principal.user.id, dismiss: () => true },
 });
-const { can } = guards<RequestContext>();
 
 export const dismiss = os
   .$context<RequestContext>()
@@ -209,7 +207,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 
 ## Rules that bite
 
-- Never import `better-auth` in app code. Use `auth.principal`, `auth.sessions` and the guards.
+- Never import `better-auth` in app code. Use `auth.principal`, `auth.sessions` and the steps.
 - Never cast a session user (`user.id as UserId`, `user as UserModel`). The principal is already typed from the table.
 - The table makes every id. The engine runs with `generateId: false`, so an id column needs a `$defaultFn` (an `@arki/auth/ids` factory has one).
 - Production refuses `rateLimit: false` and a missing `rateLimit`. Tests get `rateLimit: false` from `testAuth`.

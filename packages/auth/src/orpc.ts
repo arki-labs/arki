@@ -1,5 +1,6 @@
 /**
- * `@arki/auth/orpc` — ownership checks for oRPC procedures.
+ * `@arki/auth/orpc` — ownership checks and policy checks for oRPC procedures. Principal checks are
+ * the plain steps in `@arki/auth` (`step(authed)` with `step` from `@arki/dot/orpc`).
  *
  * Three assertion functions, no policy engine. Each replaces the
  * load-then-check pair (`if (!row) …; if (row.userId !== …) …`) with one
@@ -28,15 +29,10 @@ import type { Context, Meta, MiddlewareOptions, MiddlewareResult, ORPCErrorConst
 import type { DeclaredErrors, ErrorMapOf } from '@arki/failure/orpc';
 import { orThrowRpc } from '@arki/failure/orpc';
 
-import type {
-  AUTH_FAILURES,
-  AUTH_POLICY_FAILURES,
-  AUTH_PRINCIPAL_FAILURES,
-  AuthenticationRequired,
-} from './boundary-failures.js';
-import type { GroupOf, Loaded, PoliciesFor, PolicyName, SubjectOf } from './policies.js';
+import type { AUTH_POLICY_FAILURES } from './boundary-failures.js';
+import type { AnyPolicies, GroupOf, Loaded, PolicyName, PrincipalOfPolicies, SubjectOf } from './policies.js';
 import type { AnyPrincipal } from './principal.js';
-import { AccessDenied, checkPrincipal, requirePrincipal, ResourceMissing } from './boundary-failures.js';
+import { AccessDenied, AuthenticationRequired, ResourceMissing } from './boundary-failures.js';
 import { AUTH_ERROR_CODES, AuthError } from './errors.js';
 import { authorizePolicy, groupOf, keyed } from './policies.js';
 
@@ -76,19 +72,6 @@ export function assertOwnedOrForbidden<T extends Owned>(
   }
 }
 
-/**
- * Principal guards for oRPC procedures. `C` is the app's request context; its `principal` is the
- * auth's principal or `null` for a guest. Each guard narrows `context.principal` to non-null.
- *
- * - `authed`: a guest → `auth.unauthenticated` (401).
- * - `verified`: also refuses an unverified email → `auth.forbidden` (403).
- * - `role(name)`: also refuses a principal without that role → `auth.forbidden` (403).
- * - `can(policies)(name, load)`: signs in, loads the subject and runs one policy (see below).
- *
- * @example
- * export const { authed, verified, role } = guards<RequestContext>();
- * impl.adminStats.use(role('admin')).handler(({ context }) => stats(context.principal.user.id));
- */
 /** The contract meta must name the policy `can` checks, so `dot explain` never shows a wrong one. */
 function assertDeclared(meta: Meta, name: string): void {
   const declared: unknown = meta['policy'];
@@ -98,13 +81,6 @@ function assertDeclared(meta: Meta, name: string): void {
     `The procedure checks policy "${name}", but its contract meta declares ${typeof declared === 'string' ? `"${declared}"` : 'none'}. Add .meta({ policy: '${name}' }) to the contract.`,
   );
 }
-
-export type PrincipalGuard<
-  C extends { readonly principal: AnyPrincipal | null },
-  Definitions extends readonly (typeof AUTH_FAILURES)[number][] = typeof AUTH_PRINCIPAL_FAILURES,
-> = <TOutput>(
-  options: MiddlewareOptions<C, TOutput, ORPCErrorConstructorMap<ErrorMapOf<Definitions>>, Meta>,
-) => MiddlewareResult<{ readonly principal: NonNullable<C['principal']> }, TOutput>;
 
 /**
  * The middleware `can` returns. `X` is the context the procedure has where it is used, `I` its
@@ -124,44 +100,31 @@ export type PolicyGuard<X, I, P, K extends string, S> = <TOutput>(
 /** Loads a policy's subject by the procedure's input, with the full context and a signed-in principal. */
 export type PolicyLoader<I, X, P, S> = (input: I, context: X & { readonly principal: P }) => Loaded<S>;
 
-export function guards<C extends { readonly principal: AnyPrincipal | null }>(): {
-  readonly authed: PrincipalGuard<C, readonly [typeof AuthenticationRequired]>;
-  readonly verified: PrincipalGuard<C>;
-  readonly role: (name: string) => PrincipalGuard<C>;
-  /**
-   * Signs in, loads the subject, runs the named policy. The procedure's contract meta must name
-   * the same policy (`.meta({ policy: 'order.refund' })`), so `dot explain` shows it; a missing or
-   * different name is `ARKI_AUTH_E008`.
-   *
-   * - a guest → `auth.unauthenticated` (401); the loader does not run;
-   * - no such subject, or the group's `view` refuses → `auth.not_found` (404; hidden and missing look identical);
-   * - the policy refuses → `auth.forbidden` (403).
-   *
-   * @example
-   * export const { can } = guards<RequestContext>();
-   * impl.refund
-   *   .use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))
-   *   .handler(({ context }) => context.usecases.refund(context.order));
-   */
-  readonly can: <T extends PoliciesFor<NonNullable<C['principal']>>>(
-    policies: T,
-  ) => <N extends PolicyName<T>, I, X extends C = C>(
-    name: N,
-    load: PolicyLoader<I, X, NonNullable<C['principal']>, SubjectOf<T, N>>,
-  ) => PolicyGuard<X, I, NonNullable<C['principal']>, GroupOf<N>, SubjectOf<T, N>>;
-} {
-  return {
-    authed: ({ context, next, errors }) =>
-      next({ context: { principal: orThrowRpc(requirePrincipal(context.principal), errors) } }),
-    verified: ({ context, next, errors }) =>
-      next({ context: { principal: orThrowRpc(checkPrincipal(context.principal, { verified: true }), errors) } }),
-    role:
-      name =>
-      ({ context, next, errors }) =>
-        next({ context: { principal: orThrowRpc(checkPrincipal(context.principal, { role: name }), errors) } }),
-    can: policies => (name, load) => async (options, input) => {
+/**
+ * Signs in, loads the subject, runs the named policy. The procedure's contract meta must name
+ * the same policy (`.meta({ policy: 'order.refund' })`), so `dot explain` shows it; a missing or
+ * different name is `ARKI_AUTH_E008`.
+ *
+ * - a guest → `auth.unauthenticated` (401); the loader does not run;
+ * - no such subject, or the group's `view` refuses → `auth.not_found` (404; hidden and missing look identical);
+ * - the policy refuses → `auth.forbidden` (403).
+ *
+ * The loader's context is the procedure's, at the `.use()` that attaches it.
+ *
+ * @example
+ * impl.refund
+ *   .use(can(orderPolicies)('order.refund', ({ id }, { usecases }) => usecases.findOrder(id)))
+ *   .handler(({ context }) => context.usecases.refund(context.order));
+ */
+export function can<T extends AnyPolicies>(policies: T) {
+  return <N extends PolicyName<T>, I, X extends { readonly principal: (AnyPrincipal & PrincipalOfPolicies<T>) | null }>(
+      name: N,
+      load: PolicyLoader<I, X, NonNullable<X['principal']>, SubjectOf<T, N>>,
+    ): PolicyGuard<X, I, NonNullable<X['principal']>, GroupOf<N>, SubjectOf<T, N>> =>
+    async (options, input) => {
       assertDeclared(options.procedure['~orpc'].meta, name);
-      const principal = orThrowRpc(requirePrincipal(options.context.principal), options.errors);
+      const principal: NonNullable<X['principal']> | null = options.context.principal;
+      if (principal === null) return orThrowRpc(AuthenticationRequired(), options.errors);
       const subject = await authorizePolicy(
         policies,
         name,
@@ -171,6 +134,5 @@ export function guards<C extends { readonly principal: AnyPrincipal | null }>():
       if (AccessDenied.is(subject)) return orThrowRpc(AccessDenied(), options.errors);
       if (ResourceMissing.is(subject)) return orThrowRpc(ResourceMissing(), options.errors);
       return options.next({ context: { principal, ...keyed(groupOf(name), subject) } });
-    },
-  };
+    };
 }

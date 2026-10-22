@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { buildEngine, route, routes } from '@arki/http';
+import { buildEngine, route, routes, step } from '@arki/http';
 import { createClient } from '@arki/http/client';
 
 import type { TestAuth } from './testing/index.js';
@@ -15,7 +15,8 @@ import { authTables } from './__fixtures__/tables.js';
 import { AccessDenied, AUTH_FAILURES, AuthenticationRequired } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
 import { AUTH_ERROR_CODES, AuthError } from './errors.js';
-import { withOptionalPrincipal, withPrincipal } from './http.js';
+import { authFailureHeaders, principalFromHeaders } from './http.js';
+import { authed, role } from './steps.js';
 import { actingAs, testAuth } from './testing/index.js';
 
 const definition = defineAuth({
@@ -44,13 +45,15 @@ beforeAll(async () => {
   const { auth } = harness;
   const engine = buildEngine([
     routes()
-      .derive(withPrincipal(auth))
+      .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
+      .use(step(authed, { failureHeaders: authFailureHeaders }))
       .bind(me, (_input, ctx) => ({ id: ctx.principal.user.id, plan: ctx.principal.user.plan })),
     routes()
-      .derive(withPrincipal(auth, { role: 'admin' }))
+      .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
+      .use(step(role('admin'), { failureHeaders: authFailureHeaders }))
       .bind(admin, () => ({ ok: true })),
     routes()
-      .derive(withOptionalPrincipal(auth))
+      .use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))
       .bind(greeting, (_input, ctx) => ({ who: ctx.principal?.user.email ?? 'guest' })),
   ]);
   fetchHttp = request => Promise.resolve(engine.fetch(request));
@@ -59,7 +62,7 @@ afterAll(() => harness.dispose());
 
 const request = (path: string, headers?: Headers) => fetchHttp(new Request(`http://localhost${path}`, { headers }));
 
-describe('withPrincipal', () => {
+describe('principalFromHeaders with authed', () => {
   it('answers 401 with E401 for a guest', async () => {
     const response = await request('/me');
     expect(response.status).toBe(401);
@@ -100,7 +103,7 @@ describe('withPrincipal', () => {
   });
 });
 
-describe('withOptionalPrincipal', () => {
+describe('principalFromHeaders alone', () => {
   it('gives null to a guest and the principal to a signed-in caller', async () => {
     await expect(request('/greeting').then(response => response.json())).resolves.toEqual({ who: 'guest' });
     const { headers } = await actingAs(harness.auth, { email: 'ada@notes.test' });
@@ -128,15 +131,21 @@ describe('canonical auth boundaries', () => {
     expect(AuthenticationRequired.is(failure)).toBe(true);
   });
 
-  it('the principal deriver preserves limiter Retry-After without publishing its cause', async () => {
+  it('the principal step preserves limiter Retry-After without publishing its cause', async () => {
     const engine = buildEngine([
       routes()
-        .derive(
-          withPrincipal({
-            principal: () =>
-              Promise.reject(new AuthError(AUTH_ERROR_CODES.rateLimited, 'private limiter detail', { retryAfter: 7 })),
-          }),
+        .use(
+          step(
+            principalFromHeaders({
+              principal: () =>
+                Promise.reject(
+                  new AuthError(AUTH_ERROR_CODES.rateLimited, 'private limiter detail', { retryAfter: 7 }),
+                ),
+            }),
+            { failureHeaders: authFailureHeaders },
+          ),
         )
+        .use(step(authed, { failureHeaders: authFailureHeaders }))
         .bind(me, (_input, ctx) => ({ id: ctx.principal.user.id, plan: 'free' })),
     ]);
     const response = await engine.fetch(new Request('http://localhost/me'));

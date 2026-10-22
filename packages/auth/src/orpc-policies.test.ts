@@ -20,7 +20,7 @@ import { authTables } from './__fixtures__/tables.js';
 import { AUTH_FAILURES } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
 import { AUTH_ERROR_CODES, isAuthError } from './errors.js';
-import { assertOwnedOrNotFound, guards } from './orpc.js';
+import { assertOwnedOrNotFound, can } from './orpc.js';
 import { actingAs, testAuth } from './testing/index.js';
 
 const definition = defineAuth({
@@ -33,7 +33,6 @@ type Context = {
   readonly orders: ReadonlyMap<string, Order>;
 };
 
-const { can } = guards<Context>();
 const orderInput = z.object({ id: z.string() });
 const base = os
   .$context<Context>()

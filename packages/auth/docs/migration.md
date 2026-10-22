@@ -137,9 +137,24 @@ export type Principal = PrincipalOf<Auth>;
 ### 4. Who is calling
 
 - Gateway: `const principal = await services.auth.principal(request.headers)`. Delete `auth.api.getSession` calls.
-- oRPC: `export const { authed, verified, role } = guards<RequestContext>()` from `@arki/auth/orpc`. Replace the app's own `protectedProcedure` session checks.
-- `@arki/http`: `routes().derive(withPrincipal(auth))` from `@arki/auth/http`.
+- oRPC: `import { authed, verified, role } from '@arki/auth'`, then `impl.x.use(step(authed))` with `step` from `@arki/dot/orpc`. Replace the app's own `protectedProcedure` session checks.
+- `@arki/http`: `routes().use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders })).use(step(authed, { failureHeaders: authFailureHeaders }))`. `principalFromHeaders` and `authFailureHeaders` come from `@arki/auth/http`; `step` from `@arki/http`.
 - Delete every `user.id as UserId` and `user as UserModel`. The principal is typed from the table.
+
+### Upgrading from `guards()` and `withPrincipal`
+
+These were removed. The checks are plain functions now, and each transport attaches them with its own `step()`.
+
+| Before                                                        | After                                                                                                                                              |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `const { authed, verified, role } = guards<RequestContext>()` | `import { authed, verified, role } from '@arki/auth'`                                                                                              |
+| `impl.x.use(authed)`                                          | `impl.x.use(step(authed))`, `step` from `@arki/dot/orpc`                                                                                           |
+| `const { can } = guards<RequestContext>()`                    | `import { can } from '@arki/auth/orpc'` (the loader context comes from the `.use()` chain)                                                         |
+| `routes().derive(withPrincipal(auth))`                        | `routes().use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders })).use(step(authed, { failureHeaders: authFailureHeaders }))` |
+| `withPrincipal(auth, { role: 'admin' })`                      | `step(role('admin'), …)` after `principalFromHeaders`                                                                                              |
+| `routes().derive(withOptionalPrincipal(auth))`                | `step(principalFromHeaders(auth), …)` alone (the principal may be `null`)                                                                          |
+
+`step` for HTTP comes from `@arki/http`. `assertFound` and the other `assert*` helpers, `authorize` and `authFailureHeaders` did not change.
 
 ### 5. Start app
 

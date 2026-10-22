@@ -6,8 +6,8 @@
  * The optional `view` policy of a group is reserved: it decides whether the principal may know the
  * subject exists. `view` false answers like a missing row (404); the action false answers 403.
  *
- * This module is pure: no oRPC, no http, no database. The transports check with `can` (from
- * `guards()` in `@arki/auth/orpc`) and `authorize` (in `@arki/auth/http`).
+ * This module is pure: no oRPC, no http, no database. The transports check with `can` (in
+ * `@arki/auth/orpc`) and `authorize` (in `@arki/auth/http`).
  *
  * @example
  * export const orderPolicies = definePolicies<{ order: Order }>()({

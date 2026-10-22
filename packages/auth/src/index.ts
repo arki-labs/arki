@@ -52,3 +52,4 @@ export {
 } from './boundary-failures.js';
 export type { PrincipalSource, PrincipalChecks } from './boundary-failures.js';
 export { authorizePolicy } from './policies.js';
+export { authed, role, verified } from './steps.js';

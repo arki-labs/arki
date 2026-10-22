@@ -20,7 +20,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 - Definition and types: `src/definition.ts`, `src/principal.ts`. Add a type test (`*.test-d.ts`).
 - Engine assembly and tables: `src/pg`. Mail and sessions tests sit next to it.
-- Guards and policies: `src/orpc.ts`, `src/policies.ts`. HTTP derivers: `src/http.ts`.
+- Policies: `src/orpc.ts`, `src/policies.ts`. Principal steps: `src/steps.ts`; HTTP: `src/http.ts`.
 - New error code: add it to `AUTH_ERROR_CODES` with JSDoc `@fix` and `@verify`, then to the Errors tables in the README and the guide.
 - The README holds install, five recipes, limits and failure behaviour. Option-by-option detail goes in `docs/reference.md`.
 - Run `bun ../../tooling/library/src/llms.ts --write` after an export change.

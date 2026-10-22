@@ -19,7 +19,7 @@ export const AuthenticationRequired = defineFailure('auth.unauthenticated', {
 /**
  * A signed-in caller lacks the required permission or verified email.
  * @fix Verify the email or use an account with the required permission.
- * @verify bun run test -- src/orpc-guards.test.ts
+ * @verify bun run test -- src/steps.test.ts
  */
 export const AccessDenied = defineFailure('auth.forbidden', {
   status: 403,

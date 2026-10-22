@@ -95,7 +95,7 @@ One check runs in this order, on both transports:
 
 Someone else's order looks exactly like a missing one, so ids cannot be probed. `order.view` itself is the `view` check alone.
 
-oRPC: `can` comes from `guards<RequestContext>()`. It signs in, loads the subject, runs the policy, and puts the subject on the context under its group's name. The loader gets the procedure's input and the full context, with `principal` non-null.
+oRPC: `can` is a standalone export of `@arki/auth/orpc`. Attach it with `.use(can(policies)(name, load))`; the loader's context type comes from the `.use()` chain. It signs in, loads the subject, runs the policy, and puts the subject on the context under its group's name. The loader gets the procedure's input and the full context, with `principal` non-null.
 
 ```ts continue
 import { os } from '@orpc/server';
@@ -103,15 +103,13 @@ import { z } from 'zod';
 
 import type { AnyPrincipal } from '@arki/auth';
 import { AUTH_FAILURES } from '@arki/auth';
-import { guards } from '@arki/auth/orpc';
+import { can } from '@arki/auth/orpc';
 import { errorMap } from '@arki/failure/orpc';
 
 type RequestContext = {
   readonly principal: AnyPrincipal | null;
   readonly orders: { byId(id: string): Promise<Order | null> };
 };
-export const { can } = guards<RequestContext>();
-
 export const refund = os
   .$context<RequestContext>()
   .errors(errorMap(...AUTH_FAILURES))
@@ -124,11 +122,11 @@ export const refund = os
 
 The procedure's meta must name the same policy. In a contract-first app that is the contract: `oc.$meta<{ policy?: string }>({}).input(…).meta({ policy: 'order.refund' })`. `can` compares the two on every call, and a missing or different name is `ARKI_AUTH_E008`, so the first test that calls the procedure catches the drift. `dot explain` reads the contract, so it lists the policy under the action (`↳ policy: order.refund`, and `meta.meta.policy` in `--json`).
 
-`@arki/http`: `authorize` wraps the handler, because it must run after the input is decoded. The bundle derives `principal` first; without it, the bind does not compile.
+`@arki/http`: `authorize` wraps the handler, because it must run after the input is decoded. The bundle adds `principal` first with `step(principalFromHeaders(auth))`; without it, the bind does not compile.
 
 ```ts continue
-import { authFailureHeaders, authorize, withOptionalPrincipal } from '@arki/auth/http';
-import { route, routes } from '@arki/http';
+import { authFailureHeaders, authorize, principalFromHeaders } from '@arki/auth/http';
+import { route, routes, step } from '@arki/http';
 
 const refundOrder = route.post('/orders/:id/refund', {
   id: 'orders.refund',
@@ -141,7 +139,7 @@ export const orderRoutes = (
   orders: RequestContext['orders'],
 ) =>
   routes()
-    .derive(withOptionalPrincipal(authService))
+    .use(step(principalFromHeaders(authService), { failureHeaders: authFailureHeaders }))
     .bind(
       refundOrder,
       authorize(orderPolicies)(
