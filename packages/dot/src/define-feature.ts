@@ -1412,7 +1412,9 @@ async function prepareUsecases<Values extends ServiceRecord>(
   const usecases: Record<string, unknown> = {};
   for (const key in factories) {
     const create: (deps: never) => Values[keyof Values] = factories[key];
-    const created = await Promise.resolve(create(deps));
+    // Each factory gets its own frozen copy, so one factory cannot change what the next one sees.
+    const ownDeps: never = Object.freeze({ ...(deps as object) }) as never;
+    const created = await Promise.resolve(create(ownDeps));
     if (creationFailed(created)) return created;
     const usecase: unknown = created;
     usecases[key] = traceUsecase(feature, key, superviseUsecase(usecase));

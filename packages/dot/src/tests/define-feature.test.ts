@@ -9,7 +9,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
  * declaration. Each test below pins one promise of the design; most of them
  * failed on the Revision 1 prototype (see "regressions" at the bottom).
  */
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { findCause, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type {
   AnyFeatureCore,
@@ -336,6 +336,45 @@ describe('the chain: each step typed from the earlier ones', () => {
       });
     };
     expect(unused).toBeTypeOf('function');
+  });
+
+  it('fails boot with a TypeError when a usecase factory mutates its deps', async () => {
+    const mutating = defineFeature('mutating')
+      .usecases({
+        a: () => 'a',
+        b: (deps: object) => {
+          Object.assign(deps, { x: 1 });
+          return 'b';
+        },
+      })
+      .provides({ mutating: ({ usecases }) => usecases })
+      .entrypoints();
+    const result = await defineApp('mutating-app').features([mutating]).start();
+    expect(findCause(result, TypeError)).toBeInstanceOf(TypeError);
+  });
+
+  it('gives each usecase factory its own frozen deps without the usecases key', async () => {
+    const seen: object[] = [];
+    const separate = defineFeature('separate')
+      .usecases({
+        a: (deps: object) => {
+          seen.push(deps);
+          return 'a';
+        },
+        b: (deps: object) => {
+          seen.push(deps);
+          return 'b';
+        },
+      })
+      .provides({ separate: ({ usecases }) => usecases })
+      .entrypoints();
+    const app = orThrow(await defineApp('separate-app').features([separate]).start());
+    const [first, second] = seen;
+    expect(seen).toHaveLength(2);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect('usecases' in (first ?? {})).toBe(false);
+    expect(first).not.toBe(second);
+    orThrow(await app.dispose());
   });
 
   it('accepts factories that ask for a subset of the deps, or for nothing', async () => {
