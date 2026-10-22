@@ -109,15 +109,20 @@ export const dailyDigest = digestLogic
   .entrypoints(digestProcedures, digestSchedules);
 ```
 
-`domain-services/extras.ts` (folder name follows D1):
+`domain-services/extras.ts`. **One domain service per file**, as for usecases: the factory is named after the file, and the class it builds lives in the same file. The layer lint enforces it: a file inside `domain-services/` may not value-import another file there (found in the first migration, E1/E2). Pure helpers go to `model/`.
 
 ```ts
-import type { DomainDeps } from '../../feature';
-import { DigestExtrasService } from './digest-extras-service';
+import type { DomainDeps } from '../feature';
+
+type DigestExtrasDeps = Pick<DomainDeps, 'clusterContext' | 'clusterDetails' | 'syntheses' | 'episodeCards' | 'videoCards' | 'copilotInsights'>;
 
 /** The digest's cross-feature extras. A missing upstream degrades to an absent section. */
-export const extras = (deps: Pick<DomainDeps, 'clusterDetails' | 'syntheses' | 'episodeCards' | 'videoCards' | 'copilotInsights'>) =>
-  new DigestExtrasService(deps);
+export class DigestExtrasService {
+  constructor(private readonly deps: DigestExtrasDeps) {}
+  // … collectEmailExtras, collectWebExtras
+}
+
+export const extras = (deps: DigestExtrasDeps) => new DigestExtrasService(deps);
 ```
 
 `usecases/get-section-extras.ts`: unchanged. `Pick<Deps, 'repos' | 'extras'>` now resolves `extras` from the domainServices step.
