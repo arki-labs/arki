@@ -236,6 +236,11 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
+      "package": "@arki/env",
+      "error": "TYPES_E001 export \"./presets\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
+    },
+    {
       "package": "@arki/fs",
       "error": "TYPES_E001 export \"./files\" exposes Zod types: $ZodTypeInternals, ZodEnum, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType, ZodURL",
       "reason": "Now-tier baseline 2026-10-17"

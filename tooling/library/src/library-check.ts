@@ -28,6 +28,11 @@
  * export entry other than `./zod` exposes Zod types), TYPES_W001 (the entry's
  * types file is not built, so that check is skipped).
  *
+ * Every library also gets `contract-entry.ts`: CONTRACT_E001 (the `./contract`
+ * entry does not bundle for the browser, or bundles server-only code),
+ * CONTRACT_E002 (an entry named `./contracts`: the one browser-safe contract
+ * entry is `./contract`), CONTRACT_W001 (the entry is not built: check skipped).
+ *
  * `--all` checks every package under `packages/`, `tooling/` and `fleet/`. Known errors
  * are listed with a reason in `tooling/library/library-check-baseline.json`; only
  * errors outside it fail the run, and a baseline entry that no longer matches
@@ -43,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
+import { checkContractEntry } from './contract-entry';
 import { checkDocs, checkSource } from './docs';
 import { checkErrorDocs } from './error-index';
 import { leaves, readManifest } from './manifest';
@@ -141,6 +147,10 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
   const types = checkPublicTypes(dir, manifest);
   errors.push(...types.errors);
   warnings.push(...types.warnings);
+
+  const contract = checkContractEntry(dir, manifest);
+  errors.push(...contract.errors);
+  warnings.push(...contract.warnings);
 
   return { errors, warnings };
 }

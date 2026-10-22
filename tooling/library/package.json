@@ -30,6 +30,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@playwright/test": "catalog:testing",
+    "esbuild": "catalog:",
     "typescript": "catalog:",
     "zod": "catalog:"
   },

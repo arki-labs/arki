@@ -100,6 +100,10 @@ Runtime support is an export-level capability, verified with real consumers.
 Keep server capabilities explicit and support the runtimes an entry advertises.
 See A-35 in the [decision ledger](decisions.md#framework-consolidation-2026-10-19).
 
+A library whose root is server-side offers what an oRPC contract needs (failures,
+ids, schemas) through one browser-safe `./contract` entry, checked by bundling it
+for the browser. See A-41.
+
 Prove representative complete application journeys from published artifacts, too:
 authentication, persistence, background work, AI and recovery must work together
 in a cold consumer without private workspace knowledge. Before publication, use
