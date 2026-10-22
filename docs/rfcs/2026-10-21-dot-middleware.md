@@ -1,12 +1,12 @@
 # RFC: one way to define middleware in Dot
 
-- Date: 2026-10-21
-- Status: Proposed. Founder decisions D1–D7 taken 2026-10-21. Step 1 (spike) passed 2026-10-21, not committed; see § 10.
-- Designer: Fable (survey + design, two read-only passes). File references below come from those passes and need a recheck when work starts.
+- Date: 2026-10-21 (revised 2026-10-22)
+- Status: Proposed. Founder decisions D1–D9 taken. Step 1 (oRPC) built; steps 2–6 open.
+- Designer: Fable (survey, design, two placement passes, `around` check). File references come from those passes; recheck them when a step starts.
 
 ## 1. The shape in one sentence
 
-**A context step is written once with `derive`, and an explicit adapter attaches it to an oRPC procedure, an HTTP route bundle or a queue job. Timing, logging, error capture and tracing are not middleware: Dot emits a handler event and apps observe it.**
+**A step and an around are plain functions, written once. Each transport package attaches them with its own `step()` and `around()`. Dot handler events stay for app-wide watching.**
 
 ## 2. Why
 
@@ -21,91 +21,94 @@ Today "middleware" means four different things in four packages:
 
 Schedules and CLI commands have no wrapping. Units have lifecycle hooks, which are not middleware and stay as they are.
 
-So an app writes `authed` up to three times, and timing/error code exists in three copies.
+So an app writes `authed` up to three times, and timing and error code exist in three copies.
 
-## 3. Three jobs, one home each
+## 3. The pieces
 
-| Job | Examples | Home |
-|---|---|---|
-| Derive / guard: add to the context, narrow it, or refuse | `authed`, `admin`, `asActor`, `principalFromHeaders` | `derive` from `@arki/dot/middleware` |
-| Around: wrap every call | timing, logging, error capture, tracing | Dot handler events on the lifecycle observer |
-| Validate | input checks | schemas (`.input()`, contracts), as today |
+| Piece | What it is | Examples | Sees the result? |
+|---|---|---|---|
+| **Step** | `(ctx: In) => object \| Failure`, sync or async. Runs before the handler. Adds the keys of the object it returns, or refuses the call. | `authed`, `admin`, `asActor`, `principalFromHeaders` | No |
+| **Around** | `<T>(ctx: In, next: () => Promise<T>) => Promise<T>`. Wraps everything declared after it. | transaction, retry, span, timeout, per-procedure opt-in | No (`T` is never inspected) |
+| **Handler events** | Dot emits `start` / `end` / `fail` with `{ kind, feature, name }` for every handler. Read-only. | app-wide metrics, error reporting, logging | Watches only |
+| **Native middleware** | Each transport's own. Kept. | caching, response rewriting | Yes |
+| **Validate** | Schemas (`.input()`, contracts), as today. | | |
+
+Nothing is shared at runtime, so nothing needs a home. A step's types come from its own function: `SuccessOf` and `FailureOf` from `@arki/failure`, which every transport already depends on.
 
 ## 4. Decisions
 
 | # | Question | Decision |
 |---|---|---|
-| D1 | Name of the shared building block | **`derive`** (the word `@arki/http` already uses). |
-| D2 | Return shape | **Both**: `derive('principal', fn)` for one value, `derive(fn)` returning an object for several. |
-| D3 | How a step attaches | **Explicit adapters**, one per transport. A step is not itself an oRPC middleware. Every `.use(guard)` call site changes. |
-| D4 | Around concerns | **Dot handler events** (`start` / `end` / `fail` with `{ kind, feature, name }`). Per-procedure opt-in (Novelette's dev delay) is given up. |
-| D5 | Adapter names | **`fromDerive`, exported by each transport package** (`@arki/dot/orpc`, `@arki/http`, `@arki/queue`). The import path names the transport. |
+| D1 | What a step is | **A plain function.** No `derive` constructor (2026-10-22, replacing "`derive`"). |
+| D2 | How a step adds to the context | **It returns an object.** The keyed shortcut `derive('principal', fn)` is dropped: write `isFailure(p) ? p : { principal: p }`. |
+| D3 | How a piece attaches | **Explicit adapters**, one per transport. Every `.use(guard)` call site changes. |
+| D4 | Watching every handler | **Dot handler events** for app-wide concerns. |
+| D5 | Adapter names | **`step()` and `around()`**, exported by each transport package (`@arki/dot/orpc`, `@arki/http`, `@arki/queue`). The import path names the transport. |
 | D6 | `http({ middleware })` fetch wrappers (CORS, tracking) | **Leave as is.** |
-| D7 | Steps on schedules and CLI commands | **Yes**: `with: [step]` on schedules and on `@arki/cli` commands. |
+| D7 | Schedules and CLI commands | **Yes**: `with: [...]` takes steps and arounds on `@arki/schedule` schedules and `@arki/cli` commands. |
+| D8 | Where `derive` / `Step` live | **Nowhere.** Not `@arki/dot` (cli cycle; `arki-layers` L003 for schedule and auth), not `@arki/failure/step` (founder), not a new package (not needed once a step is a plain function). |
+| D9 | Wrapping that does not inspect the result | **`around`**, transport-neutral (2026-10-22). Events cannot run a handler in a transaction or retry it. |
 
 ## 5. API sketch
 
 ```ts
-// apps/<app>/backend/src/core/middleware.ts — written once
-import { derive } from '@arki/dot/middleware';
-import { requirePrincipal } from '@arki/auth';
+// apps/<app>/backend/src/core/middleware.ts — written once, no Arki import needed
+export const authed = (ctx: { principal: Principal | null }) =>
+  ctx.principal === null ? AuthenticationRequired() : { principal: ctx.principal };
+export const admin = (ctx: { principal: Principal }) => (isAdminEmail(ctx.principal.user.email) ? {} : AccessDenied());
+export const inTransaction = <T>(ctx: { db: Db }, next: () => Promise<T>) => ctx.db.transaction(next);
 
-export const authed = derive('principal', (ctx: { principal: Principal | null }) => requirePrincipal(ctx.principal));
-export const admin = derive((ctx: { principal: Principal }) => (isAdminEmail(ctx.principal.user.email) ? {} : AccessDenied()));
-
-// RPC — fromDerive from '@arki/dot/orpc'
-implement(contract).$context<RequestContext>().use(bind(logic)).errors(errorMap(AuthenticationRequired)).use(fromDerive(authed));
-// HTTP — fromDerive from '@arki/http'
-routes().derive(fromDerive(principalFromHeaders(auth))).derive(fromDerive(authed));
-// queue job — fromDerive from '@arki/queue'
-q.job('refund').use(fromDerive(actorFromData)).use(fromDerive(authed)).handler((data, ctx) => ctx.principal);
-// schedule and CLI command — steps listed directly
-schedule('nightly-report', { cron: '0 3 * * *', with: [asSystem], handler: (services, ctx) => ctx.principal });
+// RPC — step / around from '@arki/dot/orpc'
+impl.refund.use(step(authed)).use(step(admin)).use(around(inTransaction)).handler(({ context }) => …);
+// HTTP — step / around from '@arki/http'
+routes().use(step(principalFromHeaders(auth))).use(step(authed)).use(around(inTransaction));
+// queue job — step / around from '@arki/queue'
+q.job('refund').use(step(actorFromData)).use(around(inTransaction)).handler((data, ctx) => ctx.principal);
+// schedule and CLI command — functions listed directly
+schedule('nightly-report', { cron: '0 3 * * *', with: [asSystem, inTransaction], handler: (services, ctx) => … });
 defineCommand({ name: 'purge', with: [asOperator], run: ctx => ctx.principal });
 ```
 
+The HTTP, queue, schedule and CLI shapes are indicative; each follows its package as it is.
+
 ## 6. Typing
 
-- `Step<In, Out, F>`. `In` is the parameter type, written once. `Out` is the return type minus `Failure`. `F` is the `Failure` part. Nothing is restated.
-- RPC adapter: builds an oRPC middleware whose error map is `ErrorMapOf<F>`. A procedure must declare `F` with `.errors(errorMap(...))`, checked at compile time as `PrincipalGuard` does today. A refusal throws the declared oRPC error.
-- HTTP adapter: the context becomes `Ctx & Out`. A refusal short-circuits into the wire envelope (existing path in `bundle.ts`).
-- Job adapter: wraps the step as a job middleware. A refusal becomes the job outcome.
-- `bind(logic)` stays Dot's own oRPC middleware. Order is declaration order; later steps see earlier keys.
-- Each adapter gets a `*.test-d.ts` with a two-way `toEqualTypeOf` on the handler context.
+- A step's input is its parameter type, written once. What it adds is `SuccessOf<fn>`, which must be an object; what it refuses with is `FailureOf<fn>`. Nothing is restated.
+- An around is generic in `T`, so it cannot change the result, and the context type after it equals the type before it.
+- RPC `step`: returns `StepMiddleware<In, Added, Refused>`, a generic function shaped like an oRPC middleware. oRPC checks `IntersectPick` at the `.use()` call, where the types are concrete. Its `errors` parameter is `DeclaredErrors<Refused>`: oRPC passes the procedure's whole error map in, so an undeclared code is a compile error. A refusal throws the declared `ORPCError` (`rpcError` from `@arki/failure/orpc`).
+- RPC `around`: `next()` returns oRPC's `MiddlewareResult`, which becomes the around's `T`. Typed body, no seam.
+- HTTP: a refusal short-circuits into the wire envelope (existing path in `bundle.ts`). Queue: a refusal becomes the job outcome. Schedule and CLI: a refusal is the run's failure.
+- In `with: [...]` lists the element type is `Step | Around`. The runtime tells them apart by `fn.length >= 2`: an around must declare `next` to call it, and a step with a second required parameter fails the step type.
+- Order is declaration order, onion style. A step sees every key added before it. An around wraps everything after it: `[authed, inTransaction, loadAccount]` runs `loadAccount` inside the transaction.
+- `bind(logic)` stays Dot's own oRPC middleware.
 
 ## 7. What goes, what comes
 
-Goes: queue's `src/middleware/*` (timing, logging, error handling, validation); `errorCaptureMiddleware`; `guards()` in `@arki/auth/orpc` (`assert*` helpers stay); `withPrincipal` and `authorize` in `@arki/auth/http` (`authFailureHeaders` stays).
+Goes: queue's `src/middleware/*` (timing, logging, error handling, validation); `errorCaptureMiddleware` (becomes a handler-event observer); `guards()` in `@arki/auth/orpc` (`assert*` helpers stay); `withPrincipal` and `authorize` in `@arki/auth/http` (`authFailureHeaders` stays); `@arki/http`'s keyed `derive(key, fn)`.
 
-Comes: `@arki/dot/middleware` (`derive`, `Step`); core steps in `@arki/auth` (`authed`, `verified`, `role`, `can`, `principalFromHeaders`); `fromDerive` in `@arki/dot/orpc`, `@arki/http` and `@arki/queue`; `with: [step]` on schedules and `@arki/cli` commands; handler events on Dot's observer.
+Comes: `step` and `around` in `@arki/dot/orpc`, `@arki/http` and `@arki/queue`; `with: [...]` on schedules and `@arki/cli` commands; plain-function core steps in `@arki/auth` (`authed`, `verified`, `role`, `can`, `principalFromHeaders`); handler events on Dot's observer; `rpcError` in `@arki/failure/orpc`.
 
-Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24, ad-hoc `.middleware(` 25, job `.use(` 13, HTTP 1. With D3, every `.use(guard)` call site also changes (93 `.use(` calls; some are `bind`, which stays).
+Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24, ad-hoc `.middleware(` 25, job `.use(` 13, HTTP 1, plus every `.use(guard)` call site.
 
 ## 8. Plan
 
-1. **Spike (half a day).** Build `derive` and the RPC adapter only. Prove oRPC's `IntersectPick` holds with no cast, locked by a type test. If it needs a cast, stop and bring it back.
-2. HTTP and job adapters, then `with:` on schedules and CLI commands, each with type tests. The exact schedule and command shapes follow `@arki/schedule` and `@arki/cli` as they are; the sketch above is indicative.
-3. Handler events in Dot; move timing / logging / error capture onto them.
-4. Auth core steps; delete `guards()`, `withPrincipal`, `authorize`.
+1. **oRPC** — done: `step`, `around`, `rpcError`, type and runtime tests.
+2. HTTP (`step`, `around` on the route bundle; wrap at the one handler call, `engine.ts` ~339), queue (adapt to job middleware), schedule (`with:` folded at `runtime.ts` ~330), CLI (`with:` folded at `cli.ts` ~297). Each with type tests.
+3. Handler events in Dot; move error capture, timing and logging onto them.
+4. Auth core steps as plain functions; delete `guards()`, `withPrincipal`, `authorize`.
 5. Migrate apps, one app per commit. Novelette's legacy `publicProcedure` / `protectedProcedure` go with its move to `defineFeature`.
-6. Docs: `packages/dot/docs/di.md`, `@arki/auth` and `@arki/queue` READMEs, changesets (0.x: minor).
+6. Docs: `packages/dot/docs/di.md`, `@arki/auth`, `@arki/http`, `@arki/queue`, `@arki/schedule`, `@arki/cli` READMEs; changesets (0.x: minor).
 
 ## 9. Risks
 
-- oRPC may not accept a generic `Out` without a cast (step 1 tests this first).
-- One `Failure` means three different refusals (thrown RPC error, HTTP envelope, job outcome). Each needs a test and a doc line.
+- One `Failure` means several refusals (thrown RPC error, HTTP envelope, job outcome, run failure). Each needs a test and a doc line.
+- The `with: [...]` runtime split by `fn.length` relies on an around declaring `next`. A test pins it per package.
 - Long `.use` chains can still hit TS7056; unchanged from today.
 
-## 10. Spike result (step 1)
+## 10. Step 1 result (oRPC)
 
-Passed: `derive` and the oRPC `fromDerive` work with **no cast**.
-
-- `packages/dot/src/middleware.ts`: `derive` (keyed and object forms), `Step`, `StepResult`.
-- `packages/dot/src/orpc.ts`: `fromDerive`. It returns a generic function shaped like an oRPC middleware, as `PrincipalGuard` does. oRPC checks `IntersectPick` at the `.use()` call, where the types are concrete. Its `errors` parameter is `DeclaredErrors<F>`: oRPC passes the procedure's whole error map in, so a missing code is a compile error.
-- Two changes from § 6 were needed:
-  - A step returns a tagged `StepResult` (`{ ok: true, added } | { ok: false, failure }`), not `Out | F`. `Exclude<Out | F, Failure>` does not reduce to `Out` while `Out` is generic.
-  - `@arki/failure/orpc` gains `rpcError(failure, errors)`: the declared `ORPCError` for a failure already in hand. `orThrowRpc` now shares its private helper.
-- Tests: `src/tests/middleware.test-d.ts` (exact handler context for both forms, chained steps, async step, contract-first; four `@ts-expect-error` cases, each checked to fail for the intended reason) and `src/tests/middleware.test.ts` (declared 401/403 with `defined: true`, handler not run on refusal, keys added).
-- Known cost: a refused `.use(fromDerive(step))` gives a long oRPC `MiddlewareOptions` error. Readable at its first line only. Worth a branded error message later, as `ShadowGuard` does for `bind`.
-- `@arki/dot/middleware` is not in `package.json` `exports` yet.
-
+- `packages/dot/src/orpc.ts`: `step`, `around`, `StepMiddleware`, `AroundMiddleware`. No cast at any call site. `step`'s body is written against `Context` behind a typed overload (`SuccessOf` of a generic `R` does not narrow under `isFailure`), the same seam as `errorMap` in `@arki/failure`. `around` has a typed body.
+- `@arki/failure/orpc`: `rpcError(failure, errors)`, the declared `ORPCError` for a failure in hand. `orThrowRpc` shares its private helper.
+- Tests: `src/tests/middleware.test-d.ts` (exact handler context, chained steps, async step, around keeps the context, inline around, contract first; six `@ts-expect-error` cases, each checked to fail for the intended reason) and `src/tests/middleware.test.ts` (declared 401/403 with `defined: true`, handler not run on refusal; around wraps later steps and the handler, passes the result through, sees refusals and handler errors).
+- A wrong `.use(step(fn))` now reports `StepMiddleware<{ principal: … }, …> is not assignable…`: readable at the first line.
+- The first spike (a `derive` constructor and a `Step` type in `src/middleware.ts`, c922bf69cd) was replaced by plain functions.

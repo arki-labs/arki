@@ -49,8 +49,9 @@ import type {
 } from '@orpc/server';
 import { ORPCError, os, traverseContractProcedures } from '@orpc/server';
 
-import type { Failure } from '@arki/failure';
+import type { Failure, FailureOf, SuccessOf } from '@arki/failure';
 import type { DeclaredErrors } from '@arki/failure/orpc';
+import { isFailure } from '@arki/failure';
 import { rpcError } from '@arki/failure/orpc';
 import { getLogger } from '@arki/log';
 import { is, recordSchema } from '@arki/schema';
@@ -58,7 +59,6 @@ import { is, recordSchema } from '@arki/schema';
 import type { RpcEntrypoint } from './define-feature.js';
 import type { HandleEntries, ServicesBag } from './feature.js';
 import type { JsonObject } from './manifest.js';
-import type { Step } from './middleware.js';
 import type { ActionDeclaration, CtxOf, NeedsShape } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { toJsonObject } from './manifest.js';
@@ -117,26 +117,68 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
     });
 }
 
+/** The oRPC middleware {@link step} makes: reads `In`, adds `Added`, or refuses with `Refused`. */
+export type StepMiddleware<In, Added extends Context, Refused extends Failure> = <TOutput>(options: {
+  readonly context: In;
+  readonly next: MiddlewareNextFn<TOutput>;
+  readonly errors: DeclaredErrors<Refused>;
+}) => Promise<MiddlewareResult<Added, TOutput>>;
+
+/** The oRPC middleware {@link around} makes: wraps the rest of the chain and the handler, adds nothing. */
+export type AroundMiddleware<In> = <TOutput>(options: {
+  readonly context: In;
+  readonly next: MiddlewareNextFn<TOutput>;
+}) => Promise<MiddlewareResult<Record<never, never>, TOutput>>;
+
 /**
- * Attach a `derive` step to an oRPC procedure: `impl.refund.use(fromDerive(authed))`.
+ * Run a step before an oRPC procedure: `impl.refund.use(step(authed))`.
  *
- * What the step adds lands on the handler's context. A failure it returns is
- * thrown as the typed `ORPCError` the procedure declares, so a procedure that
- * does not list the step's failures (the contract's errors, or
+ * A step is a plain function. Its parameter is the least context it reads; it
+ * returns an object to add to the context, or a failure to refuse the call:
+ *
+ *   const authed = (ctx: { principal: Principal | null }) =>
+ *     ctx.principal === null ? AuthenticationRequired() : { principal: ctx.principal };
+ *
+ * A refusal is thrown as the typed `ORPCError` the procedure declares, so a
+ * procedure that does not list the step's failures (the contract's errors, or
  * `.errors(errorMap(...))`) does not compile. oRPC hands a middleware the
  * procedure's whole error map; the `errors` parameter asks only for the codes
- * the step can refuse with.
+ * the step can refuse with. The same function attaches to the other
+ * transports with their own `step`.
  */
-export function fromDerive<In extends Context, Out extends Context, F extends Failure>(step: Step<In, Out, F>) {
-  return async <TOutput>(options: {
-    readonly context: In;
-    readonly next: MiddlewareNextFn<TOutput>;
-    readonly errors: DeclaredErrors<F>;
-  }): Promise<MiddlewareResult<Out, TOutput>> => {
-    const result = await step.run(options.context);
-    if (!result.ok) throw rpcError(result.failure, options.errors);
-    return options.next({ context: result.added });
+export function step<In extends Context, R extends object | PromiseLike<object>>(
+  fn: (context: In) => R,
+): StepMiddleware<In, Extract<SuccessOf<(context: In) => R>, Context>, FailureOf<(context: In) => R>>;
+// Erasure seam: `SuccessOf` of a generic `R` does not narrow under `isFailure`, so
+// the body is written against `Context` and the overload above carries the types.
+export function step(fn: (context: Context) => unknown): unknown {
+  return async (options: {
+    readonly context: Context;
+    readonly next: (options: { readonly context: unknown }) => unknown;
+    readonly errors: DeclaredErrors<Failure>;
+  }) => {
+    const value: unknown = await fn(options.context);
+    if (isFailure(value)) throw rpcError(value, options.errors);
+    return options.next({ context: value });
   };
+}
+
+/**
+ * Wrap an oRPC procedure: `impl.refund.use(around(inTransaction))`.
+ *
+ * An around is a plain function that runs `next` inside whatever it sets up
+ * (a transaction, a retry, a span, a timeout) and returns what `next` returns.
+ * It never sees the result's shape, so the same function attaches to every
+ * transport with that transport's `around`:
+ *
+ *   const inTransaction = <T>(ctx: { db: Db }, next: () => Promise<T>) => ctx.db.transaction(() => next());
+ *
+ * It wraps everything declared after it: later steps and the handler.
+ */
+export function around<In extends Context>(
+  fn: <T>(context: In, next: () => Promise<T>) => Promise<T>,
+): AroundMiddleware<In> {
+  return async options => fn(options.context, async () => options.next());
 }
 
 /** What `errorCaptureMiddleware` hands its reporter with the error. */
