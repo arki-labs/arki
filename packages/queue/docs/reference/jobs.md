@@ -25,8 +25,8 @@ const q = initQueue.create();
 Job builders are similar to tRPC procedures. They can be composed with middleware:
 
 ```ts skip="excerpt: it uses names this page does not define"
-// Base job with common middleware
-const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(loggingMiddleware());
+// Base job with a shared step
+const baseJob = q.job.use(step(() => ({ logger })));
 
 // Extend with more middleware
 const authenticatedJob = baseJob.use(authMiddleware);
@@ -64,7 +64,7 @@ Without `retry`, provider failures have a limit of three attempts. Returned busi
 
 The persisted refusal contains its public code, status, message, remediation, and data. Private causes stay in process. Foreman retains that envelope. A thrown handler or middleware error is reported as `UnexpectedDefect`, but the retry sees the thrown error: it follows the job's `Backoff` as in `@arki/resilience`, so `upTo(2)` runs it up to 3 times and `.while(...)` can narrow it. Bad stored input becomes `InvalidInput` or `ValidatorDefect` and stops. A returned failure stops by default. Provider outages and abandoned claims remain under provider supervision; a settled handler failure is never also thrown into that retry layer.
 
-`timeoutMs` aborts `ctx.signal` and reports canonical `Deadline`; external worker cancellation reports `Cancelled`. Settlement waits for the handler and middleware to finish, so retry never overlaps owned work. Handlers must honor the signal; a handler that ignores cancellation can delay shutdown indefinitely. The older timeout middleware also waits for settlement and clears its timer; prefer `timeoutMs` when work needs the abort signal.
+`timeoutMs` aborts `ctx.signal` and reports canonical `Deadline`; external worker cancellation reports `Cancelled`. Settlement waits for the handler and middleware to finish, so retry never overlaps owned work. Handlers must honor the signal; a handler that ignores cancellation can delay shutdown indefinitely. Use `timeoutMs` for timeouts: there is no timeout middleware.
 
 `trigger()` and job `enqueue()` return a job id or `JobTriggerFailure`. Register `JOB_TRIGGER_FAILURES` at transport boundaries. `QueueUnavailable` means no transport is active. `QueueAcceptanceUnknown` means the acknowledgement was lost; inspect the stable idempotency key before trying again. Successful enqueue acknowledges delivery, not business success.
 
@@ -132,26 +132,34 @@ const timed = q.middleware(async ({ job, next }) => {
 With `.use(mw1).use(mw2)` the order is `mw1` before, `mw2` before, handler,
 `mw2` after, `mw1` after. `next({ ctx })` replaces the context for what follows.
 
-**Standard Middleware:**
+**There is no standard middleware.** Each old helper has a replacement:
 
-- `errorHandlingMiddleware()` - Catches and formats errors
-- `loggingMiddleware()` - Logs job execution
-- `structuredLoggingMiddleware()` - Adds `logger` to context
-- `timingMiddleware()` - Logs execution time
-- `performanceMiddleware()` - Adds `performance` tracker to context
-- `timeoutMiddleware({ timeout: 30000 })` - Enforces max execution time
-- `validationMiddleware()` - Validates input (handled automatically)
+| You wanted                             | Use                                                                                    |
+| -------------------------------------- | -------------------------------------------------------------------------------------- |
+| Timing and logging of every job        | `logHandlers()` observer from `@arki/dot` (see Handler events below)                   |
+| Error reporting                        | `reportErrors({ report })` observer from `@arki/dot`                                   |
+| A maximum run time                     | `.options({ timeoutMs })`                                                              |
+| A logger or a performance tracker      | Your own step: `step(() => ({ logger }))` adds `logger` to the context                 |
+| Input validation                       | `.input(schema)`; the queue parses the data before any middleware runs                 |
+
+### Handler events
+
+A job in a Dot feature (`jobs(...)`) reports to the app's lifecycle observers. Each run emits `starting`, then
+`completed` or `failed`, with `transport: 'job'`, the feature's name and the job's name. A step that refuses, or a
+Failure the handler returns, is `completed` with outcome `refused`. A throw is `failed` and is rethrown unchanged,
+so retries behave as before. With no observer, nothing is added to the run. `queueWorker` and `outboxJobs`
+share the same jobs, so both lanes emit.
 
 ## Advanced Patterns
 
-### Extending Context with Middleware
+### Extending Context with a Step
 
-Middleware can extend the context type:
+A step can extend the context type:
 
 ```ts skip="excerpt: it uses names this page does not define"
-// Structured logging middleware adds logger to context
+// A step adds logger to context
 const jobWithLogger = q.job
-  .use(structuredLoggingMiddleware())
+  .use(step(() => ({ logger })))
   .name('my-job')
   .input(schema)
   .handler(async (data, ctx) => {
@@ -159,19 +167,6 @@ const jobWithLogger = q.job
     ctx.logger.info('Starting job', { data });
     ctx.logger.warn('Something happened');
     ctx.logger.error('Error occurred', { error });
-
-    return { success: true };
-  });
-
-// Performance middleware adds performance tracker
-const jobWithPerformance = q.job
-  .use(performanceMiddleware())
-  .name('my-job')
-  .input(schema)
-  .handler(async (data, ctx) => {
-    const mark = ctx.performance.mark('database-query');
-    await ctx.db.query(...);
-    ctx.performance.measure('database-query', mark);
 
     return { success: true };
   });
@@ -246,10 +241,10 @@ Build reusable job builders with common middleware:
 
 ```ts skip="excerpt: it uses names this page does not define"
 // Base job for all jobs
-const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware());
+const baseJob = q.job;
 
 // Job that needs logging
-const monitoredJob = baseJob.use(structuredLoggingMiddleware());
+const monitoredJob = baseJob.use(step(() => ({ logger })));
 
 // Job that needs authentication
 const authJob = monitoredJob.use(authMiddleware);

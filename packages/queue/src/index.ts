@@ -78,27 +78,6 @@ export { createJobContext, executeMiddlewareChain } from './middleware.ts';
 export { around, step } from './step.ts';
 export type { AroundJobMiddleware, StepJobMiddleware } from './step.ts';
 
-// Standard middleware
-export {
-  ConsoleLogger,
-  JobError,
-  JobValidationError,
-  PerformanceTracker,
-  customLoggingMiddleware,
-  customValidationMiddleware,
-  devTimingMiddleware,
-  errorHandlingMiddleware,
-  errorHandlingMiddlewareWithFormatter,
-  loggingMiddleware,
-  outputValidationMiddleware,
-  performanceMiddleware,
-  structuredLoggingMiddleware,
-  timeoutMiddleware,
-  timingMiddleware,
-  validationMiddleware,
-} from './middleware/index.ts';
-export type { LogEntry, LogLevel, Logger } from './middleware/index.ts';
-
 // Bull Board UI (unchanged)
 export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 

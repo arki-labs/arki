@@ -16,7 +16,7 @@ import type { AnyDefinedFeature, AnyFeatureSlice, EntrypointBinder } from '@arki
 import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
-import { entrypoint, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { entrypoint, handlerObserverOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -29,6 +29,7 @@ import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { JobTriggerResult } from './trigger.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
+import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueMeta } from './types/queue.ts';
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 import { debugWorker, observeQueue } from './debug.ts';
@@ -201,6 +202,7 @@ export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
   /** The producer side, named after the feature: an instance's ids carry its instance (`send-mail#eu.produce`). */
   readonly actionsOf: (feature: string) => readonly QueueDotAction[];
   readonly registry: TRegistry;
+  /** The registry it returns holds the same jobs, each wrapped to report to the handler observer. */
   readonly resolve: (services: unknown) => FeatureJobs<TRegistry>;
 };
 
@@ -221,8 +223,52 @@ export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry)
     actions: [],
     actionsOf: feature => queueProducerActions(featureRegistry(feature, registry)),
     registry,
-    resolve: services => ({ registry, services: jobServicesOf(services) }),
+    resolve: services => {
+      const observer = handlerObserverOf(typeof services === 'object' && services !== null ? services : {});
+      return { registry: observedRegistry(registry, observer), services: jobServicesOf(services) };
+    },
   };
+}
+
+type HandlerObserver = ReturnType<typeof handlerObserverOf>;
+
+/**
+ * The outermost job middleware of a feature's job: the handler call (steps, arounds and the handler
+ * inside it) runs in the app's handler observer. What the chain returns decides the event: a step's
+ * refusal or a Failure the handler returns is `completed/refused`, a throw is `failed` and is
+ * rethrown unchanged, so the queue's retries see exactly what they saw before.
+ */
+function observingMiddleware(name: string, observer: HandlerObserver): JobMiddleware<unknown, unknown, QueueMeta> {
+  return {
+    _type: 'middleware',
+    _fn: async ({ ctx, next }) => {
+      const result = await observer.run({ transport: 'job', name }, async () => {
+        const settled = await next();
+        return settled.output;
+      });
+      return { ctx, output: result };
+    },
+  };
+}
+
+/** A job with the observing middleware in front. The copy is its own definition; the original is never changed. */
+function observedJob<TInput, TOutput, TDeps>(
+  job: JobDefinition<TInput, TOutput, TDeps>,
+  observer: HandlerObserver,
+): JobDefinition<TInput, TOutput, TDeps> {
+  const { name, inputSchema, handler, options, middlewares } = job._internal;
+  const copy: JobDefinition<TInput, TOutput, TDeps> = {
+    _type: 'job',
+    _internal: {
+      name,
+      inputSchema,
+      handler,
+      middlewares: [observingMiddleware(name, observer), ...middlewares],
+      ...(options === undefined ? {} : { options }),
+    },
+    trigger: (data, triggerOptions) => triggerJob(copy._internal, data, triggerOptions),
+  };
+  return copy;
 }
 
 function isQueueRegistry(value: unknown): value is QueueRegistry {
@@ -274,11 +320,35 @@ function renamedJob<TInput, TOutput, TDeps>(
  * copied once, so a schedule or flow step points at the same copy the registry lists.
  */
 function renamedRegistry(registry: QueueRegistry, rename: (name: string) => string): QueueRegistry {
+  return copiedRegistry(registry, rename, (job, name) => renamedJob(job, name));
+}
+
+/** The jobs of a feature, each wrapped to report to the handler observer. Schedules and flows keep their names and point at the wrapped copies. */
+// The copy has the registry's shape (same keys, same job types, one middleware prepended at run time).
+// The overload says so; the implementation is written against the wide type, so no cast is needed.
+function observedRegistry<TRegistry extends QueueRegistry>(registry: TRegistry, observer: HandlerObserver): TRegistry;
+function observedRegistry(registry: QueueRegistry, observer: HandlerObserver): QueueRegistry {
+  return copiedRegistry(
+    registry,
+    name => name,
+    job => observedJob(job, observer),
+  );
+}
+
+/** Copy a registry with every job replaced by `copyJob(job, rename(job name))`, once per job, so schedules and flows share the copy. */
+function copiedRegistry(
+  registry: QueueRegistry,
+  rename: (name: string) => string,
+  copyJob: (
+    job: JobDefinition<unknown, unknown, unknown>,
+    name: string,
+  ) => JobDefinition<unknown, unknown, unknown>,
+): QueueRegistry {
   const copies = new Map<object, JobDefinition<unknown, unknown, unknown>>();
   const jobCopy = (job: JobDefinition<unknown, unknown, unknown>): JobDefinition<unknown, unknown, unknown> => {
     const known = copies.get(job);
     if (known !== undefined) return known;
-    const copy = renamedJob(job, rename(job._internal.name));
+    const copy = copyJob(job, rename(job._internal.name));
     copies.set(job, copy);
     return copy;
   };

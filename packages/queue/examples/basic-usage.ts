@@ -6,14 +6,7 @@
 
 import { z } from '@arki/contracts';
 
-import {
-  backoff,
-  errorHandlingMiddleware,
-  initQueue,
-  loggingMiddleware,
-  structuredLoggingMiddleware,
-  timingMiddleware,
-} from '../src/index.ts';
+import { backoff, initQueue, step } from '../src/index.ts';
 
 // ============================================
 // 1. Define Application Context
@@ -71,11 +64,17 @@ const q = initQueue.context<AppContext>().create({
 // 3. Create Job Builders with Middleware
 // ============================================
 
-// Base job with standard middleware
-const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(loggingMiddleware());
+// Timing and error reports come from the app's observers (`logHandlers()`, `reportErrors()` in @arki/dot).
+// Input is checked by `.input(schema)`. A timeout is `.options({ timeoutMs })`.
 
-// Job with structured logging (adds logger to context)
-const monitoredJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(structuredLoggingMiddleware());
+// Base job: no middleware needed
+const baseJob = q.job;
+
+// A step adds a logger to the context of every job built from `monitoredJob`
+const logger = {
+  info: (message: string, fields?: unknown) => console.log(message, fields),
+};
+const monitoredJob = q.job.use(step(() => ({ logger })));
 
 // Custom auth middleware example
 const authMiddleware = q.middleware<AppContext & { user: { id: string; email: string } }>(
@@ -209,7 +208,7 @@ const dailyEmailSchedule = q.schedule
 // Schedule with inline handler
 const hourlyDataSync = q.schedule
   .interval(60 * 60 * 1000) // Every hour
-  .use(structuredLoggingMiddleware())
+  .use(step(() => ({ logger })))
   .name('data.hourly-sync')
   .input(z.object({ timestamp: z.string() }))
   .handler(async (data, ctx) => {
@@ -224,8 +223,6 @@ const hourlyDataSync = q.schedule
 // Weekly cleanup schedule with existing job
 const weeklyCleanup = q.schedule
   .cron('0 2 * * 0') // Every Sunday at 2 AM
-  .use(errorHandlingMiddleware())
-  .use(loggingMiddleware())
   .job(syncData)
   .data({
     source: 'temp_data',
@@ -240,8 +237,6 @@ const weeklyCleanup = q.schedule
 const userOnboardingFlow = q.flow
   .name('users.onboarding-flow')
   .input(z.object({ userId: z.string(), email: z.string() }))
-  .use(structuredLoggingMiddleware())
-  .use(errorHandlingMiddleware())
   .step('send-welcome-email', {
     job: sendEmail,
     data: input => ({
@@ -270,8 +265,6 @@ const dataProcessingFlow = q.flow
       userId: z.string(),
     }),
   )
-  .use(timingMiddleware())
-  .use(loggingMiddleware())
   // Step 1: Initial sync (no dependencies)
   .step('initial-sync', {
     job: syncData,

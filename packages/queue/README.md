@@ -86,7 +86,7 @@ Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
 
 ## Public imports
 
-- `@arki/queue`: the core. `initQueue`, the standard middleware, `QUEUE_PRIORITIES`, `backoff`, `CronPatterns`, `queueJobId`, `JOB_TRIGGER_FAILURES`, `FLOW_ENQUEUE_FAILURES`, `createDurableScheduler`, and the types.
+- `@arki/queue`: the core. `initQueue`, `step`, `around`, `QUEUE_PRIORITIES`, `backoff`, `CronPatterns`, `queueJobId`, `JOB_TRIGGER_FAILURES`, `FLOW_ENQUEUE_FAILURES`, `createDurableScheduler`, and the types.
 - `@arki/queue/types`: the types only.
 - `@arki/queue/runtime-local`: the same builders on pg-boss and PGlite. `initQueue`, `createRuntimeLocalQueueInstance`.
 - `@arki/queue/dot`: Dot adapters. `queue`, `queueWorker`, `jobs`, `durableScheduler`, `outboxPlugin`, `outboxJobs`.
@@ -170,7 +170,7 @@ process.exit(0);
 ## Documentation
 
 - [Recover jobs after a worker dies](docs/recipes/recover-jobs.md): what recovers a job on each lane, with a runnable example.
-- [Jobs, middleware and retries](docs/reference/jobs.md): builders, retry rules, telemetry, middleware, testing, shutdown.
+- [Jobs, middleware and retries](docs/reference/jobs.md): builders, retry rules, telemetry, middleware, handler events, testing, shutdown.
 - [Schedules and flows](docs/reference/schedules-and-flows.md): cron and interval schedules, durable schedules for `@arki/schedule`, flows.
 - [Outbox](docs/reference/outbox.md): jobs that commit with your transaction.
 - [Dot](docs/reference/dot.md): `queue()`, `queueWorker()` and `jobs()`.

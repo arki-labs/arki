@@ -16,6 +16,7 @@ import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, infra, service } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 import type { QueueClient } from './dot.ts';
 import type { QueueBuilder, QueueInstance } from './types/builder.ts';
@@ -32,6 +33,7 @@ import {
 } from './dot.ts';
 import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
 import { initQueue } from './init.ts';
+import { jobsByName } from './outbox/registry.ts';
 import { project } from './projection.ts';
 
 const q = initQueue.create();
@@ -295,7 +297,11 @@ describe('queueWorker() — the entrypoint', () => {
     );
 
     // Only features with a jobs() slice contribute; billing is skipped.
-    expect(registered).toEqual({ orders: registry });
+    // The jobs are the feature's own, each wrapped to report to the handler observer, so compare by name.
+    expect(Object.keys(registered ?? {})).toEqual(['orders']);
+    const booted = registered?.['orders'];
+    if (!is(booted, recordSchema)) throw new Error('The orders registry was not registered.');
+    expect([...jobsByName(booted).keys()]).toEqual([...jobsByName(registry).keys()]);
     // The worker reads where to consume from the client, so producer and
     // consumer can never disagree on connection or key prefix.
     expect(seen.connection).toBe(REDIS_URL);

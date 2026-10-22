@@ -24,7 +24,7 @@ const weeklyReport = q.schedule.weekly('monday', '09:00').name('weekly-report').
 // whose middleware is the `.use()` chain
 const hourlySync = q.schedule
   .interval(60 * 60 * 1000) // Every hour
-  .use(structuredLoggingMiddleware())
+  .use(step(() => ({ logger })))
   .name('data.hourly-sync')
   .input(z.object({ timestamp: z.string() }))
   .handler(async (data, ctx) => {
