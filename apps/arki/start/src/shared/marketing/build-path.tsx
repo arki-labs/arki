@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { lazy, Suspense } from 'react';
 
 import type { BuildStep } from './build-steps';
 import type { Excerpt } from './excerpt';
@@ -24,7 +25,39 @@ import {
 } from './build-steps';
 import { Code, HighlightedText } from './code';
 import { WireSheet } from './drawing-sheet';
-import { JournalChapter } from './journal-chapter';
+import { scrollParent } from './elevation';
+
+/** How far ahead of the screen the journal chapter starts loading. */
+const LOAD_AHEAD = '800px 0px';
+
+/** Resolves once the element with `id` comes within `LOAD_AHEAD` of the screen; at once on the server. */
+function nearScreen(id: string): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const element = document.getElementById(id);
+  if (element === null) return Promise.resolve();
+  return new Promise(resolve => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (!entries.some(entry => entry.isIntersecting)) return;
+        observer.disconnect();
+        resolve();
+      },
+      { root: scrollParent(element), rootMargin: LOAD_AHEAD },
+    );
+    observer.observe(element);
+  });
+}
+
+/**
+ * The journal chapter is the heaviest part of the homepage, so its code loads only when floor F4 comes near the
+ * screen. Until then React keeps the server-rendered chapter (its no-JavaScript form) on screen, and hydrates it in
+ * place once the code arrives. The server imports it at once, so the HTML always holds the whole chapter.
+ */
+const JournalChapter = lazy(() =>
+  nearScreen('step-remember')
+    .then(() => import('./journal-chapter'))
+    .then(chapter => ({ default: chapter.JournalChapter })),
+);
 
 type StepProps = {
   step: BuildStep;
@@ -160,7 +193,9 @@ export function BuildPath() {
       </Step>
 
       <Step step={REMEMBER_STEP} index={3}>
-        <JournalChapter headline={false} />
+        <Suspense fallback={null}>
+          <JournalChapter headline={false} />
+        </Suspense>
       </Step>
 
       <Step step={SERVE_STEP} index={4}>

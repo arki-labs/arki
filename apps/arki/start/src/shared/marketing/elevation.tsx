@@ -47,7 +47,7 @@ function craneDrop(floor: number, progress: number): number {
 }
 
 /** The nearest ancestor that scrolls. On this site the page scrolls inside `.marketing`, not in the window. */
-function scrollParent(element: HTMLElement): HTMLElement | null {
+export function scrollParent(element: HTMLElement): HTMLElement | null {
   for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
     if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
   }

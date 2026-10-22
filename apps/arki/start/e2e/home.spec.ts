@@ -40,6 +40,16 @@ const sheet = (page: Page, number: string) => page.locator(`#${number.toLowerCas
 const tip = (page: Page) => page.locator('#glossary-tip');
 const word = (page: Page, text: string) => page.locator('.home-code button.tk-term', { hasText: text }).first();
 
+/**
+ * The homepage with its journal chapter running. The chapter's code loads only when floor F4 comes near the screen,
+ * so this scrolls there the way a reader does, then waits for the controls the code brings.
+ */
+const openJournal = async (page: Page) => {
+  await page.goto('/');
+  await page.locator('#step-remember').evaluate(floor => floor.scrollIntoView());
+  await expect(sheet(page, 'J-100').getByRole('button', { name: 'Reset' })).toBeVisible();
+};
+
 test.describe('/ build path', () => {
   // WHY: the page promises a build order (define, wire, feature, remember, serve, inspect), so the sections must run
   // in that order and show the real code of each step, or the "floors" are only decoration.
@@ -376,7 +386,7 @@ test.describe('/ build path', () => {
     // WHY: the key API words explain themselves; hovering one must show its sentence, and Escape must close it.
     test('hovering waitFor shows its tooltip, and Escape closes it', async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 800 });
-      await page.goto('/');
+      await openJournal(page);
       await word(page, 'waitFor').scrollIntoViewIfNeeded();
       await word(page, 'waitFor').hover();
       await expect(tip(page)).toBeVisible();
@@ -404,7 +414,7 @@ test.describe('/ build path', () => {
     test.describe('on a touch phone', () => {
       test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
       test('tapping waitFor opens its tooltip inside the screen; tapping elsewhere closes it', async ({ page }) => {
-        await page.goto('/');
+        await openJournal(page);
         await word(page, 'waitFor').scrollIntoViewIfNeeded();
         await word(page, 'waitFor').tap();
         await expect(tip(page)).toBeVisible();
@@ -466,7 +476,7 @@ test.describe('/ build path', () => {
     // WHY: J-100's promise: the row is its events replayed. A patch changes only its columns, and the replay pane
     // rebuilds an older version while the live row stays where it is.
     test('J-100: events patch the row, and the slider replays an older version', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-100');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await expect(bench.locator('.home-ledger tbody')).toContainText('No events yet');
@@ -486,7 +496,7 @@ test.describe('/ build path', () => {
 
     // WHY: J-101's first promise: cut the power before the commit and none of the four writes exist.
     test('J-101: pulling the plug mid-write leaves nothing, and no job to run', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-101');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await bench.getByRole('button', { name: 'Run payOrder' }).click();
@@ -500,7 +510,7 @@ test.describe('/ build path', () => {
     // WHY: J-101's second promise: the job exists only after the commit, and a worker killed after the send runs it
     // again under the same id, so the inbox still holds one email.
     test('J-101: commit, kill the worker after the send, rerun: one email', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-101');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await bench.getByRole('button', { name: 'Run payOrder' }).click();
@@ -516,7 +526,7 @@ test.describe('/ build path', () => {
     // WHY: J-102's promise: three deliveries of one webhook run the handler once, write one event and get three
     // identical replies; the same key with another body is refused.
     test('J-102: three deliveries, one run, one event, identical replies', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-102');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await expect(bench).toContainText('runs: 0');
@@ -535,7 +545,7 @@ test.describe('/ build path', () => {
 
     // WHY: J-103's promise: a hand edit is caught by verify, undone by repair, and forget keeps verify green.
     test('J-103: verify shows the drift, repair fixes it, forget stays green', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-103');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await bench.getByRole('button', { name: "set status = 'shipped'" }).click();
@@ -556,7 +566,7 @@ test.describe('/ build path', () => {
     test('J-104: a restart during payBack still makes one refund, then the signal finishes the run', async ({
       page,
     }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-104');
       await expect(bench.locator('.home-badge')).toContainText('not on npm yet');
       await bench.getByRole('button', { name: 'Reset' }).click();
@@ -571,7 +581,7 @@ test.describe('/ build path', () => {
 
     // WHY: with the README's defaults a timeout parks the run for an operator; a cancel then undoes newest first.
     test('J-104: three days without a signal leave the run stuck; cancel undoes hold', async ({ page }) => {
-      await page.goto('/');
+      await openJournal(page);
       const bench = sheet(page, 'J-104');
       await bench.getByRole('button', { name: 'Reset' }).click();
       await bench.getByRole('button', { name: 'Start the refund' }).click();

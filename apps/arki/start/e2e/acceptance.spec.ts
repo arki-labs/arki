@@ -202,8 +202,9 @@ test.describe('site acceptance', () => {
     }
   });
 
-  // WHY: docs pages must load fast on a phone; the plan caps their JavaScript at 200 KB gzip.
-  for (const path of DOCS_PAGES) {
+  // WHY: docs pages must load fast on a phone; the plan caps their JavaScript at 200 KB gzip. The homepage too: its
+  // journal chapter is the heaviest part, so it must load only when its floor comes near, not with the page.
+  for (const path of ['/', ...DOCS_PAGES]) {
     test(`JavaScript on ${path} stays within 200 KB gzip`, async ({ page }, testInfo) => {
       const scripts = new Map<string, number>();
       page.on('response', response => {
