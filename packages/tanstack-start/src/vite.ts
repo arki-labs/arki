@@ -1,4 +1,7 @@
+import type { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import type { Plugin } from 'vite';
+import babel from '@rolldown/plugin-babel';
+import { reactCompilerPreset } from '@vitejs/plugin-react';
 
 /**
  * Packages whose server-only subpaths are reached from the client module graph
@@ -36,6 +39,74 @@ export function fleetVite(): Plugin {
           exclude: [...FLEET_SERVER_ONLY_PACKAGES],
         },
       };
+    },
+  };
+}
+
+type ReactCompilerOptions = Parameters<typeof reactCompilerPreset>[0];
+
+/**
+ * React Compiler for the app: every component and hook is memoized at build
+ * time, so a render re-runs only what its inputs changed. Place it after
+ * `viteReact()`. Runs the stable Babel plugin (`babel-plugin-react-compiler`)
+ * through `@rolldown/plugin-babel`, on the files the preset's filter selects.
+ *
+ * A component that breaks the rules of React is skipped by the compiler; the
+ * `react-compiler/react-compiler` lint rule in `@arki/eslint-config` reports it
+ * as an error first, so lint is where such a component shows up.
+ *
+ * `@vitejs/plugin-react` also ships a Rust port (`viteReact({ compiler: true })`
+ * with `oxc-transform-react`), marked experimental by Vite. Switch this helper
+ * to it when that flag goes; every app changes at once.
+ */
+export function reactCompiler(options?: ReactCompilerOptions): ReturnType<typeof babel> {
+  return babel({ presets: [reactCompilerPreset(options)] });
+}
+
+type StartRouterOptions = NonNullable<NonNullable<Parameters<typeof tanstackStart>[0]>['router']>;
+
+/**
+ * One lazy chunk per route: the loader travels with the component.
+ *
+ * By default TanStack Router splits the component out of a route but keeps its
+ * loader in the entry chunk, so the first page downloads every route's loader
+ * imports: validators, server-function stubs, content. Grouping loader and
+ * component keeps it one request per route and an entry chunk that holds the
+ * router only. Pass as `tanstackStart({ router: { codeSplittingOptions: oneChunkPerRoute } })`.
+ */
+export const oneChunkPerRoute: NonNullable<StartRouterOptions['codeSplittingOptions']> = {
+  defaultBehavior: [['loader', 'component'], ['pendingComponent'], ['errorComponent'], ['notFoundComponent']],
+};
+
+/** No newline: prepended on the entry's first line, so line numbers in stack traces and source maps hold. */
+const ZOD_COMPILE_IMPORT = `import 'zod/compile';`;
+
+/**
+ * Compiled Zod on the server: every schema the server constructs parses
+ * through a generated validator instead of the interpreter (Zod's own median
+ * is 2.4x, more for wide objects). This covers oRPC input validation, server
+ * function validators, env and every other `parse` on the server.
+ *
+ * Zod's `zod/compile` shim compiles the schemas constructed after it loads, so
+ * it must be the first import of the server bundle. This plugin prepends that
+ * import to every entry module of the server build (TanStack Start's own
+ * server entry included), whether the app configures `server.entry` or not.
+ * ES modules evaluate imports in order, so the shim installs before the route
+ * tree, the Dot app and every other module construct a schema. The client is
+ * untouched: the compiler is 7 KB and the browser runs no hot validation loop.
+ * A schema the compiler cannot model (async refinements, transforms,
+ * `z.coerce`, recursion) falls back to the interpreter with the same results.
+ */
+export function zodCompiled(): Plugin {
+  return {
+    name: 'arki:tanstack-start:zod-compiled',
+    // Build only: the dev server's module info has no `isEntry` (reading it throws), and dev has no hot loop to speed up.
+    apply: 'build',
+    applyToEnvironment: environment => environment.config.consumer === 'server',
+    transform(code, id) {
+      // Rolldown resolves the build entries itself, so `resolveId` never sees them; the module info does.
+      if (this.getModuleInfo(id)?.isEntry !== true) return;
+      return { code: ZOD_COMPILE_IMPORT + code, map: null };
     },
   };
 }

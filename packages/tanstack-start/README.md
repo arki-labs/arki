@@ -11,10 +11,10 @@ Build the query utils from the contract **value**. Each leaf is oRPC's own `Proc
 
 ```ts
 // lib/orpc/client.tsx — keep your own link and serializers
-import { createORPCClient, RPCLink } from '@arki/tanstack-start/orpc/client';
-import { createOrpcUtils } from '@arki/tanstack-start/orpc/client';
 import type { ContractRouterClient } from '@orpc/contract';
 import { rpcContract } from '@my-app/backend/rpc';
+
+import { createORPCClient, createOrpcUtils, RPCLink } from '@arki/tanstack-start/orpc/client';
 
 const link = new RPCLink({ url: '/api/orpc', customJsonSerializers: temporalJsonSerializers });
 const client: ContractRouterClient<typeof rpcContract> = createORPCClient(link);
@@ -45,21 +45,23 @@ A keyset-paged list over the `pageInput` / `page` contract of `@arki/contracts`.
 ```tsx
 const { items, status, loadMore } = useKeysetQuery(orpc.posts.list, { status: 'published' });
 
-{status === 'canLoadMore' && <button onClick={() => void loadMore(50)}>More</button>}
+{
+  status === 'canLoadMore' && <button onClick={() => void loadMore(50)}>More</button>;
+}
 ```
 
 `args` is the input without the cursor; `limit` is the first page's size and part of the query key.
 A procedure whose output is not a `Page` (`{ items, nextCursor: string | null }`, extra fields allowed)
 or whose input has no `cursor` is a compile error.
 
-| `status` | Meaning |
-| --- | --- |
-| `idle` | `enabled: false` and no data. No request. |
+| `status`           | Meaning                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `idle`             | `enabled: false` and no data. No request.                                             |
 | `loadingFirstPage` | No data yet, first page in flight (also during SSR — guard on this, not `isLoading`). |
-| `canLoadMore` | The last page had a `nextCursor`. |
-| `loadingMore` | `loadMore` is fetching the next page. |
-| `exhausted` | The last page said `nextCursor: null`. Exact: the server fetched `limit + 1` rows. |
-| `error` | The first page failed, or a later one did (earlier `items` are kept). |
+| `canLoadMore`      | The last page had a `nextCursor`.                                                     |
+| `loadingMore`      | `loadMore` is fetching the next page.                                                 |
+| `exhausted`        | The last page said `nextCursor: null`. Exact: the server fetched `limit + 1` rows.    |
+| `error`            | The first page failed, or a later one did (earlier `items` are kept).                 |
 
 - **`loadMore(n)`** fetches one more page of `n` rows (default: the args' limit, else the contract
   default). A no-op unless `status` is `canLoadMore`; a double click sends one request. It resolves
@@ -85,7 +87,8 @@ loader: ({ context }) =>
 const create = useOptimisticMutation(orpc.posts.create, {
   apply: (cache, input) =>
     cache.updateKeyset(orpc.posts.list, { status: 'published' }, (items, pageIndex) =>
-      pageIndex === 0 ? [{ ...input, id: tempId() }, ...items] : [...items]),
+      pageIndex === 0 ? [{ ...input, id: tempId() }, ...items] : [...items],
+    ),
 });
 ```
 
@@ -112,3 +115,31 @@ failure does not prove the server did not commit; the refetch shows it.
 
 `useOptimisticMutation` and a queued `useOfflineMutation` (`@arki/offline/mutations`) are alternatives
 for one action: calling both sends it twice.
+
+## Vite plugins: `@arki/tanstack-start/vite`
+
+Build-time helpers for an app's `vite.config.ts`. Each one moves work from request time to `vite build`.
+
+```ts
+import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import viteReact from '@vitejs/plugin-react';
+
+import { fleetVite, oneChunkPerRoute, reactCompiler, zodCompiled } from '@arki/tanstack-start/vite';
+
+export default defineConfig({
+  plugins: [
+    tanstackStart({ router: { codeSplittingOptions: oneChunkPerRoute } }),
+    viteReact(),
+    reactCompiler(),
+    zodCompiled(),
+    fleetVite(),
+  ],
+});
+```
+
+| Export             | What it does                                                                                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reactCompiler()`  | React Compiler on every component and hook, through `@rolldown/plugin-babel`. A render re-runs only what its inputs changed. Place it after `viteReact()`. A component that breaks the rules of React is reported by the `react-compiler` lint rule first.         |
+| `zodCompiled()`    | Server bundle only: prepends `import 'zod/compile'` to the server entry, so every schema the server constructs (oRPC inputs, server function validators, env) parses through a compiled validator. Schemas the compiler cannot model fall back to the interpreter. |
+| `oneChunkPerRoute` | `codeSplittingOptions` that keeps a route's loader in the route's own chunk. The default leaves every loader in the entry chunk, so the first page downloads every route's validators and server-function stubs.                                                   |
+| `fleetVite()`      | Excludes `@arki/admin` from the client dev dep-scan for apps that mount the `/api/fleet` snapshot route.                                                                                                                                                           |
