@@ -10,6 +10,7 @@ import type { JobTriggerResult } from './trigger.ts';
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { InternalJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
+import type { AroundJobMiddleware, FitsContext, StepJobMiddleware } from './step.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder, observeQueue } from './debug.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
@@ -52,23 +53,36 @@ export function createJobBuilder<
     }),
   );
 
-  return {
-    use<TContextOut2, TNextFailure extends Failure = never>(
-      middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure>,
-    ) {
-      observeQueue(() =>
-        debugBuilder.debug('Adding middleware to job builder (total: {total})', {
-          total: params.middlewares.length + 1,
-        }),
-      );
+  // `step(fn)` and `around(fn)` are middleware too: the overloads on `JobBuilderDef.use` type them,
+  // and the chain runs them like any other, so one implementation stores all three.
+  // Erasure seam: the overloads above carry the types; the implementation returns `unknown`
+  // because their builders differ in context and failure types, which no one return type spans.
+  function use<TIn, TAdded extends object, TRefused extends Failure>(
+    middleware: StepJobMiddleware<TIn, TAdded, TRefused> & FitsContext<TContextOut, TIn>,
+  ): JobBuilderDef<TContext, TContextOut & TAdded, TMeta, TFailure | TRefused>;
+  function use<TIn>(
+    middleware: AroundJobMiddleware<TIn> & FitsContext<TContextOut, TIn>,
+  ): JobBuilderDef<TContext, TContextOut, TMeta, TFailure>;
+  function use<TContextOut2, TNextFailure extends Failure = never>(
+    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure> & { readonly _adapter?: never },
+  ): JobBuilderDef<TContext, TContextOut2, TMeta, TFailure | TNextFailure>;
+  function use(middleware: { readonly _type: 'middleware' }): unknown {
+    observeQueue(() =>
+      debugBuilder.debug('Adding middleware to job builder (total: {total})', {
+        total: params.middlewares.length + 1,
+      }),
+    );
 
-      // Type safety: middleware transforms TContextOut -> TContextOut2
-      // Runtime: store as unknown array for execution
-      return createJobBuilder<TContext, TContextOut2, TMeta, TFailure | TNextFailure>({
-        config: params.config,
-        middlewares: [...params.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta, TNextFailure>],
-      });
-    },
+    return createJobBuilder<TContext, unknown, TMeta, Failure>({
+      config: params.config,
+      // Erasure seam (as before): the overloads proved the middleware fits this builder's context;
+      // the chain runs on `unknown` contexts.
+      middlewares: [...params.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta, Failure>],
+    });
+  }
+
+  return {
+    use,
 
     name(name: string) {
       observeQueue(() => debugBuilder.debug('Setting job name: {name}', { name }));

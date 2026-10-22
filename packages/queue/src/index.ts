@@ -75,6 +75,8 @@ export type { InternalScheduleDefinition } from './schedule-builder.ts';
 
 // Middleware execution (for advanced use cases)
 export { createJobContext, executeMiddlewareChain } from './middleware.ts';
+export { around, step } from './step.ts';
+export type { AroundJobMiddleware, StepJobMiddleware } from './step.ts';
 
 // Standard middleware
 export {

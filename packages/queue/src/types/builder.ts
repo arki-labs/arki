@@ -14,6 +14,7 @@ import type { JobTriggerResult } from '../trigger.ts';
 import type { JobContext, JobDefinition, JobOptions, TriggerOptions } from './job.ts';
 import type { JobMiddleware, MiddlewareFunction } from './middleware.ts';
 import type { QueueConfig, QueueMeta } from './queue.ts';
+import type { AroundJobMiddleware, FitsContext, StepJobMiddleware } from '../step.ts';
 
 /**
  * Queue builder returned by initQueue
@@ -84,11 +85,25 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
  */
 export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta, TFailure extends Failure = never> = {
   /**
+   * Add a `step(fn)`: the job's context gains what the step returns, and the
+   * step's refusals join the job's result. The job's context must have the
+   * keys the step reads.
+   */
+  use<TIn, TAdded extends object, TRefused extends Failure>(
+    middleware: StepJobMiddleware<TIn, TAdded, TRefused> & FitsContext<TContextOut, TIn>,
+  ): JobBuilderDef<TContext, TContextOut & TAdded, TMeta, TFailure | TRefused>;
+
+  /** Add an `around(fn)`: wraps later steps and the handler; the context is unchanged. */
+  use<TIn>(
+    middleware: AroundJobMiddleware<TIn> & FitsContext<TContextOut, TIn>,
+  ): JobBuilderDef<TContext, TContextOut, TMeta, TFailure>;
+
+  /**
    * Add middleware to this job builder
    * Middleware can transform context, add logging, handle errors, etc.
    */
   use<TContextOut2, TNextFailure extends Failure = never>(
-    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure>,
+    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta, TNextFailure> & { readonly _adapter?: never },
   ): JobBuilderDef<TContext, TContextOut2, TMeta, TFailure | TNextFailure>;
 
   /**

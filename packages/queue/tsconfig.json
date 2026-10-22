@@ -19,7 +19,8 @@
     "src/outbox/outbox.types.spec.ts",
     "src/job-conformance.spec.ts",
     "src/schedule-port.test.ts",
-    "src/runtime-local/settle.spec.ts"
+    "src/runtime-local/settle.spec.ts",
+    "src/step.spec.ts"
   ],
   "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts"]
 }
