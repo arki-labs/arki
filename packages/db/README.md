@@ -49,7 +49,7 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 ## When not to use this
 
 - You want a query builder or an ORM of your own. This package configures Drizzle. It does not hide it.
-- You need a database other than Postgres. The runtimes are node-postgres, Bun SQL and PGlite. All speak Postgres.
+- You need a database other than Postgres. The runtimes are node-postgres, Bun SQL and PGlite. All speak Postgres. Hosted Postgres works: see [Hosted Postgres](#hosted-postgres).
 - You want retries for any error. Only SQLSTATE `40001` and `40P01` are retried. Everything else runs once.
 - You need exactly-once effects inside a transaction. A `fetch` in a retried handler runs again. Move effects after the commit.
 - You need a migration tool. `dbMigrations()` applies pending migrations at boot. Writing them is `drizzle-kit`.
@@ -68,6 +68,37 @@ The combined Hermes smoke currently fails on rest-destructured parameters in the
 installed oRPC dependency. This is tracked as framework finding F35 for T11/T16.
 Use `test:runtimes --require-all` to expose the failure; a skipped Hermes leg is
 not evidence of support. Per-entry published-artifact proof remains separate.
+
+## Hosted Postgres
+
+Neon, Supabase, PlanetScale Postgres and CockroachDB connect with the default `pg` driver. Queries work through a connection pooler. Session features do not: behind a pooler in transaction mode, `LISTEN` hears nothing and a session lock is held by whoever gets the connection next. So the `db()` plugin publishes a second, small pool, `sessionPool`, on the direct URL.
+
+| Host | `DB_URL` | `DB_DIRECT_URL` | `LISTEN` | Notes |
+| --- | --- | --- | --- | --- |
+| Plain Postgres | the server | not needed | yes | `sessionPool` reuses `DB_URL`. |
+| Neon | the `-pooler` URL | the direct URL | through `DB_DIRECT_URL` | Detected: without `DB_DIRECT_URL`, `sessionPool.connect()` refuses. |
+| Supabase | the pooler on port `6543` | the direct connection, or the pooler on `5432` | through `DB_DIRECT_URL` | Port `6543` is detected. Port `5432` (session mode) counts as direct. |
+| PlanetScale Postgres | the PgBouncer URL | the direct URL | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself. |
+| Self-hosted PgBouncer, transaction mode | the PgBouncer URL | the server | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself. |
+| CockroachDB | the cluster | not needed | **no** | `LISTEN` fails with SQLSTATE `42601`, so listeners and lock wake-ups must poll. Retries on `40001` work. Plain `INT` is 64-bit and node-postgres returns it as a string: use `integer` (`int4`) for numbers you add. |
+
+CockroachDB is checked by `ARKI_DB_CRDB=1 bun run test -- src/cockroach.crdb.test.ts` (it needs Docker).
+
+Wire `sessionPool` into whatever holds a session:
+
+```ts skip="wiring inside a Dot app; @arki/journal and @arki/lock are not dependencies of this package"
+import { listenOnPool } from '@arki/db/pg';
+
+// A journal worker hears the wake channel through the direct connection.
+journal.worker(services.db, { listen: listenOnPool(services.sessionPool, journal.wakeChannel) });
+
+// A lock lease wakes waiters on release.
+pgLease(services.db, { ttl, listen: () => services.sessionPool.connect() });
+```
+
+Run migrations against `DB_DIRECT_URL` too. Neon requires it, and a migration that takes a lock needs the session to last.
+
+Without Dot, `resolveDirectUrl({ url, directUrl })` from `@arki/db/pg` returns the URL to give your own listen pool, or a `db.session_needs_direct_url` failure when `url` is a known pooler.
 
 ## Usage
 
@@ -741,6 +772,7 @@ first null
 | Variable                                   | Purpose                                      |
 | ------------------------------------------ | -------------------------------------------- |
 | `DB_URL`                                   | Primary Postgres connection URL.             |
+| `DB_DIRECT_URL`                            | Direct URL for `sessionPool` when `DB_URL` is a pooler. See [Hosted Postgres](#hosted-postgres). |
 | `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used. |
 | `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`). |
 | `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).   |

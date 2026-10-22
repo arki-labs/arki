@@ -385,6 +385,8 @@ with `.error.data.underlyingCode`.
 | `ARKI_DOT_E026`                                                             | A handle is missing from the services bag.                                                                                                              | Mount the provider; check the gateway's needs.                                          |
 | `ARKI_DOT_E027`                                                             | A feature key collides with another slot or a reserved name.                                                                                            | Rename the alias or key.                                                                |
 | `ARKI_DOT_E031`                                                             | A procedure's contract `meta` is not plain JSON.                                                                                                        | Keep contract meta JSON-safe.                                                           |
+| `ARKI_DOT_E034`                                                             | A feature needs `domainService(fn)` its parent does not declare above `.features()`, or it is top-level.                                                | Declare `fn` in the parent's `.domainServices()`; need it from a child only.            |
+| `ARKI_DOT_E035`                                                             | `.domainServices()` ran twice, or after `.features()`, `.usecases()` or `.provides()`.                                                                  | Call it once, right after `.infra()`.                                                   |
 
 Full lifecycle table: [Lifecycle](lifecycle.md). Diagnostics shapes:
 [Diagnostics](diagnostics.md).

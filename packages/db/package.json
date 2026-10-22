@@ -208,6 +208,7 @@
     "eslint": "catalog:",
     "nanoid": "^6.0.2",
     "p-retry": "^8.0.1",
+    "testcontainers": "catalog:testing",
     "typescript": "catalog:",
     "uuid": "^14.0.3",
     "vitest": "catalog:"

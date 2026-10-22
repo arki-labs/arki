@@ -2033,6 +2033,7 @@
       "jsdocSummary": "Yule's K: repetitiveness of the vocabulary; `0` when every word is distinct or the text is empty."
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_STRING_E001",
     "ARKI_STRING_E002",

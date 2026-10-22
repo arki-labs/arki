@@ -227,5 +227,6 @@
       "jsdocSummary": "Omit without union flattening"
     }
   ],
+  "groups": [],
   "errorCodes": []
 }

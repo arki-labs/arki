@@ -366,5 +366,6 @@
     ]
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

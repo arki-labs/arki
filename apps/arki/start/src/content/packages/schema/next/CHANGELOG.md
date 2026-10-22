@@ -4,6 +4,19 @@
 
 `parse` and `parseAsync` return canonical typed failures through the shared failure executor. `SchemaError` and validation-related `SchemaRunError` codes are removed; `ARKI_SCHEMA_E003` remains for unsupported JSON Schema targets.
 
+## 0.2.0
+
+### Minor Changes
+
+- 6601242: Throwing channel next to `parse`: `is(value, schema)` (guard), `assert(value, schema, { at, message })` (narrows to the schema's input type; never transforms) and `ensure(value, schema, options)` (returns the schema's output, a throwing `parse`). A rejected value throws `AssertError` (`ARKI_SCHEMA_E004`) with the same `issues` that `parse` reports; the message lists them with paths and never contains the raw value. An async schema throws `ARKI_SCHEMA_E005` at once. Also adds the schemas `recordSchema` (non-null, non-array object) and `plainObjectSchema` (prototype is `Object.prototype` or `null`); use them as `is(value, recordSchema)`.
+
+### Patch Changes
+
+- 2000a7e: Fix: `is`, `assert` and `ensure` now answer about a value that is itself a failure. Before, `is(failureValue, recordSchema)` returned `false` for an invalid-input failure and threw for any other failure, because `parse` returns a failure-valued output and a rejection the same way. `@arki/failure/schema` now exports `executeSchema`, which runs a schema once without unwrapping (`{ value }` or a failure), and the throwing channel is built on it.
+- Updated dependencies [6601242]
+- Updated dependencies [2000a7e]
+  - @arki/failure@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

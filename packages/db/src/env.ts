@@ -17,6 +17,9 @@ export const env = defineEnv({
     // standard) is also accepted as a fallback via the runtimeEnv alias below,
     // which resolves to this same `env.DB_URL` field so consumers don't change.
     DB_URL: z.url(),
+    // The direct (non-pooled) URL for LISTEN, session locks and migrations, when
+    // DB_URL goes through a transaction pooler (Neon -pooler, Supabase :6543).
+    DB_DIRECT_URL: z.url().optional(),
   },
 
   client: {},
@@ -32,5 +35,6 @@ export const env = defineEnv({
     // still work. Closes the silent divergence between app schemas keyed on
     // DATABASE_URL and this package's DB_URL schema.
     DB_URL: process.env['DB_URL'] ?? process.env['DATABASE_URL'],
+    DB_DIRECT_URL: process.env['DB_DIRECT_URL'],
   },
 });

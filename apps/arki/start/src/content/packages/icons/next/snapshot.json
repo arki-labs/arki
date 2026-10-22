@@ -3,9 +3,16 @@
   "channel": "next",
   "version": "0.1.2",
   "archive": false,
-  "sha512": "5ac1f502bd0583e44805dafa5e645129c0bef633f16891529b399fdd57ebd17efd28a19b8b1e861a4f8e90507b5bc2e27c632f5e79dd05fc9b8be1242dee5dc4",
+  "sha512": "4c337e5be28db6b65325a3fdad533b0f27eb48bd6b788f043bb432459ded36b3ff6926712ea778b1d6bed6aa02b4fcbd5083a0ebba0a8e67e6c4767afb46b69c",
   "files": [
     "README.md",
+    "api-names/_root-1.json",
+    "api-names/brands-1.json",
+    "api-names/brands__index-1.json",
+    "api-names/index-1.json",
+    "api-names/phosphor-1.json",
+    "api-names/phosphor-ssr-1.json",
+    "api-names/phosphor__ssr-1.json",
     "api.json",
     "docs/agent-guide.md",
     "errors.json",
@@ -13,8 +20,8 @@
   ],
   "candidate": {
     "wave": "frontend",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:20:08.169Z"
+    "sourceCommit": "89e0296e9783c4b06a5ac4da017b00ea0b298553",
+    "createdAt": "2026-10-21T07:44:38.386Z"
   },
   "examples": {
     "examples": 6,
@@ -26,5 +33,6 @@
     "failures": []
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

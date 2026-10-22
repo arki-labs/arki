@@ -26,5 +26,6 @@
     "failures": []
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

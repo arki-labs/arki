@@ -49,8 +49,9 @@ export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' 
 /**
  * Stable error codes for every failure the kernel throws, `ARKI_DOT_E001`..
  * Codes are never renumbered and never reused (E009 and E010 are retired).
- * E001-E021 and E033 are lifecycle failures; E022-E031 are feature-composition
- * failures (see `FEATURE_ERROR_CODES`); E032 is non-JSON manifest data.
+ * E001-E021 and E033 are lifecycle failures; E022-E031 and E034-E035 are
+ * feature-composition failures (see `FEATURE_ERROR_CODES`); E032 is non-JSON
+ * manifest data.
  */
 export const DotLifecycleErrorCode = {
   /**

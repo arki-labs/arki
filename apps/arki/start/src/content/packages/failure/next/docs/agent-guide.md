@@ -100,10 +100,11 @@ export async function titleOrDraft(id: string) {
 | `ARKI_FAILURE_E001` | `defineFailure` got an empty code or `ok`.    | Use a dotted code such as `post.not_found`.         |
 | `ARKI_FAILURE_E002` | Status is not an integer from 400 to 599.     | Pass a valid status or none.                        |
 | `ARKI_FAILURE_E003` | `match` met a code it has no handler for.     | Add the handler; fix the cast that hid it.          |
-| `ARKI_FAILURE_E004` | `assertNever` was reached.                    | Handle the new case; validate data at the boundary. |
+| `ARKI_FAILURE_E004` | `unreachable` was reached.                    | Handle the new case; validate data at the boundary. |
 | `ARKI_FAILURE_E005` | `errorMap` got two definitions with one code. | Give each definition its own code.                  |
 | `ARKI_FAILURE_E006` | Retired; use `InvalidEnvelope`.               | Check stored data; avoid transforming schemas.      |
 | `ARKI_FAILURE_E007` | Retired; use `AsyncSchema`.                   | Use a synchronous schema for failure data.          |
+| `ARKI_FAILURE_E008` | An `invariant` condition was falsy.           | Fix the caller that broke the assumption.           |
 
 ## Verify
 

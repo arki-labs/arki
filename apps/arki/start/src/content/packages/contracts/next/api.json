@@ -1,6 +1,6 @@
 {
   "package": "@arki/contracts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "entries": [
     {
       "subpath": ".",
@@ -2481,6 +2481,7 @@
       "jsdocSummary": ""
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_CONTRACTS_E001",
     "ARKI_CONTRACTS_E002",

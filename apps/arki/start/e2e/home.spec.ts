@@ -23,6 +23,7 @@ import {
   SIGNAL,
   WORKFLOW_EVENTS,
 } from '../src/shared/marketing/journal-lab';
+import { MODEL_HEADLINE, MODEL_PARTS } from '../src/shared/marketing/model-excerpts';
 
 const workspaceRoot = new URL('../../../../', import.meta.url);
 const workspaceFile = (path: string) => readFileSync(new URL(path, workspaceRoot), 'utf8');
@@ -63,6 +64,16 @@ test.describe('/ build path', () => {
       const shown = step.excerpts.filter(excerpt => excerpt !== WIRE_FIX);
       for (const excerpt of shown) await expectExcerptShown(steps.nth(index), excerpt);
     }
+  });
+
+  // WHY: the mental model band claims three ideas with real code behind each; the code must be on the page, or the
+  // claims are only copy.
+  test('the mental model band shows its three parts, each with its excerpt', async ({ page }) => {
+    await page.goto('/');
+    const band = page.locator('section[aria-labelledby="home-model"]');
+    await expect(band.locator('h2')).toHaveText(MODEL_HEADLINE);
+    await expect(band.locator('.home-model > div > b')).toHaveText(MODEL_PARTS.map(part => part.name));
+    for (const part of MODEL_PARTS) await expectExcerptShown(band, part.excerpt);
   });
 
   // WHY: a line shown as "copied from the file" must be on that line of that file, or the page misleads readers.

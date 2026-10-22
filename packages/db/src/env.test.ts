@@ -54,3 +54,34 @@ describe('@arki/db env — DATABASE_URL → DB_URL resolution (iteration 2 Conce
     expect(env.DB_URL).toBe('postgresql://user:pass@localhost:5432/legacy_only');
   });
 });
+
+// DB_DIRECT_URL carries LISTEN and session locks past a pooled DB_URL; most apps never set it.
+describe('@arki/db env — DB_DIRECT_URL', () => {
+  const original = process.env['DB_DIRECT_URL'];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env['DB_DIRECT_URL'];
+    else process.env['DB_DIRECT_URL'] = original;
+    vi.resetModules();
+  });
+
+  it('is undefined when unset, so a plain Postgres app needs one URL', async () => {
+    delete process.env['DB_DIRECT_URL'];
+    vi.resetModules();
+    const { env } = await import('./env.js');
+    expect(env.DB_DIRECT_URL).toBeUndefined();
+  });
+
+  it('reads the direct URL when set', async () => {
+    process.env['DB_DIRECT_URL'] = 'postgresql://app:pw@ep-x-123.eu-central-1.aws.neon.tech/neondb';
+    vi.resetModules();
+    const { env } = await import('./env.js');
+    expect(env.DB_DIRECT_URL).toBe('postgresql://app:pw@ep-x-123.eu-central-1.aws.neon.tech/neondb');
+  });
+
+  it('rejects a value that is not a URL instead of failing later at LISTEN time', async () => {
+    process.env['DB_DIRECT_URL'] = 'not a url';
+    vi.resetModules();
+    await expect(import('./env.js').then(module => module.env.DB_DIRECT_URL)).rejects.toThrow();
+  });
+});

@@ -269,6 +269,24 @@ function admittedPackages(config: ReleaseConfig): ReadonlyArray<{ readonly name:
   return out;
 }
 
+/**
+ * Removes the content folder of every package that left the config (retired or merged into another).
+ * The site build rejects docs for a package missing from `packages.json`, and the channel syncs only
+ * visit admitted packages, so nothing else clears them.
+ */
+async function pruneRetired(options: SiteOptions, contentRoot: string): Promise<SiteItem[]> {
+  const admitted = new Set(admittedPackages(options.config).map(entry => shortName(entry.name)));
+  const items: SiteItem[] = [];
+  for (const entry of await readdir(contentRoot, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || admitted.has(entry.name)) continue;
+    const dir = path.join(contentRoot, entry.name);
+    for (const version of await readdir(dir))
+      items.push({ name: `@arki/${entry.name}`, version, channel: options.channel, action: 'removed', archive: false });
+    await rm(dir, { recursive: true, force: true });
+  }
+  return items;
+}
+
 // ---------------------------------------------------------------------------
 // Channels
 // ---------------------------------------------------------------------------
@@ -755,6 +773,7 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
     }
   }
 
+  items.push(...(await pruneRetired(options, contentRoot)));
   const counts = await writeGenerated(options, contentRoot, generatedRoot, errors);
   const repoDocs = await copyRepoDocs(options.cwd, errors);
   const count = (action: SiteItem['action']): number => items.filter(i => i.action === action).length;

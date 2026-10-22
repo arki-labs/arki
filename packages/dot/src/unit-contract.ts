@@ -570,7 +570,7 @@ declare const OwnershipSym: unique symbol;
  * the unit's name as a literal — the `provider` its handles carry.
  */
 /** See {@link Unit.role}. */
-export type UnitRole = 'infra' | 'feature' | 'entrypoint';
+export type UnitRole = 'infra' | 'feature' | 'domain-service' | 'entrypoint';
 
 export type Unit<
   out TNeeds extends ServiceRecord = ServiceRecord,

@@ -332,7 +332,7 @@ console.info(locks.store.guarantees.fence); // 'durable'
 - `ensureLockTable(db)` creates the table. Or copy `LEASE_TABLE_SQL` (or `leaseTableSql('name')`) into your own migration. The default table is `arki_lock`.
 - Pass an autocommit pool or database, never a transaction handle. A rollback would undo an acquire and give the same fence out twice. The first acquire checks this and throws `config`.
 - Release keeps the row (`token = NULL`). If it deleted the row, the fence would start again at 1.
-- `wait` is `'poll'` unless you give `listen: () => pool.connect()`. With `listen`, waiters wake on release through `LISTEN`/`NOTIFY`. `listen` must be a direct connection: `LISTEN` hears nothing through PgBouncer in transaction mode.
+- `wait` is `'poll'` unless you give `listen: () => pool.connect()`. With `listen`, waiters wake on release through `LISTEN`/`NOTIFY`. `listen` must be a direct connection: `LISTEN` hears nothing through PgBouncer in transaction mode. In a Dot app, `listen: () => services.sessionPool.connect()` gives one (`@arki/db`, [Hosted Postgres](../db/README.md#hosted-postgres)).
 - A semaphore key is one row. Its holders live in a `holders jsonb` column on that row. `ensureLockTable` adds the column only when it is missing, so a boot does not take an `ACCESS EXCLUSIVE` lock.
 
 ### `redisStore`

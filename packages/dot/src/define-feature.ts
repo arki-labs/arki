@@ -6,6 +6,7 @@
  *   defineFeature('daily-digest')
  *     .needs({ db: entrypointOnly(database.provides.db), plans: billing.provides.entitlements })
  *     .infra(store, mailer)                              its own units, private to it
+ *     .domainServices({ extras })                        domain services, built once; usecases and children see them
  *     .features(compile, deliver)                       its nested features, named `daily-digest.<child>`
  *     .usecases({ preview, send })                       what it does: one factory per usecase
  *     .provides({ digests: ({ usecases }) => … })        what it offers other features
@@ -46,8 +47,14 @@ import type {
   Handle,
   InferredOwnership,
   KernelCtx,
+  LazyService,
   NeedsShape,
   NoReservedKeys,
+  Provided,
+  ProvidedValue,
+  ProvidedValues,
+  Service,
+  ServiceRecord,
   Unit,
   UnitNeeds,
   UnitOwner,
@@ -57,10 +64,6 @@ import type {
   UnitProviderIdentities,
   UnitProvides,
   UnitRuntime,
-  Provided,
-  ProvidedValues,
-  Service,
-  ServiceRecord,
   WireNeeds,
 } from './unit-contract.js';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
@@ -107,12 +110,17 @@ export type UsecaseNeeds<N extends NeedsShape> = {
   [K in keyof N as N[K] extends { readonly entrypointOnly: true } ? never : K]: N[K];
 };
 
-/** What `.usecases(create)` receives: the usecase-visible needs by alias, the infra services and the children's services by local key. */
+/**
+ * What `.usecases(create)` receives: the usecase-visible needs by alias, the infra services, the domain
+ * services `S` and the children's services by local key. With `C = []` and no `S` it is what a domain
+ * service may ask for (`DomainDeps`).
+ */
 export type CoreDeps<
   N extends NeedsShape,
   I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
-> = CtxOf<UsecaseNeeds<N>> & InfraProvides<I> & ChildProvides<C>;
+  S = EmptyShape,
+> = CtxOf<UsecaseNeeds<N>> & InfraProvides<I> & S & ChildProvides<C>;
 
 /** What `.provides` factories and every entrypoint receive: every need (entrypoint-only included), infra, children and the usecases object. */
 export type CoreServices<
@@ -304,9 +312,7 @@ type RemappedKey<TName extends string, TLocal, Owners extends string, S extends 
 type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyUnit> = Omit<
   Unit<
     {
-      [
-        K in keyof UnitNeeds<P> as RemappedKey<TName, TLocal, Owners, UnitProviderIdentities<P>, K>
-      ]: UnitNeeds<P>[K];
+      [K in keyof UnitNeeds<P> as RemappedKey<TName, TLocal, Owners, UnitProviderIdentities<P>, K>]: UnitNeeds<P>[K];
     },
     UnitProvides<P>,
     UnitProviderIdentities<P>,
@@ -362,6 +368,8 @@ type OutOfScope<TName extends string, N> = {
         : K
       : never;
 }[keyof N];
+/** Needs written with `domainService(fn)`: only a child may have them, its parent binds them. */
+type DomainServiceNeeds<N> = { [K in keyof N]: N[K] extends { readonly domainService: unknown } ? K : never }[keyof N];
 /** A need may name a public handle, its own scope's private infra, or a nested feature's provides from inside that feature's parent. */
 export type NeedsGuard<TName extends string, N> = ([InternalNeeds<N>] extends [never]
   ? unknown
@@ -375,7 +383,14 @@ export type NeedsGuard<TName extends string, N> = ([InternalNeeds<N>] extends [n
           TName,
           N
         >;
-      });
+      }) &
+  (Nested<TName> extends true
+    ? unknown
+    : [DomainServiceNeeds<N>] extends [never]
+      ? unknown
+      : {
+          readonly "DOT: domainService(...) names a parent's domain service; only a child may need it": DomainServiceNeeds<N>;
+        });
 
 type ChildName<C> = C extends { readonly name: infer X extends string } ? X : never;
 type NotChildName<TName extends string, C extends readonly AnyDefinedFeature[]> = {
@@ -385,31 +400,43 @@ type ChildKeyCollision<
   N,
   I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
-> = keyof ChildProvides<C> & (keyof N | keyof InfraProvides<I> | ReservedAlias);
+  F,
+> = keyof ChildProvides<C> & (keyof N | keyof InfraProvides<I> | keyof F | ReservedAlias);
 type SiblingDup<C extends readonly AnyDefinedFeature[], Seen = never> = C extends readonly [
   infer H extends AnyDefinedFeature,
   ...infer T extends readonly AnyDefinedFeature[],
 ]
   ? (keyof H['provides'] & Seen) | SiblingDup<T, Seen | keyof H['provides']>
   : never;
+/** `F` is the feature's domain-service factories: a child may need only those, by `domainService(fn)`. */
 export type ChildrenGuard<
   TName extends string,
   N,
   I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
+  F = EmptyShape,
 > = ([NotChildName<TName, C>] extends [never]
   ? unknown
   : { readonly 'DOT: a child feature must be named `<parent>.<child>`': NotChildName<TName, C> }) &
-  ([ChildKeyCollision<N, I, C>] extends [never]
+  ([ChildKeyCollision<N, I, C, F>] extends [never]
     ? unknown
     : {
-        readonly 'DOT: a child provides a key that collides with a need alias, an infra service or a reserved name': ChildKeyCollision<
+        readonly 'DOT: a child provides a key that collides with a need alias, an infra service, a domain service or a reserved name': ChildKeyCollision<
           N,
           I,
-          C
+          C,
+          F
         >;
       }) &
-  ([SiblingDup<C>] extends [never] ? unknown : { readonly 'DOT: two children provide the same key': SiblingDup<C> });
+  ([SiblingDup<C>] extends [never] ? unknown : { readonly 'DOT: two children provide the same key': SiblingDup<C> }) &
+  ([Exclude<ChildDomainNeeds<C>, F[keyof F]>] extends [never]
+    ? unknown
+    : {
+        readonly 'DOT: a child needs a domain service this feature does not declare above .features()': Exclude<
+          ChildDomainNeeds<C>,
+          F[keyof F]
+        >;
+      });
 
 /** Children whose rpc contract the feature's own contract does not mount under some key. */
 type UnmountedChild<C extends readonly AnyDefinedFeature[], E extends readonly AnyEntrypoint[]> = {
@@ -430,9 +457,9 @@ type ChildContractGuard<C extends readonly AnyDefinedFeature[], E extends readon
 /** The keys the feature generates for itself: a provides factory may not take them. */
 type GeneratedKeys<TName extends string> = `${TName}.services` | `${TName}.usecases` | `feature.${TName}`;
 /** Inside a parent, a provided key must not also be an infra key: both publish under `<name>.<key>`. */
-type ProvidesGuard<TName extends string, I extends readonly AnyUnit[], P> = ([
-  keyof P & GeneratedKeys<TName>,
-] extends [never]
+type ProvidesGuard<TName extends string, I extends readonly AnyUnit[], P> = ([keyof P & GeneratedKeys<TName>] extends [
+  never,
+]
   ? unknown
   : {
       readonly 'DOT: a provided key is generated by the feature itself (services, usecases, feature slice)': keyof P &
@@ -480,11 +507,7 @@ export type QualifiedUnit<TName extends string, N extends NeedsShape, P extends 
   Unit<
     {
       [
-        K in keyof UnitNeeds<P> as K extends TLocal
-          ? Qualify<TName, K>
-          : K extends keyof N
-            ? WireKeyOfNeed<N[K], K>
-            : K
+        K in keyof UnitNeeds<P> as K extends TLocal ? Qualify<TName, K> : K extends keyof N ? WireKeyOfNeed<N[K], K> : K
       ]: UnitNeeds<P>[K];
     },
     { [K in keyof UnitProvides<P> as Qualify<TName, K>]: UnitProvides<P>[K] },
@@ -623,6 +646,17 @@ export type FeatureParams<TName, N, I, C, U, P, E> = {
   readonly provides: P;
   readonly entrypoints: E;
 };
+
+/** The factories a needs record names through `domainService(fn)`. */
+type DomainServiceFns<N> = { [K in keyof N]: N[K] extends { readonly domainService: infer Fn } ? Fn : never }[keyof N];
+/** The domain-service factories the children name with `domainService(fn)`, read off each child's needs. */
+type ChildDomainNeeds<C extends readonly AnyDefinedFeature[]> = {
+  [K in keyof C]: C[K] extends { readonly [FeatureParamsTag]?: infer Params }
+    ? Params extends { readonly needs: infer CN }
+      ? DomainServiceFns<CN>
+      : never
+    : never;
+}[number];
 
 /** The service type a witness carries. */
 type Carried<W> = W extends Service<infer T> ? T : never;
@@ -942,6 +976,48 @@ export type UsecaseGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] ex
       };
     };
 
+/* ---- domain services: built once per boot, above the children, seen by usecases only ---- */
+
+/** What a domain-service factory builds, as its readers see it: awaited, a creation Failure out, a `resource()` opened. */
+export type DomainServiceValue<Fn extends Factory> = ProvidedValue<Awaited<ReturnType<Fn>>>;
+
+/** The domain services `.domainServices(F)` declares, by key: what the feature's usecases see next to `DomainDeps`. */
+export type DomainServiceValues<F extends UsecaseFactories> = { readonly [K in keyof F]: DomainServiceValue<F[K]> };
+
+/**
+ * A child's need on a domain service its parent declares, named by the factory: `domainService(extras)`.
+ * The parent binds it when it compiles (`remapNeeds`), never the app. So its wire key is `never` at the
+ * type level: the wiring types (`WireNeeds`, `WireKeyOfNeed`) drop the need instead of asking the app for
+ * a service under the alias. The runtime witness has no `key`; nothing reads one off it.
+ */
+export type DomainServiceHandle<Fn extends Factory> = Service<DomainServiceValue<Fn>> & {
+  readonly domainService: Fn;
+  readonly key: never;
+  readonly lazy: LazyService<DomainServiceValue<Fn>> & { readonly domainService: Fn; readonly key: never };
+};
+
+type DomainServiceCollision<N, I extends readonly AnyUnit[], F> = keyof F &
+  (keyof N | keyof InfraProvides<I> | ReservedAlias);
+/** A domain-service key must not shadow a need alias, an infra key or a reserved name: usecases see all of them by key. */
+export type DomainServicesGuard<N, I extends readonly AnyUnit[], F> = [DomainServiceCollision<N, I, F>] extends [never]
+  ? unknown
+  : {
+      readonly 'DOT: a domain service key collides with a need alias, an infra service or a reserved name': DomainServiceCollision<
+        N,
+        I,
+        F
+      >;
+    };
+
+/** Names each domain service whose factory asks for a dep not declared above it, and the deps it lacks. */
+type DomainServiceDepsGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] extends [never]
+  ? unknown
+  : {
+      readonly 'DOT: a domain service asks for a dep not declared above it (a need or an infra service)': {
+        readonly [K in BadUsecases<D, F>]: Exclude<keyof DepsAskedBy<F[K]>, keyof D>;
+      };
+    };
+
 /* ---- stages: each offers only the later steps ---- */
 
 export type EntrypointsStage<
@@ -980,12 +1056,13 @@ export type UsecasesStage<
   N extends NeedsShape,
   I extends readonly AnyUnit[],
   C extends readonly AnyDefinedFeature[],
+  S = EmptyShape,
 > = Omit<ProvidesStage<TName, N, I, C, EmptyShape>, typeof CoreServicesTag> & {
   /**
    * Before `.usecases()` there are no usecases, so `DepsOf<typeof <feature>Deps>` is
-   * exactly what a usecase may ask for — needs + infra + children, no `usecases` key.
+   * exactly what a usecase may ask for — needs + infra + domain services + children, no `usecases` key.
    */
-  readonly [CoreServicesTag]?: CoreDeps<N, I, C>;
+  readonly [CoreServicesTag]?: CoreDeps<N, I, C, S>;
   /**
    * One factory per usecase, built once per boot: `{ signup, markInvited }`,
    * each `(deps) => usecase`. An inline factory gets the deps type for free
@@ -999,20 +1076,22 @@ export type UsecasesStage<
    * tries the second, today's signature, whose guard prints the `DOT:` label —
    * and prints the LAST overload's failure under "No overload matches this call".
    */
-  usecases<const F extends UsecaseFactoriesOf<CoreDeps<N, I, C>>>(
+  usecases<const F extends UsecaseFactoriesOf<CoreDeps<N, I, C, S>>>(
     factories: F & UsecaseSignatureGuard<F>,
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
   usecases<const F extends UsecaseFactories>(
-    factories: F & UsecaseGuard<CoreDeps<N, I, C>, F> & UsecaseSignatureGuard<F>,
+    factories: F & UsecaseGuard<CoreDeps<N, I, C, S>, F> & UsecaseSignatureGuard<F>,
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
 };
 
-export type FeaturesStage<TName extends string, N extends NeedsShape, I extends readonly AnyUnit[]> = UsecasesStage<
-  TName,
-  N,
-  I,
-  readonly []
-> & {
+/** `F`: the domain-service factories (children may name them); `S`: their values (usecases see them). */
+export type FeaturesStage<
+  TName extends string,
+  N extends NeedsShape,
+  I extends readonly AnyUnit[],
+  F = EmptyShape,
+  S = EmptyShape,
+> = UsecasesStage<TName, N, I, readonly [], S> & {
   /**
    * The feature's own features, in boot order — each a finished feature
    * named `<this>.<child>`. A child sees this feature's infra (by handle)
@@ -1020,18 +1099,41 @@ export type FeaturesStage<TName extends string, N extends NeedsShape, I extends 
    * its siblings, nowhere else.
    */
   features<const C extends readonly AnyDefinedFeature[]>(
-    ...children: C & ChildrenGuard<TName, N, I, C>
-  ): UsecasesStage<TName, N, I, C>;
+    ...children: C & ChildrenGuard<TName, N, I, C, F>
+  ): UsecasesStage<TName, N, I, C, S>;
 };
 
-export type InfraStage<TName extends string, N extends NeedsShape> = FeaturesStage<TName, N, readonly []> & {
+export type DomainServicesStage<
+  TName extends string,
+  N extends NeedsShape,
+  I extends readonly AnyUnit[],
+> = FeaturesStage<TName, N, I> & {
+  /**
+   * The feature's domain services, one plain factory per key, built once per boot before the
+   * children: `{ extras }`, each `(deps: Pick<DomainDeps, …>) => value` (a function, an object or a
+   * class instance). `DomainDeps` is `DepsOf` of the stage above (needs + infra), so a factory cannot
+   * ask for a peer, itself or anything below. Usecases see each value by key; a child names one with
+   * `domainService(fn)`; `provides` and entrypoints never see them.
+   *
+   * Two overloads, as for `.usecases()`: the first infers inline factories, the second prints the
+   * `DOT:` label for a factory that asks for a dep not declared above it.
+   */
+  domainServices<const F extends UsecaseFactoriesOf<CoreDeps<N, I, readonly []>>>(
+    factories: F & DomainServicesGuard<N, I, F>,
+  ): FeaturesStage<TName, N, I, F, DomainServiceValues<F>>;
+  domainServices<const F extends UsecaseFactories>(
+    factories: F & DomainServiceDepsGuard<CoreDeps<N, I, readonly []>, F> & DomainServicesGuard<N, I, F>,
+  ): FeaturesStage<TName, N, I, F, DomainServiceValues<F>>;
+};
+
+export type InfraStage<TName extends string, N extends NeedsShape> = DomainServicesStage<TName, N, readonly []> & {
   /**
    * The feature's own units, in boot order. Their keys are private to this
    * feature and its children. A unit's need alias is bound to a sibling's
    * key first, then to the feature's need of the same alias; anything else
    * is a compile error naming the alias.
    */
-  infra<const I extends readonly AnyUnit[]>(...plugins: I & InfraGuard<N, I>): FeaturesStage<TName, N, I>;
+  infra<const I extends readonly AnyUnit[]>(...plugins: I & InfraGuard<N, I>): DomainServicesStage<TName, N, I>;
 };
 
 export type NeedsStage<TName extends string> = InfraStage<TName, EmptyShape> & {
@@ -1048,10 +1150,17 @@ export type NeedsStage<TName extends string> = InfraStage<TName, EmptyShape> & {
 /** An erased factory: the stage types checked it against the services it is called with. */
 type Factory = (services: never) => unknown;
 
+/** The chain's steps in order: `.domainServices()` refuses to run after a later one (`ARKI_DOT_E035`). */
+const STEP = { needs: 0, infra: 1, domainServices: 2, features: 3, usecases: 4, provides: 5 } as const;
+
 type FeatureState<P extends ServiceRecord = ServiceRecord, U extends ServiceRecord = ServiceRecord> = {
   readonly name: string;
   readonly needs: NeedsShape;
   readonly infra: readonly AnyUnit[];
+  /** The `.domainServices()` factories by key; `undefined` until that step runs. */
+  readonly domainServices: Readonly<Record<string, Factory>> | undefined;
+  /** The last step called (see {@link STEP}). */
+  readonly step: (typeof STEP)[keyof typeof STEP];
   readonly children: readonly RuntimeFeature[];
   readonly usecases: { readonly [Key in keyof U]: (services: never) => U[Key] } | undefined;
   readonly provides: { readonly [K in keyof P]: (services: never) => P[K] };
@@ -1082,6 +1191,7 @@ type RuntimeStage<in out P extends ServiceRecord = ServiceRecord, in out U exten
   readonly handles: NeedsShape;
   needs(needs: NeedsShape): RuntimeStage<P, U>;
   infra(...plugins: readonly AnyUnit[]): RuntimeStage<P, U>;
+  domainServices(factories: Readonly<Record<string, Factory>>): RuntimeStage<P, U>;
   features(...children: readonly RuntimeFeature[]): RuntimeStage<P, U>;
   usecases<Next extends ServiceRecord>(factories: {
     readonly [Key in keyof Next]: (services: never) => Next[Key];
@@ -1167,6 +1277,32 @@ export function entrypointOnly<H extends AnyHandle & { readonly lazy: object }>(
   // Erasure seam: the flag and the provenance are added to the handle and its lazy form; the type says the flag only.
   return { ...handle, entrypointOnly: true as const, origin: canonical(handle), lazy } as unknown as EntrypointOnly<H>;
 }
+
+/** What `domainService(fn)` builds at runtime: the factory, and a lazy form that names it too. No `key`: the parent binds it. */
+type DomainServiceWitness = {
+  readonly domainService: Factory;
+  readonly lazy: { readonly lazy: true; readonly domainService: Factory };
+};
+
+/** One witness per factory, so a child's need and its parent's declaration meet by identity. */
+const domainServiceWitnesses = new WeakMap<Factory, DomainServiceWitness>();
+
+/**
+ * Need a domain service the parent feature declares: `needs({ extras: domainService(extras) })` in a
+ * child, where `extras` is the factory the parent passes to `.domainServices({ extras })`. The parent
+ * binds it to the value it built, once per boot (`domainService(fn).lazy` gives the lazy form). Only a
+ * child may need one, and only of a factory its parent declares above `.features()`
+ * (`ARKI_DOT_E034` otherwise). The same factory always gives the same witness.
+ */
+export function domainService<Fn extends Factory>(fn: Fn): DomainServiceHandle<Fn> {
+  const known = domainServiceWitnesses.get(fn) ?? { domainService: fn, lazy: { lazy: true, domainService: fn } };
+  domainServiceWitnesses.set(fn, known);
+  // Erasure seam: one witness per factory, typed by the factory that keys it; `key: never` is type-only (see DomainServiceHandle).
+  return known as DomainServiceHandle<Fn>;
+}
+
+/** The factory a `domainService(fn)` witness names, or `undefined` for any other witness. */
+const domainServiceIn = (witness: object): unknown => ('domainService' in witness ? witness.domainService : undefined);
 
 /** A feature and every descendant, depth-first in declaration order — what drivers and `dot explain` walk. Each node once. */
 export function allFeatures(features: readonly AnyDefinedFeature[]): readonly AnyDefinedFeature[] {
@@ -1403,11 +1539,22 @@ function checkChildContracts(state: FeatureState, entrypoints: readonly AnyEntry
   }
 }
 
-/** Keep creation failures typed while the kernel owns and joins asynchronous preparation. */
+/** Wraps one built value under its key before anything reads it. */
+type WrapBuilt = (feature: string, key: string, value: unknown) => unknown;
+
+/** A usecase is supervised, then traced. A domain service is traced only (`traceUsecase`: a function gets a span, any other value passes as is). */
+const wrapUsecase: WrapBuilt = (feature, key, value) => traceUsecase(feature, key, superviseUsecase(value));
+
+/**
+ * Keep creation failures typed while the kernel owns and joins asynchronous preparation. Builds the
+ * usecases, and the domain services too: each under the reserved `usecases` slot of the unit's context,
+ * which no need alias or infra key may take.
+ */
 async function prepareUsecases<Values extends ServiceRecord>(
   feature: string,
   factories: { readonly [Key in keyof Values]: (deps: never) => Values[Key] } | undefined,
   deps: never,
+  wrap: WrapBuilt,
 ): Promise<{ usecases: Record<string, unknown> } | UsecaseCreationFailure<Values>> {
   const usecases: Record<string, unknown> = {};
   for (const key in factories) {
@@ -1416,11 +1563,13 @@ async function prepareUsecases<Values extends ServiceRecord>(
     const ownDeps: never = Object.freeze({ ...(deps as object) }) as never;
     const created = await Promise.resolve(create(ownDeps));
     if (creationFailed(created)) return created;
-    const usecase: unknown = created;
-    usecases[key] = traceUsecase(feature, key, superviseUsecase(usecase));
+    usecases[key] = wrap(feature, key, created);
   }
   return { usecases };
 }
+
+/** The context a domain-service unit's factories read: what `prepareUsecases` built, by local key. */
+type BuiltDomainServices = { readonly usecases: Readonly<Record<string, unknown>> };
 
 function creationFailed<Value>(value: Value): value is FailureIn<Value> {
   return isFailure<unknown>(value);
@@ -1439,6 +1588,12 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
   const sliceKey = `feature.${state.name}`;
   const nested = parentOf(state.name) !== undefined;
   const instanced = state.name.includes('#');
+  const domainServices = state.domainServices ?? {};
+  const domainUnitName = `${state.name}/domain-services`;
+  // Each domain service under its local key, published as `<name>.<key>` and private to this feature and its children.
+  const domainHandles: Record<string, Handle<unknown, string>> = {};
+  for (const key of Object.keys(domainServices))
+    domainHandles[key] = scopedHandleOf(`${state.name}.${key}`, domainUnitName, state.name);
   // Inside a parent a provided key is scoped: `digest.compile.compiler`; an instance qualifies too
   // (`reports#eu.summary`), so two copies mount side by side. At the top level it is public and bare.
   const publishKey = (key: string): string => (nested || instanced ? `${state.name}.${key}` : key);
@@ -1451,6 +1606,13 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
       ownedInfra.set(h.lazy, target);
     }
   }
+  // A child's `domainService(fn)` (either form) → this feature's domain-service unit, rewired like an infra handle.
+  for (const [key, fn] of Object.entries(domainServices)) {
+    const witness = domainService(fn);
+    const target: Remap = { key: `${state.name}.${key}`, unit: domainUnitName, scope: state.name };
+    ownedInfra.set(witness, target);
+    ownedInfra.set(witness.lazy, target);
+  }
   // Entrypoint-only needs: in the unit's needs (boot order, explain), out of the usecases' deps.
   const doorKeys = new Set(
     Object.entries(state.needs)
@@ -1460,7 +1622,12 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
 
   // Preparation enriches the owned kernel context once before any provider can run.
   const usecasesOf = (ctx: object): unknown => ('usecases' in ctx ? ctx.usecases : undefined);
-  const servicesOf = (ctx: object): object => ({ ...ctx, usecases: usecasesOf(ctx) });
+  // Domain services stay below the usecases: `provides` factories, entrypoints and `<name>.services` never see them.
+  const domainKeys = new Set(Object.keys(domainServices));
+  const servicesOf = (ctx: object): object => ({
+    ...(domainKeys.size === 0 ? ctx : Object.fromEntries(Object.entries(ctx).filter(([k]) => !domainKeys.has(k)))),
+    usecases: usecasesOf(ctx),
+  });
 
   const factories: Record<string, (ctx: object) => unknown> = {
     [usecasesKey]: usecasesOf,
@@ -1493,13 +1660,37 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
       state.name,
       state.usecases,
       Object.fromEntries(Object.entries(ctx).filter(([key]) => !doorKeys.has(key))) as never,
+      wrapUsecase,
     ),
   );
+  // The domain services: one unit, built once per boot after the infra and before the children, from the
+  // usecase-visible needs and the infra. Functions are traced, nothing is supervised.
+  const domainUnit: AnyUnit | undefined =
+    state.domainServices === undefined
+      ? undefined
+      : {
+          runtime: createUnitRuntime<BuiltDomainServices | Failure>(undefined, ctx =>
+            prepareUsecases(state.name, domainServices, ctx, traceUsecase),
+          ),
+          name: domainUnitName,
+          needs: {
+            ...Object.fromEntries(Object.entries(state.needs).filter(([key]) => !doorKeys.has(key))),
+            ...infra.handles,
+          },
+          actions: [],
+          renames: {},
+          role: 'domain-service',
+          provides: Object.fromEntries(Object.values(domainHandles).map(h => [h.key, h])),
+          factories: Object.fromEntries(
+            Object.entries(domainHandles).map(([key, h]) => [h.key, (ctx: BuiltDomainServices) => ctx.usecases[key]]),
+          ),
+          hooks: {},
+        };
   // The record infra() builds, written out: the needs here are already handles, and the keys already wire keys.
   const unit: AnyUnit = {
     runtime,
     name: state.name,
-    needs: { ...state.needs, ...infra.handles, ...childHandles(state.children) },
+    needs: { ...state.needs, ...infra.handles, ...domainHandles, ...childHandles(state.children) },
     actions: entrypoints.flatMap(e => [...e.actions, ...(e.actionsOf?.(state.name, state.children) ?? [])]),
     renames: {},
     role: 'feature',
@@ -1507,9 +1698,10 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     factories,
     hooks: {},
   };
-  // Boot order: this feature's infra, then each child (its own units, any depth), then this feature.
+  // Boot order: this feature's infra, its domain services, then each child (its own units, any depth), then this feature.
   const units: readonly AnyUnit[] = [
     ...infra.units,
+    ...(domainUnit === undefined ? [] : [domainUnit]),
     ...state.children.flatMap(c => c.units().map(u => remapNeeds(u, ownedInfra))),
     unit,
   ];
@@ -1524,6 +1716,11 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
       owned.set(h, state.name);
       owned.set(h.lazy, state.name);
     }
+  }
+  for (const fn of Object.values(domainServices)) {
+    const witness = domainService(fn);
+    owned.set(witness, state.name);
+    owned.set(witness.lazy, state.name);
   }
   const rpc = entrypoints.find(e => e.kind === 'rpc');
 
@@ -1685,13 +1882,26 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
             remediation: 'Need a public handle, or have the owning feature re-export the service with provides().',
           });
         }
+        if (parentOf(state.name) === undefined && domainServiceIn(witness) !== undefined) {
+          throw new FeatureError({
+            code: FEATURE_ERROR_CODES.domainServiceNotAbove,
+            message: `[feature] "${state.name}": need "${alias}" is domainService(...), which names a parent's domain service; a top-level feature has no parent.`,
+            remediation:
+              "Declare the factory in this feature's own .domainServices({ … }) and read it in the usecases by key, or need a public handle.",
+          });
+        }
       }
-      return stage({ ...state, needs });
+      return stage({ ...state, needs, step: STEP.needs });
     },
     features: (...children) => {
       const seen = new Map<string, string>(
-        [...Object.keys(state.needs), ...state.infra.flatMap(p => Object.keys(p.provides))].map(k => [k, state.name]),
+        [
+          ...Object.keys(state.needs),
+          ...state.infra.flatMap(p => Object.keys(p.provides)),
+          ...Object.keys(state.domainServices ?? {}),
+        ].map(k => [k, state.name]),
       );
+      const declared = new Set<unknown>(Object.values(state.domainServices ?? {}));
       for (const child of children) {
         if (parentOf(child.name) !== state.name) {
           throw new FeatureError({
@@ -1700,19 +1910,28 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
             remediation: `Name the child "${state.name}.${child.name.split('.').at(-1)}" (its folder sits under this feature's).`,
           });
         }
+        for (const [alias, witness] of Object.entries(child.handles)) {
+          const fn = domainServiceIn(witness);
+          if (fn === undefined || declared.has(fn)) continue;
+          throw new FeatureError({
+            code: FEATURE_ERROR_CODES.domainServiceNotAbove,
+            message: `[feature] "${state.name}": child "${child.name}" needs "${alias}" through domainService(...), but "${state.name}" does not declare that factory above .features().`,
+            remediation: `Pass the factory to "${state.name}".domainServices({ … }) before .features(); the child names the same function.`,
+          });
+        }
         for (const key of Object.keys(child.provides)) {
           const owner = seen.get(key);
           if (RESERVED.has(key) || owner !== undefined) {
             throw collision(
               state.name,
-              `child "${child.name}" provides "${key}", which collides with ${owner === state.name ? 'a need alias or an infra service' : `a service of "${owner}"`}`,
+              `child "${child.name}" provides "${key}", which collides with ${owner === state.name ? 'a need alias or an infra service or a domain service' : `a service of "${owner}"`}`,
               'Rename one of the two; inside a feature one key means one thing.',
             );
           }
           seen.set(key, child.name);
         }
       }
-      return stage({ ...state, children });
+      return stage({ ...state, children, step: STEP.features });
     },
     infra: (...units) => {
       const seen = new Set<string>();
@@ -1755,9 +1974,29 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
           }
         }
       }
-      return stage({ ...state, infra: units });
+      return stage({ ...state, infra: units, step: STEP.infra });
     },
-    usecases: factories => stage({ ...state, usecases: factories }),
+    domainServices: factories => {
+      if (state.step > STEP.domainServices || state.domainServices !== undefined) {
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.stepOrder,
+          message: `[feature] "${state.name}": .domainServices() runs once, after .needs()/.infra() and before .features(), .usecases() and .provides().`,
+          remediation: 'Declare every domain service in one .domainServices({ … }) call, right after .infra().',
+        });
+      }
+      const infraKeys = new Set(state.infra.flatMap(p => Object.keys(p.provides)));
+      for (const key of Object.keys(factories)) {
+        if (RESERVED.has(key) || key in state.needs || infraKeys.has(key)) {
+          throw collision(
+            state.name,
+            `domain service "${key}" collides with a need alias, an infra service or a reserved name`,
+            'Rename the domain service; usecases see needs, infra and domain services by one key each.',
+          );
+        }
+      }
+      return stage({ ...state, domainServices: factories, step: STEP.domainServices });
+    },
+    usecases: factories => stage({ ...state, usecases: factories, step: STEP.usecases }),
     provides: factories => {
       const infraKeys = new Set(state.infra.flatMap(p => Object.keys(p.provides)));
       for (const key of Object.keys(factories)) {
@@ -1781,7 +2020,7 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
           );
         }
       }
-      return stage({ ...state, provides: factories });
+      return stage({ ...state, provides: factories, step: STEP.provides });
     },
     entrypoints: (...entrypoints) => compile(state, infra, handles, entrypoints),
   };
@@ -1805,6 +2044,8 @@ export function defineFeature<const TName extends string>(name: TName & FeatureN
     name,
     needs: {},
     infra: [],
+    domainServices: undefined,
+    step: STEP.needs,
     children: [],
     usecases: undefined,
     provides: {},

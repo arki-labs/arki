@@ -66,6 +66,18 @@ export const FEATURE_ERROR_CODES = {
    * @verify dot explain --json | jq -e .ok
    */
   rpcMetaNotJson: 'ARKI_DOT_E031',
+  /**
+   * A feature needs `domainService(fn)` that no parent declares above `.features()`: the parent never passed `fn` to `.domainServices()`, or the feature is top-level.
+   * @fix Pass the factory to the parent's `.domainServices({ … })` before `.features()`, and need it only from that parent's children.
+   * @verify dot explain --json | jq -e .ok
+   */
+  domainServiceNotAbove: 'ARKI_DOT_E034',
+  /**
+   * `.domainServices()` ran twice, or after `.features()`, `.usecases()` or `.provides()`.
+   * @fix Declare every domain service in one `.domainServices({ … })` call, right after `.infra()`.
+   * @verify dot explain --json | jq -e .ok
+   */
+  stepOrder: 'ARKI_DOT_E035',
 } as const;
 
 export type FeatureErrorCode = (typeof FEATURE_ERROR_CODES)[keyof typeof FEATURE_ERROR_CODES];

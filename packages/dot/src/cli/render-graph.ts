@@ -31,7 +31,7 @@ function escapeLabel(name: string): string {
 /** Hexagon groups, in boot order. A unit without a role (an erased graph) sits with the infra. */
 const GROUPS = [
   { id: 'infra', label: 'infra · what features need', roles: ['infra', undefined] },
-  { id: 'features', label: 'features · the domain', roles: ['feature'] },
+  { id: 'features', label: 'features · the domain', roles: ['feature', 'domain-service'] },
   { id: 'entrypoints', label: 'entrypoints · what calls the features', roles: ['entrypoint'] },
 ] as const;
 

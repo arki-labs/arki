@@ -116,6 +116,7 @@ export class RefundService {
     private readonly writes: RefundWrites,
     private readonly paymentRepository: PaymentReads,
     config: RefundServiceConfig,
+    /** Sends the customer's rejection mail only. The approvers' mail is an effect: `createRefundEffects`. */
     private readonly notificationService?: NotificationService,
   ) {
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
@@ -149,10 +150,7 @@ export class RefundService {
       return this.approveRefund({ refundId: refund.id, approvedBy: this.systemUserId });
     }
 
-    if (this.notificationService) {
-      await this.notifyApprovers(refund);
-    }
-
+    // The approvers hear from the `refund-approval-request` effect (`createRefundEffects`), after the commit
     return refund;
   }
 
@@ -256,19 +254,6 @@ export class RefundService {
     const amount = refundAmountOf(refund);
     const limit = this.autoApproveLimits.get(amount.currency.code);
     return limit !== undefined && amount.lte(limit);
-  }
-
-  private async notifyApprovers(refund: Refund): Promise<void> {
-    if (this.notificationService?.sendRefundApprovalRequest) {
-      try {
-        await this.notificationService.sendRefundApprovalRequest(refund);
-      } catch (error) {
-        logger.error('Refund approval request for {refundId} was not sent: {error}', {
-          refundId: refund.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
   }
 
   private async notifyCustomer(refund: Refund, event: 'rejected'): Promise<void> {

@@ -1,91 +1,74 @@
 [
   {
-    "name": "@arki/assert",
-    "short": "assert",
-    "tier": 2,
-    "wave": "foundation",
-    "status": "next",
-    "npmVersion": "0.0.3",
-    "nextVersion": "0.1.0",
-    "candidate": {
-      "wave": "foundation",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:17:38.846Z"
-    },
-    "versions": [
-      {
-        "version": "0.0.3",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.0.2",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.0.1",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.1.0",
-        "channel": "next",
-        "archive": false
-      }
-    ],
+    "name": "@arki/ai",
+    "short": "ai",
+    "tier": 1,
+    "wave": "ai",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
     "runtimes": {},
     "benchStatus": "none",
-    "hasLlms": true,
-    "examples": {
-      "compiled": 3,
-      "run": 3,
-      "skipped": 0
-    },
+    "hasLlms": false,
+    "examples": null,
     "demos": [],
-    "mirror": "https://github.com/arki-labs/assert",
+    "mirror": "https://github.com/arki-labs/ai",
     "openGaps": [
       {
-        "kind": "readiness",
-        "title": "file-llms-txt",
+        "kind": "demo",
+        "title": "vector-search/factory.ts supports mock | qdrant only; no pgvector",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "file-agents-md",
+        "kind": "demo",
+        "title": "StructuredLLMProvider.generateStructuredData returns only the parsed output: no token usa…",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "file-agent-guide",
+        "kind": "demo",
+        "title": "No way to ask \"is this provider usable?\" before a call: StructuredLLMProvider has no isAv…",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "readme-h2-order",
+        "kind": "demo",
+        "title": "calculateLLMCost prices an unknown model at DEFAULTPRICING, so a local Ollama model is bi…",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "pkg-engines",
+        "kind": "demo",
+        "title": "No fake or test LLM provider",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "files-ship-dist-docs",
+        "kind": "demo",
+        "title": "No DOT plugin for text generation (@arki/ai/dot only has vectorIndex)",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "types",
+        "kind": "demo",
+        "title": "Admitted (A-40) but not published: arki.deps.json has version: null, so bun run arki:npm…",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "No provider check (is Ollama up, is the model pulled, is there a key?)",
+        "url": null,
+        "foundBy": "faultline"
+      },
+      {
+        "kind": "demo",
+        "title": "@arki/ai is admitted (A-40) but private, as are @arki/queue and @arki/schedule",
+        "url": null,
+        "foundBy": "faultline"
       }
     ]
   },
@@ -96,15 +79,15 @@
     "wave": "foundation",
     "status": "next",
     "npmVersion": null,
-    "nextVersion": "0.1.0",
+    "nextVersion": "0.1.1",
     "candidate": {
-      "wave": "dot-kernel",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:18:35.314Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
-        "version": "0.1.0",
+        "version": "0.1.1",
         "channel": "next",
         "archive": false
       }
@@ -336,6 +319,24 @@
     ]
   },
   {
+    "name": "@arki/chat-ui",
+    "short": "chat-ui",
+    "tier": 1,
+    "wave": "ai",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/chat-ui",
+    "openGaps": []
+  },
+  {
     "name": "@arki/cli",
     "short": "cli",
     "tier": 1,
@@ -379,11 +380,11 @@
     "wave": "foundation",
     "status": "next",
     "npmVersion": "0.0.2",
-    "nextVersion": "0.1.0",
+    "nextVersion": "0.1.1",
     "candidate": {
-      "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -397,7 +398,7 @@
         "archive": true
       },
       {
-        "version": "0.1.0",
+        "version": "0.1.1",
         "channel": "next",
         "archive": false
       }
@@ -458,11 +459,11 @@
     "wave": "foundation",
     "status": "next",
     "npmVersion": "0.1.0",
-    "nextVersion": "0.2.0",
+    "nextVersion": "0.3.0",
     "candidate": {
-      "wave": "dot-kernel",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:18:35.314Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -496,7 +497,7 @@
         "archive": true
       },
       {
-        "version": "0.2.0",
+        "version": "0.3.0",
         "channel": "next",
         "archive": false
       }
@@ -505,16 +506,11 @@
     "benchStatus": "none",
     "hasLlms": true,
     "examples": {
-      "compiled": 14,
+      "compiled": 16,
       "run": 11,
       "skipped": 2
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.0.4"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/contracts",
     "openGaps": [
       {
@@ -546,9 +542,9 @@
     "npmVersion": "0.2.0",
     "nextVersion": "0.3.0",
     "candidate": {
-      "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -706,12 +702,7 @@
     "benchStatus": "none",
     "hasLlms": false,
     "examples": null,
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.1.9"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/db",
     "openGaps": [
       {
@@ -829,12 +820,7 @@
       "run": 22,
       "skipped": 8
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.4.1"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/dot",
     "openGaps": [
       {
@@ -872,8 +858,38 @@
         "title": "Running app.boot() under context.with(ROOTCONTEXT.setValue(key, v), …) stalls boot under…",
         "url": null,
         "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "The dot bin runs under Node (#!/usr/bin/env node) and cannot import a .ts app file there…",
+        "url": null,
+        "foundBy": "drop-studio"
+      },
+      {
+        "kind": "demo",
+        "title": "createAppRuntime(app).get() returns a DotApp type that is not assignable to the result ty…",
+        "url": null,
+        "foundBy": "faultline"
       }
     ]
+  },
+  {
+    "name": "@arki/embeddings",
+    "short": "embeddings",
+    "tier": 1,
+    "wave": "ai",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/embeddings",
+    "openGaps": []
   },
   {
     "name": "@arki/env",
@@ -953,12 +969,7 @@
       "run": 4,
       "skipped": 3
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.0.8"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/env",
     "openGaps": [
       {
@@ -1067,15 +1078,15 @@
     "wave": "foundation",
     "status": "next",
     "npmVersion": null,
-    "nextVersion": "0.1.0",
+    "nextVersion": "0.2.0",
     "candidate": {
-      "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "channel": "next",
         "archive": false
       }
@@ -1084,8 +1095,8 @@
     "benchStatus": "none",
     "hasLlms": true,
     "examples": {
-      "compiled": 14,
-      "run": 10,
+      "compiled": 15,
+      "run": 11,
       "skipped": 1
     },
     "demos": [],
@@ -1231,8 +1242,8 @@
     "nextVersion": "0.1.2",
     "candidate": {
       "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
+      "sourceCommit": "89e0296e9783c4b06a5ac4da017b00ea0b298553",
+      "createdAt": "2026-10-21T07:44:38.386Z"
     },
     "versions": [
       {
@@ -1355,6 +1366,24 @@
         "title": "pkg-engines",
         "url": null,
         "foundBy": null
+      },
+      {
+        "kind": "demo",
+        "title": "webhookSender (@arki/journal/http/webhooks) posts through publicFetch(), which refuses lo…",
+        "url": null,
+        "foundBy": "faultline"
+      },
+      {
+        "kind": "demo",
+        "title": "An idempotent command (journal.run(..., { idempotencyKey })) whose result held a Date (th…",
+        "url": null,
+        "foundBy": "faultline"
+      },
+      {
+        "kind": "demo",
+        "title": "No public way to tell a replayed idempotent run from a first run",
+        "url": null,
+        "foundBy": "faultline"
       }
     ]
   },
@@ -1550,11 +1579,11 @@
     "wave": "foundation",
     "status": "next",
     "npmVersion": "0.1.0",
-    "nextVersion": "0.2.0",
+    "nextVersion": "0.3.0",
     "candidate": {
-      "wave": "dot-kernel",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:18:35.314Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -1578,7 +1607,7 @@
         "archive": true
       },
       {
-        "version": "0.2.0",
+        "version": "0.3.0",
         "channel": "next",
         "archive": false
       }
@@ -1587,16 +1616,11 @@
     "benchStatus": "none",
     "hasLlms": true,
     "examples": {
-      "compiled": 6,
+      "compiled": 8,
       "run": 0,
       "skipped": 3
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.0.3"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/log",
     "openGaps": [
       {
@@ -1696,8 +1720,8 @@
     "nextVersion": "0.1.0",
     "candidate": {
       "wave": "foundation",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:17:38.846Z"
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -1939,87 +1963,39 @@
     ]
   },
   {
-    "name": "@arki/react-hooks",
-    "short": "react-hooks",
-    "tier": 2,
-    "wave": "frontend",
-    "status": "next",
-    "npmVersion": "0.1.1",
-    "nextVersion": "0.1.2",
-    "candidate": {
-      "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
-    },
-    "versions": [
-      {
-        "version": "0.1.1",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.0.0-stage",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.1.2",
-        "channel": "next",
-        "archive": false
-      }
-    ],
+    "name": "@arki/queue",
+    "short": "queue",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
     "runtimes": {},
     "benchStatus": "none",
-    "hasLlms": true,
-    "examples": {
-      "compiled": 5,
-      "run": 0,
-      "skipped": 0
-    },
+    "hasLlms": false,
+    "examples": null,
     "demos": [],
-    "mirror": "https://github.com/arki-labs/react-hooks",
+    "mirror": "https://github.com/arki-labs/queue",
     "openGaps": [
       {
-        "kind": "readiness",
-        "title": "file-llms-txt",
+        "kind": "demo",
+        "title": "Per-job context enrichment exists (queue middleware can replace the context per execution…",
         "url": null,
-        "foundBy": null
+        "foundBy": "drop-studio"
       },
       {
-        "kind": "readiness",
-        "title": "file-agents-md",
+        "kind": "demo",
+        "title": "A thrown handler reaches the job's retry backoff as the returned failure UnexpectedDefect",
         "url": null,
-        "foundBy": null
+        "foundBy": "faultline"
       },
       {
-        "kind": "readiness",
-        "title": "file-agent-guide",
+        "kind": "demo",
+        "title": "@arki/queue/dot (queue(), queueWorker()) is BullMQ/Redis only",
         "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "readme-h2-order",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "pkg-engines",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "files-ship-dist-docs",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "types",
-        "url": null,
-        "foundBy": null
+        "foundBy": "faultline"
       }
     ]
   },
@@ -2108,21 +2084,39 @@
     ]
   },
   {
+    "name": "@arki/schedule",
+    "short": "schedule",
+    "tier": 1,
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
+    "runtimes": {},
+    "benchStatus": "none",
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/schedule",
+    "openGaps": []
+  },
+  {
     "name": "@arki/schema",
     "short": "schema",
     "tier": 2,
     "wave": "foundation",
     "status": "next",
     "npmVersion": null,
-    "nextVersion": "0.1.0",
+    "nextVersion": "0.2.0",
     "candidate": {
-      "wave": "dot-kernel",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:18:35.314Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "channel": "next",
         "archive": false
       }
@@ -2131,8 +2125,8 @@
     "benchStatus": "none",
     "hasLlms": true,
     "examples": {
-      "compiled": 3,
-      "run": 3,
+      "compiled": 4,
+      "run": 4,
       "skipped": 0
     },
     "demos": [],
@@ -2174,8 +2168,8 @@
     "nextVersion": "0.3.0",
     "candidate": {
       "wave": "foundation",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:17:38.846Z"
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -2259,88 +2253,22 @@
     ]
   },
   {
-    "name": "@arki/theme",
-    "short": "theme",
+    "name": "@arki/testing",
+    "short": "testing",
     "tier": 1,
-    "wave": "frontend",
-    "status": "next",
-    "npmVersion": "0.2.1",
-    "nextVersion": "0.2.2",
-    "candidate": {
-      "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
-    },
-    "versions": [
-      {
-        "version": "0.2.1",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.0.0-stage",
-        "channel": "published",
-        "archive": true
-      },
-      {
-        "version": "0.2.2",
-        "channel": "next",
-        "archive": false
-      }
-    ],
+    "wave": "infrastructure-adapters",
+    "status": "none",
+    "npmVersion": null,
+    "nextVersion": null,
+    "candidate": null,
+    "versions": [],
     "runtimes": {},
     "benchStatus": "none",
-    "hasLlms": true,
-    "examples": {
-      "compiled": 4,
-      "run": 1,
-      "skipped": 0
-    },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.2.1"
-      }
-    ],
-    "mirror": "https://github.com/arki-labs/theme",
-    "openGaps": [
-      {
-        "kind": "readiness",
-        "title": "file-llms-txt",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "file-agents-md",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "file-agent-guide",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "readme-h2-order",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "pkg-engines",
-        "url": null,
-        "foundBy": null
-      },
-      {
-        "kind": "readiness",
-        "title": "files-ship-dist-docs",
-        "url": null,
-        "foundBy": null
-      }
-    ]
+    "hasLlms": false,
+    "examples": null,
+    "demos": [],
+    "mirror": "https://github.com/arki-labs/testing",
+    "openGaps": []
   },
   {
     "name": "@arki/ts",
@@ -2351,9 +2279,9 @@
     "npmVersion": "0.0.3",
     "nextVersion": "0.0.4",
     "candidate": {
-      "wave": "dot-kernel",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:18:35.314Z"
+      "wave": "foundation",
+      "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+      "createdAt": "2026-10-21T15:54:43.039Z"
     },
     "versions": [
       {
@@ -2385,12 +2313,7 @@
       "run": 1,
       "skipped": 0
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.0.3"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/ts",
     "openGaps": [
       {
@@ -2441,8 +2364,8 @@
     "nextVersion": "0.1.6",
     "candidate": {
       "wave": "frontend",
-      "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-      "createdAt": "2026-10-21T06:20:08.169Z"
+      "sourceCommit": "89e0296e9783c4b06a5ac4da017b00ea0b298553",
+      "createdAt": "2026-10-21T07:44:38.386Z"
     },
     "versions": [
       {
@@ -2479,12 +2402,7 @@
       "run": 1,
       "skipped": 0
     },
-    "demos": [
-      {
-        "name": "drop-studio",
-        "pin": "0.1.4"
-      }
-    ],
+    "demos": [],
     "mirror": "https://github.com/arki-labs/ui",
     "openGaps": [
       {

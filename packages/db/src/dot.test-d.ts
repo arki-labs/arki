@@ -8,6 +8,7 @@ import { expectTypeOf } from 'vitest';
 import type { UnitCloseFailure, UnitOpenFailure, UnitPhaseFailures, Provided } from '@arki/dot/unit';
 import { defineApp } from '@arki/dot/unit';
 
+import type { SessionPool } from './dot.js';
 import type { LocalRuntimeCloseFailure, LocalRuntimeFailure } from './runtime-local.js';
 import { db } from './dot.js';
 
@@ -24,7 +25,12 @@ expectTypeOf<Provided<typeof database.provides.db>>().toEqualTypeOf<NodePgDataba
 expectTypeOf<Provided<typeof embedded.provides.db>>().toEqualTypeOf<PgliteDatabase<typeof relations>>();
 expectTypeOf<typeof database.factories>().toEqualTypeOf<{
   readonly db: (ctx: never) => NodePgDatabase<typeof relations>;
+  readonly sessionPool: (ctx: never) => SessionPool;
 }>();
+expectTypeOf<Provided<typeof database.provides.sessionPool>>().toEqualTypeOf<SessionPool>();
+// PGlite listens through `client.listen`, so only the pg driver publishes a session pool.
+// @ts-expect-error -- the embedded driver has no sessionPool
+void embedded.provides.sessionPool;
 expectTypeOf<typeof embedded.factories>().toEqualTypeOf<{
   readonly db: (ctx: never) => Promise<PgliteDatabase<typeof relations> | LocalRuntimeFailure>;
 }>();

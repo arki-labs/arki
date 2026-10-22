@@ -30,7 +30,7 @@
     "code": "ARKI_FAILURE_E004",
     "package": "@arki/failure",
     "kind": "thrown",
-    "what": "`assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside).",
+    "what": "`unreachable` was reached, so a value the types said could not happen did happen (often bad data from outside).",
     "fix": "Handle the new case in the `switch`, or validate the data at the boundary.",
     "verify": "bun run test -- src/handle.test.ts",
     "source": "src/errors.ts:38"
@@ -61,6 +61,15 @@
     "fix": "Use a schema that validates synchronously for failure data.",
     "verify": "bun run test -- src/revive.test.ts",
     "source": "src/errors.ts:59"
+  },
+  {
+    "code": "ARKI_FAILURE_E008",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "An `invariant` condition was falsy, so code relied on something that is not true.",
+    "fix": "Find the caller that broke the assumption and fix it; do not catch this error.",
+    "verify": "bun run test -- src/handle.test.ts",
+    "source": "src/errors.ts:66"
   },
   {
     "code": "failure.invalid_envelope",

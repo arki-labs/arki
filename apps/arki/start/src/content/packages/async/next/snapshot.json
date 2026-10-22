@@ -1,9 +1,9 @@
 {
   "name": "@arki/async",
   "channel": "next",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "archive": false,
-  "sha512": "bf91b69c9d2a8333ee5acba235b0b1b81800e3e1068de6b97f49385f8a1bd5a04a88f03a480379898fca5470187ab3124c770e2f09a2e2b82e9633b4f74acd4a",
+  "sha512": "3a4fe5368cd3d7367e105770ef24d1a0fe6e97fa46af7f8fc18b8aefb181d18d0581a8dc56501429638ed01d5fe3854d343cadf81cbe7192807faaad75695374",
   "files": [
     "AGENTS.md",
     "README.md",
@@ -14,9 +14,9 @@
     "llms.txt"
   ],
   "candidate": {
-    "wave": "dot-kernel",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:18:35.314Z"
+    "wave": "foundation",
+    "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+    "createdAt": "2026-10-21T15:54:43.039Z"
   },
   "examples": {
     "examples": 11,
@@ -28,5 +28,6 @@
     "failures": []
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

@@ -9,7 +9,7 @@
  * Usage in TanStack Start (__root.tsx):
  * ```tsx
  * import { ScriptOnce } from '@tanstack/react-router';
- * import { themeScript, THEME_STORAGE_KEY } from '@arki/theme/script';
+ * import { themeScript, THEME_STORAGE_KEY } from '@arki/ui/theme/script';
  *
  * // In your RootDocument component's <head>:
  * <ScriptOnce>{themeScript(THEME_STORAGE_KEY)}</ScriptOnce>

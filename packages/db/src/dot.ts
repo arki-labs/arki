@@ -56,17 +56,21 @@
 import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import pg from 'pg';
 
 import type { Handle } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 import { isFailure } from '@arki/failure';
 
+import type { SessionNeedsDirectUrl } from './hosts.js';
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
+import type { ListenPool } from './pg-listen.js';
 import type { PgliteInitOptions } from './runtime-local.js';
 import type { TransactionFailure } from './transaction.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
+import { resolveDirectUrl } from './hosts.js';
 import { migrateDb, pendingMigrations } from './migrate.js';
 import { runTransactionOnce } from './owned-transaction.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -100,6 +104,14 @@ export const DB_PLUGIN_ERROR_CODES = {
    * @verify bun run test -- src/repos.test.ts
    */
   readerNotAMethod: 'ARKI_DB_PLUGIN_E003',
+  /**
+   * `sessionPool.connect()` ran while `DB_URL` is a known transaction pooler and no direct URL is set.
+   * Through the pooler, LISTEN hears nothing and a session lock outlives its owner.
+   *
+   * @fix Set `DB_DIRECT_URL`, or pass a `directUrl` thunk to `db()`.
+   * @verify bun run test -- src/dot.test.ts
+   */
+  sessionOnPooledUrl: 'ARKI_DB_PLUGIN_E004',
 } as const;
 
 /**
@@ -121,6 +133,11 @@ export type PgDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptions<T
    * back to `DB_URL` from the environment when absent or `undefined`.
    */
   readonly url?: () => string | undefined;
+  /**
+   * The direct (non-pooled) URL that `sessionPool` connects to, read at boot.
+   * Falls back to `DB_DIRECT_URL`, then to `url` when `url` is not a known pooler.
+   */
+  readonly directUrl?: () => string | undefined;
 };
 
 /** Options for the embedded-PGlite driver. */
@@ -134,13 +151,24 @@ export type PgliteDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptio
 export type DbDotOptions<TRelations extends AnyRelations> = PgDbDotOptions<TRelations> | PgliteDbDotOptions<TRelations>;
 
 /**
- * Services published by the db adapter. Keyed by the driver — for the
- * default `'pg'` driver, `services.db` is a `NodePgDatabase<TRelations>`;
- * for `'pglite'` it is a `PgliteDatabase<TRelations>`.
+ * A small pool on the direct URL, for work that must keep one session: LISTEN
+ * (`listenOnPool`), session locks (a lock lease's `listen`), migrations. It is
+ * separate from the query pool, so held listeners never take query connections.
  */
-export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | 'pglite' = 'pg'> = {
-  readonly db: TDriver extends 'pglite' ? PgliteDatabase<TRelations> : NodePgDatabase<TRelations>;
-};
+export type SessionPool = ListenPool & { end(): Promise<void> };
+
+/**
+ * Services published by the db adapter. Keyed by the driver — for the
+ * default `'pg'` driver, `services.db` is a `NodePgDatabase<TRelations>`
+ * and `services.sessionPool` a {@link SessionPool}; for `'pglite'`, `db` is a
+ * `PgliteDatabase<TRelations>` (PGlite listens through `client.listen`).
+ */
+export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | 'pglite' = 'pg'> = TDriver extends 'pglite'
+  ? { readonly db: PgliteDatabase<TRelations> }
+  : { readonly db: NodePgDatabase<TRelations>; readonly sessionPool: SessionPool };
+
+/** Listeners and lock waiters hold their connection for as long as they run; four covers both with room to spare. */
+const SESSION_POOL_MAX = 4;
 
 /**
  * Build a DOT plugin that opens a Drizzle database and publishes it as
@@ -206,31 +234,23 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
     name: 'db',
     configure(ctx) {
       ctx.registerService('db', 'db');
+      ctx.registerService('sessionPool', 'db');
     },
     provides: {
-      db: (): DbServices<TRelations, 'pg'>['db'] => {
-        // Validate at the plugin boundary so the DOT lifecycle gets a coded
-        // error. `createDb` still throws raw `Error` for non-DOT consumers
-        // (its public contract is unchanged); the check here makes sure we
-        // never reach it without a URL.
-        const url = ('url' in options ? options.url?.() : undefined) ?? env.DB_URL;
-        if (url === undefined || url === '') {
-          throw new DotUnitError({
-            code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
-            message: '[db] DB_URL is not configured.',
-            remediation:
-              'Pass url: () => env.DB_URL to db(...) or set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
-            docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
-          });
-        }
-        return createDb<TRelations>({
+      db: (): DbServices<TRelations, 'pg'>['db'] =>
+        createDb<TRelations>({
           relations: options.relations,
-          url,
+          url: readUrl(options),
           ...(options.logger === undefined ? {} : { logger: options.logger }),
-        });
+        }),
+      sessionPool: (): SessionPool => {
+        // Never throws for a pooled URL: an app that uses no session feature must still boot.
+        const direct = resolveDirectUrl({ url: readUrl(options), directUrl: options.directUrl?.() ?? env.DB_DIRECT_URL });
+        if (isFailure(direct)) return refusingPool(direct);
+        return new pg.Pool({ connectionString: direct, max: SESSION_POOL_MAX });
       },
     },
-    async dispose({ db: handle }) {
+    async dispose({ db: handle, sessionPool }) {
       // Drizzle exposes the underlying pg.Pool as `$client`. We call its
       // `end()` to drain in-flight queries and close all sockets.
       const pgHandle = handle as NodePgDatabase<TRelations> & {
@@ -239,8 +259,44 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
       if (pgHandle.$client !== undefined) {
         await pgHandle.$client.end();
       }
+      await sessionPool.end();
     },
   });
+}
+
+/**
+ * The URL from the `url` thunk, else `DB_URL`. Validated at the plugin boundary
+ * so the DOT lifecycle gets a coded error. `createDb` still throws raw `Error`
+ * for non-DOT consumers (its public contract is unchanged).
+ */
+function readUrl<TRelations extends AnyRelations>(options: PgDbDotOptions<TRelations>): string {
+  const url = options.url?.() ?? env.DB_URL;
+  if (url === undefined || url === '') {
+    throw new DotUnitError({
+      code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
+      message: '[db] DB_URL is not configured.',
+      remediation:
+        'Pass url: () => env.DB_URL to db(...) or set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
+      docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
+    });
+  }
+  return url;
+}
+
+/** A `sessionPool` stand-in whose every `connect()` rejects with the coded refusal. */
+function refusingPool(refusal: ReturnType<typeof SessionNeedsDirectUrl>): SessionPool {
+  return {
+    connect: () =>
+      Promise.reject(
+        new DotUnitError({
+          code: DB_PLUGIN_ERROR_CODES.sessionOnPooledUrl,
+          message: `[db] ${refusal.message}`,
+          remediation: `Set DB_DIRECT_URL, or pass directUrl: () => env.DB_DIRECT_URL to db(...). ${refusal.data.hint}`,
+          docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e004',
+        }),
+      ),
+    end: () => Promise.resolve(),
+  };
 }
 
 /**

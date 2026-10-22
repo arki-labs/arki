@@ -22,6 +22,10 @@ Use `isStandardSchema(value)` to recognize callable and object schemas. Source t
 
 Use `hasJsonSchema(schema)` before reading converters. `withJsonSchema(schema, input, output?)` supplies draft-2020-12 converters. Unsupported targets throw `SchemaRunError` (`ARKI_SCHEMA_E003`); validation uses returned failures.
 
+## Throw on a bug
+
+`parse` for data that may be bad (returns). `assert(value, schema, { at })` for a value that must be right (throws, narrows to the input type, never transforms). `ensure(value, schema)` returns the output (throwing `parse`). A failure is `AssertError` with `ARKI_SCHEMA_E004`; an async schema is `ARKI_SCHEMA_E005`. The message never contains the value. `is(value, schema)` is the boolean guard. For an object check use `is(value, recordSchema)` or `plainObjectSchema`, not a hand-written guard.
+
 ## Verify
 
 Run `bun run build`, `bun run typecheck`, `bun run test`, `bun run lint`, `bun run test:docs`, then `bun run test:runtimes --require-all`. Runtime provisioning failures must remain explicit. Run `bun ../../tooling/library/src/llms.ts --check` for the export map.

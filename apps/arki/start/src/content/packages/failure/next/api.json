@@ -1,14 +1,7 @@
 {
   "package": "@arki/failure",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entries": [
-    {
-      "subpath": ".",
-      "name": "assertNever",
-      "kind": "function",
-      "signature": "export declare function assertNever(value: never, message?: string): never;",
-      "jsdocSummary": "Mark a branch that cannot be reached. Put it in the `default` of a switch over a union: when the union gains a member, the call stops compiling."
-    },
     {
       "subpath": ".",
       "name": "AsyncSchema",
@@ -69,7 +62,7 @@
       "subpath": ".",
       "name": "FAILURE_ERROR_CODES",
       "kind": "variable",
-      "signature": "export declare const FAILURE_ERROR_CODES: { /** * `defineFailure` got an empty code, or the reserved code `ok`. * * @fix Give the failure a non-empty dotted code such as `post.not_found`, and not `ok`. * @verify bun run test -- src/failure.test.ts */ readonly invalidCode: 'ARKI_FAILURE_E001'; /** * `defineFailure` got a status that is not an integer from 400 to 599. * * @fix Pass an integer status from 400 to 599, or leave `status` out for the default 400. * @verify bun run test -- src/failure.test.ts */ readonly invalidStatus: 'ARKI_FAILURE_E002'; /** * `match` met a failure code it has no handler for. The types stop this, so it happens only when they were bypassed. * * @fix Add a handler for the code to `match`, or fix the cast that hid it from the compiler. * @verify bun run test -- src/handle.test.ts */ readonly unhandledFailure: 'ARKI_FAILURE_E003'; /** * `assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside). * * @fix Handle the new case in the `switch`, or validate the data at the boundary. * @verify bun run test -- src/handle.test.ts */ readonly unreachable: 'ARKI_FAILURE_E004'; /** * Two definitions with the same code were given where codes must be unique. * * @fix Give each definition its own code, or pass the definition only once. * @verify bun run test -- src/orpc.test.ts */ readonly duplicateCode: 'ARKI_FAILURE_E005'; /** * @deprecated Retired: revival now returns InvalidEnvelope with reason invalid_data. * * @fix Check the stored data against the schema. A schema that transforms its input cannot read its own output. * @verify bun run test -- src/revive.test.ts */ readonly invalidData: 'ARKI_FAILURE_E006'; /** * @deprecated Retired: revival now returns AsyncSchema. * * @fix Use a schema that validates synchronously for failure data. * @verify bun run test -- src/revive.test.ts */ readonly asyncSchema: 'ARKI_FAILURE_E007'; };",
+      "signature": "export declare const FAILURE_ERROR_CODES: { /** * `defineFailure` got an empty code, or the reserved code `ok`. * * @fix Give the failure a non-empty dotted code such as `post.not_found`, and not `ok`. * @verify bun run test -- src/failure.test.ts */ readonly invalidCode: 'ARKI_FAILURE_E001'; /** * `defineFailure` got a status that is not an integer from 400 to 599. * * @fix Pass an integer status from 400 to 599, or leave `status` out for the default 400. * @verify bun run test -- src/failure.test.ts */ readonly invalidStatus: 'ARKI_FAILURE_E002'; /** * `match` met a failure code it has no handler for. The types stop this, so it happens only when they were bypassed. * * @fix Add a handler for the code to `match`, or fix the cast that hid it from the compiler. * @verify bun run test -- src/handle.test.ts */ readonly unhandledFailure: 'ARKI_FAILURE_E003'; /** * `unreachable` was reached, so a value the types said could not happen did happen (often bad data from outside). * * @fix Handle the new case in the `switch`, or validate the data at the boundary. * @verify bun run test -- src/handle.test.ts */ readonly unreachable: 'ARKI_FAILURE_E004'; /** * Two definitions with the same code were given where codes must be unique. * * @fix Give each definition its own code, or pass the definition only once. * @verify bun run test -- src/orpc.test.ts */ readonly duplicateCode: 'ARKI_FAILURE_E005'; /** * @deprecated Retired: revival now returns InvalidEnvelope with reason invalid_data. * * @fix Check the stored data against the schema. A schema that transforms its input cannot read its own output. * @verify bun run test -- src/revive.test.ts */ readonly invalidData: 'ARKI_FAILURE_E006'; /** * @deprecated Retired: revival now returns AsyncSchema. * * @fix Use a schema that validates synchronously for failure data. * @verify bun run test -- src/revive.test.ts */ readonly asyncSchema: 'ARKI_FAILURE_E007'; /** * An `invariant` condition was falsy, so code relied on something that is not true. * * @fix Find the caller that broke the assumption and fix it; do not catch this error. * @verify bun run test -- src/handle.test.ts */ readonly invariant: 'ARKI_FAILURE_E008'; };",
       "jsdocSummary": "Stable error codes of `@arki/failure`."
     },
     {
@@ -134,6 +127,13 @@
       "kind": "variable",
       "signature": "export declare const InvalidInput: import(\"./failure.js\").FailureDefinition<\"schema.invalid_input\", StandardSchemaV1<unknown, InputData>>;",
       "jsdocSummary": "Input failed the schema's checks. Only intentional public issue fields are retained."
+    },
+    {
+      "subpath": ".",
+      "name": "invariant",
+      "kind": "function",
+      "signature": "export declare function invariant(condition: unknown, message?: string | (() => string)): asserts condition;",
+      "jsdocSummary": "Prove a condition the surrounding code relies on. A falsy condition is a bug in the caller, so it throws a {@link FailureError }; afterwards the compiler treats the condition as true. The message may be a function, built only on failure."
     },
     {
       "subpath": ".",
@@ -298,6 +298,13 @@
     },
     {
       "subpath": ".",
+      "name": "unreachable",
+      "kind": "function",
+      "signature": "export declare function unreachable(_value: never, message?: string): never;",
+      "jsdocSummary": "Mark a branch that cannot be reached. Put it in the `default` of a switch over a union: when the union gains a member, the call stops compiling. The default message never contains the value, because it may be a secret."
+    },
+    {
+      "subpath": ".",
       "name": "ValidatorDefect",
       "kind": "variable",
       "signature": "export declare const ValidatorDefect: import(\"./failure.js\").FailureDefinition<\"schema.validator_defect\", undefined>;",
@@ -382,6 +389,13 @@
     },
     {
       "subpath": "./schema",
+      "name": "executeSchema",
+      "kind": "function",
+      "signature": "export declare function executeSchema<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown): import(\"./failure.js\").Failure<\"schema.async_required\", undefined> | import(\"./failure.js\").Failure<\"schema.invalid_input\", { issues: readonly StandardSchemaV1.Issue[]; }> | import(\"./failure.js\").Failure<\"schema.validator_defect\", undefined> | { value: Output; };",
+      "jsdocSummary": "Run a schema once without unwrapping: `{ value }` on success, or an invalid-input, async-schema or validator-defect failure. Use it when the value itself may be a failure, which `parse` would confuse with a rejection."
+    },
+    {
+      "subpath": "./schema",
       "name": "isAsyncSchemaFailure",
       "kind": "function",
       "signature": "export declare function isAsyncSchemaFailure(value: unknown): value is AsyncSchemaFailure;",
@@ -423,6 +437,7 @@
       "jsdocSummary": "The exact failures a synchronous schema parse can return."
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_FAILURE_E001",
     "ARKI_FAILURE_E002",
@@ -431,6 +446,7 @@
     "ARKI_FAILURE_E005",
     "ARKI_FAILURE_E006",
     "ARKI_FAILURE_E007",
+    "ARKI_FAILURE_E008",
     "failure.invalid_envelope",
     "failure.unexpected_defect",
     "schema.async_required",

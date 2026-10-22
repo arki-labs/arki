@@ -1,6 +1,6 @@
 {
   "package": "@arki/async",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "entries": [
     {
       "subpath": ".",
@@ -388,6 +388,7 @@
       "jsdocSummary": "The exact canonical supervisor union."
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_ASYNC_E001",
     "ARKI_ASYNC_E002",

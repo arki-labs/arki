@@ -43,6 +43,12 @@ async function importDotWithoutDbUrl(): Promise<{
   return { db: freshDb, DotUnitError: FreshDotPluginError };
 }
 
+const connectionStringOf = (pool: unknown) => (pool as { options: { connectionString?: string } }).options.connectionString;
+
+// Drizzle's type leaves out `$client`; dot.ts's dispose widens the handle the same way.
+type WithClient = { readonly $client: { end(): Promise<void> } };
+const queryPoolOf = <Handle extends object>(handle: Handle) => (handle as Handle & WithClient).$client;
+
 describe('@arki/db/dot', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -144,6 +150,66 @@ describe('@arki/db/dot', () => {
     if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
     if (!(caught.cause instanceof FreshDotPluginError)) throw new Error('cause should be a DotUnitError');
     expect(caught.cause.code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
+  });
+
+  describe('sessionPool', () => {
+    const neonPooled = 'postgresql://app:pw@ep-x-123-pooler.eu-central-1.aws.neon.tech/neondb';
+    const neonDirect = 'postgresql://app:pw@ep-x-123.eu-central-1.aws.neon.tech/neondb';
+    // pg.Pool opens no socket until connect(), so these boots need no database.
+
+    it('boots on a pooled DB_URL but refuses LISTEN through it, naming the host and the fix', async () => {
+      // Why: an app that never listens must run on the pooler; one that does must not hear silence.
+      const app = await orThrow(defineApp('db-session-pooled').infra(db({ relations, url: () => neonPooled })).boot());
+      try {
+        await expect(app.services.sessionPool.connect()).rejects.toMatchObject({
+          code: DB_PLUGIN_ERROR_CODES.sessionOnPooledUrl,
+          message: expect.stringContaining('neon pooler'),
+          remediation: expect.stringContaining('DB_DIRECT_URL'),
+        });
+      } finally {
+        await orThrow(app.dispose());
+      }
+    });
+
+    it('connects to directUrl when given, so listeners skip the pooler', async () => {
+      const app = await orThrow(
+        defineApp('db-session-direct')
+          .infra(db({ relations, url: () => neonPooled, directUrl: () => neonDirect }))
+          .boot(),
+      );
+      try {
+        expect(connectionStringOf(app.services.sessionPool)).toBe(neonDirect);
+      } finally {
+        await orThrow(app.dispose());
+      }
+    });
+
+    it('reuses a direct DB_URL, so plain Postgres needs one URL', async () => {
+      const app = await orThrow(defineApp('db-session-plain').infra(db({ relations, url: () => neonDirect })).boot());
+      try {
+        expect(connectionStringOf(app.services.sessionPool)).toBe(neonDirect);
+        expect(app.services.sessionPool).not.toBe(queryPoolOf(app.services.db));
+      } finally {
+        await orThrow(app.dispose());
+      }
+    });
+
+    it('ends the session pool on dispose, after the query pool', async () => {
+      const app = await orThrow(defineApp('db-session-dispose').infra(db({ relations, url: () => neonDirect })).boot());
+      const order: string[] = [];
+      const queryEnd = vi.spyOn(queryPoolOf(app.services.db), 'end').mockImplementation(() => {
+        order.push('query');
+        return Promise.resolve();
+      });
+      const sessionEnd = vi.spyOn(app.services.sessionPool, 'end').mockImplementation(() => {
+        order.push('session');
+        return Promise.resolve();
+      });
+      await orThrow(app.dispose());
+      expect(queryEnd).toHaveBeenCalledOnce();
+      expect(sessionEnd).toHaveBeenCalledOnce();
+      expect(order).toEqual(['query', 'session']);
+    });
   });
 
   it('mounts a second db scope via rename()', async () => {

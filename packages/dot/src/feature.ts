@@ -49,6 +49,7 @@ export type { FeatureErrorCode } from './feature-error.js';
 export {
   allFeatures,
   defineFeature,
+  domainService,
   entrypointOnly,
   instanceOf,
   mountFeatures,
@@ -72,6 +73,7 @@ export type {
   CoreServices,
   DefinedFeature,
   DepsOf,
+  DomainServiceHandle,
   Entrypoint,
   EntrypointOnly,
   RequestHandles,

@@ -158,7 +158,7 @@ The template is never turned into a string on the hot path. Formatters render it
 - Core sinks: `consoleSink({ format? })`, `memorySink()`, `lineSink(write, { format? })`.
 - Node sinks (`@arki/log/node`): `stdout({ format? })`, `stderr({ format? })`, `file({ path, format? })`. They buffer lines and flush synchronously on process exit.
 - Formatters: `json()` (the default), `pretty({ colors? })`, `logfmt()`.
-- Processors: `redact(paths, { censor? })`, `enrich(fn)`, `dropWhen(predicate)`. A processor changes a record with `updateRecord(record, changes)`.
+- Processors: `redact(paths, { censor? })`, `maskSecrets(values, { censor? })`, `enrich(fn)`, `dropWhen(predicate)`. `maskSecrets` hides known secret values at any path (pass `secretValues` from `@arki/env/node`); values shorter than 8 characters are not masked. A processor changes a record with `updateRecord(record, changes)`.
 - A sink may set its own `level` and `processors`. Logging never throws into the code that logs: a failing sink loses only its own copy, and the failure is reported once on `console.error`.
 
 ## Wrappers

@@ -1,20 +1,7 @@
 [
   {
-    "name": "@arki/assert",
-    "version": "0.1.0",
-    "report": {
-      "examples": 4,
-      "modules": 3,
-      "compiled": 3,
-      "ran": 3,
-      "skipped": 0,
-      "skippedBlocks": [],
-      "failures": []
-    }
-  },
-  {
     "name": "@arki/async",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "report": {
       "examples": 11,
       "modules": 10,
@@ -46,7 +33,7 @@
   },
   {
     "name": "@arki/clock",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "report": {
       "examples": 6,
       "modules": 5,
@@ -59,11 +46,11 @@
   },
   {
     "name": "@arki/contracts",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "report": {
-      "examples": 16,
-      "modules": 14,
-      "compiled": 14,
+      "examples": 18,
+      "modules": 16,
+      "compiled": 16,
       "ran": 11,
       "skipped": 2,
       "skippedBlocks": [
@@ -78,7 +65,20 @@
           "reason": "fragment: keyset and input come from your own contract"
         }
       ],
-      "failures": []
+      "failures": [
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 20,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'defineId'. Did you mean 'undefined'?"
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 26,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'defineId'. Did you mean 'undefined'?"
+        }
+      ]
     }
   },
   {
@@ -461,17 +461,17 @@
   },
   {
     "name": "@arki/failure",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "report": {
-      "examples": 23,
-      "modules": 14,
-      "compiled": 14,
-      "ran": 10,
+      "examples": 24,
+      "modules": 15,
+      "compiled": 15,
+      "ran": 11,
       "skipped": 1,
       "skippedBlocks": [
         {
           "file": "README.md",
-          "line": 346,
+          "line": 362,
           "reason": "needs an app's eslint config and typescript-eslint"
         }
       ],
@@ -493,11 +493,11 @@
   },
   {
     "name": "@arki/log",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "report": {
-      "examples": 10,
-      "modules": 6,
-      "compiled": 6,
+      "examples": 12,
+      "modules": 8,
+      "compiled": 8,
       "ran": 0,
       "skipped": 3,
       "skippedBlocks": [
@@ -517,7 +517,50 @@
           "reason": "before and after fragment of a migration"
         }
       ],
-      "failures": []
+      "failures": [
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 22,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'configure'."
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 22,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'sinks'. Either declare one or provide an initializer."
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 22,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'redact'. Did you mean 'React'?"
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 28,
+          "rule": "DOCX_E007",
+          "message": "import of a package not declared in package.json, or a relative import: \"@arki/env/node\" is not in package.json"
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 31,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2304 Cannot find name 'configure'."
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 31,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'sinks'. Either declare one or provide an initializer."
+        },
+        {
+          "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+          "line": 31,
+          "rule": "DOCX_E001",
+          "message": "example does not typecheck: TS2552 Cannot find name 'redact'. Did you mean 'React'?"
+        }
+      ]
     }
   },
   {
@@ -528,19 +571,6 @@
       "modules": 29,
       "compiled": 29,
       "ran": 1,
-      "skipped": 0,
-      "skippedBlocks": [],
-      "failures": []
-    }
-  },
-  {
-    "name": "@arki/react-hooks",
-    "version": "0.1.2",
-    "report": {
-      "examples": 5,
-      "modules": 5,
-      "compiled": 5,
-      "ran": 0,
       "skipped": 0,
       "skippedBlocks": [],
       "failures": []
@@ -561,12 +591,12 @@
   },
   {
     "name": "@arki/schema",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "report": {
-      "examples": 4,
-      "modules": 3,
-      "compiled": 3,
-      "ran": 3,
+      "examples": 5,
+      "modules": 4,
+      "compiled": 4,
+      "ran": 4,
       "skipped": 0,
       "skippedBlocks": [],
       "failures": []
@@ -580,19 +610,6 @@
       "modules": 14,
       "compiled": 14,
       "ran": 4,
-      "skipped": 0,
-      "skippedBlocks": [],
-      "failures": []
-    }
-  },
-  {
-    "name": "@arki/theme",
-    "version": "0.2.2",
-    "report": {
-      "examples": 4,
-      "modules": 4,
-      "compiled": 4,
-      "ran": 1,
       "skipped": 0,
       "skippedBlocks": [],
       "failures": []

@@ -6,7 +6,7 @@
     "what": "A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}.",
     "fix": "Pass a finite wait from 0 up to `MAX_WAIT_MS` (about 24.8 days). For a longer wait, sleep again when the timer fires.",
     "verify": "bun run test",
-    "source": "src/errors.ts:20"
+    "source": "src/errors.ts:21"
   },
   {
     "code": "ARKI_ASYNC_E002",
@@ -15,7 +15,7 @@
     "what": "Work was cut short by its `AbortSignal` before it finished: a `sleep`, a `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call. `cause` is `signal.reason`.",
     "fix": "Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work.",
     "verify": "bun run test",
-    "source": "src/errors.ts:29"
+    "source": "src/errors.ts:30"
   },
   {
     "code": "ARKI_ASYNC_E003",
@@ -24,7 +24,7 @@
     "what": "One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any.",
     "fix": "Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice.",
     "verify": "bun run test",
-    "source": "src/errors.ts:36"
+    "source": "src/errors.ts:37"
   },
   {
     "code": "ARKI_ASYNC_E004",
@@ -33,7 +33,7 @@
     "what": "A `timeout` deadline passed before the task finished.",
     "fix": "Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline.",
     "verify": "bun run test",
-    "source": "src/errors.ts:43"
+    "source": "src/errors.ts:44"
   },
   {
     "code": "ARKI_ASYNC_E005",
@@ -42,7 +42,7 @@
     "what": "A `concurrency` limit is not a positive integer or `Infinity`.",
     "fix": "Pass a whole number of at least 1, or leave `concurrency` out for no limit.",
     "verify": "bun run test",
-    "source": "src/errors.ts:50"
+    "source": "src/errors.ts:51"
   },
   {
     "code": "async.cancelled",
@@ -51,7 +51,7 @@
     "what": "Owned execution was cancelled; the external reason stays private.",
     "fix": "Honor the signal and handle cancellation at the calling boundary.",
     "verify": "bun run test",
-    "source": "src/errors.ts:147"
+    "source": "src/errors.ts:148"
   },
   {
     "code": "async.deadline",
@@ -60,7 +60,7 @@
     "what": "An owned deadline elapsed; work still needs cooperative settlement.",
     "fix": "Allow more time or make work honor the owned signal.",
     "verify": "bun run test",
-    "source": "src/errors.ts:155"
+    "source": "src/errors.ts:156"
   },
   {
     "code": "async.scope_failed",
@@ -69,6 +69,6 @@
     "what": "Multiple owned failures; public counts serialize while original members stay private.",
     "fix": "Inspect the local typed cause and address every failure.",
     "verify": "bun run test",
-    "source": "src/errors.ts:187"
+    "source": "src/errors.ts:188"
   }
 ]

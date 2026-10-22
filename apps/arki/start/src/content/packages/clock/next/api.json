@@ -1,6 +1,6 @@
 {
   "package": "@arki/clock",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "entries": [
     {
       "subpath": ".",
@@ -73,6 +73,7 @@
       "jsdocSummary": "Default production `Clock`, backed by the runtime `Date` and `setTimeout`."
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_CLOCK_E001",
     "ARKI_CLOCK_E002",

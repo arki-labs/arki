@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/schema`: Standard Schema for every validator: the spec types, `parse` and `parseAsync`, issue helpers, and a JSON Schema bridge. `SCHEMA_ERROR_CODES`, `SchemaRunError`, `formatIssues`, `hasJsonSchema`, `isStandardSchema`, `parse`, `parseAsync`, `pathOf`, `withJsonSchema`; types `SchemaInput`, `SchemaOutput`, `SchemaRunErrorCode`; and 3 more.
+- `@arki/schema`: Standard Schema for every validator: the spec types, `parse` and `parseAsync`, the throwing `is`/`assert`/`ensure`, issue helpers, and a JSON Schema bridge. `AssertError`, `SCHEMA_ERROR_CODES`, `SchemaRunError`, `assert`, `ensure`, `formatIssues`, `hasJsonSchema`, `is`, `isStandardSchema`, `parse`, `parseAsync`, `pathOf`; and 11 more.
 <!-- llms:end -->
 
 ## Start here

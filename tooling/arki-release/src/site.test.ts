@@ -217,6 +217,25 @@ describe('site --channel published', () => {
   });
 });
 
+describe('site retired packages', () => {
+  it('removes the docs of a package that left the config: the site build rejects docs missing from packages.json', async () => {
+    registry.set('@arki/a@0.2.0', WITH_DOCS);
+    for (const version of ['0.1.0', 'next']) {
+      mkdirSync(content('gone', version), { recursive: true });
+      writeFileSync(content('gone', version, 'README.md'), '# gone\n');
+    }
+    const result = await runSite({ cwd: root, config, channel: 'published', npmRunner: npm });
+
+    expect(existsSync(content('gone'))).toBe(false);
+    expect(existsSync(content('a', '0.2.0', 'README.md'))).toBe(true);
+    expect(result.summary.removed).toBe(2);
+    expect(result.items.filter(item => item.action === 'removed').map(item => item.name)).toEqual([
+      '@arki/gone',
+      '@arki/gone',
+    ]);
+  });
+});
+
 describe('site --channel next', () => {
   it('rewrites next/ every run and shows it as latest while npm only has an archive', async () => {
     registry.set('@arki/a@0.1.0', README_ONLY);

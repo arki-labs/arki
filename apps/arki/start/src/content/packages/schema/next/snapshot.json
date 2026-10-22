@@ -1,9 +1,9 @@
 {
   "name": "@arki/schema",
   "channel": "next",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "archive": false,
-  "sha512": "07859b76d90a42305622600f04c197c3e56f727f3cd7f2de6ba3df07c432295a87593188bd45424e6225aaebec3325da7048a032803552edda90dd308c168f18",
+  "sha512": "a9879f3e96610e951d72580cce22bd3b91e45cdb053fca8e288dc39641b7661ef4eca46825fd4061e67dea62ec9546e2185ea5d4d39363b15951e4a4152fff92",
   "files": [
     "CHANGELOG.md",
     "README.md",
@@ -13,19 +13,20 @@
     "llms.txt"
   ],
   "candidate": {
-    "wave": "dot-kernel",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:18:35.314Z"
+    "wave": "foundation",
+    "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+    "createdAt": "2026-10-21T15:54:43.039Z"
   },
   "examples": {
-    "examples": 4,
-    "modules": 3,
-    "compiled": 3,
-    "ran": 3,
+    "examples": 5,
+    "modules": 4,
+    "compiled": 4,
+    "ran": 4,
     "skipped": 0,
     "skippedBlocks": [],
     "failures": []
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

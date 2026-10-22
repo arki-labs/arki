@@ -523,11 +523,16 @@ function onSide<const U extends AnyUnit>(unit: U, role: UnitRole): U {
   return unit.role === undefined ? { ...unit, role } : unit;
 }
 
-/** Infra steps take infra and feature units; entrypoint steps take entrypoints only. */
+/** Infra steps take infra, feature and domain-service units; entrypoint steps take entrypoints only. */
 function misplacedIn(units: readonly (AnyUnit | EntrypointBinder | InfraBinder)[], step: Step): readonly MisplacedUnit[] {
   return units.flatMap(unit => {
     const role = unit.role;
-    if (role === undefined || role === step.role || (step.role === 'infra' && role === 'feature')) return [];
+    if (
+      role === undefined ||
+      role === step.role ||
+      (step.role === 'infra' && (role === 'feature' || role === 'domain-service'))
+    )
+      return [];
     return [{ name: 'bind' in unit ? `${role}.fromFeatures(...)` : unit.name, role, step: step.name }];
   });
 }

@@ -1,27 +1,28 @@
 {
   "name": "@arki/log",
   "channel": "next",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "archive": false,
-  "sha512": "92398535b4934a7d4c6a25e0a66fa6e9007ca74683dbf8d9abb4bb021d17d6118d6d7fbadbc2c7a0b2f07a181d6962321ceba19252490f335233b39cb45a2246",
+  "sha512": "1771eb8a3f055c4a9b212aef2c8c58ddfcb31317c62a4ebc5c8dc4dc6768f5b56b845a207512ecbd13729541b15325e5caf41add394403d0cb889f70f8a45261",
   "files": [
     "CHANGELOG.md",
     "README.md",
     "api.json",
     "docs/agent-guide.md",
     "docs/upgrades/0.1.0-to-0.2.0.md",
+    "docs/upgrades/0.2.0-to-0.3.0.md",
     "errors.json",
     "llms.txt"
   ],
   "candidate": {
-    "wave": "dot-kernel",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:18:35.314Z"
+    "wave": "foundation",
+    "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+    "createdAt": "2026-10-21T15:54:43.039Z"
   },
   "examples": {
-    "examples": 10,
-    "modules": 6,
-    "compiled": 6,
+    "examples": 12,
+    "modules": 8,
+    "compiled": 8,
     "ran": 0,
     "skipped": 3,
     "skippedBlocks": [
@@ -41,8 +42,52 @@
         "reason": "before and after fragment of a migration"
       }
     ],
-    "failures": []
+    "failures": [
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 22,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'configure'."
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 22,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'sinks'. Either declare one or provide an initializer."
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 22,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'redact'. Did you mean 'React'?"
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 28,
+        "rule": "DOCX_E007",
+        "message": "import of a package not declared in package.json, or a relative import: \"@arki/env/node\" is not in package.json"
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 31,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2304 Cannot find name 'configure'."
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 31,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS18004 No value exists in scope for the shorthand property 'sinks'. Either declare one or provide an initializer."
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 31,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'redact'. Did you mean 'React'?"
+      }
+    ]
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

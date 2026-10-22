@@ -215,6 +215,8 @@ The legacy rows below describe diagnostic IDs and their private cause classes. M
 | `ARKI_DOT_E031`              | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.                                     | Keep contract `meta` JSON-safe.                        |
 | `ARKI_DOT_E032`              | `DotManifestError`  | Manifest data is not plain JSON.                                                              | Pass plain JSON only.                                  |
 | `ARKI_DOT_E033`              | `DotLifecycleError` | A unit is mounted on the wrong side (an entrypoint in `.infra()`, or an infra or feature unit in `.entrypoints()`). | Mount infra with `.infra(...)`, entrypoints with `.entrypoints(...)`. |
+| `ARKI_DOT_E034`              | `FeatureError`      | A feature needs `domainService(fn)` its parent does not declare above `.features()`, or it is top-level. | Declare `fn` in the parent's `.domainServices()`; need it from a child only. |
+| `ARKI_DOT_E035`              | `FeatureError`      | `.domainServices()` ran twice, or after `.features()`, `.usecases()` or `.provides()`.     | Call it once, right after `.infra()`.                  |
 
 The `dot` command returns `dot.*` failure codes (`dot.app_not_found`, `dot.doctor_failed`, ...) in the `arki.cli/1` envelope; see the [agent guide](./docs/agent-guide.md#errors) and [The `dot` command](./docs/cli.md). Exit codes: `0` ok, `1` bug, `2` usage, `3` a returned failure.
 

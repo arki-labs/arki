@@ -6,8 +6,8 @@
     "what": "A wait is negative, `NaN`, not finite, or above {@link MAX_WAIT_MS}.",
     "fix": "Pass a finite wait from 0 up to `MAX_WAIT_MS` (about 24.8 days). For a longer wait, sleep again when the timer fires.",
     "verify": "bun run test",
-    "source": "src/errors.ts:20",
-    "version": "0.1.0",
+    "source": "src/errors.ts:21",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -17,8 +17,8 @@
     "what": "Work was cut short by its `AbortSignal` before it finished: a `sleep`, a `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call. `cause` is `signal.reason`.",
     "fix": "Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work.",
     "verify": "bun run test",
-    "source": "src/errors.ts:29",
-    "version": "0.1.0",
+    "source": "src/errors.ts:30",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -28,8 +28,8 @@
     "what": "One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any.",
     "fix": "Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice.",
     "verify": "bun run test",
-    "source": "src/errors.ts:36",
-    "version": "0.1.0",
+    "source": "src/errors.ts:37",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -39,8 +39,8 @@
     "what": "A `timeout` deadline passed before the task finished.",
     "fix": "Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline.",
     "verify": "bun run test",
-    "source": "src/errors.ts:43",
-    "version": "0.1.0",
+    "source": "src/errors.ts:44",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -50,8 +50,8 @@
     "what": "A `concurrency` limit is not a positive integer or `Infinity`.",
     "fix": "Pass a whole number of at least 1, or leave `concurrency` out for no limit.",
     "verify": "bun run test",
-    "source": "src/errors.ts:50",
-    "version": "0.1.0",
+    "source": "src/errors.ts:51",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -62,7 +62,7 @@
     "fix": "Pass a step that is zero or more. Use `setNow` to move the mock clock back.",
     "verify": "bun run test",
     "source": "src/errors.ts:16",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -73,7 +73,7 @@
     "fix": "Pass a finite delay from 0 up to `MAX_TIMER_MS` (about 24.8 days). Split a longer wait into steps.",
     "verify": "bun run test",
     "source": "src/errors.ts:23",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -84,7 +84,7 @@
     "fix": "Handle SleepCancelled returned from sleep.",
     "verify": "bun run test",
     "source": "src/errors.ts:31",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -95,7 +95,7 @@
     "fix": "Supply the exact stored prefix as a string; use `''` for unprefixed IDs.",
     "verify": "bun run test -- src/ids.test.ts",
     "source": "src/errors.ts:17",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -106,7 +106,7 @@
     "fix": "Give each id kind a prefix that does not start another one.",
     "verify": "bun run test -- src/ids.test.ts",
     "source": "src/errors.ts:24",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -117,7 +117,7 @@
     "fix": "Provide Web Crypto getRandomValues; application-owned secure providers must fail closed in every supported mode.",
     "verify": "bun run test:runtimes",
     "source": "src/errors.ts:31",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -128,7 +128,7 @@
     "fix": "Declare at least one key. Order by NOT NULL columns and end on a unique one.",
     "verify": "bun run test -- src/pagination.test.ts",
     "source": "src/errors.ts:38",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -139,7 +139,7 @@
     "fix": "Send back a cursor exactly as the same keyset returned it, or start from the first page.",
     "verify": "bun run test -- src/pagination.test.ts",
     "source": "src/errors.ts:45",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -150,7 +150,7 @@
     "fix": "Rename the contract key: no `.`, and not a name the query utils reserve.",
     "verify": "bun run test -- src/orpc.test.ts",
     "source": "src/errors.ts:52",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -161,7 +161,7 @@
     "fix": "Pass a leaf of `createOrpcUtils`, or an object built by `operations()`.",
     "verify": "bun run test -- src/orpc.test.ts",
     "source": "src/errors.ts:59",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -172,7 +172,7 @@
     "fix": "Use a supported Drizzle column builder and matching Drizzle version.",
     "verify": "bun run test -- src/drizzle.test.ts",
     "source": "src/errors.ts:66",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -183,7 +183,7 @@
     "fix": "Supply a non-empty literal domain name, such as `billing.refund`.",
     "verify": "bun run test -- src/ids.test.ts",
     "source": "src/errors.ts:73",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -194,7 +194,7 @@
     "fix": "Use 'uuid', omit format, or supply 2–256 distinct non-surrogate UTF-16 alphabet characters and an integer length of 1–256.",
     "verify": "bun run test -- src/ids.test.ts",
     "source": "src/errors.ts:80",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -535,7 +535,7 @@
     "fix": "Give the failure a non-empty dotted code such as `post.not_found`, and not `ok`.",
     "verify": "bun run test -- src/failure.test.ts",
     "source": "src/errors.ts:17",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -546,7 +546,7 @@
     "fix": "Pass an integer status from 400 to 599, or leave `status` out for the default 400.",
     "verify": "bun run test -- src/failure.test.ts",
     "source": "src/errors.ts:24",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -557,18 +557,18 @@
     "fix": "Add a handler for the code to `match`, or fix the cast that hid it from the compiler.",
     "verify": "bun run test -- src/handle.test.ts",
     "source": "src/errors.ts:31",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
     "code": "ARKI_FAILURE_E004",
     "package": "@arki/failure",
     "kind": "thrown",
-    "what": "`assertNever` was reached, so a value the types said could not happen did happen (often bad data from outside).",
+    "what": "`unreachable` was reached, so a value the types said could not happen did happen (often bad data from outside).",
     "fix": "Handle the new case in the `switch`, or validate the data at the boundary.",
     "verify": "bun run test -- src/handle.test.ts",
     "source": "src/errors.ts:38",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -579,7 +579,7 @@
     "fix": "Give each definition its own code, or pass the definition only once.",
     "verify": "bun run test -- src/orpc.test.ts",
     "source": "src/errors.ts:45",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -590,7 +590,7 @@
     "fix": "Check the stored data against the schema. A schema that transforms its input cannot read its own output.",
     "verify": "bun run test -- src/revive.test.ts",
     "source": "src/errors.ts:52",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -601,7 +601,18 @@
     "fix": "Use a schema that validates synchronously for failure data.",
     "verify": "bun run test -- src/revive.test.ts",
     "source": "src/errors.ts:59",
-    "version": "0.1.0",
+    "version": "0.2.0",
+    "channel": "next"
+  },
+  {
+    "code": "ARKI_FAILURE_E008",
+    "package": "@arki/failure",
+    "kind": "thrown",
+    "what": "An `invariant` condition was falsy, so code relied on something that is not true.",
+    "fix": "Find the caller that broke the assumption and fix it; do not catch this error.",
+    "verify": "bun run test -- src/handle.test.ts",
+    "source": "src/errors.ts:66",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -612,7 +623,7 @@
     "fix": "Call `configure()` once at the app entry, with `{ owner: import.meta.url }` so a dev re-run of the entry is allowed. Use `reconfigure()` on its handle to change the setup.",
     "verify": "bun run test -- src/core/logging.test.ts",
     "source": "src/core/errors.ts:13",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -623,7 +634,7 @@
     "fix": "Add the channel to `configure({ channels })`, or use one of the defined names.",
     "verify": "bun run test -- src/core/logging.test.ts",
     "source": "src/core/errors.ts:20",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -634,7 +645,7 @@
     "fix": "Use `trace`, `debug`, `info`, `warn`, `error` or `fatal`, or a number from 1 to 24.",
     "verify": "bun run test -- src/core/logging.test.ts",
     "source": "src/core/errors.ts:27",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -645,7 +656,7 @@
     "fix": "Restore the active fake first with `restore()` or `using`. Keep one fake at a time.",
     "verify": "bun run test -- src/testing/fake.test.ts",
     "source": "src/core/errors.ts:34",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -656,7 +667,7 @@
     "fix": "Use the handle returned by the latest `configure()` call.",
     "verify": "bun run test -- src/core/logging.test.ts",
     "source": "src/core/errors.ts:41",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -864,8 +875,30 @@
     "what": "A `withJsonSchema` converter was asked for a target other than draft-2020-12.",
     "fix": "Ask for the `draft-2020-12` target.",
     "verify": "bun run test -- src/vendors.test.ts",
-    "source": "src/errors.ts:10",
-    "version": "0.1.0",
+    "source": "src/errors.ts:12",
+    "version": "0.2.0",
+    "channel": "next"
+  },
+  {
+    "code": "ARKI_SCHEMA_E004",
+    "package": "@arki/schema",
+    "kind": "thrown",
+    "what": "`assert` or `ensure` got a value the schema rejects. The value is a bug in the caller, so it throws instead of returning a failure.",
+    "fix": "Read `issues` on the error, then fix the code that produced the value. Use `parse` where bad data is expected.",
+    "verify": "bun run test -- src/assert.test.ts",
+    "source": "src/errors.ts:19",
+    "version": "0.2.0",
+    "channel": "next"
+  },
+  {
+    "code": "ARKI_SCHEMA_E005",
+    "package": "@arki/schema",
+    "kind": "thrown",
+    "what": "`is`, `assert` or `ensure` got a schema that validates asynchronously. They are synchronous and cannot wait for it.",
+    "fix": "Use `parseAsync`, or a schema that validates synchronously.",
+    "verify": "bun run test -- src/assert.test.ts",
+    "source": "src/errors.ts:26",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -930,8 +963,8 @@
     "what": "Owned execution was cancelled; the external reason stays private.",
     "fix": "Honor the signal and handle cancellation at the calling boundary.",
     "verify": "bun run test",
-    "source": "src/errors.ts:147",
-    "version": "0.1.0",
+    "source": "src/errors.ts:148",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -941,8 +974,8 @@
     "what": "An owned deadline elapsed; work still needs cooperative settlement.",
     "fix": "Allow more time or make work honor the owned signal.",
     "verify": "bun run test",
-    "source": "src/errors.ts:155",
-    "version": "0.1.0",
+    "source": "src/errors.ts:156",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -952,8 +985,8 @@
     "what": "Multiple owned failures; public counts serialize while original members stay private.",
     "fix": "Inspect the local typed cause and address every failure.",
     "verify": "bun run test",
-    "source": "src/errors.ts:187",
-    "version": "0.1.0",
+    "source": "src/errors.ts:188",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -1030,7 +1063,7 @@
     "fix": "Handle cancellation at the owning operation boundary.",
     "verify": "bun run test",
     "source": "src/errors.ts:55",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "channel": "next"
   },
   {
@@ -1041,7 +1074,7 @@
     "fix": "Send back the cursor unchanged, or start from the first page.",
     "verify": "bun run test -- src/pagination.test.ts",
     "source": "src/errors.ts:119",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -1052,7 +1085,7 @@
     "fix": "Use non-null strings, finite numbers, booleans or valid Dates and keep the cursor within 1024 characters.",
     "verify": "bun run test -- src/pagination.test.ts",
     "source": "src/errors.ts:129",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -1063,7 +1096,7 @@
     "fix": "Provide Web Crypto getRandomValues, or randomUUID for UUID declarations; application-owned secure providers must fail closed in every supported mode.",
     "verify": "bun run test -- src/ids.test.ts",
     "source": "src/errors.ts:139",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "channel": "next"
   },
   {
@@ -1382,7 +1415,7 @@
     "fix": "Send a supported failure envelope with validated JSON data.",
     "verify": "bun run test -- src/revive.test.ts",
     "source": "src/foundations.ts:115",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -1393,7 +1426,7 @@
     "fix": "Inspect the private cause and fix the operation.",
     "verify": "bun run test -- src/schema.test.ts",
     "source": "src/foundations.ts:126",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -1404,7 +1437,7 @@
     "fix": "Use parseAsync() and await the result.",
     "verify": "bun run test -- src/schema.test.ts",
     "source": "src/foundations.ts:67",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -1415,7 +1448,7 @@
     "fix": "Correct the reported input issues.",
     "verify": "bun run test -- src/schema.test.ts",
     "source": "src/foundations.ts:56",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {
@@ -1426,7 +1459,7 @@
     "fix": "Fix the validator; inspect the private cause for details.",
     "verify": "bun run test -- src/schema.test.ts",
     "source": "src/foundations.ts:77",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "channel": "next"
   },
   {

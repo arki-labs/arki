@@ -1,6 +1,6 @@
 {
   "package": "@arki/log",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "entries": [
     {
       "subpath": ".",
@@ -249,6 +249,13 @@
     },
     {
       "subpath": ".",
+      "name": "maskSecrets",
+      "kind": "function",
+      "signature": "export declare function maskSecrets(values: () => readonly string[], options?: { readonly censor?: string; }): Processor;",
+      "jsdocSummary": "Replaces every occurrence of a known secret value, wherever it appears: the template, string fields at any depth, the serialised error, the body. `redact` hides values at known paths; this hides known values at any path, for a secret that was revealed and then logged by hand. `values` is read per record, so secrets loaded after `configure()` are covered too."
+    },
+    {
+      "subpath": ".",
       "name": "memorySink",
       "kind": "function",
       "signature": "export declare function memorySink(): MemorySink;",
@@ -260,6 +267,13 @@
       "kind": "type",
       "signature": "export type MemorySink = Sink & { readonly records: readonly LogRecord[]; clear(): void; };",
       "jsdocSummary": "A sink that keeps records in memory."
+    },
+    {
+      "subpath": ".",
+      "name": "MIN_SECRET_LENGTH",
+      "kind": "variable",
+      "signature": "export declare const MIN_SECRET_LENGTH = 8;",
+      "jsdocSummary": "Values shorter than this are never masked: too likely to match ordinary text."
     },
     {
       "subpath": ".",
@@ -458,6 +472,7 @@
       "jsdocSummary": "What a captured record must match. Every given part must match; `fields` matches a subset."
     }
   ],
+  "groups": [],
   "errorCodes": [
     "ARKI_LOG_E001",
     "ARKI_LOG_E002",

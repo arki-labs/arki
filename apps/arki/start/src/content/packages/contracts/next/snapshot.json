@@ -1,28 +1,29 @@
 {
   "name": "@arki/contracts",
   "channel": "next",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "archive": false,
-  "sha512": "8187666c2462370c26534a22b66e503eb7b743a9b39bfcdccd936679ff7f225119e20ca9ef80abf6e991180d802b448ccc04e793cd61a2e88ff5802b04e385ec",
+  "sha512": "067f0dc6003e20d9a52ad0325e36168462be7c17feefe3a9605f65a41ba6dfc0510db31674f4921a89d5cf937d59d854f3fd2eb598d5fbef7df99aff0343ffdf",
   "files": [
     "README.md",
     "api.json",
     "docs/agent-guide.md",
     "docs/upgrades/0.1.0-to-0.2.0.md",
+    "docs/upgrades/0.2.0-to-0.3.0.md",
     "docs/upgrades/domain-ids.md",
     "docs/upgrades/typed-ids.md",
     "errors.json",
     "llms.txt"
   ],
   "candidate": {
-    "wave": "dot-kernel",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:18:35.314Z"
+    "wave": "foundation",
+    "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+    "createdAt": "2026-10-21T15:54:43.039Z"
   },
   "examples": {
-    "examples": 16,
-    "modules": 14,
-    "compiled": 14,
+    "examples": 18,
+    "modules": 16,
+    "compiled": 16,
     "ran": 11,
     "skipped": 2,
     "skippedBlocks": [
@@ -37,8 +38,22 @@
         "reason": "fragment: keyset and input come from your own contract"
       }
     ],
-    "failures": []
+    "failures": [
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 20,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'defineId'. Did you mean 'undefined'?"
+      },
+      {
+        "file": "docs/upgrades/0.2.0-to-0.3.0.md",
+        "line": 26,
+        "rule": "DOCX_E001",
+        "message": "example does not typecheck: TS2552 Cannot find name 'defineId'. Did you mean 'undefined'?"
+      }
+    ]
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }

@@ -1,7 +1,42 @@
 {
   "package": "@arki/schema",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entries": [
+    {
+      "subpath": ".",
+      "name": "assert",
+      "kind": "function",
+      "signature": "export declare function assert<Schema extends StandardSchemaV1>(value: unknown, schema: Schema, options?: AssertOptions): asserts value is StandardSchemaV1.InferInput<Schema>;",
+      "jsdocSummary": "Throw `AssertError` unless `value` matches the schema, and narrow the variable to the schema's input type. It never transforms: use {@link ensure} for the output. A rejection is a bug in the caller (`ARKI_SCHEMA_E004`); use `parse` where bad data is expected."
+    },
+    {
+      "subpath": ".",
+      "name": "AssertError",
+      "kind": "class",
+      "signature": "export declare class AssertError extends Error { readonly code: AssertErrorCode; /** The schema's issues, with the value redacted out of each message. Empty for `asyncAssert`. */ readonly issues: readonly StandardSchemaV1.Issue[]; /** What to do about it, in one sentence. */ readonly remediation: string; constructor(code: AssertErrorCode, message: string, remediation: string, issues: readonly StandardSchemaV1.Issue[], options?: ErrorOptions); }",
+      "jsdocSummary": "A value failed `assert` or `ensure`, or a schema could not run synchronously. The message lists the issues with their paths. It never contains the value, because asserted values are often secrets: `issues` holds redacted messages and plain-key paths."
+    },
+    {
+      "subpath": ".",
+      "name": "AssertErrorCode",
+      "kind": "type",
+      "signature": "export type AssertErrorCode = typeof SCHEMA_ERROR_CODES.assertFailed | typeof SCHEMA_ERROR_CODES.asyncAssert;",
+      "jsdocSummary": "The code of an {@link AssertError}."
+    },
+    {
+      "subpath": ".",
+      "name": "AssertOptions",
+      "kind": "type",
+      "signature": "export type AssertOptions = { /** Replaces the default headline. A function is called only on failure. */ readonly message?: string | (() => string); /** Names the value in the message, such as `\"PORT\"`. */ readonly at?: string; };",
+      "jsdocSummary": "How a failed `assert` or `ensure` describes itself."
+    },
+    {
+      "subpath": ".",
+      "name": "ensure",
+      "kind": "function",
+      "signature": "export declare function ensure<Schema extends StandardSchemaV1>(value: unknown, schema: Schema, options?: AssertOptions): StandardSchemaV1.InferOutput<Schema>;",
+      "jsdocSummary": "The schema's output, or `AssertError`: a throwing `parse`."
+    },
     {
       "subpath": ".",
       "name": "formatIssues",
@@ -15,6 +50,13 @@
       "kind": "function",
       "signature": "export declare function hasJsonSchema<Input, Output>(schema: StandardSchemaV1<Input, Output>): schema is SchemaWithJson<Input, Output>;",
       "jsdocSummary": "True when the schema can also describe itself as JSON Schema (`~standard.jsonSchema`)."
+    },
+    {
+      "subpath": ".",
+      "name": "is",
+      "kind": "function",
+      "signature": "export declare function is<Schema extends StandardSchemaV1>(value: unknown, schema: Schema): value is StandardSchemaV1.InferInput<Schema>;",
+      "jsdocSummary": "True when `value` matches the schema. It is a guard, so a rejected value is `false`, never a throw. An async schema throws `ARKI_SCHEMA_E005` instead of answering `false`, because `false` would silently mean \"invalid\" for data that may be fine."
     },
     {
       "subpath": ".",
@@ -46,9 +88,23 @@
     },
     {
       "subpath": ".",
+      "name": "plainObjectSchema",
+      "kind": "variable",
+      "signature": "export declare const plainObjectSchema: StandardSchemaV1<Record<string, unknown>>;",
+      "jsdocSummary": "Accepts an object whose prototype is `Object.prototype` or `null`: object literals and `Object.create(null)`, not class instances, dates or arrays. The value is returned as it is."
+    },
+    {
+      "subpath": ".",
+      "name": "recordSchema",
+      "kind": "variable",
+      "signature": "export declare const recordSchema: StandardSchemaV1<Record<string, unknown>>;",
+      "jsdocSummary": "Accepts a non-null object that is not an array: safe to read string keys from. Class instances and dates count. The value is returned as it is. Use it as `is(value, recordSchema)`."
+    },
+    {
+      "subpath": ".",
       "name": "SCHEMA_ERROR_CODES",
       "kind": "variable",
-      "signature": "export declare const SCHEMA_ERROR_CODES: { /** * A `withJsonSchema` converter was asked for a target other than draft-2020-12. * * @fix Ask for the `draft-2020-12` target. * @verify bun run test -- src/vendors.test.ts */ readonly unsupportedTarget: 'ARKI_SCHEMA_E003'; };",
+      "signature": "export declare const SCHEMA_ERROR_CODES: { /** * A `withJsonSchema` converter was asked for a target other than draft-2020-12. * * @fix Ask for the `draft-2020-12` target. * @verify bun run test -- src/vendors.test.ts */ readonly unsupportedTarget: 'ARKI_SCHEMA_E003'; /** * `assert` or `ensure` got a value the schema rejects. The value is a bug in the caller, so it throws instead of returning a failure. * * @fix Read `issues` on the error, then fix the code that produced the value. Use `parse` where bad data is expected. * @verify bun run test -- src/assert.test.ts */ readonly assertFailed: 'ARKI_SCHEMA_E004'; /** * `is`, `assert` or `ensure` got a schema that validates asynchronously. They are synchronous and cannot wait for it. * * @fix Use `parseAsync`, or a schema that validates synchronously. * @verify bun run test -- src/assert.test.ts */ readonly asyncAssert: 'ARKI_SCHEMA_E005'; };",
       "jsdocSummary": "Stable error codes of `@arki/schema`."
     },
     {
@@ -76,7 +132,7 @@
       "subpath": ".",
       "name": "SchemaRunErrorCode",
       "kind": "type",
-      "signature": "export type SchemaRunErrorCode = (typeof SCHEMA_ERROR_CODES)[keyof typeof SCHEMA_ERROR_CODES];",
+      "signature": "export type SchemaRunErrorCode = typeof SCHEMA_ERROR_CODES.unsupportedTarget;",
       "jsdocSummary": "The code of a {@link SchemaRunError}."
     },
     {
@@ -108,7 +164,10 @@
       "jsdocSummary": "A new schema that validates like `schema` and describes itself with the given JSON Schema (`output` defaults to `input`). Use it for a validator that cannot produce JSON Schema on its own. It answers only the `draft-2020-12` target; any other throws `ARKI_SCHEMA_E003`."
     }
   ],
+  "groups": [],
   "errorCodes": [
-    "ARKI_SCHEMA_E003"
+    "ARKI_SCHEMA_E003",
+    "ARKI_SCHEMA_E004",
+    "ARKI_SCHEMA_E005"
   ]
 }

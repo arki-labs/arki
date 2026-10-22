@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/log`: The core of @arki/log: loggers, `configure()`, templates, processors, formatters, core sinks and wrappers. `LOG_ERROR_CODES`, `Level`, `LogError`, `buffer`, `configure`, `consoleSink`, `createLogging`, `deduplicate`, `dropWhen`, `enrich`, `fingersCrossed`, `getLogger`; and 40 more.
+- `@arki/log`: The core of @arki/log: loggers, `configure()`, templates, processors, formatters, core sinks and wrappers. `LOG_ERROR_CODES`, `Level`, `LogError`, `MIN_SECRET_LENGTH`, `buffer`, `configure`, `consoleSink`, `createLogging`, `deduplicate`, `dropWhen`, `enrich`, `fingersCrossed`; and 43 more.
 - `@arki/log/node`: Node, Bun and Deno sinks (`stdout`, `stderr`, `file`), `fromEnv()` and `asyncContext()` for @arki/log. `asyncContext`, `file`, `fromEnv`, `stderr`, `stdout`.
 - `@arki/log/otel`: An OpenTelemetry trace source and log sink for @arki/log. `otelSink`, `otelTrace`.
 - `@arki/log/testing`: `fakeLog()`, a test double that captures every log record and asserts on it. `LogAssertionError`, `fakeLog`; types `CapturedRecord`, `FakeLog`, `RecordMatch`.

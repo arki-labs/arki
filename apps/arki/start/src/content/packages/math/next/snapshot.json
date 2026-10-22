@@ -3,7 +3,7 @@
   "channel": "next",
   "version": "0.1.0",
   "archive": false,
-  "sha512": "1ba87c246a8c7f698eba7c1eff6480eb3a918043bfed8bcf0b303d82367e4a41fc8fad946ee1815ed18bd8d5ad8b2699b51071f40380312e36165d83c6348c84",
+  "sha512": "ae83a3fd073c6d52bd49011a0a4298b6bcb735acf3ea210ca7337826a6adc6bffa0b2d47d28af31defa47f816f3a96e80e9b96a6f705ae01098fff1125958a23",
   "files": [
     "README.md",
     "api.json",
@@ -36,8 +36,8 @@
   ],
   "candidate": {
     "wave": "foundation",
-    "sourceCommit": "0e70527fc5e65ba9e901cc177e03e22349b49f0b",
-    "createdAt": "2026-10-21T06:17:38.846Z"
+    "sourceCommit": "734f2b3651ba9e0dc5a4648a24e831162f413e1b",
+    "createdAt": "2026-10-21T15:54:43.039Z"
   },
   "examples": {
     "examples": 30,
@@ -49,5 +49,6 @@
     "failures": []
   },
   "engines": {},
+  "license": "MIT",
   "benchStatus": "none"
 }
