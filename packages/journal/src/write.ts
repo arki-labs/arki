@@ -382,6 +382,9 @@ export function createWriter<
           }
         }
 
+        // Every effect job carries its event: `args` is the stored row as inserted, so the worker
+        // runs it without reading `journal_events` back.
+        const storedBySeq = new Map(inserted.map(stored => [stored.seq, stored]));
         const jobs = [];
         for (const event of recorded) {
           for (const effect of effects) {
@@ -392,10 +395,13 @@ export function createWriter<
             ) {
               const generated = jobId();
               if (isFailure(generated)) return refusal.settle(generated);
+              const stored = storedBySeq.get(event.seq);
+              if (stored === undefined) throw new Error(`journal: no stored row for event seq ${event.seq}`);
               jobs.push({
                 id: generated,
                 eventSeq: event.seq,
                 effect: effect.name,
+                args: stored,
                 priority: effect.schedule.priority ?? 0,
                 ...dueAt(effect, event),
               });

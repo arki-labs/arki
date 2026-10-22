@@ -13,8 +13,10 @@ import { z } from 'zod';
 import type { IdGenerationFailure } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import { ensure } from '@arki/schema';
 
 import type { JournalTables } from './pg.js';
+import { StoredEventRow } from './pg.js';
 import type { ArchivedJob, ArchiveOutcome, EffectRetention, ResolvedKeep, ResolvedRetention } from './retention.js';
 import type { DbHandle } from './types.js';
 import type { JobRow } from './worker.js';
@@ -69,6 +71,20 @@ export type EventHeader = {
 };
 
 export type JobWithState = JobRow & { readonly state: JobState };
+
+/** The header of the event an effect job carries in `args`. A bad copy is a library bug, so it throws. */
+const eventHeaderOf = (jobId: string, args: unknown): EventHeader => {
+  const stored = ensure(args, StoredEventRow, { at: `journal: effect job ${jobId} args` });
+  return {
+    seq: stored.seq,
+    id: stored.id,
+    kind: stored.kind,
+    entityId: stored.entityId,
+    version: stored.version,
+    type: stored.type,
+    recordedAt: stored.recordedAt,
+  };
+};
 
 export type JobDetail = JobWithState & {
   /** Null on a queue job. */
@@ -215,7 +231,7 @@ export function createManagedJobOps(deps: JobOpsDeps) {
 }
 
 function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
-  const { events: eventsTable, jobs: jobsTable, jobAttempts, jobArchive, jobOperations } = deps.tables;
+  const { jobs: jobsTable, jobAttempts, jobArchive, jobOperations } = deps.tables;
   const policy = deps.retention;
 
   const stateOf = sql<JobState>`
@@ -287,22 +303,8 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
   const job = async (db: DbHandle, id: string): Promise<JobDetail | undefined> => {
     const [row] = await db.select(withState).from(jobsTable).where(eq(jobsTable.id, id)).limit(1);
     if (row === undefined) return undefined;
-    const [event] =
-      row.eventSeq === null
-        ? []
-        : await db
-            .select({
-              seq: eventsTable.seq,
-              id: eventsTable.id,
-              kind: eventsTable.kind,
-              entityId: eventsTable.entityId,
-              version: eventsTable.version,
-              type: eventsTable.type,
-              recordedAt: eventsTable.recordedAt,
-            })
-            .from(eventsTable)
-            .where(eq(eventsTable.seq, row.eventSeq))
-            .limit(1);
+    // The header comes from the job's own copy of the event, so it shows for an entity that keeps no event rows.
+    const event = row.kind === 'effect' && row.args !== null ? eventHeaderOf(row.id, row.args) : null;
     const attempts = await db
       .select()
       .from(jobAttempts)
@@ -314,7 +316,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
       .where(sql`${jobOperations.jobIds} @> ${JSON.stringify([id])}::jsonb`)
       .orderBy(desc(jobOperations.at), desc(jobOperations.id))
       .limit(OPERATION_HISTORY);
-    return { ...row, event: event ?? null, attemptLog: attempts, operations };
+    return { ...row, event, attemptLog: attempts, operations };
   };
 
   const jobCounts = (db: DbHandle): Promise<JobCount[]> =>

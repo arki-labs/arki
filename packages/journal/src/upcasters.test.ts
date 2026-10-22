@@ -161,6 +161,33 @@ describe('upcasters', () => {
     expect(seen).toEqual([{ note: 'rerun me', by: 'unknown', pinned: false }]);
   });
 
+  it('upcasts the event copy an effect job carries, so a job queued before a release runs with the current shape', async () => {
+    // Why: an effect job holds its event in `args`, stamped with the schema version of the write.
+    // A worker from the next release decodes that copy as replay decodes a row: through the
+    // upcasters. Otherwise a deploy would hand old payloads to new handlers.
+    const seen: unknown[] = [];
+    const memoMail = j.effect('memo-mail', memo, {
+      MemoNoteSet: e => {
+        seen.push(e.data);
+      },
+    });
+    const withEffects = j.compose({ effects: [memoMail] });
+    const id = orderId(++next);
+    orThrow(
+      await db.transaction(tx =>
+        withEffects.write(tx, memoV1, id, {
+          meta,
+          events: () => [MemoOpened({ customerId: 'cus_memo' }), NoteSetV1({ text: 'old shape' })],
+        }),
+      ),
+    );
+    const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, 'memo-mail'));
+    expect(job?.args).toMatchObject({ type: 'MemoNoteSet', schemaVersion: 1, data: { text: 'old shape' } });
+
+    expect(orThrow(await withEffects.drain(db))).toBe(1);
+    expect(seen).toEqual([{ note: 'old shape', by: 'unknown', pinned: false }]);
+  });
+
   it('forget erases an old row from its upcast form and stores it at the current version', async () => {
     // Why: the erased form is built from today's shape, so it must be stored as today's
     // version. Stored as version 1, the next read would run the first step on data

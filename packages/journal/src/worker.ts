@@ -12,10 +12,12 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { Cancelled } from '@arki/async';
 import { attempt, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
+import { ensure } from '@arki/schema';
 
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
+import { StoredEventRow } from './pg.js';
 import type { EffectRetention, ResolvedRetention } from './retention.js';
 import type {
   AcceptFailure,
@@ -108,7 +110,7 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
 export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run>(
   deps: DrainDeps<Meta, AppDb, Run>,
 ) {
-  const { events: eventsTable, jobs: jobsTable, jobAttempts: attemptsTable, jobArchive: archiveTable } = deps.tables;
+  const { jobs: jobsTable, jobAttempts: attemptsTable, jobArchive: archiveTable } = deps.tables;
   const policy = deps.retention ?? resolveRetention(undefined);
   const effectOverride = effectOverrides(deps.effects);
   const { decodeStoredEvent } = deps.history;
@@ -224,11 +226,12 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     signal: AbortSignal,
   ): Promise<{ readonly outcome: unknown; readonly retryReason: unknown }> => {
     // The check constraint sets both on every effect row; this narrows them once.
-    if (job.effect === null || job.eventSeq === null)
+    if (job.effect === null || job.args === null)
       throw new Error(`journal: effect job ${job.id} has no effect or event`);
     if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
-    const [eventRow] = await db.select().from(eventsTable).where(eq(eventsTable.seq, job.eventSeq));
-    if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
+    // The job's own copy of the stored row, never `journal_events`: the entity may keep no event
+    // rows. Decoded as replay decodes a row, so the upcasters apply to a job from an older release.
+    const eventRow = ensure(job.args, StoredEventRow, { at: `journal: effect job ${job.id} args` });
     const event = decodeStoredEvent(
       eventRow,
       findEventDefinition(effect.entities, eventRow.kind, eventRow.type),

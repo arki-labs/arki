@@ -6,7 +6,7 @@
 
 <!-- llms:start -->
 - `@arki/journal`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowReadMismatch`, `WorkflowStranded`, `backoff`, `combineRunners`, `initJournal`, `isJournalError`; and 114 more.
-- `@arki/journal/pg`: `journalTables`; types `ExportsEveryJournalTable`, `JournalTables`, `WorkflowShape`.
+- `@arki/journal/pg`: `StoredEventRow`, `journalTables`; types `ExportsEveryJournalTable`, `JournalTables`, `WorkflowShape`.
 - `@arki/journal/foreman`: @arki/journal/foreman. `ArchivedSummary`, `AttemptSummary`, `JOURNAL_JOBS_ERROR_CODES`, `JOURNAL_WORKFLOWS_ERROR_CODES`, `JobSummary`, `OperationSummary`, `foremanReceiptTables`, `journalJobsModule`, `journalReceiptStore`, `journalWorkflowsModule`; types `ForemanReceiptTables`, `JournalJobsModuleOptions`; and 2 more.
 - `@arki/journal/http`: The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `responseCache`.
 - `@arki/journal/http/webhooks`: Outgoing webhooks on the journal's job table: @arki/journal/http/webhooks. `WEBHOOK_ERROR_CODES`, `WebhookError`, `webhookSender`, `webhookTables`; types `DispatchInput`, `SubscribeInput`, `WebhookSender`, `WebhookSenderOptions`, `WebhookTables`, `WebhookTx`.

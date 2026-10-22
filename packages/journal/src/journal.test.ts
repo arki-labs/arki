@@ -56,6 +56,12 @@ const mail = j.effect('order-mail', order, {
     /* delivery is the drain test's business */
   },
 });
+/** An effect on the event with an erased form, so its jobs carry personal data that forget must reach. */
+const noteMail = j.effect('note-mail', order, {
+  OrderNoted: () => {
+    /* nothing to deliver; the job row is the point */
+  },
+});
 
 /** The notes in the order the projection saw them. */
 const noted: string[] = [];
@@ -748,6 +754,65 @@ describe('replay, verify, repair', () => {
     await expect(journal.forget(db, order, legacy)).rejects.toMatchObject({ code: 'NO_HISTORY' });
     const legacyEvents = await history(legacy);
     expect(legacyEvents.map(e => [e.data, e.erasedAt])).toEqual([[{ note: 'private' }, null]]);
+  });
+
+  it('forget also erases the event copy in hot effect jobs and in the job archive, so no plain data survives in the job tables', async () => {
+    // Why: an effect job carries its event in `args`, and the archive keeps finished jobs for days.
+    // A forget that rewrote only `journal_events` would leave the personal data in two more tables.
+    // Both copies must end up as the erased event: same data, schema version and erased time.
+    const noting = j.compose({ effects: [noteMail] });
+    const id = orderId(++next);
+    orThrow(await place(id));
+    const first = orThrow(
+      await db.transaction(tx =>
+        noting.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'secret one' })] }),
+      ),
+    );
+    // The first note's job finishes and lands in the archive; the second's stays hot.
+    orThrow(await noting.drain(db));
+    const second = orThrow(
+      await db.transaction(tx =>
+        noting.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'secret two' })] }),
+      ),
+    );
+    const firstId = first.events[0]?.id ?? '';
+    const secondId = second.events[0]?.id ?? '';
+    const archivedOf = (eventId: string) =>
+      db.select().from(tables.jobArchive).where(sql`${tables.jobArchive.args}->>'id' = ${eventId}`);
+    const hotOf = (eventId: string) =>
+      db.select().from(tables.jobs).where(sql`${tables.jobs.args}->>'id' = ${eventId}`);
+    expect((await archivedOf(firstId)).map(row => row.effect)).toEqual(['note-mail']);
+    expect((await hotOf(secondId)).map(row => row.effect)).toEqual(['note-mail']);
+
+    expect(orThrow(await noting.forget(db, order, id))).toMatchObject({ erased: 2 });
+
+    const events = await history(id);
+    const erasedAt = events[1]?.erasedAt?.toISOString();
+    expect(erasedAt).toBeDefined();
+    const [archived] = await archivedOf(firstId);
+    const [hot] = await hotOf(secondId);
+    expect(archived?.args).toMatchObject({ data: { note: '[erased]' }, schemaVersion: OrderNoted.version, erasedAt });
+    expect(hot?.args).toMatchObject({ data: { note: '[erased]' }, schemaVersion: OrderNoted.version, erasedAt });
+    expect(JSON.stringify(archived?.args)).not.toContain('secret');
+    expect(JSON.stringify(hot?.args)).not.toContain('secret');
+    // The copies stay the stored row, so the hot job still runs through the same decoder.
+    expect(orThrow(await noting.drain(db))).toBe(1);
+  });
+
+  it('the schema refuses an effect row without its event copy, so a worker never claims a job it cannot run', async () => {
+    // Why: the worker runs an effect from `args` alone. A row with `event_seq` and no `args` would
+    // be claimed and fail every time; the check constraint keeps such a row out of the table.
+    const id = orderId(++next);
+    const placed = orThrow(await place(id));
+    await expect(
+      db.insert(tables.jobs).values({
+        id: 'job_no_args',
+        kind: 'effect',
+        eventSeq: placed.events[0]?.seq ?? -1,
+        effect: 'order-mail',
+        args: null,
+      }),
+    ).rejects.toMatchObject({ cause: expect.objectContaining({ constraint: 'journal_jobs_kind_check' }) });
   });
 
   it('throughVersion cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {

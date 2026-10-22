@@ -118,6 +118,35 @@ describe('job states and reads', () => {
     expect(await ops.job(db, 'job_missing')).toBeUndefined();
   });
 
+  it('job reads an effect job’s event header from the job’s own `args`, not from journal_events', async () => {
+    // Why: Foreman must show what a job is for even when the entity keeps no event rows. The header
+    // comes back with real dates, and it is the copy the job holds: here the copy says a different
+    // type than the stored row, and the detail shows the copy.
+    const [stored] = await db
+      .insert(tables.events)
+      .values({ id: 'evt_detail', kind: 'order', entityId: 'ord_detail', version: 1, type: 'OrderPaid', data: {}, meta: {} })
+      .returning();
+    if (stored === undefined) throw new Error('no event row');
+    const id = orThrow(jobId());
+    await db.insert(tables.jobs).values({
+      id,
+      kind: 'effect',
+      eventSeq: stored.seq,
+      effect: 'order-mail',
+      args: { ...stored, type: 'FromArgs' },
+    });
+    const detail = await ops.job(db, id);
+    expect(detail?.event).toEqual({
+      seq: stored.seq,
+      id: 'evt_detail',
+      kind: 'order',
+      entityId: 'ord_detail',
+      version: 1,
+      type: 'FromArgs',
+      recordedAt: stored.recordedAt,
+    });
+  });
+
   it('refuses a limit outside 1 to 200 with BAD_ARGUMENT, so one call cannot read the whole table', async () => {
     await expect(ops.jobs(db, { limit: 201 })).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });
     await expect(ops.jobs(db, { limit: 0 })).rejects.toMatchObject({ code: 'BAD_ARGUMENT' });

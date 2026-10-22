@@ -89,6 +89,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   type MetaOut = SchemaOutput<Meta>;
   const { metaSchema } = deps;
   const eventsTable = deps.tables.events;
+  const { jobs: jobsTable, jobArchive } = deps.tables;
 
   /**
    * Turn a stored log row into a recorded event, parsing data and meta with
@@ -355,14 +356,27 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
               `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
             );
           }
-          await tx
+          const [stamped] = await tx
             .update(eventsTable)
             .set({
               data: form.data,
               schemaVersion: def.version,
               erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())`,
             })
-            .where(eq(eventsTable.seq, row.seq));
+            .where(eq(eventsTable.seq, row.seq))
+            .returning({ erasedAt: eventsTable.erasedAt });
+          if (stamped === undefined) throw new Error(`journal: forget: event ${row.id} vanished under the row lock`);
+          // Every effect job carries a copy of its event in `args`, and the archive keeps finished jobs
+          // for days. Both copies get the same erased data, schema version and stamp as the event row.
+          const erasedCopy = JSON.stringify({ data: form.data, schemaVersion: def.version, erasedAt: stamped.erasedAt });
+          await tx
+            .update(jobsTable)
+            .set({ args: sql`${jobsTable.args} || ${erasedCopy}::jsonb` })
+            .where(and(eq(jobsTable.kind, 'effect'), sql`${jobsTable.args}->>'id' = ${row.id}`));
+          await tx
+            .update(jobArchive)
+            .set({ args: sql`${jobArchive.args} || ${erasedCopy}::jsonb` })
+            .where(and(eq(jobArchive.kind, 'effect'), sql`${jobArchive.args}->>'id' = ${row.id}`));
           erased += 1;
         }
         // The row must match the history it now has. Repair on `tx` is a savepoint.

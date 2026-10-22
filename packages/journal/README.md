@@ -692,14 +692,14 @@ const worker = journal.worker(db, {
 
 The two lanes side by side:
 
-|                | Effect row                        | Queue row                                    |
-| -------------- | --------------------------------- | -------------------------------------------- |
-| `kind`         | `effect`                          | `queue`                                      |
-| Written by     | a journal write                   | `runAfter(tx, job, args)` in any transaction |
-| Needs an event | yes (`event_seq`, `effect`)       | no (`job_name`, `args`)                      |
-| Run by         | the effect handler in the journal | the `jobs` runner                            |
-| Retry          | the effect's `retry`              | the runner's `retryDelay`                    |
-| Dedupe         | one row per event and effect      | optional `dedupe_key`, per job name          |
+|                | Effect row                                          | Queue row                                    |
+| -------------- | --------------------------------------------------- | -------------------------------------------- |
+| `kind`         | `effect`                                            | `queue`                                      |
+| Written by     | a journal write                                     | `runAfter(tx, job, args)` in any transaction |
+| Needs an event | yes: its copy in `args` (and `event_seq`, `effect`) | no (`job_name`, `args`)                      |
+| Run by         | the effect handler in the journal                   | the `jobs` runner                            |
+| Retry          | the effect's `retry`                                | the runner's `retryDelay`                    |
+| Dedupe         | one row per event and effect                        | optional `dedupe_key`, per job name          |
 
 What a queue row promises:
 
@@ -1409,7 +1409,7 @@ journal_jobs
   event_seq     bigint references journal_events(seq) -- effect rows only
   effect        varchar(128)                          -- effect rows only
   job_name      varchar(128)                          -- queue rows only
-  args          jsonb                                 -- queue rows only; JSON null is allowed
+  args          jsonb                                 -- queue rows: the input (JSON null is allowed); effect rows: the job's copy of its journal_events row
   dedupe_key    varchar(256)                          -- queue rows only; optional
   priority      integer not null default 0 -- from the effect's schedule; higher first
   attempts      integer not null default 0
@@ -1422,7 +1422,7 @@ journal_jobs
   replay_of     text                      -- the archived job id a replay came from
   unique (event_seq, effect)
   unique (job_name, dedupe_key) where dedupe_key is not null
-  check journal_jobs_kind_check             -- an effect row has event_seq and effect and no job_name, args or dedupe_key;
+  check journal_jobs_kind_check             -- an effect row has event_seq, effect and args and no job_name or dedupe_key;
                                             -- a queue row has job_name and args and no event_seq or effect
   index (priority desc, available_at) where dead_at is null
 
@@ -1466,6 +1466,8 @@ journal_job_operations
 ```
 
 `kind = 'effect'` rows are the rows the journal always had. `unique (event_seq, effect)` stays. NULLs are distinct, so queue rows never collide on it. The due index serves both kinds. A dedupe key is scoped to its `job_name`.
+
+**Effect rows carry their event.** `args` holds the `journal_events` row the write inserted, as JSON. The worker, `journal.job` and the workflow runner read the event from there and never join `journal_events`, so a job runs the same whether or not its entity keeps event rows. The copy is decoded as replay decodes a row, so upcasters apply to a job queued before a release. `StoredEventRow` from `@arki/journal/pg` parses `args` back to the row type (its timestamps come back as `Date`). The copy is also in `journal_job_archive` for as long as the archive keeps the job (7 days by default): `forget` rewrites both copies in the same transaction as the event row.
 
 **Migrating an existing app.** Run `drizzle-kit generate`. The new migration drops `NOT NULL` on `event_seq` and `effect`, adds the four columns and the check, and creates the dedupe index. Every statement is additive or relaxes a constraint. Existing rows take the default `kind = 'effect'` and pass the check. The check scans the table once. The table is small, because rows are deleted on success. If it holds very many dead rows, edit the generated SQL to add the check as `NOT VALID` and run `VALIDATE CONSTRAINT` after.
 

@@ -17,11 +17,12 @@ import type { AsyncSchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { Deadline } from '@arki/async';
 import { defineFailure, InvalidInput, isAsyncSchemaFailure, isFailure, orThrow, ValidatorDefect } from '@arki/failure';
-import { parseAsync } from '@arki/schema';
+import { ensure, parseAsync } from '@arki/schema';
 
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
 import type { CommandFailure } from '../errors.js';
 import type { JournalTables } from '../pg.js';
+import { StoredEventRow } from '../pg.js';
 import type { JobRetention, RetentionAge } from '../retention.js';
 import type {
   DbHandle,
@@ -1024,17 +1025,17 @@ export function createWorkflows<
   const cancelTimers = async (tx: Tx, runId: string, gone: { readonly park: boolean; readonly deadline: boolean }) => {
     const types = [...(gone.park ? ['Parked'] : []), ...(gone.deadline ? ['RunStarted'] : [])];
     if (types.length === 0) return;
+    // The event type is read from the job's own event copy, so this needs no `journal_events` row.
     const pending = await tx
       .select({ id: tables.jobs.id })
       .from(tables.jobs)
-      .innerJoin(tables.events, eq(tables.events.seq, tables.jobs.eventSeq))
       .where(
         and(
           eq(tables.jobs.runId, runId),
           eq(tables.jobs.effect, TIMER_EFFECT),
           isNull(tables.jobs.deadAt),
           or(isNull(tables.jobs.leaseUntil), lte(tables.jobs.leaseUntil, sql`now()`)),
-          inArray(tables.events.type, types),
+          inArray(sql`${tables.jobs.args}->>'type'`, types),
         ),
       );
     for (const job of pending) {
@@ -1841,12 +1842,17 @@ export function createWorkflows<
    */
   const deadJobsOf = async (tx: Tx, runId: string) => {
     const rows = await tx
-      .select({ id: tables.jobs.id, data: tables.events.data })
+      .select({ id: tables.jobs.id, args: tables.jobs.args })
       .from(tables.jobs)
-      .leftJoin(tables.events, eq(tables.events.seq, tables.jobs.eventSeq))
       .where(and(eq(tables.jobs.runId, runId), sql`${tables.jobs.deadAt} IS NOT NULL`))
       .orderBy(asc(tables.jobs.deadAt), asc(tables.jobs.id));
-    return rows.map(row => ({ id: row.id, node: jobNodeSchema.parse(row.data ?? {}) }));
+    // The node is in the event copy the job carries; a workflow job is always an effect job.
+    return rows.map(row => ({
+      id: row.id,
+      node: jobNodeSchema.parse(
+        row.args === null ? {} : (ensure(row.args, StoredEventRow, { at: `journal: job ${row.id} args` }).data ?? {}),
+      ),
+    }));
   };
   /**
    * `retryStep`: a dead step runs again. A failed `do` or `undo` row gets its next attempt with the same key. A failed

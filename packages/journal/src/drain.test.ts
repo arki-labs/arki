@@ -16,12 +16,15 @@ let client: PGlite;
 let next = 0;
 
 const calls: { jobId: string; type: string; signalAborted: boolean }[] = [];
+/** The data of the last event the mail effect ran with. */
+let lastData: unknown;
 let failMail = false;
 
 const mail = j
   .effect('order-mail', order, {
     OrderPaid: (e, { jobId, signal }) => {
       calls.push({ jobId, type: e.type, signalAborted: signal.aborted });
+      lastData = e.data;
       if (failMail) throw new Error('smtp down');
     },
   })
@@ -66,6 +69,34 @@ describe('drain', () => {
     const job = await placeAndPay();
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
     expect(calls.at(-1)).toEqual({ jobId: job.id, type: 'OrderPaid', signalAborted: false });
+    expect(await jobById(job.id)).toBeNull();
+  });
+
+  it('an effect job carries its event: `args` is the stored event row, as JSON', async () => {
+    // Why: the job must be able to run without `journal_events` (an entity may keep no history),
+    // so the writer puts the whole stored row in the job. The copy is byte-for-byte the row,
+    // with its dates as ISO strings, so one schema decodes it back to the row type.
+    const job = await placeAndPay();
+    if (job.eventSeq === null) throw new Error('no event seq');
+    const [stored] = await db.select().from(tables.events).where(eq(tables.events.seq, job.eventSeq));
+    expect(job.args).toEqual(JSON.parse(JSON.stringify(stored)));
+    expect(job.args).toMatchObject({ type: 'OrderPaid', data: { amount: 1 }, recordedAt: expect.any(String) });
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
+  });
+
+  it('an effect runs from the job’s own copy of the event, so it no longer depends on journal_events', async () => {
+    // Why: a job that read the event back by `event_seq` could not run for an entity whose events
+    // are not stored. The proof: the stored row is changed under the job, and the effect still sees
+    // the data the write recorded.
+    const job = await placeAndPay();
+    if (job.eventSeq === null) throw new Error('no event seq');
+    await db
+      .update(tables.events)
+      .set({ data: { amount: 999 } })
+      .where(eq(tables.events.seq, job.eventSeq));
+    expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
+    expect(calls.at(-1)?.jobId).toBe(job.id);
+    expect(lastData).toEqual({ amount: 1 });
     expect(await jobById(job.id)).toBeNull();
   });
 

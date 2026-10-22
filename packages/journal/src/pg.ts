@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
 
 import type { WorkflowShape } from './workflow/shape.js';
 import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js';
@@ -67,13 +68,16 @@ export function journalTables(schema?: PgSchema) {
       id: varchar('id').primaryKey(),
       /** `effect`: an effect's job for one event. `queue`: a job scheduled by a runner (`@arki/queue/outbox`). */
       kind: varchar('kind', { length: 8 }).notNull().default('effect').$type<'effect' | 'queue'>(),
-      /** Set on `effect` rows only. */
+      /** Set on `effect` rows only: the seq of the stored event. The worker never reads the event by it; `args` holds the copy it runs. */
       eventSeq: bigint('event_seq', { mode: 'number' }).references(() => events.seq),
       /** Set on `effect` rows only. */
       effect: varchar('effect', { length: 128 }),
       /** Set on `queue` rows only: the persisted job name the runner looks up. */
       jobName: varchar('job_name', { length: 128 }),
-      /** Set on `queue` rows only: the job's input as plain JSON, parsed by the runner. */
+      /**
+       * `queue` rows: the job's input as plain JSON, parsed by the runner.
+       * `effect` rows: the job's own copy of the `journal_events` row it is for, decoded by `StoredEventRow`.
+       */
       args: jsonb('args'),
       /** `queue` rows only, optional: one unfinished row per job name and key. */
       dedupeKey: varchar('dedupe_key', { length: 256 }),
@@ -104,7 +108,7 @@ export function journalTables(schema?: PgSchema) {
       // Each kind sets its own columns and leaves the other kind's empty.
       check(
         'journal_jobs_kind_check',
-        sql`(${t.kind} = 'effect' and ${t.eventSeq} is not null and ${t.effect} is not null and ${t.jobName} is null and ${t.args} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
+        sql`(${t.kind} = 'effect' and ${t.eventSeq} is not null and ${t.effect} is not null and ${t.args} is not null and ${t.jobName} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
       ),
       uniqueIndex('journal_jobs_queue_dedupe_unique')
         .on(t.jobName, t.dedupeKey)
@@ -351,6 +355,36 @@ export function journalTables(schema?: PgSchema) {
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;
+
+/** A `timestamptz` column after a JSON round trip: an ISO string in, a `Date` out. */
+const jsonTimestamp = z.codec(z.iso.datetime({ offset: true }), z.date(), {
+  decode: text => new Date(text),
+  encode: date => date.toISOString(),
+});
+
+/**
+ * A `journal_events` row as an effect job's `args` holds it: the row the write inserted, after the
+ * jsonb round trip. Its output is exactly the row type (`JournalTables['events']['$inferSelect']`),
+ * so the worker decodes the copy as it would decode the stored row. The type is the table's; this
+ * schema only brings the timestamps back from their JSON strings.
+ */
+export const StoredEventRow = z.object({
+  seq: z.int(),
+  id: z.string(),
+  kind: z.string(),
+  entityId: z.string(),
+  version: z.int(),
+  type: z.string(),
+  data: z.unknown(),
+  meta: z.unknown(),
+  recordedAt: jsonTimestamp,
+  commandId: z.string().nullable(),
+  causeSeq: z.int().nullable(),
+  correlationId: z.string().nullable(),
+  erasedAt: jsonTimestamp.nullable(),
+  schemaVersion: z.int(),
+});
+export type StoredEventRow = JournalTables['events']['$inferSelect'];
 /** The node manifest a run stores in `workflow_runs.shape`, the type of that column. */
 export type { WorkflowShape } from './workflow/shape.js';
 
