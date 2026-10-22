@@ -1,7 +1,7 @@
 # RFC: one way to define middleware in Dot
 
 - Date: 2026-10-21 (revised 2026-10-22)
-- Status: Proposed. Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI) and 3 (handler events) built; steps 4–6 open.
+- Status: Proposed. Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI), 3 (handler events) and 4 (auth steps, keyed `derive` deleted) built; steps 5–6 open.
 - Designer: Fable (survey, design, two placement passes, `around` check). File references come from those passes; recheck them when a step starts.
 
 ## 1. The shape in one sentence
@@ -60,7 +60,7 @@ Nothing is shared at runtime, so nothing needs a home. A step's types come from 
 // apps/<app>/backend/src/core/middleware.ts — written once, no Arki import needed
 export const authed = (ctx: { principal: Principal | null }) =>
   ctx.principal === null ? AuthenticationRequired() : { principal: ctx.principal };
-export const admin = (ctx: { principal: Principal }) => (isAdminEmail(ctx.principal.user.email) ? {} : AccessDenied());
+export const admin = (ctx: { principal: Principal }) => (isAdminEmail(ctx.principal.user.email) ? { isAdmin: true } : AccessDenied());
 export const inTransaction = <T>(ctx: { db: Db }, next: () => Promise<T>) => ctx.db.transaction(next);
 
 // RPC — step / around from '@arki/dot/orpc'
@@ -101,7 +101,7 @@ Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24,
 1. **oRPC** — done: `step`, `around`, `rpcError`, type and runtime tests.
 2. **HTTP, queue, schedule, CLI** — done: see § 11.
 3. **Handler events** — done: see § 12.
-4. Auth core steps as plain functions; delete `guards()`, `withPrincipal`, `authorize`. Delete `@arki/http`'s keyed `derive(key, fn)` in the same change: `withPrincipal` / `withOptionalPrincipal` are its main users, so it goes when they become steps (plus one novelette call site, `apps/novelette/server/src/plugins/server-info.ts`).
+4. **Auth** — done: see § 13. Auth core steps as plain functions; delete `guards()`, `withPrincipal`, `authorize`. Delete `@arki/http`'s keyed `derive(key, fn)` in the same change: `withPrincipal` / `withOptionalPrincipal` are its main users, so it goes when they become steps (plus one novelette call site, `apps/novelette/server/src/plugins/server-info.ts`).
 5. Migrate apps, one app per commit. Novelette's legacy `publicProcedure` / `protectedProcedure` go with its move to `defineFeature`.
 6. Docs: `packages/dot/docs/di.md`, `@arki/auth`, `@arki/http`, `@arki/queue`, `@arki/schedule`, `@arki/cli` READMEs; changesets (0.x: minor).
 
@@ -140,3 +140,15 @@ Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24,
 - `errorCaptureMiddleware` is gone; `reportErrors({ report })` keeps its rule. avocabo moved to it (`apps/avocabo/backend/src/entrypoints/middleware.ts`, `app.ts`).
 - CLI commands emit nothing: no app runs `defineCommand` inside Dot, and `@arki/cli` cannot import Dot.
 
+## 13. Step 4 result (auth steps, keyed `derive` deleted)
+
+Founder decisions (2026-10-22): migrate every app's guards in this step, one commit per app, so nothing is ever broken (this pulls the auth part of step 5 forward); policy checks keep their per-transport wrappers, because a policy loads its subject from the input and a step sees only the context.
+
+- `@arki/auth` root: `authed`, `verified`, `role(name)` as plain functions (`packages/auth/src/steps.ts`). Each is generic in the principal, so `step(authed)` keeps the app's own principal type on oRPC and HTTP; no `guards<C>()` factory is needed. Refusals and codes are unchanged.
+- `@arki/auth/orpc`: `guards()` is deleted. `can(policies)(name, load)` is a standalone export with the same behaviour and the same `ARKI_AUTH_E008` meta check; its loader context is inferred from the `.use()` that attaches it. `assert*` helpers unchanged.
+- `@arki/auth/http`: `withPrincipal` and `withOptionalPrincipal` are deleted. `principalFromHeaders(auth)` is a step that reads `ctx.req` and adds `principal` (`null` for a guest); a signed-in route adds `step(authed)` after it, each with `{ failureHeaders: authFailureHeaders }` for the challenge. `authorize` stays (D: per-transport policy wrappers).
+- `@arki/http`: `derive(key, fn)`, the bundle's `.derive()` and the keyed-deriver stage are deleted, with `Deriver`, `ErasedDeriver`, `BASE_CTX_KEYS` and `ARKI_HTTP_E007` (duplicate key), which only `derive` used. `verifyWebhook({ scheme })` is a step: `routes().use(step(verifyWebhook({ scheme })))` adds `webhook`. `@arki/live`'s endpoint and novelette's `server-info.ts` moved to steps. The bundle field `derivers` is renamed `stages` (founder, 2026-10-22).
+- Bug found and fixed: since `e5d1248e93` the base context's `url` and `signal` are prototype getters, and the stage loop's `{ ...ctx, ...added }` dropped them, so any stage after the first saw `ctx.url === undefined` (61 `@arki/live` tests failed at HEAD). The loop now copies both as own keys (`extendCtx`); only routes with stages pay for the URL parse. A test pins it.
+- Typing trap, all transports: a step whose success is the empty object (`ok ? {} : AccessDenied()`) loses its failure from the type, because TypeScript reduces `{} | Failure` to `{}`; the route then need not declare it. Return a non-empty object (`{ isAdmin: true }`). The § 5 sketch is fixed; `@arki/http`'s agent guide warns about it.
+- Apps: 23 backends and the app template replace `guards<C>()` with `step(authed)` from `@arki/dot/orpc` (avocabo 217 call sites, novelette 139, the rest one `protectedProcedure` each). avocabo's one `can` imports it directly. Other ad-hoc app middleware (`admin`, permission factories) is step 5.
+- Benchmark (in-process, min-of-N CPU µs/req, load average 24–212): within noise; two runs of the same code differ more than before and after.
