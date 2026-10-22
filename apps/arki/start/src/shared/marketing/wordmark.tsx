@@ -20,6 +20,15 @@ export function Wordmark() {
   );
 }
 
+/** Only the accent dot, for the header of pages whose hero already shows the letters. */
+export function BrandDot() {
+  return (
+    <svg className="home-brand-dot" viewBox="389 154.5 65 65" aria-hidden="true">
+      <circle className="home-wordmark-dot" cx="421.5" cy="187" r="32.5" />
+    </svg>
+  );
+}
+
 /** The hero wordmark: the bubble sits where the dot is, over a soft glow. */
 export function HeroMark() {
   return (

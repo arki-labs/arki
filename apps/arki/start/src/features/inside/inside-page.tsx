@@ -142,7 +142,7 @@ export function InsidePage() {
     <GlossaryProvider>
       <div className="home inside" ref={stage}>
         <div className="home-wrap">
-          <HomeHeader current="/inside" />
+          <HomeHeader current="/inside" brand="dot" />
           <section className="home-hero" aria-labelledby="inside-title">
             <HeroMark />
             <div>

@@ -75,6 +75,11 @@
 .home-wordmark-dot {
   fill: var(--primary);
 }
+.home-brand-dot {
+  display: block;
+  width: 26px;
+  height: auto;
+}
 .home-nav {
   display: flex;
   flex: 1 1 auto;
@@ -117,6 +122,9 @@
   }
   .home-wordmark {
     width: 120px;
+  }
+  .home-brand-dot {
+    width: 30px;
   }
   .home-nav a {
     padding: 0 9px;
@@ -480,6 +488,7 @@
 .home-note code,
 .home-ctext code,
 .home-card code,
+.home-model code,
 .home-pane code {
   padding: 1px 4px;
   background: var(--muted);
@@ -1457,6 +1466,31 @@
 .home-card code {
   font-size: 11.5px;
 }
+.home-model {
+  display: grid;
+  margin-top: 18px;
+  border-top: 1px solid var(--home-line);
+}
+.home-model > div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1.6fr);
+  align-items: start;
+  gap: 10px 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-model b {
+  display: block;
+  color: var(--primary);
+  font: 600 11px/1.2 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.home-model p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+}
 .home-waves {
   display: grid;
   margin-top: 18px;
@@ -1892,7 +1926,8 @@
   .home-rooms {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .home-wave {
+  .home-wave,
+  .home-model > div {
     grid-template-columns: minmax(0, 1fr);
   }
 }

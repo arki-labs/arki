@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 
 import { ModeSwitch } from './mode-switch';
-import { Wordmark } from './wordmark';
+import { BrandDot, Wordmark } from './wordmark';
 
 const REPO = 'https://github.com/arki-labs/arki';
 
@@ -34,12 +34,18 @@ function SiteLinks({ current }: Readonly<{ current?: SiteHref }>) {
   );
 }
 
-/** The wordmark and the main links, shared by the homepage and the pages that wear its frame. */
-export function HomeHeader({ current }: Readonly<{ current?: SiteHref }>) {
+/**
+ * The brand link and the main links, shared by the homepage and the pages that wear its frame.
+ * Pages whose hero already shows the big mark pass `brand="dot"` so the letters appear once.
+ */
+export function HomeHeader({
+  current,
+  brand = 'wordmark',
+}: Readonly<{ current?: SiteHref; brand?: 'wordmark' | 'dot' }>) {
   return (
     <header className="home-bar">
       <a className="home-brand" href="/" aria-label="arki home">
-        <Wordmark />
+        {brand === 'dot' ? <BrandDot /> : <Wordmark />}
       </a>
       <nav className="home-nav" aria-label="Main navigation">
         <SiteLinks current={current} />

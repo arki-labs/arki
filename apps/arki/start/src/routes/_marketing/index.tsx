@@ -6,7 +6,7 @@ import { BuildPath } from '~/shared/marketing/build-path';
 import { BUILD_STEPS } from '~/shared/marketing/build-steps';
 import { Elevation } from '~/shared/marketing/elevation';
 import { GlossaryProvider } from '~/shared/marketing/glossary-term';
-import { BuiltWith, Materials, StartHere } from '~/shared/marketing/home-bands';
+import { BuiltWith, Materials, MentalModel, StartHere } from '~/shared/marketing/home-bands';
 import { HomeFooter, HomeHeader } from '~/shared/marketing/home-chrome';
 import { HeroMark } from '~/shared/marketing/wordmark';
 import homeCss from '~/styles/home.css?url';
@@ -33,7 +33,7 @@ function HomePage() {
     <GlossaryProvider>
       <div className="home" ref={stage}>
         <div className="home-wrap">
-          <HomeHeader />
+          <HomeHeader brand="dot" />
           <div className="home-hero">
             <HeroMark />
             <div>
@@ -57,6 +57,7 @@ function HomePage() {
             <BuildPath />
             <Elevation stage={stage} />
           </div>
+          <MentalModel />
           <BuiltWith />
           <Materials />
           <StartHere />
