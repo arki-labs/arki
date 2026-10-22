@@ -1,7 +1,7 @@
 # RFC: one way to define middleware in Dot
 
 - Date: 2026-10-21 (revised 2026-10-22)
-- Status: Proposed. Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI), 3 (handler events) and 4 (auth steps, keyed `derive` deleted) built; steps 5–6 open.
+- Status: Proposed. Founder decisions D1–D14 taken. Steps 1 (oRPC), 2 (HTTP, queue, schedule, CLI), 3 (handler events), 4 (auth steps, keyed `derive` deleted) and 5 (app guards) built; step 6 open.
 - Designer: Fable (survey, design, two placement passes, `around` check). File references come from those passes; recheck them when a step starts.
 
 ## 1. The shape in one sentence
@@ -102,7 +102,7 @@ Migration in `apps/*/backend/src` (Fable's count, non-test files): `guards<` 24,
 2. **HTTP, queue, schedule, CLI** — done: see § 11.
 3. **Handler events** — done: see § 12.
 4. **Auth** — done: see § 13. Auth core steps as plain functions; delete `guards()`, `withPrincipal`, `authorize`. Delete `@arki/http`'s keyed `derive(key, fn)` in the same change: `withPrincipal` / `withOptionalPrincipal` are its main users, so it goes when they become steps (plus one novelette call site, `apps/novelette/server/src/plugins/server-info.ts`).
-5. Migrate apps, one app per commit. Novelette's legacy `publicProcedure` / `protectedProcedure` go with its move to `defineFeature`.
+5. **Apps** — done: see § 14. Migrate apps, one app per commit. Novelette's legacy `publicProcedure` / `protectedProcedure` go with its move to `defineFeature`.
 6. Docs: `packages/dot/docs/di.md`, `@arki/auth`, `@arki/http`, `@arki/queue`, `@arki/schedule`, `@arki/cli` READMEs; changesets (0.x: minor).
 
 ## 9. Risks
@@ -152,3 +152,14 @@ Founder decisions (2026-10-22): migrate every app's guards in this step, one com
 - Typing trap, all transports: a step whose success is the empty object (`ok ? {} : AccessDenied()`) loses its failure from the type, because TypeScript reduces `{} | Failure` to `{}`; the route then need not declare it. Return a non-empty object (`{ isAdmin: true }`). The § 5 sketch is fixed; `@arki/http`'s agent guide warns about it.
 - Apps: 23 backends and the app template replace `guards<C>()` with `step(authed)` from `@arki/dot/orpc` (avocabo 217 call sites, novelette 139, the rest one `protectedProcedure` each). avocabo's one `can` imports it directly. Other ad-hoc app middleware (`admin`, permission factories) is step 5.
 - Benchmark (in-process, min-of-N CPU µs/req, load average 24–212): within noise; two runs of the same code differ more than before and after.
+
+## 14. Step 5 result (app guards)
+
+Founder decisions (2026-10-22): guards refuse with `@arki/auth`'s `AccessDenied` (`auth.forbidden`, 403), not a per-app `FORBIDDEN`; the steps are named `admin`, `permitted(resource, action)` and `anyRole(roles)`; `roleProcedure` is converted although nothing calls it; timing and error-handling middleware stay oRPC middleware in apps that do not run on Dot.
+
+- Only avocabo, lottomato and novelette mount procedures through Dot's `bind`. The other 20 backends build them from plain `os`, so handler events never see them, and an around gets no procedure path. Their `timingMiddleware`, `errorHandlingMiddleware`, `commandErrors()` and hyphenate's `rateLimitMiddleware` (it wraps `next`; no rate-limit failure exists) stay native.
+- 18 backends (arki, brandability, diffdigg, domodoro, ekuation, everseek, evervest, foreman, forkworks, games-platform, kapodopera, loonyjobs, loonytools, manuscribed, solitairium, sudoku, toolsforwords, typeroom): `createAuthorizeMiddleware` / `createRoleMiddleware` / `adminMiddleware` become the steps `permitted`, `anyRole` and `admin`; each keeps its app's own check (repo, `db` helper or email allowlist). Every builder declares `.errors(errorMap(AccessDenied))`, and dropping it is a compile error (checked once per app). toolsforwords' `originMiddleware` is the step `allowedOrigin`. hyphenate and ucssr had nothing to convert.
+- Wire change: a refused admin, role or permission call answers `auth.forbidden` (403). In brandability, diffdigg, domodoro, everseek, games-platform, manuscribed and sudoku the old admin guard answered `UNAUTHORIZED` (401) to a signed-in non-admin; that is now 403. Tests that matched the old codes moved (games-platform, kapodopera, novelette, avocabo); avocabo's two admin pages match `auth.forbidden`.
+- avocabo: `admin` checks sign-in itself (`AuthenticationRequired` or `AccessDenied`), so admin sites drop the extra `step(authed)`; `cronSecret` is a step refusing with `AuthenticationRequired` (one message instead of three; Start's `verifyCronSecret` still answers first). Timing is `logHandlers()` plus `around(devDelay)`. The admin-gate tests call through the real chain instead of matching middleware identity, because `step()` makes a new function each call. `idempotency` stays native (it reads the output).
+- lottomato: timing is `logHandlers()` plus `around(devDelay)`; `errorHandling` stays. novelette: `admin` is a step after `step(authed)`; the six admin contracts declare `AccessDenied`. Novelette's legacy `publicProcedure` / `protectedProcedure` were already gone.
+- Open: avocabo's cron contract declares its error with `oc.errors(...).router(cronSchedules)`, but `cronRouterFor` still takes the plain `cronSchedules` (it infers the names from that exact type); an `errors` option on `defineCronContract` in `@arki/schedule` would remove the second object. forkworks keeps a pre-existing `'ADMIN' as UserRole` cast.
