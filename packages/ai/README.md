@@ -142,26 +142,26 @@ The tombstone table is written once. Pass it the column kit for your database. T
 import { pgSchema } from 'drizzle-orm/pg-core';
 
 import { createTombstoneTable, tombstoneOutbox } from '@arki/ai/drizzle';
+import { defineId } from '@arki/contracts';
 import { pgColumns } from '@arki/db/pg';
 
-type UserId = `u_${string}`;
-
-const tombstones = createTombstoneTable<'pg', UserId, 'vtmb_'>(pgColumns(pgSchema('app')), {
+const tombstones = createTombstoneTable(pgColumns(pgSchema('app')), {
   name: 'vector_tombstones',
   idPrefix: 'vtmb_',
+  userId: defineId('usr_'), // types `user_id`
 });
 export const outbox = tombstoneOutbox(tombstones.table);
 ```
 
 ```ts
 import { createTombstoneTable, sqliteTombstoneOutbox } from '@arki/ai/drizzle/sqlite';
+import { defineId } from '@arki/contracts';
 import { sqliteColumns } from '@arki/db/sqlite';
 
-type UserId = `u_${string}`;
-
-const tombstones = createTombstoneTable<'sqlite', UserId, 'vtmb_'>(sqliteColumns(), {
+const tombstones = createTombstoneTable(sqliteColumns(), {
   name: 'vector_tombstones',
   idPrefix: 'vtmb_',
+  userId: defineId('usr_'),
 });
 export const outbox = sqliteTombstoneOutbox(tombstones.table);
 ```

@@ -18,7 +18,7 @@ import { chunksOf, TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chun
 export { createTombstoneTable, type TombstoneTableOptions } from './tables';
 export { TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks';
 
-/** The base table shape (unbranded); a branded table from `createTombstoneTable<UserId, 'vtmb_'>` extends it. */
+/** The base table shape (unbranded); a branded table (`userId: defineId('usr_')`) extends it. */
 export type TombstoneTable = ReturnType<typeof createTombstoneTable<'pg', string, string>>['table'];
 
 /** A Drizzle Postgres database or transaction — only what the outbox uses. */

@@ -16,7 +16,7 @@ import { chunksOf, TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chun
 export { createTombstoneTable, type TombstoneTableOptions } from './tables';
 export { TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks';
 
-/** The base table shape (unbranded); a branded table from `createTombstoneTable<'sqlite', UserId, 'vtmb_'>` extends it. */
+/** The base table shape (unbranded); a branded table (`userId: defineId('usr_')`) extends it. */
 export type SqliteTombstoneTable = ReturnType<typeof createTombstoneTable<'sqlite', string, string>>['table'];
 
 /** A Drizzle SQLite database or transaction — only what the outbox uses. */

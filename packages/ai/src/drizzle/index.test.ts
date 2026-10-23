@@ -13,8 +13,8 @@ import { pgSchema } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import type { IdGenerationFailure, z } from '@arki/contracts';
-import { RandomSourceUnavailable } from '@arki/contracts';
+import type { IdGenerationFailure, IdOf, z } from '@arki/contracts';
+import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { createLibsqlDb } from '@arki/db/libsql';
 import { pgColumns } from '@arki/db/pg';
 import { sqliteColumns } from '@arki/db/sqlite';
@@ -23,7 +23,9 @@ import { createTombstoneTable, tombstoneOutbox } from './index';
 import { sqliteTombstoneOutbox } from './sqlite';
 
 /** The app's user id brand, as the tables type it. */
-type UserId = `u_${string}`;
+/** The test's user-id declaration; `user_id` is typed by it. */
+const userId = defineId('u_');
+type UserId = IdOf<typeof userId>;
 
 /** One row as the reconciler sees it. */
 type TombstoneRow = { id: string; pointId: string };
@@ -107,9 +109,10 @@ function describeTombstoneOutbox(dialect: string, ops: OutboxOps): void {
 
 const schema = pgSchema('ai_test');
 const pgKit = pgColumns(schema);
-const { table: PgTombstone, id: pgTombstoneId } = createTombstoneTable<'pg', UserId, 'vtmb_'>(pgKit, {
+const { table: PgTombstone, id: pgTombstoneId } = createTombstoneTable(pgKit, {
   name: 'vector_tombstones',
   idPrefix: 'vtmb_',
+  userId,
 });
 const pgOutbox = tombstoneOutbox(PgTombstone);
 
@@ -136,7 +139,7 @@ afterAll(async () => {
 
 describe('createTombstoneTable on Postgres', () => {
   it.each(['', 'old-/ .'])('preserves existing arbitrary prefix %j through declarations and column schemas', prefix => {
-    const { table, id } = createTombstoneTable(pgKit, { name: 'prefix_compat', idPrefix: prefix });
+    const { table, id } = createTombstoneTable(pgKit, { name: 'prefix_compat', idPrefix: prefix, userId });
     const generated = id.create();
     expect(id.prefix).toBe(prefix);
     expect(id.schema.safeParse(generated).success).toBe(true);
@@ -204,10 +207,11 @@ describeTombstoneOutbox('Postgres', {
 
 // ── SQLite (libSQL, in memory) ───────────────────────────────
 
-const { table: SqliteTombstone, id: sqliteTombstoneId } = createTombstoneTable<'sqlite', UserId, 'vtmb_'>(
-  sqliteColumns(),
-  { name: 'vector_tombstones', idPrefix: 'vtmb_' },
-);
+const { table: SqliteTombstone, id: sqliteTombstoneId } = createTombstoneTable(sqliteColumns(), {
+  name: 'vector_tombstones',
+  idPrefix: 'vtmb_',
+  userId,
+});
 const sqliteOutbox = sqliteTombstoneOutbox(SqliteTombstone);
 
 const { db: sqliteDb, close: closeSqlite } = createLibsqlDb({

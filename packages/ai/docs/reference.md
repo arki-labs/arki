@@ -49,7 +49,7 @@ const index =
 `runVectorReconciliation` drains erasure tombstones (durable index only), migrates dimension mismatches, re-upserts current rows, then deletes points whose rows stopped being current while they were upserted. Run it from cron. Each call handles at most `ROW_CAP_PER_RUN` rows and `TOMBSTONE_CAP_PER_RUN` tombstones.
 
 - `@arki/ai/dot`: `vectorIndex({ collection, payloadIndexes, env?, runtime?, provider? })` provides `embedder` and `vectorIndex`. Resolved once at boot. Optional peer: `@arki/dot`.
-- `@arki/ai/drizzle`: `createTombstoneTable<'pg', UserId>(pgColumns(schema), { name, idPrefix })` and `tombstoneOutbox(table)` with `write(tx, userId, pointIds)` (in the delete's transaction), `clear(db, pointIds)` and `store(db)`. `@arki/ai/drizzle/sqlite` is the SQLite twin (`createTombstoneTable<'sqlite', UserId>(sqliteColumns(), …)`, `sqliteTombstoneOutbox`). Optional peers: `drizzle-orm`, `@arki/db`.
+- `@arki/ai/drizzle`: `createTombstoneTable(pgColumns(schema), { name, idPrefix, userId })` and `tombstoneOutbox(table)` with `write(tx, userId, pointIds)` (in the delete's transaction), `clear(db, pointIds)` and `store(db)`. `@arki/ai/drizzle/sqlite` is the SQLite twin (`createTombstoneTable(sqliteColumns(), …)`, `sqliteTombstoneOutbox`). Optional peers: `drizzle-orm`, `@arki/db`.
 
 ## The tool loop
 
