@@ -41,7 +41,7 @@ import { ollamaModelOptionsSchema } from './ollama/index.js';
 import { openaiModelOptionsSchema } from './openai/index.js';
 import { openaiCompatibleModelOptionsSchema } from './openai-compatible/index.js';
 import { rerankCacheOptionsSchema, rerankCallOptionsSchema, rerankOptionsSchema } from './rerank/index.js';
-import { embedOptionsSchema } from './schemas.js';
+import { embedOptionsSchema } from './embed.js';
 import { sparseEmbedOptionsSchema, sparseModelOptionsSchema } from './sparse/index.js';
 import { embedStreamOptionsSchema } from './stream.js';
 import { teiRerankerOptionsSchema } from './tei/index.js';

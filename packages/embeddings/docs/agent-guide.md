@@ -183,3 +183,13 @@ cd packages/embeddings && bun run test:docs
 cd packages/embeddings && bun run test:runtimes
 bun tooling/library/src/llms.ts --check
 ```
+
+Then ask the running app what this package added. Run both from the app root.
+
+```sh
+dot explain --json | jq '.data'
+dot doctor --json | jq '.data'
+```
+
+- `dot explain --json` shows the `embeddings` unit and the `embedder` it provides.
+- `dot doctor --json` shows whether the app boots with the `embeddings` unit, and lists any issue. A model that did not build does not stop the boot: `embedder` is `null`, and the log has the warning `embeddings are off, embedder is null`.

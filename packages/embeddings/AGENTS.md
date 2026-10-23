@@ -14,6 +14,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 8. A new failure is defined once in `src/failures.ts` with `defineFailure`, with JSDoc `@fix` and `@verify`, and listed in `EMBED_FAILURES`.
 9. Types are written once. A model record's facts live in `EmbeddingModel`; do not restate them in an adapter.
 10. `fakeEmbedder` is not semantic. Never assert ranking by meaning against it.
+11. Every public options object has a Standard Schema (`embedOptionsSchema`, `cohereRerankerOptionsSchema`, and so on). A factory returns `ConfigurationFailure` on bad options; a per-call option throws through `assert`. Read one as JSON Schema with `schema['~standard'].jsonSchema.input({ target: 'draft-2020-12' })`.
 
 ## Changing this package
 
@@ -32,3 +33,13 @@ bun run test:docs
 bun run test:runtimes
 bun ../../tooling/library/src/llms.ts --check
 ```
+
+Then ask the running app what this package added. Run both from the app root.
+
+```sh
+dot explain --json | jq '.data'
+dot doctor --json | jq '.data'
+```
+
+- `dot explain --json` shows the `embeddings` unit and the `embedder` it provides.
+- `dot doctor --json` shows whether the app boots with the `embeddings` unit, and lists any issue. A model that did not build does not stop the boot: `embedder` is `null`, and the log has the warning `embeddings are off, embedder is null`.

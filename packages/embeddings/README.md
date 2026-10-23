@@ -1,6 +1,8 @@
 # @arki/embeddings
 
-Text → vectors for ARKI. One `Embedder` shape over every provider, every response checked, every expected failure returned as a value.
+Text → vectors and rerank. For vector, semantic and hybrid search see `@arki/search`.
+
+One `Embedder` shape over every provider, every response checked, every expected failure returned as a value.
 
 ## Install
 
@@ -44,13 +46,38 @@ export async function embedForIndex(embedder: Embedder, texts: readonly string[]
 ## When not to use this
 
 - Vector storage and search. This package makes vectors and compares nothing for you; `cosine` is for tests and rescoring.
-- Reranking. It is not in this release.
 - Multi-vector output (one vector per token). No adapter produces it.
 - Meaning-based assertions in tests with `fakeEmbedder`. Its vectors are not semantic (see [Testing](#testing)).
 
 ## Runtime support
 
-The root, `./ollama`, `./openai-compatible`, `./env`, `./kv` and `./testing` use only `fetch` and run on Node, Bun, Deno, in the browser and on Hermes. `./openai` loads its AI SDK peers on the first call, not at import, and needs Node or Bun. `./dot` needs `@arki/dot`, so Node or Bun. `./transformers` runs ONNX Runtime in process: Node and Bun (CPU), and the browser through Transformers.js' WebGPU or WASM backend. It does not run on Hermes, and Deno is not claimed. Its smoke check downloads the model, so it runs only with `TRANSFORMERS_SMOKE=1`, and only on the Node and Bun legs: the browser is not yet covered by a smoke. The root imports no provider SDK, no `process.env` and no `node:*`.
+`yes` means the smoke script (`bun run test:runtimes`) runs that entry on that engine. `–` means the smoke does not run it, so nothing is claimed.
+
+| Entry                                | Node | Bun | Deno | Browser | Hermes |
+| ------------------------------------ | ---- | --- | ---- | ------- | ------ |
+| `@arki/embeddings`                   | yes  | yes | yes  | yes     | yes    |
+| `@arki/embeddings/ollama`            | yes  | yes | yes  | yes     | yes    |
+| `@arki/embeddings/openai-compatible` | yes  | yes | yes  | yes     | yes    |
+| `@arki/embeddings/kv`                | yes  | yes | yes  | yes     | yes    |
+| `@arki/embeddings/testing`           | yes  | yes | yes  | yes     | yes    |
+| `@arki/embeddings/openai`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/voyage`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/cohere`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/google`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/mistral`           | –    | –   | –    | –       | –      |
+| `@arki/embeddings/jina`              | –    | –   | –    | –       | –      |
+| `@arki/embeddings/bedrock`           | –    | –   | –    | –       | –      |
+| `@arki/embeddings/sparse`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/rerank`            | –    | –   | –    | –       | –      |
+| `@arki/embeddings/tei`               | –    | –   | –    | –       | –      |
+| `@arki/embeddings/dot`               | –    | –   | –    | –       | –      |
+| `@arki/embeddings/transformers`      | opt-in | opt-in | – | opt-in  | –      |
+
+- `package.json` declares Node, Bun, Deno, browser and Hermes for the package as a whole. It has no per-entry list.
+- The smoke also checks that every built entry imports in Node with an empty environment. An adapter entry whose optional peer is not installed is reported as incomplete, not as a failure.
+- `./transformers` in a browser downloads the model (about 300 MB), so that leg is opt-in. Set `TRANSFORMERS_SMOKE=1` to run it.
+- The Hermes leg runs only where `HERMES_BIN` is set.
+- The root imports no provider SDK, no `process.env` and no `node:*`. `./openai`, `./google`, `./mistral` and `./bedrock` load their AI SDK peers on the first call, not at import.
 
 Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embeddings`.
 
@@ -72,12 +99,24 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/rerank`            | `rerank(reranker, query, items, { text, topK?, onTooLong?, signal? })`, `withRerankCache(reranker, store)`, the `Reranker` type                                                                                                                                                                                                                                                                    | none                                      |
 | `@arki/embeddings/tei`               | `createTeiReranker({ id, baseURL, maxDocuments?, maxInputTokens? })`: a reranker on a TEI server's `/rerank`                                                                                                                                                                                                                                                                                       | none                                      |
 | `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                                                                                                                      | none                                      |
-| `@arki/embeddings/dot`               | `embeddings({ model?, cache?, resilience?, env? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                                                                                                            | `@arki/dot` (optional)                    |
+| `@arki/embeddings/dot`               | `embeddings({ model, cache?, resilience? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                                                                                                            | `@arki/dot` (optional)                    |
 | `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default; `await createTransformersReranker({ id?, dtype?, … })`: bge-reranker-v2-m3 `q8` or Qwen3-Reranker-0.6B in process                                                                                                              | `@huggingface/transformers` (optional)    |
 | `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline; `fakeReranker({ scores?, maxDocuments?, maxInputTokens? })`                                                                                                                                                                         | none                                      |
 
 Creating a model never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
+
+## Options schemas
+
+Every public options object has a Standard Schema, for example `embedOptionsSchema` and `cohereRerankerOptionsSchema`. Factories such as `createCohereReranker` return a `ConfigurationFailure` when the options are bad. Per-call options such as `embed`'s throw through `assert`, because a bad call option is a bug in the caller.
+
+To read a schema as JSON Schema:
+
+```ts
+import { embedOptionsSchema } from '@arki/embeddings';
+
+const jsonSchema = embedOptionsSchema['~standard'].jsonSchema.input({ target: 'draft-2020-12' });
+```
 
 ## Failure behaviour
 

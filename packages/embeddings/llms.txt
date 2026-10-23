@@ -5,23 +5,23 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_2_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`; and 52 more.
-- `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
-- `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
-- `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
-- `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`; the multimodal models use `POST /v1/multimodalembeddings`). `createVoyageModel`, `createVoyageReranker`; types `VoyageModelOptions`, `VoyageRerankerOptions`.
-- `@arki/embeddings/cohere`: Cohere over plain `fetch` (`POST /v2/embed`). `createCohereCompatibleReranker`, `createCohereModel`, `createCohereReranker`; types `CohereCompatibleRerankerOptions`, `CohereModelOptions`, `CohereRerankerOptions`.
-- `@arki/embeddings/google`: Gemini embedding models. `createGoogleModel`; types `GoogleModelOptions`.
-- `@arki/embeddings/mistral`: Mistral embedding models through the AI SDK. `createMistralModel`; types `MistralModelOptions`.
-- `@arki/embeddings/jina`: Jina AI over plain `fetch` (`POST /v1/embeddings`). `createJinaModel`, `createJinaReranker`; types `JinaModelOptions`, `JinaRerankerOptions`.
-- `@arki/embeddings/sparse`: sparse (SPLADE) vectors from a Text Embeddings Inference server's `POST /embed_sparse` over plain `fetch` (TEI started with `--pooling splade` on a BERT or DistilBERT masked-LM). `createSparseModel`, `isSameSparseSpace`, `requireSparseSpace`, `sparseSpaceId`; types `SparseBatch`, `SparseEmbedOptions`, `SparseEmbedder`, `SparseModelOptions`, `SparseSpace`, `SparseVector`.
-- `@arki/embeddings/rerank`: put search hits in order of relevance to one query. `RERANK_PROVIDERS`, `rerank`, `withRerankCache`; types `RerankCacheOptions`, `RerankCallOptions`, `RerankHit`, `RerankOptions`, `RerankProviderName`, `RerankResult`, `Reranker`.
-- `@arki/embeddings/tei`: a reranker on a Hugging Face Text Embeddings Inference server (`POST /rerank`, a sequence-classification model such as `BAAI/bge-reranker-v2-m3`). `createTeiReranker`; types `TeiRerankerOptions`.
-- `@arki/embeddings/bedrock`: Amazon Titan Text Embeddings on AWS Bedrock through the AI SDK. `createBedrockModel`; types `BedrockModelOptions`.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_2_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`; and 57 more.
+- `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`, `ollamaModelOptionsSchema`; types `OllamaModelOptions`.
+- `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`, `openaiModelOptionsSchema`; types `OpenAIModelOptions`.
+- `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`, `openaiCompatibleModelOptionsSchema`; types `OpenAICompatibleModelOptions`.
+- `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`; the multimodal models use `POST /v1/multimodalembeddings`). `createVoyageModel`, `createVoyageReranker`, `voyageModelOptionsSchema`, `voyageRerankerOptionsSchema`; types `VoyageModelOptions`, `VoyageRerankerOptions`.
+- `@arki/embeddings/cohere`: Cohere over plain `fetch` (`POST /v2/embed`). `cohereCompatibleRerankerOptionsSchema`, `cohereModelOptionsSchema`, `cohereRerankerOptionsSchema`, `createCohereCompatibleReranker`, `createCohereModel`, `createCohereReranker`; types `CohereCompatibleRerankerOptions`, `CohereModelOptions`, `CohereRerankerOptions`.
+- `@arki/embeddings/google`: Gemini embedding models. `createGoogleModel`, `googleModelOptionsSchema`; types `GoogleModelOptions`.
+- `@arki/embeddings/mistral`: Mistral embedding models through the AI SDK. `createMistralModel`, `mistralModelOptionsSchema`; types `MistralModelOptions`.
+- `@arki/embeddings/jina`: Jina AI over plain `fetch` (`POST /v1/embeddings`). `createJinaModel`, `createJinaReranker`, `jinaModelOptionsSchema`, `jinaRerankerOptionsSchema`; types `JinaModelOptions`, `JinaRerankerOptions`.
+- `@arki/embeddings/sparse`: sparse (SPLADE) vectors from a Text Embeddings Inference server's `POST /embed_sparse` over plain `fetch` (TEI started with `--pooling splade` on a BERT or DistilBERT masked-LM). `createSparseModel`, `isSameSparseSpace`, `requireSparseSpace`, `sparseEmbedOptionsSchema`, `sparseModelOptionsSchema`, `sparseSpaceId`; types `SparseBatch`, `SparseEmbedOptions`, `SparseEmbedder`, `SparseModelOptions`, `SparseSpace`, `SparseVector`.
+- `@arki/embeddings/rerank`: put search hits in order of relevance to one query. `RERANK_PROVIDERS`, `rerank`, `rerankCacheOptionsSchema`, `rerankCallOptionsSchema`, `rerankOptionsSchema`, `withRerankCache`; types `RerankCacheOptions`, `RerankCallOptions`, `RerankHit`, `RerankOptions`, `RerankProviderName`, `RerankResult`; and 1 more.
+- `@arki/embeddings/tei`: a reranker on a Hugging Face Text Embeddings Inference server (`POST /rerank`, a sequence-classification model such as `BAAI/bge-reranker-v2-m3`). `createTeiReranker`, `teiRerankerOptionsSchema`; types `TeiRerankerOptions`.
+- `@arki/embeddings/bedrock`: Amazon Titan Text Embeddings on AWS Bedrock through the AI SDK. `bedrockModelOptionsSchema`, `createBedrockModel`; types `BedrockModelOptions`.
 - `@arki/embeddings/testing`: a deterministic fake embedder and fake reranker for tests, and real vectors recorded once and replayed offline. `fakeEmbedder`, `fakeReranker`, `fixtureEmbedder`, `recordEmbedder`; types `FakeEmbedderOptions`, `FakeRerankerOptions`.
 - `@arki/embeddings/kv`: a `CacheStore` over an `@arki/kv` client (or anything with its `get` and `set`), so `withCache` shares vectors across processes through Redis. `kvCacheStore`.
-- `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `embeddings`.
-- `@arki/embeddings/transformers`: a model run in process by Transformers.js (ONNX Runtime), no server. `createTransformersModel`, `createTransformersReranker`; types `TransformersModelOptions`, `TransformersRerankerOptions`.
+- `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `embeddings`, `embeddingsPluginOptionsSchema`; types `EmbeddingsPluginOptions`.
+- `@arki/embeddings/transformers`: a model run in process by Transformers.js (ONNX Runtime), no server. `createTransformersModel`, `createTransformersReranker`, `transformersModelOptionsSchema`, `transformersRerankerOptionsSchema`; types `TransformersModelOptions`, `TransformersRerankerOptions`.
 <!-- llms:end -->
 
 ## Start here
@@ -47,5 +47,6 @@
 - The embedder never changes input text (call `normalizeText` yourself), and `fakeEmbedder` is not semantic.
 - Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
 - A cache key covers the space and the exact text; `embeddings()` from `./dot` publishes `null` when nothing resolves.
+- Every public options object has a Standard Schema (`embedOptionsSchema`, `cohereRerankerOptionsSchema`). Factories return `ConfigurationFailure` on bad options; per-call options throw through `assert`. Read one with `schema['~standard'].jsonSchema.input({ target: 'draft-2020-12' })`.
 - The package reads no environment variables. Build the model with the provider's `createXModel` from your app's own settings; creating it never touches the network.
 - `resolveSpace(embedder)` learns Ollama's digest before stale-row checks. Int8 needs one shared `calibrateInt8` range; binary packs MSB first.

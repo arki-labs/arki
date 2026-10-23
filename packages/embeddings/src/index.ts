@@ -29,7 +29,7 @@ export type { EmbedderOptions } from './embedder.js';
 export { embedderOptionsSchema } from './embedder.js';
 export type { EmbedManyOptions } from './embed.js';
 export { embedManyOptionsSchema } from './embed.js';
-export { embedOptionsSchema } from './schemas.js';
+export { embedOptionsSchema } from './embed.js';
 export {
   Cancelled,
   ConfigurationFailure,

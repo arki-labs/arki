@@ -89,9 +89,6 @@ export const embedOptionsFields = z.object({
   signal: objectSchema<AbortSignal>().optional(),
 });
 
-/** `EmbedOptions`, checked by `embed`; a type test locks it to the type. Lives here, not in `types.ts`, which this file imports. */
-export const embedOptionsSchema = withOptionsJson(embedOptionsFields.readonly());
-
 /** A recorded call's text inputs and the `EmbedOptions` that change its answer; a type test locks it. */
 export const embedRequestSchema = embedOptionsFields
   .pick({ purpose: true, dimensions: true, quantization: true, onTooLong: true })

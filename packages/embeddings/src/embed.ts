@@ -7,8 +7,14 @@ import type { EmbedFailure } from './failures.js';
 import type { EmbedInput, EmbedOptions, Embedder, Embedding, EmbeddingBatch, Usage } from './types.js';
 import { Cancelled, InputTooLong, InvalidOutput } from './failures.js';
 import { pack } from './pack.js';
-import { embedOptionsFields, embedOptionsSchema, functionSchema, withOptionsJson } from './schemas.js';
+import { embedOptionsFields, functionSchema, withOptionsJson } from './schemas.js';
 import { addTokens } from './tokens.js';
+
+/**
+ * `EmbedOptions`, checked by `embed`; a type test locks it to the type. Defined here, not in
+ * `schemas.ts`: the root entry exports it, and `schemas.ts` holds Zod types the public `.d.ts` must not reach.
+ */
+export const embedOptionsSchema = withOptionsJson(embedOptionsFields.readonly());
 
 /** `embedMany` options: the per-call options plus how many chunks run at once and a progress callback. */
 export type EmbedManyOptions = EmbedOptions & {
