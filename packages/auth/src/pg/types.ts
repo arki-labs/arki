@@ -34,7 +34,8 @@ import type {
  * SQLite (libSQL). Only the engine's adapter touches it, and it only needs the query builder
  * every one of them shares. The adapter's dialect is read from the database itself.
  */
-export type AuthDb = PgAsyncDatabase<PgQueryResultHKT, AnyRelations> | SQLiteAsyncDatabase<'async', unknown, AnyRelations>;
+export type AuthDb =
+  PgAsyncDatabase<PgQueryResultHKT, AnyRelations> | SQLiteAsyncDatabase<'async', unknown, AnyRelations>;
 
 /** One auth table, built on Postgres or on SQLite (`createAuthTables` from `./pg` or `./sqlite`). */
 export type AuthTable = AnyPgTable | AnySQLiteTable;

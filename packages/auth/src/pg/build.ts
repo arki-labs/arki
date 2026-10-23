@@ -366,8 +366,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         clientIpHeader: runtime.clientIp?.header,
       },
       db: bindings.db,
-      provider:
-        dialectOf(bindings.db) ?? invalid('`db` is neither a Drizzle Postgres nor a Drizzle SQLite database.'),
+      provider: dialectOf(bindings.db) ?? invalid('`db` is neither a Drizzle Postgres nor a Drizzle SQLite database.'),
       tables,
       additionalFields,
       sessionFields,

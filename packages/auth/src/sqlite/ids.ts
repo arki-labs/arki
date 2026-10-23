@@ -23,7 +23,10 @@ const kit = sqliteColumns();
  * `userForeignKeys` as plain SQLite columns for the app's own tables.
  */
 export const authIdSources = {
-  user: { primaryColumn: () => kit.id(userId).primaryColumn(), createForeignKeyFactory: userIdColumns.createForeignKeyFactory },
+  user: {
+    primaryColumn: () => kit.id(userId).primaryColumn(),
+    createForeignKeyFactory: userIdColumns.createForeignKeyFactory,
+  },
   session: kit.id(sessionId),
   account: kit.id(accountId),
   verification: kit.id(verificationId),

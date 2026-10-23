@@ -2,7 +2,13 @@ import type { Column } from 'drizzle-orm';
 
 import type { AnyColumnSpec, ColumnKit, Dialect } from '@arki/db/columns';
 
-import type { AuthColumnFill, AuthColumnOptions, ColumnSpecs, PrimaryColumnSource, SpecValue } from './column-options.js';
+import type {
+  AuthColumnFill,
+  AuthColumnOptions,
+  ColumnSpecs,
+  PrimaryColumnSource,
+  SpecValue,
+} from './column-options.js';
 import { byFill, columnNamer, filledAt, now } from './column-options.js';
 
 export type { AuthColumnFill, AuthColumnNaming, AuthColumnOptions, PrimaryColumnSource } from './column-options.js';
@@ -170,10 +176,7 @@ function withColumns<
   D extends Dialect,
   TBase extends ColumnSpecs<D> & { id: AnyColumnSpec<D> },
   TExtra extends ExtraColumns<D, TExtra> | undefined,
->(
-  base: TBase,
-  extra: TExtra,
-): Pick<TBase, 'id'> & Omit<TBase, keyof NonNullable<TExtra>> & NonNullable<TExtra> {
+>(base: TBase, extra: TExtra): Pick<TBase, 'id'> & Omit<TBase, keyof NonNullable<TExtra>> & NonNullable<TExtra> {
   return { ...base, ...extra };
 }
 
@@ -271,7 +274,10 @@ export function createAuthTables<
 ) {
   const name = columnNamer(naming);
 
-  const User = c.table('users', withColumns(authUserColumns(c, { id: ids.user.primaryColumn(), naming, fill }), columns?.user));
+  const User = c.table(
+    'users',
+    withColumns(authUserColumns(c, { id: ids.user.primaryColumn(), naming, fill }), columns?.user),
+  );
 
   const userForeignKeys = ids.user.createForeignKeyFactory(() => User.id);
 
@@ -300,7 +306,10 @@ export function createAuthTables<
 
   const Verification = c.table(
     'verifications',
-    withColumns(authVerificationColumns(c, { id: ids.verification.primaryColumn(), naming, fill }), columns?.verification),
+    withColumns(
+      authVerificationColumns(c, { id: ids.verification.primaryColumn(), naming, fill }),
+      columns?.verification,
+    ),
   );
 
   return { User, Session, Account, Verification, userForeignKeys };

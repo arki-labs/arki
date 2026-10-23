@@ -16,7 +16,10 @@ export const authTables = createAuthTables(c, {
   ids: authIdSources,
   columns: {
     user: {
-      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
+      plan: c
+        .text('plan', { enum: ['free', 'pro'] })
+        .notNull()
+        .default('free'),
       stripeCustomerId: c.text('stripe_customer_id'),
       preferences: c.json('preferences').$type<{ readonly theme: string }>(),
     },

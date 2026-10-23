@@ -1,6 +1,6 @@
 # @arki/auth
 
-Sign-in for Arki apps on Bun, TanStack Start and oRPC. You write one declaration (`defineAuth`) and bind it once on the server (`createAuth`, or the Dot unit `auth`). The principal, the guards and the client read their types from that declaration and from your own user table. Every security claim points at a test that runs on PGlite.
+Sign-in for Arki apps on Bun, TanStack Start and oRPC. You write one declaration (`defineAuth`) and bind it once on the server (`createAuth`, or the Dot unit `auth`). The principal, the guards and the client read their types from that declaration and from your own user table. Every security claim points at a test that runs on PGlite; the core flows also run on libSQL.
 
 The engine is [Better Auth](https://www.better-auth.com) 1.7.7. It stays behind this package's API. App code never imports `better-auth`.
 
@@ -72,7 +72,10 @@ export const authTables = createAuthTables(c, {
   ids: authIdSources,
   columns: {
     user: {
-      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
+      plan: c
+        .text('plan', { enum: ['free', 'pro'] })
+        .notNull()
+        .default('free'),
     },
   },
 });
@@ -245,7 +248,10 @@ const tables = createAuthTables(c, {
   ids: authIdSources,
   columns: {
     user: {
-      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
+      plan: c
+        .text('plan', { enum: ['free', 'pro'] })
+        .notNull()
+        .default('free'),
     },
   },
 });
@@ -287,6 +293,71 @@ import { assertAuthBoots } from '@arki/auth/testing/production-boot';
 it('the auth boots as declared in production', () => assertAuthBoots(() => import('../../infra/auth')));
 ```
 
+## SQLite
+
+The same tables and the same engine run on SQLite (libSQL). The tables are written once against the column kit of `@arki/db`, so the only difference is the kit you pass and the entry you import from:
+
+|                    | Postgres                                          | SQLite                                                       |
+| ------------------ | ------------------------------------------------- | ------------------------------------------------------------ |
+| Kit                | `pgColumns(pgSchema('notes'))` from `@arki/db/pg` | `sqliteColumns({ prefix: 'notes_' })` from `@arki/db/sqlite` |
+| Tables and runtime | `@arki/auth/pg`                                   | `@arki/auth/sqlite`                                          |
+| Workspace tables   | `@arki/auth/pg/workspaces`                        | `@arki/auth/sqlite/workspaces`                               |
+| Test database      | `testAuth(definition, { tables })` (PGlite)       | `testAuth(definition, { tables, database: 'libsql' })`       |
+
+SQLite has no schemas, so the Postgres schema becomes a table-name prefix. `createAuth` reads the dialect from `db`; there is no option to set.
+
+```ts
+import { defineRelations } from 'drizzle-orm';
+
+import { defineAuth } from '@arki/auth';
+import { authIdSources, createAuth, createAuthTables } from '@arki/auth/sqlite';
+import { createWorkspaceTables } from '@arki/auth/sqlite/workspaces';
+import { EMPTY_TWEAKS, tweaksSpec } from '@arki/auth/tweaks-column';
+import { defineId } from '@arki/contracts';
+import { createLibsqlDb } from '@arki/db/libsql';
+import { sqliteColumns } from '@arki/db/sqlite';
+
+const c = sqliteColumns({ prefix: 'notes_' });
+
+export const authTables = createAuthTables(c, {
+  fill: 'app',
+  ids: authIdSources,
+  columns: {
+    user: { tweaks: tweaksSpec(c).notNull().default(EMPTY_TWEAKS) },
+    session: { activeOrganizationId: c.text('active_organization_id'), activeTeamId: c.text('active_team_id') },
+  },
+});
+export const workspaceTables = createWorkspaceTables(c, {
+  fill: 'app',
+  user: authTables.User,
+  ids: {
+    organization: c.id(defineId('organization_')),
+    member: c.id(defineId('mem_')),
+    invitation: c.id(defineId('inv_')),
+    team: c.id(defineId('team_')),
+    teamMember: c.id(defineId('tmem_')),
+  },
+});
+
+const { db } = createLibsqlDb({ url: 'file:notes.db', relations: defineRelations({}) });
+export const auth = createAuth(
+  defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], workspaces: { teams: true } }),
+  {
+    db,
+    tables: { ...authTables, ...workspaceTables },
+    rateLimit: { store: 'memory' },
+    runtime: () => ({ url: 'http://localhost:3000', secret: process.env.AUTH_SECRET, production: false }),
+  },
+);
+```
+
+Limits on SQLite:
+
+- Timestamps keep milliseconds, not microseconds.
+- Case-insensitive matching covers ASCII letters only.
+- Unique-violation errors carry no constraint name.
+- The workspace scoping kernel (`workspaceReadFilter` and the rest) builds Postgres filters and stays on `@arki/auth/pg/workspaces`.
+
 ## Public imports
 
 | Entry                                        | Runtime                              | What it gives you                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -296,8 +367,10 @@ it('the auth boots as declared in production', () => assertAuthBoots(() => impor
 | `@arki/auth/zod`                             | Node, Bun, Deno, browser (needs Zod) | `userIdSchema`, `sessionIdSchema`, `accountIdSchema`, `verificationIdSchema`, `organizationIdSchema`, `teamIdSchema`, `emailSchema`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `@arki/auth/password`                        | Node, Bun, Deno, browser             | `hashPassword`, `verifyPassword`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `@arki/auth/workspaces`                      | Node, Bun, Deno, browser             | `rankRole`, `roleAtLeast`, `scopeLevel`, `WorkspaceScopeError`; types `WorkspaceRole`, `WorkspaceContext`, `Scope`, `RowScope`, `ScopeLevel`, `OrganizationId`, `TeamId`                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `@arki/auth/pg`                              | Node, Bun                            | `createAuth`, `createAuthTables`, `auth*Columns`, `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, `authLinkInput`; types `Auth`, `AuthBindings`, `AuthRuntime`, `RateLimitBinding`, …                                                                                                                                                                                                                                                                                                                                  |
+| `@arki/auth/pg`                              | Node, Bun                            | `createAuth`, `createAuthTables`, `auth*Columns`, `authIdSources`, `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, `authLinkInput`; types `Auth`, `AuthBindings`, `AuthRuntime`, `RateLimitBinding`, …                                                                                                                                                                                                                                                                                                                 |
 | `@arki/auth/pg/workspaces`                   | Node, Bun                            | `createWorkspaceTables`, `createWorkspaceForeignKeys`, `registerWorkspaceResource`, `getWorkspaceResource`, `resetWorkspaceRegistry`, `workspaceReadFilter`, `resolveWriteScope`, `canSeeRow`, `reassignScope`                                                                                                                                                                                                                                                                                                                                                                                              |
+| `@arki/auth/sqlite`                          | Node, Bun                            | the same as `./pg`, on SQLite (libSQL), with SQLite id columns: `createAuth`, `createAuthTables`, `auth*Columns`, `authIdSources`, `userIdColumns`, `sessionIdColumns`, `accountIdColumns`, `verificationIdColumns`, `assertAuthSecret`, `additionalFieldsFromColumns`, `authLinkInput`; types `Auth`, `AuthBindings`, `AuthRuntime`, `RateLimitBinding`, …                                                                                                                                                                                                                                                 |
+| `@arki/auth/sqlite/workspaces`               | Node, Bun                            | `createWorkspaceTables`, `createWorkspaceForeignKeys` (the scoping kernel stays on `./pg/workspaces`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `@arki/auth/dot`                             | Node, Bun                            | `auth`, `AuthOf`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `@arki/auth/orpc`                            | Node, Bun                            | `can`, `assertFound`, `assertOwnedOrNotFound`, `assertOwnedOrForbidden`; types `PolicyGuard`, `PolicyLoader`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `@arki/auth/http`                            | Node, Bun                            | `principalFromHeaders`, `authorize`, `authFailureHeaders`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -310,7 +383,7 @@ it('the auth boots as declared in production', () => assertAuthBoots(() => impor
 | `@arki/auth/testing/playwright`              | Node                                 | Playwright global setup and fixtures                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `@arki/auth/env`, `@arki/auth/tweaks-column` | Node, Bun                            | unchanged helpers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
-Optional peers: `@arki/dot` for `./dot`, `@orpc/server` for `./orpc`, `@arki/http` for `./http`, React, `@arki/ui`, `@arki/icons` and TanStack for the UI entries, `@electric-sql/pglite`, `drizzle-kit` and `vitest` for the testing entries, `@playwright/test` for `./testing/playwright`.
+Optional peers: `@arki/dot` for `./dot`, `@orpc/server` for `./orpc`, `@arki/http` for `./http`, React, `@arki/ui`, `@arki/icons` and TanStack for the UI entries, `@electric-sql/pglite` (or `@libsql/client` for `database: 'libsql'`), `drizzle-kit` and `vitest` for the testing entries, `@playwright/test` for `./testing/playwright`.
 
 ## Failure behaviour
 

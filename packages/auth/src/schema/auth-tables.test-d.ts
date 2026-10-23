@@ -24,7 +24,14 @@ const sqliteText = sqliteColumns().text('plan');
 const kit = createAuthTables(c, {
   fill: 'app',
   ids: authIdSources,
-  columns: { user: { plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free') } },
+  columns: {
+    user: {
+      plan: c
+        .text('plan', { enum: ['free', 'pro'] })
+        .notNull()
+        .default('free'),
+    },
+  },
 });
 const kitWorkspaces = createWorkspaceTables(c, {
   fill: 'database',

@@ -1,7 +1,7 @@
 {
   "name": "@arki/auth",
   "version": "0.2.0",
-  "description": "Sign-in for Arki apps: one definition, one Postgres-backed engine, and the principal, guards and client types inferred from your own tables.",
+  "description": "Sign-in for Arki apps: one definition, one engine on Postgres or SQLite, and the principal, guards and client types inferred from your own tables.",
   "repository": {
     "type": "git",
     "url": "https://github.com/arki-labs/arki.git",

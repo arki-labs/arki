@@ -5,11 +5,11 @@
 import { pgSchema } from 'drizzle-orm/pg-core';
 import { describe, expectTypeOf, it } from 'vitest';
 
+import { pgColumns } from '@arki/db/pg';
+
 import type { UserId } from './ids.js';
 import type { PrincipalFor } from './pg/types.js';
 import type { PrincipalOf } from './principal.js';
-import { pgColumns } from '@arki/db/pg';
-
 import { defineAuth } from './definition.js';
 import { authIdSources } from './pg/ids.js';
 import { createAuthTables } from './schema/auth-tables.js';
@@ -20,7 +20,10 @@ const tables = createAuthTables(c, {
   ids: authIdSources,
   columns: {
     user: {
-      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
+      plan: c
+        .text('plan', { enum: ['free', 'pro'] })
+        .notNull()
+        .default('free'),
       stripeCustomerId: c.text('stripe_customer_id'),
     },
   },

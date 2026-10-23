@@ -49,7 +49,15 @@ export function createWorkspaceTables<
   TFill extends AuthColumnFill,
 >(
   c: ColumnKit<'sqlite'>,
-  options: CreateWorkspaceTablesOptions<'sqlite', TOrganizationId, TMemberId, TInvitationId, TTeamId, TTeamMemberId, TFill>,
+  options: CreateWorkspaceTablesOptions<
+    'sqlite',
+    TOrganizationId,
+    TMemberId,
+    TInvitationId,
+    TTeamId,
+    TTeamMemberId,
+    TFill
+  >,
 ) {
   const tables = workspaceTables(c, options);
   return {
