@@ -122,7 +122,7 @@ What is different:
 - **No isolation levels.** SQLite is serializable already. Transactions start with `BEGIN IMMEDIATE`.
 - **No schemas.** `migrationsSchema` does not apply; the bookkeeping table sits in the main database.
 - **Only libSQL.** bun:sqlite, node:sqlite and better-sqlite3 commit when an async callback returns, so a throw after an `await` keeps its writes. `runTransaction` refuses them with `ARKI_DB_TX_E007`.
-- **Still Postgres-only:** the tables that `@arki/auth`, `@arki/payments`, `@arki/fs` and other packages ship, and `@arki/journal`, `@arki/lock` and `@arki/live`.
+- **Packages on SQLite:** `@arki/auth` (`./sqlite`, without the workspace scoping helpers), `@arki/fs` (`./sqlite`), `@arki/offline` and `@arki/ai` (`./drizzle/sqlite`) ship their tables through the column kit below. **Still Postgres-only:** `@arki/payments`, `@arki/mail`, `@arki/journal`, `@arki/lock` and `@arki/live`.
 
 The measurements behind these rules are in `docs/arki/research/17-multi-database/spike/results.md` in the Arki repository.
 
