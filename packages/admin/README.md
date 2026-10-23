@@ -2,20 +2,20 @@
 
 The contract between an ARKI app and Foreman (the fleet control plane). An app exposes **modules** (reads and actions) behind signed requests. Foreman reads the manifest and calls them.
 
-Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler), `./receipts` (receipt schemas and the KV store), `./client` (Foreman side), `./dot` (DOT entrypoint), `./http` (v1 `/api/fleet`).
+Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler and `createForemanRoute`), `./receipts` (receipt schemas and the KV store), `./pg` (the Postgres store for apps without a KV), `./client` (Foreman side), `./dot` (DOT entrypoint), `./http` (v1 `/api/fleet`).
 
 ## Turn it on
 
 Set all four variables, or none. With none set, `/api/foreman/*` answers 404 and the app boots as before. With only some set, the first request throws `ARKI_ADMIN_E014`.
 
-| Variable              | What                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `novelette:prod`. |
+| Variable              | What                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `novelette:prod`.                           |
 | `FOREMAN_ENVIRONMENT` | Optional `prod`, `staging` or `dev`. Overrides what `foremanEnvironmentFromNodeEnv(NODE_ENV)` returns. |
-| `FOREMAN_APP_KEY`     | The app's identity key. It signs every response.                                   |
-| `FOREMAN_READ_KEY`    | Foreman's read public key. `_NEXT` holds the new key while rotating.               |
-| `FOREMAN_EXECUTE_KEY` | Foreman's execute public key. Must differ from the read key. `_NEXT` as above.     |
-| `FOREMAN_WRITES`      | `on` allows executes. Unset or `off` refuses every execute.                        |
+| `FOREMAN_APP_KEY`     | The app's identity key. It signs every response.                                                       |
+| `FOREMAN_READ_KEY`    | Foreman's read public key. `_NEXT` holds the new key while rotating.                                   |
+| `FOREMAN_EXECUTE_KEY` | Foreman's execute public key. Must differ from the read key. `_NEXT` as above.                         |
+| `FOREMAN_WRITES`      | `on` allows executes. Unset or `off` refuses every execute.                                            |
 
 Generate keys with `generateForemanKeyPair()`. Spread `foremanEnvShape` from `@arki/admin/env` into the app's env schema; the validated env is a `ForemanEnv` as is.
 
@@ -23,30 +23,37 @@ Generate keys with `generateForemanKeyPair()`. Spread `foremanEnvShape` from `@a
 
 ## Plain TanStack app
 
-```ts
-// backend/src/foreman.ts  (build on first request, not at import)
-import { createForemanHandlerFromEnv, kvReceiptStore } from '@arki/admin/server';
+`createForemanRoute` is the mount every app uses. It builds the handler on the first request, never at import. One store holds the nonces and the receipts, and the receipts are namespaced by the app's audience (`FOREMAN_APP_ID:environment`).
 
-let handler: ((request: Request) => Promise<Response>) | undefined;
-export function handleForeman(request: Request) {
-  handler ??= createForemanHandlerFromEnv({
-    env, // validated env that includes foremanEnvShape
-    environment: 'prod',
-    app: { version, commit },
-    nonces: kv, // any @arki/kv KV
-    receipts: kvReceiptStore(kv, { namespace: 'myapp:prod' }), // required for executes; also serves core.receipts
-    context: () => ({}),
-    health: async () => (await getFleetSnapshot()).health, // reuse the /api/fleet function
-    modules: [queueForemanModule({ queues })],
-  });
-  return handler(request);
-}
+```ts
+// backend/src/features/fleet/foreman.ts
+import { createForemanRoute } from '@arki/admin/server';
+
+export const foremanRoute = createForemanRoute(() => ({
+  env, // validated env that includes foremanEnvShape and NODE_ENV
+  app: { version, commit: env.SOURCE_COMMIT },
+  store: kv, // any @arki/kv KV, pgForemanStore (./pg), or memoryForemanStore
+  context: () => ({}),
+  health: async () => (await getFleetSnapshot()).health, // reuse the /api/fleet function
+  modules: [queueForemanModule({ queues })],
+}));
 
 // start/src/routes/api/foreman/$.ts
 export const Route = createFileRoute('/api/foreman/$')({
-  server: { handlers: { ANY: ({ request }) => handleForeman(request) } },
+  server: { handlers: { ANY: ({ request }) => foremanRoute(request) } },
 });
 ```
+
+A DOT app graph passes its services: `createForemanRoute((services: Services) => ({ ... }))` and `ANY: ({ request, context }) => foremanRoute(request, context.services)`. The handler is built once per services object.
+
+| Store                                                 | When                                                                                                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@arki/kv` `KV`                                       | The app has a KV.                                                                                                                                             |
+| `pgForemanStore({ db, table })` from `@arki/admin/pg` | The app has Postgres but no KV. Add `foremanStoreTable()` to the schema and migrate. Expiries use the database clock.                                         |
+| `memoryForemanStore()`                                | One instance, no KV, no database. A restart forgets the nonces, so a captured request can be replayed until its signature expires. Keep `FOREMAN_WRITES` off. |
+| `null`                                                | No store in this process (development without a KV). The route answers 404 while the keys are unset and throws `ARKI_ADMIN_E014` once they are set.           |
+
+`createForemanHandlerFromEnv` is still there for an app that wires the nonces and receipts itself.
 
 Keep the `/api/fleet` route. Foreman still polls it until it negotiates protocol 2.
 
@@ -103,12 +110,20 @@ Use the schema itself as the read's `output`, so the app and Foreman parse the s
 import { boardOutputSchema, PANEL_RENDERER } from '@arki/admin/panels';
 
 const today = defineRead({
-  id: 'shop.today', summary: 'How the shop is doing today', permission: 'shop:read',
-  input: z.object({}), output: boardOutputSchema,
-  load: async () => ({ cards: [{ key: 'orders', label: 'Orders', group: 'Sales', value: 12, format: 'count', tone: 'ok' }] }),
+  id: 'shop.today',
+  summary: 'How the shop is doing today',
+  permission: 'shop:read',
+  input: z.object({}),
+  output: boardOutputSchema,
+  load: async () => ({
+    cards: [{ key: 'orders', label: 'Orders', group: 'Sales', value: 12, format: 'count', tone: 'ok' }],
+  }),
 });
 const shop = defineModule({
-  id: 'shop', version: '1.0.0', reads: { today }, actions: {},
+  id: 'shop',
+  version: '1.0.0',
+  reads: { today },
+  actions: {},
   panels: [{ id: 'today', renderer: PANEL_RENDERER.board, read: 'today', actions: [] }],
 });
 ```
@@ -156,7 +171,7 @@ An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) 
 
 **Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:prod`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
 
-**DOT app with a journal: `journalReceiptStore(...)`** (`@arki/journal/foreman`; it used to be `@arki/admin/pg`). Add the table and migrate:
+**DOT app with a journal: `journalReceiptStore(...)`** (`@arki/journal/foreman`). Add the table and migrate:
 
 ```ts
 // schema.ts

@@ -28,6 +28,31 @@ export type ForemanAppOptions<TCtx> = Pick<
     app: { version: string; commit?: string };
   };
 
+/** The answer of an app with no `FOREMAN_*` variables. */
+const answerOff = (): Promise<Response> =>
+  Promise.resolve(
+    Response.json(
+      {
+        error: {
+          code: ADMIN_ERROR_CODES.unknownCapability,
+          message: 'Foreman v2 is not configured on this app.',
+          remediation:
+            'Set the FOREMAN_* variables (see @arki/admin/env), or ignore this: the app runs fine without them.',
+        },
+      },
+      { status: 404, headers: { 'cache-control': 'no-store' } },
+    ),
+  );
+
+/**
+ * The handler of an app with no `FOREMAN_*` variables: every request gets a 404.
+ * `createForemanRoute` answers with it too, so both say the same thing.
+ */
+export function foremanOff(): (request: Request) => Promise<Response> {
+  logger.debug('Foreman v2 is off: no FOREMAN_* variables are set.');
+  return answerOff;
+}
+
 /**
  * Build the handler for `/api/foreman/*`, with `core.health` and `core.manifest`
  * added to the app's modules. With no `FOREMAN_*` variables set it returns a
@@ -37,23 +62,7 @@ export function createForemanHandlerFromEnv<TCtx>(
   options: ForemanAppOptions<TCtx>,
 ): (request: Request) => Promise<Response> {
   const config = foremanConfigFromEnv(options.env, options.environment);
-  if (config === undefined) {
-    logger.debug('Foreman v2 is off: no FOREMAN_* variables are set.');
-    return () =>
-      Promise.resolve(
-        Response.json(
-          {
-            error: {
-              code: ADMIN_ERROR_CODES.unknownCapability,
-              message: 'Foreman v2 is not configured on this app.',
-              remediation:
-                'Set the FOREMAN_* variables (see @arki/admin/env), or ignore this: the app runs fine without them.',
-            },
-          },
-          { status: 404, headers: { 'cache-control': 'no-store' } },
-        ),
-      );
-  }
+  if (config === undefined) return foremanOff();
   return createForemanHandler<TCtx>({
     identity: config.identity,
     keys: config.keys,

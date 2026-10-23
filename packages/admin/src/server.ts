@@ -171,3 +171,5 @@ export type {
 } from './receipts';
 export { kvReceiptStore, RECEIPT_WINDOW_SECONDS } from './receipts';
 export { createForemanHandlerFromEnv } from './foreman-app';
+export type { ForemanRouteOptions, ForemanStore } from './foreman-route';
+export { createForemanRoute, memoryForemanStore } from './foreman-route';
