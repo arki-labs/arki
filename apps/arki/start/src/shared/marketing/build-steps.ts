@@ -603,7 +603,7 @@ const STEP_LIST = [
     number: 'F3',
     verb: 'Feature',
     kicker: 'model · usecases · infra · entrypoints',
-    title: 'A feature is one folder. Its rules never touch the database.',
+    title: 'A feature is one part of the product. It names what it needs, and gets nothing else.',
     excerpts: [FEATURE_NEEDS, FEATURE_USECASE],
   },
   {
@@ -639,10 +639,10 @@ export const [DEFINE_STEP, WIRE_STEP, FEATURE_STEP, REMEMBER_STEP, SERVE_STEP, I
 
 /** The four rooms of a feature, as the design draws them. */
 export const FEATURE_ROOMS = [
-  { name: 'model', text: 'tables, schemas, ids' },
-  { name: 'usecases', text: 'the rules' },
-  { name: 'infra', text: 'store, limiter, turnstile' },
-  { name: 'entrypoints', text: 'rpc contract' },
+  { name: 'model', text: 'the things and their rules' },
+  { name: 'usecases', text: 'what someone can do' },
+  { name: 'infra', text: 'how it talks to the outside' },
+  { name: 'entrypoints', text: 'how a request gets in' },
 ] as const;
 
 type Wave = { name: string; title: string; packages: readonly string[] };

@@ -110,12 +110,15 @@ const FEATURE_KEY = [
   { call: '.needs({…})', meaning: 'What the feature takes from the app: the database, the cache and the mailer.' },
   {
     call: 'entrypointOnly(…)',
-    meaning: 'Only the feature’s own infra and entrypoints get this one. Its usecases never do.',
+    meaning: 'This service goes to the feature’s infra and entrypoints only. Usecases never see it.',
   },
-  { call: '.infra(…)', meaning: 'The feature’s private services: a store, a rate limiter and a bot check.' },
+  {
+    call: '.infra(…)',
+    meaning: 'How the feature talks to the outside world: a store, a rate limiter and a bot check.',
+  },
   {
     call: "Pick<Deps, 'repos'>",
-    meaning: 'A usecase names the services it uses. This one reads the repos and nothing else.',
+    meaning: 'A usecase names the services it uses. This one uses the repos and nothing else.',
   },
 ] as const satisfies readonly KeyRow[];
 
@@ -173,9 +176,10 @@ export function BuildPath() {
 
       <Step step={FEATURE_STEP} index={2}>
         <p className="home-step-text">
-          A feature holds one part of your app, like the waitlist. It says what it needs. Its own infra talks to the
-          database. Its usecases, the rules, get only the services they ask for by name, so a test builds one with the
-          real store on a real database and nothing else.
+          Take the waitlist. It lives in one folder, in four parts, each with one job. The model is the things it knows
+          and their rules. The usecases are what someone can do, one file each: sign up, unsubscribe, count. The infra
+          is how it talks to the outside world. The entrypoints are how a request gets in. The feature names what it
+          needs from the app, and each usecase gets only the services it asks for.
         </p>
         <ul className="home-rooms" aria-label="The four rooms of a feature">
           {FEATURE_ROOMS.map(room => (
