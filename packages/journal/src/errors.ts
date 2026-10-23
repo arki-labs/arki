@@ -291,6 +291,27 @@ export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
 });
 export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
 
+/** A start found `concurrency.limit` unfinished runs of this workflow with the same concurrency key. `running` lists
+ * them, oldest first. Returned when `onBusy` is `'refuse'`, and always for a child run: a child cannot join a run that
+ * another parent started.
+ * @fix Wait for one of the running runs to finish, or start the run with another concurrency key.
+ * @verify bun run test -- src/workflow/concurrency.test.ts
+ */
+export const WorkflowBusy = defineFailure('journal.workflow_busy', {
+  status: 409,
+  data: z.object({
+    name: z.string(),
+    key: z.string(),
+    limit: z.number().int(),
+    running: z.array(z.string()),
+    detail: z.string(),
+  }),
+  message: '{detail}',
+  remediation: 'Wait for one of the running runs to finish, or start the run with another concurrency key.',
+});
+/** A {@link WorkflowBusy} failure value. */
+export type WorkflowBusy = ReturnType<typeof WorkflowBusy>;
+
 /** What `def.read` returns when a stored value of the run does not fit its schema. `field` is `input`, `output` or
  * `results.<node>`; `detail` is the `WORKFLOW_READ_MISMATCH` message, and the cause is the schema's `InvalidInput`,
  * with its issues.

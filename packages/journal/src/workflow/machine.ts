@@ -1,7 +1,7 @@
 /**
  * The `workflow.run` entity: its events, its reducers (the run row) and the step projection
  * (`workflow_steps`). Pure state shape; the runner, builder and verbs come in later steps.
- * A run's stored state is one of six values. `stuck`, `stranded` and `residual` are derived
+ * A run's stored state is one of seven values (`RUN_STATES`). `stuck`, `stranded` and `residual` are derived
  * from the step rows, so no event names them.
  */
 import { and, eq, sql } from 'drizzle-orm';
@@ -13,6 +13,7 @@ import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
 import type { StepPhase, STEP_VIEW_STATUSES } from './states.js';
+import { changedMetadata, metadataChangeSchema } from './run-fields.js';
 import { SKIP_CAUSES, STEP_PHASES } from './states.js';
 
 const at = z.iso.datetime();
@@ -66,6 +67,19 @@ export function workflowMachine<
       parentId: z.string().nullable(),
       parentPath: z.string().nullable(),
       concurrencyKey: z.string().nullable(),
+      // The run fields came later: a run started before them has none of these, and its row gets the defaults.
+      scope: z.string().nullable().optional(),
+      tags: z.array(z.string()).readonly().optional(),
+      metadata: z.record(z.string(), z.unknown()).readonly().optional(),
+      rootId: z.string().nullable().optional(),
+      // Start timing came later still, the same way: an older run has no delay and no ttl.
+      startAt: at.nullable().optional(),
+      ttlAt: at.nullable().optional(),
+      ttlMs: z.int().positive().nullable().optional(),
+      // Set by `startBatch` and by `replay` only; `replay` also records its operator.
+      batchId: z.string().optional(),
+      replayOf: z.string().optional(),
+      ...byOperator,
       at,
     }),
   );
@@ -149,9 +163,29 @@ export function workflowMachine<
     z.object({ reason: z.string().min(1), actorId: z.string().nullable(), executionId: byOperator.executionId, at }),
   );
   const CompensationStarted = j.event('CompensationStarted', z.object({ at }));
+  /** A step (`ctx.metadata`) or an operator (`setMetadata`) changed the run's metadata. The reducer applies `change`. */
+  const MetadataChanged = j.event('MetadataChanged', z.object({ change: metadataChangeSchema, at, ...byOperator }));
+  /** A step (`ctx.tags.add`) or an operator (`addTags`) added `tags`: only those the run did not have, each once. */
+  const RunTagged = j.event(
+    'RunTagged',
+    z.object({ tags: z.array(z.string().min(1)).min(1).readonly(), at, ...byOperator }),
+  );
   const RunCompleted = j.event('RunCompleted', z.object({ output: z.unknown(), at, keepUntil }));
   const RunFailed = j.event('RunFailed', z.object({ error: z.string().min(1), at, keepUntil }));
   const RunCancelled = j.event('RunCancelled', z.object({ at, keepUntil }));
+  /** The run's `ttl` passed before its first node started, so the worker ran nothing. */
+  const RunExpired = j.event('RunExpired', z.object({ at, keepUntil }));
+  /**
+   * An operator moved the start of a run whose first node had not started (`reschedule`). `ttlAt` and `deadlineAt`
+   * move with it, as `start` worked them out from the start time.
+   */
+  const RunRescheduled = j.event(
+    'RunRescheduled',
+    z.object({ startAt: at, ttlAt: at.nullable(), deadlineAt: at.nullable(), at, ...byOperator }),
+  );
+
+  /** A stored time, or null for none (and for an older event that has no such field). */
+  const date = (value: string | null | undefined) => (value === null || value === undefined ? null : new Date(value));
 
   const finished = (data: { readonly at: string; readonly keepUntil: string | null }) => ({
     node: null,
@@ -176,6 +210,16 @@ export function workflowMachine<
       parentId: e.data.parentId,
       parentPath: e.data.parentPath,
       concurrencyKey: e.data.concurrencyKey,
+      scope: e.data.scope ?? null,
+      tags: [...(e.data.tags ?? [])],
+      metadata: e.data.metadata ?? {},
+      rootId: e.data.rootId ?? null,
+      fieldChanges: 0,
+      startAt: date(e.data.startAt),
+      ttlAt: date(e.data.ttlAt),
+      ttlMs: e.data.ttlMs ?? null,
+      batchId: e.data.batchId ?? null,
+      replayOf: e.data.replayOf ?? null,
       startedAt: new Date(e.data.at),
     }))
     // A scheduled node ends a park. A run that is compensating stays compensating.
@@ -190,9 +234,9 @@ export function workflowMachine<
       e.data.phase === 'do' ? { results: { ...row.results, [e.data.path]: e.data.result } } : {},
     )
     // A `when`-skipped `do` node is `null` in results. A node dropped by compensation (a wait that never got its
-    // signal) never ran, so it leaves no key. A skipped undo changes nothing on the row.
+    // signal) or by expiry never ran, so it leaves no key. A skipped undo changes nothing on the row.
     .on(NodeSkipped, (row, e) =>
-      e.data.phase === 'do' && e.data.cause !== 'compensating'
+      e.data.phase === 'do' && e.data.cause !== 'compensating' && e.data.cause !== 'expired'
         ? { results: { ...row.results, [e.data.path]: null } }
         : {},
     )
@@ -235,9 +279,22 @@ export function workflowMachine<
       finishedAt: null,
       keepUntil: null,
     }))
+    // Neither moves the run: they change only what describes it, and `fieldChanges` counts them.
+    .on(MetadataChanged, (row, e) => ({
+      metadata: changedMetadata(row.metadata, e.data.change),
+      fieldChanges: row.fieldChanges + 1,
+    }))
+    .on(RunTagged, (row, e) => ({ tags: [...row.tags, ...e.data.tags], fieldChanges: row.fieldChanges + 1 }))
+    // A new start moves the run, so it is not a field change: an approval taken before it no longer holds.
+    .on(RunRescheduled, (_row, e) => ({
+      startAt: new Date(e.data.startAt),
+      ttlAt: date(e.data.ttlAt),
+      deadlineAt: date(e.data.deadlineAt),
+    }))
     .on(RunCompleted, (_row, e) => ({ state: 'completed', output: e.data.output, ...finished(e.data) }))
     .on(RunFailed, (_row, e) => ({ state: 'failed', ...finished(e.data) }))
-    .on(RunCancelled, (_row, e) => ({ state: 'cancelled', ...finished(e.data) }));
+    .on(RunCancelled, (_row, e) => ({ state: 'cancelled', ...finished(e.data) }))
+    .on(RunExpired, (_row, e) => ({ state: 'expired', ...finished(e.data) }));
 
   const stepRow = (runId: string, path: string, stepPhase: StepPhase) => ({ runId, path, phase: stepPhase });
 
@@ -339,9 +396,13 @@ export function workflowMachine<
       DeadlineReached,
       CancelRequested,
       CompensationStarted,
+      MetadataChanged,
+      RunTagged,
       RunCompleted,
       RunFailed,
       RunCancelled,
+      RunExpired,
+      RunRescheduled,
     },
   };
 }

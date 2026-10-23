@@ -25,7 +25,7 @@ describe('journal.workflows, as types', () => {
     expectTypeOf<StepView['status']>().toEqualTypeOf<'scheduled' | 'done' | 'skipped' | 'failed' | 'running'>();
     expectTypeOf<RunDetail['residual']>().toEqualTypeOf<readonly string[]>();
     expectTypeOf<RunState>().toEqualTypeOf<
-      'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled'
+      'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled' | 'expired'
     >();
   });
 
@@ -34,5 +34,22 @@ describe('journal.workflows, as types', () => {
     expectTypeOf(orThrow(done).how).toEqualTypeOf<'rescheduled' | 'childrenRestarted' | 'jobRetried'>();
     // @ts-expect-error every operation names who did it
     orThrow(await journal.workflows.skipUndo(db, { runId: 'r', path: 'p' }, {}));
+  });
+
+  it('reschedule takes a wait from now or a time, never both, and gives the new start', async () => {
+    const op = { actor: 'usr' };
+    const moved = await journal.workflows.reschedule(db, { runId: 'r', delay: '5m' }, op);
+    expectTypeOf(orThrow(moved).startAt).toEqualTypeOf<string>();
+    orThrow(await journal.workflows.reschedule(db, { runId: 'r', at: new Date() }, op));
+    // @ts-expect-error a wait is an age like '5m', not free text
+    orThrow(await journal.workflows.reschedule(db, { runId: 'r', delay: 'soon' }, op));
+    // @ts-expect-error the new start is one thing: a wait or a time
+    orThrow(await journal.workflows.reschedule(db, { runId: 'r' }, op));
+  });
+
+  it('a run says how long it is delayed, derived and never stored', () => {
+    expectTypeOf<RunSummary['delayedUntil']>().toEqualTypeOf<Date | null>();
+    expectTypeOf<RunDetail['run']['delayedUntil']>().toEqualTypeOf<Date | null>();
+    expectTypeOf<RunDetail['run']['ttlAt']>().toEqualTypeOf<Date | null>();
   });
 });

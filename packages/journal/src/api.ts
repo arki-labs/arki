@@ -47,6 +47,7 @@ import type {
   Services,
   ServicesFor,
   SingleKey,
+  StepHookContext,
   StrandedJobs,
   Tap,
   TapHandlers,
@@ -54,8 +55,12 @@ import type {
   WakeListener,
 } from './types.js';
 import type {
+  FinishBound,
   NoResults,
   StartOn,
+  TaskBody,
+  TaskDef,
+  TaskOptions,
   WorkflowBuilder,
   WorkflowDef,
   WorkflowOptions,
@@ -245,6 +250,12 @@ export type WorkflowCommandRunner<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx> = DbHandle,
 > = RootRunnerWith<Meta, Tx, [meta?: SchemaInput<Meta>, opts?: CallOptions]>;
+/** What a workflow body sees of the app: its database and a `ctx.run` that may leave out the meta. */
+type WorkflowHost<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb,
+> = { readonly db: AppDb; readonly run: WorkflowCommandRunner<Meta, Tx> };
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -542,11 +553,13 @@ export type Journal<
    * it to stop; a rejection of `next` is the hook's rejection too; the context is frozen
    * and the result cannot be changed; hooks run in registration order, the first outermost.
    * Register at boot: once the journal has run a command, a drain or a worker, `around`
-   * throws `BAD_DEFINITION`.
+   * throws `BAD_DEFINITION`. Step hooks wrap each workflow step body and undo, inside the
+   * `journal.step` span; they are frozen by the first drain or worker.
    */
   readonly hooks: {
     readonly command: HookPoint<CommandHookContext<SchemaOutput<Meta>>>;
     readonly effect: HookPoint<EffectHookContext<SchemaOutput<Meta>>>;
+    readonly step: HookPoint<StepHookContext>;
   };
   readonly catalog: {
     /**
@@ -658,16 +671,38 @@ export type JournalDefinitions<
     D extends EventsOf<E> = never,
   >(
     name: string,
-    options: WorkflowOptions<Input, N, Declared, StartOn<Input, E, D, SchemaOutput<Meta>>>,
-  ): WorkflowBuilder<
-    Input,
-    NoResults,
-    N,
-    Declared,
-    never,
-    { readonly db: AppDb; readonly run: WorkflowCommandRunner<Meta, Tx> },
-    StarterOf<Meta, Tx, Input>
-  >;
+    options: WorkflowOptions<
+      Input,
+      N,
+      Declared,
+      StartOn<Input, E, D, SchemaOutput<Meta>>,
+      WorkflowHost<Meta, Tx, AppDb>
+    >,
+  ): WorkflowBuilder<Input, NoResults, N, Declared, never, WorkflowHost<Meta, Tx, AppDb>, StarterOf<Meta, Tx, Input>>;
+  /**
+   * A task: a workflow of one step, for the common case. `j.task(name, options, run)` is
+   * `j.workflow(name, options).step('run', run, { retry, timeout, undo, key }).finish()`, so it is a workflow
+   * definition in every way. The output is what `run` returns; with an `output` schema, `run` must return its output.
+   */
+  task<
+    Input extends StandardSchemaV1,
+    Returned extends FinishBound<Declared>,
+    N extends Needs = NoNeeds,
+    Declared extends StandardSchemaV1 | undefined = undefined,
+    E extends AnyEntity<SchemaOutput<Meta>> = never,
+    D extends EventsOf<E> = never,
+  >(
+    name: string,
+    options: TaskOptions<
+      Input,
+      N,
+      Declared,
+      StartOn<Input, E, D, SchemaOutput<Meta>>,
+      WorkflowHost<Meta, Tx, AppDb>,
+      Returned
+    >,
+    run: TaskBody<Input, N, WorkflowHost<Meta, Tx, AppDb>, Returned>,
+  ): TaskDef<Input, N, Declared, StarterOf<Meta, Tx, Input>, Returned>;
   compose<
     const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
     const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],

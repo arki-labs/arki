@@ -26,6 +26,7 @@ import { commandId, correlationId } from './id.js';
 import { trackRefusals } from './refusals.js';
 import { isReturnedFailure } from './rollback.js';
 import { assertRoundTrips, sameValue } from './storage.js';
+import { withJournalSpan } from './telemetry.js';
 import { oneAtATime } from './transaction-guard.js';
 
 /** What JSON storage keeps of `value`. `undefined` has no JSON form, so it comes back as `undefined` here too. */
@@ -202,16 +203,22 @@ export function createCommandRunner<
           let result: Awaited<R> | CommandFailure;
           try {
             // Inside the transaction: a hook that throws rolls the command back cleanly.
-            result = await hooks.run(
-              {
-                name: command.name,
-                input: parsed,
-                meta,
-                commandId: own,
-                correlationId: trace.correlationId,
-                idempotencyKey: key ?? null,
-              },
-              async (): Promise<Awaited<R> | CommandFailure> => {
+            const hookContext = {
+              name: command.name,
+              input: parsed,
+              meta,
+              commandId: own,
+              correlationId: trace.correlationId,
+              idempotencyKey: key ?? null,
+            };
+            const spanAttributes = {
+              'journal.command.name': command.name,
+              'journal.command.id': own,
+              'journal.correlation_id': trace.correlationId,
+              'journal.command.idempotent': key !== undefined,
+            };
+            result = await withJournalSpan('journal.command', spanAttributes, () =>
+              hooks.run(hookContext, async (): Promise<Awaited<R> | CommandFailure> => {
                 // Before the receipt: a receipt proves the command ran once, not that this caller
                 // may have its result. A replay is authorized like a first run.
                 if (command.authorize !== undefined) {
@@ -235,7 +242,7 @@ export function createCommandRunner<
                 if (isReturnedFailure(value)) return value;
                 await storeReceipt(tx, key, command.name, value);
                 return value;
-              },
+              }),
             );
           } catch (error) {
             // The handler's own error is the one to report; the rollback undoes the rest.

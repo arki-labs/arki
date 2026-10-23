@@ -3,8 +3,11 @@
  * Foreman schemas (`foreman/workflows.ts`) all derive from these arrays.
  */
 
-/** Every state `workflow_runs.state` stores. */
-export const RUN_STATES = ['running', 'parked', 'compensating', 'completed', 'failed', 'cancelled'] as const;
+/**
+ * Every state `workflow_runs.state` stores. `expired`: the run's `ttl` passed before its first node started, so it
+ * never ran. A delayed run is `running`: a reader derives `delayedUntil` from `start_at`.
+ */
+export const RUN_STATES = ['running', 'parked', 'compensating', 'completed', 'failed', 'cancelled', 'expired'] as const;
 
 /** Every status `workflow_steps.status` stores. */
 export const STEP_STATUSES = ['scheduled', 'done', 'skipped', 'failed'] as const;
@@ -30,6 +33,7 @@ export const CANCEL_STATES = ['compensating', 'cancelled'] as const satisfies re
 /**
  * Why a node was skipped, for code to act on (`reason` is the text for people): `when` (its condition was false),
  * `compensating` (the run began compensating before the node ran: it has no result), `no-undo` (the step declares no
- * undo), `detached` (a detached child is left running), `operator` (`skipUndo`).
+ * undo), `detached` (a detached child is left running), `operator` (`skipUndo`), `expired` (the run's `ttl` passed
+ * before its first node ran: it has no result).
  */
-export const SKIP_CAUSES = ['when', 'compensating', 'no-undo', 'detached', 'operator'] as const;
+export const SKIP_CAUSES = ['when', 'compensating', 'no-undo', 'detached', 'operator', 'expired'] as const;

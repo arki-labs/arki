@@ -43,6 +43,7 @@ import type {
   Projection,
   RootDb,
   SingleKey,
+  StepHookContext,
   Tap,
   TransactionSource,
 } from './types.js';
@@ -60,8 +61,8 @@ import { trackRefusals } from './refusals.js';
 import { assertRetention, effectOverrides, resolveRetention } from './retention.js';
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
-import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
 import { createPgStore } from './store.js';
+import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
@@ -201,6 +202,7 @@ function createInit<
     effect,
     tap: tapFor<MetaOut, AppDb>(),
     workflow: workflows.workflow,
+    task: workflows.task,
     compose: config => {
       const registered = config.workflows === undefined || config.workflows.length === 0 ? undefined : config.workflows;
       if (registered !== undefined && config.workflowMeta === undefined) {
@@ -226,6 +228,7 @@ function createInit<
         commands: workflows.operate,
         registry: workflows.started,
         meta: config.workflowMeta,
+        stepHooks: workflows.stepHooks,
       });
     },
   };
@@ -277,6 +280,8 @@ function createJournal<
     readonly commands: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['operate'];
     readonly registry: ReadonlyMap<string, { readonly shapeHash: string }>;
     readonly meta: SchemaInput<Meta> | undefined;
+    /** The step hooks the runner wraps each step body and undo in. */
+    readonly stepHooks: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['stepHooks'];
   },
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
@@ -316,6 +321,7 @@ function createJournal<
   });
   const commandHooks = createHookPoint<CommandHookContext<SchemaOutput<Meta>>>('command');
   const effectHooks = createHookPoint<EffectHookContext<SchemaOutput<Meta>>>('effect');
+  const stepHooks = workflowWiring?.stepHooks ?? createHookPoint<StepHookContext>('step');
   const run = createCommandRunner<Meta, Tx>({
     metaSchema,
     writeWithValidatedMeta,
@@ -360,6 +366,7 @@ function createJournal<
     return {
       run: (command, input, meta, call) =>
         run(db, command, input, meta, call, cause, fence).then(refusals.watch(`the command "${command.name}"`)),
+      runUnwatched: (command, input, meta, call) => run(db, command, input, meta, call, cause, fence),
       accept: refusals.accept,
       settle: async handler => {
         const outcome = await handler.finally(refusals.finish);
@@ -376,7 +383,14 @@ function createJournal<
   };
   const drain = createDrain<Meta, WorkerDb, RootCommandRunner<Meta, Tx>>({
     tables,
-    hooks: effectHooks,
+    // Steps run inside effect jobs, so the first drain freezes the step hooks together with the effect hooks.
+    hooks: {
+      ...effectHooks,
+      freeze: () => {
+        effectHooks.freeze();
+        stepHooks.freeze();
+      },
+    },
     effects,
     retention,
     history,
@@ -508,10 +522,24 @@ function createJournal<
         journal.wake();
         return done;
       },
+      // A metadata or tag change moves no run, so there is no work to wake a worker for.
+      setMetadata: (source, args, op) => run(source, verbCommands().setMetadata, { ...args, op }, verbMeta()),
+      addTags: (source, args, op) => run(source, verbCommands().addTags, { ...args, op }, verbMeta()),
+      reschedule: async (source, args, op) => {
+        const done = await run(source, verbCommands().reschedule, { ...args, op }, verbMeta());
+        // The first node may be due now.
+        journal.wake();
+        return done;
+      },
+      replay: async (source, args, op) => {
+        const done = await run(source, verbCommands().replay, { ...args, op }, verbMeta());
+        journal.wake();
+        return done;
+      },
       checkResult: (db, args) => verbCommands().checkResult(db, args),
     },
     wakeChannel,
-    hooks: { command: commandHooks.point, effect: effectHooks.point },
+    hooks: { command: commandHooks.point, effect: effectHooks.point, step: stepHooks.point },
     catalog: {
       entities: [...entitiesByKind.values()].map(entity => ({
         kind: entity.kind,

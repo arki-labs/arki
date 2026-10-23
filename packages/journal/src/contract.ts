@@ -10,6 +10,7 @@ export {
   CommandForbidden,
   CommandInvalid,
   CommandNotFound,
+  WorkflowBusy,
   WorkflowReadMismatch,
   WorkflowStranded,
 } from './errors.js';

@@ -118,6 +118,7 @@
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"
   },
@@ -132,6 +133,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@testcontainers/postgresql": "catalog:testing",

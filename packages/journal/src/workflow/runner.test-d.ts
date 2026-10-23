@@ -4,9 +4,10 @@ import { z } from 'zod';
 
 import type { SchemaInput, SchemaOutput } from '@arki/schema';
 
-import type { CommandConflict } from '../errors.js';
+import type { CommandConflict, CommandInvalid, WorkflowBusy } from '../errors.js';
 import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
+import type { RunFields, RunTiming } from './run-fields.js';
 import type { CancelOutcome, SignalOutcome } from './runner.js';
 import type { SignalStatus } from './states.js';
 import type { OrderId } from '../test-support.js';
@@ -67,18 +68,25 @@ describe('def.signal, as types', () => {
 });
 
 describe('def.start, as types', () => {
-  it('takes the workflow input and an optional id, and returns the run id or a refusal', () => {
-    expectTypeOf<SchemaInput<typeof refund.start.input>>().toEqualTypeOf<{
-      readonly input: { paymentId: string; amount: number };
-      readonly id?: string;
-    }>();
-    expectTypeOf<SchemaOutput<typeof refund.start.input>>().toEqualTypeOf<{
-      readonly input: { paymentId: string; amount: number };
-      readonly id?: string;
-    }>();
+  it('takes the workflow input, an optional id, the run fields and timing, and returns the run id or a refusal', () => {
+    type Args = { readonly input: { paymentId: string; amount: number }; readonly id?: string } & RunFields & RunTiming;
+    expectTypeOf<SchemaInput<typeof refund.start.input>>().toEqualTypeOf<Args>();
+    expectTypeOf<SchemaOutput<typeof refund.start.input>>().toEqualTypeOf<Args>();
     expectTypeOf<Awaited<ReturnType<typeof refund.start.handler>>>().toEqualTypeOf<
-      { readonly runId: string } | CommandConflict | CommandFailure
+      { readonly runId: string } | CommandConflict | WorkflowBusy | CommandInvalid | CommandFailure
     >();
+  });
+
+  it('takes a delay as an age or a time, and a ttl only as an age', () => {
+    const run = (args: SchemaInput<typeof refund.start.input>) => args;
+    const input = { paymentId: 'p', amount: 1 };
+    run({ input, delay: '5m', ttl: '1h' });
+    run({ input, delay: 30, ttl: 60 });
+    run({ input, delay: new Date() });
+    // @ts-expect-error an age has a unit m, h or d
+    run({ input, delay: '5s' });
+    // @ts-expect-error a ttl counts from when the run is due, so it is a length, never a time
+    run({ input, ttl: new Date() });
   });
 
   it('a workflow keeps its output type next to start', () => {

@@ -6,6 +6,7 @@ import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EffectRetention } from './retention.js';
+import type { StepPhase } from './workflow/states.js';
 
 /**
  * A function type whose parameters are checked bivariantly.
@@ -498,6 +499,21 @@ export type CommandHookContext<MetaOut = unknown> = {
   readonly correlationId: string;
   /** The idempotency key of this call, or null. A hook sees a replayed call too: its handler does not run. */
   readonly idempotencyKey: string | null;
+};
+
+/**
+ * What a step hook sees: which run, which node, which try, and whether the body (`do`) or the undo runs. Frozen. The
+ * run's input and the step's results stay out, as they do from the `journal.step` span.
+ */
+export type StepHookContext = {
+  readonly workflow: string;
+  readonly version: number;
+  readonly runId: string;
+  /** The node's name. */
+  readonly step: string;
+  /** 1 on the step's first try, 2 on its next, and so on. */
+  readonly attempt: number;
+  readonly phase: StepPhase;
 };
 
 /** What an effect hook sees. Frozen. `attempt` counts from 1. */

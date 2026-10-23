@@ -9,6 +9,7 @@ export const correlationId = defineId('cor_').create;
 export const attemptId = defineId('att_').create;
 export const operationId = defineId('jop_').create;
 export const workflowRunId = defineId('wfr_').create;
+export const workflowBatchId = defineId('wfb_').create;
 export const workflowSignalId = defineId('wsg_').create;
 export const leaseToken = defineId('').create;
 

@@ -25,6 +25,7 @@ import type {
   ServicesFor,
 } from '../types.js';
 import type { RunDetail } from './read.js';
+import type { MetadataContext, TagsContext } from './run-fields.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
 import { parseRunKeep } from '../retention.js';
@@ -43,6 +44,10 @@ export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootD
   readonly db: AppDb;
   readonly run: Run;
   readonly accept: AcceptFailure;
+  /** Changes this run's metadata, one committed event per call. A refusal is returned and does not fail the step. */
+  readonly metadata: MetadataContext;
+  /** Adds tags to this run, one committed event per call, like `metadata`. */
+  readonly tags: TagsContext;
 };
 
 /** The context as the runner builds it: nothing is known about the input or the results. */
@@ -187,6 +192,8 @@ export type WorkflowDef<
   readonly needs: Needs;
   /** The journal event that starts a run, if any. Only the highest registered version may declare one. */
   readonly startOn: ErasedStartOn | undefined;
+  /** What runs when a run of this version ends, if anything. See `LifecycleHooks`. */
+  readonly on: ErasedLifecycleHooks | undefined;
   readonly nodes: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
@@ -225,11 +232,74 @@ export type StartOn<Input extends StandardSchemaV1, E, D, MetaOut> = {
 /** A `startOn` as the runner keeps it: nothing is known about the entity, the event or the input. */
 export type ErasedStartOn = StartOn<StandardSchemaV1, AnyEntity, AnyEventDef, unknown>;
 
+/**
+ * How a run ended, as a lifecycle hook sees it: the end state, with the output of a completed run and the error text
+ * of a failed one. `Output` is what `def.read` gives: the `output` schema's output, checked again, or `unknown` without
+ * a schema (the stored JSON).
+ */
+export type RunEnding<Output> =
+  | { readonly state: 'completed'; readonly output: Output }
+  | { readonly state: 'failed'; readonly error: string }
+  | { readonly state: 'cancelled' }
+  | { readonly state: 'expired' };
+/** One end of `RunEnding`, by its state. */
+type EndingIn<Output, State extends RunEnding<unknown>['state']> = Extract<
+  RunEnding<Output>,
+  { readonly state: State }
+>;
+
+/**
+ * What a lifecycle hook sees: the run that ended (`runId`, `workflow`, `version`, `scope`, `tags`, `metadata`, the
+ * typed `input`, and how it ended), the context of the hook's job (`db`, `run`, `accept`, `signal`, `jobId`, `attempt`),
+ * and the definition's needs by name, as a step gets them. `run` without a meta records the app's `workflowMeta`, as
+ * in a step. `metadata` is the run's metadata as it ended: the run is over, so a hook reads it and cannot change it.
+ */
+export type LifecycleHookContext<Input, Ending, N extends Needs = NoNeeds, AppDb = RootDb, Run = unknown> = Needed<N> &
+  Ending & {
+    readonly runId: string;
+    readonly workflow: string;
+    readonly version: number;
+    readonly scope: string | null;
+    readonly tags: readonly string[];
+    readonly metadata: Readonly<Record<string, unknown>>;
+    readonly input: Input;
+    readonly jobId: string;
+    /** 1 on the hook job's first try, 2 on its next, and so on. */
+    readonly attempt: number;
+    readonly signal: AbortSignal;
+    readonly db: AppDb;
+    readonly run: Run;
+    readonly accept: AcceptFailure;
+  };
+
+/**
+ * `on`: what runs when a run ends. Hooks are durable, not callbacks: the end of a run queues one job (the
+ * `workflow.on` effect) in the transaction that ends it, so a hook runs only after that commit, and at least once. The
+ * job runs the hooks of the run's own version: the specific one, then `complete`. A throw is retried as an effect's
+ * is; a returned failure is final. The run has ended: no hook changes its state. Method signatures, so a typed `on`
+ * fits the erased one a definition keeps; see `BivariantFn`.
+ */
+export type LifecycleHooks<Input, Output, N extends Needs = NoNeeds, AppDb = RootDb, Run = unknown> = {
+  /** The run completed. `ctx.output` is its output. */
+  success?(ctx: LifecycleHookContext<Input, EndingIn<Output, 'completed'>, N, AppDb, Run>): unknown;
+  /** The run failed. `ctx.error` is the text of its error, as `RunFailed` recorded it. */
+  failure?(ctx: LifecycleHookContext<Input, EndingIn<Output, 'failed'>, N, AppDb, Run>): unknown;
+  /** The run was cancelled, after any undo it had to do. */
+  cancel?(ctx: LifecycleHookContext<Input, EndingIn<Output, 'cancelled'>, N, AppDb, Run>): unknown;
+  /** The run's `ttl` passed before its first node started, so nothing ran. */
+  expired?(ctx: LifecycleHookContext<Input, EndingIn<Output, 'expired'>, N, AppDb, Run>): unknown;
+  /** Every end, after the specific hook, or alone. `ctx.state` says which end. */
+  complete?(ctx: LifecycleHookContext<Input, RunEnding<Output>, N, AppDb, Run>): unknown;
+};
+/** The hooks as the runner keeps them: nothing is known about the input, the output, the needs or the host. */
+export type ErasedLifecycleHooks = LifecycleHooks<unknown, unknown, Needs, unknown, unknown>;
+
 export type WorkflowOptions<
   Input extends StandardSchemaV1,
   N extends Needs,
   Output extends StandardSchemaV1 | undefined,
   Start extends ErasedStartOn = ErasedStartOn,
+  Where extends Host = Host,
 > = {
   readonly version: number;
   readonly input: Input;
@@ -250,6 +320,8 @@ export type WorkflowOptions<
    * job is written in the event's transaction, so the run starts once. An id that already has a run starts nothing.
    */
   readonly startOn?: Start;
+  /** What runs when a run ends: `success`, `failure`, `cancel`, `expired`, and `complete` for every end. See `LifecycleHooks`. */
+  readonly on?: LifecycleHooks<SchemaOutput<Input>, ReadOutputOf<Output>, N, Where['db'], Where['run']>;
 };
 
 /** Results by node name, as the runner stores them. */
@@ -396,16 +468,66 @@ export type WorkflowBuilder<
     ...run: [Last] extends [FinishBound<Declared>]
       ? [run?: (ctx: FinishContext<Input, Results>) => Returned]
       : [run: (ctx: FinishContext<Input, Results>) => Returned]
-  ): WorkflowDef<
-    Input,
-    FinishOutput<Declared, Returned>,
-    Signals,
-    N,
-    ReadOutputOf<Declared>,
-    ReadResultsOf<Results, Checked>
-  > &
-    ApplyExtension<Ext, Signals, ReadOutputOf<Declared>, ReadResultsOf<Results, Checked>>;
+  ): Finished<Input, Results, N, Declared, Returned, Signals, Checked, Ext>;
 };
+
+/** What `finish` builds: the definition, typed by what the builder grew, with what a journal adds to it. */
+type Finished<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Returned,
+  Signals extends AnySignals,
+  Checked extends AnyResults,
+  Ext extends DefExtension,
+> = WorkflowDef<
+  Input,
+  FinishOutput<Declared, Returned>,
+  Signals,
+  N,
+  ReadOutputOf<Declared>,
+  ReadResultsOf<Results, Checked>
+> &
+  ApplyExtension<Ext, Signals, ReadOutputOf<Declared>, ReadResultsOf<Results, Checked>>;
+
+/** The name of a task's one step: `j.task` is a workflow whose only node is this step. */
+export const TASK_STEP = 'run';
+/** A task's body: the body of its one step, which sees no earlier results. */
+export type TaskBody<Input extends StandardSchemaV1, N extends Needs, Where extends Host, Returned> = (
+  ctx: Ctx<Input, NoResults, N, Where>,
+) => Returned;
+/** The options of a task's one step that make sense for a single step. `next` and `when` do not, and `output` is the workflow's. */
+export type TaskStepOptions<Input extends StandardSchemaV1, N extends Needs, Where extends Host, Returned> = Pick<
+  StepOptions<Ctx<Input, NoResults, N, Where>, NoInfer<Resolved<Returned>>, never>,
+  'retry' | 'timeout' | 'undo' | 'key'
+>;
+/** What `j.task` takes: the workflow's options and its step's options in one object. */
+export type TaskOptions<
+  Input extends StandardSchemaV1,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Start extends ErasedStartOn,
+  Where extends Host,
+  Returned,
+> = WorkflowOptions<Input, N, Declared, Start, Where> & TaskStepOptions<Input, N, Where, Returned>;
+/** What `j.task` builds: what `.step(TASK_STEP, body).finish()` builds. */
+export type TaskDef<
+  Input extends StandardSchemaV1,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Ext extends DefExtension,
+  Returned,
+> = Finished<
+  Input,
+  Add<NoResults, typeof TASK_STEP, StepResult<Returned, undefined>>,
+  N,
+  Declared,
+  StepResult<Returned, undefined>,
+  NoSignals,
+  NoResults,
+  Ext
+>;
 
 /** A `waitFor` result: the payload, or `null` when the wait timed out into `continue` or its `when` skipped it. */
 type Waited<Payload extends StandardSchemaV1, OnTimeout, When> = OnTimeout extends 'continue'
@@ -427,7 +549,7 @@ type FinishOutput<Declared extends StandardSchemaV1 | undefined, Returned> = [De
   ? SchemaOutput<Declared>
   : Resolved<Returned>;
 /** What `finish` may return: with an `output` schema, its output or a failure, or a promise of either. */
-type FinishBound<Declared extends StandardSchemaV1 | undefined> = [Declared] extends [StandardSchemaV1]
+export type FinishBound<Declared extends StandardSchemaV1 | undefined> = [Declared] extends [StandardSchemaV1]
   ? SchemaOutput<Declared> | Failure | PromiseLike<SchemaOutput<Declared> | Failure>
   : unknown;
 
@@ -668,9 +790,30 @@ export function workflow<
   Where extends Host = { readonly db: RootDb; readonly run: unknown },
 >(
   name: string,
-  options: WorkflowOptions<Input, N, Declared>,
+  options: WorkflowOptions<Input, N, Declared, ErasedStartOn, Where>,
 ): WorkflowBuilder<Input, NoResults, N, Declared, never, Where> {
   return workflowWith(name, options, () => ({}));
+}
+
+/**
+ * The desugaring of a task: `builder.step(TASK_STEP, run, { retry, timeout, undo, key }).finish()`. `j.task` passes
+ * `j.workflow(name, options)` as the builder, so a task is a workflow definition in every way.
+ */
+export function taskOf<
+  Input extends StandardSchemaV1,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Ext extends DefExtension,
+  Returned extends FinishBound<Declared>,
+>(
+  builder: WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Ext>,
+  options: TaskStepOptions<Input, N, Where, Returned>,
+  run: TaskBody<Input, N, Where, Returned>,
+): TaskDef<Input, N, Declared, Ext, Returned> {
+  // Only the step's own options: the rest of `options` are the workflow's, and `output` there is the run's output.
+  const { retry, timeout, undo, key } = options;
+  return builder.step(TASK_STEP, run, { retry, timeout, undo, key }).finish();
 }
 
 /**
@@ -686,7 +829,7 @@ export function workflowWith<
   Start extends ErasedStartOn,
 >(
   name: string,
-  options: WorkflowOptions<Input, N, Declared, Start>,
+  options: WorkflowOptions<Input, N, Declared, Start, Where>,
   attach: Attach<Input, Ext>,
 ): WorkflowBuilder<Input, NoResults, N, Declared, never, Where, Ext> {
   if (name === '') refuse(name, 'a workflow needs a name');
@@ -725,6 +868,7 @@ export function workflowWith<
       limits,
       needs: options.needs ?? {},
       startOn,
+      on: options.on,
     },
   });
 }

@@ -1,6 +1,6 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
@@ -42,6 +42,19 @@ const started = (minute = 0, concurrencyKey: string | null = null) =>
     concurrencyKey,
     at: clock(minute),
   });
+/** The data of a `RunStarted` as it is written today, without the optional fields. */
+const startedData = () => ({
+  name: 'payments.refund',
+  workflowVersion: 1,
+  shape,
+  shapeHash: 'h1',
+  input: {},
+  deadlineAt: clock(600),
+  parentId: null,
+  parentPath: null,
+  concurrencyKey: null,
+  at: clock(0),
+});
 type RunEvent = ReturnType<(typeof events)[keyof typeof events]>;
 const write = (id: string, ...pending: RunEvent[]) =>
   db.transaction(tx => journal.write(tx, run, id, { meta, events: () => pending }));
@@ -252,6 +265,78 @@ describe('the workflow.run reducers', () => {
   });
 });
 
+describe('the run fields on RunStarted', () => {
+  it('a RunStarted stored before the run fields, start timing, batches and replays existed still replays, with none of them set', async () => {
+    const id = orThrow(workflowRunId());
+    // `started()` writes the event as it was before scope, tags, metadata, rootId, startAt, ttlAt, ttlMs, batchId and
+    // replayOf: none of them is in its data, so an old run has no delay, never expires, is in no batch and replays nothing.
+    orThrow(await write(id, started()));
+    const defaults = {
+      scope: null,
+      tags: [],
+      metadata: {},
+      rootId: null,
+      startAt: null,
+      ttlAt: null,
+      ttlMs: null,
+      batchId: null,
+      replayOf: null,
+    };
+    expect(await runRow(id)).toMatchObject(defaults);
+    const replayed = orThrow(await db.transaction(tx => journal.replay(tx, run, id)));
+    expect(replayed.row).toMatchObject(defaults);
+  });
+
+  it('a RunStarted with the run fields writes them on the row, and replay rebuilds them', async () => {
+    const id = orThrow(workflowRunId());
+    const fields = {
+      scope: 'tenant_1',
+      tags: ['a', 'b'],
+      metadata: { source: 'api' },
+      rootId: 'wfr_root',
+      batchId: 'wfb_1',
+      replayOf: 'wfr_old',
+    };
+    const data = {
+      name: 'payments.refund',
+      workflowVersion: 1,
+      shape,
+      shapeHash: 'h1',
+      input: {},
+      deadlineAt: null,
+      parentId: null,
+      parentPath: null,
+      concurrencyKey: null,
+      at: clock(0),
+    };
+    orThrow(await write(id, events.RunStarted({ ...data, ...fields })));
+    expect(await runRow(id)).toMatchObject(fields);
+    const replayed = orThrow(await db.transaction(tx => journal.replay(tx, run, id)));
+    expect(replayed.row).toMatchObject(fields);
+  });
+});
+
+describe('start timing', () => {
+  it('a reschedule moves the start, ttl and deadline, and a run that expired ends with its retention, both rebuilt by replay', async () => {
+    const id = orThrow(workflowRunId());
+    const timing = { startAt: clock(10), ttlAt: clock(70), ttlMs: 3_600_000 };
+    orThrow(await write(id, events.RunStarted({ ...startedData(), ...timing })));
+    expect(await runRow(id)).toMatchObject({ startAt: new Date(clock(10)), ttlAt: new Date(clock(70)), ttlMs: 3_600_000 });
+    const moved = { startAt: clock(20), ttlAt: clock(80), deadlineAt: clock(610) };
+    orThrow(await write(id, events.RunRescheduled({ ...moved, at: clock(1), actorId: 'usr_ops' })));
+    const after = { state: 'running', startAt: new Date(clock(20)), ttlAt: new Date(clock(80)), deadlineAt: new Date(clock(610)) };
+    expect(await runRow(id)).toMatchObject(after);
+    // A reschedule moves the run, so it is not a field change: an approval taken before it must not hold.
+    const rescheduledRow = await runRow(id);
+    expect(rescheduledRow?.fieldChanges).toBe(0);
+    orThrow(await write(id, events.RunExpired({ at: clock(81), keepUntil: clock(900) })));
+    const ended = { state: 'expired', finishedAt: new Date(clock(81)), keepUntil: new Date(clock(900)) };
+    expect(await runRow(id)).toMatchObject(ended);
+    const replayed = orThrow(await db.transaction(tx => journal.replay(tx, run, id)));
+    expect(replayed.row).toMatchObject({ ...ended, startAt: new Date(clock(20)), ttlAt: new Date(clock(80)) });
+  });
+});
+
 describe('the step projection', () => {
   it('writes one row per node and phase with the status the events say, so Foreman can read position without replaying', async () => {
     const id = orThrow(workflowRunId());
@@ -355,11 +440,19 @@ describe('the step projection', () => {
     expect(await stepRows(id)).toEqual([]);
   });
 
-  it('a second unfinished run with the same name and concurrency key is refused by the database, and a finished one frees the key', async () => {
+  it('the row keeps the concurrency key and an ended run leaves the unfinished set, which is what the start gate counts', async () => {
+    const unfinishedWithKey = async () =>
+      db
+        .select({ id: tables.workflowRuns.id })
+        .from(tables.workflowRuns)
+        .where(and(eq(tables.workflowRuns.concurrencyKey, 'pay_1'), isNull(tables.workflowRuns.finishedAt)));
     const first = orThrow(workflowRunId());
     orThrow(await write(first, started(0, 'pay_1')));
-    await expect(write(orThrow(workflowRunId()), started(0, 'pay_1'))).rejects.toThrow();
+    // The table allows a second one: a limit above 1 needs it, and the start gate (under a lock) enforces the limit.
+    const second = orThrow(workflowRunId());
+    orThrow(await write(second, started(0, 'pay_1')));
+    expect(await unfinishedWithKey()).toHaveLength(2);
     orThrow(await write(first, events.RunCompleted({ output: null, at: clock(1), keepUntil: null })));
-    await expect(write(orThrow(workflowRunId()), started(0, 'pay_1'))).resolves.not.toThrow();
+    expect(await unfinishedWithKey()).toEqual([{ id: second }]);
   });
 });

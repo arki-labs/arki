@@ -280,6 +280,29 @@ export function journalTables(schema?: PgSchema) {
       parentId: varchar('parent_id', { length: 256 }),
       parentPath: varchar('parent_path', { length: 256 }),
       concurrencyKey: varchar('concurrency_key', { length: 256 }),
+      /** The key of the tenant the run belongs to, from `start`. A child has its parent's. */
+      scope: varchar('scope', { length: 256 }),
+      /** Labels to find the run by, from `start`. A child has none of its own. */
+      tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+      /** Free JSON data about the run, from `start`. */
+      metadata: jsonb('metadata').notNull().$type<Readonly<Record<string, unknown>>>().default({}),
+      /** The top run of the tree this run is in. Null for a run with no parent. */
+      rootId: varchar('root_id', { length: 256 }),
+      /**
+       * How many of the run's events changed only `metadata` or `tags`. `version - field_changes` counts the events
+       * that moved the run, so an approval taken on a run is not voided by its progress reports.
+       */
+      fieldChanges: integer('field_changes').notNull().default(0),
+      /** When the run's first node is due, from `start({ delay })` or `reschedule`. Null: it was due at once. */
+      startAt: timestamp('start_at', { withTimezone: true, mode: 'date' }),
+      /** When a run whose first node has not started gives up and ends `expired`. Null: it never expires. */
+      ttlAt: timestamp('ttl_at', { withTimezone: true, mode: 'date' }),
+      /** The `ttl` of `start` in milliseconds (a bigint: 25 days is past an integer), so `reschedule` can move `ttl_at`. */
+      ttlMs: bigint('ttl_ms', { mode: 'number' }),
+      /** The batch of `def.startBatch` that started the run. Null for a run started on its own. */
+      batchId: varchar('batch_id', { length: 256 }),
+      /** The run that `journal.workflows.replay` started this one again from. Null for a run that is no replay. */
+      replayOf: varchar('replay_of', { length: 256 }),
       cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
       cancelReason: text('cancel_reason'),
       startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
@@ -290,13 +313,17 @@ export function journalTables(schema?: PgSchema) {
       version: integer('version').notNull().default(0),
     },
     t => [
-      // One unfinished run per name and concurrency key. A null key never collides.
-      uniqueIndex('workflow_runs_concurrency_unique')
+      // The unfinished runs per name and concurrency key, which the start gate counts under an advisory lock.
+      index('workflow_runs_concurrency_idx')
         .on(t.name, t.concurrencyKey)
         .where(sql`${t.finishedAt} is null`),
       index('workflow_runs_state_name_idx').on(t.state, t.name),
       index('workflow_runs_parent_id_idx').on(t.parentId),
       index('workflow_runs_keep_until_idx').on(t.keepUntil),
+      index('workflow_runs_scope_idx').on(t.scope),
+      index('workflow_runs_tags_idx').using('gin', t.tags),
+      index('workflow_runs_root_id_idx').on(t.rootId),
+      index('workflow_runs_batch_id_idx').on(t.batchId),
     ],
   );
 

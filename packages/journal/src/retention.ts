@@ -1,8 +1,10 @@
 import type { JournalTables } from './pg.js';
 import { JournalError } from './errors.js';
 
+/** The units an age string takes: minutes, hours, days. */
+export const AGE_UNITS = ['m', 'h', 'd'] as const;
 /** Seconds, or a string with unit `m`, `h` or `d` (`'30d'`): the same shape `@arki/schedule` takes for its lock durations. */
-export type RetentionAge = number | `${number}${'m' | 'h' | 'd'}`;
+export type RetentionAge = number | `${number}${(typeof AGE_UNITS)[number]}`;
 
 /**
  * What to do with a finished job's archive row.
@@ -40,6 +42,8 @@ export type RunRetention = {
   readonly failed?: Keep;
   /** Default: the `failed` value. */
   readonly cancelled?: Keep;
+  /** A run whose `ttl` passed before it started. Default: the `failed` value, as for `cancelled`. */
+  readonly expired?: Keep;
 };
 
 /** The journal-wide policy. Every field is optional; the defaults are in {@link defaultRetention}. */
@@ -95,6 +99,7 @@ export type ResolvedRetention = {
     readonly completed: ResolvedKeep;
     readonly failed: ResolvedKeep;
     readonly cancelled: ResolvedKeep;
+    readonly expired: ResolvedKeep;
   };
   readonly sweep: false | { readonly everyMs: number; readonly batch: number };
 };
@@ -204,6 +209,7 @@ function resolveRunRetention(runs: RunRetention | undefined): ResolvedRetention[
     completed: parseRunKeep(runs?.completed ?? defaultRetention.workflows.completed, 'retention.workflows.completed'),
     failed,
     cancelled: runs?.cancelled === undefined ? failed : parseRunKeep(runs.cancelled, 'retention.workflows.cancelled'),
+    expired: runs?.expired === undefined ? failed : parseRunKeep(runs.expired, 'retention.workflows.expired'),
   };
 }
 
@@ -232,7 +238,7 @@ export function keepFor(
 
 /**
  * The keep rule for a run that ended as `outcome`. The workflow's own setting wins over the journal's. A workflow
- * that sets `failed` but not `cancelled` gives both the same time, as the journal's default does.
+ * that sets `failed` but not `cancelled` (or `expired`) gives both the same time, as the journal's default does.
  */
 export function runKeepFor(
   policy: ResolvedRetention,
@@ -240,7 +246,8 @@ export function runKeepFor(
   outcome: keyof ResolvedRetention['workflows'],
   workflow: string,
 ): ResolvedKeep {
-  const setting = outcome === 'cancelled' ? (own.cancelled ?? own.failed) : own[outcome];
+  const setting =
+    outcome === 'cancelled' || outcome === 'expired' ? (own[outcome] ?? own.failed) : own[outcome];
   if (setting === undefined) return policy.workflows[outcome];
   return parseRunKeep(setting, `workflow "${workflow}": retention.${outcome}`);
 }

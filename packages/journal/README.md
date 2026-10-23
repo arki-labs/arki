@@ -173,6 +173,16 @@ Every recorded event says where it came from. The library stamps three columns; 
 
 The command context exposes `commandId` and `correlationId` for logs. To read a chain: `select * from journal_events where correlation_id = $1 order by seq`. Rows written before these columns existed have `null` in all three.
 
+**OpenTelemetry spans.** The journal emits three spans through `@opentelemetry/api`, with the tracer `@arki/journal`. It installs no SDK: with none installed, the spans cost nothing and export nothing.
+
+| Span              | Around                                                                               | Attributes                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `journal.command` | one command run, inside its transaction, around the command hooks                    | `journal.command.name`, `journal.command.id`, `journal.correlation_id`, `journal.command.idempotent`                                              |
+| `journal.effect`  | one effect attempt, inside its lease, around the effect hooks                        | `journal.effect.name`, `journal.job.id`, `journal.job.attempt`, `journal.event.type`                                                              |
+| `journal.step`    | the body or the undo of one workflow step attempt, inside its `workflow.step` effect | `journal.workflow.name`, `journal.workflow.version`, `journal.workflow.run_id`, `journal.step.name`, `journal.step.attempt`, `journal.step.phase` |
+
+Each span ends with `journal.outcome`: `ok`, `failure` (a returned failure, with `failure.code`) or `defect` (a throw). A failure is not recorded as an exception event. Inputs, payloads, meta, results and error messages are never attributes. The span is the active span while the work runs, so a command that an effect or a step runs is its child. A tracer or context manager that throws changes nothing: the work runs once and its result passes through.
+
 ### Idempotent commands
 
 A webhook or a retried request can run the same command twice. `journal.run(db, cmd, input, meta, { idempotencyKey })` makes the second run answer like the first and write nothing. The first run records the key, the command name, the parsed input and its result in `journal_receipts`, inside its own transaction, so a receipt exists exactly when the run committed. A later run with the same key and the same input returns the stored result without running the handler; hooks still run and see `ctx.idempotencyKey`. The same key with another input, or with another command, returns `CommandConflict` (`journal.conflict`). A concurrent repeat waits for the first to commit, then replays it. A key cannot be reused inside its own run.
@@ -527,6 +537,12 @@ journal.hooks.effect.around(async (ctx, next) => {
   log.debug('effect %s attempt %d for %s', ctx.name, ctx.attempt, ctx.event.id);
   await next();
 });
+journal.hooks.step.around(async (ctx, next) => {
+  // ctx: { workflow, version, runId, step, attempt, phase }, frozen; phase is 'do' (the body) or 'undo'
+  const started = performance.now();
+  await next();
+  log.debug('step %s (%s) of %s took %d ms', ctx.step, ctx.phase, ctx.runId, performance.now() - started);
+});
 ```
 
 The rules, all enforced:
@@ -535,7 +551,8 @@ The rules, all enforced:
 - A rejection of `next` is the hook's rejection too. A hook that catches it and returns still fails, with the original error: a rolled-back command cannot look like a success to the caller.
 - The context is frozen, and the result is the handler's own. A hook cannot change the input or the result.
 - Hooks run in registration order, the first one outermost. Command hooks run inside the transaction, around the handler, so a throw rolls the command back cleanly; a child run is wrapped again, with its own `commandId` and the same `correlationId`. Effect hooks run inside the lease, around the handler, so a throw fails the job like a handler failure: it is retried with backoff and recorded on the job row.
-- Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. In a Dot app, a unit that needs the journal attaches in `boot`, which runs before the worker starts.
+- Step hooks wrap each workflow step body and each undo, inside the `journal.step` span, so a span a hook starts is a child of the step. They see no input and no result, as the span does. A throw fails that attempt of the step like a throw from the body: it is retried with the step's `retry`. A step's `when` and `key` functions run outside them. A node with no body of its own (a `sleep`, a `waitFor`, the start of a `child` or a `map`) is not wrapped.
+- Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. Step hooks are frozen by the first drain or worker. In a Dot app, a unit that needs the journal attaches in `boot`, which runs before the worker starts.
 
 ## Operating the jobs
 
@@ -843,6 +860,44 @@ A workflow is a list of steps that runs to the end even when the process dies. E
 
 The [agent guide](docs/agent-guide.md#workflows) has the rules, the error codes and the traps.
 
+### Tasks
+
+Most durable work is one unit: send the email, summarize the document, call the API. `j.task(name, options, run)` is that case. It is a workflow of one step named `run`: it builds `j.workflow(name, options).step('run', run, { retry, timeout, undo, key }).finish()`. So a task is a workflow definition in every way: `compose`, `start`, `startBatch`, `signal`, `cancel`, `read`, `child`, `map`, versions, concurrency, retention, `startOn`, the run fields and Foreman all work the same. `options` are the workflow's options (`version`, `input`, `output?`, `deadline?`, `concurrency?`, `retention?`, `limits?`, `needs?`, `startOn?`, `onDeadStep?`) plus the step's `retry?`, `timeout?`, `undo?` and `key?`. `run` gets the step context. The output is what `run` returns; with an `output` schema, `run` must return that schema's output, or the call does not compile. Use `j.workflow` when the work has more than one step, waits for a signal or sleeps.
+
+```ts run
+import { z } from 'zod';
+
+import { orThrow } from '@arki/failure';
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+
+const summarize = j.task(
+  'docs.summarize',
+  {
+    version: 1,
+    input: z.object({ docId: z.string() }),
+    output: z.object({ summary: z.string() }),
+    // The step's own options sit next to the workflow's.
+    timeout: '10m',
+  },
+  async ({ input }) => ({ summary: `summary of ${input.docId}` }),
+);
+
+const journal = j.compose({ workflows: [summarize], workflowMeta: { actorId: 'system:workflow' } });
+const { db, client } = await openJournalDb(tables);
+
+const started = orThrow(await journal.run(db, summarize.start, { input: { docId: 'doc_1' } }, { actorId: 'usr_1' }));
+await journal.drain(db);
+const done = orThrow(await summarize.read(db, started.runId));
+// `output` is typed by the task's `output` schema.
+if (done?.run.output?.summary !== 'summary of doc_1') throw new Error('the task completes with its output');
+await client.close();
+```
+
 ### Define a workflow
 
 `j.workflow(name, { version, input, output?, needs? })` starts a definition. Each node adds one result, and the types follow: in a later step, `results.hold` has the type the `hold` step returned. `.finish()` ends the definition. The example is one file that runs: it defines a refund, runs it on an in-memory database, and checks what happened.
@@ -890,7 +945,7 @@ export const refund = j
 
 The other nodes:
 
-- `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, and the needs by name. `run(command, input)` may leave the meta out: the command then records the `workflowMeta` the app gave `compose`. A meta passed as the third argument is used as given. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
+- `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, `metadata` and `tags` (change the run's fields, below), and the needs by name. `run(command, input)` may leave the meta out: the command then records the `workflowMeta` the app gave `compose`. A meta passed as the third argument is used as given. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
 - `when: ctx => boolean` skips the step when it returns false. Its result is then `null`, and its type says so (`R | null`).
 - `next: 'node'` or `next: ({ result }) => 'node' | 'next'` jumps back to an earlier node, so a loop is a step with `next`. A name later in the list does not compile.
 - `.waitFor(name, { signal, schema, timeout?, onTimeout?, when? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node. `when` works as on a step: when it returns false the run does not park, the result is `null`, and the type says so (`payload | null`).
@@ -952,7 +1007,11 @@ export const journal = j.compose({
 
 A finished definition has three commands and one read. The commands run through `journal.run`, `journal.bind`, `context.run` or `ctx.run`, like any command.
 
-- `def.start` takes `{ input, id? }` and returns `{ runId }`. The default id is `wfr_<random>`. Give your own id to make the start idempotent: the same id and input return the same run, and another input is a `CommandConflict`.
+- `def.start` takes `{ input, id?, scope?, tags?, metadata?, delay?, ttl? }` and returns `{ runId }`. The default id is `wfr_<random>`. Give your own id to make the start idempotent: the same id and input return the same run, and another input or another `scope` is a `CommandConflict`.
+- The run fields describe the run, not its work. `scope` is the key of the tenant or owner the run belongs to (1 to 256 characters). `tags` are up to 10 labels of 1 to 128 characters, to find runs by. `metadata` is a JSON object of at most 256 KiB (default `{}`). A field outside these limits is refused (`InvalidInput`; metadata that is too large is `CommandInvalid`), and no run starts. The limits are `RUN_FIELD_LIMITS`. A child run (`child`, `map`) takes its parent's `scope` and no tags or metadata. Each run stores `rootId`: null for a run with no parent, else the id of the top run of its tree. The readers return all four fields; a run in a list leaves out `metadata`.
+- `delay` and `ttl` time the start. `delay` is an age (seconds, or `'5m'`, `'2h'`, `'1d'`) or a `Date`: the first node is due that much later (a time in the past is now). The run is stored at once in state `running`, holds its concurrency slot, and the readers show `delayedUntil` (the planned start while it is ahead and the first node has not started; else `null`). The deadline counts from the planned start. `ttl` is an age longer than 0: when a worker picks up the first node's first try after `ttl` has passed since the run was due, the body does not run and the run ends in the state `expired` (event `RunExpired`, the node skipped with cause `expired`). An expired run frees its concurrency slot. A run whose first node has started never expires. A bad value is `InvalidInput` and starts nothing. A child run takes no delay and no ttl. `journal.workflows.reschedule` (§ Operators) moves a start that has not happened yet.
+- A step or an undo changes its run's metadata and tags with `ctx.metadata` and `ctx.tags`: `set(patch)` merges a JSON object into the top level, `increment(key, by = 1)` adds to a number (a missing key counts as 0), `append(key, value)` pushes onto an array (a missing key starts one), `remove(key)` drops a key, and `tags.add(...tags)` adds the tags the run does not have yet. Each call is its own command and one event on the run (`MetadataChanged` with the `change`, or `RunTagged` with the new tags; a call that adds no tag writes none). It commits at once, not with the step's checkpoint, so a reader sees the progress while the step still runs, under the attempt's fence: an attempt that has ended writes nothing. A call never rejects, so it may be left un-awaited (`void ctx.metadata.increment('done')`). It returns `{ metadata }` or `{ tags }` after the change, or a refusal: `CommandConflict` once the run has finished, `CommandInvalid` for a value of the wrong type (`increment` on a non-number, `append` on a non-array), metadata over 256 KiB after the change, or more than 10 tags. A database failure or a lost fence is returned as a failure too. None of these fail the step, even when they arrive after it settled, and none needs `accept`. A retried attempt runs its calls again: `set` and `remove` end with the same metadata, `increment` and `append` apply once more per attempt. Changes are allowed while the run is running, parked or compensating. `journal.workflows.setMetadata` and `addTags` (§ Operators) make the same changes from outside a run.
+- `def.startBatch` takes `{ items, batchId? }` and starts many runs of one workflow in one transaction. Each item is what `def.start` takes, and there are 1 to `BATCH_LIMIT` (1000) items. It returns `{ batchId, runs }`: `runs[i]` is item i's outcome, `{ runId }` or its refusal (`WorkflowBusy`, `CommandConflict`, `CommandInvalid`). Each item runs in its own savepoint, so a refused item rolls back only itself and the others start. An item that does not fit the start schema, or a wrong number of items, is a caller bug: the whole batch is `InvalidInput` and nothing starts. The default batch id is `wfb_<random>`; every run stores it in `batchId`. `journal.workflows.batch(db, batchId)` counts its runs by state, and `runs(db, { batchId })` lists them (§ Operators).
 - `def.signal(name)` takes `{ runId, deliveryId, payload }`. `name` must be a signal one of the `waitFor` nodes declares. `deliveryId` is the sender's own id, such as the webhook event id. It returns a `status`: `woke` (the run moved on), `kept` (stored; the run takes it when it reaches the wait), `duplicate` (this `deliveryId` was seen) or `finished` (the run is over, so it was dropped) or `no-run` (no run of this workflow has that id, or the id belongs to another workflow; nothing is stored). `no-run` is a status, not a failure, so a webhook for a missing run is answered 200 and the provider stops resending. The operator verb `journal.workflows.signal` names a specific run and still refuses an unknown one.
 - `def.cancel` takes `{ runId, reason }`. It returns `{ state: 'compensating' }` while the run undoes its steps, or `{ state: 'cancelled' }` when there was nothing to undo.
 - `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema). A result without a schema is `unknown`. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
@@ -1035,7 +1094,8 @@ A run whose version is no longer registered, or whose definition has other nodes
 
 | Call                                                       | What it does                                                                                                                                |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runs(db, { state?, name?, version?, parentId?, stuck?, limit?, after? })` | `{ runs, next }`: runs, newest first. Pass `next` as `after` for the next page. It is `null` on the last page. |
+| `runs(db, { state?, name?, version?, parentId?, stuck?, tag?, scope?, rootId?, batchId?, from?, to?, limit?, after? })` | `{ runs, next }`: runs, newest first. Pass `next` as `after` for the next page. It is `null` on the last page. `tag` keeps runs that have that tag; `rootId` keeps the runs below that top run; `batchId` keeps the runs of one `startBatch`; `from` and `to` are `Date`s on the start time (`from` included, `to` not). |
+| `batch(db, batchId)`                                       | `{ batchId, total, states, runIds, more }`: how many runs of the batch are in each state (`states.completed`, ...), and their ids, oldest first. `runIds` holds at most `BATCH_LIMIT` (1000) ids; `more` says there are more (several `startBatch` calls gave the same `batchId`): page them with `runs(db, { batchId })`. An unknown batch has `total: 0`. |
 | `run(db, id)`                                              | One run with its steps, children, `residual` and unconsumed signals. Untyped: `def.read` is the typed form.                                 |
 | `counts(db)`                                               | How many runs per name, version and state.                                                                                                  |
 | `stranded(db)`                                             | Unfinished runs whose code is missing or changed.                                                                                           |
@@ -1046,6 +1106,10 @@ A run whose version is no longer registered, or whose definition has other nodes
 | `skipUndo(db, { runId, path }, op)`                        | Gives up a failed undo. `op.reason` is required. The path joins `residual` and compensation goes on.                                        |
 | `signal(db, { runId, name, deliveryId, payload }, op)`     | Delivers a signal from JSON, checked by the run's own version.                                                                              |
 | `cancel(db, { runId, reason }, op)`                        | Cancels a run of any workflow.                                                                                                              |
+| `setMetadata(db, { runId, change }, op)`                   | Changes the metadata of an unfinished run, like `ctx.metadata`. `change` is `{ kind: 'set', patch }`, `{ kind: 'increment', key, by }`, `{ kind: 'append', key, value }` or `{ kind: 'remove', key }`. Returns `{ metadata }`. |
+| `addTags(db, { runId, tags }, op)`                         | Adds tags to an unfinished run, like `ctx.tags.add`. Returns `{ tags }`.                                                                    |
+| `replay(db, { runId, overrides? }, op)`                    | Starts a new run of the run's workflow at the newest registered version, under a new id, with the old run's input, `scope`, `tags` and `metadata`; `overrides` replaces any of them and may add `delay` and `ttl`. Works for a finished or an unfinished run. The new run's `replayOf` is the old id and its `RunStarted` carries the operator; the old run is unchanged. Its children are not copied: the new run starts its own. It is a start: the input is checked by the newest input schema (`InvalidInput` when it no longer fits), and the concurrency gate applies (`WorkflowBusy`; with `onBusy: 'join'`, the running run's id). Returns `{ runId }`. `CommandNotFound` for no such run. |
+| `reschedule(db, { runId, delay } \| { runId, at }, op)`     | Moves the start of a run whose first node has not started: the first node is due at the new time (`delay` from now, or `at`; a past time is now), and `ttl` and the deadline count from it. One `RunRescheduled` event. Returns `{ startAt }` (ISO). `CommandConflict` once the first node has started, `CommandNotFound` for no such run. |
 
 `op` is `{ actor, reason?, executionId? }`, as for the job verbs. The run's events record it. A step or timer job belongs to its run: the raw job verbs (`journal.retry`, `discard`, `cancel`) refuse it with `JOB_MANAGED`.
 
@@ -1125,6 +1189,58 @@ if (thanked?.run.output !== 'thanks for 500') throw new Error('the order started
 await client.close();
 ```
 
+### Concurrency
+
+`concurrency: { key, limit, onBusy }` on the workflow caps how many unfinished runs share one key, such as one sync per account. `key` gets the parsed input and returns a string of 1 to 256 characters. A parked run counts: it still holds its slot until it ends.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+const sync = j
+  .workflow('accounts.sync', {
+    version: 1,
+    input: z.object({ accountId: z.string() }),
+    concurrency: { key: ({ accountId }) => accountId, limit: 1, onBusy: 'refuse' },
+  })
+  .step('pull', ({ input }) => pull(input.accountId))
+  .finish();
+```
+
+- At the limit, `onBusy: 'refuse'` returns `WorkflowBusy` (`journal.workflow_busy`, status 409). Its data names the key, the limit and the running run ids, oldest first. No run is created.
+- At the limit, `onBusy: 'join'` returns the oldest running run's id instead of a new one, so the caller follows the run already under way.
+- The same start again (same `id`, same input) is the same run, never a busy key.
+- A child run (`child`, `map`) is never joined: the run it would join reports to another parent. A busy child is `WorkflowBusy`, and its parent's node fails like any child that cannot start.
+- A `startOn` start that is busy and refused leaves its job dead with `WorkflowBusy`.
+- The check runs inside the start's transaction, under a transaction-scoped advisory lock on the workflow name and the key. Two starts of one key on two connections take turns, so a race never overfills a key.
+
+### Lifecycle hooks
+
+`on: { success, failure, cancel, expired, complete }` on a workflow's options (or a task's) says what runs when a run ends. Each hook gets the run that ended (`runId`, `workflow`, `version`, `scope`, `tags`, `metadata`, the typed `input`, and `state`), the context of its job (`db`, `run`, `accept`, `signal`, `jobId`, `attempt`), and the definition's needs by name, as a step does. `success` also gets `output`: the `output` schema's output, checked again as `def.read` checks it, or `unknown` without a schema. `failure` gets `error`, the text of the run's error. `complete` runs for every end, after the specific hook, or alone; `ctx.state` says which end it was.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+const charge = j.task(
+  'billing.charge',
+  {
+    version: 1,
+    input: z.object({ orderId: z.string() }),
+    output: z.object({ receiptId: z.string() }),
+    needs: { mailer: need<Mailer>() },
+    on: {
+      success: ({ input, output, mailer }) => mailer.receipt(input.orderId, output.receiptId),
+      failure: ({ input, error, run }) => run(markUnpaid, { orderId: input.orderId, reason: error }),
+      complete: ({ runId, state }) => log.debug('charge %s ended %s', runId, state),
+    },
+  },
+  ({ input, key }) => payments.charge(input.orderId, { idempotencyKey: key }),
+);
+```
+
+Hooks are durable, not callbacks:
+
+- Composing adds one effect, `workflow.on`, when at least one definition declares `on`. A run end queues one job of it, in the transaction that ends the run. So a hook runs only after that commit: an end whose transaction rolls back runs nothing.
+- The job calls the hooks of the run's own version, even after a newer version is deployed. A stranded run (its version is not registered) has a dead hook job, retried by an operator once the code is back.
+- A hook runs at least once. A throw is retried as an effect's is (8 tries, 1 s up to 5 min), and a retry runs the specific hook again before `complete`. A returned failure is final: the job is dead. Make a hook idempotent, with `ctx.jobId` as the key of what it sends.
+- The run has ended: a hook never changes its state, and `ctx.metadata` is the metadata as it ended. `ctx.run(command, input)` without a meta records the app's `workflowMeta`, as in a step.
+- The end events do not name the workflow, so the job is queued for every run end of a compose with hooks; a run whose definition has no hook for that end ends its job as done. A compose with no `on` at all queues nothing.
+
 ### Retention
 
 A finished run's row is kept for a while, then the sweeper deletes it. Its events stay. Set the time on `initJournal`, next to the job retention. A workflow's own `retention` option overrides it.
@@ -1147,7 +1263,7 @@ export const nightly = j
   .finish();
 ```
 
-Defaults: `completed` 7 days, `failed` 90 days, `cancelled` the same as `failed`. `'untilExported'` and `max` are refused: a run has no sink. A completed child whose parent has not finished is kept, because the parent may still undo it.
+Defaults: `completed` 7 days, `failed` 90 days, `cancelled` and `expired` the same as `failed`. `'untilExported'` and `max` are refused: a run has no sink. A completed child whose parent has not finished is kept, because the parent may still undo it.
 
 ### Workflows in Dot
 
@@ -1382,6 +1498,10 @@ The procedure must have `journal` and a `db` the journal can write through on it
 ## Tables
 
 `journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps` and `workflowSignals`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+
+`workflowRuns` has three nullable columns for start timing: `start_at` (the planned start of a delayed run), `ttl_at` (when a run that has not started expires) and `ttl_ms` (the `ttl`, so `reschedule` can move `ttl_at`). Its `state` may be `expired`. An app upgrading from an earlier version generates a migration for them.
+
+`workflowRuns` also has `batch_id` (the batch of `def.startBatch` that started the run, indexed by `workflow_runs_batch_id_idx`) and `replay_of` (the run that `journal.workflows.replay` started this one from). Both are nullable `varchar(256)`. An app upgrading generates a migration for them; old runs keep `null`.
 
 **Export every table on its own.** drizzle-kit collects only a schema module's top-level exports, so a table that sits only inside the `journalTables()` object never gets a migration. Export each one, and add `ExportsEveryJournalTable` from `@arki/journal/pg` so a table added in a later version fails the build until you export it:
 

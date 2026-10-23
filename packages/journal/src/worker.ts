@@ -43,8 +43,11 @@ import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
 import { bindHandlers } from './handlers.js';
 import { attemptId, leaseToken } from './id.js';
+import type { InternalEffectContext } from './internal-context.js';
+import { journalOwnedEffect, unwatchedRun } from './internal-context.js';
 import { effectOverrides, keepFor, keepUntil, resolveRetention } from './retention.js';
 import { assertRootDb } from './storage.js';
+import { withJournalSpan } from './telemetry.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
 /**
@@ -83,6 +86,8 @@ const scheduledJob = (job: JobRow): ScheduledJob => {
  */
 export type EffectAttempt<Run> = {
   readonly run: Run;
+  /** `run` without the refusal watch, under the same fence. Only a `journalOwnedEffect` gets it (`internal-context.ts`). */
+  readonly runUnwatched: Run;
   readonly accept: AcceptFailure;
   readonly settle: (handler: Promise<unknown>) => Promise<unknown>;
 };
@@ -248,18 +253,32 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     // Inside the lease: a hook that throws fails the job like a handler failure.
     const outcome = await attempt(
       () =>
-        deps.hooks.run({ name: effect.name, event, jobId: job.id, attempt: job.attempts }, () => {
-          const { run, accept, settle } = deps.attemptOn(db, event, effect.name, {
-            jobId: job.id,
-            attempt: job.attempts,
-          });
-          return settle(
-            attempt(
-              () => effect.run(event, { jobId: job.id, attempt: job.attempts, signal, db, run, accept }),
-              onThrow,
-            ),
-          );
-        }),
+        withJournalSpan(
+          'journal.effect',
+          {
+            'journal.effect.name': effect.name,
+            'journal.job.id': job.id,
+            'journal.job.attempt': job.attempts,
+            'journal.event.type': event.type,
+          },
+          () =>
+            deps.hooks.run({ name: effect.name, event, jobId: job.id, attempt: job.attempts }, () => {
+              const { run, runUnwatched, accept, settle } = deps.attemptOn(db, event, effect.name, {
+                jobId: job.id,
+                attempt: job.attempts,
+              });
+              const context: InternalEffectContext<AppDb, Run> = {
+                jobId: job.id,
+                attempt: job.attempts,
+                signal,
+                db,
+                run,
+                accept,
+                ...(journalOwnedEffect in effect ? { [unwatchedRun]: runUnwatched } : {}),
+              };
+              return settle(attempt(() => effect.run(event, context), onThrow));
+            }),
+        ),
       onThrow,
     );
     return { outcome, retryReason: caught !== undefined && outcome === caught.defect ? caught.cause : outcome };

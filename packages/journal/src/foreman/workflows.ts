@@ -116,10 +116,17 @@ const RunSummary = z
     deadlineAt: timeOrNull,
     parentId: z.string().nullable(),
     parentPath: z.string().nullable(),
+    scope: z.string().nullable(),
+    tags: z.array(z.string()),
+    rootId: z.string().nullable(),
     cancelledAt: timeOrNull,
     cancelReason: z.string().nullable(),
     startedAt: z.iso.datetime(),
     finishedAt: timeOrNull,
+    /** When a delayed run's first node is due, while it is still ahead; null otherwise. */
+    delayedUntil: timeOrNull,
+    /** When a run whose first node has not started ends `expired`; null when it has no ttl. */
+    ttlAt: timeOrNull,
     stuck: z.boolean(),
     stranded: StrandedCode.nullable(),
   })
@@ -299,7 +306,11 @@ async function guarded<T>(runId: string, run: () => Promise<T>): Promise<T> {
 }
 
 const isOver = (detail: RunDetail) => detail.run.finishedAt !== null;
-const revisionOf = (detail: RunDetail) => String(detail.run.version);
+/**
+ * The revision an approval is taken on: the run's events that moved it. A metadata or tag change (`fieldChanges`)
+ * does not count, so a step that reports progress does not void an approval to act on its run.
+ */
+const revisionOf = (detail: RunDetail) => String(detail.run.version - detail.run.fieldChanges);
 /** The revision of a retry of dead jobs: the run's version and the exact jobs, so the approval covers what is retried. */
 const deadJobsRevision = (detail: RunDetail, ids: readonly string[]) => `${revisionOf(detail)}:${ids.join(',')}`;
 
@@ -387,7 +398,7 @@ export function journalWorkflowsModule<
     }
   }
 
-  /** A change of the run's journal version since the preview voids the approval. */
+  /** A change of the run's revision since the preview voids the approval: an event that moved the run, not a metadata change. */
   async function assertUnchanged(runId: string, permit: Permit): Promise<RunDetail> {
     const detail = await openRun(runId);
     if (revisionOf(detail) !== permit.expectedRevision) throw stale(runId);
@@ -407,12 +418,20 @@ export function journalWorkflowsModule<
         version: z.number().int().positive().optional(),
         parentId: z.string().min(1).optional(),
         stuck: z.boolean().optional(),
+        tag: z.string().min(1).optional(),
+        scope: z.string().min(1).optional(),
+        rootId: z.string().min(1).optional(),
+        from: z.iso.datetime().optional(),
+        to: z.iso.datetime().optional(),
         limit: pageLimit,
         after: cursor,
       })
       .strict(),
     output: z.object({ runs: z.array(RunSummary), next: z.string().nullable() }).strict(),
-    load: async ({ state, name, version, parentId, stuck, limit, after }, _ctx: Record<string, never>) => {
+    load: async (
+      { state, name, version, parentId, stuck, tag, scope, rootId, from, to, limit, after },
+      _ctx: Record<string, never>,
+    ) => {
       const page = await journal.workflows.runs(db, {
         limit,
         ...(state === undefined ? {} : { state }),
@@ -420,6 +439,11 @@ export function journalWorkflowsModule<
         ...(version === undefined ? {} : { version }),
         ...(parentId === undefined ? {} : { parentId }),
         ...(stuck === undefined ? {} : { stuck }),
+        ...(tag === undefined ? {} : { tag }),
+        ...(scope === undefined ? {} : { scope }),
+        ...(rootId === undefined ? {} : { rootId }),
+        ...(from === undefined ? {} : { from: new Date(from) }),
+        ...(to === undefined ? {} : { to: new Date(to) }),
         ...(after === undefined ? {} : { after }),
       });
       return {
@@ -434,10 +458,15 @@ export function journalWorkflowsModule<
           deadlineAt: isoOrNull(run.deadlineAt),
           parentId: run.parentId,
           parentPath: run.parentPath,
+          scope: run.scope,
+          tags: run.tags,
+          rootId: run.rootId,
           cancelledAt: isoOrNull(run.cancelledAt),
           cancelReason: run.cancelReason === null ? null : redactSecrets(run.cancelReason),
           startedAt: iso(run.startedAt),
           finishedAt: isoOrNull(run.finishedAt),
+          delayedUntil: isoOrNull(run.delayedUntil),
+          ttlAt: isoOrNull(run.ttlAt),
           stuck: run.stuck,
           stranded: run.stranded,
         })),
@@ -462,6 +491,7 @@ export function journalWorkflowsModule<
         input: z.string().optional(),
         results: z.string().optional(),
         output: z.string().optional(),
+        metadata: z.string().optional(),
       })
       .strict(),
     load: async ({ runId }, _ctx: Record<string, never>) => {
@@ -471,6 +501,8 @@ export function journalWorkflowsModule<
       const input = shown(payloadMode, row.input);
       const results = shown(payloadMode, row.results);
       const output = shown(payloadMode, row.output);
+      // Metadata is the app's own data, like the input: shown only as the payload option allows.
+      const metadata = shown(payloadMode, row.metadata);
       return {
         run: {
           id: row.id,
@@ -483,10 +515,15 @@ export function journalWorkflowsModule<
           deadlineAt: isoOrNull(row.deadlineAt),
           parentId: row.parentId,
           parentPath: row.parentPath,
+          scope: row.scope,
+          tags: row.tags,
+          rootId: row.rootId,
           cancelledAt: isoOrNull(row.cancelledAt),
           cancelReason: row.cancelReason === null ? null : redactSecrets(row.cancelReason),
           startedAt: iso(row.startedAt),
           finishedAt: isoOrNull(row.finishedAt),
+          delayedUntil: isoOrNull(row.delayedUntil),
+          ttlAt: isoOrNull(row.ttlAt),
           stuck: row.stuck,
           stranded: row.stranded,
         },
@@ -530,6 +567,7 @@ export function journalWorkflowsModule<
         ...(input.text === undefined ? {} : { input: input.text }),
         ...(results.text === undefined ? {} : { results: results.text }),
         ...(output.text === undefined ? {} : { output: output.text }),
+        ...(metadata.text === undefined ? {} : { metadata: metadata.text }),
       };
     },
   });

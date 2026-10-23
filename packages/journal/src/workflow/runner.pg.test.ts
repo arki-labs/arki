@@ -14,8 +14,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
+import { WorkflowBusy } from '../errors.js';
 import { j, tables } from '../test-support.js';
 
 const workflowMeta = { actorId: 'system:workflow' };
@@ -93,7 +94,17 @@ const racing = j
   .step('after', () => 'done')
   .finish();
 
-const journal = j.compose({ workflows: [racing], workflowMeta });
+/** Two imports per account at a time: the start gate counts under an advisory lock. */
+const gated = j
+  .workflow('test.gated', {
+    version: 1,
+    input: z.object({ account: z.string() }),
+    concurrency: { key: ({ account }) => account, limit: 2, onBusy: 'refuse' },
+  })
+  .step('load', () => 'loaded')
+  .finish();
+
+const journal = j.compose({ workflows: [racing, gated], workflowMeta });
 journal.hooks.command.around(async (ctx, next) => {
   if (ctx.name === 'workflow.checkpoint' && holdAt === 'checkpoint') {
     checkpoints += 1;
@@ -169,6 +180,23 @@ describe('two workers race one run', () => {
     expect(bodies).toBe(1);
     expect((await completedOf(id)).filter(path => path === 'settle')).toEqual(['settle']);
   }, 30_000);
+});
+
+describe('concurrency gate under concurrent starts', () => {
+  it('eight starts of one key on two connections at once create exactly the limit, so a race never overfills a key', async () => {
+    const account = `acc_race_${Date.now()}`;
+    const starts = Array.from({ length: 8 }, (_, n) =>
+      journal.run(n % 2 === 0 ? dbA : dbB, gated.start, { input: { account } }, caller),
+    );
+    const outcomes = await Promise.all(starts);
+    expect(outcomes.filter(outcome => WorkflowBusy.is(outcome))).toHaveLength(6);
+    expect(outcomes.filter(outcome => !isFailure(outcome))).toHaveLength(2);
+    const rows = await dbA
+      .select({ id: tables.workflowRuns.id })
+      .from(tables.workflowRuns)
+      .where(eq(tables.workflowRuns.concurrencyKey, account));
+    expect(rows).toHaveLength(2);
+  });
 });
 
 const restartProcess = promisify(execFile);

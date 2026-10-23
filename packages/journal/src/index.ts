@@ -30,6 +30,7 @@ export {
   CommandInvalid,
   CommandNotFound,
   JournalError,
+  WorkflowBusy,
   WorkflowReadMismatch,
   WorkflowStranded,
   isJournalError,
@@ -63,6 +64,7 @@ export type {
   WakeListener,
   CommandHookContext,
   EffectHookContext,
+  StepHookContext,
   EventsOf,
   IdTable,
   KeyColumn,
@@ -114,6 +116,7 @@ export type {
 } from './retention.js';
 export { ndjsonArchiveSink } from './retention.js';
 export type {
+  BatchSummary,
   HistoryEvent,
   RunCount,
   RunDetail,
@@ -127,8 +130,19 @@ export type {
   WorkflowVerbs,
 } from './workflow/read.js';
 export type { WorkflowShape } from './workflow/shape.js';
-export type { WorkflowDef } from './workflow/define.js';
-export type { WorkflowStarter } from './workflow/runner.js';
+export type { LifecycleHookContext, LifecycleHooks, RunEnding, WorkflowDef } from './workflow/define.js';
+export type { ReplayArgs, ReplayOverrides, StartBatchOutcome, WorkflowStarter } from './workflow/runner.js';
+export {
+  BATCH_LIMIT,
+  RUN_FIELD_LIMITS,
+  type MetadataChange,
+  type MetadataContext,
+  type MetadataOutcome,
+  type RunFields,
+  type RunMetadata,
+  type TagsContext,
+  type TagsOutcome,
+} from './workflow/run-fields.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';

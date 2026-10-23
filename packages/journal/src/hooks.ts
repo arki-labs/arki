@@ -18,7 +18,7 @@ export type HookPoint<Ctx> = {
   around(hook: Around<Ctx>): void;
 };
 
-export function createHookPoint<Ctx extends object>(what: 'command' | 'effect') {
+export function createHookPoint<Ctx extends object>(what: 'command' | 'effect' | 'step') {
   const hooks: Around<Ctx>[] = [];
   let frozen = false;
 

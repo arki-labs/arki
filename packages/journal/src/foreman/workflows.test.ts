@@ -402,6 +402,45 @@ describe('revision', () => {
     await settle();
   });
 
+  it('a metadata or tag change after the preview keeps the approval: progress reports must not block an operator', async () => {
+    const id = await startCheckout();
+    const mod = module();
+    const preview = await mod.actions.cancel.runPreview({ runId: id, reason: 'customer left' }, NO_CTX);
+
+    const operator = { actor: 'usr_ops' };
+    expectOk(
+      await journal.workflows.setMetadata(
+        db,
+        { runId: id, change: { kind: 'increment', key: 'done', by: 1 } },
+        operator,
+      ),
+    );
+    expectOk(await journal.workflows.addTags(db, { runId: id, tags: ['busy'] }, operator));
+    const done = orThrow(
+      await mod.actions.cancel.runExecute({ runId: id, reason: 'customer left' }, NO_CTX, permit(preview.revision)),
+    );
+    expect(done.state).toBe('compensating');
+    await settle();
+    expect(await stateOf(id)).toBe('cancelled');
+  });
+
+  it('a step scheduled after the preview still voids the approval, with metadata changes on both sides', async () => {
+    const id = await startPayout('moved', true);
+    const mod = module();
+    const operator = { actor: 'usr_ops' };
+    const change = { kind: 'increment', key: 'done', by: 1 } as const;
+    expectOk(await journal.workflows.setMetadata(db, { runId: id, change }, operator));
+    const preview = await mod.actions.cancel.runPreview({ runId: id, reason: 'stop' }, NO_CTX);
+
+    expectOk(await journal.workflows.setMetadata(db, { runId: id, change }, operator));
+    // Someone else retried the dead step after the operator looked: the run moved.
+    expectOk(await journal.workflows.retryStep(db, { runId: id, path: 'ship', phase: 'do' }, operator));
+    await expect(
+      mod.actions.cancel.runExecute({ runId: id, reason: 'stop' }, NO_CTX, permit(preview.revision)),
+    ).rejects.toMatchObject({ code: CODES.staleRevision, status: 409 });
+    await settle();
+  });
+
   it('a retry of dead jobs is refused when another job of the run died after the preview', async () => {
     const mod = module();
     // Another deploy, without this workflow's code, claims the run's first step: the job dies stranded.

@@ -75,6 +75,11 @@ describe('retention resolution', () => {
     expect(policy.sink).toBeUndefined();
   });
 
+  it('an expired run is kept like a failed one unless set, so a run that never ran stays long enough to look into', () => {
+    expect(stored(resolveRetention({ workflows: { failed: '10d' } }).workflows.expired).ageMs).toBe(10 * DAY);
+    expect(stored(resolveRetention({ workflows: { failed: '10d', expired: '2d' } }).workflows.expired).ageMs).toBe(2 * DAY);
+  });
+
   it("per-effect retention wins over the journal's, and the journal's over the default", () => {
     const policy = resolveRetention({ archive: { completed: '2d' }, retryableFor: '10d' });
     // journal beats default
