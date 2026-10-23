@@ -22,6 +22,7 @@ const QUICKSTART_FILE = 'packages/dot/docs/quickstart.md';
 const QUICKSTART_APP = 'packages/dot/docs/examples/quickstart.ts';
 const QUICKSTART_WRONG = 'packages/dot/docs/examples/quickstart-wrong-order.mjs';
 const WAITLIST = 'apps/avocabo/backend/src/features/waitlist';
+const FEATURES_FILE = 'apps/avocabo/backend/src/features.ts';
 const SERVER_FILE = 'apps/avocabo/start/src/server.ts';
 const UNSUBSCRIBE_ROUTE = 'apps/avocabo/start/src/routes/waitlist/unsubscribe.tsx';
 
@@ -219,6 +220,17 @@ export const WIRE_ERROR_SOURCE = {
   path: 'packages/dot/src/define-app.ts',
   message: 'DOT: a unit in this list cannot be mounted at its position',
 } as const;
+
+/** The app's one feature list: a feature joins the app with one line here. */
+export const FEATURE_LIST = {
+  note: 'one line per feature',
+  parts: [
+    { id: 'import', path: FEATURES_FILE, from: 47, lines: ["import { waitlist } from './features/waitlist/feature';"] },
+    { id: 'list', path: FEATURES_FILE, from: 52, lines: ['export const features = [', '  health,'] },
+    { id: 'waitlist', path: FEATURES_FILE, from: 73, lines: ['  waitlist,'] },
+    { id: 'end', path: FEATURES_FILE, from: 81, lines: ['] as const;'] },
+  ],
+} as const satisfies Excerpt;
 
 export const FEATURE_NEEDS = {
   parts: [
@@ -546,6 +558,7 @@ export const ALL_EXCERPTS = [
   WIRE_UNITS,
   WIRE_MISTAKE,
   WIRE_FIX,
+  FEATURE_LIST,
   FEATURE_NEEDS,
   FEATURE_USECASE,
   ORDER_ENTITY,
@@ -603,8 +616,8 @@ const STEP_LIST = [
     number: 'F3',
     verb: 'Feature',
     kicker: 'model · usecases · infra · entrypoints',
-    title: 'A feature is one part of the product. It names what it needs, and gets nothing else.',
-    excerpts: [FEATURE_NEEDS, FEATURE_USECASE],
+    title: 'Open a feature and read what your product does. The plumbing waits outside.',
+    excerpts: [FEATURE_LIST, FEATURE_NEEDS, FEATURE_USECASE],
   },
   {
     id: 'remember',

@@ -10,6 +10,7 @@ import {
   DOCTOR_COMMAND,
   EXPLAIN_COMMAND,
   EXPLAIN_GRAPH_OUTPUT,
+  FEATURE_LIST,
   FEATURE_NEEDS,
   FEATURE_ROOMS,
   FEATURE_STEP,
@@ -176,10 +177,12 @@ export function BuildPath() {
 
       <Step step={FEATURE_STEP} index={2}>
         <p className="home-step-text">
-          Take the waitlist. It lives in one folder, in four parts, each with one job. The model is the things it knows
-          and their rules. The usecases are what someone can do, one file each: sign up, unsubscribe, count. The infra
-          is how it talks to the outside world. The entrypoints are how a request gets in. The feature names what it
-          needs from the app, and each usecase gets only the services it asks for.
+          A feature is one part of your product, like the waitlist. In the middle are its rules: the model, the things
+          it knows, and the usecases, what someone can do: sign up, unsubscribe, count. They are plain functions, with
+          no HTTP, no SQL and no email in them. Around them sit the infra, how the feature talks to the outside, and the
+          entrypoints, how a request gets in. So you read what your product does in one place, test a rule by handing it
+          only what it names, and change the storage or add a new way in without touching a rule. The infra can never
+          reach into the rules: the types forbid it. A feature joins the app with one line.
         </p>
         <ul className="home-rooms" aria-label="The four rooms of a feature">
           {FEATURE_ROOMS.map(room => (
@@ -190,6 +193,7 @@ export function BuildPath() {
           ))}
         </ul>
         <Callout step={FEATURE_STEP}>
+          <Code excerpt={FEATURE_LIST} />
           <Code excerpt={FEATURE_NEEDS} />
           <CodeKey rows={FEATURE_KEY} />
           <Code excerpt={FEATURE_USECASE} />
