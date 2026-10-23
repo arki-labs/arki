@@ -3,17 +3,18 @@
  * plugin list is a plain array of the engine's own plugin values, with no cast.
  */
 import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
-import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { expo } from '@better-auth/expo';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { bearer, magicLink, oAuthProxy, organization } from 'better-auth/plugins';
 
+import type { Dialect } from '@arki/db/dialect';
+
 import type { AuthMethod, ResolvedDefinition } from '../definition.js';
 import type { AdditionalFields } from './fields.js';
 import type { AuthMail, AuthMailKind } from './mail.js';
 import type { RateLimitStorage } from './security/kv-storage.js';
-import type { AuthDb, AuthTables } from './types.js';
+import type { AuthDb, AuthTable, AuthTables } from './types.js';
 import { PASSWORD_MIN_LENGTH } from '../constants.js';
 import { AUTH_ERROR_CODES, AuthError, isAuthError } from '../errors.js';
 import { AUTH_BASE_PATH } from './events.js';
@@ -47,6 +48,8 @@ export type EngineInput = {
   readonly definition: ResolvedDefinition;
   readonly runtime: EngineRuntime;
   readonly db: AuthDb;
+  /** The adapter's dialect, read from `db`. */
+  readonly provider: Dialect;
   readonly tables: AuthTables;
   readonly additionalFields: AdditionalFields;
   /** The app's own session columns `sessionCreating` writes; the engine drops fields it does not know. */
@@ -61,7 +64,7 @@ export type EngineInput = {
 };
 
 /** The engine's model names mapped to the app's tables. */
-export function engineSchema(tables: AuthTables): Record<string, AnyPgTable> {
+export function engineSchema(tables: AuthTables): Record<string, AuthTable> {
   const { User, Session, Account, Verification, Organization, Member, Invitation, Team, TeamMember } = tables;
   return {
     user: User,
@@ -116,7 +119,7 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
     baseURL: runtime.url,
     basePath: AUTH_BASE_PATH,
     secret: runtime.secret,
-    database: drizzleAdapter(input.db, { provider: 'pg', schema: engineSchema(input.tables) }),
+    database: drizzleAdapter(input.db, { provider: input.provider, schema: engineSchema(input.tables) }),
     trustedOrigins: [
       originOf(runtime.url),
       ...(runtime.productionUrl === undefined ? [] : [originOf(runtime.productionUrl)]),

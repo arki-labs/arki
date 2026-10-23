@@ -1,12 +1,12 @@
 /**
  * The auth builder behind `createAuth` and `testAuth`.
  */
-import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { makeSignature } from 'better-auth/crypto';
 import { getTableColumns } from 'drizzle-orm';
 
+import { dialectOf } from '@arki/db/dialect';
 import { isFailure } from '@arki/failure';
 
 import { is, recordSchema } from '@arki/schema';
@@ -20,6 +20,7 @@ import type {
   AuthBindings,
   AuthRuntime,
   AuthSessions,
+  AuthTable,
   AuthTables,
   AuthTestingApi,
   IdTokenSession,
@@ -169,7 +170,7 @@ function assertWorkspaceTables(tables: AuthTables, teams: boolean): void {
  * default. A table whose `id` has none would insert a null id at the first sign-up.
  */
 function assertIdDefaults(tables: AuthTables, workspaces: ResolvedDefinition['workspaces']): void {
-  const checked: readonly (readonly [string, AnyPgTable | undefined])[] = [
+  const checked: readonly (readonly [string, AuthTable | undefined])[] = [
     ['User', tables.User],
     ['Session', tables.Session],
     ['Account', tables.Account],
@@ -365,6 +366,8 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         clientIpHeader: runtime.clientIp?.header,
       },
       db: bindings.db,
+      provider:
+        dialectOf(bindings.db) ?? invalid('`db` is neither a Drizzle Postgres nor a Drizzle SQLite database.'),
       tables,
       additionalFields,
       sessionFields,

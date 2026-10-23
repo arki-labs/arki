@@ -3,9 +3,9 @@
  * app's Drizzle table, so nothing is declared twice.
  */
 import type { BetterAuthOptions } from 'better-auth';
-import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { getTableColumns } from 'drizzle-orm';
 
+import type { AuthTable } from './types.js';
 import { AUTH_ERROR_CODES, AuthError } from '../errors.js';
 
 /** The engine's description of extra user fields. */
@@ -40,7 +40,7 @@ function fieldTypeOf(name: string, dataType: string, enumValues: readonly string
  * is not a column of the table is `ARKI_AUTH_E001`.
  */
 export function additionalFieldsFromColumns(
-  table: AnyPgTable,
+  table: AuthTable,
   fields: readonly string[],
   signUpFields: readonly string[],
   returned = true,

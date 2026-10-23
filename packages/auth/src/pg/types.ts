@@ -4,6 +4,7 @@
 import type { BetterAuthPlugin } from 'better-auth';
 import type { AnyRelations, InferInsertModel } from 'drizzle-orm';
 import type { AnyPgTable, PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import type { AnySQLiteTable, SQLiteAsyncDatabase } from 'drizzle-orm/sqlite-core';
 
 import type { KV } from '@arki/kv';
 import type { Mailer, MailTemplate } from '@arki/mail';
@@ -29,10 +30,14 @@ import type {
 } from '../principal.js';
 
 /**
- * A Drizzle Postgres database: node-postgres, PGlite, or any other async Postgres driver.
- * The engine's adapter only needs the query builder every one of them shares.
+ * A Drizzle database: Postgres (node-postgres, PGlite, or any other async Postgres driver) or
+ * SQLite (libSQL). Only the engine's adapter touches it, and it only needs the query builder
+ * every one of them shares. The adapter's dialect is read from the database itself.
  */
-export type AuthDb = PgAsyncDatabase<PgQueryResultHKT, AnyRelations>;
+export type AuthDb = PgAsyncDatabase<PgQueryResultHKT, AnyRelations> | SQLiteAsyncDatabase<'async', unknown, AnyRelations>;
+
+/** One auth table, built on Postgres or on SQLite (`createAuthTables` from `./pg` or `./sqlite`). */
+export type AuthTable = AnyPgTable | AnySQLiteTable;
 
 /**
  * The app's auth tables, usually from `createAuthTables` (and `createWorkspaceTables` when the
@@ -40,15 +45,15 @@ export type AuthDb = PgAsyncDatabase<PgQueryResultHKT, AnyRelations>;
  * the table's branded id.
  */
 export type AuthTables = PrincipalTables & {
-  readonly User: AnyPgTable;
-  readonly Session: AnyPgTable;
-  readonly Account: AnyPgTable;
-  readonly Verification: AnyPgTable;
-  readonly Organization?: AnyPgTable;
-  readonly Member?: AnyPgTable;
-  readonly Invitation?: AnyPgTable;
-  readonly Team?: AnyPgTable;
-  readonly TeamMember?: AnyPgTable;
+  readonly User: AuthTable;
+  readonly Session: AuthTable;
+  readonly Account: AuthTable;
+  readonly Verification: AuthTable;
+  readonly Organization?: AuthTable;
+  readonly Member?: AuthTable;
+  readonly Invitation?: AuthTable;
+  readonly Team?: AuthTable;
+  readonly TeamMember?: AuthTable;
 };
 
 /** A user table whose row has every column the definition exposes. Unknown names do not compile. */

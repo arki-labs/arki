@@ -46,6 +46,16 @@
       "import": "./dist/pg/workspaces/index.js",
       "default": "./dist/pg/workspaces/index.js"
     },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "import": "./dist/sqlite/index.js",
+      "default": "./dist/sqlite/index.js"
+    },
+    "./sqlite/workspaces": {
+      "types": "./dist/sqlite/workspaces/index.d.ts",
+      "import": "./dist/sqlite/workspaces/index.js",
+      "default": "./dist/sqlite/workspaces/index.js"
+    },
     "./dot": {
       "types": "./dist/dot.d.ts",
       "import": "./dist/dot.js",
@@ -164,6 +174,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
@@ -186,6 +197,7 @@
     "@arki/icons": "workspace:*",
     "@arki/ui": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
@@ -209,6 +221,9 @@
       "optional": true
     },
     "@electric-sql/pglite": {
+      "optional": true
+    },
+    "@libsql/client": {
       "optional": true
     },
     "@orpc/server": {
