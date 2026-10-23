@@ -2,7 +2,7 @@
   "name": "@arki/pubsub",
   "version": "0.1.0",
   "private": true,
-  "description": "Publish and subscribe with one contract over memory, a polled message table (Postgres or SQLite), Postgres LISTEN/NOTIFY and Redis.",
+  "description": "Publish and subscribe with one contract and a dedicated integration per backend: memory, Postgres LISTEN/NOTIFY, SQLite (a polled table) and Redis.",
   "keywords": [
     "arki",
     "typescript",
@@ -41,15 +41,15 @@
       "import": "./dist/pg/index.js",
       "default": "./dist/pg/index.js"
     },
-    "./poll": {
-      "types": "./dist/poll/index.d.ts",
-      "import": "./dist/poll/index.js",
-      "default": "./dist/poll/index.js"
-    },
     "./redis": {
       "types": "./dist/redis/index.d.ts",
       "import": "./dist/redis/index.js",
       "default": "./dist/redis/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "import": "./dist/sqlite/index.js",
+      "default": "./dist/sqlite/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",

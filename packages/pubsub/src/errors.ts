@@ -27,10 +27,10 @@ export const PUBSUB_ERROR_CODES = {
    */
   closed: 'ARKI_PUBSUB_E003',
   /**
-   * Bad setup: a bad interval or retention time, or a database and a table of different dialects.
+   * Bad setup: a non-positive `intervalMs` or `retainMs`.
    *
    * @fix Fix the option named in the message.
-   * @verify bun run test -- src/poll/poll.test.ts
+   * @verify bun run test -- src/sqlite/sqlite.test.ts
    */
   config: 'ARKI_PUBSUB_E004',
 } as const;

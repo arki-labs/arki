@@ -7,10 +7,8 @@ import type { Redis } from 'ioredis';
 
 import { getLogger } from '@arki/log';
 
-import type { Subscription } from '../subscribers.js';
-import type { PubSub } from '../types.js';
+import type { OnMessage, PubSub } from '../types.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
-import { createSubscribers, deliver } from '../subscribers.js';
 
 const log = getLogger('arki:pubsub');
 
@@ -19,12 +17,13 @@ export type RedisPubSubOptions = {
   readonly client: Redis;
 };
 
+/** One subscribed channel: its callbacks, and its `SUBSCRIBE` (in flight or done). */
+type Channel = { readonly callbacks: Set<OnMessage>; readonly subscribing: Promise<unknown> };
+
 /** A pubsub over Redis pub/sub. */
 export function redisPubSub(options: RedisPubSubOptions): PubSub {
   const { client } = options;
-  const subscribers = createSubscribers();
-  /** One `SUBSCRIBE` per channel, in flight or done. */
-  const subscribing = new Map<string, Promise<unknown>>();
+  const channels = new Map<string, Channel>();
   let subscriber: Redis | undefined;
   let closed = false;
 
@@ -32,7 +31,18 @@ export function redisPubSub(options: RedisPubSubOptions): PubSub {
   function connection(): Redis {
     if (subscriber) return subscriber;
     const created = client.duplicate();
-    created.on('message', (channel, payload) => deliver(subscribers.of(channel), payload));
+    created.on('message', (name, payload) => {
+      for (const callback of channels.get(name)?.callbacks ?? []) {
+        try {
+          callback(payload);
+        } catch (error) {
+          log.warn('a subscriber on {channel} threw: {message}', {
+            channel: name,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    });
     created.on('error', (error: Error) => {
       log.debug('redis subscriber connection error: {message}', { message: error.message });
     });
@@ -41,36 +51,41 @@ export function redisPubSub(options: RedisPubSubOptions): PubSub {
     return created;
   }
 
-  async function leave(subscription: Subscription): Promise<void> {
-    if (!subscribers.remove(subscription)) return;
-    subscribing.delete(subscription.channel);
-    if (!closed) await subscriber?.unsubscribe(subscription.channel);
-  }
-
   return {
     async publish(channel, payload) {
       checkOpen(closed, 'redis');
       checkMessage(channel, payload);
       await client.publish(channel, payload);
     },
-    async subscribe(channel, onMessage) {
+    async subscribe(name, onMessage) {
       checkOpen(closed, 'redis');
-      checkChannel(channel);
-      const { subscription, first } = subscribers.add(channel, onMessage);
-      if (first) subscribing.set(channel, connection().subscribe(channel));
+      checkChannel(name);
+      let channel = channels.get(name);
+      if (channel === undefined) {
+        channel = { callbacks: new Set(), subscribing: connection().subscribe(name) };
+        channels.set(name, channel);
+      }
+      // Wrapped, so the same function subscribed twice is two subscriptions.
+      const subscription: OnMessage = payload => onMessage(payload);
+      channel.callbacks.add(subscription);
+      const leave = async (): Promise<void> => {
+        if (!channel.callbacks.delete(subscription) || channel.callbacks.size > 0) return;
+        if (channels.get(name) === channel) channels.delete(name);
+        if (!closed) await subscriber?.unsubscribe(name);
+      };
       try {
-        await subscribing.get(channel);
+        await channel.subscribing;
       } catch (error) {
-        await leave(subscription);
+        await leave();
         throw error;
       }
-      return () => leave(subscription);
+      return leave;
     },
     async close() {
       if (closed) return;
       closed = true;
-      subscribers.clear();
-      subscribing.clear();
+      for (const channel of channels.values()) channel.callbacks.clear();
+      channels.clear();
       if (subscriber) await subscriber.quit();
       log.debug('redis pubsub closed');
     },

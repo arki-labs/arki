@@ -3,26 +3,21 @@ import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
 import type { LibSQLDatabase, LibSQLRunResult } from 'drizzle-orm/libsql';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgAsyncTransaction, PgQueryResultHKT } from 'drizzle-orm/pg-core';
-import type { PgliteDatabase, PgliteQueryResultHKT } from 'drizzle-orm/pglite';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type { SQLiteAsyncTransaction } from 'drizzle-orm/sqlite-core';
 import { Redis } from 'ioredis';
 import pg from 'pg';
 import { expectTypeOf, test } from 'vitest';
 
-import { pgColumns } from '@arki/db/pg';
-import { sqliteColumns } from '@arki/db/sqlite';
-
 import type { PubSub, Unsubscribe } from './index.js';
 import { memoryPubSub } from './memory.js';
 import { pgPubSub } from './pg/index.js';
-import { pollPubSub, pubsubTable } from './poll/index.js';
 import { redisPubSub } from './redis/index.js';
+import { sqlitePubSub } from './sqlite/index.js';
 
 declare const pgDb: PgliteDatabase;
 declare const sqliteDb: LibSQLDatabase;
 declare const nodePgDb: NodePgDatabase;
-const pgTable = pubsubTable(pgColumns());
-const sqliteTable = pubsubTable(sqliteColumns());
 
 test('redis has no publishIn', () => {
   const pubsub = redisPubSub({ client: new Redis() });
@@ -49,25 +44,16 @@ test("subscribe fits @arki/journal's WakeListener with no adapter", () => {
   expectTypeOf(listen).returns.resolves.toEqualTypeOf<Unsubscribe>();
 });
 
-test("pollPubSub's publishIn takes the database's own transaction type, inferred", () => {
-  const onPg = pollPubSub({ db: pgDb, table: pgTable });
-  expectTypeOf<Parameters<typeof onPg.publishIn>[0]>().toEqualTypeOf<
-    PgAsyncTransaction<PgliteQueryResultHKT, EmptyRelations>
-  >();
-  void pgDb.transaction(tx => onPg.publishIn(tx, 'orders', 'ord_1'));
-
-  const onSqlite = pollPubSub({ db: sqliteDb, table: sqliteTable });
-  expectTypeOf<Parameters<typeof onSqlite.publishIn>[0]>().toEqualTypeOf<
+test("sqlitePubSub's publishIn takes the database's own transaction type, inferred", () => {
+  const pubsub = sqlitePubSub({ db: sqliteDb });
+  expectTypeOf<Parameters<typeof pubsub.publishIn>[0]>().toEqualTypeOf<
     SQLiteAsyncTransaction<'async', LibSQLRunResult, EmptyRelations>
   >();
-  void sqliteDb.transaction(tx => onSqlite.publishIn(tx, 'orders', 'ord_1'));
-
-  // @ts-expect-error -- a SQLite transaction cannot publish on a Postgres pubsub
-  void sqliteDb.transaction(tx => onPg.publishIn(tx, 'orders', 'ord_1'));
-  // @ts-expect-error -- the table must be built with the database's dialect
-  void pollPubSub({ db: pgDb, table: sqliteTable });
-  // @ts-expect-error -- the table must be built with the database's dialect
-  void pollPubSub({ db: sqliteDb, table: pgTable });
+  void sqliteDb.transaction(tx => pubsub.publishIn(tx, 'orders', 'ord_1'));
+  // @ts-expect-error -- a Postgres transaction cannot write the SQLite table
+  void pgDb.transaction(tx => pubsub.publishIn(tx, 'orders', 'ord_1'));
+  // @ts-expect-error -- a Postgres database is not a SQLite one
+  void sqlitePubSub({ db: pgDb });
 });
 
 test("pgPubSub's publishIn takes any Drizzle Postgres transaction, never a database or a SQLite one", () => {

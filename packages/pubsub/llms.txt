@@ -1,6 +1,6 @@
 # @arki/pubsub
 
-> Publish and subscribe on named channels over memory, a polled table (Postgres or SQLite), Postgres LISTEN/NOTIFY and Redis. Best effort, like NOTIFY. Not a queue.
+> Publish and subscribe on named channels with a dedicated integration per backend: memory, Postgres LISTEN/NOTIFY, SQLite (a polled table) and Redis. Best effort, like NOTIFY. Not a queue.
 
 ## Import paths
 
@@ -8,8 +8,8 @@
 - `@arki/pubsub`: the contract, its limits and its errors. `CHANNEL_PATTERN`, `MAX_PAYLOAD_BYTES`, `PUBSUB_ERROR_CODES`, `PubSubError`; types `OnMessage`, `PubSub`, `PubSubErrorCode`, `TransactionalPubSub`, `Unsubscribe`.
 - `@arki/pubsub/memory`: in-process fan-out, for tests and one-process apps. `memoryPubSub`.
 - `@arki/pubsub/pg`: Postgres LISTEN/NOTIFY. `pgPubSub`; types `PgPubSubOptions`, `PgPubSubPool`, `PgTransaction`.
-- `@arki/pubsub/poll`: messages in a database table, read by polling. `pollPubSub`, `pubsubTable`; types `PgPollDb`, `PollPubSubOptions`, `PubsubRow`, `PubsubTable`, `SqlitePollDb`.
 - `@arki/pubsub/redis`: Redis `PUBLISH`, and `SUBSCRIBE` on a second connection (`client.duplicate()`), since a subscribed Redis connection can run nothing else. `redisPubSub`; types `RedisPubSubOptions`.
+- `@arki/pubsub/sqlite`: messages in a SQLite table, read by polling. `pubsubTable`, `sqlitePubSub`; types `PubsubTable`, `SqlitePubSubDb`, `SqlitePubSubOptions`.
 - `@arki/pubsub/testing`: the conformance suite every backend runs. `describePubSubContract`; types `PubSubContractOptions`, `PubSubSubject`, `TransactionalPubSubSubject`.
 <!-- llms:end -->
 
@@ -24,7 +24,7 @@
 - [Test a new backend](docs/agent-guide.md#test-a-new-backend)
 
 ## Rules that bite
-- Only `pollPubSub` and `pgPubSub` have `publishIn`; it sends at commit and never after a rollback.
+- Only `pgPubSub` and `sqlitePubSub` have `publishIn`; it sends at commit and never after a rollback.
 - Channels are `^[a-z0-9_]{1,63}$`; payloads are at most 7999 UTF-8 bytes. Send ids.
 - `pgPubSub` needs a session pool, never a transaction pooler.
 - `close()` never closes your database, pool or Redis client.

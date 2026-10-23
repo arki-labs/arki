@@ -4,9 +4,8 @@
  */
 import { getLogger } from '@arki/log';
 
-import type { PubSub } from './types.js';
+import type { OnMessage, PubSub } from './types.js';
 import { checkChannel, checkMessage, checkOpen } from './limits.js';
-import { createSubscribers, deliver } from './subscribers.js';
 
 const log = getLogger('arki:pubsub');
 
@@ -15,7 +14,8 @@ const log = getLogger('arki:pubsub');
  * Messages arrive on a later microtask, never inside `publish`, in the order they were published.
  */
 export function memoryPubSub(): PubSub {
-  const subscribers = createSubscribers();
+  /** The callbacks of each channel. A callback leaves its set when it unsubscribes. */
+  const channels = new Map<string, Set<OnMessage>>();
   let closed = false;
 
   return {
@@ -23,21 +23,38 @@ export function memoryPubSub(): PubSub {
       checkOpen(closed, 'memory');
       checkMessage(channel, payload);
       // Taken now: a subscriber that joins before the microtask runs did not see this publish.
-      const receivers = subscribers.of(channel);
-      queueMicrotask(() => deliver(receivers, payload));
+      const receivers = [...(channels.get(channel) ?? [])];
+      queueMicrotask(() => {
+        for (const onMessage of receivers) {
+          if (!channels.get(channel)?.has(onMessage)) continue; // unsubscribed meanwhile
+          try {
+            onMessage(payload);
+          } catch (error) {
+            log.warn('a subscriber on {channel} threw: {message}', {
+              channel,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      });
     },
     async subscribe(channel, onMessage) {
       checkOpen(closed, 'memory');
       checkChannel(channel);
-      const { subscription } = subscribers.add(channel, onMessage);
+      // Wrapped, so the same function subscribed twice is two subscriptions.
+      const subscription: OnMessage = payload => onMessage(payload);
+      const set = channels.get(channel) ?? new Set();
+      set.add(subscription);
+      channels.set(channel, set);
       return async () => {
-        subscribers.remove(subscription);
+        set.delete(subscription);
+        if (set.size === 0 && channels.get(channel) === set) channels.delete(channel);
       };
     },
     async close() {
       if (closed) return;
       closed = true;
-      subscribers.clear();
+      channels.clear();
       log.debug('memory pubsub closed');
     },
   };

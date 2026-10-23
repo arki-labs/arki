@@ -18,10 +18,8 @@ import type { ListenOptions, ListenPool } from '@arki/db/pg';
 import { listenOnPool } from '@arki/db/pg';
 import { getLogger } from '@arki/log';
 
-import type { Subscription } from '../subscribers.js';
-import type { TransactionalPubSub } from '../types.js';
+import type { OnMessage, TransactionalPubSub } from '../types.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
-import { createSubscribers, deliver } from '../subscribers.js';
 
 const log = getLogger('arki:pubsub');
 
@@ -38,29 +36,24 @@ export type PgPubSubOptions = {
   readonly listen?: ListenOptions;
 };
 
+/** One heard channel: its callbacks, and the listen that resolves with the function that stops it. */
+type Channel = { readonly callbacks: Set<OnMessage>; readonly listening: Promise<() => Promise<void>> };
+
 /** A pubsub over Postgres LISTEN/NOTIFY. */
 export function pgPubSub(options: PgPubSubOptions): TransactionalPubSub<PgTransaction> {
   const { pool } = options;
-  const subscribers = createSubscribers();
-  /** One listener per channel; each resolves with the function that stops it. */
-  const listeners = new Map<string, Promise<() => Promise<void>>>();
+  const channels = new Map<string, Channel>();
   let closed = false;
 
-  async function stopListener(channel: string): Promise<void> {
-    const listening = listeners.get(channel);
-    if (listening === undefined) return;
-    listeners.delete(channel);
-    let stop: () => Promise<void>;
+  async function stop(name: string, channel: Channel): Promise<void> {
+    if (channels.get(name) === channel) channels.delete(name);
+    let unlisten: () => Promise<void>;
     try {
-      stop = await listening;
+      unlisten = await channel.listening;
     } catch {
       return; // The listen never started (its subscriber got the error), so nothing to stop.
     }
-    await stop();
-  }
-
-  async function leave(subscription: Subscription): Promise<void> {
-    if (subscribers.remove(subscription)) await stopListener(subscription.channel);
+    await unlisten();
   }
 
   return {
@@ -74,30 +67,53 @@ export function pgPubSub(options: PgPubSubOptions): TransactionalPubSub<PgTransa
       checkMessage(channel, payload);
       await tx.execute(sql`select pg_notify(${channel}, ${payload})`);
     },
-    async subscribe(channel, onMessage) {
+    async subscribe(name, onMessage) {
       checkOpen(closed, 'pg');
-      checkChannel(channel);
-      const { subscription, first } = subscribers.add(channel, onMessage);
-      if (first) {
-        log.debug('listening on {channel}', { channel });
-        listeners.set(
-          channel,
-          listenOnPool(pool, channel, options.listen)(payload => deliver(subscribers.of(channel), payload)),
-        );
+      checkChannel(name);
+      let channel = channels.get(name);
+      if (channel === undefined) {
+        log.debug('listening on {channel}', { channel: name });
+        const callbacks = new Set<OnMessage>();
+        const listening = listenOnPool(
+          pool,
+          name,
+          options.listen,
+        )(payload => {
+          for (const callback of callbacks) {
+            try {
+              callback(payload);
+            } catch (error) {
+              log.warn('a subscriber on {channel} threw: {message}', {
+                channel: name,
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        });
+        channel = { callbacks, listening };
+        channels.set(name, channel);
       }
+      // Wrapped, so the same function subscribed twice is two subscriptions.
+      const subscription: OnMessage = payload => onMessage(payload);
+      channel.callbacks.add(subscription);
+      const leave = async (): Promise<void> => {
+        if (!channel.callbacks.delete(subscription) || channel.callbacks.size > 0) return;
+        await stop(name, channel);
+      };
       try {
-        await listeners.get(channel);
+        await channel.listening;
       } catch (error) {
-        await leave(subscription);
+        await leave();
         throw error;
       }
-      return () => leave(subscription);
+      return leave;
     },
     async close() {
       if (closed) return;
       closed = true;
-      subscribers.clear();
-      await Promise.all([...listeners.keys()].map(channel => stopListener(channel)));
+      const open = [...channels];
+      for (const [, channel] of open) channel.callbacks.clear();
+      await Promise.all(open.map(([name, channel]) => stop(name, channel)));
       log.debug('pg pubsub closed');
     },
   };
