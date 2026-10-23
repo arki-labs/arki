@@ -85,6 +85,11 @@
       "import": "./dist/pg.js",
       "default": "./dist/pg.js"
     },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js",
+      "default": "./dist/sqlite.js"
+    },
     "./temporal": {
       "types": "./dist/temporal.d.ts",
       "import": "./dist/temporal.js",
@@ -194,6 +199,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@libsql/client": "^0.18.0",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
@@ -215,6 +221,7 @@
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
+    "@libsql/client": "^0.18.0",
     "@orpc/server": "catalog:backend",
     "@typescript-eslint/utils": "^8.0.0",
     "eslint": ">=9.0.0",
@@ -222,6 +229,9 @@
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
+      "optional": true
+    },
+    "@libsql/client": {
       "optional": true
     },
     "@orpc/server": {

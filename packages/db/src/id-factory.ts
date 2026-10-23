@@ -3,9 +3,11 @@ import type { PgColumn } from 'drizzle-orm/pg-core';
 import { varchar } from 'drizzle-orm/pg-core';
 
 import type { IdGenerationFailure } from '@arki/contracts';
-import { CONTRACTS_ERROR_CODES, ContractsError, createIdBody, z } from '@arki/contracts';
-import { COLUMN_ZOD_SCHEMA } from '@arki/contracts/drizzle';
+import { createIdBody, z } from '@arki/contracts';
 import { isFailure, orThrow } from '@arki/failure';
+
+import type { OnDelete } from './id-columns-shared.js';
+import { tagColumnSchema } from './id-columns-shared.js';
 
 /** Generate an unprefixed legacy ID, or the canonical entropy failure. */
 export const createId = createIdBody;
@@ -15,27 +17,6 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` |
   const body = createId();
   return isFailure(body) ? body : `${prefix}${body}`;
 };
-
-/**
- * Stash a Zod schema on a Drizzle column builder so that
- * `@arki/contracts`'s `createSelectSchema`/`createInsertSchema`/`createUpdateSchema`
- * wrappers auto-apply it as a refine — turning the brand from a phantom-only
- * type into a real runtime check.
- *
- * The builder's `config` object is the SAME reference passed to the constructed
- * column (see `PgVarcharBuilder.build` → `new PgVarchar(table, this.config)`),
- * so writing here is readable from the column later.
- */
-function tagColumnSchema<TBuilder extends object>(builder: TBuilder, schema: z.ZodType): TBuilder {
-  const config: unknown = Reflect.get(builder, 'config');
-  if (typeof config !== 'object' || config === null) {
-    throw new ContractsError(CONTRACTS_ERROR_CODES.invalidColumnMetadata, 'The Drizzle builder has no column config.');
-  }
-  Object.assign(config, { [COLUMN_ZOD_SCHEMA]: schema });
-  return builder;
-}
-
-type OnDelete = 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default';
 
 /**
  * What the column helpers need from an id kind: its schema (stamped on every
