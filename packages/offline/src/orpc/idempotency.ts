@@ -15,7 +15,7 @@ export type IdempotentContext = {
   readonly session: { readonly user: { readonly id: string } } | null | undefined;
 };
 
-/** The two calls the middleware makes. `IdempotencyRepository` is the Postgres one. */
+/** The two calls the middleware makes. `IdempotencyRepository` is the Postgres one, `SqliteIdempotencyRepository` the SQLite one. */
 export type IdempotencyStore = Pick<IdempotencyRepository, 'find' | 'store'>;
 
 /**

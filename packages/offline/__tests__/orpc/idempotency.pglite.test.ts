@@ -4,13 +4,16 @@
  * `createRouterClient` — which also proves the contract meta reaches the
  * middleware at run time (`MiddlewareOptions.procedure`).
  *
- * Two legs, same cases: PGlite (in-process) and a real Postgres in a
- * testcontainer (needs Docker, like the other `*.pg.test.ts` suites).
+ * Three legs, same cases: PGlite (in-process), a real Postgres in a
+ * testcontainer (needs Docker, like the other `*.pg.test.ts` suites), and
+ * SQLite (libSQL, in memory) through the table written once and the SQLite
+ * repository twin.
  */
 import { PGlite } from '@electric-sql/pglite';
 import { oc } from '@orpc/contract';
 import { createRouterClient, implement } from '@orpc/server';
-import { sql } from 'drizzle-orm';
+import { defineRelations, sql } from 'drizzle-orm';
+import { generateDrizzleJson, generateMigration } from 'drizzle-kit/payload/sqlite';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import pg from 'pg';
@@ -18,17 +21,23 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { z } from 'zod';
 import { pgSchema } from 'drizzle-orm/pg-core';
 
+import { createLibsqlDb } from '@arki/db/libsql';
+import { pgColumns } from '@arki/db/pg';
+import { sqliteColumns } from '@arki/db/sqlite';
 import { startPostgresContainer } from '@arki/testing/containers';
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { IdempotencyKeyId } from '../../src/orpc/idempotency-id';
 import { idempotencyKeyId } from '../../src/orpc/idempotency-id';
 import { IdempotencyStoreUnconfirmed } from '../../src/orpc/idempotency-failures';
 import type { IdempotencyStore, IdempotentContext } from '../../src/orpc/idempotency';
 import type { IdempotencyDatabase } from '../../src/orpc/idempotency-repository';
 import { idempotency } from '../../src/orpc/idempotency';
+import { idempotencyKeys } from '../../src/orpc/idempotency-keys';
 import { IdempotencyRepository } from '../../src/orpc/idempotency-repository';
-import { createIdempotencyTable, idempotencyKeys } from '../../src/orpc/idempotency-table';
+import { SqliteIdempotencyRepository } from '../../src/orpc/idempotency-repository-sqlite';
+import { createIdempotencyTable } from '../../src/orpc/idempotency-table';
 import { offlineSafe } from '../../src/orpc/offline-safe-marker';
 
 const contract = {
@@ -51,14 +60,56 @@ const CREATE_TABLE = sql`
 const CREATE_INDEX = sql`
   create unique index offline_idk_key_path_user_idx on offline_idempotency_keys (idempotency_key, procedure_path, user_id)`;
 
-type Leg = { readonly name: string; readonly open: () => Promise<{ db: IdempotencyDatabase; close: () => Promise<void> }> };
+const CREATE_SQLITE_TABLES = async (db: ReturnType<typeof createLibsqlDb>['db'], tables: Record<string, unknown>) => {
+  const empty = await generateDrizzleJson({});
+  for (const statement of await generateMigration(empty, await generateDrizzleJson(tables))) {
+    await db.run(sql.raw(statement));
+  }
+};
+
+/** What one database offers the shared cases: the repository, plus real reads and writes on its table. */
+type LegHandle = {
+  readonly store: IdempotencyStore;
+  readonly close: () => Promise<void>;
+  /** Every cached row, as `{ id, procedurePath }`. */
+  readonly rows: () => Promise<readonly { id: string; procedurePath: string }[]>;
+  readonly clear: () => Promise<void>;
+  /** Insert a row whose window already ended. */
+  readonly insertExpired: (row: { id: IdempotencyKeyId; idempotencyKey: string; procedurePath: string; userId: string }) => Promise<void>;
+  /** Run `action` and count the INSERT statements it started. */
+  readonly countInserts: <T>(action: () => Promise<T>) => Promise<{ result: T; inserts: number }>;
+};
+
+type Leg = { readonly name: string; readonly open: () => Promise<LegHandle> };
+
+function pgHandle(db: IdempotencyDatabase, close: () => Promise<void>): LegHandle {
+  return {
+    store: new IdempotencyRepository(db, idempotencyKeys),
+    close,
+    rows: () => db.select().from(idempotencyKeys),
+    clear: async () => {
+      await db.delete(idempotencyKeys);
+    },
+    insertExpired: async row => {
+      await db.insert(idempotencyKeys).values({ ...row, responseJson: { id: 'hl_old' }, expiresAt: new Date(Date.now() - 1000) });
+    },
+    countInserts: async action => {
+      const insert = vi.spyOn(db, 'insert');
+      const result = await action();
+      return { result, inserts: insert.mock.calls.length };
+    },
+  };
+}
 
 const legs: readonly Leg[] = [
   {
     name: 'PGlite',
     open: async () => {
       const client = new PGlite();
-      return { db: drizzlePglite({ client }), close: () => client.close() };
+      const db = drizzlePglite({ client });
+      await db.execute(CREATE_TABLE);
+      await db.execute(CREATE_INDEX);
+      return pgHandle(db, () => client.close());
     },
   },
   {
@@ -66,11 +117,35 @@ const legs: readonly Leg[] = [
     open: async () => {
       const container = await startPostgresContainer();
       const pool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 2 });
+      const db = drizzlePg({ client: pool });
+      await db.execute(CREATE_TABLE);
+      await db.execute(CREATE_INDEX);
+      return pgHandle(db, async () => {
+        await pool.end();
+        await container.stop();
+      });
+    },
+  },
+  {
+    name: 'SQLite (libSQL)',
+    open: async () => {
+      const table = createIdempotencyTable(sqliteColumns());
+      const { db, close } = createLibsqlDb({ url: ':memory:', relations: defineRelations({ table }) });
+      await CREATE_SQLITE_TABLES(db, { table });
       return {
-        db: drizzlePg({ client: pool }),
-        close: async () => {
-          await pool.end();
-          await container.stop();
+        store: new SqliteIdempotencyRepository(db, table),
+        close: () => Promise.resolve(close()),
+        rows: () => db.select().from(table),
+        clear: async () => {
+          await db.run(sql`delete from offline_idempotency_keys`);
+        },
+        insertExpired: async row => {
+          await db.insert(table).values({ ...row, responseJson: { id: 'hl_old' }, expiresAt: new Date(Date.now() - 1000) });
+        },
+        countInserts: async action => {
+          const insert = vi.spyOn(db, 'insert');
+          const result = await action();
+          return { result, inserts: insert.mock.calls.length };
         },
       };
     },
@@ -78,20 +153,17 @@ const legs: readonly Leg[] = [
 ];
 
 describe.each(legs)('idempotency on $name', leg => {
-  let db: IdempotencyDatabase;
-  let close: () => Promise<void> = () => Promise.resolve();
+  let handle: LegHandle;
 
   beforeAll(async () => {
-    ({ db, close } = await leg.open());
-    await db.execute(CREATE_TABLE);
-    await db.execute(CREATE_INDEX);
+    handle = await leg.open();
   }, 120_000);
 
-  afterAll(() => close());
+  afterAll(() => handle.close());
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   beforeEach(async () => {
-    await db.delete(idempotencyKeys);
+    await handle.clear();
   });
 
   /** `overlap`: each handler waits until two lookups happened, so two replays truly overlap. */
@@ -100,7 +172,7 @@ describe.each(legs)('idempotency on $name', leg => {
     let lookups = 0;
     let bothLookedUp: () => void = () => undefined;
     const twoLookups = new Promise<void>(resolve => (bothLookedUp = resolve));
-    const repo = new IdempotencyRepository(db, idempotencyKeys);
+    const repo = handle.store;
     const store: IdempotencyStore = {
       find: async (...args) => {
         const found = await repo.find(...args);
@@ -128,7 +200,7 @@ describe.each(legs)('idempotency on $name', leg => {
     const replay = await client.highlights.create({ text: 'a' });
     expect(replay).toEqual(first);
     expect(runs()).toBe(1);
-    const rows = await db.select().from(idempotencyKeys);
+    const rows = await handle.rows();
     expect(rows.map(row => row.procedurePath)).toEqual(['highlights.create']);
     expect(rows[0]?.id).toMatch(/^idk_[\w-]{21}$/);
   });
@@ -136,38 +208,75 @@ describe.each(legs)('idempotency on $name', leg => {
   it('returns the original entropy refusal before attempting an insert', async () => {
     const refusal = RandomSourceUnavailable();
     vi.spyOn(idempotencyKeyId, 'create').mockReturnValueOnce(refusal);
-    const insert = vi.spyOn(db, 'insert');
-    const repo = new IdempotencyRepository(db, idempotencyKeys);
-    expect(await repo.store('key', 'posts.create', 'usr_1', { id: 'post_1' })).toBe(refusal);
-    expect(insert).not.toHaveBeenCalled();
-    expect(await db.select().from(idempotencyKeys)).toEqual([]);
+    const { result, inserts } = await handle.countInserts(() => handle.store.store('key', 'posts.create', 'usr_1', { id: 'post_1' }));
+    expect(result).toBe(refusal);
+    expect(inserts).toBe(0);
+    expect(await handle.rows()).toEqual([]);
   });
 
   it('fails closed without entropy and supervises a throwing provider before SQL', async () => {
-    vi.stubGlobal('crypto', {});
-    const insert = vi.spyOn(db, 'insert');
-    const repo = new IdempotencyRepository(db, idempotencyKeys);
-    expect(RandomSourceUnavailable.is(await repo.store('key', 'path', 'user', null))).toBe(true);
-    const cause = new Error('private entropy detail');
-    vi.stubGlobal('crypto', { getRandomValues() { throw cause; } });
-    const result = await repo.store('key', 'path', 'user', null);
-    expect(UnexpectedDefect.is(result)).toBe(true);
-    expect(isFailure(result) && result.cause).toBe(cause);
-    expect(JSON.stringify(result)).not.toContain('private entropy detail');
-    expect(insert).not.toHaveBeenCalled();
+    const { inserts } = await handle.countInserts(async () => {
+      vi.stubGlobal('crypto', {});
+      expect(RandomSourceUnavailable.is(await handle.store.store('key', 'path', 'user', null))).toBe(true);
+      const cause = new Error('private entropy detail');
+      vi.stubGlobal('crypto', { getRandomValues() { throw cause; } });
+      const result = await handle.store.store('key', 'path', 'user', null);
+      expect(UnexpectedDefect.is(result)).toBe(true);
+      expect(isFailure(result) && result.cause).toBe(cause);
+      expect(JSON.stringify(result)).not.toContain('private entropy detail');
+    });
+    expect(inserts).toBe(0);
   });
 
   it('returns an unconfirmed write when the database rejects the statement', async () => {
-    const repo = new IdempotencyRepository(db, idempotencyKeys);
-    const result = await repo.store('x'.repeat(129), 'path', 'usr_1', { secret: 'private response' });
+    const result = await handle.store.store('x'.repeat(129), 'path', 'usr_1', { secret: 'private response' });
     expect(IdempotencyStoreUnconfirmed.is(result)).toBe(true);
     expect(isFailure(result) && result.cause).toBeDefined();
     expect(JSON.stringify(result)).not.toContain('private response');
-    expect(await db.select().from(idempotencyKeys)).toEqual([]);
+    expect(await handle.rows()).toEqual([]);
   });
 
+  it('an unmarked procedure with the same key runs every time', async () => {
+    const { client, runs } = serve('k1');
+    await client.highlights.rename({ text: 'a' });
+    await client.highlights.rename({ text: 'a' });
+    expect(runs()).toBe(2);
+  });
+
+  it('an expired row does not answer: the replay runs again', async () => {
+    await handle.insertExpired({
+      id: orThrow(idempotencyKeyId.create()),
+      idempotencyKey: 'k1',
+      procedurePath: 'highlights.create',
+      userId: 'usr_1',
+    });
+    const { client, runs } = serve('k1');
+    await expect(client.highlights.create({ text: 'a' })).resolves.toEqual({ id: 'hl_1' });
+    expect(runs()).toBe(1);
+  });
+
+  it('BOUNDARY, not exactly-once: two replays arriving together can both run the handler', async () => {
+    const { client, runs } = serve('k1', true);
+    await Promise.all([client.highlights.create({ text: 'a' }), client.highlights.create({ text: 'a' })]);
+    // Lookup, run and store are separate steps; the README says so. A transactional
+    // claim would make this 1 — that is a separate task.
+    expect(runs()).toBe(2);
+  });
+});
+
+describe('idempotency table in a Postgres schema', () => {
+  const client = new PGlite();
+  const db = drizzlePglite({ client });
+
+  beforeAll(async () => {
+    await db.execute(CREATE_TABLE);
+    await db.execute(CREATE_INDEX);
+  });
+
+  afterAll(() => client.close());
+
   it('uses the same nominal definition in namespaced tables without an implicit default', async () => {
-    const namespaced = createIdempotencyTable(pgSchema('id09'));
+    const namespaced = createIdempotencyTable(pgColumns(pgSchema('id09')));
     await db.execute(sql`create schema if not exists id09`);
     await db.execute(sql`create table id09.offline_idempotency_keys (like public.offline_idempotency_keys including all)`);
     try {
@@ -183,34 +292,5 @@ describe.each(legs)('idempotency on $name', leg => {
     } finally {
       await db.execute(sql`drop schema id09 cascade`);
     }
-  });
-
-  it('an unmarked procedure with the same key runs every time', async () => {
-    const { client, runs } = serve('k1');
-    await client.highlights.rename({ text: 'a' });
-    await client.highlights.rename({ text: 'a' });
-    expect(runs()).toBe(2);
-  });
-
-  it('an expired row does not answer: the replay runs again', async () => {
-    await db.insert(idempotencyKeys).values({
-      id: orThrow(idempotencyKeyId.create()),
-      idempotencyKey: 'k1',
-      procedurePath: 'highlights.create',
-      userId: 'usr_1',
-      responseJson: { id: 'hl_old' },
-      expiresAt: new Date(Date.now() - 1_000),
-    });
-    const { client, runs } = serve('k1');
-    await expect(client.highlights.create({ text: 'a' })).resolves.toEqual({ id: 'hl_1' });
-    expect(runs()).toBe(1);
-  });
-
-  it('BOUNDARY, not exactly-once: two replays arriving together can both run the handler', async () => {
-    const { client, runs } = serve('k1', true);
-    await Promise.all([client.highlights.create({ text: 'a' }), client.highlights.create({ text: 'a' })]);
-    // Lookup, run and store are separate steps; the README says so. A transactional
-    // claim would make this 1 — that is a separate task.
-    expect(runs()).toBe(2);
   });
 });

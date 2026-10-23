@@ -9,7 +9,7 @@ import { RandomSourceUnavailable } from '@arki/contracts';
 
 import { IdempotencyRepository } from '../../src/orpc/idempotency-repository';
 import { IdempotencyStoreUnconfirmed } from '../../src/orpc/idempotency-failures';
-import { idempotencyKeys } from '../../src/orpc/idempotency-table';
+import { idempotencyKeys } from '../../src/orpc/idempotency-keys';
 import { idempotencyKeyId } from '../../src/orpc/idempotency-id';
 
 const storage = new AsyncLocalStorage<Context>();

@@ -173,6 +173,34 @@ export { idempotencyKeys };
 
 Run `turbo db:migrations:generate --filter=@myapp/backend` after adding the table.
 
+#### SQLite
+
+The table is written once. `idempotencyKeys` is the Postgres table in the default schema. For another Postgres schema or for SQLite, build it from a column kit; the SQLite repository is its own class, because Drizzle's Postgres and SQLite query builders are different classes.
+
+```ts
+// Postgres, in a schema
+import { createIdempotencyTable } from '@arki/offline/orpc';
+import { pgColumns } from '@arki/db/pg';
+
+export const idempotencyKeys = createIdempotencyTable(pgColumns(appSchema));
+```
+
+```ts
+// SQLite (libSQL)
+import { SqliteIdempotencyRepository, createIdempotencyTable, idempotency } from '@arki/offline/orpc';
+import { sqliteColumns } from '@arki/db/sqlite';
+
+export const idempotencyKeys = createIdempotencyTable(sqliteColumns());
+// db is a libSQL Drizzle database, for example from `createLibsqlDb` in `@arki/db/libsql`.
+const repo = new SqliteIdempotencyRepository(db, idempotencyKeys);
+```
+
+SQLite limits that apply here:
+
+- Timestamps keep milliseconds, not microseconds. This does not matter for a 7-day window.
+- `varchar` limits become `CHECK (length(col) <= n)` constraints. An over-long key is refused and `store()` returns `IdempotencyStoreUnconfirmed`, as on Postgres.
+- Tables are not `STRICT`: raw SQL can store a wrongly typed value. Drizzle-typed writes are unaffected.
+
 ---
 
 ### Tier 3 — True local-first sync (deferred)

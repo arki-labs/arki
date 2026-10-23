@@ -93,19 +93,27 @@
     "workbox-strategies": "catalog:tanstack/start"
   },
   "peerDependencies": {
+    "@arki/db": "workspace:*",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "drizzle-orm": "catalog:drizzle",
     "react": "catalog:react"
   },
+  "peerDependenciesMeta": {
+    "@arki/db": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@arki/db": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
@@ -115,6 +123,7 @@
     "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
     "@vitejs/plugin-react": "catalog:",
+    "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
     "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
