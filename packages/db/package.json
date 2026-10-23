@@ -85,6 +85,11 @@
       "import": "./dist/pg.js",
       "default": "./dist/pg.js"
     },
+    "./libsql": {
+      "types": "./dist/libsql.d.ts",
+      "import": "./dist/libsql.js",
+      "default": "./dist/libsql.js"
+    },
     "./sqlite": {
       "types": "./dist/sqlite.d.ts",
       "import": "./dist/sqlite.js",
