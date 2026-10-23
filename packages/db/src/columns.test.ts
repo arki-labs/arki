@@ -17,11 +17,14 @@ import { getTableConfig, pgSchema } from 'drizzle-orm/pg-core';
 import { generateDrizzleJson, generateMigration } from 'drizzle-kit/api-postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createInsertSchema } from '@arki/contracts/drizzle';
 import { Temporal } from '@arki/date/types';
+import { orThrow } from '@arki/failure';
 
-import { noteTables, pgComments, pgNotes } from './__fixtures__/kit/note-tables.js';
+import { noteId, noteTables, pgComments, pgNotes } from './__fixtures__/kit/note-tables.js';
 import { comments, notes } from './__fixtures__/kit/sqlite-schema.js';
 import { pgColumns } from './columns-pg.js';
+import { sqliteColumns } from './columns-sqlite.js';
 import { createLibsqlDb } from './libsql.js';
 import { migrateDb } from './migrate.js';
 import { findDatabaseError } from './sql-state.js';
@@ -136,5 +139,19 @@ describe('sqliteColumns, through drizzle-kit and migrateDb on libSQL', () => {
 
   it('refuses a row that breaks a table check', async () => {
     expect(await sqlStateOf(opened.db.insert(notes).values({ title: 'Neg', slug: 'neg', tags: [], views: -1 }))).toBe('23514');
+  });
+});
+
+describe('contracts schemas on kit tables', () => {
+  it.each([
+    ['pg', noteTables(pgColumns()).notes],
+    ['sqlite', noteTables(sqliteColumns()).notes],
+  ] as const)('%s: the insert schema checks the id prefix and the json column schema', (_dialect, notes) => {
+    const insert = createInsertSchema(notes);
+    const valid = { id: orThrow(noteId.create()), title: 'A', slug: 'a', tags: [], settings: { theme: 'dark' } };
+
+    expect(insert.safeParse(valid).success).toBe(true);
+    expect(insert.safeParse({ ...valid, id: 'user_1' }).success).toBe(false);
+    expect(insert.safeParse({ ...valid, settings: { theme: 'blue' } }).success).toBe(false);
   });
 });

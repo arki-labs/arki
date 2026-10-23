@@ -14,6 +14,8 @@ import type { Column, SQL } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date/types';
 import type { z } from '@arki/contracts';
+import type { JsonStorableSchema } from '@arki/contracts/drizzle';
+import { jsonStorageSchema } from '@arki/contracts/drizzle';
 import { orThrow } from '@arki/failure';
 
 import type { Dialect } from './dialect.js';
@@ -389,7 +391,10 @@ export type ColumnKit<D extends Dialect> = {
   bigint(name?: string): ColumnSpec<D, 'bigint'>;
   boolean(name?: string): ColumnSpec<D, 'boolean'>;
   /** `jsonb` on Postgres, JSON `text` on SQLite. With a Zod schema, typed and checked by it. */
-  json<TSchema extends z.ZodType>(name: string | undefined, schema: TSchema): ColumnSpec<D, 'json', { type: z.output<TSchema> }>;
+  json<TSchema extends z.ZodType>(
+    name: string | undefined,
+    schema: JsonStorableSchema<TSchema>,
+  ): ColumnSpec<D, 'json', { type: z.output<TSchema> }>;
   json(name?: string): ColumnSpec<D, 'json'>;
   /** A `Date` column: `timestamp` (± time zone) on Postgres, milliseconds on SQLite. */
   timestamp(name?: string, options?: { readonly withTimezone?: boolean }): ColumnSpec<D, 'timestamp'>;
@@ -408,10 +413,15 @@ export type ColumnKit<D extends Dialect> = {
 
 /** The shared part of `pgColumns` and `sqliteColumns`: everything but building the table. */
 export function createColumnKit<D extends Dialect>(dialect: D, table: TableBuilder<D>): ColumnKit<D> {
-  function json<TSchema extends z.ZodType>(name: string | undefined, schema: TSchema): ColumnSpec<D, 'json', { type: z.output<TSchema> }>;
+  function json<TSchema extends z.ZodType>(
+    name: string | undefined,
+    schema: JsonStorableSchema<TSchema>,
+  ): ColumnSpec<D, 'json', { type: z.output<TSchema> }>;
   function json(name?: string): ColumnSpec<D, 'json'>;
   function json(name?: string, schema?: z.ZodType): ColumnSpec<D, 'json', ColumnFlags> {
-    return new ColumnSpec<D, 'json', ColumnFlags>(definition('json', name, { schema }));
+    return new ColumnSpec<D, 'json', ColumnFlags>(
+      definition('json', name, { schema: schema && jsonStorageSchema(schema) }),
+    );
   }
 
   return {

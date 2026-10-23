@@ -28,26 +28,31 @@ const jsonValueSchema = z.json();
  * Use a separate wire codec in refinements. Non-finite JSON output is rejected.
  * This does not install a database driver codec or run transforms on queries.
  */
-export function jsonColumn<TSchema extends z.ZodType>(
-  name: string,
-  schema: TSchema &
-    ([z.output<TSchema>] extends [z.core.util.JSONType]
-      ? [z.output<TSchema>] extends [z.input<TSchema>]
-        ? unknown
-        : never
-      : never),
-) {
+export function jsonColumn<TSchema extends z.ZodType>(name: string, schema: JsonStorableSchema<TSchema>) {
   const builder = jsonb(name).$type<z.output<TSchema>>();
   const config: unknown = Reflect.get(builder, 'config');
   if (typeof config !== 'object' || config === null) {
     throw new ContractsError(CONTRACTS_ERROR_CODES.invalidColumnMetadata, 'The Drizzle builder has no column config.');
   }
-  const storageSchema = schema.refine(
-    value => jsonValueSchema.safeParse(value).success,
-    'Expected JSON storage output',
-  );
-  Object.assign(config, { [COLUMN_ZOD_SCHEMA]: storageSchema });
+  Object.assign(config, { [COLUMN_ZOD_SCHEMA]: jsonStorageSchema(schema) });
   return builder;
+}
+
+/**
+ * The schemas a JSON column accepts: output that is JSON, and that the
+ * schema takes back as input. `jsonColumn` and `@arki/db`'s column kit
+ * (`c.json(name, schema)`) both require it.
+ */
+export type JsonStorableSchema<TSchema extends z.ZodType> = TSchema &
+  ([z.output<TSchema>] extends [z.core.util.JSONType]
+    ? [z.output<TSchema>] extends [z.input<TSchema>]
+      ? unknown
+      : never
+    : never);
+
+/** The schema stamped on a JSON column: the column's schema, refusing output that is not JSON (such as `NaN`). */
+export function jsonStorageSchema(schema: z.ZodType): z.ZodType {
+  return schema.refine(value => jsonValueSchema.safeParse(value).success, 'Expected JSON storage output');
 }
 
 function readColumnSchema(column: Column): z.ZodType | undefined {
