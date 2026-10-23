@@ -7,7 +7,7 @@
  * (reverse declaration order). `database.provides.db` is the typed handle
  * consumers name in their `needs`, known before anything boots.
  *
- * Two drivers are supported:
+ * Three drivers are supported:
  *   - `'pg'` (default) — `node-postgres` pool. Pass `url: () => env.DB_URL`
  *     to read the URL at boot (never at import); without it the adapter
  *     reads `DB_URL`. The `DB_POOL_*` env vars come from `@arki/db`'s
@@ -15,6 +15,10 @@
  *   - `'pglite'` — embedded PGlite. Pass `dataDir`, or `memory: true` for
  *     an in-memory instance. Use for tests, single-binary apps, or local
  *     development without a real Postgres server.
+ *   - `'libsql'` — SQLite through libSQL: a `file:` path, `:memory:`, or a
+ *     Turso / libSQL server. Pass `url: () => env.DB_URL` (or set `DB_URL`)
+ *     and, for a server, `authToken`. `@libsql/client` is an optional peer,
+ *     loaded only by this driver.
  *
  * @example
  * ```ts
@@ -55,6 +59,7 @@
 
 import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import pg from 'pg';
 
@@ -112,6 +117,14 @@ export const DB_PLUGIN_ERROR_CODES = {
    * @verify bun run test -- src/dot.test.ts
    */
   sessionOnPooledUrl: 'ARKI_DB_PLUGIN_E004',
+  /**
+   * The database URL does not fit the driver: a `postgres:` URL with `driver: 'libsql'`, or a SQLite URL
+   * (`file:`, `libsql:`, `:memory:`) with the pg driver. The wrong driver would fail later, with a less clear error.
+   *
+   * @fix Set `driver` to match the URL, or fix the URL.
+   * @verify bun run test -- src/dot.test.ts
+   */
+  driverUrlMismatch: 'ARKI_DB_PLUGIN_E005',
 } as const;
 
 /**
@@ -147,8 +160,24 @@ export type PgliteDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptio
     readonly driver: 'pglite';
   };
 
+/** Options for the libSQL driver: SQLite in a file, in memory, or on a libSQL server. */
+export type LibsqlDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptions<TRelations> & {
+  /** Driver discriminant. */
+  readonly driver: 'libsql';
+  /**
+   * `file:path.db`, `:memory:`, or a `libsql:` / `http(s):` / `ws(s):` server URL,
+   * read when the app boots. Falls back to `DB_URL` when absent or `undefined`.
+   */
+  readonly url?: () => string | undefined;
+  /** The server's auth token (Turso), read at boot. Not used for local files. */
+  readonly authToken?: () => string | undefined;
+};
+
 /** Discriminated union of all supported driver option shapes. */
-export type DbDotOptions<TRelations extends AnyRelations> = PgDbDotOptions<TRelations> | PgliteDbDotOptions<TRelations>;
+export type DbDotOptions<TRelations extends AnyRelations> =
+  | PgDbDotOptions<TRelations>
+  | PgliteDbDotOptions<TRelations>
+  | LibsqlDbDotOptions<TRelations>;
 
 /**
  * A small pool on the direct URL, for work that must keep one session: LISTEN
@@ -161,11 +190,17 @@ export type SessionPool = ListenPool & { end(): Promise<void> };
  * Services published by the db adapter. Keyed by the driver — for the
  * default `'pg'` driver, `services.db` is a `NodePgDatabase<TRelations>`
  * and `services.sessionPool` a {@link SessionPool}; for `'pglite'`, `db` is a
- * `PgliteDatabase<TRelations>` (PGlite listens through `client.listen`).
+ * `PgliteDatabase<TRelations>` (PGlite listens through `client.listen`); for
+ * `'libsql'`, `db` is a `LibSQLDatabase<TRelations>` (SQLite has no LISTEN).
  */
-export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | 'pglite' = 'pg'> = TDriver extends 'pglite'
+export type DbServices<
+  TRelations extends AnyRelations,
+  TDriver extends 'pg' | 'pglite' | 'libsql' = 'pg',
+> = TDriver extends 'pglite'
   ? { readonly db: PgliteDatabase<TRelations> }
-  : { readonly db: NodePgDatabase<TRelations>; readonly sessionPool: SessionPool };
+  : TDriver extends 'libsql'
+    ? { readonly db: LibSQLDatabase<TRelations> }
+    : { readonly db: NodePgDatabase<TRelations>; readonly sessionPool: SessionPool };
 
 /** Listeners and lock waiters hold their connection for as long as they run; four covers both with room to spare. */
 const SESSION_POOL_MAX = 4;
@@ -181,8 +216,12 @@ export function db<TRelations extends AnyRelations>(
 export function db<TRelations extends AnyRelations>(
   options: PgliteDbDotOptions<TRelations>,
 ): ReturnType<typeof createPglitePlugin<TRelations>>;
+export function db<TRelations extends AnyRelations>(
+  options: LibsqlDbDotOptions<TRelations>,
+): ReturnType<typeof createLibsqlPlugin<TRelations>>;
 export function db<TRelations extends AnyRelations>(options: DbDotOptions<TRelations>) {
   if (options.driver === 'pglite') return createPglitePlugin(options);
+  if (options.driver === 'libsql') return createLibsqlPlugin(options);
   return createPgPlugin(options);
 }
 
@@ -240,12 +279,12 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
       db: (): DbServices<TRelations, 'pg'>['db'] =>
         createDb<TRelations>({
           relations: options.relations,
-          url: readUrl(options),
+          url: readUrl('pg', options.url),
           ...(options.logger === undefined ? {} : { logger: options.logger }),
         }),
       sessionPool: (): SessionPool => {
         // Never throws for a pooled URL: an app that uses no session feature must still boot.
-        const direct = resolveDirectUrl({ url: readUrl(options), directUrl: options.directUrl?.() ?? env.DB_DIRECT_URL });
+        const direct = resolveDirectUrl({ url: readUrl('pg', options.url), directUrl: options.directUrl?.() ?? env.DB_DIRECT_URL });
         if (isFailure(direct)) return refusingPool(direct);
         return new pg.Pool({ connectionString: direct, max: SESSION_POOL_MAX });
       },
@@ -264,14 +303,49 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
   });
 }
 
+function createLibsqlPlugin<TRelations extends AnyRelations>(options: LibsqlDbDotOptions<TRelations>) {
+  // libSQL path: `@libsql/client` is an optional peer, so it loads only here.
+  let close: (() => void) | undefined;
+  return infra({
+    name: 'db',
+    configure(ctx): undefined {
+      ctx.registerService('db', 'db');
+    },
+    provides: {
+      db: async (): Promise<DbServices<TRelations, 'libsql'>['db']> => {
+        const url = readUrl('libsql', options.url);
+        const { createLibsqlDb } = await import('./libsql.js');
+        const opened = createLibsqlDb<TRelations>({
+          url,
+          authToken: options.authToken?.(),
+          relations: options.relations,
+          ...(options.logger === undefined ? {} : { logger: options.logger }),
+        });
+        close = opened.close;
+        return opened.db;
+      },
+    },
+    dispose() {
+      close?.();
+      close = undefined;
+    },
+  });
+}
+
+/** URL schemes that belong to the other driver: the realistic mix-ups, not every invalid URL. */
+const FOREIGN_SCHEMES = {
+  pg: ['file:', 'libsql:', ':memory:'],
+  libsql: ['postgres:', 'postgresql:'],
+} as const;
+
 /**
  * The URL from the `url` thunk, else `DB_URL`. Validated at the plugin boundary
  * so the DOT lifecycle gets a coded error. `createDb` still throws raw `Error`
  * for non-DOT consumers (its public contract is unchanged).
  */
-function readUrl<TRelations extends AnyRelations>(options: PgDbDotOptions<TRelations>): string {
-  const url = options.url?.() ?? env.DB_URL;
-  if (url === undefined || url === '') {
+function readUrl(driver: keyof typeof FOREIGN_SCHEMES, url: (() => string | undefined) | undefined): string {
+  const value = url?.() ?? env.DB_URL;
+  if (value === undefined || value === '') {
     throw new DotUnitError({
       code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
       message: '[db] DB_URL is not configured.',
@@ -280,7 +354,19 @@ function readUrl<TRelations extends AnyRelations>(options: PgDbDotOptions<TRelat
       docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
     });
   }
-  return url;
+  const scheme = FOREIGN_SCHEMES[driver].find(foreign => value.toLowerCase().startsWith(foreign));
+  if (scheme !== undefined) {
+    throw new DotUnitError({
+      code: DB_PLUGIN_ERROR_CODES.driverUrlMismatch,
+      message: `[db] the ${driver} driver was given a ${scheme} URL.`,
+      remediation:
+        driver === 'pg'
+          ? "A SQLite URL needs db({ driver: 'libsql' }). For Postgres, give a postgres:// URL."
+          : "A Postgres URL needs the pg driver (omit driver). For SQLite, give a file:, :memory: or libsql:// URL.",
+      docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e005',
+    });
+  }
+  return value;
 }
 
 /** A `sessionPool` stand-in whose every `connect()` rejects with the coded refusal. */
