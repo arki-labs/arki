@@ -4,8 +4,10 @@ Six steps. The full, typechecked wiring is in `examples/files/server.ts` and `ex
 
 1. **Declare the owner id** in the feature's browser-safe ids module: `export const userId = defineId('usr_')`
    (or reuse the app's existing declaration). A workspace id works too: the owner type is generic.
-2. **Add the table** to the server schema: `export const files = filesTable({ owner: userId })` from
-   `@arki/fs/pg`, then run `drizzle-kit generate` and commit the migration. One table per app.
+2. **Add the table** to the server schema: `export const files = filesTable(pgColumns(), { owner: userId })`
+   with `pgColumns` from `@arki/db/pg` and `filesTable` from `@arki/fs/pg`, then run `drizzle-kit generate`
+   and commit the migration. One table per app. On SQLite (libSQL), use `sqliteColumns()` from
+   `@arki/db/sqlite` and import everything from `@arki/fs/sqlite` instead.
 3. **Build the storage once** in the feature's `.infra()` step:
    `fileStorage(db, createR2Storage({ ... }), { files, bucket: 'uploads', limits: { maxSize, allowedMime } })`.
    Pass the root database. Usecases ask for the storage like any service.

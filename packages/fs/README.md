@@ -11,7 +11,8 @@ any byte is written.
 | Entry                                                       | What                                                        | Runs on                                        | Peers you install                |
 | ----------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------- | -------------------------------- |
 | `@arki/fs/files`                                            | file ids, wire schemas, failures, error codes, `uploadFile` | Node, Bun, Deno, browsers, Hermes              | none                             |
-| `@arki/fs/pg`                                               | `filesTable`, `fileStorage`, the sweep                      | server                                         | `@arki/db`, `drizzle-orm`        |
+| `@arki/fs/pg`                                               | `filesTable`, `fileStorage`, the sweep on Postgres          | server                                         | `@arki/db`, `drizzle-orm`        |
+| `@arki/fs/sqlite`                                           | the same on SQLite (libSQL); see [SQLite](#sqlite)          | server                                         | `@arki/db`, `drizzle-orm`        |
 | `@arki/fs/orpc`                                             | `filesContract`, `filesRouter`                              | server; the contract gives clients their types | `@orpc/contract`, `@orpc/server` |
 | `@arki/fs/testing`                                          | `memoryUploadAdapter`                                       | Node, Bun                                      | none                             |
 | `@arki/fs/storage`, `/storage/*`, `/s3`, `/local/*`, `/env` | storage adapters and local helpers                          | Node, Bun                                      | none                             |
@@ -251,6 +252,40 @@ export function cleanupSchedule(storage: FileStorage<typeof files>, locks: Locke
 ```
 
 The rows hold the duty, so a missed tick loses nothing. Two sweepers never take the same row.
+
+## SQLite
+
+`@arki/fs/sqlite` runs the same table, lifecycle and sweep on SQLite through libSQL
+(`createLibsqlDb` from `@arki/db/libsql`). Import from `@arki/fs/sqlite` instead of `@arki/fs/pg`. The
+table is written once; only the kit changes:
+
+```ts
+// model/tables.ts (server): the same table on the SQLite kit; `prefix` stands in for a Postgres schema
+export const files = filesTable(sqliteColumns({ prefix: 'storage_' }), { owner: userId });
+
+// infra (boot): `db` is the root handle from `createLibsqlDb({ url: 'file:app.db', relations })`
+export function buildStorage(db: FilesDb, adapter: SignedUploadAdapter) {
+  return fileStorage(db, adapter, {
+    files,
+    bucket: 'uploads',
+    limits: { maxSize: 20_000_000, allowedMime: ['image/*', 'application/pdf'] },
+  });
+}
+```
+
+SQLite has no schemas, so `prefix` goes before the table and index names instead. Every option,
+failure and guarantee above holds. What differs:
+
+- Deadlines still come from the database clock, as on Postgres: `unixepoch('subsec')` in integer
+  milliseconds. `greatest`/`least` become `max()`/`min()`, intervals become milliseconds.
+- Timestamps keep milliseconds. Postgres keeps them too here (`timestamptz(3)`), so values agree.
+- Cleanup workers in different processes take turns instead of running in parallel. SQLite has one
+  writer and no `SKIP LOCKED`, so the sweep claims rows with one
+  `UPDATE … WHERE id IN (SELECT … LIMIT n) RETURNING` inside a write transaction (`BEGIN IMMEDIATE`).
+  Two sweepers still never take the same row.
+- The sha256 check uses `regexp` (libSQL ships it). The `char(64)` limit is enforced by a `length()`
+  CHECK the column kit adds, since SQLite ignores declared lengths.
+- A CHECK failure is `SQLITE_CONSTRAINT_CHECK` (`rawCode` 275); `@arki/db` reads it as SQLSTATE 23514.
 
 ## Local development
 

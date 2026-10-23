@@ -1,10 +1,11 @@
 # @arki/fs
 
-> File storage for arki apps: S3/R2/local adapters, and the files table — a Postgres upload recipe where the row exists before any byte and nothing is ready until the server saw the object.
+> File storage for arki apps: S3/R2/local adapters, and the files table — a Postgres or SQLite upload recipe where the row exists before any byte and nothing is ready until the server saw the object.
 
 ## Entries
 - @arki/fs/files — fileId (`fil_`), uploadRequest, uploadTicket, fileRecord, signedFileUrl, FileUnavailable, UploadPending, FileWrongState, UploadMismatch, FILE_ERROR_CODES, FileStorageError, uploadFile(client, blob, { onProgress, signal }). Portable (Node, Bun, Deno, browser, Hermes).
-- @arki/fs/pg — filesTable({ owner, name?, schema? }), fileStorage(db, adapter, options), toFileRecord(row), types FileRow<T>, OwnerOf<T>, FilePolicy<T>. Server. Peers: @arki/db, drizzle-orm.
+- @arki/fs/pg — filesTable(pgColumns(schema?), { owner, name? }), fileStorage(db, adapter, options), toFileRecord(row), types FilesTable<D, TOwner>, FileRow<T>, OwnerOf<T>, FilePolicy<T>. Server. Peers: @arki/db, drizzle-orm.
+- @arki/fs/sqlite — the same on SQLite (libSQL): filesTable(sqliteColumns({ prefix? }), { owner, name? }), fileStorage(libsqlDb, adapter, options). Sweepers in different processes take turns (one writer). Server. Peers: @arki/db, drizzle-orm.
 - @arki/fs/orpc — filesContract (createUpload, confirmUpload, url, remove), filesRouter(implementer.files, { storage, actor }). Peers: @orpc/contract, @orpc/server.
 - @arki/fs/testing — memoryUploadAdapter(); browserPut(url, body, headers) plays the browser PUT.
 - @arki/fs/storage — createStorage, createS3StorageAdapter, createR2Storage (both SignedUploadAdapter), createLocalStorageAdapter (plain StorageAdapter, cannot sign uploads).
