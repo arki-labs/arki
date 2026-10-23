@@ -90,6 +90,11 @@
       "import": "./src/pg/index.ts",
       "node": "./src/pg/index.ts"
     },
+    "./sqlite": {
+      "types": "./dist/src/sqlite/index.d.ts",
+      "import": "./src/sqlite/index.ts",
+      "node": "./src/sqlite/index.ts"
+    },
     "./testing": {
       "types": "./dist/src/testing.d.ts",
       "import": "./src/testing.ts",
@@ -131,6 +136,9 @@
       ],
       "s3": [
         "src/s3.ts"
+      ],
+      "sqlite": [
+        "src/sqlite/index.ts"
       ],
       "storage": [
         "src/storage/index.ts"
@@ -197,6 +205,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@testcontainers/postgresql": "catalog:testing",
