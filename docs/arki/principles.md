@@ -8,6 +8,9 @@ tracks implementation; acceptance does not imply that every package already comp
 The six additions and broader application verification were accepted on
 2026-10-20 in [A-37](decisions.md#framework-consolidation-2026-10-19).
 Typed identities and branded domain values were added in A-38 on the same date.
+One dedicated integration per backend was added in A-42 on 2026-10-23.
+The checklist form of every principle, with the founder rules that have no
+A-number, is the `arki-library-principles` skill in `.agents/skills/`.
 
 ## Define once, infer everywhere
 
@@ -232,3 +235,23 @@ applications; performance improvements must preserve their precision.
 Verification proves that nested or parallel agent calls cannot silently multiply
 the caller's budget, and that representative large applications stay within
 recorded runtime and compiler budgets.
+
+## One dedicated integration per backend
+
+Each backend a package supports (a store, an event log, a pub/sub, a driver,
+a provider) is its own subpath module that the application imports and uses
+directly, the way `drizzle-orm/node-postgres` and `drizzle-orm/pglite` are
+imported: `@arki/journal/postgres`, `@arki/pubsub/pg`, `@arki/pubsub/sqlite`.
+The module owns its code and its queries. There is no shared runtime layer
+that several backends run through, no union-typed helper that picks its SQL at
+runtime and no generic backend with a dialect switch. Some query text repeating
+between backends is accepted. See [A-42](decisions.md#framework-consolidation-2026-10-19).
+
+Sharing plain declarations remains fine: a column list, a schema, a contract
+test suite that every backend must pass. The rule is against runtime layers,
+not against shared facts. Platform dependencies of a backend entry are
+optional peers, and a portable entry reaches one only through a lazy import.
+
+Verification runs the same contract test suite against every backend and
+checks that each backend entry imports no other backend's module and no
+shared "any backend" runtime helper.

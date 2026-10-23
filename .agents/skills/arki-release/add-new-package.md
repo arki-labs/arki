@@ -16,6 +16,8 @@ Run `bun tooling/arki-release/src/cli.ts inventory` to see current classificatio
 - Pass `bun release:arki audit` (no leak hits except acceptable `warning`s).
 - Have a benchmark against its most popular competitors: a `bench/<name>.bench.ts` suite on `@arki/bench` (`packages/bench/`), `"bench": "bun run build && arki-bench"`, and a README section between `<!-- bench:start -->` / `<!-- bench:end -->` written by `bun run bench --profile publish --write-readme` on an idle machine. Compare groups keep one written contract checked before timing; rivals that keep a different promise are `differs`. Speed for runtime code; bundle size for UI, CSS and icon packages. Founder rule, 2026-10-13.
 
+- Follow every rule in the [`arki-library-principles`](../arki-library-principles/SKILL.md) skill: run its "New package steps" and its before-commit checklist. The scorecard checks the mechanical rules; the rest (types written once, returned failures, one integration per backend, general-purpose API) is a review you do by reading.
+
 If any check fails, the package isn't ready. Don't try to force-fit it — fix the underlying issue first.
 
 ## Promotion steps
