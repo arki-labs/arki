@@ -46,6 +46,11 @@
       "import": "./dist/poll/index.js",
       "default": "./dist/poll/index.js"
     },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "import": "./dist/redis/index.js",
+      "default": "./dist/redis/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js",

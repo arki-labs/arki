@@ -5,6 +5,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgAsyncTransaction, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import type { PgliteDatabase, PgliteQueryResultHKT } from 'drizzle-orm/pglite';
 import type { SQLiteAsyncTransaction } from 'drizzle-orm/sqlite-core';
+import { Redis } from 'ioredis';
 import pg from 'pg';
 import { expectTypeOf, test } from 'vitest';
 
@@ -15,12 +16,20 @@ import type { PubSub, Unsubscribe } from './index.js';
 import { memoryPubSub } from './memory.js';
 import { pgPubSub } from './pg/index.js';
 import { pollPubSub, pubsubTable } from './poll/index.js';
+import { redisPubSub } from './redis/index.js';
 
 declare const pgDb: PgliteDatabase;
 declare const sqliteDb: LibSQLDatabase;
 declare const nodePgDb: NodePgDatabase;
 const pgTable = pubsubTable(pgColumns());
 const sqliteTable = pubsubTable(sqliteColumns());
+
+test('redis has no publishIn', () => {
+  const pubsub = redisPubSub({ client: new Redis() });
+  expectTypeOf(pubsub).toEqualTypeOf<PubSub>();
+  // @ts-expect-error -- Redis cannot join a database transaction
+  void pubsub.publishIn;
+});
 
 test('memory has no publishIn', () => {
   const pubsub = memoryPubSub();
