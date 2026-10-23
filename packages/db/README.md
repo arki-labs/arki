@@ -126,6 +126,38 @@ What is different:
 
 The measurements behind these rules are in `docs/arki/research/17-multi-database/spike/results.md` in the Arki repository.
 
+### Tables a package ships: the column kit
+
+A package that ships tables writes each one once, against a `ColumnKit`. The app passes the kit for its database, and gets that database's real Drizzle table:
+
+```ts skip="illustrates a package's table factory"
+import type { ColumnKit, Dialect } from '@arki/db/columns';
+import { pgColumns, pgSchema } from '@arki/db/pg';
+import { sqliteColumns } from '@arki/db/sqlite';
+
+export function noteTables<D extends Dialect>(c: ColumnKit<D>) {
+  const notes = c.table(
+    'notes',
+    {
+      id: c.id(noteId).primaryColumn(),
+      title: c.varchar('title', { length: 200 }).notNull(),
+      settings: c.json('settings', settingsSchema),
+      createdAt: c.timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => [c.index('notes_created').on(t.createdAt, c.desc(t.id))],
+  );
+  return { notes };
+}
+
+const onPostgres = noteTables(pgColumns(pgSchema('notes'))); // tables in the `notes` schema
+const onSqlite = noteTables(sqliteColumns({ prefix: 'notes_' })); // SQLite has no schemas: a name prefix
+```
+
+- **Same types as hand-written tables.** `noteTables(pgColumns())` has exactly the type `pgTable('notes', { … })` would have, and the SQLite tables exactly the type of `sqliteTable`. Rows, inserts, `$type<…>()` and drizzle-kit work unchanged. On Postgres, drizzle-kit cannot tell a kit table from the hand-written one, so moving a package's tables to the kit needs no migration.
+- **Columns:** `text` (with `enum`), `varchar`, `char`, `integer`, `bigint` (a JS `number`), `boolean`, `json` (typed by `$type` or checked by a Zod schema, as `jsonColumn` does), `timestamp` (`Date`), `instant` (`Temporal.Instant`), and `id(declaration)` for ids declared with `defineId`. Modifiers mirror Drizzle's: `notNull`, `primaryKey`, `default`, `defaultNow`, `$defaultFn`, `$onUpdateFn`, `$type`, `unique`, `references`. Extras: `index`, `uniqueIndex` (with `.where()` for a partial index), `unique`, `check`, `desc`.
+- **On SQLite:** `jsonb` becomes JSON `text`, timestamps become integer milliseconds, and `varchar(n)` / `char(n)` become `text` plus a `CHECK` on `length()`, so the Postgres limit still holds. Index names take the prefix, because SQLite index names are global to the database.
+- **Queries stay per dialect.** Drizzle's Postgres and SQLite query builders are different classes, so one query body cannot take either database. A package keeps one query file per dialect, each fully typed, and runs one behavior test suite against both.
+
 ## Usage
 
 App-shaped blocks import their tables, `db` and repositories from [the docs fixture](docs/examples/fixture.ts): a small schema (users, posts, stories, accounts, orders, invoices) on an in-memory PGlite database from `@arki/db/runtime-local`, seeded with a few rows. In your app those names come from your own `tables.ts`, `relations.ts` and `db.ts`.
@@ -820,7 +852,10 @@ first null
 - `@arki/db/orpc` — `transactionalProcedure`, `transactionalProcedureConfig`, `TransactionScopeOf`: the oRPC middleware. Portable; needs the optional peer `@orpc/server`.
 - `@arki/db/eslint` — the `db/no-effects-in-transaction` rule. Tooling only; needs `eslint`, `@typescript-eslint/utils` and `typescript`.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
-- `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.
+- `@arki/db/pg` — re-export of `drizzle-orm/pg-core`, plus `pgColumns(schema?)`, the Postgres column kit.
+- `@arki/db/libsql` — `createLibsqlDb`: a libSQL database with writes queued per process. Needs the optional peer `@libsql/client`.
+- `@arki/db/sqlite` — re-export of `drizzle-orm/sqlite-core`, plus `idColumns`, `instant` (integer milliseconds) and `sqliteColumns({ prefix? })`, the SQLite column kit.
+- `@arki/db/columns` — `ColumnKit`, `ColumnSpec` and `TableOf`: the types a package writes its tables against.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.
 - `@arki/db/bun` — Bun-SQL driver entry (also routed via the `bun` condition on `./init`).
 - `@arki/db/client` — types-only client surface reserved for future Tier-3 sync work.
