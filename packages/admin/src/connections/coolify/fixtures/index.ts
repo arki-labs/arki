@@ -53,7 +53,8 @@ export const servers = [
 export const projects = [{ id: 2, uuid: PROJECT_UUID, name: 'Example', description: null }];
 
 export const environments = [
-  { id: 3, name: 'production', project_id: 2, created_at: '2026-01-02T03:04:05.000000Z', description: null },
+  // Shaped like Coolify 4.4.7, which sends no project_id here.
+  { id: 3, uuid: 'env00000example', name: 'production', created_at: '2026-01-02T03:04:05.000000Z', description: null },
 ];
 
 export const unreachableServer = { ...servers[0], settings: { is_reachable: false, is_usable: false } };

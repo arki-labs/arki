@@ -78,7 +78,6 @@ describe('coolify-conformance: fixture replay', () => {
     const projectEnvironments = project === undefined ? [] : await client.listEnvironments(project.uuid);
     const [environment] = projectEnvironments;
     expect(environment?.id).toBe(app?.environment_id);
-    expect(environment?.project_id).toBe(project?.id);
     expect(project?.name).toBe('Example');
     expect(app?.dockerfile_location).toBe('/apps/example/Dockerfile');
     expect(app?.watch_paths).toBe('apps/example/**');

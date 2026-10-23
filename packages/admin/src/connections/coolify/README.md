@@ -8,7 +8,7 @@ Sources (read 2026-10-14):
 - `GET /applications`: https://coolify.io/docs/api-reference/api/operations/list-applications
 - `GET /deployments`, `GET /deployments/applications/{uuid}?skip&take`: https://coolify.io/docs/api-reference/api/operations/list-deployments and `.../list-deployments-by-app-uuid`
 - `GET /servers`: https://coolify.io/docs/api-reference/api/operations/list-servers
-- `GET /projects`, `GET /projects/{uuid}/environments` (read 2026-10-23 from the v4.x `openapi.yaml`): an application's `environment_id` is an environment `id`, whose `project_id` is a project `id`. `GET /applications` also carries `base_directory`, `dockerfile_location` and `watch_paths`.
+- `GET /projects`, `GET /projects/{uuid}/environments` (read 2026-10-23 from the v4.x `openapi.yaml`, checked against Coolify 4.4.7): an application's `environment_id` is the `id` of an environment in one project's list. The docs give each environment a `project_id`, but 4.4.7 sends none, so name the project from the list you asked for. `GET /applications` also carries `base_directory`, `dockerfile_location` and `watch_paths`.
 - `GET /version` (docs show `"v4.0.0"`; body parsed as JSON string or plain text): https://coolify.io/docs/api-reference/api/operations/version
 - Webhook channel: https://coolify.io/docs/knowledge-base/notifications
 

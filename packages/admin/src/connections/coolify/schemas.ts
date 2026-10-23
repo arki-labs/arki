@@ -37,7 +37,8 @@ export const coolifyProjectSchema = z.looseObject({
 export const coolifyEnvironmentSchema = z.looseObject({
   id: z.number().int(),
   name: z.string(),
-  project_id: z.number().int(),
+  /** In the docs, but Coolify 4.4.7 omits it: the project is the one whose environments you listed. */
+  project_id: z.number().int().nullish(),
 });
 
 export const coolifyDeploymentSchema = z.looseObject({
