@@ -50,7 +50,7 @@ const notesContract = contract.router({
     .output(z.array(z.string())),
 });
 const notesFeature = defineFeature('notes').entrypoints(
-  rpc(notesContract, implement(notesContract), { list: o => o.list.handler(() => []) }),
+  rpc(notesContract, implement(notesContract), o => ({ list: o.list.handler(() => []) })),
 );
 const appContract = { notes: notesContract };
 const manifest = liveManifest(appContract, { scopes });

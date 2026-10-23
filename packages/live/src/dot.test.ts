@@ -70,13 +70,12 @@ const postsContract = contract.router({
   create: contract.input(z.object({ title: z.string() })),
 });
 const postsFeature = defineFeature('posts').entrypoints(
-  rpc(postsContract, implement(postsContract), {
-    list: o => o.list.handler(() => []),
-    create: o =>
-      o.create.handler(() => {
-        // A write: nothing to return.
-      }),
-  }),
+  rpc(postsContract, implement(postsContract), o => ({
+    list: o.list.handler(() => []),
+    create: o.create.handler(() => {
+      // A write: nothing to return.
+    }),
+  })),
 );
 const appContract = { posts: postsContract };
 const TRIGGERS = liveMigration({ app: 'blog', tables: liveTables(liveManifest(appContract)) }).up;

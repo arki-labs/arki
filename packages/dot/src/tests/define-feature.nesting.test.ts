@@ -37,8 +37,8 @@ import {
   sliceOf,
 } from '../feature.js';
 import { defineApp, fake, infra } from '../index.js';
-import { unit } from '../unit-contract.js';
 import { rpc } from '../orpc.js';
+import { unit } from '../unit-contract.js';
 import { createDb, database } from './fixtures/nested-digest/db.js';
 import { digest } from './fixtures/nested-digest/digest/feature.js';
 import { compile, compileLogic } from './fixtures/nested-digest/digest/features/compile/feature.js';
@@ -195,9 +195,7 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
       }
       return [...owners.keys()];
     };
-    expect(() => read(f => f.units())).toThrow(
-      'duplicate projection name "compile-stats" (digest and digest.compile)',
-    );
+    expect(() => read(f => f.units())).toThrow('duplicate projection name "compile-stats" (digest and digest.compile)');
     expect(read(ownUnits)).toEqual(['digest-stats', 'compile-stats']);
   });
 });
@@ -226,7 +224,7 @@ describe('rpc: the parent mounts the children (Astra round 1 #5)', () => {
     const childContract = oc.router({ ping: oc.output(z.string()) });
     const childImplementer = implement(childContract).$context<RequestContext>();
     const child = defineFeature('p.c').entrypoints(
-      rpc(childContract, childImplementer, { ping: o => o.ping.handler(() => 'pong') }),
+      rpc(childContract, childImplementer, o => ({ ping: o.ping.handler(() => 'pong') })),
     );
     // @ts-expect-error no rpc at all on the parent
     expect(() => defineFeature('p').features(child).entrypoints()).toThrow(/is not mounted in its own contract/);
@@ -236,14 +234,14 @@ describe('rpc: the parent mounts the children (Astra round 1 #5)', () => {
       defineFeature('p')
         .features(child)
         // @ts-expect-error the parent's contract does not mount the child's
-        .entrypoints(rpc(parentContract, parentImplementer, { other: o => o.other.handler(() => 'x') })),
+        .entrypoints(rpc(parentContract, parentImplementer, o => ({ other: o.other.handler(() => 'x') }))),
     ).toThrow(/is not mounted in its own contract/);
     const okContract = oc.router({ c: childContract });
     const okImplementer = implement(okContract).$context<RequestContext>();
     expect(() =>
       defineFeature('p')
         .features(child)
-        .entrypoints(rpc(okContract, okImplementer, { c: () => child.router })),
+        .entrypoints(rpc(okContract, okImplementer, () => ({ c: child.router }))),
     ).not.toThrow();
   });
 });
@@ -278,14 +276,12 @@ describe('transactions (Astra round 1 #3): entrypoints open them, usecases take 
       db: entrypointOnly(database.provides.db),
       raw: database.provides.db,
     });
-    const peek = peekDeps
-      .usecases({ sees: (deps: Record<string, unknown>) => () => Object.keys(deps) })
-      .entrypoints({
-        kind: 'door',
-        key: 'door',
-        actions: [],
-        resolve: ({ db }) => db.transaction(() => Promise.resolve('opened')),
-      });
+    const peek = peekDeps.usecases({ sees: (deps: Record<string, unknown>) => () => Object.keys(deps) }).entrypoints({
+      kind: 'door',
+      key: 'door',
+      actions: [],
+      resolve: ({ db }) => db.transaction(() => Promise.resolve('opened')),
+    });
     const app = orThrow(await defineApp('peek').infra(database).features([peek]).start());
     const seen = app.services['peek.usecases'].sees();
     expect(seen).toContain('raw');

@@ -17,7 +17,7 @@ import { errorMap } from '@arki/failure/orpc';
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
 import { defineFeature, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
-import { needsMiddleware, rpc, step } from '../orpc.js';
+import { rpc, rpcFor, step } from '../orpc.js';
 
 const NotSignedIn = defineFailure('orders.not_signed_in', { status: 401 });
 const Declined = defineFailure('orders.declined', { status: 402 });
@@ -26,7 +26,7 @@ type RequestContext = {
   readonly signedIn: boolean;
   readonly services: Readonly<Record<string, unknown>>;
 };
-const bind = needsMiddleware<RequestContext>();
+const shop = rpcFor<RequestContext>();
 
 const contract = oc.router({
   pay: {
@@ -40,29 +40,26 @@ const contract = oc.router({
 });
 
 const ordersLogic = defineFeature('orders').usecases({});
-const implementer = implement(contract).$context<RequestContext>().use(bind(ordersLogic));
+const implementer = shop.implement(contract).with(ordersLogic);
 const signedIn = (ctx: { readonly signedIn: boolean }) => (ctx.signedIn ? {} : NotSignedIn());
 
 const orders = ordersLogic.entrypoints(
-  rpc(contract, implementer, {
+  rpc(contract, implementer, impl => ({
     pay: {
-      card: impl => impl.pay.card.handler(() => 'paid'),
-      declined: impl =>
-        impl.pay.declined.handler(() => {
-          throw new ORPCError('PAYMENT_REQUIRED', { status: 402, data: Declined() });
-        }),
-      broken: impl =>
-        impl.pay.broken.handler(() => {
-          throw new Error('db down');
-        }),
-      serverError: impl =>
-        impl.pay.serverError.handler(() => {
-          throw new ORPCError('INTERNAL_SERVER_ERROR');
-        }),
-      guarded: impl => impl.pay.guarded.use(step(signedIn)).handler(() => 'in'),
+      card: impl.pay.card.handler(() => 'paid'),
+      declined: impl.pay.declined.handler(() => {
+        throw new ORPCError('PAYMENT_REQUIRED', { status: 402, data: Declined() });
+      }),
+      broken: impl.pay.broken.handler(() => {
+        throw new Error('db down');
+      }),
+      serverError: impl.pay.serverError.handler(() => {
+        throw new ORPCError('INTERNAL_SERVER_ERROR');
+      }),
+      guarded: impl.pay.guarded.use(step(signedIn)).handler(() => 'in'),
     },
-    contextKeys: impl => impl.contextKeys.handler(({ context }) => Object.keys(context)),
-  }),
+    contextKeys: impl.contextKeys.handler(({ context }) => Object.keys(context)),
+  })),
 );
 
 const boot = async () => {

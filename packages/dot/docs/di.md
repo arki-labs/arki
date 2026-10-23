@@ -303,20 +303,19 @@ units with `f.units()`.
 
 ```ts
 import { oc } from '@orpc/contract';
-import { implement } from '@orpc/server';
 import { z } from 'zod';
 
 import type { DepsOf, ServicesBag } from '@arki/dot/feature';
 import { infra } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
-import { needsMiddleware, rpc, step } from '@arki/dot/orpc';
+import { rpc, rpcFor, step } from '@arki/dot/orpc';
 import { defineFailure, orThrow } from '@arki/failure';
 import { errorMap } from '@arki/failure/orpc';
 
 // core/orpc.ts — once per app
 type Session = { readonly user: { readonly id: string } };
 export type RequestContext = { session: Session | null; headers: Headers; services: ServicesBag };
-export const bind = needsMiddleware<RequestContext>();
+export const { implement } = rpcFor<RequestContext>();
 // A step: a plain function, attached with `step()` (see Steps and arounds).
 // With `@arki/auth`, use its `authed` and `AuthenticationRequired` instead.
 export const SignInRequired = defineFailure('auth.unauthenticated', { status: 401, message: 'Sign in to continue.' });
@@ -350,28 +349,28 @@ export const purge =
 const dailyDigestDeps = defineFeature('daily-digest').needs({ plans: billing.provides.entitlements }).infra(store);
 export type Deps = DepsOf<typeof dailyDigestDeps>;
 export const dailyDigestLogic = dailyDigestDeps.usecases({ preview, purge });
-export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(dailyDigestLogic));
+export const rpcImplementer = implement(digestRpcContract).with(dailyDigestLogic);
 
 // This example uses an exception boundary at RPC handlers; usecases keep typed outcomes.
-// features/daily-digest/entrypoints/procedures.ts — the whole tree. In its own file it
-// reads the implementer as a type only (`import type { rpcImplementer } from '../feature'`),
-// so there is no runtime import back.
-export const digestProcedures = {
-  preview: (impl: typeof rpcImplementer) =>
-    impl.preview
-      .use(step(authed))
-      .handler(async ({ context }) => orThrow(await context.usecases.preview(context.session.user.id))),
+// features/daily-digest/entrypoints/procedures.ts — the whole tree, one function of the
+// implementer. In its own file it reads the implementer as a type only
+// (`import type { rpcImplementer } from '../feature'`), so there is no runtime import back.
+export const digestProcedures = (impl: typeof rpcImplementer) => ({
+  preview: impl.preview
+    .use(step(authed))
+    .handler(async ({ context }) => orThrow(await context.usecases.preview(context.session.user.id))),
   admin: {
-    purge: (impl: typeof rpcImplementer) =>
-      impl.admin.purge.handler(async ({ context }) => orThrow(await context.usecases.purge())),
+    purge: impl.admin.purge.handler(async ({ context }) => orThrow(await context.usecases.purge())),
   },
-};
+});
 
 // back in feature.ts
 export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
 ```
 
-- **`bind(dailyDigestLogic)`** puts the feature's needs, private infra and `usecases` on the
+- **`implement(digestRpcContract).with(dailyDigestLogic)`** is oRPC's implementer of the
+  contract on the app's request context (`rpcFor<RequestContext>()` makes the app's
+  `implement` once), with the feature's needs, private infra and `usecases` on the
   handler context, read from `context.services` by handle. The request context
   holds request data only; what a handler may touch is declared once, in the
   chain, where `dot explain` sees it. `context.db` does not compile when only
@@ -381,8 +380,8 @@ export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, r
 - **`step(authed)`** runs a plain function before the handler. It adds
   `session` to the context, or refuses with `SignInRequired`, which the
   contract must declare. See [Steps and arounds](middleware.md).
-- **`rpc(contract, implementer, factories)`** builds the router from one factory per
-  procedure. The factories object is shaped like the contract — a group
+- **`rpc(contract, implementer, procedures)`** builds the router from one function of
+  the implementer. What it returns is shaped like the contract — a group
   (`admin.purge`) is a nested object in the same file. Keys
   match the contract exactly: an extra key is
   `'DOT: a procedure key is not in the contract'`, a missing key or a
@@ -798,7 +797,7 @@ const reports = defineFeature('reports')
         repos.region(),
   })
   .provides({ summary: ({ usecases }) => ({ region: usecases.region() }) })
-  .entrypoints(rpc({}, {}, {}));
+  .entrypoints(rpc({}, {}, () => ({})));
 
 const eu = reports.instance('eu', { db: databaseEu.provides.dbEu }); // `reports#eu`, on the EU database
 const us = reports.instance('us'); // `reports#us`, on the primary

@@ -1,11 +1,9 @@
 /** Child: `digest.compile`. Needs the parent's private `repos`; `db` only for its entrypoints; owns `ranker`; nests `rank`. */
-import { implement } from '@orpc/server';
 
 import type { DepsOf } from '../../../../../../feature.js';
-import type { RequestContext } from '../../../../rpc-app/orpc.js';
 import { defineFeature, entrypointOnly } from '../../../../../../feature.js';
 import { rpc } from '../../../../../../orpc.js';
-import { bind } from '../../../../rpc-app/orpc.js';
+import { implement } from '../../../../rpc-app/orpc.js';
 import { database, projectionsUnit } from '../../../db.js';
 import { store } from '../../infra/store.js';
 import { compileProcedures } from './entrypoints/procedures.js';
@@ -24,7 +22,7 @@ const compileDeps = defineFeature('digest.compile')
 export type CompileDeps = DepsOf<typeof compileDeps>;
 
 export const compileLogic = compileDeps.usecases({ compileFor });
-export const rpcImplementer = implement(compileRpcContract).$context<RequestContext>().use(bind(compileLogic));
+export const rpcImplementer = implement(compileRpcContract).with(compileLogic);
 
 /** A stand-in for `schedules(compileLogic, [...])`: the slice payload is the schedule names. */
 const compileSchedules = {

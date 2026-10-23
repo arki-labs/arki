@@ -1,5 +1,5 @@
 /**
- * `@arki/dot/orpc` — `bind(logic)` and `rpc(contract, implementer, factories)`.
+ * `@arki/dot/orpc` — `bind(logic)`, `rpcFor()` and `rpc(contract, implementer, procedures)`.
  *
  * Why these tests exist: a feature's handlers must get exactly what the
  * feature declared (needs, private infra, usecases) and nothing more, typed,
@@ -25,10 +25,10 @@ import type { ServicesBag } from '../feature.js';
 import type { RequestContext } from './fixtures/rpc-app/orpc.js';
 import { defineFeature, entrypointOnly, FEATURE_ERROR_CODES, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
-import { needsMiddleware, rpc } from '../orpc.js';
-import { digest, digestLogic } from './fixtures/rpc-app/digest/feature.js';
+import { needsMiddleware, rpc, rpcFor } from '../orpc.js';
+import { digest, digestLogic, rpcImplementer } from './fixtures/rpc-app/digest/feature.js';
 import { billing, database } from './fixtures/rpc-app/infra.js';
-import { bind } from './fixtures/rpc-app/orpc.js';
+import { bind, implement as implementFeature } from './fixtures/rpc-app/orpc.js';
 
 const rpcContract = { digest: digest.contract };
 const appRouter = implement(rpcContract)
@@ -97,7 +97,7 @@ describe('bind(digestLogic): the handler context is what the feature declared', 
   });
 });
 
-describe('rpc(contract, implementer, factories): one factory per procedure, keys match the contract', () => {
+describe('rpc(contract, implementer, procedures): one function of the implementer, keys match the contract', () => {
   const contract = oc.router({
     ping: oc.output(z.number()),
     admin: { count: oc.output(z.number()), reset: oc.output(z.string()) },
@@ -105,15 +105,16 @@ describe('rpc(contract, implementer, factories): one factory per procedure, keys
   const other = oc.router({ pong: oc.output(z.string()) });
   const implemented = implement(contract).$context<RequestContext>();
   type Os = typeof implemented;
-  const ping = (o: Os) => o.ping.handler(() => 1);
-  const count = (o: Os) => o.admin.count.handler(() => 2);
-  const reset = (o: Os) => o.admin.reset.handler(() => 'done');
+  const procedures = (o: Os) => ({
+    ping: o.ping.handler(() => 1),
+    admin: { count: o.admin.count.handler(() => 2), reset: o.admin.reset.handler(() => 'done') },
+  });
 
-  it('builds the router from the factories, a group as a nested object, and exposes it to routerFor', async () => {
-    const entry = rpc(contract, implemented, { ping, admin: { count, reset } });
+  it('builds the router from the procedures, a group as a nested object, and exposes it to routerFor', async () => {
+    const entry = rpc(contract, implemented, procedures);
     expect(entry).toMatchObject({ kind: 'rpc', key: 'rpc', contract });
     expect(entry.resolve({})).toBe(entry.router);
-    // Each leaf got the implementer: the built router answers like a hand-written one.
+    // The procedures got the implementer: the built router answers like a hand-written one.
     const client = createRouterClient(entry.router, {
       context: { session: null, headers: new Headers(), services: {} },
     });
@@ -123,31 +124,66 @@ describe('rpc(contract, implementer, factories): one factory per procedure, keys
 
   it('rejects an extra key, a missing key, a wrong procedure under a key and a bare procedure', () => {
     const refused = () => {
+      const missingReset = (o: Os) => ({
+        ping: o.ping.handler(() => 1),
+        admin: { count: o.admin.count.handler(() => 2) },
+      });
+      const resetAsCount = (o: Os) => ({
+        ...procedures(o),
+        admin: { count: procedures(o).admin.reset, reset: procedures(o).admin.reset },
+      });
       // @ts-expect-error -- `extra` is not in the contract
-      rpc(contract, implemented, { ping, admin: { count, reset }, extra: ping });
+      rpc(contract, implemented, o => ({ ...procedures(o), extra: o.ping.handler(() => 1) }));
       // @ts-expect-error -- `admin.extra` is not in the contract (nested groups are checked too)
-      rpc(contract, implemented, { ping, admin: { count, reset, extra: count } });
+      rpc(contract, implemented, o => ({ ...procedures(o), admin: { ...procedures(o).admin, extra: 1 } }));
       // @ts-expect-error -- `admin.reset` is missing
-      rpc(contract, implemented, { ping, admin: { count } });
+      rpc(contract, implemented, missingReset);
       // @ts-expect-error -- `reset` does not implement `count` (another output schema)
-      rpc(contract, implemented, { ping, admin: { count: reset, reset } });
+      rpc(contract, implemented, resetAsCount);
       // @ts-expect-error -- a bare `os` procedure is not the contract's procedure
-      rpc(contract, implemented, { ping: () => bare.handler(() => 1), admin: { count, reset } });
+      rpc(contract, implemented, o => ({ ...procedures(o), ping: bare.handler(() => 1) }));
       // @ts-expect-error -- the procedure implements another contract (its output is a string)
-      rpc(contract, implemented, { ping: () => implement(other).pong.handler(() => 'x'), admin: { count, reset } });
+      rpc(contract, implemented, o => ({ ...procedures(o), ping: implement(other).pong.handler(() => 'x') }));
     };
     expect(refused).toBeTypeOf('function');
   });
 
   it('says which key is extra in the error, so the fix is obvious', () => {
-    type Guard = Parameters<
-      typeof rpc<
-        typeof contract,
-        Os,
-        { ping: typeof ping; admin: { count: typeof count; reset: typeof reset }; extra: typeof ping }
-      >
-    >[2];
+    type Built = ReturnType<typeof procedures>;
+    type Guard = Parameters<typeof rpc<typeof contract, Os, Built & { readonly extra: Built['ping'] }>>[2];
     expectTypeOf<Guard>().toHaveProperty('DOT: a procedure key is not in the contract');
+  });
+});
+
+describe("rpcFor(): the app's implement(contract).with(logic)", () => {
+  it('is the hand-written implementer: the handler sees the request context and the bound handles', () => {
+    // `rpcImplementer` in the fixture is `implement(digestRpcContract).with(digestLogic)`.
+    const probe = rpcImplementer.preview.handler(({ context }) => {
+      expectTypeOf<NonNullable<SuccessOf<typeof context.usecases.preview>>>().toHaveProperty('items');
+      expectTypeOf(context).toHaveProperty('db');
+      // @ts-expect-error TS2339: `plans` is a plain need, so it never reaches the handler context
+      void context.plans;
+      expectTypeOf(context.session).toEqualTypeOf<RequestContext['session']>();
+      return null;
+    });
+    expect(probe).toBeDefined();
+  });
+
+  it("passes oRPC's config through, so a transactional implementer can validate output inside the transaction", () => {
+    const transactional = implementFeature(digest.contract, {
+      initialOutputValidationIndex: Number.POSITIVE_INFINITY,
+    }).with(digestLogic);
+    expect(transactional.preview['~orpc'].outputValidationIndex).toBe(Number.POSITIVE_INFINITY);
+    expect(rpcImplementer.preview['~orpc'].outputValidationIndex).toBeLessThan(Number.POSITIVE_INFINITY);
+  });
+
+  it('refuses at compile time an alias that would shadow a request-context key', () => {
+    type TracedContext = RequestContext & { readonly requestId: string };
+    const traced = rpcFor<TracedContext>();
+    const shadowing = defineFeature('traced').needs({ requestId: entrypointOnly(billing.provides.entitlements) });
+    // @ts-expect-error -- the bound `requestId` would replace the request's own
+    const refused = () => traced.implement(digest.contract).with(shadowing);
+    expect(refused).toBeTypeOf('function');
   });
 });
 

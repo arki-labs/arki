@@ -3,34 +3,36 @@
  *
  * Design: RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`, Part B.
  *
- *   // app: core/orpc.ts
- *   export const bind = needsMiddleware<RequestContext>();
+ *   // app: entrypoints/middleware.ts
+ *   export const { implement } = rpcFor<RequestContext>();
  *
  *   // features/digest/feature.ts
  *   const digestDeps = defineFeature('digest').needs({ plans }).infra(store);
  *   export type Deps = DepsOf<typeof digestDeps>;
  *   export const digestLogic = digestDeps.usecases({ preview });
- *   export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(digestLogic));
+ *   export const rpcImplementer = implement(digestRpcContract).with(digestLogic);
  *   export const digest = digestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
  *
  *   // features/digest/entrypoints/procedures.ts — `import type` only, so no runtime back-import
  *   import type { rpcImplementer } from '../feature';
- *   export const digestProcedures = {
- *     preview: (impl: typeof rpcImplementer) => impl.preview.handler(({ context }) => context.usecases.preview()),
- *   };
+ *   export const digestProcedures = (impl: typeof rpcImplementer) => ({
+ *     preview: impl.preview.handler(({ context }) => context.usecases.preview()),
+ *   });
  *
  * Two pieces:
  *
- * - `needsMiddleware<Ctx>()` makes the app's `bind`. `bind(digestLogic)` puts the
- *   feature's needs, private infra and usecases on the handler context, by
- *   alias, read from the request's services bag. The request context keeps
- *   request data only (`session`, `headers`, `services`); the feature's
- *   dependencies are declared once, in its chain, where `dot explain` sees them.
- * - `rpc(contract, implementer, factories)` is the entrypoint descriptor. The
- *   factories object is shaped like the contract (a group is a nested
- *   object); each leaf is `(impl) => impl.<path>.handler(…)`. Keys match the
- *   contract exactly: an extra key, a missing key or a procedure that does not
- *   implement its key do not compile.
+ * - `rpcFor<Ctx>()` makes the app's `implement` (and `bind`, the middleware
+ *   behind it). `implement(contract).with(digestLogic)` is oRPC's implementer
+ *   of the contract on the app's request context, with the feature's needs,
+ *   private infra and usecases on the handler context, by alias, read from
+ *   the request's services bag. The request context keeps request data only
+ *   (`session`, `headers`, `services`); the feature's dependencies are
+ *   declared once, in its chain, where `dot explain` sees them.
+ * - `rpc(contract, implementer, procedures)` is the entrypoint descriptor.
+ *   `procedures` is one function of the implementer that returns the router,
+ *   shaped like the contract (a group is a nested object; a mounted child
+ *   feature is `child.router`). Keys match the contract exactly: an extra key,
+ *   a missing key or a procedure that does not implement its key do not compile.
  *   Each procedure also becomes a manifest action, so `dot explain` lists
  *   the feature's procedures and the policy their contract meta declares.
  *
@@ -38,16 +40,19 @@
  * serves oRPC; the rest of Dot never loads it.
  */
 import type {
+  AnyMiddleware,
+  BuilderConfig,
   Context,
   ContractProcedure,
   ContractRouter,
+  ImplementerInternalWithMiddlewares,
   IntersectPick,
   Meta,
   MiddlewareNextFn,
   MiddlewareResult,
   Router,
 } from '@orpc/server';
-import { ORPCError, os, traverseContractProcedures } from '@orpc/server';
+import { implement, ORPCError, os, traverseContractProcedures } from '@orpc/server';
 
 import type { Failure, FailureOf, SuccessOf } from '@arki/failure';
 import type { DeclaredErrors } from '@arki/failure/orpc';
@@ -126,6 +131,55 @@ export function needsMiddleware<Ctx extends RequestContextShape>() {
 }
 
 /**
+ * Make the app's oRPC pieces for its request context type, once:
+ * `export const { implement } = rpcFor<RequestContext>()`.
+ *
+ * `implement(contract).with(logic)` is the feature's implementer: oRPC's
+ * `implement(contract)` on the app's request context, with `bind(logic)` as
+ * its first middleware. `config` is oRPC's own, passed through
+ * (`transactionalProcedureConfig` from `@arki/db/orpc`, say). `bind` is that
+ * middleware alone, for an app that composes an implementer by hand.
+ */
+export function rpcFor<Ctx extends RequestContextShape>() {
+  const bind = needsMiddleware<Ctx>();
+  return {
+    bind,
+    implement: <C extends Record<string, ContractRouter<Meta>>>(contract: C, config?: BuilderConfig) => ({
+      with: <H extends NeedsShape>(
+        logic: { readonly name: string; readonly handles: H } & ShadowGuard<Ctx, H>,
+      ): FeatureImplementer<C, Ctx, H> => implementWith<C, Ctx, H>(contract, config, bind(logic)),
+    }),
+  };
+}
+
+/**
+ * What `implement(contract).with(logic)` returns: oRPC's implementer of the
+ * contract, each procedure's handler seeing the request context plus the
+ * feature's handles (what `bind(logic)` adds).
+ */
+export type FeatureImplementer<
+  C extends Record<string, ContractRouter<Meta>>,
+  Ctx extends Context,
+  H extends NeedsShape,
+> = ImplementerInternalWithMiddlewares<C, Ctx, Ctx & BoundContext<H>>;
+
+function implementWith<C extends Record<string, ContractRouter<Meta>>, Ctx extends Context, H extends NeedsShape>(
+  contract: C,
+  config: BuilderConfig | undefined,
+  boundLogic: AnyMiddleware,
+): FeatureImplementer<C, Ctx, H>;
+// Erasure seam: oRPC's `Implementer<C, …>` is a conditional on `C` (one procedure, or a router)
+// that stays unresolved inside a generic, so `.use` is not callable on it there. The body is
+// written against a plain router contract and the overload above carries the types.
+function implementWith(
+  contract: Record<string, ContractRouter<Meta>>,
+  config: BuilderConfig | undefined,
+  boundLogic: AnyMiddleware,
+): unknown {
+  return implement(contract, config).use(boundLogic);
+}
+
+/**
  * An oRPC error below 500 (`UNAUTHORIZED`, `BAD_REQUEST`, a declared failure, a step's refusal)
  * is normal traffic: the call was refused, not broken. Anything else thrown is a bug.
  */
@@ -201,75 +255,66 @@ export function around<In extends Context>(
 }
 
 /**
- * Shaped like the contract: a leaf is `(impl) => impl.<path>.handler(…)`, a group
- * is a nested object — or, for a mounted child feature, `() => child.router`,
- * the child's whole router under the key the contract gives it.
- * `Router<C[K], never>` is oRPC's own "implements" check for one procedure
- * (or one subtree) — same schemas — and `never` as the initial context
+ * The feature's procedures: one function of its implementer that returns the
+ * router, shaped like the contract. A leaf is `impl.<path>.handler(…)`, a
+ * group a nested object, a mounted child feature its router (`child.router`)
+ * under the key the contract gives it. `Router<C, never>` is oRPC's own
+ * "implements" check — same schemas — and `never` as the initial context
  * accepts whatever context the app's implementer settled on.
  */
-export type ProcedureFactories<C, O> = {
-  readonly [K in keyof C]: C[K] extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
-    ? (implementer: O) => Router<C[K], never>
-    : | ProcedureFactories<C[K], O>
-      | (C[K] extends ContractRouter<Meta> ? (implementer: O) => Router<C[K], never> : never);
-};
+export type Procedures<C extends ContractRouter<Meta>, O, R extends Router<C, never> = Router<C, never>> = (
+  implementer: O,
+) => R;
 
-/** The router the factories build: each factory's return under its key. */
-export type BuiltRouter<F> = {
-  readonly [K in keyof F]: F[K] extends (implementer: never) => infer R ? R : BuiltRouter<F[K]>;
-};
-
-// Keys in the factories the contract does not have (a nested group reports the
+// Keys in the router the contract does not have (a nested group reports the
 // inner key). No `${K}.${…}` path string here: that hit TS2589 in the probe.
-type ExtraKeys<C, F> = {
-  [K in keyof F]: K extends keyof C
-    ? F[K] extends (implementer: never) => unknown
+type ExtraKeys<C, R> = {
+  [K in keyof R]: K extends keyof C
+    ? C[K] extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
       ? never
-      : ExtraKeys<C[K], F[K]>
+      : ExtraKeys<C[K], R[K]>
     : K;
-}[keyof F];
+}[keyof R];
 
 /** A compile error naming each procedure key the contract does not list. */
-export type ContractKeysGuard<C, F> = [ExtraKeys<C, F>] extends [never]
+export type ContractKeysGuard<C, R> = [ExtraKeys<C, R>] extends [never]
   ? unknown
-  : { readonly 'DOT: a procedure key is not in the contract': ExtraKeys<C, F> };
+  : { readonly 'DOT: a procedure key is not in the contract': ExtraKeys<C, R> };
 
 /**
- * The feature's oRPC entrypoint: its contract, and the router built from one
- * factory per procedure. The whole tree lives in one `entrypoints/procedures.ts`;
- * each leaf takes the feature's `rpcImplementer` as a typed parameter, so it
- * never imports the feature at runtime. The contract stays the one list of procedure names: a missing,
- * extra or wrong procedure does not compile. `DefinedFeature.contract` /
+ * The feature's oRPC entrypoint: its contract, and the router its procedures
+ * function builds from the implementer. The whole tree lives in one
+ * `entrypoints/procedures.ts`, a function that takes the feature's
+ * `rpcImplementer` as a typed parameter (`import type`), so it never imports
+ * the feature at runtime. The contract stays the one list of procedure names:
+ * a missing, extra or wrong procedure does not compile. `DefinedFeature.contract` /
  * `.router` are read from this descriptor, so `routerFor(rpcContract,
  * features)` finds the feature by its contract. Its actions (one per
  * procedure, `<feature>.<path>`) are named when the feature compiles, through
  * `actionsOf`. A subtree whose built router IS a declared child's router is
  * the child's: the child names those actions itself, so they are skipped
- * here. An inline group (`admin: impl => ({ … })`) has no child owner and
- * keeps its actions.
+ * here. An inline group (`admin: { … }`) has no child owner and keeps its
+ * actions.
  *
  * A usecase need not have a procedure (a cron, a webhook or a `provides`
  * handle may call it), and a procedure need not have a usecase: `rpc` checks
  * against the contract only.
  */
-export function rpc<C extends ContractRouter<Meta>, O, const F extends ProcedureFactories<C, O>>(
+export function rpc<C extends ContractRouter<Meta>, O, R extends Router<C, never>>(
   contract: C,
   implementer: O,
-  factories: F & ContractKeysGuard<C, F>,
-): RpcEntrypoint<C, BuiltRouter<F>> {
+  procedures: Procedures<C, O, R> & ContractKeysGuard<C, R>,
+): RpcEntrypoint<C, R> {
   // Read now, so a bad `meta` fails where the feature is declared, not at boot.
-  const procedures = rpcProcedures(contract);
-  // Erasure seam: `buildRouter` walks the factories untyped; `F` already
-  // proved each leaf returns its contract's procedure, so the result is `BuiltRouter<F>`.
-  const router = buildRouter(implementer, factories) as BuiltRouter<F>;
+  const contractProcedures = rpcProcedures(contract);
+  const router = procedures(implementer);
   return {
     kind: 'rpc',
     key: 'rpc',
     actions: [],
     actionsOf: (feature, children = []) => {
       const mounted = mountedPaths(router, new Set(children.map(child => child.router)));
-      return procedures
+      return contractProcedures
         .filter(
           procedure => !mounted.some(prefix => procedure.path === prefix || procedure.path.startsWith(`${prefix}.`)),
         )
@@ -292,24 +337,9 @@ function mountedPaths(
     const here = [...path, key];
     if (childRouters.has(value)) return [here.join('.')];
     // A procedure carries `~orpc`; only plain groups are walked.
-    if (is(value, recordSchema) && !('~orpc' in value))
-      return mountedPaths(value, childRouters, here);
+    if (is(value, recordSchema) && !('~orpc' in value)) return mountedPaths(value, childRouters, here);
     return [];
   });
-}
-
-/** Call every leaf factory with the implementer; a group (a plain object) recurses. */
-function buildRouter(implementer: unknown, factories: object): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(factories).map(([key, value]: [string, unknown]) => [
-      key,
-      typeof value === 'function'
-        ? value(implementer)
-        : is(value, recordSchema)
-          ? buildRouter(implementer, value)
-          : value,
-    ]),
-  );
 }
 
 /** Identifies the layout of an rpc action's `meta`, for tools that read `dot explain --json`. */

@@ -41,20 +41,19 @@ const storyContract = oc.$meta<{ auth?: 'user' | 'admin' }>({}).router({
 
 const storyOs = implement(storyContract);
 const stories = defineFeature('stories').entrypoints(
-  rpc(storyContract, storyOs, {
-    list: o => o.list.handler(() => []),
-    remove: o =>
-      o.remove.handler(() => {
-        throw new ORPCError('NOT_FOUND');
-      }),
-    drafts: { list: o => o.drafts.list.handler(() => []) },
-  }),
+  rpc(storyContract, storyOs, o => ({
+    list: o.list.handler(() => []),
+    remove: o.remove.handler(() => {
+      throw new ORPCError('NOT_FOUND');
+    }),
+    drafts: { list: o.drafts.list.handler(() => []) },
+  })),
 );
 
 /** A second feature with a `list` of its own. */
 const podContract = oc.router({ list: oc.output(z.array(z.string())) });
 const pods = defineFeature('pods').entrypoints(
-  rpc(podContract, implement(podContract), { list: o => o.list.handler(() => []) }),
+  rpc(podContract, implement(podContract), o => ({ list: o.list.handler(() => []) })),
 );
 
 const manifestOf = () =>
@@ -99,7 +98,7 @@ describe('rpc(): manifest actions', () => {
 
   it('refuses meta that is not plain JSON, where the feature is declared', () => {
     const odd = oc.$meta<{ since?: Date }>({}).router({ ping: oc.meta({ since: new Date(0) }).output(z.string()) });
-    expect(() => rpc(odd, implement(odd), { ping: o => o.ping.handler(() => 'pong') })).toThrow(
+    expect(() => rpc(odd, implement(odd), o => ({ ping: o.ping.handler(() => 'pong') }))).toThrow(
       expect.objectContaining({ code: FEATURE_ERROR_CODES.rpcMetaNotJson }),
     );
   });
@@ -115,7 +114,7 @@ describe('dot explain: the policy a procedure declares', () => {
       .input(z.object({ id: z.string() })),
   });
   const orders = defineFeature('orders').entrypoints(
-    rpc(orderContract, implement(orderContract), { refund: o => o.refund.handler(() => undefined) }),
+    rpc(orderContract, implement(orderContract), o => ({ refund: o.refund.handler(() => undefined) })),
   );
   const manifest = orThrow(defineApp('policy-explain').features([orders]).configure()).manifest;
 
@@ -156,7 +155,7 @@ const orderContract = oc.$meta<{ policy?: string }>({}).router({
     .input(z.object({ id: z.string() })),
 });
 const orders = defineFeature('orders').entrypoints(
-  rpc(orderContract, implement(orderContract), { refund: o => o.refund.handler(() => null) }),
+  rpc(orderContract, implement(orderContract), o => ({ refund: o.refund.handler(() => null) })),
 );
 export default defineApp('policy-explain').features([orders]);
 `,

@@ -10,7 +10,6 @@
  */
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { oc } from '@orpc/contract';
-import { implement } from '@orpc/server';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import pg from 'pg';
@@ -21,7 +20,7 @@ import type { LiveMeta } from '@arki/live';
 import { repos } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import { needsMiddleware, rpc } from '@arki/dot/orpc';
+import { rpc, rpcFor } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { http } from '@arki/http/dot';
@@ -73,7 +72,8 @@ const postsLogic = postsDeps.usecases({
     (id: string, title: string) =>
       bound.posts.add(id, title),
 });
-const impl = implement(postsContract).$context<RequestContext>().use(needsMiddleware<RequestContext>()(postsLogic));
+const { implement } = rpcFor<RequestContext>();
+const impl = implement(postsContract).with(postsLogic);
 
 /** One snapshot per call: every read of the handler sees one point in time. */
 const readSnapshot = liveRead((context: DepsOf<typeof postsLogic>) =>
@@ -81,13 +81,12 @@ const readSnapshot = liveRead((context: DepsOf<typeof postsLogic>) =>
 );
 
 const postsFeature = postsLogic.entrypoints(
-  rpc(postsContract, impl, {
-    list: o => o.list.use(readSnapshot).handler(({ context }) => context.liveRead.posts.all()),
-    create: o =>
-      o.create.handler(async ({ context, input }) => {
-        orThrow(await context.usecases.add(input.id, input.title));
-      }),
-  }),
+  rpc(postsContract, impl, o => ({
+    list: o.list.use(readSnapshot).handler(({ context }) => context.liveRead.posts.all()),
+    create: o.create.handler(async ({ context, input }) => {
+      orThrow(await context.usecases.add(input.id, input.title));
+    }),
+  })),
 );
 
 const liveQ = liveQueries({

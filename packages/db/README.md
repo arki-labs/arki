@@ -56,13 +56,13 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 
 ## Runtime support
 
-| Entry                                   | Node | Bun                                   | Deno | Browser | Hermes |
-| --------------------------------------- | ---- | ------------------------------------- | ---- | ------- | ------ |
+| Entry                                   | Node | Bun                                   | Deno | Browser | Hermes  |
+| --------------------------------------- | ---- | ------------------------------------- | ---- | ------- | ------- |
 | `@arki/db/transaction`, `@arki/db/orpc` | yes  | yes                                   | yes  | yes     | blocked |
-| `@arki/db/init` (node-postgres)         | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no     |
-| `@arki/db/runtime-local` (PGlite)       | yes  | yes                                   | no   | no      | no     |
-| `@arki/db/libsql` (SQLite)              | yes  | yes                                   | no   | no      | no     |
-| `@arki/db/sqlite` (tables, `idColumns`) | yes  | yes                                   | no   | no      | no     |
+| `@arki/db/init` (node-postgres)         | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no      |
+| `@arki/db/runtime-local` (PGlite)       | yes  | yes                                   | no   | no      | no      |
+| `@arki/db/libsql` (SQLite)              | yes  | yes                                   | no   | no      | no      |
+| `@arki/db/sqlite` (tables, `idColumns`) | yes  | yes                                   | no   | no      | no      |
 
 `@arki/db/transaction` and `@arki/db/orpc` are portable: no driver. `bun run test:runtimes` runs them on each runtime. The driver entries need a server runtime with sockets or a file system.
 
@@ -75,14 +75,14 @@ not evidence of support. Per-entry published-artifact proof remains separate.
 
 Neon, Supabase, PlanetScale Postgres and CockroachDB connect with the default `pg` driver. Queries work through a connection pooler. Session features do not: behind a pooler in transaction mode, `LISTEN` hears nothing and a session lock is held by whoever gets the connection next. So the `db()` plugin publishes a second, small pool, `sessionPool`, on the direct URL.
 
-| Host | `DB_URL` | `DB_DIRECT_URL` | `LISTEN` | Notes |
-| --- | --- | --- | --- | --- |
-| Plain Postgres | the server | not needed | yes | `sessionPool` reuses `DB_URL`. |
-| Neon | the `-pooler` URL | the direct URL | through `DB_DIRECT_URL` | Detected: without `DB_DIRECT_URL`, `sessionPool.connect()` refuses. |
-| Supabase | the pooler on port `6543` | the direct connection, or the pooler on `5432` | through `DB_DIRECT_URL` | Port `6543` is detected. Port `5432` (session mode) counts as direct. |
-| PlanetScale Postgres | the PgBouncer URL | the direct URL | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself. |
-| Self-hosted PgBouncer, transaction mode | the PgBouncer URL | the server | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself. |
-| CockroachDB | the cluster | not needed | **no** | `LISTEN` fails with SQLSTATE `42601`, so listeners and lock wake-ups must poll. Retries on `40001` work. Plain `INT` is 64-bit and node-postgres returns it as a string: use `integer` (`int4`) for numbers you add. |
+| Host                                    | `DB_URL`                  | `DB_DIRECT_URL`                                | `LISTEN`                | Notes                                                                                                                                                                                                                |
+| --------------------------------------- | ------------------------- | ---------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain Postgres                          | the server                | not needed                                     | yes                     | `sessionPool` reuses `DB_URL`.                                                                                                                                                                                       |
+| Neon                                    | the `-pooler` URL         | the direct URL                                 | through `DB_DIRECT_URL` | Detected: without `DB_DIRECT_URL`, `sessionPool.connect()` refuses.                                                                                                                                                  |
+| Supabase                                | the pooler on port `6543` | the direct connection, or the pooler on `5432` | through `DB_DIRECT_URL` | Port `6543` is detected. Port `5432` (session mode) counts as direct.                                                                                                                                                |
+| PlanetScale Postgres                    | the PgBouncer URL         | the direct URL                                 | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself.                                                                                                                                                                          |
+| Self-hosted PgBouncer, transaction mode | the PgBouncer URL         | the server                                     | through `DB_DIRECT_URL` | Not detected: set `DB_DIRECT_URL` yourself.                                                                                                                                                                          |
+| CockroachDB                             | the cluster               | not needed                                     | **no**                  | `LISTEN` fails with SQLSTATE `42601`, so listeners and lock wake-ups must poll. Retries on `40001` work. Plain `INT` is 64-bit and node-postgres returns it as a string: use `integer` (`int4`) for numbers you add. |
 
 CockroachDB is checked by `ARKI_DB_CRDB=1 bun run test -- src/cockroach.crdb.test.ts` (it needs Docker).
 
@@ -648,9 +648,7 @@ const accountsDeps = defineFeature('accounts')
 export type Deps = DepsOf<typeof accountsDeps>;
 export type AccountsTx = TransactionScopeOf<typeof transact>; // { tx, repos, '~arkiTransaction' }, inferred
 export const accountsLogic = accountsDeps.usecases({ transfer: () => transfer, balance });
-export const rpcImplementer = implement(accountsRpcContract, transactionalProcedureConfig)
-  .$context<RequestContext>()
-  .use(bind(accountsLogic));
+export const rpcImplementer = implement(accountsRpcContract, transactionalProcedureConfig).with(accountsLogic);
 
 // entrypoints/transact.ts — declared once per feature
 export const transact = transactionalProcedure((ctx: Pick<Deps, 'db' | 'repositories'>) => ctx.db, {
@@ -665,8 +663,9 @@ export async function transfer({ repos }: AccountsTx, input: TransferInput) {
 }
 
 // entrypoints/procedures.ts — the procedure still only calls a usecase
-transfer: (impl: typeof rpcImplementer) =>
-  impl.transfer.use(transact).handler(({ context, input }) => context.usecases.transfer(context, input)),
+export const accountsProcedures = (impl: typeof rpcImplementer) => ({
+  transfer: impl.transfer.use(transact).handler(({ context, input }) => context.usecases.transfer(context, input)),
+});
 ```
 
 - `repositories` (pool) and `repos` (bound to `tx`) never share a name, so
@@ -795,16 +794,16 @@ first null
 
 ## Environment variables
 
-| Variable                                   | Purpose                                      |
-| ------------------------------------------ | -------------------------------------------- |
-| `DB_URL`                                   | Primary Postgres connection URL.             |
+| Variable                                   | Purpose                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `DB_URL`                                   | Primary Postgres connection URL.                                                                 |
 | `DB_DIRECT_URL`                            | Direct URL for `sessionPool` when `DB_URL` is a pooler. See [Hosted Postgres](#hosted-postgres). |
-| `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used. |
-| `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`). |
-| `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).   |
-| `DB_POOL_CONNECTION_TIMEOUT`               | Acquire timeout in ms (default `2000`).      |
-| `DB_LOGGING`                               | Enable Drizzle logger when truthy.           |
-| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.    |
+| `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used.                                                     |
+| `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`).                                                     |
+| `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).                                                       |
+| `DB_POOL_CONNECTION_TIMEOUT`               | Acquire timeout in ms (default `2000`).                                                          |
+| `DB_LOGGING`                               | Enable Drizzle logger when truthy.                                                               |
+| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.                                                        |
 
 ## Public imports
 
@@ -918,7 +917,6 @@ Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the pack
 ## Benchmarks
 
 The measurements below predate the bounded Web Crypto ID generator. They describe the previous Cuid2 implementation; rerun the benchmark before using these numbers for current ID performance.
-
 
 ID creation against the common ID generators, and PGlite (in memory) queries through the @arki/db handle against raw Drizzle on the same PGlite instance.
 

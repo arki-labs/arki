@@ -1570,7 +1570,7 @@ function checkEntrypoints(state: FeatureState, entrypoints: readonly AnyEntrypoi
 
 function checkChildContracts(state: FeatureState, entrypoints: readonly AnyEntrypoint[]): void {
   const rpc = entrypoints.find(e => e.kind === 'rpc');
-  // By router identity: `rpc(contract, implementer, { compile: () => compile.router })` keeps the child's router object as it is.
+  // By router identity: `rpc(contract, implementer, () => ({ compile: compile.router }))` keeps the child's router object as it is.
   const mounted = new Set<unknown>(rpc !== undefined && 'router' in rpc ? Object.values(rpc.router as object) : []);
   for (const child of state.children) {
     if (child.contract !== undefined && !mounted.has(child.router)) {

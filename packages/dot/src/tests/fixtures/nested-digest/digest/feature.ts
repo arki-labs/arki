@@ -1,11 +1,9 @@
 /** Parent: `digest`. Owns the store (repos), nests `compile` and `deliver`, re-exports the compiler. Entrypoints open transactions. */
-import { implement } from '@orpc/server';
 
 import type { DepsOf } from '../../../../feature.js';
-import type { RequestContext } from '../../rpc-app/orpc.js';
 import { defineFeature, entrypointOnly } from '../../../../feature.js';
 import { rpc } from '../../../../orpc.js';
-import { bind } from '../../rpc-app/orpc.js';
+import { implement } from '../../rpc-app/orpc.js';
 import { database, projectionsUnit } from '../db.js';
 import { digestProcedures } from './entrypoints/procedures.js';
 import { digestRpcContract } from './entrypoints/rpc.js';
@@ -29,7 +27,7 @@ export const digestLogic = digestDeps.usecases({
   run,
   compiler: ({ compiler }: Pick<DigestDeps, 'compiler'>) => compiler,
 });
-export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(digestLogic));
+export const rpcImplementer = implement(digestRpcContract).with(digestLogic);
 
 /** A stand-in for `schedules(digestLogic, [...])`: the parent declares only its own schedules. */
 const digestSchedules = { kind: 'schedules', key: 'schedules', actions: [], resolve: () => ['send-digest'] } as const;

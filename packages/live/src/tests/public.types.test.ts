@@ -7,7 +7,6 @@
  */
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { oc } from '@orpc/contract';
-import { implement } from '@orpc/server';
 import { count, inArray } from 'drizzle-orm';
 import { integer, pgSchema, pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -17,7 +16,7 @@ import type { RepoSet } from '@arki/db/dot';
 import type { DepsOf, ServicesBag } from '@arki/dot/feature';
 import { repos } from '@arki/db/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
-import { needsMiddleware, rpc } from '@arki/dot/orpc';
+import { rpc, rpcFor } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -63,7 +62,7 @@ type RequestContext = {
   readonly headers: Headers;
   readonly services: ServicesBag;
 };
-const bind = needsMiddleware<RequestContext>();
+const { implement } = rpcFor<RequestContext>();
 
 // ── the contract: two live procedures (different outputs and errors) and one write ──
 type AppMeta = { readonly auth?: 'public' | 'user' };
@@ -101,7 +100,7 @@ const postsLogic = postsDeps.usecases({
       return first?.title ?? null;
     },
 });
-const rpcImplementer = implement(postsRpcContract).$context<RequestContext>().use(bind(postsLogic));
+const rpcImplementer = implement(postsRpcContract).with(postsLogic);
 
 /** What a live handler reads: the repos bound to the snapshot's transaction. */
 type Readers = RepoSet<{ posts: typeof postRepository; users: typeof userRepository }>;
@@ -111,33 +110,30 @@ const readSnapshot = liveRead((context: DepsOf<typeof postsLogic>) =>
   snapshot(context.db, tx => orThrow(context.usecases.readers(tx))),
 );
 
-const postsProcedures = {
-  list: (impl: typeof rpcImplementer) =>
-    impl.list.use(readSnapshot).handler(async ({ context, input, errors }) => {
-      expectTypeOf(context.liveRead).toEqualTypeOf<Readers>();
-      const page = await context.liveRead.posts.page(input.page);
-      if (page.length === 0 && input.page > 1) throw errors.PAGE_OUT_OF_RANGE({ data: { last: 1 } });
-      const authors = await context.liveRead.users.names(page.map(row => row.authorId));
-      const names = new Map(authors.map(author => [author.id, author.name]));
-      return page.map(row => ({ id: row.id, title: row.title, author: names.get(row.authorId) ?? '?' }));
-    }),
-  stats: (impl: typeof rpcImplementer) =>
-    impl.stats.use(readSnapshot).handler(async ({ context }) => {
-      // Two reads, one snapshot.
-      const total = await context.liveRead.posts.total();
-      const first = await context.liveRead.posts.page(1);
-      return { posts: total, firstTitle: first[0]?.title ?? null };
-    }),
-  create: (impl: typeof rpcImplementer) =>
-    impl.create.handler(async ({ context, input }) => {
-      // A write procedure has no `liveRead`: it never asked for one.
-      expectTypeOf(context).not.toHaveProperty('liveRead');
-      const rows = await context.db.insert(posts).values({ id: 'p1', title: input.title, authorId: 'u1' }).returning();
-      const row = rows[0];
-      if (!row) throw new Error('insert returned nothing');
-      return { id: row.id, title: row.title, author: row.authorId };
-    }),
-};
+const postsProcedures = (impl: typeof rpcImplementer) => ({
+  list: impl.list.use(readSnapshot).handler(async ({ context, input, errors }) => {
+    expectTypeOf(context.liveRead).toEqualTypeOf<Readers>();
+    const page = await context.liveRead.posts.page(input.page);
+    if (page.length === 0 && input.page > 1) throw errors.PAGE_OUT_OF_RANGE({ data: { last: 1 } });
+    const authors = await context.liveRead.users.names(page.map(row => row.authorId));
+    const names = new Map(authors.map(author => [author.id, author.name]));
+    return page.map(row => ({ id: row.id, title: row.title, author: names.get(row.authorId) ?? '?' }));
+  }),
+  stats: impl.stats.use(readSnapshot).handler(async ({ context }) => {
+    // Two reads, one snapshot.
+    const total = await context.liveRead.posts.total();
+    const first = await context.liveRead.posts.page(1);
+    return { posts: total, firstTitle: first[0]?.title ?? null };
+  }),
+  create: impl.create.handler(async ({ context, input }) => {
+    // A write procedure has no `liveRead`: it never asked for one.
+    expectTypeOf(context).not.toHaveProperty('liveRead');
+    const rows = await context.db.insert(posts).values({ id: 'p1', title: input.title, authorId: 'u1' }).returning();
+    const row = rows[0];
+    if (!row) throw new Error('insert returned nothing');
+    return { id: row.id, title: row.title, author: row.authorId };
+  }),
+});
 
 const postsFeature = postsLogic.entrypoints(rpc(postsRpcContract, rpcImplementer, postsProcedures));
 

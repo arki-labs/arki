@@ -144,7 +144,7 @@ import { isFailure } from '@arki/failure';
 // Stand-ins: in a real app these come from @arki/log, @arki/db and @arki/http.
 const logger = infra({ name: 'log', provides: { log: () => ({ info: (_message: string) => {} }) } });
 const database = infra({ name: 'database', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
-const orders = defineFeature('orders').entrypoints(rpc({}, {}, {}));
+const orders = defineFeature('orders').entrypoints(rpc({}, {}, () => ({})));
 const features = [orders] as const;
 const gateway = entrypoint.fromFeatures(mounted =>
   unit({
@@ -202,7 +202,7 @@ const preview =
 const dailyDigestLogic = dailyDigestDeps.usecases({ preview });
 export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
-  .entrypoints(rpc({}, {}, {})); // entrypoints/ — the contract is empty here
+  .entrypoints(rpc({}, {}, () => ({}))); // entrypoints/ — the contract is empty here
 
 const shop = await defineApp('shop').features([billing, dailyDigest]).boot();
 if (isFailure(shop)) throw new Error(shop.code);

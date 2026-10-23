@@ -50,7 +50,7 @@ const reports = defineFeature('reports')
         repos.region(),
   })
   .provides({ summary: ({ usecases }) => ({ region: usecases.region() }) })
-  .entrypoints(rpc({}, {}, {}));
+  .entrypoints(rpc({}, {}, () => ({})));
 
 describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
   it('mounts two copies side by side, each on its own database', async () => {

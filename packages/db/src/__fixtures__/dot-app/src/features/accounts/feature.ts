@@ -1,5 +1,4 @@
 /** The chain: the pool-bound repository source keeps its own name, `repositories`; `repos` is the bound set. */
-import { implement } from '@orpc/server';
 
 import type { DepsOf } from '@arki/dot/feature';
 import { rename } from '@arki/dot';
@@ -7,11 +6,10 @@ import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 
 import type { TransactionScopeOf } from '../../../../../orpc.js';
-import type { RequestContext } from '../../core/orpc.js';
 import type { transact } from './entrypoints/transact.js';
 import { transactionalProcedureConfig } from '../../../../../orpc.js';
 import { database } from '../../core/database.js';
-import { bind } from '../../core/orpc.js';
+import { implement } from '../../core/orpc.js';
 import { accountsProcedures } from './entrypoints/procedures.js';
 import { accountsRpcContract } from './entrypoints/rpc.js';
 import { repository } from './infra/repository.js';
@@ -28,8 +26,6 @@ export type AccountsTx = TransactionScopeOf<typeof transact>;
 
 export const accountsLogic = accountsDeps.usecases({ transfer: () => transfer, balance });
 
-export const rpcImplementer = implement(accountsRpcContract, transactionalProcedureConfig)
-  .$context<RequestContext>()
-  .use(bind(accountsLogic));
+export const rpcImplementer = implement(accountsRpcContract, transactionalProcedureConfig).with(accountsLogic);
 
 export const accounts = accountsLogic.entrypoints(rpc(accountsRpcContract, rpcImplementer, accountsProcedures));
