@@ -3,6 +3,13 @@
 - **Status:** PROPOSED (2026-10-22). Decisions D-1 to D-3 answered the same
   day (section 4). Reviewed the same day (section 7). Pluggable event stores
   added the same day (section 8, D-4 to D-6) and reviewed (8.9).
+- **Progress:** slice 1 in `f49fcea75b`, with every effect job carrying its
+  event (founder's choice, wider than slice 1 as written). Its two leaks, the
+  archive sink and the Foreman payload, were closed in the commit that adds
+  this line. Slice 2 landed inside `2c462f04ed` ("feat(eslint):
+  domain-services joins the feature layers"): another session's plain
+  `git commit` took the staged slice 2 hunks. The content is the reviewed
+  slice 2; only the message is wrong.
 - **Scope:** `@arki/journal` only. Apps change only if they opt in.
 - **Inputs:** four read-only agent reports (Fable) from 2026-10-22: domain
   core, write path, event-log dependents, prior decisions + prior art. Then

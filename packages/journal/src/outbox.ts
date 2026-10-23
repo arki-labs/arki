@@ -86,6 +86,13 @@ const eventHeaderOf = (jobId: string, args: unknown): EventHeader => {
   };
 };
 
+/**
+ * A row as the archive sink receives it. An effect row's `args` is its copy of the event, data and meta included.
+ * The sink is outside the database, where `forget` cannot reach, so it gets only the event header.
+ */
+const forExport = (row: ArchivedJob): ArchivedJob =>
+  row.kind === 'effect' && row.args !== null ? { ...row, args: eventHeaderOf(row.id, row.args) } : row;
+
 export type JobDetail = JobWithState & {
   /** Null on a queue job. */
   readonly event: EventHeader | null;
@@ -830,7 +837,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         const reservedId = newOperationId();
         if (isFailure(reservedId)) return reservedId;
         try {
-          await sink.write(rows, { signal: opts?.signal ?? new AbortController().signal });
+          await sink.write(rows.map(forExport), { signal: opts?.signal ?? new AbortController().signal });
         } catch (error) {
           debug.warn('exportArchive: sink {sink} failed, {count} rows stay unexported: {failed}', {
             sink: sink.name,

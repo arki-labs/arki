@@ -284,10 +284,17 @@ const toOperation = (row: JobOperation): z.input<typeof OperationSummary> => ({
   at: iso(row.at),
 });
 
-/** The `payload` field of a detail read: absent while the option says `hidden`, and for a job that has no payload. */
-function payloadFor(mode: 'hidden' | 'redacted', args: unknown): { payload?: string } {
-  if (mode === 'hidden' || args === null || args === undefined) return {};
-  return { payload: redactSecrets(canonicalJson(jsonValueSchema.parse(args))) };
+/**
+ * The `payload` field of a detail read: absent while the option says `hidden`, and for a job that has no payload.
+ * Only a queue job's `args` is a payload. An effect job's `args` is its copy of the event, data and meta included,
+ * so it never shows; the detail's `event` header names the event instead.
+ */
+function payloadFor(
+  mode: 'hidden' | 'redacted',
+  job: { readonly kind: 'effect' | 'queue'; readonly args: unknown },
+): { payload?: string } {
+  if (mode === 'hidden' || job.kind !== 'queue' || job.args === null || job.args === undefined) return {};
+  return { payload: redactSecrets(canonicalJson(jsonValueSchema.parse(job.args))) };
 }
 
 const notFound = (what: string, id: string) =>
@@ -430,7 +437,7 @@ export function journalJobsModule<
         event: detail.event === null ? null : { ...detail.event, recordedAt: iso(detail.event.recordedAt) },
         attempts: detail.attemptLog.map(row => toAttempt(row)),
         operations: detail.operations.map(row => toOperation(row)),
-        ...payloadFor(payloadMode, detail.args),
+        ...payloadFor(payloadMode, detail),
       };
     },
   });
@@ -544,7 +551,7 @@ export function journalJobsModule<
         job: toArchivedSummary(row),
         attempts: toArchivedAttempts(row.attemptLog),
         operations: history.operations.map(row => toOperation(row)),
-        ...payloadFor(payloadMode, row.args),
+        ...payloadFor(payloadMode, row),
       };
     },
   });

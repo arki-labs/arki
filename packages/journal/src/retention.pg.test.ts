@@ -172,6 +172,50 @@ describe('the sweep verbs on two connections', () => {
     expect(await archiveIds()).toEqual([]);
   });
 
+  it("exportArchive sends an effect row's event header, never its data or meta: the sink is outside the database, where forget cannot reach", async () => {
+    const { sink, batches } = recordingSink();
+    const sweeper = ops({ archive: { sink } });
+    const recordedAt = new Date(Date.now() - 2 * DAY);
+    const effectId = await archiveRow({
+      kind: 'effect',
+      jobName: null,
+      effect: 'sendWelcomeMail',
+      eventSeq: 7,
+      args: {
+        seq: 7,
+        id: 'evt_export',
+        kind: 'order',
+        entityId: 'ord_1',
+        version: 2,
+        type: 'OrderPaid',
+        data: { email: 'a@b.c' },
+        meta: { actorId: 'usr_1' },
+        recordedAt: recordedAt.toISOString(),
+        commandId: null,
+        causeSeq: null,
+        correlationId: null,
+        erasedAt: null,
+        schemaVersion: 1,
+      },
+    });
+    const queueId = await archiveRow({ args: { to: 'q@b.c' } });
+
+    expect(await sweeper.exportArchive(dbA)).toMatchObject({ exported: 2, failed: false });
+    const sent = new Map(batches.flat().map(row => [row.id, row]));
+    expect(sent.get(effectId)?.args).toEqual({
+      seq: 7,
+      id: 'evt_export',
+      kind: 'order',
+      entityId: 'ord_1',
+      version: 2,
+      type: 'OrderPaid',
+      recordedAt,
+    });
+    expect(JSON.stringify(sent.get(effectId))).not.toContain('a@b.c');
+    // A queue job's args is its input, which the app chose to archive; it goes as it is.
+    expect(sent.get(queueId)?.args).toEqual({ to: 'q@b.c' });
+  });
+
   it('exportArchive skips rows another connection holds, so two exporters never send the same row together', async () => {
     const { sink, ids } = recordingSink();
     const sweeper = ops({ archive: { sink } });

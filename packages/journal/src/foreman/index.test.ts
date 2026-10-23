@@ -337,6 +337,19 @@ describe('T(journal-foreman) nothing secret leaves', () => {
     expect(shown.payload).not.toContain('sk-live-abcdefghijklmnop');
     expect(shown.payload).toContain('[REDACTED]');
   });
+
+  it("an effect job never shows a payload, even with payload: 'redacted': its args is a copy of the event, data and meta included", async () => {
+    const id = await welcomeMailJob();
+    const live = await redacted().reads.job.run({ id }, NO_CTX);
+    expect(live).not.toHaveProperty('payload');
+    // The header still names the event, so the admin sees what the job is for.
+    expect(live.event).toMatchObject({ type: 'OrderPaid' });
+
+    await kill(id);
+    orThrow(await journal.discard(db, id, { actor: 'alice', reason: 'gone' }));
+    const archived = await redacted().reads.archivedJob.run({ id }, NO_CTX);
+    expect(archived).not.toHaveProperty('payload');
+  });
 });
 
 describe('T(journal-foreman) replay and purge', () => {
