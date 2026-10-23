@@ -8,8 +8,9 @@
  * `durable` says whether a point written here outlives the process — the
  * reconciler acknowledges erasure tombstones only against a durable index.
  */
-import type { EmbeddingSpace, EnvSource } from '@arki/embeddings';
+import type { EmbeddingSpace } from '@arki/embeddings';
 
+import type { EnvSource } from '../embeddings/runtime';
 import type { VectorSearchProvider } from '../types';
 import { debugVector } from '../debug.ts';
 import { MockVectorProvider } from './providers/mock';
