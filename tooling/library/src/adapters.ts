@@ -14,6 +14,7 @@ export const ADAPTERS = new Set([
   'orpc',
   'pg',
   'libsql',
+  'sqlite',
   'vite',
   'server',
   'cli',
