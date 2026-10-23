@@ -17,7 +17,7 @@
  *
  * - `schedules(core, [{ name, cron | every, handler: s => ... }])` — the
  *   feature owns them. Each handler receives what the feature's entrypoints
- *   get (its needs, its private infra and `usecases`), typed from the core
+ *   get (`usecases` and its `entrypointOnly(...)` needs), typed from the core
  *   with no annotation (a missing need is a compile error). Not durable: a
  *   durable run happens in another process that does not hold these services.
  * - `schedules([defineSchedule(...)])` — handlers receive the driver's
@@ -33,7 +33,7 @@
  * declarations.
  */
 
-import type { AnyDefinedFeature, AnyFeatureCore, AnyFeatureSlice, DepsOf, EntrypointBinder } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureCore, AnyFeatureSlice, EntrypointBinder, EntrypointServicesOf } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Unit, WireNeeds } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
 import { allFeatures, entrypoint, handlerObserverOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
@@ -453,25 +453,25 @@ function isScheduleDefList<TContext>(
  *   driver's `context`.
  * - `schedules(core, defs)`: for a `defineFeature` feature, in its
  *   `.entrypoints(...)`. Handlers receive what the feature's entrypoints get —
- *   its needs, its private infra and `usecases` — typed from the core, so a
+ *   `usecases` and its `entrypointOnly(...)` needs — typed from the core, so a
  *   schedules file of its own needs no annotation:
  *   `export const digestSchedules = (c: typeof core) => schedules(c, [{ name, cron, handler: ({ usecases }) => usecases.sendDue() }])`.
  */
 export function schedules<const TDefinitions extends readonly ScheduleDef<never>[]>(
   defs: TDefinitions,
 ): ScheduleFeatureSlice<TDefinitions>;
-export function schedules<C extends AnyFeatureCore, const D extends readonly FeatureScheduleOptions<DepsOf<C>>[]>(
+export function schedules<C extends AnyFeatureCore, const D extends readonly FeatureScheduleOptions<EntrypointServicesOf<C>>[]>(
   core: C,
-  defs: D & LockGuard<DepsOf<C>, D>,
-): FeatureScheduleSlice<D, DepsOf<C>>;
+  defs: D & LockGuard<EntrypointServicesOf<C>, D>,
+): FeatureScheduleSlice<D, EntrypointServicesOf<C>>;
 export function schedules<
   TContext,
   C extends AnyFeatureCore,
-  const D extends readonly FeatureScheduleOptions<DepsOf<C>>[],
+  const D extends readonly FeatureScheduleOptions<EntrypointServicesOf<C>>[],
 >(
   coreOrDefs: C | readonly ScheduleDef<TContext>[],
   defs?: D,
-): ScheduleFeatureSlice<readonly ScheduleDef<TContext>[]> | FeatureScheduleSlice<D, DepsOf<C>> {
+): ScheduleFeatureSlice<readonly ScheduleDef<TContext>[]> | FeatureScheduleSlice<D, EntrypointServicesOf<C>> {
   if (isScheduleDefList(coreOrDefs)) {
     return {
       kind: 'schedules',
@@ -490,7 +490,7 @@ export function schedules<
       remediation: 'Pass the schedule list as the second argument: schedules(core, [{ name, cron, handler }]).',
     });
   }
-  return featureOwnedSchedules<DepsOf<C>, D>(defs);
+  return featureOwnedSchedules<EntrypointServicesOf<C>, D>(defs);
 }
 
 function isScheduleList(value: unknown): value is readonly ScheduleDef<unknown>[] {
