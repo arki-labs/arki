@@ -7,7 +7,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { SQLiteAsyncDatabase } from 'drizzle-orm/sqlite-core';
 import { and, asc, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
-import { unrefTimer } from '@arki/db/pg';
+import { unrefTimer } from '@arki/db/sqlite';
 import { sqliteNowMs } from '@arki/db/sqlite';
 import { getLogger } from '@arki/log';
 

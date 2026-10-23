@@ -13,20 +13,11 @@
  * Typed by shape, so this file imports no driver.
  */
 import { getLogger } from '@arki/log';
-import { is, recordSchema } from '@arki/schema';
+
+import { unrefTimer } from './timers.js';
 
 /** Enable with `DEBUG=arki:db:listen`. */
 const debugListen = getLogger('arki:db:listen');
-
-/**
- * Let the process exit while this timer waits. Node and Bun return a timer object
- * with `unref`; browsers, Deno's web API and Hermes return a number, which never
- * holds a process open, so there is nothing to do.
- */
-export function unrefTimer(timer: unknown): void {
-  if (is(timer, recordSchema) && 'unref' in timer && typeof timer.unref === 'function')
-    timer.unref();
-}
 
 /** The part of a `pg` pool client a listener uses. */
 export type ListenClient = {

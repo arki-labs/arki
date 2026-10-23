@@ -99,3 +99,4 @@ export type { SqliteColumnsOptions, SqliteTableOf } from './columns-sqlite.js';
 export { sqliteColumns } from './columns-sqlite.js';
 export { instant } from './sqlite-instant.js';
 export { sqliteNowMs } from './sqlite-now.js';
+export { unrefTimer } from './timers.js';
