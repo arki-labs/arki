@@ -16,6 +16,7 @@ import { orThrow } from '@arki/failure';
 import { attemptId, jobId } from '../id.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from '../test-support.js';
 import { JOURNAL_JOBS_ERROR_CODES, journalJobsModule } from './index.js';
+import { jobsModule } from './jobs.js';
 import { foremanHarness } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -32,8 +33,9 @@ const sendWelcomeMail = j.effect('sendWelcomeMail', order, {
   },
 });
 const journal = j.compose({ effects: [sendWelcomeMail] });
-const hidden = () => journalJobsModule({ journal, db });
-const redacted = () => journalJobsModule({ journal, db, payload: 'redacted' });
+// The tests read the module with its exact types; `journalJobsModule` hands out the same object as a plain `ForemanModule`.
+const hidden = () => jobsModule({ journal, db });
+const redacted = () => jobsModule({ journal, db, payload: 'redacted' });
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -101,6 +103,18 @@ const queueRow = async (extra?: Partial<Insert>): Promise<string> => {
 };
 const operations = () => db.select().from(tables.jobOperations);
 
+describe('journalJobsModule', () => {
+  it('is the jobs module with plain types, so the public entry names no Zod', () => {
+    // Why: the admin dispatcher reads the reads and actions at runtime, by id and schema; only the
+    // static type is general. The same ids must be there, or an operator would lose a verb.
+    const exact = jobsModule({ journal, db });
+    const plain = journalJobsModule({ journal, db });
+    expect(plain.id).toBe(exact.id);
+    expect(Object.keys(plain.reads)).toEqual(Object.keys(exact.reads));
+    expect(Object.keys(plain.actions)).toEqual(Object.keys(exact.actions));
+  });
+});
+
 describe('T(journal-foreman) the worked example', () => {
   it('lists a dead sendWelcomeMail job, shows its error redacted, and retryJob previews, executes and the job runs', async () => {
     const module = hidden();
@@ -120,11 +134,13 @@ describe('T(journal-foreman) the worked example', () => {
 
     const preview = await module.actions.retryJob.runPreview({ jobId: id, reason: 'provider outage' }, NO_CTX);
     expect(preview.consequence).toContain('side effects');
-    const done = orThrow(await module.actions.retryJob.runExecute(
-      { jobId: id, reason: 'provider outage' },
-      NO_CTX,
-      permit(preview.revision),
-    ));
+    const done = orThrow(
+      await module.actions.retryJob.runExecute(
+        { jobId: id, reason: 'provider outage' },
+        NO_CTX,
+        permit(preview.revision),
+      ),
+    );
     expect(done.jobId).toBe(id);
 
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
@@ -385,11 +401,9 @@ describe('T(journal-foreman) replay and purge', () => {
     const id = await queueRow();
     orThrow(await journal.cancel(db, id, { actor: 'a' }));
     const preview = await module.actions.replayJob.runPreview({ id, reason: 'needed after all' }, NO_CTX);
-    const done = orThrow(await module.actions.replayJob.runExecute(
-      { id, reason: 'needed after all' },
-      NO_CTX,
-      permit(preview.revision),
-    ));
+    const done = orThrow(
+      await module.actions.replayJob.runExecute({ id, reason: 'needed after all' }, NO_CTX, permit(preview.revision)),
+    );
     expect(done.jobId).not.toBe(id);
     expect(await journal.job(db, done.jobId)).toMatchObject({ replayOf: id, state: 'ready' });
     expect((await operations()).find(row => row.action === 'replay')).toMatchObject({

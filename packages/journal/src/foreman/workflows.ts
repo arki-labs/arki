@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
 import type { IdGenerationFailure } from '@arki/contracts';
-import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+import type { StandardSchemaV1 } from '@arki/schema';
 import {
   canonicalJson,
   defineAction,
@@ -21,82 +21,19 @@ import {
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { findCause, isFailure, orThrow } from '@arki/failure';
 
-import type { DbHandle, Journal, RootDb, TransactionSource } from '../index.js';
+import type { RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
-import { CANCEL_STATES, RUN_STATES, SIGNAL_STATUSES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
+import type { JournalWorkflowsModuleOptions } from './shapes.js';
 import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
+import { CANCEL_STATES, RUN_STATES, SIGNAL_STATUSES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
+import { JOURNAL_WORKFLOWS_ERROR_CODES } from './shapes.js';
 
 const isIdGenerationFailure = <Value>(value: Value): value is Extract<Value, IdGenerationFailure> =>
   ID_GENERATION_FAILURES.some(definition => definition.is(value));
 
-/**
- * The coded refusals of the workflow actions. They are module errors, so the dispatcher answers them with the status
- * written here. Canonical generation failures keep their original 500 status.
- */
-export const JOURNAL_WORKFLOWS_ERROR_CODES = {
-  /** The run changed since the preview the approval pinned. HTTP 409.
-   * @fix Refresh the workflow preview and obtain approval for the current run revision.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  staleRevision: 'ARKI_JOURNAL_E010',
-  /** The run is over: completed, failed or cancelled. HTTP 409.
-   * @fix Inspect the terminal run result; start a new run instead of mutating the finished run.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  finished: 'ARKI_JOURNAL_E011',
-  /** The step is not dead (or never ran), so there is nothing to retry, resolve or skip. HTTP 409.
-   * @fix Select a dead step and refresh the run before retrying, resolving or skipping it.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  stepNotDead: 'ARKI_JOURNAL_E012',
-  /** The signal name is unknown to the run's version, or its payload does not match the signal's schema. HTTP 400.
-   * @fix Use a signal declared by the pinned workflow version and supply a payload matching its schema.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  badSignal: 'ARKI_JOURNAL_E013',
-  /** The run is already undoing its work. HTTP 409.
-   * @fix Let compensation finish and inspect its outcome before further workflow operations.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  compensating: 'ARKI_JOURNAL_E014',
-  /** The step cannot be resolved by hand: no `output` schema, not a step, or the run is not running. 409; 400 for a result that does not match the schema.
-   * @fix Resolve a dead step of a running workflow that declares an output schema, using a result accepted by that schema.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  stepNotResolvable: 'ARKI_JOURNAL_E015',
-  /** No run has this id. HTTP 404.
-   * @fix Check the run id against the journal and use an existing run.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  notFound: 'ARKI_JOURNAL_E016',
-  /** The run's code is not registered on this journal, or has other nodes, so nothing can move it. HTTP 409.
-   * @fix Restore the workflow definition and version pinned by the run with its original node shape.
-   * @verify bun run test -- src/foreman/workflows.test.ts
-   */
-  stranded: 'ARKI_JOURNAL_E017',
-} as const;
-
 const MAX_PAGE = 200;
 
 // ---- options ----------------------------------------------------------------------------------------------------
-
-export type JournalWorkflowsModuleOptions<
-  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
-  Tx extends TransactionSource<Tx>,
-  AppDb extends RootDb,
-> = {
-  /** The app's composed journal, with the workflows registered. */
-  journal: Journal<Meta, Tx, AppDb>;
-  /** The root database the reads run on. The verbs run on it too, so it is also the journal's transaction source. */
-  db: DbHandle & TransactionSource<Tx>;
-  /**
-   * What reads show of a run's input, results, output, signal payloads and event data.
-   * `hidden` (default): nothing. `redacted`: canonical JSON with secrets removed, capped. Errors always have secrets removed.
-   */
-  payload?: 'hidden' | 'redacted';
-  /** The meta of the commands the module runs for an approved permit. Its `actorId` is also written on the run's events as the actor. */
-  meta: (permit: Permit) => SchemaInput<Meta> & { readonly actorId: string };
-};
 
 // ---- output schemas ---------------------------------------------------------------------------------------------
 
@@ -359,7 +296,7 @@ const listOf = (names: readonly string[]) => names.map(name => `"${name}"`).join
 
 // ---- the module -------------------------------------------------------------------------------------------------
 
-export function journalWorkflowsModule<
+export function workflowsModule<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,

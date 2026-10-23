@@ -20,9 +20,11 @@ import * as ids from '../id.js';
 import { initJournal } from '../journal.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
-import { journalJobsModule } from './index.js';
+import { journalWorkflowsModule } from './index.js';
+import { jobsModule } from './jobs.js';
+import { JOURNAL_WORKFLOWS_ERROR_CODES } from './shapes.js';
 import { foremanHarness } from './test-support.js';
-import { JOURNAL_WORKFLOWS_ERROR_CODES, journalWorkflowsModule } from './workflows.js';
+import { workflowsModule } from './workflows.js';
 
 const NO_CTX = {} as const;
 const caller = { actorId: 'usr_test' };
@@ -106,7 +108,7 @@ beforeEach(() => {
 
 const foremanMeta = (permit: Permit) => ({ actorId: `foreman:${permit.approvedBy}` });
 const module = (payload?: 'hidden' | 'redacted') =>
-  journalWorkflowsModule({
+  workflowsModule({
     journal,
     db,
     meta: foremanMeta,
@@ -167,6 +169,17 @@ const startRefunding = async () => {
   await settle();
   return id;
 };
+
+describe('journalWorkflowsModule', () => {
+  it('is the workflows module with plain types, so the public entry names no Zod', () => {
+    // Why: the dispatcher finds reads and actions by id at runtime; the wrapper must not drop one.
+    const exact = module();
+    const plain = journalWorkflowsModule({ journal, db, meta: foremanMeta });
+    expect(plain.id).toBe(exact.id);
+    expect(Object.keys(plain.reads)).toEqual(Object.keys(exact.reads));
+    expect(Object.keys(plain.actions)).toEqual(Object.keys(exact.actions));
+  });
+});
 
 describe('reads', () => {
   it('every read lists runs an operator can find a stuck run from', async () => {
@@ -593,7 +606,7 @@ describe('jobs module', () => {
       { id: 'job_loose', kind: 'queue', jobName: 'demo', args: {}, deadAt: longAgo },
       { id: 'job_owned', kind: 'queue', jobName: 'demo', args: {}, deadAt: longAgo, runId: 'wfr_owned' },
     ]);
-    const jobs = journalJobsModule({ journal, db });
+    const jobs = jobsModule({ journal, db });
     const preview = await jobs.actions.purgeDead.runPreview({ olderThanDays: 31, limit: 100 }, NO_CTX);
     expect(preview.deadJobs).toBe(1);
     expect(preview.consequence).not.toContain('counted above');
