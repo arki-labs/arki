@@ -212,9 +212,11 @@ export function createWriter<
         // real create and replay can tell the two apart. A row at version 0 whose log is
         // not empty lags the log; the unique index would not catch a start at 2.
         // A transient entity has no log: the row's version is the base, 0 when there is no row.
+        // Adopt reads the log top for a row at any version: it takes a row whose log is empty,
+        // whether the row predates the journal or its entity kept no events until now.
         const stored = row?.version ?? 0;
         const latestLogVersion =
-          !transient && (row === null || stored === 0) ? await highestVersion(sp, entity.kind, id) : 0;
+          !transient && (adopting || row === null || stored === 0) ? await highestVersion(sp, entity.kind, id) : 0;
         if (row !== null && stored === 0 && latestLogVersion > 0) {
           throw new JournalError(
             'CONFLICT',
@@ -223,12 +225,20 @@ export function createWriter<
             `the row is at version 0 but its log already holds version ${latestLogVersion}`,
           );
         }
-        if (adopting && (row === null || stored !== 0 || latestLogVersion > 0)) {
+        if (adopting && row === null) {
           throw new JournalError(
             'CONFLICT',
             entity.kind,
             id,
-            `adopt needs a row at version 0 with no history, but found ${row === null ? 'no row' : `the row at version ${stored}`} and a log ending at version ${latestLogVersion}`,
+            `adopt needs a row with no history, but found no row and a log ending at version ${latestLogVersion}`,
+          );
+        }
+        if (adopting && latestLogVersion > 0) {
+          throw new JournalError(
+            'CONFLICT',
+            entity.kind,
+            id,
+            `adopt needs a row with no history, but the row at version ${stored} has a log ending at version ${latestLogVersion}: it was written to after its events started being stored, and its history cannot be completed from here`,
           );
         }
         if (adopting && pending.length !== 1) {

@@ -50,6 +50,18 @@ const keptDraft = jt
 const quickOrder = j
   .entity('quick-order', orders, { events: 'transient' })
   .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }));
+/** The whole row, so one create event can rebuild any draft the transient entity left behind. */
+const DraftImported = j.event(
+  'DraftImported',
+  z.object({ customerId: z.string().min(1), total: z.int().positive(), status: z.enum(['placed', 'paid']) }),
+);
+/** `draft` after the switch: same kind, same table, events stored, plus a create that rebuilds a row as it is. */
+const draftStored = j
+  .entity('draft', orders, { events: 'stored' })
+  .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
+  .create(DraftImported, e => ({ customerId: e.data.customerId, total: e.data.total, status: e.data.status }))
+  .on(OrderPaid, () => ({ status: 'paid' }))
+  .on(OrderCancelled, () => null);
 
 /** What the inline projection and the effect saw, so a test can check the seq they got. */
 const projected: { readonly id: string; readonly seq: number; readonly type: string }[] = [];
@@ -341,5 +353,74 @@ describe('refusals', () => {
     // The row is untouched by the refusals.
     const row = await rowOf(id);
     expect(row?.version).toBe(1);
+  });
+});
+
+const pay = () => [OrderPaid({ amount: 1 })];
+/** One create event built from the stored row; `total` overrides it to make a create that does not rebuild the row. */
+const importRow = (total?: number) => (row: { customerId: string; total: number; status: string } | null) => [
+  DraftImported({
+    customerId: row?.customerId ?? '',
+    total: total ?? row?.total ?? 0,
+    status: row?.status === 'paid' ? 'paid' : 'placed',
+  }),
+];
+const draftVersions = async (id: OrderId) => {
+  const rows = await eventRowsOf('draft', id);
+  return rows.map(e => e.version);
+};
+/** Three transient writes: the row is at version 3 and the log has nothing for it. */
+const writeThreeTransient = async () => {
+  const id = orderId(++next);
+  orThrow(await db.transaction(tx => journal.write(tx, draft, id, { meta, events: place })));
+  orThrow(await db.transaction(tx => journal.write(tx, draft, id, { meta, events: pay })));
+  orThrow(await db.transaction(tx => journal.write(tx, draft, id, { meta, events: pay })));
+  expect(await rowOf(id)).toMatchObject({ status: 'paid', version: 3 });
+  expect(await draftVersions(id)).toEqual([]);
+  return id;
+};
+
+describe('switching an entity from transient to stored', () => {
+  it('adopt takes a row at any version with no history: its create becomes version 1 and the log is complete', async () => {
+    // Why: the switch is "change the setting, adopt each row before its first write". A row the
+    // transient entity left at version 3 has no history to continue from, so adopt must accept it as
+    // it accepts a legacy row at version 0. The version drops to 1 because the history starts there.
+    const id = await writeThreeTransient();
+    const adopted = orThrow(
+      await db.transaction(tx => stored.adopt(tx, draftStored, id, { meta, events: importRow() })),
+    );
+    expect(adopted.row).toMatchObject({ id, customerId: 'c', total: 1, status: 'paid', version: 1 });
+    expect(adopted.events.map(e => [e.type, e.version])).toEqual([['DraftImported', 1]]);
+    expect(await draftVersions(id)).toEqual([1]);
+    expect(orThrow(await stored.replay(db, draftStored, id)).row).toMatchObject({ status: 'paid', version: 1 });
+    expect(await stored.verify(db, draftStored, id)).toEqual({ ok: true });
+    // Writes continue from the complete history.
+    const paid = orThrow(await db.transaction(tx => stored.write(tx, draftStored, id, { meta, events: pay })));
+    expect(paid.row?.version).toBe(2);
+    expect(await draftVersions(id)).toEqual([1, 2]);
+  });
+
+  it('adopt refuses a row that was written to after the switch, and changes nothing', async () => {
+    // Why: that write recorded version 4 on top of nothing. The log can never be completed from
+    // here, and a create at version 1 would leave a gap replay cannot fold over.
+    const id = await writeThreeTransient();
+    orThrow(await db.transaction(tx => stored.write(tx, draftStored, id, { meta, events: pay })));
+    expect(await draftVersions(id)).toEqual([4]);
+    const refused = db.transaction(tx => stored.adopt(tx, draftStored, id, { meta, events: importRow() }));
+    await expect(refused).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(refused).rejects.toThrow('written to after its events started being stored');
+    expect(await rowOf(id)).toMatchObject({ version: 4 });
+    expect(await draftVersions(id)).toEqual([4]);
+  });
+
+  it('adopt refuses a create that does not rebuild the row, and the row stays at its version', async () => {
+    // Why: the same rule as for a legacy row. A history that starts with a different row than the
+    // one stored would make verify report drift at once and repair overwrite real data.
+    const id = await writeThreeTransient();
+    const wrong = db.transaction(tx => stored.adopt(tx, draftStored, id, { meta, events: importRow(999) }));
+    await expect(wrong).rejects.toMatchObject({ code: 'VALUE_MISMATCH' });
+    await expect(wrong).rejects.toThrow('column "total"');
+    expect(await rowOf(id)).toMatchObject({ total: 1, version: 3 });
+    expect(await draftVersions(id)).toEqual([]);
   });
 });
