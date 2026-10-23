@@ -16,7 +16,7 @@ export const Route = createFileRoute('/_marketing/')({
     const base = getDefaultMeta({
       title: 'arki — Build from the foundation up.',
       description:
-        'Typed TypeScript packages that compose into one app. The compiler checks the wiring, Postgres keeps the history. Six build steps, each with the real code behind it.',
+        'Typed TypeScript packages. Dot composes them into one app and the compiler checks the wiring. With the journal nothing writes to a row directly: every change is an event, and a reducer turns it into the row in the same transaction. Six build steps, each with the real code behind it.',
     });
     return {
       ...base,
@@ -43,8 +43,10 @@ function HomePage() {
               </p>
               <h1>Build from the foundation up.</h1>
               <p>
-                Typed TypeScript packages that compose into one app. The compiler checks the wiring. Postgres keeps the
-                history. Each floor is one step; the two that matter most come with their own drawing sheet.
+                Typed TypeScript packages. Dot composes them into one app, and the compiler checks the wiring. With the
+                journal nothing writes to a row directly: every change is an event, and a reducer turns it into the row
+                in the same transaction. Each floor is one step; the two that matter most come with their own drawing
+                sheet.
               </p>
               <code className="home-install">bun add @arki/dot</code>
               <div className="home-links">
