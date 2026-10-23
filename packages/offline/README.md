@@ -92,7 +92,7 @@ The replay request carries the session signed in *at replay*, not the one that q
 
 **Unknown session (offline reload).** After a reload without network the app often cannot tell who is signed in yet. Then `actorId()` answers `undefined`, which is different from `null` (the session says signed out). The queue remembers every id `actorId()` returns on the device (key `<storageKey>:last-actor`). A write queued while `actorId()` is `undefined` is bound to that last actor; if no actor was ever seen on the device it stays `null`. The replay rules above do not change, so such a write is sent only once that last user is signed in again, and is dead-lettered as `ACTOR_MISMATCH` for anyone else.
 
-**Sign-out forgets the last actor.** When `actorId()` answers `null`, the remembered id is deleted. On a shared device this matters: after Alice signs out, a write queued by whoever uses the device next is bound to nobody, never to Alice, so it can never replay under her account. Feed `undefined` only while your session is still loading (for better-auth: `isPending`), never as a stand-in for signed out.
+**Sign-out forgets the last actor.** When `actorId()` answers `null`, the remembered id is deleted. On a shared device this matters: after Ada signs out, a write queued by whoever uses the device next is bound to nobody, never to Ada, so it can never replay under her account. Feed `undefined` only while your session is still loading (for better-auth: `isPending`), never as a stand-in for signed out.
 
 ```tsx
 // src/root-provider.tsx — components read the client with useQueryClient()

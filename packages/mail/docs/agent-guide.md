@@ -27,8 +27,8 @@ const invite = defineTemplate({
   text: data => `You are invited to ${data.team}: ${data.url}`,
 });
 
-const mail = mailer({ transport: logTransport(), from: 'Acme <hi@acme.dev>' });
-const result = await mail.send(invite, { team: 'Core', url: 'https://acme.dev/i/1' }, { to: 'ada@example.com' });
+const mail = mailer({ transport: logTransport(), from: 'Analytical Pizza <hello@pizza.example>' });
+const result = await mail.send(invite, { team: 'Core', url: 'https://pizza.example/i/1' }, { to: 'ada@example.com' });
 if (isFailure(result)) throw new Error(result.message);
 ```
 
@@ -44,7 +44,7 @@ const mail = mailer({
     resend({ apiKey: process.env.RESEND_API_KEY ?? '', quotaPerMonth: 3000 }),
     unosend({ apiKey: process.env.UNOSEND_API_KEY ?? '' }),
   ]),
-  from: 'Acme <hi@acme.dev>',
+  from: 'Analytical Pizza <hello@pizza.example>',
 });
 ```
 
@@ -76,7 +76,7 @@ import { mailer } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
-const mail = mailer({ transport: sink, from: 'hi@acme.dev' });
+const mail = mailer({ transport: sink, from: 'hello@pizza.example' });
 await mail.sendRaw({ to: 'ada@example.com', subject: 'Hi', text: 'Hello' });
 if (sink.sentTo('ada@example.com').length !== 1) throw new Error('expected one mail');
 ```

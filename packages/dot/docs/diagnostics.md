@@ -172,7 +172,7 @@ const billing = defineFeature('billing')
   .provides({ billing: ({ usecases }) => ({ ready: usecases.ready }) })
   .entrypoints();
 
-const app = await defineApp('my-app').infra(database).features([billing]).boot();
+const app = await defineApp('pizzeria').infra(database).features([billing]).boot();
 if (isFailure(app)) throw new Error(app.code);
 
 // Static graph

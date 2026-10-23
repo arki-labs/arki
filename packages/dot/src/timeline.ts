@@ -8,7 +8,7 @@
  *
  * @example
  * ```
- * Timeline: my-app (state=booted)
+ * Timeline: pizzeria (state=booted)
  * ─────────────────────────────────────────────────────────
  * configure
  *   env       0.5ms  █

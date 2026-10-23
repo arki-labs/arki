@@ -18,6 +18,6 @@ import { FAQSchema, OrganizationSchema } from '@arki/seo/react';
 import { Meta } from '@arki/seo/tanstack-start';
 
 export const Route = createFileRoute('/')({
-  head: () => ({ meta: Meta({ title: 'Home', description: 'Welcome' }) }),
+  head: () => ({ meta: Meta({ title: 'Analytical Pizza', description: 'Pizza, computed. Ovens open at noon.' }) }),
 });
 ```

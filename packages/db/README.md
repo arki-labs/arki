@@ -452,8 +452,8 @@ export const transfer = implement(contract, transactionalProcedureConfig)
   .transfer.use(transact) // always the last `.use()`
   .handler(({ context: { repos }, input }) => moveMoney(repos, input));
 
-await call(transfer, { from: 'acc_alice', to: 'acc_bob', cents: 500 });
-if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
+await call(transfer, { from: 'acc_ada', to: 'acc_grace', cents: 950 }); // one margherita, paid back
+if ((await balance('acc_grace')) !== 1050) throw new Error('the transfer did not commit');
 ```
 
 Declare `transactionErrorMap` on the contract: `oc.errors(transactionErrorMap)`.
@@ -486,14 +486,14 @@ import { runTransaction } from '@arki/db/transaction';
 
 import { balance, db, moveMoney, repositories } from './fixture.ts';
 
-const input = { from: 'acc_alice', to: 'acc_bob', cents: 500 };
+const input = { from: 'acc_ada', to: 'acc_grace', cents: 950 }; // one margherita, paid back
 const signal = AbortSignal.timeout(10_000);
 
 await runTransaction(db, async (tx, attempt) => moveMoney(repositories.withTx(tx), input), {
   retries: 3, // extra attempts: at most 4 runs
   signal, // stops before the next attempt and during the wait
 });
-if ((await balance('acc_bob')) !== 600) throw new Error('the transfer did not commit');
+if ((await balance('acc_grace')) !== 1050) throw new Error('the transfer did not commit');
 ```
 
 `@arki/db/transaction` and `@arki/db/orpc` import no driver. Their combined smoke
@@ -803,8 +803,8 @@ async function listStories(userId: string, cursor: string | undefined, limit: nu
   return byNewest.page(rows, limit); // { items, nextCursor } — null on the last page
 }
 
-const first = orThrow(await listStories('usr_1', undefined, 2));
-const last = orThrow(await listStories('usr_1', first.nextCursor ?? undefined, 2));
+const first = orThrow(await listStories('usr_ada', undefined, 2));
+const last = orThrow(await listStories('usr_ada', first.nextCursor ?? undefined, 2));
 console.log(first.items.map(story => story.title).join(', '));
 console.log(last.items.map(story => story.title).join(', '), last.nextCursor);
 ```

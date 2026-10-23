@@ -268,16 +268,17 @@ import { createTransformersReranker } from '@arki/embeddings/transformers';
 import { isFailure } from '@arki/failure';
 
 const hits = [
-  { id: 'a', text: 'Berlin is the capital of Germany.' },
-  { id: 'b', text: 'Paris is the capital and largest city of France.' },
+  { id: 'a', text: 'Margherita: tomato, mozzarella, basil.' },
+  { id: 'b', text: 'Diavola: tomato, mozzarella, spicy salami.' },
+  { id: 'c', text: "The scooter to Ada's house is running late." },
 ];
 
 export async function best() {
   const reranker = await createTransformersReranker();
   if (isFailure(reranker)) return reranker;
-  const ranked = await rerank(reranker, 'What is the capital of France?', hits, { text: hit => hit.text, topK: 1 });
+  const ranked = await rerank(reranker, 'Which pizza has no meat?', hits, { text: hit => hit.text, topK: 1 });
   await reranker.dispose?.();
-  return ranked; // { hits: [{ item: { id: 'b', … }, index: 1, score: 0.98 }], usage } or a failure value
+  return ranked; // { hits: [{ item: { id: 'a', … }, index: 0, score }], usage } or a failure value
 }
 ```
 

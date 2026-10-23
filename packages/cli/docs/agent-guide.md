@@ -27,7 +27,7 @@ Read [llms.txt](../llms.txt) first for the index. When this guide and `llms.txt`
      describe: 'List the users',
      input: z.object({ limit: z.int().min(1).default(20).describe('How many to list') }),
      effects: 'read',
-     run: ({ input }) => ({ items: [{ id: 'usr_1', name: 'Ada' }].slice(0, input.limit) }),
+     run: ({ input }) => ({ items: [{ id: 'usr_ada', name: 'Ada' }].slice(0, input.limit) }),
    });
    ```
 
@@ -75,7 +75,7 @@ Read [llms.txt](../llms.txt) first for the index. When this guide and `llms.txt`
      describe: 'Show one user',
      input: z.object({ id: z.string() }),
      args: ['id'],
-     run: ({ input }) => (input.id === 'usr_1' ? { id: input.id, name: 'Ada' } : UserNotFound({ id: input.id })),
+     run: ({ input }) => (input.id === 'usr_ada' ? { id: input.id, name: 'Ada' } : UserNotFound({ id: input.id })),
    });
    ```
 

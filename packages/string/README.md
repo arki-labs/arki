@@ -351,7 +351,7 @@ import { slugify, transliterate } from '@arki/string/slug';
 
 slugify('Привет мир'); // 'privet-mir'
 slugify('Nguyễn Đăng Khoa'); // 'nguyen-dang-khoa'
-slugify('fooBar & baz'); // 'foo-bar-and-baz'
+slugify('Quattro Formaggi & Crème Fraîche'); // 'quattro-formaggi-and-creme-fraiche'
 slugify('Hello World', { separator: '_', lowercase: false }); // 'Hello_World'
 slugify('ä ö', { locale: 'sv' }); // 'a-o'  (German default would give 'ae-oe')
 transliterate('crème brûlée'); // 'creme brulee'

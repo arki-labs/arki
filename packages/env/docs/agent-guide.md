@@ -74,7 +74,7 @@ import { z } from 'zod';
 import { defineApp } from '@arki/dot';
 import { env } from '@arki/dot/env';
 
-const app = await defineApp('my-app')
+const app = await defineApp('pizzeria')
   .infra(env({ schema: { PORT: z.coerce.number().default(3000) } }))
   .build();
 ```

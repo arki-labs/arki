@@ -11,10 +11,10 @@ There is no hidden core: remove every unit and nothing is left. The units
 are the app.
 
 ```text
-defineApp('acme')  .infra(database)  .infra(stripe)  .start()
-                        │               │
-     boot / start:      1st ──────────▶ 2nd
-     stop / dispose:    2nd ◀────────── 1st
+defineApp('pizzeria')  .infra(database)  .infra(stripe)  .start()
+                            │               │
+         boot / start:      1st ──────────▶ 2nd
+         stop / dispose:    2nd ◀────────── 1st
 ```
 
 ## Install
@@ -69,7 +69,7 @@ const stripe = infra({
   },
 });
 
-const app = await defineApp('acme')
+const app = await defineApp('pizzeria')
   .infra(database, stripe) // providers before consumers — enforced at compile time
   .start();
 if (isFailure(app)) throw new Error(app.code);

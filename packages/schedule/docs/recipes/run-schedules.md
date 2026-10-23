@@ -10,8 +10,8 @@ The schedule below sets `overlap: 'skip'`. While one run is active in this proce
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
-const report = defineSchedule({
-  name: 'daily-report',
+const doughProof = defineSchedule({
+  name: 'nightly-dough-proof',
   every: '1h',
   overlap: 'skip',
   handler: async () => {
@@ -20,12 +20,12 @@ const report = defineSchedule({
   },
 });
 
-const runtime = createScheduleRuntime({ schedules: [report] });
+const runtime = createScheduleRuntime({ schedules: [doughProof] });
 runtime.start(); // arms the timer: the first tick is an hour away
 
 // Run it now, as a test or an admin button would.
-const first = runtime.trigger('daily-report');
-const second = runtime.trigger('daily-report'); // the first run is still active in this process
+const first = runtime.trigger('nightly-dough-proof');
+const second = runtime.trigger('nightly-dough-proof'); // the first run is still active in this process
 
 for (const result of await Promise.all([first, second])) {
   console.log(result.status === 'ran' ? `ran: ${result.value.rows} rows` : result.status);

@@ -19,7 +19,7 @@ const sessionFactory = createFactory<Session>(() => ({
 }));
 
 const one = sessionFactory({ score: 10 });
-const built = sessionFactory().with('score', 20).withMany({ userId: 'usr_1' }).build();
+const built = sessionFactory().with('score', 20).withMany({ userId: 'usr_ada' }).build();
 const five = createMany(sessionFactory, 5, index => ({ score: index * 10 }));
 const ranked = createSequence(sessionFactory, 'score', [100, 200, 300]);
 
@@ -27,7 +27,7 @@ console.log(one.score, built.score, built.userId, five.length, ranked.map(sessio
 ```
 
 ```text
-10 20 usr_1 5 100,200,300
+10 20 usr_ada 5 100,200,300
 ```
 
 `createMany(factory, count, overrides)` takes an object or a function of the index. `createSequence(factory, field, values)` makes one object per value.

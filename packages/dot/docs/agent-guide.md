@@ -46,8 +46,8 @@ in `src/cli/json.ts`, exported from `@arki/dot/cli`.
 1. Preview. No files are written:
 
    ```sh
-   npx dot new my-app --dry-run --json
-   npx dot new my-app --template minimal --dry-run --json
+   npx dot new pizzeria --dry-run --json
+   npx dot new pizzeria --template minimal --dry-run --json
    ```
 
 2. Read `.data.operations[]`. Each entry has `path`, `action` (`create`,
@@ -55,7 +55,7 @@ in `src/cli/json.ts`, exported from `@arki/dot/cli`.
 3. Write the files:
 
    ```sh
-   npx dot new my-app --json
+   npx dot new pizzeria --json
    ```
 
    The real run returns the same `.data`. Pass `--target <dir>` to pick the
@@ -108,7 +108,7 @@ import { spawnSync } from 'node:child_process';
 import type { Envelope } from '@arki/cli';
 import type { DotNewResult } from '@arki/dot/cli';
 
-const result = spawnSync('npx', ['dot', 'new', 'my-app', '--dry-run', '--json'], { encoding: 'utf8' });
+const result = spawnSync('npx', ['dot', 'new', 'pizzeria', '--dry-run', '--json'], { encoding: 'utf8' });
 const envelope: Envelope<DotNewResult> = JSON.parse(result.stdout);
 export const overwrites = envelope.ok
   ? (envelope.data?.operations ?? []).filter(op => op.action !== 'create').map(op => op.path)

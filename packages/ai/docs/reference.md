@@ -55,26 +55,26 @@ const index =
 
 `createAiSdkRuntime` runs a tool loop behind the framework-neutral `AgentRuntime` contract. Define tools with `defineAgentTool`: `execute`'s input type comes from `inputSchema`, and its return type comes from `output`.
 
-```ts skip="needs a model and a weather service"
+```ts skip="needs a model and the oven service"
 import { z } from 'zod';
 
 import { createAiSdkRuntime, defineAgentTool } from '@arki/ai';
 import { createOllama } from 'ai-sdk-ollama';
 
-const weather = defineAgentTool({
-  name: 'weather',
-  description: 'Current temperature for a city.',
-  inputSchema: z.object({ city: z.string() }),
+const ovenTemperature = defineAgentTool({
+  name: 'oven_temperature',
+  description: 'Current temperature of the pizza oven.',
+  inputSchema: z.object({}),
   output: z.object({ celsius: z.number() }),
-  async execute({ city }, { signal }) {
-    const response = await fetch(`https://example.com/weather/${city}`, { signal });
+  async execute(_input, { signal }) {
+    const response = await fetch('https://oven.example/temperature', { signal });
     return { celsius: Number(await response.text()) };
   },
 });
 
 const controller = new AbortController();
 const runtime = createAiSdkRuntime({ model: createOllama()('qwen3.6:latest') });
-for await (const event of runtime.runToolLoop({ prompt: 'Oslo?', tools: [weather], signal: controller.signal })) {
+for await (const event of runtime.runToolLoop({ prompt: 'Is the oven hot enough for a margherita?', tools: [ovenTemperature], signal: controller.signal })) {
   // run:start, text:delta, tool:start, tool:result, tool:failure, tool:error, run:finish
 }
 ```

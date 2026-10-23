@@ -32,9 +32,9 @@ const t = initTester
     createContext: ({ db, repo, kv }) => createContext({ db, repo, kv }),
     createCaller: ({ context }) => createCaller(context),
     defaultUsers: {
-      user: { id: 'usr_test', email: 'user@example.com', name: 'Test User' },
-      moderator: { id: 'usr_mod', email: 'mod@example.com', name: 'Test Moderator', roles: ['moderator'] },
-      admin: { id: 'usr_admin', email: 'admin@example.com', name: 'Test Admin', roles: ['admin'] },
+      user: { id: 'usr_ada', email: 'ada@example.com', name: 'Ada Lovelace' },
+      moderator: { id: 'usr_grace', email: 'grace@example.com', name: 'Grace Hopper', roles: ['moderator'] },
+      admin: { id: 'usr_alan', email: 'alan@example.com', name: 'Alan Turing', roles: ['admin'] },
     },
   });
 
@@ -119,7 +119,7 @@ tester.caller.user; // a regular user
 tester.caller.moderator;
 tester.caller.admin;
 
-const custom = tester.createCustomCaller({ id: 'usr_custom', email: 'custom@example.com', name: 'Custom User' });
+const custom = tester.createCustomCaller({ id: 'usr_katherine', email: 'katherine@example.com', name: 'Katherine Johnson' });
 ```
 
 ## Clean up tables

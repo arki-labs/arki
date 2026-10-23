@@ -22,13 +22,13 @@ import { resend } from '@arki/mail/http/resend';
 const welcome = defineTemplate({
   name: 'welcome',
   input: z.object({ name: z.string(), trialDays: z.number().default(14) }),
-  subject: data => `Welcome, ${data.name}`,
+  subject: data => `Welcome aboard, ${data.name}`,
   text: data => `Hi ${data.name}, your trial lasts ${data.trialDays} days.`,
 });
 
 const mail = mailer({
   transport: resend({ apiKey: process.env.RESEND_API_KEY ?? '' }),
-  from: 'Acme <hello@acme.dev>',
+  from: 'Analytical Pizza <hello@pizza.example>',
 });
 
 const sent = await mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
@@ -43,7 +43,7 @@ The sender comes from the call, then the template's `defaults.from`, then the ma
 Two options guard non-production setups:
 
 - `transport: logTransport()` sends nothing. It logs each mail at debug level and reports it as `simulated`.
-- `redirectTo: 'staging@acme.dev'` sends every mail there instead, drops Cc and Bcc, and keeps the original To in `X-Original-To`.
+- `redirectTo: 'staging@pizza.example'` sends every mail there instead, drops Cc and Bcc, and keeps the original To in `X-Original-To`.
 
 `onEvent` observes `sending`, `sent` and `failed`. An observer that throws is logged; it never fails or repeats a send.
 
@@ -120,8 +120,8 @@ import { defineTemplate, mailer, MailUncertain } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
-const mail = mailer({ transport: sink, from: 'hi@acme.dev' });
-const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Ping', text: () => 'pong' });
+const mail = mailer({ transport: sink, from: 'hello@pizza.example' });
+const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Is this thing on?', text: () => 'It is. Carry on.' });
 
 sink.failNext(MailUncertain({ transport: 'sink', detail: 'request timed out' }));
 const result = await mail.send(ping, {}, { to: 'ada@example.com' });
@@ -149,13 +149,13 @@ const receipt = defineTemplate({
   name: 'receipt',
   input: z.object({ total: z.string() }),
   subject: data => `Receipt: ${data.total}`,
-  text: data => `You paid ${data.total}.`,
+  text: data => `You paid ${data.total}. The oven thanks you.`,
   html: data => `<p>You paid <b>${data.total}</b>.</p>`,
-  defaults: { from: 'Billing <billing@acme.dev>' },
+  defaults: { from: 'Analytical Pizza <hello@pizza.example>' },
 });
 
 // No transport needed: previews and content tests.
-const preview = await renderTemplate(receipt, { total: '5 EUR' });
+const preview = await renderTemplate(receipt, { total: '9.50 EUR' });
 if (!isFailure(preview)) console.info(preview.subject);
 ```
 
@@ -217,7 +217,7 @@ const mail = mailer({
     ],
     { store: kvQuotaStore(kv) },
   ),
-  from: 'Acme <hello@acme.dev>',
+  from: 'Analytical Pizza <hello@pizza.example>',
 });
 ```
 
@@ -261,7 +261,7 @@ await journal.worker(db, { jobs: outbox.runner });
 import { mail, mailJobs, mailOutboxPlugin } from '@arki/mail/dot';
 
 defineApp('shop')
-  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
+  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Analytical Pizza <hello@pizza.example>' })))
   .infra(mailOutboxPlugin({ tables }))
   .entrypoints(journalWorker({ jobs: mailJobs() }));
 ```
@@ -279,8 +279,8 @@ import { defineTemplate, mailer, MailRejected } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
-const mail = mailer({ transport: sink, from: 'hi@acme.dev' });
-const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Ping', text: () => 'pong' });
+const mail = mailer({ transport: sink, from: 'hello@pizza.example' });
+const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Is this thing on?', text: () => 'It is. Carry on.' });
 
 await mail.send(ping, {}, { to: 'ada@example.com' });
 console.info(sink.sentWith(ping).length, sink.sentTo('ada@example.com').length, sink.last()?.message.subject);

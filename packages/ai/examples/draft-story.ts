@@ -14,7 +14,7 @@ const draftStory = createFlow<StoryState, StoryContext>({
   nodes: {
     outline: {
       id: 'outline',
-      run: async (_state, context) => ({ outline: await context.write('Outline a short story.') }),
+      run: async (_state, context) => ({ outline: await context.write('Outline a short story about a pizza oven that learns to count.') }),
       next: 'draft',
     },
     draft: {

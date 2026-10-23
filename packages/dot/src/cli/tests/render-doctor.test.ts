@@ -72,6 +72,7 @@ describe('renderDoctorText', () => {
     expect(text()).toContain('[OK]');
     expect(text()).toContain('p');
     expect(text()).toContain('Summary: SUCCESS');
+    expect(text()).toContain('All systems nominal.');
     orThrow(await app.dispose());
   });
 });

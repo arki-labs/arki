@@ -140,7 +140,7 @@ export type DotHandlerLifecycleEvent = DotHandlerStartingEvent | DotHandlerCompl
  * import { defineApp } from '@arki/dot';
  *
  * const events: DotLifecycleEvent[] = [];
- * const app = await defineApp('my-app', {
+ * const app = await defineApp('pizzeria', {
  *   observers: [(event) => events.push(event)],
  * })
  *   .infra(myUnit)

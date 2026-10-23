@@ -101,8 +101,8 @@ const userSelect = createSelectSchema(users, {
   profile: () => profileSchema,
 });
 type User = z.output<typeof userSelect>;
-const user: User = { id: 'usr_1', email: 'a@example.com', profile: null };
-if (userSelect.parse(user).email !== 'a@example.com') throw new Error('select schema changed the row');
+const user: User = { id: 'usr_ada', email: 'ada@example.com', profile: null };
+if (userSelect.parse(user).email !== 'ada@example.com') throw new Error('select schema changed the row');
 if (userSelect.safeParse({ ...user, profile: { displayName: 42 } }).success) throw new Error('invalid JSON accepted');
 if (userSelect.safeParse({ ...user, id: 'org_42' }).success) throw new Error('wrong prefix accepted');
 ```

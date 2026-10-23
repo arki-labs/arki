@@ -100,15 +100,15 @@ export const db = local.db;
 /** What `db.transaction` hands its callback. */
 export type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-await db.insert(users).values({ id: 'usr_1', name: 'Ada' });
+await db.insert(users).values({ id: 'usr_ada', name: 'Ada' });
 await db.insert(accounts).values([
-  { id: 'acc_alice', cents: 1000 },
-  { id: 'acc_bob', cents: 100 },
+  { id: 'acc_ada', cents: 1000 },
+  { id: 'acc_grace', cents: 100 },
 ]);
 await db.insert(stories).values(
   ['first', 'second', 'third'].map((title, day) => ({
     id: `sty_${String(day + 1)}`,
-    userId: 'usr_1',
+    userId: 'usr_ada',
     title,
     createdAt: new Date(Date.UTC(2026, 0, day + 1)),
   })),

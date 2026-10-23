@@ -166,7 +166,7 @@ span's `traceId` and `spanId` automatically:
   "name": "arki:dot:lifecycle",
   "body": "boot: FAILED — rolling back already-booted units",
   "attributes": {
-    "dot.app.name": "my-app",
+    "dot.app.name": "pizzeria",
     "dot.app.phase": "boot",
     "dot.unit.name": "db",
     "dot.app.rollback.count": 2
@@ -196,12 +196,12 @@ import { defineApp } from '@arki/dot';
 import { dbInfra, envInfra } from './units';
 
 new NodeSDK({
-  serviceName: 'my-app',
+  serviceName: 'pizzeria',
   contextManager: new AsyncLocalStorageContextManager(),
   // traceExporter, metricReader, logRecordProcessor — your choice
 }).start();
 
-await defineApp('my-app').infra(envInfra, dbInfra).start();
+await defineApp('pizzeria').infra(envInfra, dbInfra).start();
 
 // 3. Optionally turn on lifecycle logs at the env layer:
 //    DEBUG=arki:dot:lifecycle bun run app.ts
@@ -284,7 +284,7 @@ const dbInfra = infra({ name: 'db', provides: { db: () => ({ ready: true }) } })
 
 const events: DotLifecycleEvent[] = [];
 
-const app = await defineApp('my-app', {
+const app = await defineApp('pizzeria', {
   observers: [event => events.push(event)],
 })
   .infra(envInfra)
@@ -393,7 +393,7 @@ subscription — to catch `configure`-phase events, pass them through
 for terminal output:
 
 ```text
-Timeline: my-app (state=booted)
+Timeline: pizzeria (state=booted)
 ─────────────────────────────────
 configure
   env       0.5ms  █

@@ -39,18 +39,18 @@ const welcome = q.job
   });
 
 const pglite = new PGlite();
-const queue = createRuntimeLocalQueueInstance({ pglite, createContext: () => ({ greeting: 'Welcome' }) });
+const queue = createRuntimeLocalQueueInstance({ pglite, createContext: () => ({ greeting: 'Welcome to Analytical Pizza' }) });
 await queue.register(q.registry({ welcome }));
 await queue.start();
 
-orThrow(await welcome.trigger({ userId: 'usr_1' }));
+orThrow(await welcome.trigger({ userId: 'usr_ada' }));
 await done.promise;
 await queue.stop();
 await pglite.close();
 ```
 
 ```text
-Welcome, usr_1
+Welcome to Analytical Pizza, usr_ada
 ```
 
 To run the same job on Redis, build the queue with `q.createQueue({ connection: 'redis://localhost:6379', createContext })` instead. The job does not change.

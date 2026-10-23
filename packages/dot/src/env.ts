@@ -13,7 +13,7 @@
  * import { env } from '@arki/dot/env';
  * import { z } from 'zod';
  *
- * const app = await defineApp('my-app')
+ * const app = await defineApp('pizzeria')
  *   .infra(env({ schema: { PORT: z.coerce.number().default(3000) } }))
  *   .boot();
  *

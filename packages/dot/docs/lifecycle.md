@@ -203,7 +203,7 @@ const flaky = infra({
   },
 });
 
-const outcome = await defineApp('my-app').infra(flaky).boot();
+const outcome = await defineApp('pizzeria').infra(flaky).boot();
 if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');
 if (!(outcome.cause instanceof Error) || outcome.cause.message !== 'no network') {
   throw new Error('original cause was lost');
@@ -224,7 +224,7 @@ const stuck = infra({
   },
 });
 
-const app = await defineApp('my-app').infra(stuck).boot();
+const app = await defineApp('pizzeria').infra(stuck).boot();
 if (isFailure(app)) throw new Error(app.code);
 const outcome = await app.dispose();
 if (!UnexpectedDefect.is(outcome)) throw new Error('expected a supervised defect');

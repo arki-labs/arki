@@ -17,5 +17,5 @@ bun examples/render-agent-run.tsx
 Expected output:
 
 ```text
-true true <p>Order 7</p>
+true true <p>Order ord_42</p>
 ```

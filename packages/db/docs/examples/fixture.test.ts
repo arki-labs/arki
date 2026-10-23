@@ -15,7 +15,7 @@ describe('the docs fixture', () => {
 
   it('seeds the rows the README output depends on', async () => {
     // Why: `run expect` blocks print these rows; a changed seed must fail here first.
-    expect(await balance('acc_bob')).toBe(100);
+    expect(await balance('acc_grace')).toBe(100);
     const seeded = await db.select().from(stories);
     expect(seeded.map(story => story.title).toSorted()).toEqual(['first', 'second', 'third']);
     await db.insert(orders).values({ id: 'ord_test' });

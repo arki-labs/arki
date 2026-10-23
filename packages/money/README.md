@@ -29,7 +29,7 @@ if (total.toString() !== '25.00 EUR') throw new Error(`unexpected total: ${total
 price.times(3); // 59.97 EUR
 // price.times('1.19') throws RoundingNecessaryError: 23.7881 does not fit
 price.times('1.19', 'halfEven'); // 23.79 EUR
-money(100, 'EUR').allocate([1, 1, 1]); // [33.34, 33.33, 33.33] — adds back to 100.00
+money(100, 'EUR').allocate([1, 1, 1]); // [33.34, 33.33, 33.33], three friends, one pizza, zero cents lost
 // money(1, 'EUR').plus(money(1, 'USD')) is a compile error, and throws CurrencyMismatchError at run time
 ```
 

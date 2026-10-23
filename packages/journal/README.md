@@ -961,7 +961,7 @@ const summarize = j.task(
 const journal = j.compose({ workflows: [summarize], workflowMeta: { actorId: 'system:workflow' } });
 const { db, client } = await openJournalDb(tables);
 
-const started = orThrow(await journal.run(db, summarize.start, { input: { docId: 'doc_1' } }, { actorId: 'usr_1' }));
+const started = orThrow(await journal.run(db, summarize.start, { input: { docId: 'doc_1' } }, { actorId: 'usr_ada' }));
 await journal.drain(db);
 const done = orThrow(await summarize.read(db, started.runId));
 // `output` is typed by the task's `output` schema.
@@ -1090,7 +1090,7 @@ A finished definition has three commands and one read. The commands run through 
 
 ```ts continue
 const { db, client } = await openJournalDb(tables); // in an app: the root database
-const customer = { actorId: 'usr_1' };
+const customer = { actorId: 'usr_ada' };
 
 const started = orThrow(
   await journal.run(db, refund.start, { id: 'refund:ord_1', input: { paymentId: 'pay_1', amount: 500 } }, customer),
@@ -1278,7 +1278,7 @@ const placeOrder = j.command('orders.place', z.object({ id: z.string(), total: z
 const journal = j.compose({ workflows: [welcome], workflowMeta: { actorId: 'system:workflow' } });
 const { db, client } = await openJournalDb({ ...tables, orders });
 
-orThrow(await journal.run(db, placeOrder, { id: 'ord_1', total: 500 }, { actorId: 'usr_1' }));
+orThrow(await journal.run(db, placeOrder, { id: 'ord_1', total: 500 }, { actorId: 'usr_ada' }));
 await journal.drain(db); // workflow.start:orders.welcome starts the run
 await journal.drain(db); // thank
 
@@ -1500,7 +1500,7 @@ orThrow(
     h.db,
     h.reminder.start,
     { id: 'trial_1', input: { email: 'ana@example.com' } },
-    { actorId: 'usr_1' },
+    { actorId: 'usr_ada' },
   ),
 );
 orThrow(await h.drain()); // parked on `wait`

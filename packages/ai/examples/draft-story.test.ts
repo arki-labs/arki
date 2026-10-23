@@ -6,8 +6,8 @@ describe('draftStory', () => {
   it('feeds the outline of step one into step two', async () => {
     const result = await draftStory.run({}, { write: async instruction => `<${instruction}>` });
     expect(result).toEqual({
-      outline: '<Outline a short story.>',
-      draft: '<Write it from: <Outline a short story.>>',
+      outline: '<Outline a short story about a pizza oven that learns to count.>',
+      draft: '<Write it from: <Outline a short story about a pizza oven that learns to count.>>',
     });
   });
 });

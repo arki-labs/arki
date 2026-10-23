@@ -43,8 +43,8 @@ The **User** table represents the canonical identity of a person in your system.
 // User record
 {
   id: "usr_abc123",
-  name: "Alex Player",
-  email: "alex@example.com",
+  name: "Ada Lovelace",
+  email: "ada@example.com",
   emailVerified: true,
   image: "https://cdn.example.com/avatar.jpg",
   createdAt: "2024-01-15T10:00:00Z",
@@ -92,7 +92,7 @@ The **Account** table represents a specific authentication method linked to a Us
   id: "acc_xyz789",
   userId: "usr_abc123",
   providerId: "credentials",
-  accountId: "alex@example.com",
+  accountId: "ada@example.com",
   password: "$2a$10$...",  // Hashed password
   accessToken: null,
   refreshToken: null
@@ -131,7 +131,7 @@ Users can authenticate through different providers while maintaining a single id
 
 ```typescript skip="concept sketch of engine rows, not a program"
 // Same user, three sign-in options:
-// 1. Email: alex@example.com + password
+// 1. Email: ada@example.com + password
 // 2. Google: "Sign in with Google"
 // 3. GitHub: "Sign in with GitHub"
 
@@ -226,8 +226,8 @@ Sessions contain User ID, not Account ID:
   session: {
     user: {
       id: "usr_abc123",      // User ID available
-      email: "alex@example.com",
-      name: "Alex Player"
+      email: "ada@example.com",
+      name: "Ada Lovelace"
     }
   }
 }
@@ -272,8 +272,8 @@ POST /api/auth/sign-up/social
 // A. User record
 {
   id: "usr_abc123",
-  email: "alex@example.com",  // From Google profile
-  name: "Alex Player",         // From Google profile
+  email: "ada@example.com",  // From Google profile
+  name: "Ada Lovelace",         // From Google profile
   image: "https://google.com/avatar.jpg",
   emailVerified: true
 }
@@ -292,7 +292,7 @@ POST /api/auth/sign-up/social
 // features/player-profile/procedures/create-profile.ts
 {
   userId: "usr_abc123",        // References the User
-  displayName: "Alex Player",
+  displayName: "Ada Lovelace",
   gamesPlayed: 0
 }
 ```
@@ -388,12 +388,12 @@ Your application code should rarely interact with the Account table directly. be
 {
   users: {
     id: "usr_abc123",
-    email: "alex@example.com",
-    name: "Alex Player"
+    email: "ada@example.com",
+    name: "Ada Lovelace"
   },
   playerProfiles: {
     userId: "usr_abc123",
-    displayName: "Alex",
+    displayName: "Ada",
     level: 5
   }
 }
@@ -403,7 +403,7 @@ Your application code should rarely interact with the Account table directly. be
   accounts: {
     userId: "usr_abc123",
     providerId: "google",
-    displayName: "Alex",  // DON'T DO THIS
+    displayName: "Ada",  // DON'T DO THIS
     level: 5              // DON'T DO THIS
   }
 }

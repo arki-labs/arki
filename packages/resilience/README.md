@@ -13,13 +13,13 @@ bun add @arki/resilience
 
 ## Quick start
 
-Wrap a call to a third-party API with a preset: retry plus a timeout, tuned for HTTP.
+Retry plus a timeout, for the oven API that sulks on Mondays.
 
 ```ts
 import { externalApiPolicy, withResilience } from '@arki/resilience';
 
 const data = await withResilience(
-  () => fetch('https://api.example.com/billing').then(r => r.json()),
+  () => fetch('https://oven.example/temperature').then(r => r.json()),
   externalApiPolicy,
 );
 ```
@@ -117,7 +117,7 @@ Report a bug or ask a question in the [Arki issue tracker](https://github.com/ar
 import { externalApiPolicy, withResilience } from '@arki/resilience';
 
 const data = await withResilience(
-  () => fetch('https://api.example.com/billing').then(r => r.json()),
+  () => fetch('https://oven.example/temperature').then(r => r.json()),
   externalApiPolicy,
 );
 ```

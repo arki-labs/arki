@@ -7,7 +7,7 @@ import { createToolRegistry, ToolRegistryProvider, useToolRegistry } from '@arki
 // #region run
 const state: RuntimeUiState = {
   status: 'running',
-  text: 'Looking up the order.',
+  text: 'Asking the oven where order ord_42 went.',
   toolCalls: [{ tool: 'lookupOrder', status: 'running' }],
 };
 
@@ -23,7 +23,7 @@ const registry = createToolRegistry({ lookupOrder: OrderCard });
 
 function ToolView({ toolName }: { toolName: string }) {
   const Component = useToolRegistry().getComponent(toolName);
-  return Component ? <Component args={{ id: 7 }} result={null} status="complete" /> : <p>No widget</p>;
+  return Component ? <Component args={{ id: 'ord_42' }} result={null} status="complete" /> : <p>No widget</p>;
 }
 
 const widget = renderToStaticMarkup(
@@ -33,4 +33,4 @@ const widget = renderToStaticMarkup(
 );
 // #endregion registry
 
-console.log(html.includes('lookupOrder'), html.includes('Looking up the order.'), widget);
+console.log(html.includes('lookupOrder'), html.includes('Asking the oven where order ord_42 went.'), widget);

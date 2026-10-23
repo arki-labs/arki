@@ -33,14 +33,14 @@ database URL, and check `/api/health`. This recipe assumes the default
    `drizzle/` into a small runner image:
 
    ```sh
-   docker build -t my-app .
+   docker build -t pizzeria .
    ```
 
 4. **Run it with a database URL.** The other variables are listed in
    `.env.example`:
 
    ```sh
-   docker run -p 3000:3000 -e DB_URL=postgres://app:secret@db.internal:5432/app my-app
+   docker run -p 3000:3000 -e DB_URL=postgres://app:secret@db.internal:5432/app pizzeria
    ```
 
    On boot, the `dbMigrations` unit applies the migrations in `drizzle/`

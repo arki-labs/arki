@@ -21,16 +21,16 @@ bun add @arki/schedule
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
-const report = defineSchedule({
-  name: 'daily-report',
-  cron: '0 6 * * *',
+const doughProof = defineSchedule({
+  name: 'nightly-dough-proof',
+  cron: '0 4 * * *', // runs at 04:00, while the dough rises and everyone sleeps
   handler: async () => ({ rows: 3 }),
 });
 
-const runtime = createScheduleRuntime({ schedules: [report] });
-runtime.start(); // arms the timer for 06:00
+const runtime = createScheduleRuntime({ schedules: [doughProof] });
+runtime.start(); // arms the timer for 04:00
 
-const result = await runtime.trigger('daily-report'); // run it now
+const result = await runtime.trigger('nightly-dough-proof'); // run it now
 if (result.status === 'ran') console.log(`ran: ${result.value.rows} rows`);
 
 await runtime.stop();
@@ -120,8 +120,8 @@ A wrong declaration throws a `ScheduleError` with a code `ARKI_SCHEDULE_E001` to
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
-const report = defineSchedule({
-  name: 'daily-report',
+const doughProof = defineSchedule({
+  name: 'nightly-dough-proof',
   every: '1h',
   overlap: 'skip',
   handler: async () => {
@@ -130,12 +130,12 @@ const report = defineSchedule({
   },
 });
 
-const runtime = createScheduleRuntime({ schedules: [report] });
+const runtime = createScheduleRuntime({ schedules: [doughProof] });
 runtime.start(); // arms the timer: the first tick is an hour away
 
 // Run it now, as a test or an admin button would.
-const first = runtime.trigger('daily-report');
-const second = runtime.trigger('daily-report'); // the first run is still active in this process
+const first = runtime.trigger('nightly-dough-proof');
+const second = runtime.trigger('nightly-dough-proof'); // the first run is still active in this process
 
 for (const result of await Promise.all([first, second])) {
   console.log(result.status === 'ran' ? `ran: ${result.value.rows} rows` : result.status);

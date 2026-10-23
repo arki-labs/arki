@@ -7,8 +7,8 @@ import { fakeEmbedder } from '../src/testing/index.js';
 import { embedDocuments, embedForIndex } from './index-documents.js';
 
 describe('embedDocuments', () => {
-  it('returns ModelUnavailable, not a throw, when the server is not there', async () => {
-    const result = await embedDocuments(['a'], 'http://127.0.0.1:1');
+  it('returns ModelUnavailable, not a throw, when the embedding server is out for lunch', async () => {
+    const result = await embedDocuments(['Margherita: tomato, mozzarella, basil.'], 'http://127.0.0.1:1');
     expect(ModelUnavailable.is(result) && result.data.reason).toBe('unreachable');
   });
 });

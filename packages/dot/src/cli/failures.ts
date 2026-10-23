@@ -69,7 +69,7 @@ export const AppNotFound = defineFailure('dot.app_not_found', {
   ),
   message: 'No DOT app file found in {cwd}',
   remediation:
-    'Create `dot.config.ts` exporting your app (`export default defineApp("my-app").infra(unit)`), or pass `--app <path>`.',
+    'Create `dot.config.ts` exporting your app (`export default defineApp("pizzeria").infra(unit)`), or pass `--app <path>`.',
 });
 
 export type AppInvalidExportData = {
@@ -104,7 +104,7 @@ export const AppInvalidExport = defineFailure('dot.app_invalid_export', {
       ? `${data.filePath} exports several DOT apps (${listed(data.matches)}) and none is \`default\` or \`app\`.`
       : `${data.filePath} exports no DOT app. Exports found: ${listed(data.exports)}.`;
   },
-  remediation: 'Export the app as `default` or as `app`: `export const app = defineApp("my-app").infra(unit);`',
+  remediation: 'Export the app as `default` or as `app`: `export const app = defineApp("pizzeria").infra(unit);`',
 });
 
 export type AppImportFailedData = {
@@ -467,7 +467,7 @@ export const DevAppStarted = defineFailure('dot.dev_app_started', {
   message:
     'The `{exportName}` export in {filePath} is already configured or started; dot dev needs an unstarted builder',
   remediation:
-    'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("my-app").infra(unit);`',
+    'Export the builder itself, without calling configure(), boot() or start(): `export const dev = defineApp("pizzeria").infra(unit);`',
 });
 
 export type DevPreflightFailedData = {

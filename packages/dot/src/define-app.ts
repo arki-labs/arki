@@ -434,7 +434,7 @@ type BuilderState<
  * Create a new DOT app builder.
  *
  * @example
- * const app = await defineApp('my-app')
+ * const app = await defineApp('pizzeria')
  *   .infra(database, cache)   // cache's needs must be satisfied by database
  *   .features([billing])
  *   .boot();

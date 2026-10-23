@@ -20,15 +20,15 @@ Open a store, write a value with a TTL, read it back, and close.
 import { KV } from '@arki/kv';
 
 export async function demo(): Promise<string | undefined> {
-  const kv = new KV('redis://localhost:6379', 'my-app');
-  await kv.set('hello', 'world', 60); // 60-second TTL
-  const value = await kv.get<string>('hello');
+  const kv = new KV('redis://localhost:6379', 'pizzeria');
+  await kv.set('oven:temperature', '240', 60); // forgotten after 60 seconds
+  const value = await kv.get<string>('oven:temperature');
   await kv.close();
-  return value; // 'world'
+  return value; // '240'
 }
 ```
 
-This needs a Redis at that URL, so the block is compiled and not run. In an app, read the URL from `KV_URL` with `createKV('my-app')`.
+This needs a Redis at that URL, so the block is compiled and not run. In an app, read the URL from `KV_URL` with `createKV('pizzeria')`.
 
 ## When not to use this
 
@@ -49,11 +49,11 @@ Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which nee
 ```ts
 import { KV } from '@arki/kv';
 
-const kv = new KV('redis://localhost:6379', 'my-app');
+const kv = new KV('redis://localhost:6379', 'pizzeria');
 
-await kv.set('hello', 'world', 60); // 60-second TTL
-const value = await kv.get('hello'); // 'world'
-await kv.delete('hello');
+await kv.set('oven:temperature', '240', 60); // forgotten after 60 seconds
+const value = await kv.get('oven:temperature'); // '240'
+await kv.delete('oven:temperature');
 
 await kv.close();
 ```
@@ -65,10 +65,10 @@ import { createKV } from '@arki/kv';
 import { createKVInstance } from '@arki/kv/instance';
 
 // Reads KV_URL from process.env, throws if missing.
-const kv = createKV('my-app');
+const kv = createKV('pizzeria');
 
 // Returns null in development if KV_URL is missing (no throw); exits in production.
-const kvOrNull = createKVInstance('my-app');
+const kvOrNull = createKVInstance('pizzeria');
 ```
 
 ### Rate limiting
@@ -77,8 +77,8 @@ const kvOrNull = createKVInstance('my-app');
 import { createKV } from '@arki/kv';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
-const kv = createKV('my-app');
-const userId = 'usr_1';
+const kv = createKV('pizzeria');
+const userId = 'usr_ada';
 const limiter = kv.getRateLimiter('login', { points: 5, duration: 60 });
 
 try {
@@ -178,7 +178,7 @@ import { kv } from '@arki/kv/dot';
 
 const env = { KV_URL: process.env.KV_URL };
 
-export const cache = kv.optional(() => ({ url: env.KV_URL, namespace: 'my-app', probe: true }));
+export const cache = kv.optional(() => ({ url: env.KV_URL, namespace: 'pizzeria', probe: true }));
 export type Kv = Provided<typeof cache.provides.kv>; // KV | null
 ```
 

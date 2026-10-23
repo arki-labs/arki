@@ -10,7 +10,7 @@ import { configureDebug, createDebugContext, isDebugEnabled, logSection, logStat
 configureDebug({ enabled: true });
 
 logSection('Setup');
-logState('User', { id: 'usr_1' });
+logState('User', { id: 'usr_ada' });
 const timer = timeOperation('Create 100 users');
 timer.end();
 

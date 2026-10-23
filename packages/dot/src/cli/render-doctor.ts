@@ -51,6 +51,21 @@ function statusIcon(status: DiagnosticStatus): string {
   }
 }
 
+/** One human sentence for the end of the text report; never used in JSON output. */
+function doctorVerdict(status: DoctorStatus): string {
+  switch (status) {
+    case 'success': {
+      return 'All systems nominal.';
+    }
+    case 'warning': {
+      return 'Mostly fine. Read the warnings above.';
+    }
+    case 'failure': {
+      return 'Not great. Each fix is listed above under remediation.';
+    }
+  }
+}
+
 function renderIssueLines(issues: readonly DiagnosticIssue[], indent: string): string[] {
   const lines: string[] = [];
   for (const issue of issues) {
@@ -127,7 +142,7 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DoctorStatus): s
   }
 
   // Summary
-  lines.push(`Summary: ${status.toUpperCase()}`);
+  lines.push(`Summary: ${status.toUpperCase()}`, doctorVerdict(status));
   return lines.join('\n');
 }
 

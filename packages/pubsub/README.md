@@ -9,11 +9,11 @@ import { memoryPubSub } from '@arki/pubsub/memory';
 
 const pubsub = memoryPubSub();
 const received: string[] = [];
-const unsubscribe = await pubsub.subscribe('orders_changed', payload => received.push(payload));
+const unsubscribe = await pubsub.subscribe('pizza_ready', payload => received.push(payload));
 
-await pubsub.publish('orders_changed', 'ord_1');
+await pubsub.publish('pizza_ready', 'ord_42');
 await new Promise(resolve => setTimeout(resolve, 0));
-if (received[0] !== 'ord_1') throw new Error('not delivered');
+if (received[0] !== 'ord_42') throw new Error('not delivered');
 
 await unsubscribe();
 await pubsub.close();
@@ -38,7 +38,7 @@ export const pubsubMessages = pubsubTable(); // export it from your schema so mi
 const pubsub = sqlitePubSub({ db, table: pubsubMessages });
 await db.transaction(async tx => {
   await tx.insert(orders).values(order);
-  await pubsub.publishIn(tx, 'orders_changed', order.id);
+  await pubsub.publishIn(tx, 'pizza_ready', order.id);
 });
 ```
 

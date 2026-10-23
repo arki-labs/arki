@@ -16,26 +16,26 @@ terminal. For a guided first run, see the [Quickstart](./quickstart.md).
 ```bash
 # Scaffold a full-stack app: TanStack Start + oRPC + Postgres (@arki/db)
 # + @arki/journal + @arki/ui, with Dockerfile, migrations and tests.
-dot new my-app
+dot new pizzeria
 
 # Scaffold the smallest DOT app instead (defineApp + env, vitest boot test).
-dot new my-app --template minimal
+dot new pizzeria --template minimal
 
 # Preview the file operations without writing anything.
-dot new my-app --dry-run --json | jq '.operations'
+dot new pizzeria --dry-run --json | jq '.operations'
 
 # Print the app manifest as a structured envelope.
-dot explain --app ./my-app.ts
+dot explain --app ./pizzeria.ts
 
 # Run boot-time diagnostics; exit 3 (dot.doctor_failed) if any check fails.
-dot doctor --app ./my-app.ts
+dot doctor --app ./pizzeria.ts
 
 # Render the unit graph as Mermaid flowchart source. explain shows
 # declaration (= boot) order; doctor boots and shows the OBSERVED wiring.
-dot doctor --app ./my-app.ts --graph
+dot doctor --app ./pizzeria.ts --graph
 
 # Every command supports --json for agent-friendly output.
-dot explain --app ./my-app.ts --json | jq '.data.plugins'
+dot explain --app ./pizzeria.ts --json | jq '.data.plugins'
 ```
 
 The CLI emits the same envelope shape as the in-process diagnostics snapshot

@@ -17,7 +17,7 @@ Render a running agent. `RuntimeConversation` takes the `RuntimeUiState` that `@
 ```tsx from="examples/render-agent-run.tsx#run"
 const state: RuntimeUiState = {
   status: 'running',
-  text: 'Looking up the order.',
+  text: 'Asking the oven where order ord_42 went.',
   toolCalls: [{ tool: 'lookupOrder', status: 'running' }],
 };
 
@@ -35,7 +35,7 @@ const registry = createToolRegistry({ lookupOrder: OrderCard });
 
 function ToolView({ toolName }: { toolName: string }) {
   const Component = useToolRegistry().getComponent(toolName);
-  return Component ? <Component args={{ id: 7 }} result={null} status="complete" /> : <p>No widget</p>;
+  return Component ? <Component args={{ id: 'ord_42' }} result={null} status="complete" /> : <p>No widget</p>;
 }
 
 const widget = renderToStaticMarkup(

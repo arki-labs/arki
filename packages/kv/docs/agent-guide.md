@@ -15,7 +15,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 ### Store a value with a TTL
 
-1. `const kv = createKV('my-app')`.
+1. `const kv = createKV('pizzeria')`.
 2. `await kv.set('key', value, 60)`. The TTL is in seconds.
 3. `await kv.get<T>('key')` returns `undefined` when the key is missing or expired.
 

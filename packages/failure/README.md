@@ -28,7 +28,7 @@ import { defineFailure, isFailure } from '@arki/failure';
 const EmailTaken = defineFailure('user.email_taken', {
   status: 409,
   data: z.object({ email: z.string() }),
-  message: 'email {email} is taken',
+  message: 'email {email} is taken (someone beat you to it)',
 });
 
 const taken = new Set(['ada@example.com']);
@@ -40,7 +40,7 @@ console.log(result.status, result.message);
 ```
 
 ```text
-409 email ada@example.com is taken
+409 email ada@example.com is taken (someone beat you to it)
 ```
 
 App-shaped blocks import their names from [the docs fixture](docs/examples/fixture.ts): an in-memory post repository, the example failures, and small stand-ins for an export step, a feed and an RPC client.
