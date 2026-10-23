@@ -1,10 +1,17 @@
 # @arki/pubsub
 
-> <!-- One or two sentences. What it is. What it is not. -->
+> Publish and subscribe on named channels over memory, a polled table (Postgres or SQLite), Postgres LISTEN/NOTIFY and Redis. Best effort, like NOTIFY. Not a queue.
 
 ## Import paths
-<!-- one bullet per exports subpath; group long lists -->
-- `@arki/pubsub`: the core. `name`.
+
+<!-- llms:start -->
+- `@arki/pubsub`: the contract, its limits and its errors. `CHANNEL_PATTERN`, `MAX_PAYLOAD_BYTES`, `PUBSUB_ERROR_CODES`, `PubSubError`; types `OnMessage`, `PubSub`, `PubSubErrorCode`, `TransactionalPubSub`, `Unsubscribe`.
+- `@arki/pubsub/memory`: in-process fan-out, for tests and one-process apps. `memoryPubSub`.
+- `@arki/pubsub/pg`: Postgres LISTEN/NOTIFY. `pgPubSub`; types `PgPubSubOptions`, `PgPubSubPool`, `PgTransaction`.
+- `@arki/pubsub/poll`: messages in a database table, read by polling. `pollPubSub`, `pubsubTable`; types `PgPollDb`, `PollPubSubOptions`, `PubsubRow`, `PubsubTable`, `SqlitePollDb`.
+- `@arki/pubsub/redis`: Redis `PUBLISH`, and `SUBSCRIBE` on a second connection (`client.duplicate()`), since a subscribed Redis connection can run nothing else. `redisPubSub`; types `RedisPubSubOptions`.
+- `@arki/pubsub/testing`: the conformance suite every backend runs. `describePubSubContract`; types `PubSubContractOptions`, `PubSubSubject`, `TransactionalPubSubSubject`.
+<!-- llms:end -->
 
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first.
@@ -12,7 +19,12 @@
 - [README](README.md): the long overview.
 
 ## By task
-<!-- one link per task in the guide's Task map -->
+- [Wake a worker when a row is written](docs/agent-guide.md#wake-a-worker-when-a-row-is-written)
+- [Feed journal's wake channel](docs/agent-guide.md#feed-arkijournals-wake-channel)
+- [Test a new backend](docs/agent-guide.md#test-a-new-backend)
 
 ## Rules that bite
-<!-- one sentence each; the mistakes agents make -->
+- Only `pollPubSub` and `pgPubSub` have `publishIn`; it sends at commit and never after a rollback.
+- Channels are `^[a-z0-9_]{1,63}$`; payloads are at most 7999 UTF-8 bytes. Send ids.
+- `pgPubSub` needs a session pool, never a transaction pooler.
+- `close()` never closes your database, pool or Redis client.
