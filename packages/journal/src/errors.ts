@@ -292,7 +292,7 @@ export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
 export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
 
 /** A start found `concurrency.limit` unfinished runs of this workflow with the same concurrency key. `running` lists
- * them, oldest first. Returned when `onBusy` is `'refuse'`, and always for a child run: a child cannot join a run that
+ * those of the caller's own scope, oldest first; another scope's run ids are never shown. Returned when `onBusy` is `'refuse'`, and always for a child run: a child cannot join a run that
  * another parent started.
  * @fix Wait for one of the running runs to finish, or start the run with another concurrency key.
  * @verify bun run test -- src/workflow/concurrency.test.ts

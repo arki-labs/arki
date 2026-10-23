@@ -200,3 +200,29 @@ describe('concurrency: key function', () => {
     expect(await stateOf(id)).toBeUndefined();
   });
 });
+
+describe('concurrency across scopes', () => {
+  it('a busy key still refuses another scope, but never names that scope its runs, so a shared key leaks no run ids', async () => {
+    const key = newId('shared');
+    const tenantA = orThrow(
+      await journal.run(db, sync.start, { input: { account: key, n: 1 }, scope: 'ten_a' }, caller),
+    );
+    const refused = await journal.run(db, sync.start, { input: { account: key, n: 2 }, scope: 'ten_b' }, caller);
+    expect(WorkflowBusy.is(refused)).toBe(true);
+    if (!WorkflowBusy.is(refused)) return;
+    expect(refused.data.running).toEqual([]);
+    expect(JSON.stringify(refused)).not.toContain(tenantA.runId);
+  });
+
+  it('join answers only a run of the same scope: another scope is refused, the same scope joins', async () => {
+    const key = newId('shared');
+    const tenantA = orThrow(
+      await journal.run(db, rebuild.start, { input: { account: key, n: 1 }, scope: 'ten_a' }, caller),
+    );
+    const fromB = await journal.run(db, rebuild.start, { input: { account: key, n: 2 }, scope: 'ten_b' }, caller);
+    expect(WorkflowBusy.is(fromB)).toBe(true);
+    expect(JSON.stringify(fromB)).not.toContain(tenantA.runId);
+    const fromA = await journal.run(db, rebuild.start, { input: { account: key, n: 3 }, scope: 'ten_a' }, caller);
+    expect(fromA).toEqual({ runId: tenantA.runId });
+  });
+});

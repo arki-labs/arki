@@ -1204,8 +1204,9 @@ const sync = j
   .finish();
 ```
 
-- At the limit, `onBusy: 'refuse'` returns `WorkflowBusy` (`journal.workflow_busy`, status 409). Its data names the key, the limit and the running run ids, oldest first. No run is created.
-- At the limit, `onBusy: 'join'` returns the oldest running run's id instead of a new one, so the caller follows the run already under way.
+- At the limit, `onBusy: 'refuse'` returns `WorkflowBusy` (`journal.workflow_busy`, status 409). Its data names the key, the limit and the running run ids of the caller's own `scope`, oldest first. No run is created.
+- At the limit, `onBusy: 'join'` returns the oldest running run of the caller's own `scope` instead of a new one, so the caller follows the run already under way. With none in its scope, the start is `WorkflowBusy`.
+- The limit counts every run with the key, whatever its scope, so a key can cap work across tenants. What a start gets back never crosses its scope: the key comes from input, and two tenants can share one.
 - The same start again (same `id`, same input) is the same run, never a busy key.
 - A child run (`child`, `map`) is never joined: the run it would join reports to another parent. A busy child is `WorkflowBusy`, and its parent's node fails like any child that cannot start.
 - A `startOn` start that is busy and refused leaves its job dead with `WorkflowBusy`.

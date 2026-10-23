@@ -1824,6 +1824,9 @@ export function createWorkflows<
    * same start again), gives `undefined`: the start goes on. At the limit, `onBusy: 'join'` answers the oldest running
    * run, and `'refuse'` returns `WorkflowBusy`. A child always gets `WorkflowBusy`: the run it would join reports to
    * another parent.
+   * The limit counts every run with the key, whatever its scope: an app may cap a key across tenants. What the caller
+   * gets back never crosses its scope: it joins only a run of its own scope (else `WorkflowBusy`), and
+   * `WorkflowBusy.running` lists only its own scope's runs, since the key comes from input another tenant can share.
    */
   const admit = async (
     tx: Tx,
@@ -1832,10 +1835,12 @@ export function createWorkflows<
     key: string,
     runId: string,
     parent: { readonly id: string; readonly path: string } | undefined,
+    scope: string | null,
   ): Promise<{ readonly runId: string; readonly created: false } | WorkflowBusy | undefined> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`journal.workflow:${def.name}:${key}`}, 0))`);
+    // The gate keeps a key at its limit, so the oldest `limit + 1` rows are all of them.
     const holders = await tx
-      .select({ id: workflowRuns.id })
+      .select({ id: workflowRuns.id, scope: workflowRuns.scope })
       .from(workflowRuns)
       .where(
         and(
@@ -1848,12 +1853,13 @@ export function createWorkflows<
       .limit(concurrency.limit + 1);
     const running = holders.map(holder => holder.id);
     if (running.includes(runId) || running.length < concurrency.limit) return undefined;
-    const oldest = running[0];
+    const ownScope = holders.filter(holder => holder.scope === scope).map(holder => holder.id);
+    const oldest = ownScope[0];
     if (concurrency.onBusy === 'join' && parent === undefined && oldest !== undefined) {
       debugWorkflow.debug('{name}: key {key} is busy; the start joins run {runId}', { name: def.name, key, runId: oldest });
       return { runId: oldest, created: false };
     }
-    const shown = running.slice(0, concurrency.limit);
+    const shown = ownScope.slice(0, concurrency.limit);
     return WorkflowBusy({
       name: def.name,
       key,
@@ -1919,7 +1925,7 @@ export function createWorkflows<
     if (isFailure(runId)) return runId;
     const concurrencyKey = def.concurrency === undefined ? null : concurrencyKeyOf(def, args.input);
     if (def.concurrency !== undefined && concurrencyKey !== null) {
-      const gate = await admit(tx, def, def.concurrency, concurrencyKey, runId, parent);
+      const gate = await admit(tx, def, def.concurrency, concurrencyKey, runId, parent, scope);
       if (gate !== undefined) return gate;
     }
     const now = new Date();
