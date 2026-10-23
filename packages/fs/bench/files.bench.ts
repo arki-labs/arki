@@ -13,6 +13,7 @@ import { defineRelations, eq, sql } from 'drizzle-orm';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
 import { defineId } from '@arki/contracts';
+import { pgColumns } from '@arki/db/pg';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { orThrow } from '@arki/failure';
 
@@ -60,7 +61,7 @@ const sdkClient = new S3Client({
 
 // The lifecycle runs on in-memory PGlite with the memory store: it measures the library, not a network.
 const userId = defineId('usr_');
-const files = filesTable({ owner: userId });
+const files = filesTable(pgColumns(), { owner: userId });
 const local = await orThrow(initDbRuntimeLocal({ memory: true }, { relations: defineRelations({ files }) }));
 const push = await pushSchema({ files }, local.db);
 await push.apply();

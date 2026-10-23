@@ -14,6 +14,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { defineId } from '@arki/contracts';
+import { pgColumns } from '@arki/db/pg';
 import { isFailure, orThrow } from '@arki/failure';
 
 import type { FileId } from '../files/index.js';
@@ -23,7 +24,7 @@ import { memoryUploadAdapter } from '../testing.js';
 import { filesTable, fileStorage } from './index.js';
 
 const userId = defineId('usr_');
-const files = filesTable({ owner: userId });
+const files = filesTable(pgColumns(), { owner: userId });
 const alice = orThrow(userId.create());
 const hello = new TextEncoder().encode('hello');
 

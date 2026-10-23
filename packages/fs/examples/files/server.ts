@@ -8,6 +8,7 @@ import { implement, ORPCError } from '@orpc/server';
 import type { IdOf } from '@arki/contracts';
 import type { Locker, ScheduleDef } from '@arki/schedule';
 import { defineId } from '@arki/contracts';
+import { pgColumns } from '@arki/db/pg';
 import { isFailure } from '@arki/failure';
 import { defineSchedule } from '@arki/schedule';
 
@@ -21,7 +22,7 @@ export const userId = defineId('usr_');
 export type UserId = IdOf<typeof userId>;
 
 // model/tables.ts (server): add `files` to the app schema, then `drizzle-kit generate`
-export const files = filesTable({ owner: userId });
+export const files = filesTable(pgColumns(), { owner: userId });
 
 // infra (boot): built once, shared by every request
 export type R2Env = {

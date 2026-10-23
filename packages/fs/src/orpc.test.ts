@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi 
 import type { IdOf } from '@arki/contracts';
 import type { SuccessOf } from '@arki/failure';
 import { defineId, RandomSourceUnavailable } from '@arki/contracts';
+import { pgColumns } from '@arki/db/pg';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { reviveRpcError } from '@arki/failure/orpc';
@@ -25,7 +26,7 @@ import { memoryUploadAdapter } from './testing.js';
 
 const userId = defineId('usr_');
 type UserId = IdOf<typeof userId>;
-const files = filesTable({ owner: userId });
+const files = filesTable(pgColumns(), { owner: userId });
 const alice = orThrow(userId.create());
 const bob = orThrow(userId.create());
 

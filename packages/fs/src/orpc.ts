@@ -19,7 +19,8 @@ import { z } from 'zod';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
 import type { FileErrorCode } from './files/errors.js';
-import type { FilesTable, FileStorage, OwnerOf } from './pg/index.js';
+import type { FileStorage } from './lifecycle/storage.js';
+import type { FilesTable, OwnerOf } from './lifecycle/table.js';
 import { FILE_ERROR_CODES, isFileStorageError } from './files/errors.js';
 import {
   CREATE_UPLOAD_FAILURES,
@@ -29,7 +30,7 @@ import {
   UploadPending,
 } from './files/failures.js';
 import { fileId, fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
-import { toFileRecord } from './pg/record.js';
+import { toFileRecord } from './lifecycle/record.js';
 
 const byFileId = z.strictObject({ fileId: fileId.schema });
 

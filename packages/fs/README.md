@@ -40,7 +40,7 @@ export const userId = defineId('usr_');
 export type UserId = IdOf<typeof userId>;
 
 // model/tables.ts (server): add `files` to the app schema, then `drizzle-kit generate`
-export const files = filesTable({ owner: userId });
+export const files = filesTable(pgColumns(), { owner: userId });
 ```
 
 Build the storage once at boot (in a Dot feature, inside its `.infra()` step):
@@ -148,7 +148,8 @@ create index files_owner_idx on files (owner_id, created_at desc, id desc);     
 create index files_sweep_idx on files (cleanup_at, id) where status <> 'ready';  -- the one sweep predicate
 ```
 
-`filesTable({ owner, name?, schema? })` names the constraints and indexes after the table. There is no
+`filesTable(kit, { owner, name? })` names the constraints and indexes after the table. The kit says
+where the table lives: `pgColumns()` or `pgColumns(pgSchema('storage'))` from `@arki/db/pg`. There is no
 foreign key on `owner_id`: deleting an owner must not drop the row that carries the cleanup duty.
 
 ### States

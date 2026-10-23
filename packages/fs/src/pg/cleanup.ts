@@ -1,40 +1,25 @@
 /**
- * The sweep: removes abandoned pending uploads and finishes removals.
- * Run it from a schedule (`defineSchedule` with a lock); the rows hold the
- * duty, so a missed tick loses nothing.
+ * The sweep's claim on Postgres. The loop around it is shared
+ * (`../lifecycle/cleanup.ts`).
  */
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
-import type { FilesContext } from './context.js';
-import { FILE_ERROR_CODES } from '../files/errors.js';
-import { fail, filesLog } from './context.js';
-
-export type CleanupOptions = {
-  /** Rows claimed per call, 1–1000. Default 100. */
-  batch?: number;
-};
-
-export type CleanupResult = {
-  removed: number;
-  failed: number;
-  /** True when the batch was full: call again (inside your time budget). */
-  more: boolean;
-};
+import type { FileId } from '../files/schemas.js';
+import type { FilesTable } from '../lifecycle/table.js';
+import type { FilesDb } from './storage.js';
 
 /**
- * Claims due rows (`status <> 'ready'` and `cleanup_at <= now()`), deletes each
- * object, then its row. A claim pushes `cleanup_at` out with backoff (1 min,
- * doubling, at most 1 day) before any delete, so a failing object cannot
- * starve later rows and two sweepers never take the same row.
+ * Claims due rows with `FOR UPDATE SKIP LOCKED`, so sweepers in several
+ * processes run side by side and never take the same row. The claim pushes
+ * `cleanup_at` out with backoff (1 min, doubling, at most 1 day) before any
+ * delete.
  */
-export async function cleanupOrphans(context: FilesContext, options: CleanupOptions = {}): Promise<CleanupResult> {
-  const { db, adapter, files, bucket } = context;
-  const batch = options.batch ?? 100;
-  if (!Number.isInteger(batch) || batch < 1 || batch > 1000) {
-    fail(FILE_ERROR_CODES.invalid, `cleanupOrphans: batch must be an integer from 1 to 1000, got ${String(batch)}`);
-  }
-  const started = Date.now();
-
+export async function claimDue(
+  db: FilesDb,
+  files: FilesTable<'pg'>,
+  bucket: string,
+  batch: number,
+): Promise<{ id: FileId; key: string }[]> {
   const due = db
     .select({ id: files.id })
     .from(files)
@@ -43,7 +28,7 @@ export async function cleanupOrphans(context: FilesContext, options: CleanupOpti
     .limit(batch)
     .for('update', { skipLocked: true });
 
-  const claimed = await db
+  return db
     .update(files)
     .set({
       status: 'deleting',
@@ -53,27 +38,4 @@ export async function cleanupOrphans(context: FilesContext, options: CleanupOpti
     })
     .where(inArray(files.id, due))
     .returning({ id: files.id, key: files.key });
-
-  let removed = 0;
-  let failed = 0;
-  for (const row of claimed) {
-    try {
-      await adapter.delete(row.key);
-      await db.delete(files).where(and(eq(files.id, row.id), eq(files.status, 'deleting')));
-      removed += 1;
-    } catch (error) {
-      failed += 1;
-      filesLog.warn('cleanup of {fileId} failed; retried after backoff', {
-        fileId: row.id,
-        error: error instanceof Error ? error : String(error),
-      });
-    }
-  }
-
-  filesLog.debug('cleanup: {removed} removed, {failed} failed in {ms} ms', {
-    removed,
-    failed,
-    ms: Date.now() - started,
-  });
-  return { removed, failed, more: claimed.length === batch };
 }
