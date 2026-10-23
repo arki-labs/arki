@@ -9,6 +9,8 @@ import { isFailure, orThrow } from '@arki/failure';
 import type { OnDelete } from './id-columns-shared.js';
 import { tagColumnSchema } from './id-columns-shared.js';
 
+export type { OnDelete } from './id-columns-shared.js';
+
 /** Generate an unprefixed legacy ID, or the canonical entropy failure. */
 export const createId = createIdBody;
 

@@ -3,5 +3,5 @@
   "compilerOptions": {
     "stripInternal": true
   },
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "**/__fixtures__/**"]
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test-d.ts", "**/*.spec.ts", "**/__fixtures__/**"]
 }

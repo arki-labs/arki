@@ -9,6 +9,8 @@ import type { OnDelete } from './id-columns-shared.js';
 import type { IdColumnSource } from './id-factory.js';
 import { tagColumnSchema } from './id-columns-shared.js';
 
+export type { OnDelete } from './id-columns-shared.js';
+
 /**
  * The SQLite columns of one id kind. Same shape as the Postgres `idColumns`
  * in `@arki/db`; the id type comes from the declaration's generator, so it

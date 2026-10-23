@@ -93,7 +93,6 @@ export class TransformersJsEmbeddingProvider extends BaseEmbeddingProvider {
   private async getPipeline(): Promise<FeatureExtractionPipeline> {
     if (!this.pipelinePromise) {
       this.pipelinePromise = (async () => {
-        // @ts-expect-error - optional peer dependency
         const mod = (await import('@huggingface/transformers')) as unknown as {
           pipeline: (
             task: 'feature-extraction',
