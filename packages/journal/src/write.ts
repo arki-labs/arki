@@ -34,6 +34,7 @@ import { debugWrite } from './debug.js';
 import { JournalError } from './errors.js';
 import { routeOf, streamOf } from './event-log.js';
 import { fold, hasDeclaredEventType } from './fold.js';
+import { checkedPriority } from './handlers.js';
 import { correlationId, eventId, jobId } from './id.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 import {
@@ -67,6 +68,13 @@ function dueAt(
   if (delaySeconds !== undefined && delaySeconds > 0)
     return { availableAt: sql`now() + make_interval(secs => ${delaySeconds})` };
   return {};
+}
+
+/** A job's priority: the effect's `priority`, or what it gives for the event when it is a function; 0 without one. */
+function jobPriority(effect: Pick<Effect, 'name' | 'schedule'>, event: Recorded): number {
+  const { priority } = effect.schedule;
+  if (typeof priority !== 'function') return priority ?? 0;
+  return checkedPriority(effect.name, priority(event));
 }
 
 /** Insert order is the version order. `RETURNING` does not promise it, so restore it. */
@@ -404,7 +412,7 @@ export function createWriter<
                 eventSeq: transient ? null : event.seq,
                 effect: effect.name,
                 args: stored,
-                priority: effect.schedule.priority ?? 0,
+                priority: jobPriority(effect, event),
                 ...dueAt(effect, event),
               });
             }

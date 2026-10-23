@@ -1,13 +1,16 @@
 /**
  * The Foreman control-plane module for durable workflows: find a stuck run, read it, and move it under an approved
- * permit (retry a dead step, give a signal that never came, resolve a step by hand, skip a failed undo, cancel a run).
- * Mirrors `journalJobsModule`: every action previews what it will do with a `revision`, and refuses with E010 when the
- * run changed since. Every verb writes who did it onto the run's events. Requires the optional peer `@arki/admin`.
+ * permit (retry a dead step, give a signal that never came, resolve a step by hand, skip a failed undo, cancel a run,
+ * change its metadata or tags, move its start, replay it), and read and change the limits runs hold (pause, resume,
+ * override, reset). Mirrors `journalJobsModule`: every action previews what it will do with a `revision`, and refuses
+ * with E010 when the run or limit changed since. Every verb writes who did it onto the run's or limit's events.
+ * Requires the optional peer `@arki/admin`.
  */
 import { z } from 'zod';
 
-import type { Permit } from '@arki/admin/module';
+import type { Permission, Permit } from '@arki/admin/module';
 import type { IdGenerationFailure } from '@arki/contracts';
+import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import {
   canonicalJson,
@@ -19,17 +22,70 @@ import {
   redactSecrets,
 } from '@arki/admin/module';
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
-import { findCause, isFailure, orThrow } from '@arki/failure';
+import { findCause, InvalidInput, isFailure, orThrow, UnexpectedFailure } from '@arki/failure';
 
-import type { RootDb, TransactionSource } from '../index.js';
+import type { LimitView, RootDb, TransactionSource } from '../index.js';
 import type { RunDetail } from '../workflow/read.js';
 import type { JournalWorkflowsModuleOptions } from './shapes.js';
-import { CommandConflict, CommandInvalid, CommandNotFound, JournalError } from '../index.js';
+import { CommandConflict, CommandInvalid, CommandNotFound, JournalError, WorkflowBusy } from '../index.js';
+import { parseAge } from '../retention.js';
+import { LIMIT_KEY_TTL } from '../workflow/limit-types.js';
+import {
+  addedTagsSchema,
+  delayAgeSchema,
+  metadataChangeSchema,
+  runFieldsSchema,
+  runOverridesSchema,
+  ttlAgeSchema,
+} from '../workflow/run-field-schemas.js';
+import { RUN_FIELD_LIMITS } from '../workflow/run-fields.js';
+import { limitNameArgsSchema, limitOverrideSchema, limitResetSchema } from '../workflow/runner.js';
 import { CANCEL_STATES, RUN_STATES, SIGNAL_STATUSES, STEP_PHASES, STEP_VIEW_STATUSES } from '../workflow/states.js';
 import { JOURNAL_WORKFLOWS_ERROR_CODES } from './shapes.js';
 
 const isIdGenerationFailure = <Value>(value: Value): value is Extract<Value, IdGenerationFailure> =>
   ID_GENERATION_FAILURES.some(definition => definition.is(value));
+
+/**
+ * The permission each read and action needs, written once: one per verb (founder, 2026-10-23), so an operator can be
+ * let tag runs without being let replay them or pause a limit. Every read needs `read`.
+ */
+export const WORKFLOW_PERMISSIONS = {
+  read: 'workflow:read',
+  retry: 'journal:retry',
+  resolve: 'workflow:resolve',
+  cancel: 'workflow:cancel',
+  signal: 'workflow:signal',
+  metadata: 'workflow:metadata',
+  reschedule: 'workflow:reschedule',
+  replay: 'workflow:replay',
+  limits: 'workflow:limits',
+} as const satisfies Record<string, Permission>;
+
+/**
+ * The journal refusals the newer verbs return as values: the dispatcher answers each with its own code, status and
+ * data (a `WorkflowBusy` names the limit, the key and why it is busy), and records it on the receipt.
+ */
+const VERB_FAILURES = [
+  ...ID_GENERATION_FAILURES,
+  CommandNotFound,
+  CommandInvalid,
+  CommandConflict,
+  WorkflowBusy,
+  InvalidInput,
+] as const;
+type VerbFailure = ReturnType<(typeof VERB_FAILURES)[number]>;
+const isVerbFailure = <Value>(value: Value): value is Extract<Value, VerbFailure> =>
+  VERB_FAILURES.some(definition => definition.is(value));
+
+/** A journal refusal met in a preview, as the module error the operator sees: the code and status execute returns it with. */
+const refusal = (failure: Failure) =>
+  moduleError(
+    failure.code,
+    failure.status,
+    failure.message,
+    failure.remediation ?? 'Read the run or limit again and preview the action again.',
+  );
 
 const MAX_PAGE = 200;
 
@@ -56,14 +112,24 @@ const RunSummary = z
     scope: z.string().nullable(),
     tags: z.array(z.string()),
     rootId: z.string().nullable(),
+    /** The `def.startBatch` that started the run; null for a run started on its own. */
+    batchId: z.string().nullable(),
+    /** The run this one replays; null for a run that is no replay. */
+    replayOf: z.string().nullable(),
     cancelledAt: timeOrNull,
     cancelReason: z.string().nullable(),
     startedAt: z.iso.datetime(),
     finishedAt: timeOrNull,
+    /** When the run's first node is due, from `delay` or `reschedule`; null when it was due at once. */
+    startAt: timeOrNull,
     /** When a delayed run's first node is due, while it is still ahead; null otherwise. */
     delayedUntil: timeOrNull,
     /** When a run whose first node has not started ends `expired`; null when it has no ttl. */
     ttlAt: timeOrNull,
+    /** The overrides the run started with; null where each step's own setting applies. */
+    maxAttempts: z.number().int().nullable(),
+    stepTimeoutMs: z.number().int().nullable(),
+    priority: z.number().int().nullable(),
     stuck: z.boolean(),
     stranded: StrandedCode.nullable(),
   })
@@ -123,6 +189,27 @@ const HistoryEntry = z
   })
   .strict();
 
+const LimitValues = z.object({ total: z.number().int().nullable(), perKey: z.number().int().nullable() }).strict();
+
+/** A limit as an operator sees it: the code values, what an operator changed, what applies now, and who holds it. */
+const LimitSummary = z
+  .object({
+    name: z.string(),
+    workflows: z.array(z.string()),
+    code: LimitValues,
+    /** The `total` and `perKey` an operator set, which replace the code values until `reset`. */
+    override: LimitValues,
+    /** The `perKey` overrides of single keys that have not expired. */
+    keys: z.array(z.object({ key: z.string(), perKey: z.number().int(), until: z.iso.datetime() }).strict()),
+    /** The values a start is checked against now. A key override is not in it. */
+    effective: LimitValues,
+    paused: z.boolean(),
+    running: z.number().int(),
+    queued: z.number().int(),
+    version: z.number().int(),
+  })
+  .strict();
+
 const operatorFields = z.object({
   actorId: z.string().optional(),
   reason: z.string().optional(),
@@ -134,6 +221,12 @@ const operatorFields = z.object({
 const iso = (date: Date) => date.toISOString();
 const isoOrNull = (date: Date | null) => (date === null ? null : date.toISOString());
 const errorOrNull = (error: string | null) => (error === null ? null : redactSecrets(error));
+/** A limit as the reads and the limit actions show it: the journal's view, with plain arrays. */
+const limitShown = (limit: LimitView) => ({
+  ...limit,
+  workflows: [...limit.workflows],
+  keys: limit.keys.map(key => ({ ...key })),
+});
 
 /** A payload as the option allows it: absent while `hidden`, and for a value that is not there. */
 function shown(mode: 'hidden' | 'redacted', value: unknown): { text?: string } {
@@ -205,6 +298,14 @@ const notResolvable = (runId: string, why: string, status = 409) =>
     'Retry the step instead, or give a result that matches the declared output.',
   );
 
+const staleLimit = (name: string) =>
+  moduleError(
+    JOURNAL_WORKFLOWS_ERROR_CODES.staleRevision,
+    409,
+    `Limit "${name}" changed since the preview.`,
+    'Preview the action again and approve the new revision.',
+  );
+
 const stranded = (runId: string, why: string) =>
   moduleError(
     JOURNAL_WORKFLOWS_ERROR_CODES.stranded,
@@ -248,6 +349,11 @@ const isOver = (detail: RunDetail) => detail.run.finishedAt !== null;
  * does not count, so a step that reports progress does not void an approval to act on its run.
  */
 const revisionOf = (detail: RunDetail) => String(detail.run.version - detail.run.fieldChanges);
+/**
+ * The revision an approval to change a limit is taken on: the limit entity's version, which every operator change
+ * moves. Runs that take or free a slot do not, so a busy limit does not void the approval.
+ */
+const revisionOfLimit = (limit: LimitView) => String(limit.version);
 /** The revision of a retry of dead jobs: the run's version and the exact jobs, so the approval covers what is retried. */
 const deadJobsRevision = (detail: RunDetail, ids: readonly string[]) => `${revisionOf(detail)}:${ids.join(',')}`;
 
@@ -293,6 +399,29 @@ const deliveryOf = (permit: Permit) => `foreman:${permit.executionId}`;
 
 /** `a, b and c`, for a short list in a sentence. */
 const listOf = (names: readonly string[]) => names.map(name => `"${name}"`).join(', ');
+
+/**
+ * A newer run verb's failure: a run that is gone maps to its code, a journal refusal goes back as the failure it is
+ * (`VERB_FAILURES`), and any other failure is a bug that throws.
+ */
+function refusedRun<Value extends Failure>(runId: string, failure: Value): Extract<Value, VerbFailure> {
+  if (CommandNotFound.is(failure)) throw notFound(runId);
+  if (isVerbFailure(failure)) return failure;
+  throw new UnexpectedFailure(failure);
+}
+
+/** Whether the run's first node has not started: it is queued, or its first step waits for its first try. */
+function notStarted(detail: RunDetail): boolean {
+  if (detail.run.state === 'queued') return true;
+  if (detail.run.state !== 'running') return false;
+  const first = detail.run.shape.nodes[0]?.name;
+  const step = detail.steps.find(candidate => candidate.path === first && candidate.phase === 'do');
+  return step?.status === 'scheduled' && step.attempt === 1;
+}
+
+/** `n run(s)`, or what 0 means: no run at all. */
+const admits = (count: number | null) =>
+  count === null ? 'no cap' : count === 0 ? 'no run' : `${count} run(s) at once`;
 
 // ---- the module -------------------------------------------------------------------------------------------------
 
@@ -342,12 +471,26 @@ export function workflowsModule<
     return detail;
   }
 
+  /** The limit as the journal shows it now, or the refusal for a name no registered workflow holds. */
+  async function openLimit(name: string): Promise<LimitView> {
+    const limit = await journal.limits.get(db, name);
+    if (isFailure(limit)) throw refusal(limit);
+    return limit;
+  }
+
+  /** An operator change of the limit since the preview voids the approval; runs that take or free a slot do not. */
+  async function assertLimitUnchanged(name: string, permit: Permit): Promise<LimitView> {
+    const limit = await openLimit(name);
+    if (revisionOfLimit(limit) !== permit.expectedRevision) throw staleLimit(name);
+    return limit;
+  }
+
   // ---- reads --------------------------------------------------------------------------------------------------
 
   const runs = defineRead({
     id: 'workflow.runs',
     summary: 'Workflow runs, newest first, with whether each is stuck or stranded',
-    permission: 'workflow:read',
+    permission: WORKFLOW_PERMISSIONS.read,
     input: z
       .object({
         state: RunState.optional(),
@@ -358,6 +501,7 @@ export function workflowsModule<
         tag: z.string().min(1).optional(),
         scope: z.string().min(1).optional(),
         rootId: z.string().min(1).optional(),
+        batchId: z.string().min(1).optional(),
         from: z.iso.datetime().optional(),
         to: z.iso.datetime().optional(),
         limit: pageLimit,
@@ -366,7 +510,7 @@ export function workflowsModule<
       .strict(),
     output: z.object({ runs: z.array(RunSummary), next: z.string().nullable() }).strict(),
     load: async (
-      { state, name, version, parentId, stuck, tag, scope, rootId, from, to, limit, after },
+      { state, name, version, parentId, stuck, tag, scope, rootId, batchId, from, to, limit, after },
       _ctx: Record<string, never>,
     ) => {
       const page = await journal.workflows.runs(db, {
@@ -379,6 +523,7 @@ export function workflowsModule<
         ...(tag === undefined ? {} : { tag }),
         ...(scope === undefined ? {} : { scope }),
         ...(rootId === undefined ? {} : { rootId }),
+        ...(batchId === undefined ? {} : { batchId }),
         ...(from === undefined ? {} : { from: new Date(from) }),
         ...(to === undefined ? {} : { to: new Date(to) }),
         ...(after === undefined ? {} : { after }),
@@ -398,12 +543,18 @@ export function workflowsModule<
           scope: run.scope,
           tags: run.tags,
           rootId: run.rootId,
+          batchId: run.batchId,
+          replayOf: run.replayOf,
           cancelledAt: isoOrNull(run.cancelledAt),
           cancelReason: run.cancelReason === null ? null : redactSecrets(run.cancelReason),
           startedAt: iso(run.startedAt),
           finishedAt: isoOrNull(run.finishedAt),
+          startAt: isoOrNull(run.startAt),
           delayedUntil: isoOrNull(run.delayedUntil),
           ttlAt: isoOrNull(run.ttlAt),
+          maxAttempts: run.maxAttempts,
+          stepTimeoutMs: run.stepTimeoutMs,
+          priority: run.priority,
           stuck: run.stuck,
           stranded: run.stranded,
         })),
@@ -415,7 +566,7 @@ export function workflowsModule<
   const run = defineRead({
     id: 'workflow.run',
     summary: 'One run with its steps, children, waiting signals and whether it is stranded',
-    permission: 'workflow:read',
+    permission: WORKFLOW_PERMISSIONS.read,
     input: z.object({ runId: runIdField }).strict(),
     output: z
       .object({
@@ -455,12 +606,18 @@ export function workflowsModule<
           scope: row.scope,
           tags: row.tags,
           rootId: row.rootId,
+          batchId: row.batchId,
+          replayOf: row.replayOf,
           cancelledAt: isoOrNull(row.cancelledAt),
           cancelReason: row.cancelReason === null ? null : redactSecrets(row.cancelReason),
           startedAt: iso(row.startedAt),
           finishedAt: isoOrNull(row.finishedAt),
+          startAt: isoOrNull(row.startAt),
           delayedUntil: isoOrNull(row.delayedUntil),
           ttlAt: isoOrNull(row.ttlAt),
+          maxAttempts: row.maxAttempts,
+          stepTimeoutMs: row.stepTimeoutMs,
+          priority: row.priority,
           stuck: row.stuck,
           stranded: row.stranded,
         },
@@ -512,7 +669,7 @@ export function workflowsModule<
   const counts = defineRead({
     id: 'workflow.counts',
     summary: 'How many runs there are per workflow name, version and state',
-    permission: 'workflow:read',
+    permission: WORKFLOW_PERMISSIONS.read,
     input: emptyInput,
     output: z
       .object({
@@ -530,7 +687,7 @@ export function workflowsModule<
   const strandedRuns = defineRead({
     id: 'workflow.stranded',
     summary: 'Unfinished runs whose code is missing or has other nodes, oldest first',
-    permission: 'workflow:read',
+    permission: WORKFLOW_PERMISSIONS.read,
     input: z.object({ limit: pageLimit }).strict(),
     output: z
       .object({
@@ -566,7 +723,7 @@ export function workflowsModule<
   const history = defineRead({
     id: 'workflow.history',
     summary: "A run's events, oldest first, with who acted on the ones an operator wrote",
-    permission: 'workflow:read',
+    permission: WORKFLOW_PERMISSIONS.read,
     input: z.object({ runId: runIdField, limit: pageLimit, after: cursor }).strict(),
     output: z.object({ events: z.array(HistoryEntry), next: z.string().nullable() }).strict(),
     load: async ({ runId, limit, after }, _ctx: Record<string, never>) => {
@@ -602,7 +759,7 @@ export function workflowsModule<
     failures: ID_GENERATION_FAILURES,
     id: 'workflow.retryStep',
     summary: 'Run a dead step again, restart its failed children, or retry the dead jobs of a run',
-    permission: 'journal:retry',
+    permission: WORKFLOW_PERMISSIONS.retry,
     // A retry runs the step's side effects once more, under the same idempotency key. It never deletes data.
     risk: 'low',
     input: z
@@ -711,7 +868,7 @@ export function workflowsModule<
     failures: ID_GENERATION_FAILURES,
     id: 'workflow.resolveStep',
     summary: 'Give the result of a failed step by hand, so the run carries on without running it again',
-    permission: 'workflow:resolve',
+    permission: WORKFLOW_PERMISSIONS.resolve,
     // The run goes on as if the step succeeded with this result. Nothing checks that the work really happened.
     risk: 'high',
     input: z.object({ runId: runIdField, path: pathField, result: jsonValueSchema, reason: reasonField }).strict(),
@@ -752,7 +909,7 @@ export function workflowsModule<
     failures: ID_GENERATION_FAILURES,
     id: 'workflow.skipUndo',
     summary: 'Give up a failed undo of a compensating run, so the run goes on undoing the rest',
-    permission: 'workflow:resolve',
+    permission: WORKFLOW_PERMISSIONS.resolve,
     // The step's work stays done and is never undone. The run lists the path as residual.
     risk: 'high',
     input: z.object({ runId: runIdField, path: pathField, reason: reasonField }).strict(),
@@ -804,7 +961,7 @@ export function workflowsModule<
     failures: ID_GENERATION_FAILURES,
     id: 'workflow.cancel',
     summary: 'Stop a run and undo the steps it completed, newest first',
-    permission: 'workflow:cancel',
+    permission: WORKFLOW_PERMISSIONS.cancel,
     // The run never finishes its work, and its completed steps are undone.
     risk: 'high',
     input: z.object({ runId: runIdField, reason: reasonField }).strict(),
@@ -937,7 +1094,7 @@ export function workflowsModule<
     failures: ID_GENERATION_FAILURES,
     id: 'workflow.signal',
     summary: 'Give a run a signal its sender never delivered, such as a webhook that did not come',
-    permission: 'workflow:signal',
+    permission: WORKFLOW_PERMISSIONS.signal,
     // The run moves on as if the outside event happened. A wrong signal lets the run act on something that did not occur.
     risk: 'medium',
     input: z
@@ -994,10 +1151,452 @@ export function workflowsModule<
     },
   });
 
+  // ---- setMetadata and addTags ---------------------------------------------------------------------------------
+
+  /**
+   * A metadata or tag change does not move the run, so it is checked against the run's revision like any action (the
+   * run must still be where the operator saw it), and it never voids another approval: two metadata actions in a row
+   * both apply, and a cancel approved before a tag still runs.
+   */
+  const setMetadata = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.setMetadata',
+    summary: "Change a run's metadata: set keys, add to a number, append to a list, or remove a key",
+    permission: WORKFLOW_PERMISSIONS.metadata,
+    // The app's own notes on the run change. Its state, steps and jobs do not.
+    risk: 'low',
+    input: z.object({ runId: runIdField, change: metadataChangeSchema, reason: optionalReason }).strict(),
+    previewOutput: z
+      .object({ revision: z.string(), runId: z.string(), keys: z.array(z.string()), consequence: z.string() })
+      .strict(),
+    output: z.object({ runId: z.string(), keys: z.array(z.string()) }).strict(),
+    preview: async ({ runId, change }, _ctx: Record<string, never>) => {
+      const detail = await openRun(runId);
+      const keys = change.kind === 'set' ? Object.keys(change.patch) : [change.key];
+      // The values stay out of the preview: metadata is the app's data, shown only as the payload option allows.
+      const what =
+        change.kind === 'set'
+          ? `${listOf(keys)} ${keys.length === 1 ? 'is' : 'are'} set; the other keys stay.`
+          : change.kind === 'increment'
+            ? `${change.by} is added to "${change.key}".`
+            : change.kind === 'append'
+              ? `A value is appended to the list "${change.key}".`
+              : `"${change.key}" is removed.`;
+      return {
+        revision: revisionOf(detail),
+        runId,
+        keys,
+        consequence: `${what} The run does not move, so approvals taken on it stay valid.`,
+      };
+    },
+    execute: async ({ runId, change, reason }, _ctx: Record<string, never>, permit) => {
+      await assertUnchanged(runId, permit);
+      const outcome = await guarded(runId, () =>
+        journal.workflows.setMetadata(db, { runId, change }, operationOf(permit, reason)),
+      );
+      if (isFailure(outcome)) return refusedRun(runId, outcome);
+      return { runId, keys: Object.keys(outcome.metadata) };
+    },
+  });
+
+  const addTags = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.addTags',
+    summary: 'Add tags to a run, so it can be found by them',
+    permission: WORKFLOW_PERMISSIONS.metadata,
+    // A tag only labels the run. Tags are never removed, so a wrong one stays on the run.
+    risk: 'low',
+    input: z.object({ runId: runIdField, tags: addedTagsSchema, reason: optionalReason }).strict(),
+    previewOutput: z
+      .object({
+        revision: z.string(),
+        runId: z.string(),
+        /** The tags the run does not have yet: only these change it. */
+        added: z.array(z.string()),
+        consequence: z.string(),
+      })
+      .strict(),
+    output: z.object({ runId: z.string(), tags: z.array(z.string()) }).strict(),
+    preview: async ({ runId, tags }, _ctx: Record<string, never>) => {
+      const detail = await openRun(runId);
+      const added = [...new Set(tags)].filter(tag => !detail.run.tags.includes(tag));
+      if (detail.run.tags.length + added.length > RUN_FIELD_LIMITS.tags) {
+        throw refusal(
+          CommandInvalid({
+            detail: `run "${runId}" has ${detail.run.tags.length} tags, and a run holds at most ${RUN_FIELD_LIMITS.tags}`,
+          }),
+        );
+      }
+      return {
+        revision: revisionOf(detail),
+        runId,
+        added,
+        consequence:
+          added.length === 0
+            ? 'The run has every one of these tags, so nothing changes.'
+            : `The run gets ${listOf(added)}. Tags are never removed. The run does not move, so approvals taken on it stay valid.`,
+      };
+    },
+    execute: async ({ runId, tags, reason }, _ctx: Record<string, never>, permit) => {
+      await assertUnchanged(runId, permit);
+      const outcome = await guarded(runId, () =>
+        journal.workflows.addTags(db, { runId, tags }, operationOf(permit, reason)),
+      );
+      if (isFailure(outcome)) return refusedRun(runId, outcome);
+      return { runId, tags: [...outcome.tags] };
+    },
+  });
+
+  // ---- reschedule ---------------------------------------------------------------------------------------------
+
+  const rescheduleInput = z.union([
+    z.object({ runId: runIdField, delay: delayAgeSchema, reason: reasonField }).strict(),
+    z.object({ runId: runIdField, at: z.iso.datetime(), reason: reasonField }).strict(),
+  ]);
+  /** The new start a reschedule asks for, from now: a time in the past is now, as the verb does it. */
+  const wantedStart = (input: z.output<typeof rescheduleInput>, now: Date) => {
+    const wanted = 'at' in input ? new Date(input.at) : new Date(now.getTime() + parseAge(input.delay));
+    return wanted.getTime() > now.getTime() ? wanted : now;
+  };
+
+  const reschedule = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.reschedule',
+    summary: 'Move the start of a delayed or queued run that has not started its first step',
+    permission: WORKFLOW_PERMISSIONS.reschedule,
+    // The run's work happens at another time, and its ttl and deadline move with it. Nothing runs twice.
+    risk: 'medium',
+    input: rescheduleInput,
+    previewOutput: z
+      .object({
+        revision: z.string(),
+        runId: z.string(),
+        /** When the first node is due now. */
+        startAt: z.iso.datetime(),
+        /** When it will be due, as of the preview: a `delay` counts from when the action runs. */
+        newStartAt: z.iso.datetime(),
+        consequence: z.string(),
+      })
+      .strict(),
+    output: z.object({ runId: z.string(), startAt: z.iso.datetime() }).strict(),
+    preview: async (input, _ctx: Record<string, never>) => {
+      const detail = await openRun(input.runId);
+      if (!notStarted(detail)) {
+        throw refusal(
+          CommandConflict({
+            detail: `run "${input.runId}" has started (it is ${detail.run.state}); only a run whose first node has not started moves`,
+          }),
+        );
+      }
+      const newStartAt = wantedStart(input, new Date());
+      const { run: row } = detail;
+      return {
+        revision: revisionOf(detail),
+        runId: input.runId,
+        startAt: iso(row.startAt ?? row.startedAt),
+        newStartAt: iso(newStartAt),
+        consequence: [
+          `The run's first node becomes due at ${iso(newStartAt)}${'delay' in input ? ' (counted from when this runs)' : ''}.`,
+          ...(row.ttlAt === null ? [] : ['Its ttl counts from the new start.']),
+          ...(row.deadlineAt === null ? [] : ['Its deadline moves by as much.']),
+        ].join(' '),
+      };
+    },
+    execute: async (input, _ctx: Record<string, never>, permit) => {
+      const { runId, reason } = input;
+      await assertUnchanged(runId, permit);
+      const when = 'at' in input ? { at: new Date(input.at) } : { delay: input.delay };
+      const outcome = await guarded(runId, () =>
+        journal.workflows.reschedule(db, { runId, ...when }, operationOf(permit, reason)),
+      );
+      if (isFailure(outcome)) return refusedRun(runId, outcome);
+      return { runId, startAt: outcome.startAt };
+    },
+  });
+
+  // ---- replay -------------------------------------------------------------------------------------------------
+
+  const replay = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.replay',
+    summary: "Start a run again under a new id, at the workflow's newest version, with its input or a new one",
+    permission: WORKFLOW_PERMISSIONS.replay,
+    // Every step of the new run runs again: what the old run did, such as a charge or an email, happens again.
+    risk: 'medium',
+    input: z
+      .object({
+        runId: runIdField,
+        overrides: z
+          .object({
+            input: jsonValueSchema.optional(),
+            ...runFieldsSchema.unwrap().shape,
+            delay: delayAgeSchema.optional(),
+            ttl: ttlAgeSchema.optional(),
+            ...runOverridesSchema.unwrap().shape,
+          })
+          .strict()
+          .optional(),
+        reason: reasonField,
+      })
+      .strict(),
+    previewOutput: z
+      .object({
+        revision: z.string(),
+        runId: z.string(),
+        name: z.string(),
+        /** The old run's state: a replay of an unfinished run leaves it running. */
+        state: RunState,
+        /** The overrides given, by name. The rest is copied from the old run. */
+        overridden: z.array(z.string()),
+        consequence: z.string(),
+      })
+      .strict(),
+    output: z.object({ runId: z.string(), replayOf: z.string(), state: RunState }).strict(),
+    // A finished run is replayed as well, so this reads the run without `openRun`, which refuses one.
+    preview: async ({ runId, overrides }, _ctx: Record<string, never>) => {
+      const detail = await journal.workflows.run(db, runId);
+      if (detail === undefined) throw notFound(runId);
+      const overridden = Object.keys(overrides ?? {});
+      return {
+        revision: revisionOf(detail),
+        runId,
+        name: detail.run.name,
+        state: detail.run.state,
+        overridden,
+        consequence: [
+          `A new run of ${detail.run.name} starts under a new id, at the newest registered version, with this run's input, scope, tags and metadata${overridden.length === 0 ? '' : ` except ${listOf(overridden)}`}.`,
+          'Every step runs again, so their side effects happen again.',
+          isOver(detail) ? 'This run stays as it ended.' : 'This run is not changed and goes on.',
+          'A busy concurrency key refuses, joins or queues the new run, as the workflow says.',
+        ].join(' '),
+      };
+    },
+    execute: async ({ runId, overrides, reason }, _ctx: Record<string, never>, permit) => {
+      const detail = await journal.workflows.run(db, runId);
+      if (detail === undefined) throw notFound(runId);
+      if (revisionOf(detail) !== permit.expectedRevision) throw stale(runId);
+      const outcome = await guarded(runId, () =>
+        journal.workflows.replay(
+          db,
+          { runId, ...(overrides === undefined ? {} : { overrides }) },
+          operationOf(permit, reason),
+        ),
+      );
+      if (isFailure(outcome)) return refusedRun(runId, outcome);
+      const started = await journal.workflows.run(db, outcome.runId);
+      if (started === undefined) throw notFound(outcome.runId);
+      // With `onBusy: 'join'` the id is the running run's, which is no replay of this one.
+      return { runId: outcome.runId, replayOf: runId, state: started.run.state };
+    },
+  });
+
+  // ---- limits -------------------------------------------------------------------------------------------------
+
+  const limitNameField = limitNameArgsSchema.unwrap().shape.name;
+
+  const limits = defineRead({
+    id: 'workflow.limits.list',
+    summary: 'Every limit the registered workflows hold, with what applies now and who holds it',
+    permission: WORKFLOW_PERMISSIONS.read,
+    input: emptyInput,
+    output: z.object({ limits: z.array(LimitSummary) }).strict(),
+    load: async (_input, _ctx: Record<string, never>) => {
+      const all = await journal.limits.list(db);
+      return { limits: all.map(each => limitShown(each)) };
+    },
+  });
+
+  const limit = defineRead({
+    id: 'workflow.limits.get',
+    summary: 'One limit, with its code values, the overrides, whether it is paused, and the runs it holds and queues',
+    permission: WORKFLOW_PERMISSIONS.read,
+    input: z.object({ name: limitNameField }).strict(),
+    output: LimitSummary,
+    load: async ({ name }, _ctx: Record<string, never>) => limitShown(await openLimit(name)),
+  });
+
+  const limitPreview = z.object({ revision: z.string(), limit: LimitSummary, consequence: z.string() }).strict();
+
+  const pauseLimit = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.limits.pause',
+    summary: 'Pause a limit: no new run that holds it starts until it is resumed; the running ones finish',
+    permission: WORKFLOW_PERMISSIONS.limits,
+    // Every workflow that holds the limit stops taking work, for every caller, until someone resumes it.
+    risk: 'high',
+    input: z.object({ name: limitNameField, reason: reasonField }).strict(),
+    previewOutput: limitPreview,
+    output: LimitSummary,
+    preview: async ({ name }, _ctx: Record<string, never>) => {
+      const now = await openLimit(name);
+      return {
+        revision: revisionOfLimit(now),
+        limit: limitShown(now),
+        consequence: now.paused
+          ? `"${name}" is paused already, so nothing changes.`
+          : `New starts of ${listOf(now.workflows)} are refused (paused), or queued where the workflow queues. The ${now.running} running run(s) go on to their end.`,
+      };
+    },
+    execute: async ({ name, reason }, _ctx: Record<string, never>, permit) => {
+      await assertLimitUnchanged(name, permit);
+      const done = await journal.limits.pause(db, { name }, operationOf(permit, reason));
+      if (isFailure(done) && isVerbFailure(done)) return done;
+      return limitShown(orThrow(done));
+    },
+  });
+
+  const resumeLimit = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.limits.resume',
+    summary: 'Resume a paused limit: runs start again by its values, and the queued ones that fit start now',
+    permission: WORKFLOW_PERMISSIONS.limits,
+    // Work held back by the pause starts at once, all of it that fits.
+    risk: 'high',
+    input: z.object({ name: limitNameField, reason: reasonField }).strict(),
+    previewOutput: limitPreview,
+    output: LimitSummary,
+    preview: async ({ name }, _ctx: Record<string, never>) => {
+      const now = await openLimit(name);
+      return {
+        revision: revisionOfLimit(now),
+        limit: limitShown(now),
+        consequence: now.paused
+          ? `New starts of ${listOf(now.workflows)} are admitted again. Of the ${now.queued} queued run(s), those that fit start now.`
+          : `"${name}" is not paused, so nothing changes.`,
+      };
+    },
+    execute: async ({ name, reason }, _ctx: Record<string, never>, permit) => {
+      await assertLimitUnchanged(name, permit);
+      const done = await journal.limits.resume(db, { name }, operationOf(permit, reason));
+      if (isFailure(done) && isVerbFailure(done)) return done;
+      return limitShown(orThrow(done));
+    },
+  });
+
+  // The fields as the verb's own schema checks them, so the bounds (a ttl of at most 30 days) are written once.
+  const keyOverrideShape = limitOverrideSchema.options[0].unwrap().shape;
+  const valuesOverrideShape = limitOverrideSchema.options[1].unwrap().shape;
+  const overrideInput = z.union([
+    z
+      .object({
+        name: limitNameField,
+        key: keyOverrideShape.key,
+        perKey: keyOverrideShape.perKey,
+        ttl: keyOverrideShape.ttl,
+        reason: reasonField,
+      })
+      .strict(),
+    z
+      .object({
+        name: limitNameField,
+        total: valuesOverrideShape.total,
+        perKey: valuesOverrideShape.perKey,
+        reason: reasonField,
+      })
+      .strict()
+      .refine(args => args.total !== undefined || args.perKey !== undefined, {
+        message: 'an override needs total, perKey or both',
+      }),
+  ]);
+  const overrideLimit = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.limits.override',
+    summary: 'Replace a limit’s total or perKey until reset, or the perKey of one key for a while',
+    permission: WORKFLOW_PERMISSIONS.limits,
+    // A higher value lets more work run at once against whatever the limit protects; 0 stops new work.
+    risk: 'high',
+    input: overrideInput,
+    previewOutput: limitPreview,
+    output: LimitSummary,
+    preview: async (input, _ctx: Record<string, never>) => {
+      const now = await openLimit(input.name);
+      // A workflow's own limit without `concurrency` caps nothing: only a pause applies to it.
+      if (now.code.total === null && now.code.perKey === null) {
+        throw refusal(
+          CommandInvalid({
+            detail: `"${input.name}" has no total or perKey in code, so only pause and resume apply to it`,
+          }),
+        );
+      }
+      const consequence =
+        'key' in input
+          ? `Key "${input.key}" admits ${admits(input.perKey)} for ${input.ttl ?? LIMIT_KEY_TTL.default}, instead of ${admits(now.effective.perKey)}.`
+          : [
+              ...(input.total === undefined
+                ? []
+                : [`In all, "${input.name}" admits ${admits(input.total)} (now ${admits(now.effective.total)}).`]),
+              ...(input.perKey === undefined
+                ? []
+                : [`Per key it admits ${admits(input.perKey)} (now ${admits(now.effective.perKey)}).`]),
+              'This lasts until reset.',
+            ].join(' ');
+      return {
+        revision: revisionOfLimit(now),
+        limit: limitShown(now),
+        consequence: `${consequence} Queued runs that fit then start now; running runs over the new value finish.`,
+      };
+    },
+    execute: async (input, _ctx: Record<string, never>, permit) => {
+      await assertLimitUnchanged(input.name, permit);
+      const args =
+        'key' in input
+          ? { name: input.name, key: input.key, perKey: input.perKey, ttl: input.ttl }
+          : { name: input.name, total: input.total, perKey: input.perKey };
+      const done = await journal.limits.override(db, args, operationOf(permit, input.reason));
+      if (isFailure(done) && isVerbFailure(done)) return done;
+      return limitShown(orThrow(done));
+    },
+  });
+
+  const resetLimit = defineAction({
+    failures: VERB_FAILURES,
+    id: 'workflow.limits.reset',
+    summary: 'Drop the overrides of a limit, or of one key, so the code values apply again. A pause stays',
+    permission: WORKFLOW_PERMISSIONS.limits,
+    // The limit goes back to the code values at once: lower or higher than what ran during the incident.
+    risk: 'high',
+    input: z.object({ name: limitNameField, key: limitResetSchema.unwrap().shape.key, reason: reasonField }).strict(),
+    previewOutput: limitPreview,
+    output: LimitSummary,
+    preview: async ({ name, key }, _ctx: Record<string, never>) => {
+      const now = await openLimit(name);
+      const overridden = now.override.total !== null || now.override.perKey !== null || now.keys.length > 0;
+      const consequence =
+        key === undefined
+          ? overridden
+            ? `Every override of "${name}" is dropped: in all it admits ${admits(now.code.total)}, per key ${admits(now.code.perKey)}, as the code says. ${now.paused ? 'It stays paused.' : ''}`.trim()
+            : `"${name}" has no override, so nothing changes.`
+          : now.keys.some(held => held.key === key)
+            ? `The override of key "${key}" is dropped: it admits ${admits(now.effective.perKey)} again.`
+            : `Key "${key}" has no override, so nothing changes.`;
+      return { revision: revisionOfLimit(now), limit: limitShown(now), consequence };
+    },
+    execute: async ({ name, key, reason }, _ctx: Record<string, never>, permit) => {
+      await assertLimitUnchanged(name, permit);
+      const done = await journal.limits.reset(db, { name, key }, operationOf(permit, reason));
+      if (isFailure(done) && isVerbFailure(done)) return done;
+      return limitShown(orThrow(done));
+    },
+  });
+
   return defineModule({
     id: '@arki/journal-workflows',
     version: '1.0.0',
-    reads: { runs, run, counts, strandedRuns, history },
-    actions: { retryStep, signal, resolveStep, skipUndo, cancel },
+    reads: { runs, run, counts, strandedRuns, history, limits, limit },
+    actions: {
+      retryStep,
+      signal,
+      resolveStep,
+      skipUndo,
+      cancel,
+      setMetadata,
+      addTags,
+      reschedule,
+      replay,
+      pauseLimit,
+      resumeLimit,
+      overrideLimit,
+      resetLimit,
+    },
   });
 }

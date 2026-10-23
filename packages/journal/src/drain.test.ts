@@ -269,6 +269,17 @@ describe('drain', () => {
     expect(await scheduled.drain(db).then(result => orThrow(result))).toBe(2);
     expect(order_.slice(2).toSorted()).toEqual([`at:${id}`, `later:${id}`]);
     expect(() => urgent.withSchedule({ priority: 1.5 })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
+    // A priority function is checked on each value it gives: the write that would store a job it cannot hold fails.
+    const tooHigh = j.compose({ effects: [urgent.withSchedule({ priority: () => 2 ** 31 })] });
+    const placed = orderId(++next);
+    orThrow(
+      await db.transaction(tx =>
+        tooHigh.write(tx, order, placed, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      ),
+    );
+    await expect(
+      db.transaction(tx => tooHigh.write(tx, order, placed, { meta, events: () => [OrderPaid({ amount: 1 })] })),
+    ).rejects.toMatchObject({ code: 'BAD_DEFINITION' });
     expect(() => urgent.withSchedule({ delaySeconds: -1 })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION' }),
     );

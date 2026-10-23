@@ -7,8 +7,8 @@ import type { SchemaInput, SchemaOutput } from '@arki/schema';
 import type { CommandConflict, CommandInvalid, WorkflowBusy } from '../errors.js';
 import type { NoNeeds } from '../types.js';
 import type { NoSignals } from './define.js';
-import type { RunFields, RunTiming } from './run-fields.js';
-import type { CancelOutcome, SignalOutcome } from './runner.js';
+import type { RunFields, RunOverrides, RunTiming } from './run-fields.js';
+import type { CancelOutcome, SignalOutcome } from './run-types.js';
 import type { SignalStatus } from './states.js';
 import type { OrderId } from '../test-support.js';
 import { j, order, OrderPlaced, Unrelated } from '../test-support.js';
@@ -68,8 +68,10 @@ describe('def.signal, as types', () => {
 });
 
 describe('def.start, as types', () => {
-  it('takes the workflow input, an optional id, the run fields and timing, and returns the run id or a refusal', () => {
-    type Args = { readonly input: { paymentId: string; amount: number }; readonly id?: string } & RunFields & RunTiming;
+  it('takes the workflow input, an optional id, the run fields, timing and overrides, and returns the run id or a refusal', () => {
+    type Args = { readonly input: { paymentId: string; amount: number }; readonly id?: string } & RunFields &
+      RunTiming &
+      RunOverrides;
     expectTypeOf<SchemaInput<typeof refund.start.input>>().toEqualTypeOf<Args>();
     expectTypeOf<SchemaOutput<typeof refund.start.input>>().toEqualTypeOf<Args>();
     expectTypeOf<Awaited<ReturnType<typeof refund.start.handler>>>().toEqualTypeOf<

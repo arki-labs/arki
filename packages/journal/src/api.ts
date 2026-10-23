@@ -8,10 +8,10 @@ import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
-import type { CommandFailure } from './errors.js';
+import type { CommandFailure, CommandInvalid, CommandNotFound } from './errors.js';
 import type { EventLog, EventLogPosition, ForwardLag, ProjectionCursor } from './event-log.js';
 import type { HookPoint } from './hooks.js';
-import type { JobOps } from './outbox.js';
+import type { JobOperationInput, JobOps } from './outbox.js';
 import type { ResolvedRetention } from './retention.js';
 import type {
   AcceptFailure,
@@ -67,8 +67,9 @@ import type {
   WorkflowOptions,
   WorkflowServices,
 } from './workflow/define.js';
+import type { LimitDef, LimitNameArgs, LimitOverrideArgs, LimitResetArgs, LimitView } from './workflow/limit-types.js';
 import type { WorkflowOps } from './workflow/read.js';
-import type { StarterOf } from './workflow/runner.js';
+import type { StarterOf } from './workflow/run-types.js';
 
 /**
  * Looks at the locked row, checks the rules, and returns the events to append.
@@ -535,6 +536,11 @@ export type Journal<
    * `compose({ workflows, workflowMeta })`.
    */
   readonly workflows: WorkflowOps<Tx>;
+  /**
+   * The limits the registered workflows hold (`concurrency`), read and changed at runtime: `list`, `get`, and the
+   * operator verbs `override`, `reset`, `pause` and `resume`. The verbs need `compose({ workflows, workflowMeta })`.
+   */
+  readonly limits: LimitOps<Tx>;
   /** A dead job back to pending: attempts and lease cleared, due now, workers woken. `JOB_NOT_DEAD` otherwise. */
   retry: JobOps['retry'];
   /** A dead job leaves the hot table, archived as `discarded`. `JOB_NOT_DEAD` otherwise. */
@@ -678,6 +684,12 @@ export type JournalDefinitions<
     on: NoInfer<TapHandlers<E, SchemaOutput<Meta>, AppDb, N>>,
   ): Tap<SchemaOutput<Meta>, AppDb, N>;
   /**
+   * A limit several workflows share: list it in each one's `concurrency.shared`. `total` caps the unfinished runs that
+   * hold it, `perKey` those with one concurrency key; at least one, each a positive whole number. Throws
+   * `BAD_DEFINITION` otherwise, and for a name that starts with `workflow/` (a workflow's own limit).
+   */
+  limit(def: LimitDef): LimitDef;
+  /**
    * A durable workflow: `.step(...)` nodes, then `.finish()`. The finished definition has `start`, a command:
    * `context.run(refund.start, { input, id? })` returns `{ runId }` (a repeat with the same `id` and input returns the
    * same run; another input is a `CommandConflict`). Pass the definition to `compose({ workflows })` so a worker runs it.
@@ -738,6 +750,43 @@ export type JournalDefinitions<
     } & ServicesOption<ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>>,
   ): Journal<Meta, Tx, AppDb>;
 };
+/**
+ * `journal.limits`: what limits there are and the operator verbs that change them. Each verb writes one event on the
+ * `journal.limit` entity, which carries `op.actor`, `op.reason` and `op.executionId`, and returns the limit after it.
+ * An unknown name is `CommandNotFound`.
+ */
+export type LimitOps<Tx> = {
+  /** Every limit the registered workflows hold, by name. */
+  list(db: DbHandle): Promise<LimitView[]>;
+  get(db: DbHandle, name: string): Promise<LimitView | CommandNotFound>;
+  /**
+   * Replaces a code value until `reset`, or the `perKey` of one key until it expires. `CommandInvalid` for a value
+   * that cannot apply: any override of a workflow without `concurrency`, or a `perKey` where no start has a key.
+   */
+  override(
+    source: TransactionSource<Tx>,
+    args: LimitOverrideArgs,
+    op: JobOperationInput,
+  ): Promise<LimitView | CommandNotFound | CommandInvalid | CommandFailure>;
+  /** The code values again: of one key, or without `key` of the whole limit. Its pause stays. */
+  reset(
+    source: TransactionSource<Tx>,
+    args: LimitResetArgs,
+    op: JobOperationInput,
+  ): Promise<LimitView | CommandNotFound | CommandFailure>;
+  /** A paused limit admits no new run (`WorkflowBusy` with `reason: 'paused'`); the runs that hold it go on. */
+  pause(
+    source: TransactionSource<Tx>,
+    args: LimitNameArgs,
+    op: JobOperationInput,
+  ): Promise<LimitView | CommandNotFound | CommandFailure>;
+  resume(
+    source: TransactionSource<Tx>,
+    args: LimitNameArgs,
+    op: JobOperationInput,
+  ): Promise<LimitView | CommandNotFound | CommandFailure>;
+};
+
 /**
  * `services` is required as soon as one listed effect has a need. `'worker'` leaves the needs
  * open: writes never need them, and each `worker` or `drain` gives them (`HandlerServices`).

@@ -11,6 +11,7 @@ export type {
   CommandRunner,
   Journal,
   JournalDefinitions,
+  LimitOps,
   ReplayResult,
   RootCommandRunner,
   WorkflowCommandRunner,
@@ -131,18 +132,34 @@ export type {
 } from './workflow/read.js';
 export type { WorkflowShape } from './workflow/shape.js';
 export type { LifecycleHookContext, LifecycleHooks, RunEnding, WorkflowDef } from './workflow/define.js';
-export type { ReplayArgs, ReplayOverrides, StartBatchOutcome, WorkflowStarter } from './workflow/runner.js';
+export type { ReplayArgs, ReplayOverrides, StartBatchOutcome, WorkflowStarter } from './workflow/run-types.js';
 export {
   BATCH_LIMIT,
   RUN_FIELD_LIMITS,
+  RUN_OVERRIDE_LIMITS,
   type MetadataChange,
   type MetadataContext,
   type MetadataOutcome,
   type RunFields,
   type RunMetadata,
+  type RunOverrides,
   type TagsContext,
   type TagsOutcome,
 } from './workflow/run-fields.js';
+export {
+  LIMIT_BOUNDS,
+  LIMIT_KEY_TTL,
+  WORKFLOW_LIMIT_PREFIX,
+  type LimitBusyReason,
+  type LimitDef,
+  type LimitKeyView,
+  type LimitNameArgs,
+  type LimitOverrideArgs,
+  type LimitResetArgs,
+  type LimitValues,
+  type LimitView,
+} from './workflow/limit-types.js';
+export { LIMIT_BUSY_REASONS } from './workflow/states.js';
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';

@@ -52,7 +52,7 @@ import type { EffectAttempt } from './worker.js';
 import { createCommandRunner } from './command.js';
 import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
-import { JournalError } from './errors.js';
+import { CommandNotFound, JournalError } from './errors.js';
 import { routeOf } from './event-log.js';
 import { defineEvent } from './event.js';
 import { bindEffectFrom, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
@@ -72,6 +72,7 @@ import {
   createTapDispatch,
   createWorkers,
 } from './worker.js';
+import { defineLimit } from './workflow/limit-types.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
@@ -225,6 +226,7 @@ function createInit<
     tap: tapFor<MetaOut, AppDb>(),
     workflow: workflows.workflow,
     task: workflows.task,
+    limit: defineLimit,
     compose: config => {
       const registered = config.workflows === undefined || config.workflows.length === 0 ? undefined : config.workflows;
       if (registered !== undefined && config.workflowMeta === undefined) {
@@ -248,6 +250,7 @@ function createInit<
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
       return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, forwardedLogs, {
         commands: workflows.operate,
+        limits: workflows.limits,
         registry: workflows.started,
         meta: config.workflowMeta,
         stepHooks: workflows.stepHooks,
@@ -319,6 +322,8 @@ function createJournal<
   /** What `journal.workflows` needs: the operator verbs, the registered code, and the meta their events are recorded with. */
   workflowWiring?: {
     readonly commands: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['operate'];
+    /** The limit reads and the commands of the limit verbs. */
+    readonly limits: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['limits'];
     readonly registry: ReadonlyMap<string, { readonly shapeHash: string }>;
     readonly meta: SchemaInput<Meta> | undefined;
     /** The step hooks the runner wraps each step body and undo in. */
@@ -496,6 +501,17 @@ function createJournal<
     }
     return workflowWiring.commands;
   };
+  const limitCommands = () => {
+    if (workflowWiring === undefined) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'workflow',
+        'limits',
+        'journal: the limit verbs need compose({ workflows, workflowMeta })',
+      );
+    }
+    return workflowWiring.limits;
+  };
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
@@ -594,6 +610,18 @@ function createJournal<
         return done;
       },
       checkResult: (db, args) => verbCommands().checkResult(db, args),
+    },
+    // A limit change starts nothing in this slice, so no verb wakes a worker. Without workflows no limit is known.
+    limits: {
+      list: async db => (workflowWiring === undefined ? [] : workflowWiring.limits.list(db)),
+      get: (db, name) =>
+        workflowWiring === undefined
+          ? Promise.resolve(CommandNotFound({ detail: `no limit "${name}"; no workflows are composed` }))
+          : workflowWiring.limits.get(db, name),
+      override: (source, args, op) => run(source, limitCommands().override, { ...args, op }, verbMeta()),
+      reset: (source, args, op) => run(source, limitCommands().reset, { ...args, op }, verbMeta()),
+      pause: (source, args, op) => run(source, limitCommands().pause, { ...args, op }, verbMeta()),
+      resume: (source, args, op) => run(source, limitCommands().resume, { ...args, op }, verbMeta()),
     },
     wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point, step: stepHooks.point },

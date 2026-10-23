@@ -11,9 +11,8 @@ import type { AsyncSchemaFailure } from '@arki/failure';
 import type { JobOperationInput, PageOptions } from '../outbox.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
-import type { StepStatus } from './machine.js';
 import type { MetadataChange, MetadataOutcome, TagsOutcome } from './run-fields.js';
-import type { StepPhase } from './states.js';
+import type { StepPhase, StepStatus } from './states.js';
 import type {
   CancelOutcome,
   ReplayArgs,
@@ -21,7 +20,7 @@ import type {
   RescheduleOutcome,
   SignalOutcome,
   StartOutcome,
-} from './runner.js';
+} from './run-types.js';
 import type { CommandFailure, CommandNotFound, WorkflowStranded } from '../errors.js';
 import { JournalError } from '../errors.js';
 import { bounded, cursorText, LIST_LIMIT, pageOf, pastCursor } from '../outbox.js';
@@ -60,6 +59,9 @@ export type RunSummary = Pick<
   | 'cancelReason'
   | 'startAt'
   | 'ttlAt'
+  | 'maxAttempts'
+  | 'stepTimeoutMs'
+  | 'priority'
   | 'startedAt'
   | 'finishedAt'
 > & {
@@ -331,6 +333,9 @@ export function createWorkflowReads(deps: {
     cancelReason: runs.cancelReason,
     startAt: runs.startAt,
     ttlAt: runs.ttlAt,
+    maxAttempts: runs.maxAttempts,
+    stepTimeoutMs: runs.stepTimeoutMs,
+    priority: runs.priority,
     startedAt: runs.startedAt,
     finishedAt: runs.finishedAt,
     delayedUntil: delayedUntilSql,

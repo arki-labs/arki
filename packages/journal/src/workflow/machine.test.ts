@@ -263,15 +263,40 @@ describe('the workflow.run reducers', () => {
       version: stored?.version,
     });
   });
+
+  it('RunQueued holds a run queued with no node, and RunDequeued lets it run; replay rebuilds both', async () => {
+    const id = orThrow(workflowRunId());
+    orThrow(
+      await write(
+        id,
+        started(),
+        events.RunQueued({ limitName: 'workflow/payments.refund', reason: 'full', ttlAt: null, at: clock(0) }),
+      ),
+    );
+    expect(await runRow(id)).toMatchObject({ state: 'queued', node: null, finishedAt: null });
+    expect(orThrow(await db.transaction(tx => journal.replay(tx, run, id))).row).toMatchObject({ state: 'queued' });
+    orThrow(
+      await write(
+        id,
+        events.RunDequeued({ at: clock(1) }),
+        events.NodeScheduled({ path: 'hold', phase: 'do', attempt: 1, key: 'k', jobId: null, at: clock(1) }),
+      ),
+    );
+    expect(await runRow(id)).toMatchObject({ state: 'running', node: 'hold' });
+    expect(orThrow(await db.transaction(tx => journal.replay(tx, run, id))).row).toMatchObject({ state: 'running' });
+  });
 });
 
 describe('the run fields on RunStarted', () => {
-  it('a RunStarted stored before the run fields, start timing, batches and replays existed still replays, with none of them set', async () => {
+  it('a RunStarted stored before the run fields, start timing, batches, replays, overrides and limits existed still replays, with none of them set', async () => {
     const id = orThrow(workflowRunId());
-    // `started()` writes the event as it was before scope, tags, metadata, rootId, startAt, ttlAt, ttlMs, batchId and
-    // replayOf: none of them is in its data, so an old run has no delay, never expires, is in no batch and replays nothing.
+    // `started()` writes the event as it was before scope, tags, metadata, rootId, startAt, ttlAt, ttlMs, batchId,
+    // replayOf, the overrides and limits: none of them is in its data, so an old run has no delay, never expires, is in
+    // no batch, replays nothing, its steps retry, time out and queue as their definitions say, and it holds no shared limit.
+    // A run from before `onBusy: 'queue'` has no `RunQueued`, so it is running.
     orThrow(await write(id, started()));
     const defaults = {
+      state: 'running',
       scope: null,
       tags: [],
       metadata: {},
@@ -281,6 +306,10 @@ describe('the run fields on RunStarted', () => {
       ttlMs: null,
       batchId: null,
       replayOf: null,
+      maxAttempts: null,
+      stepTimeoutMs: null,
+      priority: null,
+      limits: [],
     };
     expect(await runRow(id)).toMatchObject(defaults);
     const replayed = orThrow(await db.transaction(tx => journal.replay(tx, run, id)));
@@ -296,6 +325,10 @@ describe('the run fields on RunStarted', () => {
       rootId: 'wfr_root',
       batchId: 'wfb_1',
       replayOf: 'wfr_old',
+      maxAttempts: 3,
+      stepTimeoutMs: 5000,
+      priority: 4,
+      limits: ['uploads'],
     };
     const data = {
       name: 'payments.refund',

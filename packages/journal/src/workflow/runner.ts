@@ -27,7 +27,13 @@ import {
 } from '@arki/failure';
 import { ensure, parseAsync } from '@arki/schema';
 
-import type { Command, CommandContext, JournalDefinitions, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
+import type {
+  CommandContext,
+  JournalDefinitions,
+  LimitOps,
+  RootCommandRunner,
+  WorkflowCommandRunner,
+} from '../api.js';
 import type { CommandFailure } from '../errors.js';
 import type { JournalTables } from '../pg.js';
 import { storedEventRowSchema } from '../zod.js';
@@ -45,7 +51,6 @@ import type {
 import type {
   AnyResults,
   AnySignals,
-  DefExtension,
   ErasedContext,
   ErasedStartOn,
   RunEnding,
@@ -53,7 +58,7 @@ import type {
   WorkflowNode,
 } from './define.js';
 import type { RunDetail } from './read.js';
-import type { CANCEL_STATES, SignalStatus, StepPhase } from './states.js';
+import type { RUN_STATES, SignalStatus, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
 import { debugWorkflow } from '../debug.js';
 import {
@@ -75,19 +80,35 @@ import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retenti
 import { isPlainObject, sameValue } from '../storage.js';
 import { defaultEffectRetry } from '../worker.js';
 import { isCheckedRead, resultSchemaOf, taskOf, workflowWith } from './define.js';
-import type { MetadataChange, MetadataOutcome, RunFields, RunTiming, TagsOutcome } from './run-fields.js';
+import type { MetadataChange, MetadataOutcome, RunFields, RunOverrides, RunTiming, TagsOutcome } from './run-fields.js';
+import type {
+  CancelArgs,
+  CancelOutcome,
+  CancelSchema,
+  ReadOutcome,
+  RescheduleOutcome,
+  SignalOutcome,
+  SignalSchema,
+  StartArgs,
+  StartBatchOutcome,
+  StartBatchSchema,
+  StartOutcome,
+  StartSchema,
+} from './run-types.js';
+import { BATCH_LIMIT, changedMetadata, metadataRefusal, newTags, RUN_FIELD_LIMITS } from './run-fields.js';
 import {
   addedTagsSchema,
-  BATCH_LIMIT,
-  changedMetadata,
   delayAgeSchema,
   metadataChangeSchema,
-  metadataRefusal,
-  newTags,
-  RUN_FIELD_LIMITS,
   runFieldsSchema,
+  runOverridesSchema,
   runTimingSchema,
-} from './run-fields.js';
+  ttlAgeSchema,
+} from './run-field-schemas.js';
+import type { HeldLimit, KnownLimit, LimitBlock, LimitView } from './limit-types.js';
+import { LIMIT_BOUNDS, LIMIT_KEY_TTL, workflowLimitName } from './limit-types.js';
+import type { PromoteSkip } from './limits.js';
+import { createLimitGate, expiredKeys, limitLockId, limitMachine, lockExclusive } from './limits.js';
 import { workflowMachine } from './machine.js';
 import { createWorkflowReads } from './read.js';
 import { STEP_PHASES } from './states.js';
@@ -96,8 +117,10 @@ import { withJournalSpan } from '../telemetry.js';
 
 /** The library-owned effect that runs one node attempt. */
 export const STEP_EFFECT = 'workflow.step';
-/** The library-owned effect that fires a park's wake time and a run's deadline. */
+/** The library-owned effect that fires a park's wake time, a run's deadline and a queued run's ttl. */
 export const TIMER_EFFECT = 'workflow.timer';
+/** The library-owned effect that looks at a limit's queued runs again when a key's `perKey` override runs out. */
+export const LIMIT_TIMER_EFFECT = 'workflow.limitTimer';
 /** The library-owned effects that start a run from a journal event (`startOn`): `workflow.start:<workflow name>`. */
 export const START_EFFECT = 'workflow.start';
 /** The library-owned effect that runs a definition's lifecycle hooks (`on`) when a run ends. */
@@ -106,6 +129,9 @@ export const LIFECYCLE_EFFECT = 'workflow.on';
 const WORKFLOW_ACTOR = 'system:workflow';
 /** The command that moves a run on after a node attempt. Internal: only the step effect runs it. */
 const CHECKPOINT_COMMAND = 'workflow.checkpoint';
+/** The command the limit timer runs to start the queued runs that fit once a key override ran out. Internal. */
+const PROMOTE_COMMAND = 'workflow.promoteQueued';
+const promoteSchema = z.object({ name: z.string().min(1) });
 /** The command a parent's checkpoint runs to start one child run. Internal. */
 const START_CHILD_COMMAND = 'workflow.startChild';
 const startChildSchema = z.object({
@@ -130,6 +156,11 @@ const SET_METADATA_COMMAND = 'workflow.setMetadata';
 const ADD_TAGS_COMMAND = 'workflow.addTags';
 const RESCHEDULE_COMMAND = 'workflow.reschedule';
 const REPLAY_COMMAND = 'workflow.replay';
+/** The limit verbs. Internal: `journal.limits` runs them. */
+const LIMIT_OVERRIDE_COMMAND = 'limit.override';
+const LIMIT_RESET_COMMAND = 'limit.reset';
+const LIMIT_PAUSE_COMMAND = 'limit.pause';
+const LIMIT_RESUME_COMMAND = 'limit.resume';
 /** The same changes, made by a step or undo body through `ctx.metadata` and `ctx.tags`. Internal. */
 const STEP_METADATA_COMMAND = 'workflow.stepMetadata';
 const STEP_TAGS_COMMAND = 'workflow.stepTags';
@@ -172,18 +203,56 @@ export const rescheduleSchema = z.union([
   z.strictObject({ runId: z.string().min(1), delay: delayAgeSchema, op: operationSchema }).readonly(),
   z.strictObject({ runId: z.string().min(1), at: z.date(), op: operationSchema }).readonly(),
 ]);
-/** What `replay` may change: the input, the run fields and the timing. A field left out keeps the old run's; timing starts fresh. */
-export type ReplayOverrides = { readonly [K in keyof ReplayOverridable]: ReplayOverridable[K] };
-/** Flattened above, so the type compares equal to `replaySchema`'s output. */
-type ReplayOverridable = { readonly input?: unknown } & RunFields & RunTiming;
-/** `replay` takes the run to start again, and what to change. */
-export type ReplayArgs = { readonly runId: string; readonly overrides?: ReplayOverrides | undefined };
+/** A limit name as the verbs take it: a `j.limit` name or `workflow/<name>`, as long as the `journal_limits` key. */
+const limitNameSchema = z.string().min(1).max(256);
+const limitKeySchema = z.string().min(1).max(256);
+const limitCountSchema = z.int().nonnegative();
+/**
+ * `journal.limits.override`: the `perKey` of one key for a `ttl` up to `LIMIT_KEY_TTL.max`, or the limit's own
+ * `total` and `perKey`, at least one. The type is the source (`LimitOverrideArgs`); `schemas.test-d.ts` locks this
+ * schema to it both ways.
+ */
+export const limitOverrideSchema = z.union([
+  z
+    .strictObject({
+      name: limitNameSchema,
+      key: limitKeySchema,
+      perKey: limitCountSchema,
+      ttl: ttlAgeSchema
+        .refine(age => parseAge(age) <= parseAge(LIMIT_KEY_TTL.max), {
+          message: `a key override lasts at most ${LIMIT_KEY_TTL.max}`,
+        })
+        .optional(),
+      op: operationSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      name: limitNameSchema,
+      total: limitCountSchema.optional(),
+      perKey: limitCountSchema.optional(),
+      op: operationSchema,
+    })
+    .refine(args => args.total !== undefined || args.perKey !== undefined, {
+      message: 'an override needs total, perKey or both',
+    })
+    .readonly(),
+]);
+export const limitResetSchema = z
+  .object({ name: limitNameSchema, key: limitKeySchema.optional(), op: operationSchema })
+  .readonly();
+export const limitNameArgsSchema = z.object({ name: limitNameSchema, op: operationSchema }).readonly();
 /** Checks `ReplayArgs` plus the operation. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
 export const replaySchema = z
   .object({
     runId: z.string().min(1),
     overrides: z
-      .object({ input: z.unknown().optional(), ...runFieldsSchema.unwrap().shape, ...runTimingSchema.unwrap().shape })
+      .object({
+        input: z.unknown().optional(),
+        ...runFieldsSchema.unwrap().shape,
+        ...runTimingSchema.unwrap().shape,
+        ...runOverridesSchema.unwrap().shape,
+      })
       .readonly()
       .optional(),
     op: operationSchema,
@@ -191,13 +260,14 @@ export const replaySchema = z
   .readonly();
 /**
  * One item of `def.startBatch`, already checked by the batch's schema: the input as the workflow's schema gave it, and
- * the run fields and timing checked again by their own schemas. Internal.
+ * the run fields, timing and overrides checked again by their own schemas. Internal.
  */
 const batchItemSchema = z.object({
   batchId: z.string().min(1),
   item: z.object({ input: z.unknown(), id: z.string().min(1).optional() }),
   fields: runFieldsSchema,
   timing: runTimingSchema,
+  overrides: runOverridesSchema,
 });
 /** The shape of `def.startBatch`'s arguments, before each item is checked by the workflow's start schema. */
 const batchShapeSchema = z.object({
@@ -255,103 +325,6 @@ const StepDead = defineFailure('journal.workflow.step_dead', {
   remediation: 'Inspect the workflow checkpoint, repair the cause, then retry or resolve the step.',
 });
 
-/** What `def.read` gives: the run, typed, or why it cannot be. A throwing validator is a `ValidatorDefect`. */
-type ReadOutcome<Input, ReadOutput, ReadResults> =
-  | RunDetail<Input, ReadOutput, ReadResults>
-  | WorkflowReadMismatch
-  | ReturnType<typeof ValidatorDefect>
-  | undefined;
-
-/**
- * The arguments of `def.start`: the input, the run id, the run fields (`scope`, `tags`, `metadata`) and its timing
- * (`delay`, `ttl`).
- */
-export type StartArgs<Input> = { readonly input: Input; readonly id?: string } & RunFields & RunTiming;
-/**
- * The schema of `def.start`: `{ input, id?, scope?, tags?, metadata?, delay?, ttl? }`, with `input` checked by the
- * workflow's own input schema, the run fields by `runFieldsSchema` and the timing by `runTimingSchema`.
- */
-export type StartSchema<Input extends StandardSchemaV1> = StandardSchemaV1<
-  StartArgs<SchemaInput<Input>>,
-  StartArgs<SchemaOutput<Input>>
->;
-/**
- * What `def.start` returns: the run id, or a refusal when the id is taken by another run or the input is too large
- * (`CommandConflict`), the concurrency key is busy (`WorkflowBusy`), or the metadata is too large (`CommandInvalid`).
- */
-export type StartOutcome = { readonly runId: string } | CommandConflict | WorkflowBusy | CommandInvalid;
-/** The arguments of `def.startBatch`: up to `BATCH_LIMIT` starts of one workflow, and the batch id (made when left out). */
-export type StartBatchArgs<Input> = { readonly items: readonly StartArgs<Input>[]; readonly batchId?: string | undefined };
-/** The schema of `def.startBatch`: every item is checked by the workflow's start schema, so one bad item refuses the batch. */
-export type StartBatchSchema<Input extends StandardSchemaV1> = StandardSchemaV1<
-  StartBatchArgs<SchemaInput<Input>>,
-  StartBatchArgs<SchemaOutput<Input>>
->;
-/** What `def.startBatch` returns: the batch id, and for each item, in order, what its own `def.start` would have returned. */
-export type StartBatchOutcome = { readonly batchId: string; readonly runs: readonly StartOutcome[] };
-/** What a journal adds to a finished definition. */
-export type WorkflowStarter<
-  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
-  Tx extends TransactionSource<Tx>,
-  Input extends StandardSchemaV1,
-  Signals extends AnySignals,
-  ReadOutput,
-  ReadResults,
-> = {
-  readonly start: Command<StartSchema<Input>, Promise<StartOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
-  /**
-   * The command that starts many runs in one transaction, all with one `batchId`. Each item is the arguments of
-   * `start`, and `runs[i]` is item i's outcome: a refused item (`WorkflowBusy`, `CommandConflict`, ...) rolls back
-   * only its own savepoint. An item that does not fit the start schema refuses the whole batch with `InvalidInput`.
-   */
-  readonly startBatch: Command<
-    StartBatchSchema<Input>,
-    Promise<StartBatchOutcome | CommandFailure>,
-    SchemaOutput<Meta>,
-    Tx
-  >;
-  /**
-   * The command that delivers the signal `name` to a run. `name` is one of the signals the workflow's `waitFor`
-   * nodes declare, and `payload` is the input of that signal's schema.
-   */
-  readonly signal: <Name extends keyof Signals & string>(
-    name: Name,
-  ) => Command<SignalSchema<Signals[Name]>, Promise<SignalOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
-  /** The command that cancels a run: it stops, undoes its completed steps newest first, and ends `cancelled`. */
-  readonly cancel: Command<CancelSchema, Promise<CancelOutcome | CommandFailure>, SchemaOutput<Meta>, Tx>;
-  /**
-   * One run of this workflow, as `journal.workflows.run` reads it, typed by the definition. `undefined` when there is
-   * no such run, or the run belongs to another workflow.
-   *
-   * Values with a schema are checked when read, and typed by that schema: the input; the output when the workflow
-   * declares an `output` schema (`null` until the run completes); the result of each step with an `output` schema
-   * (the schema's output, not what the step returned) and of each `waitFor`. Any other result is `unknown`, and a
-   * node that has not run is missing. A run whose stored values no longer fit
-   * returns `WORKFLOW_READ_MISMATCH` (failure code `journal.workflow_read_mismatch`); read it untyped with
-   * `journal.workflows.run`. A run started on an older version is checked the same way.
-   *
-   * The stored input is the input schema's output, so a schema whose output is not a valid input (a transform)
-   * makes `read` refuse.
-   */
-  readonly read: (db: DbHandle, runId: string) => Promise<ReadOutcome<SchemaOutput<Input>, ReadOutput, ReadResults>>;
-};
-/** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
-// eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface
-export interface StarterOf<
-  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
-  Tx extends TransactionSource<Tx>,
-  Input extends StandardSchemaV1,
-> extends DefExtension {
-  readonly out: WorkflowStarter<
-    Meta,
-    Tx,
-    Input,
-    Extract<this['signals'], AnySignals>,
-    this['readOutput'],
-    this['results']
-  >;
-}
-
 function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<Input> {
   return {
     '~standard': {
@@ -359,7 +332,14 @@ function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<
       vendor: 'arki',
       validate: async value => {
         if (!isPlainObject(value)) {
-          return { issues: [{ message: 'start takes { input, id?, scope?, tags?, metadata?, delay?, ttl? }' }] };
+          return {
+            issues: [
+              {
+                message:
+                  'start takes { input, id?, scope?, tags?, metadata?, delay?, ttl?, maxAttempts?, timeout?, priority? }',
+              },
+            ],
+          };
         }
         const { id } = value;
         if (id !== undefined && (typeof id !== 'string' || id === '')) {
@@ -381,7 +361,14 @@ function startSchema<Input extends StandardSchemaV1>(input: Input): StartSchema<
         const timing = await parseAsync(runTimingSchema, { delay: value.delay, ttl: value.ttl });
         if (InvalidInput.is(timing)) return { issues: timing.data.issues };
         if (ValidatorDefect.is(timing)) orThrow(timing);
-        const args = { input: parsed, ...fields, ...timing };
+        const overrides = await parseAsync(runOverridesSchema, {
+          maxAttempts: value.maxAttempts,
+          timeout: value.timeout,
+          priority: value.priority,
+        });
+        if (InvalidInput.is(overrides)) return { issues: overrides.data.issues };
+        if (ValidatorDefect.is(overrides)) orThrow(overrides);
+        const args = { input: parsed, ...fields, ...timing, ...overrides };
         return { value: id === undefined ? args : { ...args, id } };
       },
     },
@@ -413,9 +400,6 @@ function startBatchSchema<Input extends StandardSchemaV1>(input: Input): StartBa
   };
 }
 
-/** The arguments of `def.cancel`. `executionId` is the Foreman execution that asked, kept on the job operation of a step job the cancel stops. */
-export type CancelArgs = { readonly runId: string; readonly reason: string; readonly executionId?: string | undefined };
-export type CancelSchema = StandardSchemaV1<CancelArgs>;
 /** Checks `CancelArgs`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
 export const cancelArgsSchema = z
   .object({
@@ -426,18 +410,6 @@ export const cancelArgsSchema = z
   .readonly();
 /** `cancelArgsSchema` with the type `def.cancel` shows: a Standard Schema, not zod's own. */
 const cancelSchema: CancelSchema = cancelArgsSchema;
-/** Where `reschedule` moves a run's start: a wait from now (`delay`), or a time (`at`). A time in the past is now. */
-export type RescheduleArgs =
-  | { readonly runId: string; readonly delay: RetentionAge }
-  | { readonly runId: string; readonly at: Date };
-/**
- * What `reschedule` returns: the new start (ISO time), or why not. `CommandNotFound`: no such run. `CommandConflict`:
- * its first node has started (a worker holds or has tried its job, or the run moved on), or it has finished.
- */
-export type RescheduleOutcome = { readonly startAt: string } | CommandNotFound | CommandConflict;
-
-/** `compensating`: the run is undoing its steps now (or waits for a step in flight). `cancelled`: there was nothing to undo, so it ended at once. */
-export type CancelOutcome = { readonly state: (typeof CANCEL_STATES)[number] } | CommandNotFound | CommandConflict;
 
 const isoTime = z.iso.datetime();
 /** Where a run goes after a node: to another node, or to its end with the output already worked out. */
@@ -492,6 +464,8 @@ const timerCheckpointSchema = z.object({
     /** `parkSeq`: the seq of the `Parked` event that made this timer. A later park of the same node is another wait. */
     z.object({ kind: z.literal('wake'), node: z.string().min(1), parkSeq: z.int().positive() }),
     z.object({ kind: z.literal('deadline') }),
+    /** The `ttl` of a queued run: it ends `expired` if it is still queued and its `ttl_at` has passed. */
+    z.object({ kind: z.literal('ttl') }),
   ]),
 });
 const checkpointSchema = z.union([nodeCheckpointSchema, timerCheckpointSchema]);
@@ -504,20 +478,12 @@ export const signalEnvelope = z
     payload: z.unknown(),
   })
   .readonly();
-export type SignalArgs<Payload> = { readonly runId: string; readonly deliveryId: string; readonly payload: Payload };
-/** The schema of a signal command. `payload` is typed with the input of the signal's schema; the handler checks it. */
-export type SignalSchema<Payload extends StandardSchemaV1> = StandardSchemaV1<
-  SignalArgs<SchemaInput<Payload>>,
-  SignalArgs<unknown>
->;
 /** Checks `runId` and `deliveryId` and passes the payload on: the command's handler checks it with the node's schema. */
 function signalSchemaFor<Payload extends StandardSchemaV1>(): SignalSchema<Payload> {
   return {
     '~standard': { version: 1, vendor: 'arki', validate: value => signalEnvelope['~standard'].validate(value) },
   };
 }
-/** The result of a signal. `SIGNAL_STATUSES` says what each status means. */
-export type SignalOutcome = { readonly status: SignalStatus } | CommandNotFound | CommandInvalid | CommandConflict;
 
 type Verdict =
   | { readonly kind: 'park'; readonly waitingFor: string | null; readonly wakeAt: string | null }
@@ -594,11 +560,17 @@ function storable(
 }
 
 const nowIso = () => new Date().toISOString();
-/** What a write ended: a park ends when its node completes or the run starts compensating; the deadline when the run is over or compensating. */
+/**
+ * What a write ended: a park ends when its node completes or the run starts compensating; the deadline when the run is
+ * over or compensating; the wait of a queued run when it is dequeued or over.
+ */
 const endedBy = (written: readonly { readonly type: string }[]) => ({
   park: written.some(event => event.type === 'NodeCompleted' || event.type === 'CompensationStarted'),
   deadline: written.some(event =>
     ['RunCompleted', 'RunFailed', 'RunCancelled', 'RunExpired', 'CompensationStarted'].includes(event.type),
+  ),
+  queue: written.some(event =>
+    ['RunDequeued', 'RunCompleted', 'RunFailed', 'RunCancelled', 'RunExpired'].includes(event.type),
   ),
 });
 
@@ -661,6 +633,10 @@ function nodeOfBase(def: WorkflowDef, base: string): WorkflowNode | undefined {
 }
 /** A cancel of the parent leaves a detached child running, and compensation does not wait for it. */
 const isDetached = (node: WorkflowNode | undefined) => node?.kind === 'child' && node.onCancel === 'detach';
+/** The step key of a run's first node: its first visit, so a promoted queued run gets the key a start would give it. */
+const firstKeyOf = (runId: string, path: string) => `${runId}:${path}:do`;
+/** A run a cancel stops: queued, running or parked. One that compensates is stopping already; one that ended is over. */
+const isLive = (state: (typeof RUN_STATES)[number]) => state === 'queued' || state === 'running' || state === 'parked';
 
 const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 /** The reason on the first node of a run that expired: it never ran. */
@@ -680,6 +656,28 @@ function startTiming(timing: RunTiming, now: Date) {
   return { startAt, due, ttlAt: ttlMs === null ? null : new Date(due.getTime() + ttlMs), ttlMs };
 }
 
+/**
+ * The overrides a run's `RunStarted` stores, each left out when unset so a plain start's event stays as it was. The
+ * timeout is whole ms, at least 1: an age in seconds can name less.
+ */
+function storedOverrides({ maxAttempts, timeout, priority }: RunOverrides) {
+  return {
+    ...(maxAttempts === undefined ? {} : { maxAttempts }),
+    ...(timeout === undefined ? {} : { stepTimeoutMs: Math.max(1, Math.round(parseAge(timeout))) }),
+    ...(priority === undefined ? {} : { priority }),
+  };
+}
+
+/** The `priority` a run's `NodeScheduled` and `Parked` carry for their jobs: the run's, left out when it has none. */
+const priorityOn = (priority: number | null | undefined) => (priority === null || priority === undefined ? {} : { priority });
+
+/** A step attempt's time limit in ms: the step's own `timeout`, narrowed by its run's (`start({ timeout })`). */
+function attemptTimeoutMs(own: RetentionAge | undefined, run: number | null): number | undefined {
+  const ownMs = own === undefined ? undefined : parseAge(own);
+  if (run === null) return ownMs;
+  return ownMs === undefined ? run : Math.min(ownMs, run);
+}
+
 type Definitions<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -691,8 +689,10 @@ type Definitions<
  * The concurrency key of a start. A key is the app's own text (a tenant, an account): one that is empty or longer than
  * the column (256) is a bug in the key function, so it throws.
  */
-function concurrencyKeyOf(def: WorkflowDef, input: unknown): string {
-  const key = def.concurrency?.key(input);
+function concurrencyKeyOf(def: WorkflowDef, input: unknown): string | null {
+  const keyOf = def.concurrency?.key;
+  if (keyOf === undefined) return null;
+  const key = keyOf(input);
   if (typeof key !== 'string' || key === '' || key.length > 256) {
     throw new JournalError(
       'BAD_DEFINITION',
@@ -737,13 +737,13 @@ function stepHookContext(
 }
 
 async function runBody(
-  node: { readonly name: string; readonly timeout: RetentionAge | undefined },
+  node: { readonly name: string; readonly timeoutMs: number | undefined },
   invoke: (ctx: ErasedContext) => unknown,
   build: (signal: AbortSignal) => ErasedContext,
   signal: AbortSignal,
   runId: string,
 ) {
-  const timeoutMs = node.timeout === undefined ? undefined : parseAge(node.timeout);
+  const { timeoutMs } = node;
   if (timeoutMs === undefined) return invoke(build(signal));
   const timeout = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -785,6 +785,10 @@ export function createWorkflows<
   const machine = workflowMachine<Meta, Tx>(j, tables);
   const { run, events } = machine;
   const { workflowRuns, workflowSteps, workflowSignals } = tables;
+  const limits = limitMachine<Meta, Tx>(j, tables);
+  const limitGate = createLimitGate(tables);
+  /** The limits the registered workflows hold, by name. `register` fills it; `journal.limits` knows no other name. */
+  const knownLimits = new Map<string, KnownLimit>();
   /** `journal.hooks.step`: they wrap each step body and undo, inside its `journal.step` span. */
   const stepHooks = createHookPoint<StepHookContext>('step');
 
@@ -1041,7 +1045,17 @@ export function createWorkflows<
         (node?.kind === 'step' && node.options.undo !== undefined) || (node?.kind === 'child' && node.undo);
       if (hasUndo) {
         const key = `${row.id}:${item.path}:undo${item.visit === 1 ? '' : `:${item.visit}`}`;
-        out.push(events.NodeScheduled({ path: item.path, phase: 'undo', attempt: 1, key, jobId: null, at }));
+        out.push(
+          events.NodeScheduled({
+            path: item.path,
+            phase: 'undo',
+            attempt: 1,
+            key,
+            jobId: null,
+            at,
+            ...priorityOn(row.priority),
+          }),
+        );
         return out;
       }
       if (node?.kind === 'child' || node?.kind === 'map') {
@@ -1142,6 +1156,14 @@ export function createWorkflows<
       readonly executionId?: string | undefined;
     },
   ) => {
+    // A queued run never ran: it has no node, no step and no child, so it ends at once with no compensation.
+    if (row.state === 'queued') {
+      const ended = await compensate(tx, def, row, at, {
+        cause: options.cause,
+        cancelling: options.cancelling === true,
+      });
+      return [...head, ...ended];
+    }
     const dropped = options.closed
       ? { events: [], inFlight: false }
       : await dropCurrentNode(tx, row, at, options.executionId);
@@ -1160,16 +1182,17 @@ export function createWorkflows<
     });
 
   /** Where a run goes: the next node's schedule, or its completion. */
-  const eventsAfter = async (tx: Tx, runId: string, route: Route, at: string) =>
+  const eventsAfter = async (tx: Tx, row: Row, route: Route, at: string) =>
     route.go === 'node'
       ? [
           events.NodeScheduled({
             path: route.name,
             phase: 'do',
             attempt: 1,
-            key: await keyOfNextVisit(tx, runId, route.name),
+            key: await keyOfNextVisit(tx, row.id, route.name),
             jobId: null,
             at,
+            ...priorityOn(row.priority),
           }),
         ]
       : [events.RunCompleted({ output: route.output, at, keepUntil: route.keepUntil })];
@@ -1198,7 +1221,7 @@ export function createWorkflows<
     }
     return [
       events.NodeCompleted({ path, phase: 'do', result, resolvedBy: null, at }),
-      ...(await eventsAfter(tx, row.id, route, at)),
+      ...(await eventsAfter(tx, row, route, at)),
     ];
   };
 
@@ -1238,6 +1261,15 @@ export function createWorkflows<
   const onTimer = async (tx: Tx, row: Row, fired: z.infer<typeof timerCheckpointSchema>['fired'], at: string) => {
     const def = definitionOf(row);
     if (fired.kind === 'deadline') return row.state === 'compensating' ? [] : deadlineEvents(tx, def, row, at);
+    if (fired.kind === 'ttl') {
+      // Checked by the database clock, as the first node's own check is: a reschedule may have moved `ttl_at`.
+      if (row.state !== 'queued' || row.ttlAt === null) return [];
+      const past = await tx
+        .select({ id: workflowRuns.id })
+        .from(workflowRuns)
+        .where(and(eq(workflowRuns.id, row.id), lt(workflowRuns.ttlAt, sql`now()`)));
+      return past.length === 0 ? [] : [events.RunExpired({ at, keepUntil: keepUntilFor(def, 'expired') })];
+    }
     // A timer of a park the run already left finds the run elsewhere and does nothing. A run in a loop can park on
     // the same node again: only the timer of its latest park may end that wait.
     if (row.state !== 'parked' || row.node !== fired.node) return [];
@@ -1280,8 +1312,16 @@ export function createWorkflows<
    * Cancels the timers a run no longer needs, in the transaction that moved it: the wake timer of a park it left,
    * and the deadline timer of a run that ended. A timer a worker holds is left alone: it finds nothing to do.
    */
-  const cancelTimers = async (tx: Tx, runId: string, gone: { readonly park: boolean; readonly deadline: boolean }) => {
-    const types = [...(gone.park ? ['Parked'] : []), ...(gone.deadline ? ['RunStarted'] : [])];
+  const cancelTimers = async (
+    tx: Tx,
+    runId: string,
+    gone: { readonly park: boolean; readonly deadline: boolean; readonly queue: boolean },
+  ) => {
+    const types = [
+      ...(gone.park ? ['Parked'] : []),
+      ...(gone.deadline ? ['RunStarted'] : []),
+      ...(gone.queue ? ['RunQueued'] : []),
+    ];
     if (types.length === 0) return;
     // The event type is read from the job's own event copy, so this needs no `journal_events` row.
     const pending = await tx
@@ -1454,9 +1494,7 @@ export function createWorkflows<
         return startNext();
       }
       // The first to complete wins. The others are cancelled, and the node completes once each has cleaned up.
-      moves.stops.push(
-        ...unfinished.filter(kid => kid.state === 'running' || kid.state === 'parked').map(kid => kid.id),
-      );
+      moves.stops.push(...unfinished.filter(kid => isLive(kid.state)).map(kid => kid.id));
       if (unfinished.length > 0) return [];
       return completeChildren(tx, def, index, parent, plan, [winner.id], false, at);
     }
@@ -1488,7 +1526,7 @@ export function createWorkflows<
     const before = { parked: false };
     const written = await ctx.write(run, childId, async (row, inside) => {
       if (row === null) return [];
-      const eligible = reopen ? row.state === 'completed' : row.state === 'running' || row.state === 'parked';
+      const eligible = reopen ? row.state === 'completed' : isLive(row.state);
       if (!eligible) return [];
       before.parked = row.state === 'parked';
       const at = nowIso();
@@ -1515,7 +1553,7 @@ export function createWorkflows<
     if (kids.length === 0) return;
     const def = definitionOf(row);
     const waitedFor = kids.filter(kid => kid.finishedAt === null && !isDetached(nodeOfBase(def, kid.parentPath ?? '')));
-    const live = waitedFor.filter(kid => kid.state === 'running' || kid.state === 'parked');
+    const live = waitedFor.filter(kid => isLive(kid.state));
     for (const kid of live) {
       const moved = await compensateChild(ctx, kid.id, `its parent run ${row.id} is stopping`, false);
       if (isFailure(moved)) return moved;
@@ -1547,7 +1585,11 @@ export function createWorkflows<
   ): Promise<void | CommandFailure> {
     await queueJobs(ctx.tx, runId, written.events);
     const ended = endedBy(written.events);
-    const cancelled = await cancelTimers(ctx.tx, runId, { park: wasParked && ended.park, deadline: ended.deadline });
+    const cancelled = await cancelTimers(ctx.tx, runId, {
+      park: wasParked && ended.park,
+      deadline: ended.deadline,
+      queue: ended.queue,
+    });
     if (isFailure(cancelled)) return cancelled;
     const { row } = written;
     if (row === null || written.events.length === 0) return;
@@ -1555,7 +1597,12 @@ export function createWorkflows<
       const moved = await driveChildren(ctx, row);
       if (isFailure(moved)) return moved;
     }
-    if (row.parentId !== null && row.parentPath !== null && written.events.some(event => ENDS.has(event.type))) {
+    const over = written.events.some(event => ENDS.has(event.type));
+    if (over) {
+      const promoted = await promoteAfterEnd(ctx, row);
+      if (isFailure(promoted)) return promoted;
+    }
+    if (row.parentId !== null && row.parentPath !== null && over) {
       return wakeParent(ctx, row.parentId, row.parentPath);
     }
     return;
@@ -1706,7 +1753,7 @@ export function createWorkflows<
                 })),
               ];
             }
-            return [completed, ...(await eventsAfter(inside.tx, input.runId, outcome.route, at))];
+            return [completed, ...(await eventsAfter(inside.tx, row, outcome.route, at))];
           }
           case 'skipped': {
             if (compensating) {
@@ -1717,7 +1764,7 @@ export function createWorkflows<
             }
             return [
               events.NodeSkipped({ path, phase, cause: 'when', reason: outcome.reason, actorId: null, at }),
-              ...(await eventsAfter(inside.tx, input.runId, outcome.route, at)),
+              ...(await eventsAfter(inside.tx, row, outcome.route, at)),
             ];
           }
           case 'undone': {
@@ -1737,6 +1784,7 @@ export function createWorkflows<
                 key: outcome.key,
                 jobId: null,
                 at: outcome.at,
+                ...priorityOn(row.priority),
               }),
             ];
           }
@@ -1790,7 +1838,15 @@ export function createWorkflows<
               const early = await takeSignal(inside.tx, row.id, node.signal, node.name);
               if (early !== undefined) return wakeOnSignal(inside.tx, def, index, row, early.payload, at);
             }
-            return [events.Parked({ node: path, waitingFor: outcome.waitingFor, wakeAt: outcome.wakeAt, at })];
+            return [
+              events.Parked({
+                node: path,
+                waitingFor: outcome.waitingFor,
+                wakeAt: outcome.wakeAt,
+                ...priorityOn(row.priority),
+                at,
+              }),
+            ];
           }
           case 'expired': {
             // Checked again under the run's lock: a reschedule or a cancel may have come between.
@@ -1817,55 +1873,166 @@ export function createWorkflows<
     },
   );
 
+  /** The limits a start of `def` holds, sorted by name, the order the gate locks them in: its own and the shared ones. */
+  const heldLimitsOf = (def: WorkflowDef): HeldLimit[] =>
+    [
+      {
+        name: workflowLimitName(def.name),
+        total: def.concurrency?.total,
+        perKey: def.concurrency?.limit,
+        workflow: def.name,
+      },
+      ...(def.concurrency?.shared ?? []).map(shared => ({
+        name: shared.name,
+        total: shared.total,
+        perKey: shared.perKey,
+        workflow: undefined,
+      })),
+    ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
   /**
-   * The start gate of `concurrency`. A transaction-scoped advisory lock on the workflow name and the key makes starts
-   * with one key take turns, so two of them never both see a free slot. Then it counts the unfinished runs with that
-   * key (parked runs count: they still hold their slot). Under the limit, or a start of a run that already exists (the
-   * same start again), gives `undefined`: the start goes on. At the limit, `onBusy: 'join'` answers the oldest running
-   * run, and `'refuse'` returns `WorkflowBusy`. A child always gets `WorkflowBusy`: the run it would join reports to
-   * another parent.
-   * The limit counts every run with the key, whatever its scope: an app may cap a key across tenants. What the caller
+   * Starts the oldest queued runs that hold one of `among` (with `key`, when given) and now fit, in the transaction of
+   * the change that may have freed a slot. Each candidate passes the same gate a start passes (`limitGate.blocking`,
+   * with its locks), oldest first by when it was queued. One that does not fit stays queued, and the queued runs the
+   * same busy limit blocks (of the same key, for a `perKey`) are left out of the next look: FIFO holds per key, and
+   * other keys go on. At most `LIMIT_BOUNDS.promoteTries` candidates are checked per call; the rest wait for the next
+   * run end or operator change. A promoted run is dequeued and its first node is due at its `start_at`, or now.
+   */
+  const promoteQueued = async (
+    ctx: RunCtx,
+    among: readonly HeldLimit[],
+    key: string | null,
+    skips: PromoteSkip[],
+  ): Promise<void | CommandFailure> => {
+    for (let tried = 0; tried < LIMIT_BOUNDS.promoteTries; tried++) {
+      const id = await limitGate.oldestQueued(ctx.tx, among, key, skips);
+      if (id === undefined) return;
+      const blocked: { value: PromoteSkip } = { value: { id } };
+      const written = await ctx.write(run, id, async (row, inside) => {
+        if (row === null || row.state !== 'queued') return [];
+        // A stranded run has no code to check its limits with: it stays queued until its code is back.
+        const code = codeOf(row, started);
+        const first = row.shape.nodes[0]?.name;
+        if (code instanceof JournalError || first === undefined) return [];
+        const held = heldLimitsOf(code);
+        // Lock order: this transaction already holds the locks of the run that ended (or of the verb's limit), and the
+        // candidate's other locks may sort before them. So they are only tried, never waited for: one that another
+        // transaction holds leaves the candidate queued (skipped by id), and a later change or the limit timer
+        // promotes it. Waiting could deadlock with a transaction that holds that lock and waits for one of ours.
+        const block = await limitGate.tryBlocking(inside.tx, { held, key: row.concurrencyKey, gated: true });
+        if (block === 'locked') return [];
+        if (block !== undefined) {
+          blocked.value = { limit: block.limit, key: block.scale === 'perKey' ? row.concurrencyKey : null };
+          return [];
+        }
+        const now = new Date();
+        const due = row.startAt !== null && row.startAt.getTime() > now.getTime() ? row.startAt : now;
+        return [
+          events.RunDequeued({ at: now.toISOString() }),
+          events.NodeScheduled({
+            path: first,
+            phase: 'do',
+            attempt: 1,
+            key: firstKeyOf(row.id, first),
+            jobId: null,
+            at: due.toISOString(),
+            ...priorityOn(row.priority),
+          }),
+        ];
+      });
+      if (isFailure(written)) return written;
+      if (written.events.length === 0) {
+        skips.push(blocked.value);
+        continue;
+      }
+      debugWorkflow.debug('run {runId} dequeued: its limits have room', { runId: id });
+      const settled = await settle(ctx, id, written, false);
+      if (isFailure(settled)) return settled;
+    }
+    return;
+  };
+
+  /**
+   * A run ended, so the slots it held are free: the queued runs of its key go first (its `perKey` slot is theirs),
+   * then any that hold one of its limits (a `total` slot). It first takes the locks a start of its workflow and key
+   * takes, so a start that queues at the same moment either finds the slot free or is seen here.
+   */
+  const promoteAfterEnd = async (ctx: RunCtx, row: Row): Promise<void | CommandFailure> => {
+    // With no workflow that queues, no run can be queued: an app that never queues pays nothing at a run end.
+    if (![...started.values()].some(def => def.concurrency?.onBusy === 'queue')) return;
+    const code = codeOf(row, started);
+    // A run of a workflow without `concurrency` holds no slot, so its end frees none.
+    if (code instanceof JournalError || code.concurrency === undefined) return;
+    const among = heldLimitsOf(code);
+    await limitGate.blocking(ctx.tx, { held: among, key: row.concurrencyKey, gated: true });
+    const skips: PromoteSkip[] = [];
+    if (row.concurrencyKey !== null) {
+      const sameKey = await promoteQueued(ctx, among, row.concurrencyKey, skips);
+      if (isFailure(sameKey)) return sameKey;
+    }
+    return promoteQueued(ctx, among, null, skips);
+  };
+
+  /**
+   * The start gate. `limitGate.blocking` says which limit, if any, blocks the start (see there for the locks): a
+   * paused one, or one whose `total` or `perKey` is full; parked runs count, they hold their slot until they end, and
+   * queued runs do not. No block gives `undefined`: the start goes on. It runs inside the start's write, after the
+   * append lock every journal write takes first, so its limit locks come after it as they do for a run end that frees
+   * a slot (`promoteAfterEnd`): the two never wait on each other in opposite orders. A start of a run that already
+   * exists never gets here: the write finds its row. When the workflow's own `perKey` is full, `onBusy: 'join'`
+   * answers the oldest running run of that key; anything else is `WorkflowBusy`. A child always gets `WorkflowBusy`:
+   * the run it would join reports to another parent. A pause offers no join. With `onBusy: 'queue'`, any block (full
+   * or paused, a top run or a child) gives `{ queue }`: the run is created `queued` and waits for a slot.
+   * A limit counts every run that holds it, whatever its scope: an app may cap a key across tenants. What the caller
    * gets back never crosses its scope: it joins only a run of its own scope (else `WorkflowBusy`), and
    * `WorkflowBusy.running` lists only its own scope's runs, since the key comes from input another tenant can share.
    */
   const admit = async (
     tx: Tx,
     def: WorkflowDef,
-    concurrency: NonNullable<WorkflowDef['concurrency']>,
-    key: string,
-    runId: string,
+    key: string | null,
     parent: { readonly id: string; readonly path: string } | undefined,
     scope: string | null,
-  ): Promise<{ readonly runId: string; readonly created: false } | WorkflowBusy | undefined> => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`journal.workflow:${def.name}:${key}`}, 0))`);
-    // The gate keeps a key at its limit, so the oldest `limit + 1` rows are all of them.
-    const holders = await tx
-      .select({ id: workflowRuns.id, scope: workflowRuns.scope })
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.name, def.name),
-          eq(workflowRuns.concurrencyKey, key),
-          isNull(workflowRuns.finishedAt),
-        ),
-      )
-      .orderBy(asc(workflowRuns.startedAt), asc(workflowRuns.id))
-      .limit(concurrency.limit + 1);
-    const running = holders.map(holder => holder.id);
-    if (running.includes(runId) || running.length < concurrency.limit) return undefined;
-    const ownScope = holders.filter(holder => holder.scope === scope).map(holder => holder.id);
+  ): Promise<
+    { readonly runId: string; readonly created: false } | { readonly queue: LimitBlock } | WorkflowBusy | undefined
+  > => {
+    const block = await limitGate.blocking(tx, { held: heldLimitsOf(def), key, gated: def.concurrency !== undefined });
+    if (block === undefined) return undefined;
+    if (def.concurrency?.onBusy === 'queue') return { queue: block };
+    const limitName = block.limit.name;
+    if (block.reason === 'paused') {
+      return WorkflowBusy({
+        name: def.name,
+        key,
+        limit: 0,
+        running: [],
+        limitName,
+        reason: 'paused',
+        detail: `limit "${limitName}" is paused; it admits no new run of workflow "${def.name}" until it is resumed`,
+      });
+    }
+    const ownScope = await limitGate.holdersIn(tx, block, key, scope);
     const oldest = ownScope[0];
-    if (concurrency.onBusy === 'join' && parent === undefined && oldest !== undefined) {
-      debugWorkflow.debug('{name}: key {key} is busy; the start joins run {runId}', { name: def.name, key, runId: oldest });
+    const ownPerKey = block.scale === 'perKey' && block.limit.workflow !== undefined;
+    if (ownPerKey && def.concurrency?.onBusy === 'join' && parent === undefined && oldest !== undefined) {
+      debugWorkflow.debug('{name}: key {key} is busy; the start joins run {runId}', {
+        name: def.name,
+        key,
+        runId: oldest,
+      });
       return { runId: oldest, created: false };
     }
-    const shown = ownScope.slice(0, concurrency.limit);
+    const keyed = block.scale === 'perKey' ? ` with concurrency key "${key ?? ''}"` : '';
     return WorkflowBusy({
       name: def.name,
       key,
-      limit: concurrency.limit,
-      running: shown,
-      detail: `workflow "${def.name}" already has ${concurrency.limit} unfinished run(s) with concurrency key "${key}"`,
+      limit: block.value,
+      running: ownScope,
+      limitName,
+      reason: 'full',
+      detail: ownPerKey
+        ? `workflow "${def.name}" already has ${block.value} unfinished run(s)${keyed}`
+        : `limit "${limitName}" already has ${block.value} unfinished run(s)${keyed}`,
     });
   };
 
@@ -1873,14 +2040,15 @@ export function createWorkflows<
    * Starts a run of `def` with an input that is already checked. The id is the key: the same start again is the same
    * run (`created` is false); another workflow or another input under that id is a refusal. A child run is started by
    * its parent's checkpoint, with `parent` set: it takes the parent's `scope` and tree (`rootId`), and no tags,
-   * metadata, delay or ttl of its own. A delay makes the first node due later; the deadline counts from then.
+   * metadata, delay, ttl or overrides of its own. A delay makes the first node due later; the deadline counts from then.
    * `batchId` is set by `startBatch`, and `replayOf` with the operator (`by`) by `replay`.
    */
   const startRun = async (
     def: WorkflowDef,
     { write, tx }: Pick<CommandContext<MetaOut, Tx>, 'write' | 'tx'>,
     args: { readonly input: unknown; readonly id?: string | undefined } & RunFields &
-      RunTiming & {
+      RunTiming &
+      RunOverrides & {
         readonly batchId?: string;
         readonly replayOf?: string;
         readonly by?: ReturnType<typeof operatorOf>;
@@ -1923,17 +2091,26 @@ export function createWorkflows<
     const scope = parent === undefined ? (args.scope ?? null) : parent.scope;
     const runId = args.id ?? workflowRunId();
     if (isFailure(runId)) return runId;
-    const concurrencyKey = def.concurrency === undefined ? null : concurrencyKeyOf(def, args.input);
-    if (def.concurrency !== undefined && concurrencyKey !== null) {
-      const gate = await admit(tx, def, def.concurrency, concurrencyKey, runId, parent, scope);
-      if (gate !== undefined) return gate;
-    }
+    const concurrencyKey = concurrencyKeyOf(def, args.input);
+    // What the gate said, read after the write: the run it joins, or the limit it queues on.
+    const gate: { joined?: string; queuedOn?: LimitBlock } = {};
+    const sharedLimits = (def.concurrency?.shared ?? []).map(shared => shared.name);
     const now = new Date();
     const at = now.toISOString();
     // A child starts when its parent gets to it, so only a top run has a delay or a ttl.
     const timing = startTiming(parent === undefined ? args : {}, now);
-    const written = await write(machine.run, runId, row => {
+    // Overrides belong to the run that was started with them: a child runs as its definition says.
+    const overrides = storedOverrides(parent === undefined ? args : {});
+    const written = await write(machine.run, runId, async (row, inside) => {
       if (row !== null) return [];
+      const admitted = await admit(inside.tx, def, concurrencyKey, parent, scope);
+      if (WorkflowBusy.is(admitted)) return admitted;
+      if (admitted !== undefined && 'runId' in admitted) {
+        gate.joined = admitted.runId;
+        return [];
+      }
+      const queuedOn = admitted?.queue;
+      gate.queuedOn = queuedOn;
       return [
         machine.events.RunStarted({
           name: def.name,
@@ -1953,25 +2130,39 @@ export function createWorkflows<
           startAt: timing.startAt?.toISOString() ?? null,
           ttlAt: timing.ttlAt?.toISOString() ?? null,
           ttlMs: timing.ttlMs,
-          // Left out when unset, so a plain start's event stays as it was before batches and replays.
+          ...overrides,
+          // Left out when unset, so a plain start's event stays as it was before batches, replays and limits.
+          ...(sharedLimits.length === 0 ? {} : { limits: sharedLimits }),
           ...(args.batchId === undefined ? {} : { batchId: args.batchId }),
           ...(args.replayOf === undefined ? {} : { replayOf: args.replayOf }),
           ...args.by,
           at,
         }),
-        // `at` is when the node is due, so its job waits out the delay.
-        machine.events.NodeScheduled({
-          path: first.name,
-          phase: 'do',
-          attempt: 1,
-          key: `${runId}:${first.name}:do`,
-          jobId: null,
-          at: timing.due.toISOString(),
-        }),
+        // A queued run schedules no node: a freed slot dequeues it and schedules its first node then.
+        queuedOn === undefined
+          ? // `at` is when the node is due, so its job waits out the delay.
+            machine.events.NodeScheduled({
+              path: first.name,
+              phase: 'do',
+              attempt: 1,
+              key: firstKeyOf(runId, first.name),
+              jobId: null,
+              at: timing.due.toISOString(),
+              ...priorityOn(overrides.priority),
+            })
+          : machine.events.RunQueued({
+              limitName: queuedOn.limit.name,
+              reason: queuedOn.reason,
+              ttlAt: timing.ttlAt?.toISOString() ?? null,
+              ...priorityOn(overrides.priority),
+              at,
+            }),
       ];
     });
     if (isFailure(written)) return written;
+    if (gate.joined !== undefined) return { runId: gate.joined, created: false };
     const { row } = written;
+    const { queuedOn } = gate;
     // The id is taken. The same start again is the same run; another workflow or another input is not.
     if (written.events.length === 0) {
       if (
@@ -1988,6 +2179,16 @@ export function createWorkflows<
       return { runId, created: false };
     }
     await queueJobs(tx, runId, written.events);
+    if (queuedOn !== undefined) {
+      debugWorkflow.debug('{name} v{version}: run {runId} queued: limit {limitName} is {reason}', {
+        name: def.name,
+        version: def.version,
+        runId,
+        limitName: queuedOn.limit.name,
+        reason: queuedOn.reason,
+      });
+      return { runId, created: true };
+    }
     debugWorkflow.debug('{name} v{version}: run {runId} started', { name: def.name, version: def.version, runId });
     return { runId, created: true };
   };
@@ -2015,6 +2216,7 @@ export function createWorkflows<
           ...args.item,
           ...args.fields,
           ...args.timing,
+          ...args.overrides,
           batchId: args.batchId,
         });
         return isFailure(outcome) ? outcome : { runId: outcome.runId };
@@ -2027,12 +2229,13 @@ export function createWorkflows<
         const batchId = args.batchId ?? workflowBatchId();
         if (isFailure(batchId)) return batchId;
         const runs: StartOutcome[] = [];
-        for (const { input, id, scope, tags, metadata, delay, ttl } of args.items) {
+        for (const { input, id, scope, tags, metadata, delay, ttl, maxAttempts, timeout, priority } of args.items) {
           const outcome = await context.run(startItem, {
             batchId,
             item: { input, id },
             fields: { scope, tags, metadata },
             timing: { delay, ttl },
+            overrides: { maxAttempts, timeout, priority },
           });
           // A refused item is that item's outcome: its savepoint rolled back, and the other items stand. Any other
           // failure is not about the item, and ends the batch.
@@ -2443,6 +2646,7 @@ export function createWorkflows<
             key: step.key,
             jobId: null,
             at,
+            ...priorityOn(row.priority),
             ...by,
           }),
         ];
@@ -2516,6 +2720,7 @@ export function createWorkflows<
             jobId: null,
             at,
             resolution: { result: kept.value },
+            ...priorityOn(row.priority),
             ...operatorOf(args.op),
           }),
         ];
@@ -2625,26 +2830,30 @@ export function createWorkflows<
           detail: `run "${args.runId}" has started (it is ${row.state}); only a run whose first node has not started moves`,
         });
         const first = row.shape.nodes[0]?.name;
-        if (!notStarted(row) || first === undefined) return started;
-        const [step] = await inside.tx
-          .select({ status: workflowSteps.status, attempt: workflowSteps.attempt, jobId: workflowSteps.jobId })
-          .from(workflowSteps)
-          .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, first), eq(workflowSteps.phase, 'do')));
-        if (step?.status !== 'scheduled' || step.attempt !== 1 || step.jobId === null) return started;
-        // Only a job no worker has claimed moves: one a worker holds, or has tried, may have done the node's work.
-        const moved = await inside.tx
-          .update(tables.jobs)
-          .set({ availableAt: startAt })
-          .where(
-            and(
-              eq(tables.jobs.id, step.jobId),
-              isNull(tables.jobs.deadAt),
-              isNull(tables.jobs.leaseUntil),
-              eq(tables.jobs.attempts, 0),
-            ),
-          )
-          .returning({ id: tables.jobs.id });
-        if (moved.length === 0) return started;
+        // A queued run has no node job yet: a freed slot schedules its first node at the new `start_at`.
+        const queued = row.state === 'queued';
+        if ((!queued && !notStarted(row)) || first === undefined) return started;
+        if (!queued) {
+          const [step] = await inside.tx
+            .select({ status: workflowSteps.status, attempt: workflowSteps.attempt, jobId: workflowSteps.jobId })
+            .from(workflowSteps)
+            .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, first), eq(workflowSteps.phase, 'do')));
+          if (step?.status !== 'scheduled' || step.attempt !== 1 || step.jobId === null) return started;
+          // Only a job no worker has claimed moves: one a worker holds, or has tried, may have done the node's work.
+          const moved = await inside.tx
+            .update(tables.jobs)
+            .set({ availableAt: startAt })
+            .where(
+              and(
+                eq(tables.jobs.id, step.jobId),
+                isNull(tables.jobs.deadAt),
+                isNull(tables.jobs.leaseUntil),
+                eq(tables.jobs.attempts, 0),
+              ),
+            )
+            .returning({ id: tables.jobs.id });
+          if (moved.length === 0) return started;
+        }
         // The deadline counts from the start, so it moves by as much. A deadline timer a worker holds is firing now.
         const shift = startAt.getTime() - (row.startAt ?? row.startedAt).getTime();
         const deadlineAt = row.deadlineAt === null ? null : new Date(row.deadlineAt.getTime() + shift);
@@ -2662,10 +2871,26 @@ export function createWorkflows<
               ),
             );
         }
+        const ttlAt = row.ttlMs === null ? null : new Date(startAt.getTime() + row.ttlMs);
+        // A queued run's ttl timer moves with its ttl; one a worker holds is firing now and reads `ttl_at` again.
+        if (queued && ttlAt !== null) {
+          await inside.tx
+            .update(tables.jobs)
+            .set({ availableAt: ttlAt })
+            .where(
+              and(
+                eq(tables.jobs.runId, row.id),
+                eq(tables.jobs.effect, TIMER_EFFECT),
+                isNull(tables.jobs.deadAt),
+                isNull(tables.jobs.leaseUntil),
+                sql`${tables.jobs.args}->>'type' = 'RunQueued'`,
+              ),
+            );
+        }
         return [
           events.RunRescheduled({
             startAt: startAt.toISOString(),
-            ttlAt: row.ttlMs === null ? null : new Date(startAt.getTime() + row.ttlMs).toISOString(),
+            ttlAt: ttlAt?.toISOString() ?? null,
             deadlineAt: deadlineAt?.toISOString() ?? null,
             at: now.toISOString(),
             ...operatorOf(args.op),
@@ -2676,6 +2901,148 @@ export function createWorkflows<
       return { startAt: startAt.toISOString() };
     },
   );
+
+  /** A limit the registered workflows hold, or `CommandNotFound`: `journal.limits` knows no other name. */
+  const limitOf = (name: string) =>
+    knownLimits.get(name) ??
+    CommandNotFound({
+      detail: `no limit "${name}"; journal.limits.list shows the limits the registered workflows hold`,
+    });
+
+  /**
+   * Writes one limit verb's events. Inside the write, after the append lock every journal write takes first, it takes
+   * the limit's lock exclusive, so it waits for the starts that read the limit; once it returns, every start sees the
+   * change. A change other than a pause may make room (a higher value, a reset, a resume), so the queued runs that now
+   * fit start, under the same locks. It returns the limit after it.
+   */
+  const changeLimit = async (
+    context: RunCtx,
+    known: KnownLimit,
+    op: OperationInput,
+    eventsOf: (
+      row: typeof tables.limits.$inferSelect | null,
+      now: Date,
+    ) => ReturnType<(typeof limits.events)[keyof typeof limits.events]>[],
+  ): Promise<LimitView | CommandFailure> => {
+    assertOperator(op);
+    const now = new Date();
+    const written = await context.write(limits.limit, known.name, async (row, inside) => {
+      await lockExclusive(inside.tx, limitLockId(known.name));
+      return eventsOf(row, now);
+    });
+    if (isFailure(written)) return written;
+    if (written.events.some(event => event.type !== 'LimitPaused')) {
+      const promoted = await promoteQueued(context, [known], null, []);
+      if (isFailure(promoted)) return promoted;
+    }
+    return limitGate.view(context.tx, known);
+  };
+
+  /**
+   * `journal.limits.override`: the `perKey` of one key until its `ttl` runs out, or the limit's own `total` and
+   * `perKey` until `reset`. A workflow without `concurrency` has nothing to override, and a `perKey` needs a start with
+   * a key: an override that could not apply is `CommandInvalid`, never kept and ignored.
+   */
+  const overrideLimit = j.command(LIMIT_OVERRIDE_COMMAND, limitOverrideSchema, async (args, context) => {
+    const known = limitOf(args.name);
+    if (CommandNotFound.is(known)) return known;
+    if (!known.gated) {
+      return CommandInvalid({
+        detail: `workflow "${known.workflow ?? known.name}" has no concurrency, so only pause and resume apply to "${known.name}"`,
+      });
+    }
+    if (('key' in args || args.perKey !== undefined) && !known.keyed) {
+      return CommandInvalid({
+        detail: `no start that holds "${known.name}" has a concurrency key, so a perKey cannot apply to it`,
+      });
+    }
+    return changeLimit(context, known, args.op, (row, now) => {
+      const at = now.toISOString();
+      if ('key' in args) {
+        const ttl = parseAge(args.ttl ?? LIMIT_KEY_TTL.default);
+        return [
+          limits.events.LimitKeyOverridden({
+            key: args.key,
+            perKey: args.perKey,
+            until: new Date(now.getTime() + ttl).toISOString(),
+            expired: expiredKeys(row?.keys, now),
+            at,
+            ...operatorOf(args.op),
+          }),
+        ];
+      }
+      return [
+        limits.events.LimitOverridden({
+          ...(args.total === undefined ? {} : { total: args.total }),
+          ...(args.perKey === undefined ? {} : { perKey: args.perKey }),
+          at,
+          ...operatorOf(args.op),
+        }),
+      ];
+    });
+  });
+
+  /** `journal.limits.reset`: the code values again, for one key or (without `key`) the whole limit. The pause stays. */
+  const resetLimit = j.command(LIMIT_RESET_COMMAND, limitResetSchema, async (args, context) => {
+    const known = limitOf(args.name);
+    if (CommandNotFound.is(known)) return known;
+    return changeLimit(context, known, args.op, (row, now) => {
+      // Nothing to reset is no change, so no event.
+      if (row === null || (args.key !== undefined && row.keys[args.key] === undefined)) return [];
+      return [
+        limits.events.LimitReset({
+          ...(args.key === undefined ? {} : { key: args.key }),
+          at: now.toISOString(),
+          ...operatorOf(args.op),
+        }),
+      ];
+    });
+  });
+
+  /** `journal.limits.pause`: no new run holds the limit until `resume`; the runs that hold it go on to their end. */
+  const pauseLimit = j.command(LIMIT_PAUSE_COMMAND, limitNameArgsSchema, async (args, context) => {
+    const known = limitOf(args.name);
+    if (CommandNotFound.is(known)) return known;
+    return changeLimit(context, known, args.op, (row, now) =>
+      row?.paused === true ? [] : [limits.events.LimitPaused({ at: now.toISOString(), ...operatorOf(args.op) })],
+    );
+  });
+
+  /** `journal.limits.resume`: the limit admits runs again, by its values. */
+  const resumeLimit = j.command(LIMIT_RESUME_COMMAND, limitNameArgsSchema, async (args, context) => {
+    const known = limitOf(args.name);
+    if (CommandNotFound.is(known)) return known;
+    return changeLimit(context, known, args.op, (row, now) =>
+      row?.paused === true ? [limits.events.LimitResumed({ at: now.toISOString(), ...operatorOf(args.op) })] : [],
+    );
+  });
+
+  /**
+   * Run by the limit timer when a key's `perKey` override runs out: that may make room with no event of its own, so the
+   * queued runs of the limit that now fit start. Each candidate is checked inside its own write, under the same locks
+   * a start takes; a run queued after the override ran out was judged without it, so the look needs no lock first.
+   */
+  const promoteLimit = j.command(PROMOTE_COMMAND, promoteSchema, async (args, context) => {
+    const known = knownLimits.get(args.name);
+    // A limit no registered workflow holds any more has no queued run this code can check.
+    if (known === undefined || !known.gated) return { name: args.name };
+    const promoted = await promoteQueued(context, [known], null, []);
+    return isFailure(promoted) ? promoted : { name: args.name };
+  });
+
+  /** `journal.limits.list` and `get`: the limits the registered workflows hold, as an operator sees them. */
+  const limitReads: Pick<LimitOps<Tx>, 'list' | 'get'> = {
+    list: db =>
+      Promise.all(
+        [...knownLimits.values()]
+          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+          .map(known => limitGate.view(db, known)),
+      ),
+    get: async (db, name) => {
+      const known = limitOf(name);
+      return CommandNotFound.is(known) ? known : limitGate.view(db, known);
+    },
+  };
 
   /**
    * `journal.workflows.replay`: a new run of the old run's workflow at the newest registered version, with the old
@@ -2711,6 +3078,10 @@ export function createWorkflows<
         metadata: overrides?.metadata ?? row.metadata,
         delay: overrides?.delay,
         ttl: overrides?.ttl,
+        maxAttempts: overrides?.maxAttempts ?? row.maxAttempts ?? undefined,
+        // The stored timeout is in ms, and an age in seconds names it back.
+        timeout: overrides?.timeout ?? (row.stepTimeoutMs === null ? undefined : row.stepTimeoutMs / 1000),
+        priority: overrides?.priority ?? row.priority ?? undefined,
         replayOf: row.id,
         by: operatorOf(args.op),
       });
@@ -2837,6 +3208,50 @@ export function createWorkflows<
   }
 
   /**
+   * The limits `journal.limits` knows: every registered workflow's own (a workflow without `concurrency` can still be
+   * paused), with the code values of its newest version, and every shared limit its definitions list. Two `j.limit`s
+   * of one name with other values would make one count by values the other does not say, so that throws.
+   */
+  function registerLimits(defs: readonly WorkflowDef[]) {
+    for (const def of defs) {
+      if (def.version !== newestVersionOf(def.name)) continue;
+      knownLimits.set(workflowLimitName(def.name), {
+        name: workflowLimitName(def.name),
+        total: def.concurrency?.total,
+        perKey: def.concurrency?.limit,
+        workflow: def.name,
+        workflows: [def.name],
+        gated: def.concurrency !== undefined,
+        keyed: def.concurrency?.key !== undefined,
+      });
+    }
+    for (const def of defs) {
+      for (const shared of def.concurrency?.shared ?? []) {
+        const known = knownLimits.get(shared.name);
+        if (known !== undefined && (known.total !== shared.total || known.perKey !== shared.perKey)) {
+          throw new JournalError(
+            'BAD_DEFINITION',
+            'limit',
+            shared.name,
+            `two limits are named "${shared.name}" with other values; define it once with j.limit and share that one`,
+          );
+        }
+        const keyed = def.concurrency?.key !== undefined;
+        knownLimits.set(shared.name, {
+          name: shared.name,
+          total: shared.total,
+          perKey: shared.perKey,
+          workflow: undefined,
+          workflows:
+            known?.workflows.includes(def.name) === true ? known.workflows : [...(known?.workflows ?? []), def.name],
+          gated: true,
+          keyed: keyed || known?.keyed === true,
+        });
+      }
+    }
+  }
+
+  /**
    * Registers the definitions: the step effect that runs their nodes, and the projection that keeps `workflow_steps`.
    * `meta` is the actor recorded on every checkpoint the library commits.
    */
@@ -2895,6 +3310,7 @@ export function createWorkflows<
         );
       }
     }
+    registerLimits(defs);
     const needs: Needs = Object.fromEntries(defs.flatMap(def => Object.entries(def.needs)));
 
     /**
@@ -3031,7 +3447,13 @@ export function createWorkflows<
       try {
         result = await withJournalSpan('journal.step', stepSpan(row, data, 'do'), () =>
           stepHooks.run(stepHookContext(row, data, 'do'), () =>
-            runBody({ name: node.name, timeout: node.options.timeout }, node.run, make, ctx.signal, row.id),
+            runBody(
+              { name: node.name, timeoutMs: attemptTimeoutMs(node.options.timeout, row.stepTimeoutMs) },
+              node.run,
+              make,
+              ctx.signal,
+              row.id,
+            ),
           ),
         );
       } catch (error) {
@@ -3126,7 +3548,10 @@ export function createWorkflows<
         const result = await withJournalSpan('journal.step', stepSpan(row, event.data, 'undo'), () =>
           stepHooks.run(stepHookContext(row, event.data, 'undo'), () =>
             runBody(
-              { name: node.name, timeout: node.kind === 'step' ? node.options.timeout : undefined },
+              {
+                name: node.name,
+                timeoutMs: attemptTimeoutMs(node.kind === 'step' ? node.options.timeout : undefined, row.stepTimeoutMs),
+              },
               step => undo({ ...step, result: done.result }),
               build,
               ctx.signal,
@@ -3389,7 +3814,9 @@ export function createWorkflows<
         });
       }
       const error = reasonText(verdict.reason);
-      const policy = (node.kind === 'step' ? node.options.retry : undefined) ?? defaultEffectRetry;
+      const own = (node.kind === 'step' ? node.options.retry : undefined) ?? defaultEffectRetry;
+      // A run's `maxAttempts` only narrows the step's retry: `upTo` counts retries, and the first try is not one.
+      const policy = row.maxAttempts === null ? own : own.upTo(row.maxAttempts - 1);
       const wait = verdict.retryable ? policy.delay(data.attempt, verdict.retryReason) : undefined;
       if (wait !== undefined) {
         const checkpointed = await ctx.run(
@@ -3431,6 +3858,7 @@ export function createWorkflows<
         .withSchedule({
           // A retry is due at the time its event names; a first try is due now.
           runAt: event => new Date(dueAtOf(event.data)),
+          priority: event => jobPriorityOf(event.data),
           retry: strandedRetry,
         }),
       [journalOwnedEffect]: true as const,
@@ -3483,11 +3911,17 @@ export function createWorkflows<
           if (stranded !== undefined) return stranded;
           return ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'deadline' } }, meta);
         },
+        RunQueued: async (event, ctx) => {
+          const stranded = await refuseStranded(event.entityId, ctx.db);
+          if (stranded !== undefined) return stranded;
+          return ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'ttl' } }, meta);
+        },
       })
       .withSchedule({
-        // Only a park with a wake time and a run with a deadline have anything to time.
+        // Only a park with a wake time, a run with a deadline and a queued run with a ttl have anything to time.
         when: event => timerAt(event.data) !== null,
         runAt: event => timerDueAt(event.data),
+        priority: event => jobPriorityOf(event.data),
         retry: strandedRetry,
       });
 
@@ -3632,7 +4066,17 @@ export function createWorkflows<
             },
           ];
 
-    return { effects: [effect, timer, ...starts, ...lifecycle], steps: machine.steps };
+    /**
+     * A key's `perKey` override runs out with no event of its own, so each one gets a timer at its `until`: then the
+     * queued runs of the limit that now fit start. One replaced or reset before then finds nothing new to start.
+     */
+    const limitTimer = j
+      .effect(LIMIT_TIMER_EFFECT, limits.limit, {
+        LimitKeyOverridden: (event, ctx) => ctx.run(promoteLimit, { name: event.entityId }, meta),
+      })
+      .withSchedule({ runAt: event => untilOf(event.data) });
+
+    return { effects: [effect, timer, limitTimer, ...starts, ...lifecycle], steps: machine.steps };
   }
 
   return {
@@ -3653,6 +4097,13 @@ export function createWorkflows<
       replay,
       checkResult,
     },
+    limits: {
+      ...limitReads,
+      override: overrideLimit,
+      reset: resetLimit,
+      pause: pauseLimit,
+      resume: resumeLimit,
+    },
   };
 }
 
@@ -3662,15 +4113,32 @@ function dueAtOf(data: unknown): string {
   return dueSchema.parse(data).at;
 }
 
+const prioritySchema = z.object({ priority: z.int32().optional() });
+/** The run's priority a `NodeScheduled`, `Parked` or `RunStarted` event carries for its job; 0 when it has none. */
+function jobPriorityOf(data: unknown): number {
+  return prioritySchema.parse(data).priority ?? 0;
+}
+
+// `RunStarted` has a `ttlAt` too, so `deadlineAt` comes first: its timer is the deadline.
 const timerDueSchema = z.union([
   z.object({ wakeAt: isoTime.nullable() }),
   z.object({ deadlineAt: isoTime.nullable() }),
+  z.object({ ttlAt: isoTime.nullable() }),
 ]);
-/** The time of a timer, from the untyped data of a `Parked` or `RunStarted` event; null when the event has nothing to time. */
+/**
+ * The time of a timer, from the untyped data of a `Parked`, `RunStarted` or `RunQueued` event; null when the event
+ * has nothing to time.
+ */
 function timerAt(data: unknown): Date | null {
   const parsed = timerDueSchema.parse(data);
-  const at = 'wakeAt' in parsed ? parsed.wakeAt : parsed.deadlineAt;
+  const at = 'wakeAt' in parsed ? parsed.wakeAt : 'deadlineAt' in parsed ? parsed.deadlineAt : parsed.ttlAt;
   return at === null ? null : new Date(at);
+}
+
+const untilSchema = z.object({ until: isoTime });
+/** When a key override runs out, from the untyped data of a `LimitKeyOverridden` event. */
+function untilOf(data: unknown): Date {
+  return new Date(untilSchema.parse(data).until);
 }
 /** When a timer job is due. `when` lets only timed events through, so an untimed one here is a bug. */
 function timerDueAt(data: unknown): Date {

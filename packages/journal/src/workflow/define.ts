@@ -24,11 +24,14 @@ import type {
   RootDb,
   ServicesFor,
 } from '../types.js';
+import type { LimitDef } from './limit-types.js';
+import type { ON_BUSY } from './states.js';
 import type { RunDetail } from './read.js';
 import type { MetadataContext, TagsContext } from './run-fields.js';
 import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
 import { parseRunKeep } from '../retention.js';
+import { LIMIT_BOUNDS } from './limit-types.js';
 
 /** What a node body sees. `results` has one key per earlier node. */
 export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootDb, Run = unknown> = Needed<N> & {
@@ -180,9 +183,11 @@ export type WorkflowDef<
   readonly deadline: RetentionAge | undefined;
   readonly concurrency:
     | {
-        readonly key: BivariantFn<[input: unknown], string>;
-        readonly limit: number;
-        readonly onBusy: 'refuse' | 'join';
+        readonly key: BivariantFn<[input: unknown], string> | undefined;
+        readonly limit: number | undefined;
+        readonly total: number | undefined;
+        readonly shared: readonly LimitDef[];
+        readonly onBusy: (typeof ON_BUSY)[number];
       }
     | undefined;
   readonly onDeadStep: 'wait' | 'compensate';
@@ -305,10 +310,19 @@ export type WorkflowOptions<
   readonly input: Input;
   readonly output?: Output;
   readonly deadline?: RetentionAge;
+  /**
+   * The limits a start must find room in, or `onBusy` decides. `limit` caps the unfinished runs per `key` and `total`
+   * all of them: together the workflow's own limit, `workflow/<name>`. `shared` lists at most two `j.limit`s, each
+   * counted across every workflow that lists it, its `perKey` with this workflow's `key`. A start is admitted only
+   * when every limit it holds has room. At a busy limit, `onBusy` refuses, joins the oldest running run of the key, or
+   * queues the run until a slot frees (`ON_BUSY`).
+   */
   readonly concurrency?: {
-    readonly key: (input: SchemaOutput<Input>) => string;
-    readonly limit: number;
-    readonly onBusy: 'refuse' | 'join';
+    readonly key?: (input: SchemaOutput<Input>) => string;
+    readonly limit?: number;
+    readonly total?: number;
+    readonly shared?: readonly LimitDef[];
+    readonly onBusy: (typeof ON_BUSY)[number];
   };
   readonly onDeadStep?: 'wait' | 'compensate';
   /** How long the run row stays after it ends, by how it ended. Overrides `retention.workflows` of `initJournal`. */
@@ -636,6 +650,39 @@ function refuse(workflowName: string, detail: string): never {
   throw new JournalError('BAD_DEFINITION', 'workflow', workflowName, `${workflowName}: ${detail}`);
 }
 
+/** The rules of `concurrency` that need no types. Each mistake would make a limit count something else than it says. */
+function checkConcurrency<Input extends StandardSchemaV1>(
+  workflowName: string,
+  concurrency: NonNullable<WorkflowOptions<Input, Needs, undefined>['concurrency']>,
+) {
+  const { key, limit, total, shared = [] } = concurrency;
+  if (limit === undefined && total === undefined && shared.length === 0) {
+    refuse(workflowName, 'concurrency needs limit, total or shared: without one it limits nothing');
+  }
+  if (limit !== undefined && !isPositiveInt(limit)) {
+    refuse(workflowName, `concurrency.limit must be a positive whole number, got ${limit}`);
+  }
+  if (limit !== undefined && key === undefined) {
+    refuse(
+      workflowName,
+      'concurrency.limit counts the runs of one key, so it needs concurrency.key; use total for all runs',
+    );
+  }
+  if (total !== undefined && !isPositiveInt(total)) {
+    refuse(workflowName, `concurrency.total must be a positive whole number, got ${total}`);
+  }
+  if (shared.length > LIMIT_BOUNDS.shared) {
+    refuse(workflowName, `concurrency.shared lists at most ${LIMIT_BOUNDS.shared} limits, got ${shared.length}`);
+  }
+  if (new Set(shared.map(held => held.name)).size !== shared.length) {
+    refuse(workflowName, 'concurrency.shared lists a limit twice');
+  }
+  const perKey = shared.find(held => held.perKey !== undefined);
+  if (perKey !== undefined && key === undefined) {
+    refuse(workflowName, `limit "${perKey.name}" has perKey, so concurrency needs a key to count it by`);
+  }
+}
+
 /** Adds a node after checking the rules that need no types. */
 function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
   state: BuilderState<Input, Ext>,
@@ -839,9 +886,7 @@ export function workflowWith<
     if (!isPositiveInt(value)) refuse(name, `limits.${limit} must be a positive whole number, got ${value}`);
   }
   const { concurrency } = options;
-  if (concurrency !== undefined && !isPositiveInt(concurrency.limit)) {
-    refuse(name, `concurrency.limit must be a positive whole number, got ${concurrency.limit}`);
-  }
+  if (concurrency !== undefined) checkConcurrency(name, concurrency);
   for (const [outcome, keep] of Object.entries(options.retention ?? {})) {
     parseRunKeep(keep, `workflow "${name}": retention.${outcome}`);
   }
@@ -862,7 +907,16 @@ export function workflowWith<
       input: options.input,
       output: options.output,
       deadline: options.deadline,
-      concurrency,
+      concurrency:
+        concurrency === undefined
+          ? undefined
+          : {
+              key: concurrency.key,
+              limit: concurrency.limit,
+              total: concurrency.total,
+              shared: concurrency.shared ?? [],
+              onBusy: concurrency.onBusy,
+            },
       onDeadStep: options.onDeadStep ?? 'wait',
       retention: options.retention ?? {},
       limits,

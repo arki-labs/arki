@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  boolean,
   check,
   customType,
   index,
@@ -18,6 +19,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import type { EventLogPosition } from './event-log.js';
+import type { LimitKeyOverride } from './workflow/limit-types.js';
 import type { WorkflowShape } from './workflow/shape.js';
 import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js';
 
@@ -335,6 +337,20 @@ export function journalTables(schema?: PgSchema) {
       batchId: varchar('batch_id', { length: 256 }),
       /** The run that `journal.workflows.replay` started this one again from. Null for a run that is no replay. */
       replayOf: varchar('replay_of', { length: 256 }),
+      /** The most tries any step of the run gets, from `start({ maxAttempts })`. Null: each step's own retry decides. */
+      maxAttempts: integer('max_attempts'),
+      /** The time limit of each step attempt in ms, from `start({ timeout })`. Null: each step's own `timeout`. */
+      stepTimeoutMs: integer('step_timeout_ms'),
+      /** The priority of the run's step and timer jobs, from `start({ priority })`. Null: 0, as for any job. */
+      priority: integer('priority'),
+      /**
+       * The shared limits (`concurrency.shared`) the run holds until it ends. The workflow's own limit is not listed:
+       * it counts the runs by `name`.
+       */
+      limits: text('limits')
+        .array()
+        .notNull()
+        .default(sql`'{}'::text[]`),
       cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
       cancelReason: text('cancel_reason'),
       startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull(),
@@ -356,8 +372,32 @@ export function journalTables(schema?: PgSchema) {
       index('workflow_runs_tags_idx').using('gin', t.tags),
       index('workflow_runs_root_id_idx').on(t.rootId),
       index('workflow_runs_batch_id_idx').on(t.batchId),
+      // The unfinished runs that hold a shared limit, which the start gate counts with `limits @> array[name]`.
+      index('workflow_runs_limits_idx')
+        .using('gin', t.limits)
+        .where(sql`${t.finishedAt} is null`),
+      // The queued runs, oldest first: what a freed slot promotes (`onBusy: 'queue'`).
+      index('workflow_runs_queued_idx')
+        .on(t.startedAt, t.id)
+        .where(sql`${t.state} = 'queued'`),
     ],
   );
+
+  // `journal.limit` entity table: one row per limit an operator changed (`journal.limits`). No row: the code values apply.
+  const limits = table('journal_limits', {
+    /** A `j.limit` name, or `workflow/<workflow name>` for a workflow's own limit. */
+    name: varchar('name', { length: 256 }).primaryKey(),
+    /** A paused limit admits no new run. */
+    paused: boolean('paused').notNull().default(false),
+    /** Replaces the code's `total` until `reset`. Null: the code's. */
+    total: integer('total'),
+    /** Replaces the code's `perKey` until `reset`. Null: the code's. */
+    perKey: integer('per_key'),
+    /** The `perKey` of single keys, each until its `until`. An expired one is ignored, and dropped by the next. */
+    keys: jsonb('keys').notNull().$type<Readonly<Record<string, LimitKeyOverride>>>().default({}),
+    /** The journal's entity version. */
+    version: integer('version').notNull().default(0),
+  });
 
   const workflowSteps = table(
     'workflow_steps',
@@ -416,6 +456,7 @@ export function journalTables(schema?: PgSchema) {
     workflowRuns,
     workflowSteps,
     workflowSignals,
+    limits,
   };
 }
 

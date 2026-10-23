@@ -406,7 +406,11 @@ export type ServicesFor<E extends readonly { readonly needs: Needs }[]> = UnionT
  * Retries keep their priority.
  */
 export type EffectSchedule<Meta = unknown> = {
-  readonly priority?: number;
+  /**
+   * An integer within 32 bits, or a function of the event that gives one, so each job can have its own. Bivariant,
+   * like the method signatures below, so an effect of one meta type is still an `Effect<unknown>`.
+   */
+  readonly priority?: number | BivariantFn<[event: Recorded<string, unknown, Meta>], number>;
   readonly delaySeconds?: number;
   /**
    * When a failed job runs again, and how long it waits first: a `backoff` from

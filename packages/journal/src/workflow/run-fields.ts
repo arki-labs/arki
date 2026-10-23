@@ -2,12 +2,10 @@
  * What a run is started with besides its input: the key of the tenant it belongs to (`scope`), labels to find it by
  * (`tags`) and free data about it (`metadata`). The limits are written once here; the start schema checks them.
  * The changes a step or an operator makes to them later are here too, with the pure function that applies one.
+ * Public signatures name these types, so this file imports no Zod (A-43); the schemas are in `run-field-schemas.ts`.
  */
-import { z } from 'zod';
-
 import type { CommandConflict, CommandFailure, CommandInvalid, CommandNotFound } from '../errors.js';
 import type { RetentionAge } from '../retention.js';
-import { AGE_UNITS } from '../retention.js';
 
 /** The limits on the run fields: `scope` length, number of `tags`, length of one tag, and `metadata` as JSON bytes. */
 export const RUN_FIELD_LIMITS = { scope: 256, tags: 10, tag: 128, metadataBytes: 262_144 } as const;
@@ -22,36 +20,6 @@ export type RunFields = {
 };
 
 /**
- * Checks the shape of the run fields. The size of `metadata` is checked when the run starts, with its JSON form,
- * like the input.
- */
-export const runFieldsSchema = z
-  .object({
-    scope: z.string().min(1).max(RUN_FIELD_LIMITS.scope).optional(),
-    tags: z.array(z.string().min(1).max(RUN_FIELD_LIMITS.tag)).max(RUN_FIELD_LIMITS.tags).readonly().optional(),
-    metadata: z.record(z.string(), z.unknown()).readonly().optional(),
-  })
-  .readonly();
-
-/**
- * An age as `RetentionAge` takes it, checked: seconds, or an amount with a unit (`'5m'`, `'2h'`). `positive` refuses 0.
- * The amount of a string is its leading number, so `Number.parseFloat` reads it.
- */
-const ageSchema = (positive: boolean) =>
-  z.union([
-    positive ? z.number().positive() : z.number().nonnegative(),
-    z
-      .templateLiteral([z.number(), z.enum(AGE_UNITS)])
-      .refine(age => (positive ? Number.parseFloat(age) > 0 : Number.parseFloat(age) >= 0), {
-        message: positive ? 'an age must be longer than 0' : 'an age must be 0 or more',
-      }),
-  ]);
-/** A wait before a run starts: an age, 0 or more. */
-export const delayAgeSchema = ageSchema(false);
-/** How long a run may wait to start: an age longer than 0. */
-export const ttlAgeSchema = ageSchema(true);
-
-/**
  * When a run starts, besides its fields: `delay` makes the first node due later (an age from now, or a time; a time in
  * the past is now), and `ttl` ends the run `expired` when its first node has not started that long after it was due.
  * A child run takes neither: it starts when its parent gets to it.
@@ -60,11 +28,23 @@ export type RunTiming = {
   readonly delay?: RetentionAge | Date | undefined;
   readonly ttl?: RetentionAge | undefined;
 };
-/** Checks `RunTiming`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
-export const runTimingSchema = z
-  .object({ delay: z.union([delayAgeSchema, z.date()]).optional(), ttl: ttlAgeSchema.optional() })
-  .readonly();
+/**
+ * The bounds of a run's overrides: `maxAttempts` at most 100 tries of a step, and `timeout` at most what a timer can
+ * wait (`setTimeout` fires at once past 2^31 - 1 ms).
+ */
+export const RUN_OVERRIDE_LIMITS = { maxAttempts: 100, timeoutMs: 2_147_483_647 } as const;
 
+/**
+ * How a run's steps run, set at its start and kept for its whole life. `maxAttempts` caps the tries of each step,
+ * `timeout` caps each step attempt (an age), and `priority` orders the run's step and timer jobs among due jobs:
+ * higher first, the scale of an effect's `priority`. A step's retry and timeout are code, so a run can only narrow
+ * them. A child run takes none: it runs as its definition says.
+ */
+export type RunOverrides = {
+  readonly maxAttempts?: number | undefined;
+  readonly timeout?: RetentionAge | undefined;
+  readonly priority?: number | undefined;
+};
 /** A run's metadata: a JSON object. */
 export type RunMetadata = Readonly<Record<string, unknown>>;
 
@@ -78,20 +58,6 @@ export type MetadataChange =
   | { readonly kind: 'increment'; readonly key: string; readonly by: number }
   | { readonly kind: 'append'; readonly key: string; readonly value: unknown }
   | { readonly kind: 'remove'; readonly key: string };
-
-const metadataKey = z.string().min(1);
-/** Checks a `MetadataChange`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
-export const metadataChangeSchema = z
-  .discriminatedUnion('kind', [
-    z.object({ kind: z.literal('set'), patch: z.record(z.string(), z.unknown()).readonly() }),
-    z.object({ kind: z.literal('increment'), key: metadataKey, by: z.number() }),
-    z.object({ kind: z.literal('append'), key: metadataKey, value: z.unknown() }),
-    z.object({ kind: z.literal('remove'), key: metadataKey }),
-  ])
-  .readonly();
-
-/** Checks the tags `ctx.tags.add` and `journal.workflows.addTags` take: at least one, each as at start. */
-export const addedTagsSchema = z.array(z.string().min(1).max(RUN_FIELD_LIMITS.tag)).min(1).readonly();
 
 /**
  * Why `change` cannot apply to `metadata`, or null when it can: `increment` needs a number (or nothing) at its key,

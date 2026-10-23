@@ -111,19 +111,28 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
 
 const INT4_MAX = 2_147_483_647;
 
+/**
+ * A job priority as the jobs table holds it: an integer within 32 bits. Checked where a number is declared, and for a
+ * function, on each value it gives when its job is written.
+ */
+export function checkedPriority(effectName: string, priority: number): number {
+  if (!Number.isInteger(priority) || Math.abs(priority) > INT4_MAX)
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'effect',
+      effectName,
+      `journal: effect "${effectName}": priority must be an integer within 32 bits, got ${String(priority)}`,
+    );
+  return priority;
+}
+
 /** Attach a schedule to an effect, checked once: a job row must be able to hold it. */
 export function withSchedule<Meta, AppDb, Run, N extends Needs>(
   effect: Omit<Effect<Meta, AppDb, Run, N>, 'schedule' | 'withSchedule'>,
   schedule: EffectSchedule<Meta>,
 ): Effect<Meta, AppDb, Run, N> {
-  const { priority = 0, delaySeconds = 0 } = schedule;
-  if (!Number.isInteger(priority) || Math.abs(priority) > INT4_MAX)
-    throw new JournalError(
-      'BAD_DEFINITION',
-      'effect',
-      effect.name,
-      `journal: effect "${effect.name}": priority must be an integer within 32 bits, got ${String(priority)}`,
-    );
+  const { priority, delaySeconds = 0 } = schedule;
+  if (typeof priority === 'number') checkedPriority(effect.name, priority);
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0)
     throw new JournalError(
       'BAD_DEFINITION',

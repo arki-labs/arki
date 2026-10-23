@@ -4,6 +4,8 @@ import { TRANSACTION_FAILURES } from '@arki/db/contract';
 
 import { defineFailure, SCHEMA_FAILURES } from '@arki/failure';
 
+import { LIMIT_BUSY_REASONS } from './workflow/states.js';
+
 export type JournalErrorCode =
   | 'CONFLICT'
   | 'NO_ROW'
@@ -301,23 +303,32 @@ export const WorkflowStranded = defineFailure('journal.workflow_stranded', {
 });
 export type WorkflowStranded = ReturnType<typeof WorkflowStranded>;
 
-/** A start found `concurrency.limit` unfinished runs of this workflow with the same concurrency key. `running` lists
- * those of the caller's own scope, oldest first; another scope's run ids are never shown. Returned when `onBusy` is `'refuse'`, and always for a child run: a child cannot join a run that
- * another parent started.
- * @fix Wait for one of the running runs to finish, or start the run with another concurrency key.
+/** A start found a limit it holds full or paused (`reason`). `limitName` names it: `workflow/<name>` for the
+ * workflow's own `concurrency.limit` and `total`, else a `j.limit`. `limit` is the count that is reached (0 for a
+ * pause), `key` the start's concurrency key (`null` without one: only a `total` can block such a start). `running` lists the runs of the caller's own scope that
+ * hold the limit, oldest first, at most 100; another scope's run ids are never shown. Returned when `onBusy` is
+ * `'refuse'`, for a pause, for a full limit other than the workflow's own `perKey`, and always for a child run: a
+ * child cannot join a run that another parent started.
+ * @fix Wait for one of the running runs to finish, start the run with another concurrency key, or ask an operator to
+ * raise or resume the limit (`journal.limits`).
  * @verify bun run test -- src/workflow/concurrency.test.ts
  */
 export const WorkflowBusy = defineFailure('journal.workflow_busy', {
   status: 409,
   data: z.object({
     name: z.string(),
-    key: z.string(),
+    // `''` in a failure recorded before a missing key became `null`.
+    key: z.string().nullable(),
     limit: z.number().int(),
     running: z.array(z.string()),
+    // Added with named limits: a failure recorded before them has neither.
+    limitName: z.string().optional(),
+    reason: z.enum(LIMIT_BUSY_REASONS).optional(),
     detail: z.string(),
   }),
   message: '{detail}',
-  remediation: 'Wait for one of the running runs to finish, or start the run with another concurrency key.',
+  remediation:
+    'Wait for one of the running runs to finish, start the run with another concurrency key, or raise or resume the limit (journal.limits).',
 });
 /** A {@link WorkflowBusy} failure value. */
 export type WorkflowBusy = ReturnType<typeof WorkflowBusy>;

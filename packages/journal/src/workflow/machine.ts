@@ -1,7 +1,7 @@
 /**
  * The `workflow.run` entity: its events, its reducers (the run row) and the step projection
  * (`workflow_steps`). Pure state shape; the runner, builder and verbs come in later steps.
- * A run's stored state is one of seven values (`RUN_STATES`). `stuck`, `stranded` and `residual` are derived
+ * A run's stored state is one of eight values (`RUN_STATES`). `stuck`, `stranded` and `residual` are derived
  * from the step rows, so no event names them.
  */
 import { and, eq, sql } from 'drizzle-orm';
@@ -12,9 +12,10 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
-import type { StepPhase, STEP_VIEW_STATUSES } from './states.js';
-import { changedMetadata, metadataChangeSchema } from './run-fields.js';
-import { SKIP_CAUSES, STEP_PHASES } from './states.js';
+import type { StepPhase, StepStatus } from './states.js';
+import { changedMetadata } from './run-fields.js';
+import { metadataChangeSchema } from './run-field-schemas.js';
+import { LIMIT_BUSY_REASONS, SKIP_CAUSES, STEP_PHASES } from './states.js';
 
 const at = z.iso.datetime();
 const phase = z.enum(STEP_PHASES);
@@ -40,7 +41,7 @@ export const shapeSchema = z
 /** When the run row is pruned; null keeps it. Resolved by the runner from `retention.workflows`. */
 const keepUntil = z.iso.datetime().nullable();
 /** Who asked, why, and from which Foreman execution, on an event an operator verb wrote. The run's events are the audit. */
-const byOperator = {
+export const byOperator = {
   actorId: z.string().optional(),
   reason: z.string().optional(),
   executionId: z.string().optional(),
@@ -76,6 +77,12 @@ export function workflowMachine<
       startAt: at.nullable().optional(),
       ttlAt: at.nullable().optional(),
       ttlMs: z.int().positive().nullable().optional(),
+      // Set by `start` only when given, as are the overrides below: an older or plain run has none of them.
+      maxAttempts: z.int().positive().optional(),
+      stepTimeoutMs: z.int().positive().optional(),
+      priority: z.int32().optional(),
+      // The shared limits the run holds, left out when it holds none: an older run holds none.
+      limits: z.array(z.string().min(1)).readonly().optional(),
       // Set by `startBatch` and by `replay` only; `replay` also records its operator.
       batchId: z.string().optional(),
       replayOf: z.string().optional(),
@@ -83,6 +90,23 @@ export function workflowMachine<
       at,
     }),
   );
+  /**
+   * A limit the start holds was busy and the workflow's `onBusy` is `'queue'`: the run waits, with no node scheduled,
+   * until a slot frees. `limitName` and `reason` say what blocked it then. `ttlAt` and `priority` are for the timer
+   * job that ends the run `expired` if it is still queued at its `ttl`.
+   */
+  const RunQueued = j.event(
+    'RunQueued',
+    z.object({
+      limitName: z.string().min(1),
+      reason: z.enum(LIMIT_BUSY_REASONS),
+      ttlAt: at.nullable(),
+      priority: z.int32().optional(),
+      at,
+    }),
+  );
+  /** A slot freed and the queued run fits every limit it holds: it runs, and its first node is scheduled next. */
+  const RunDequeued = j.event('RunDequeued', z.object({ at }));
   /** `at` is when the node is due: now for a first try, later for a retry that waits out its backoff. */
   const NodeScheduled = j.event(
     'NodeScheduled',
@@ -95,6 +119,8 @@ export function workflowMachine<
       at,
       /** Set by `resolveStep`: the operator's result. The worker routes it and does not run the step body. */
       resolution: z.object({ result: z.unknown() }).optional(),
+      /** The run's `priority`, for the job this event makes. Left out for a run without one. */
+      priority: z.int32().optional(),
       ...byOperator,
     }),
   );
@@ -129,7 +155,14 @@ export function workflowMachine<
   );
   const Parked = j.event(
     'Parked',
-    z.object({ node: nodePath, waitingFor: z.string().nullable(), wakeAt: at.nullable(), at }),
+    // `priority`: the run's, for the timer job, as on `NodeScheduled`.
+    z.object({
+      node: nodePath,
+      waitingFor: z.string().nullable(),
+      wakeAt: at.nullable(),
+      priority: z.int32().optional(),
+      at,
+    }),
   );
   /**
    * A child or map node reached its work: the child runs it will start, in order, each with its stored input, and the
@@ -220,8 +253,15 @@ export function workflowMachine<
       ttlMs: e.data.ttlMs ?? null,
       batchId: e.data.batchId ?? null,
       replayOf: e.data.replayOf ?? null,
+      maxAttempts: e.data.maxAttempts ?? null,
+      stepTimeoutMs: e.data.stepTimeoutMs ?? null,
+      priority: e.data.priority ?? null,
+      limits: [...(e.data.limits ?? [])],
       startedAt: new Date(e.data.at),
     }))
+    // Written with `RunStarted`, so a run that never queued has neither event and starts `running`.
+    .on(RunQueued, () => ({ state: 'queued', node: null }))
+    .on(RunDequeued, () => ({ state: 'running' }))
     // A scheduled node ends a park. A run that is compensating stays compensating.
     .on(NodeScheduled, (row, e) => ({
       node: e.data.path,
@@ -384,6 +424,8 @@ export function workflowMachine<
     steps,
     events: {
       RunStarted,
+      RunQueued,
+      RunDequeued,
       NodeScheduled,
       NodeCompleted,
       NodeSkipped,
@@ -407,8 +449,6 @@ export function workflowMachine<
   };
 }
 
-/** What a step row stores, plus `running`, which is never stored: it is derived from the step's job. */
-export type StepStatus = (typeof STEP_VIEW_STATUSES)[number];
 
 /**
  * The status of a step as a SQL expression, for a query on `workflow_steps`. A `scheduled` step is `running` while

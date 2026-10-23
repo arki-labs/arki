@@ -248,6 +248,8 @@ export const journal = j.compose({ effects: [closeAfterPayment] });
 
 `expectedVersion` is the row version the caller saw. If the stored version differs (0 for no row), the write is refused with `CONFLICT` before `events` runs. A command passes it on: `write(order, id, events, { expectedVersion: input.version })`. The client sends the version it rendered; `commandErrors()` turns the refusal into a 409 that asks it to reload. This is how concurrent editors and stale game moves are caught without a hand-written version compare.
 
+A row insert that hits a unique constraint is `CONFLICT` too, for every entity: a create that lost a race, or a column value another row already holds. The write rolls back with its events. To give the caller a clear answer on the retry, check a value that must be unique inside `events` and return a failure when it is taken.
+
 `write` returns `{ row, events }`, or the failure `events` returned: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` the trace `commandId`, `causeSeq`, `correlationId` (see Tracing), and `erasedAt` (see Erasure). An entity can be created again after a delete; its version continues from the last event.
 
 ### Transient events
@@ -258,8 +260,6 @@ By default every entity keeps its events: `initJournal({ tables })` means `initJ
 const j = initJournal({ tables, events: 'stored' }); // the journal default; 'transient' flips every entity
 const draft = j.entity('draft', drafts, { events: 'transient' }); // this entity keeps no events
 const order = j.entity('order', orders, { events: 'stored' }); // stored, even under a transient default
-A row insert that hits a unique constraint is `CONFLICT` too, for every entity: a create that lost a race, or a column value another row already holds. The write rolls back with its events. To give the caller a clear answer on the retry, check a value that must be unique inside `events` and return a failure when it is taken.
-
 ```
 
 A transient write does everything a stored write does except the `journal_events` insert: the append lock, the row lock, `expectedVersion`, the rules in `events`, the reducers, the row save, inline projections and effect jobs. The recorded events exist in memory. They get a real `seq` from the events table's own sequence, so `seq` stays the global write order across both kinds, and `recordedAt` from the transaction's `now()`; the write returns them as usual. An effect job for such an event has `event_seq` null and the event's copy in `args`, as every effect job does. Two creates of one id that race are `CONFLICT`, caught by the row's own key instead of the log's index.
@@ -275,6 +275,8 @@ A transient write does everything a stored write does except the `journal_events
 | Audit by command or correlation id, an event browser                 | works    | nothing to show                                              |
 
 Two things to know. `version` counts one row's lifetime, not the id's: a transient entity created again after a delete starts at version 1, where a stored entity continues from its last event. And `forget` is refused, so personal data in a transient event lives only in the effect jobs' `args`, until the job leaves the archive (`retention.archive`).
+
+To switch an entity to `'stored'` later, change the setting and `journal.adopt` each row before its first write: the row keeps its values, gets a create event as version 1, and its version becomes 1 (see Rows that existed before the journal). A row written to after the switch and before its adopt has a log that starts above 1; adopt refuses it with `CONFLICT`, and that row's history stays partial.
 
 ### Events in another store
 
@@ -359,8 +361,6 @@ The same call switches an entity from `events: 'transient'` to `'stored'`: chang
 await db.transaction(tx =>
   journal.adopt(tx, order, id, {
     meta: { actorId: 'migration' },
-To switch an entity to `'stored'` later, change the setting and `journal.adopt` each row before its first write: the row keeps its values, gets a create event as version 1, and its version becomes 1 (see Rows that existed before the journal). A row written to after the switch and before its adopt has a log that starts above 1; adopt refuses it with `CONFLICT`, and that row's history stays partial.
-
     events: row => [OrderPlaced({ customerId: row.customerId, total: row.total })],
   }),
 );
@@ -551,7 +551,7 @@ export const journal = j.compose({ effects: [orderMail], services: { mailer } })
 
 ### When a job runs
 
-An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. `when: event => boolean`: the write makes a job only for the events where it returns true, so `withSchedule({ when: e => e.data.total > 10_000 })` queues nothing for small orders. The default is every event of the effect's types. `retry`: a `Backoff` from `@arki/resilience` (re-exported here as `backoff`), the same retry schedule queue jobs and resilience policies take. It says how long a failed job waits before its next try, and when it is dead instead: `withSchedule({ retry: backoff.exponential({ base: 5_000 }).upTo(3).while(error => error instanceof SmtpError) })`. The default is `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`: 8 tries, doubling from 1 s to at most 5 minutes. A throw is retried by the effect's `retry`, or by this default. `lastError` records the throw as `UnexpectedDefect`, but the `while` gets the error the handler threw, as is. Retries keep their priority. A handler may also return a failure from `@arki/failure` for an expected outcome, such as a declined card: the job is then dead after one try, because another try would repeat it. It runs again only when the `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. Its `lastError` is the failure as JSON: code, message, status and data. A bad value throws `BAD_DEFINITION` where the schedule is declared.
+An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. `priority` may also be a function of the event, `priority: event => number`, so each job gets its own on the same scale; workflows use it so each run's jobs carry that run's `priority`. A value outside 32 bits throws `BAD_DEFINITION` when that job is written. `when: event => boolean`: the write makes a job only for the events where it returns true, so `withSchedule({ when: e => e.data.total > 10_000 })` queues nothing for small orders. The default is every event of the effect's types. `retry`: a `Backoff` from `@arki/resilience` (re-exported here as `backoff`), the same retry schedule queue jobs and resilience policies take. It says how long a failed job waits before its next try, and when it is dead instead: `withSchedule({ retry: backoff.exponential({ base: 5_000 }).upTo(3).while(error => error instanceof SmtpError) })`. The default is `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`: 8 tries, doubling from 1 s to at most 5 minutes. A throw is retried by the effect's `retry`, or by this default. `lastError` records the throw as `UnexpectedDefect`, but the `while` gets the error the handler threw, as is. Retries keep their priority. A handler may also return a failure from `@arki/failure` for an expected outcome, such as a declined card: the job is then dead after one try, because another try would repeat it. It runs again only when the `while` accepts that failure, as in `.while(reason => isFailure(reason) && reason.code === 'db.timeout')`. Its `lastError` is the failure as JSON: code, message, status and data. A bad value throws `BAD_DEFINITION` where the schedule is declared.
 
 ## The worker
 
@@ -1054,7 +1054,7 @@ export const fulfil = j
 
 ### Compose
 
-Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds two effects (`workflow.step`, `workflow.timer`), one more per workflow with a `startOn` (`workflow.start:<name>`, see [Start on an event](#start-on-an-event)), and one projection (the `workflow_steps` table).
+Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds three effects (`workflow.step`, `workflow.timer`, `workflow.limitTimer`), one more per workflow with a `startOn` (`workflow.start:<name>`, see [Start on an event](#start-on-an-event)), and one projection (the `workflow_steps` table).
 
 ```ts continue
 const released: string[] = [];
@@ -1078,9 +1078,10 @@ export const journal = j.compose({
 
 A finished definition has three commands and one read. The commands run through `journal.run`, `journal.bind`, `context.run` or `ctx.run`, like any command.
 
-- `def.start` takes `{ input, id?, scope?, tags?, metadata?, delay?, ttl? }` and returns `{ runId }`. The default id is `wfr_<random>`. Give your own id to make the start idempotent: the same id and input return the same run, and another input or another `scope` is a `CommandConflict`.
+- `def.start` takes `{ input, id?, scope?, tags?, metadata?, delay?, ttl?, maxAttempts?, timeout?, priority? }` and returns `{ runId }`. The default id is `wfr_<random>`. Give your own id to make the start idempotent: the same id and input return the same run, and another input or another `scope` is a `CommandConflict`.
 - The run fields describe the run, not its work. `scope` is the key of the tenant or owner the run belongs to (1 to 256 characters). `tags` are up to 10 labels of 1 to 128 characters, to find runs by. `metadata` is a JSON object of at most 256 KiB (default `{}`). A field outside these limits is refused (`InvalidInput`; metadata that is too large is `CommandInvalid`), and no run starts. The limits are `RUN_FIELD_LIMITS`. A child run (`child`, `map`) takes its parent's `scope` and no tags or metadata. Each run stores `rootId`: null for a run with no parent, else the id of the top run of its tree. The readers return all four fields; a run in a list leaves out `metadata`.
 - `delay` and `ttl` time the start. `delay` is an age (seconds, or `'5m'`, `'2h'`, `'1d'`) or a `Date`: the first node is due that much later (a time in the past is now). The run is stored at once in state `running`, holds its concurrency slot, and the readers show `delayedUntil` (the planned start while it is ahead and the first node has not started; else `null`). The deadline counts from the planned start. `ttl` is an age longer than 0: when a worker picks up the first node's first try after `ttl` has passed since the run was due, the body does not run and the run ends in the state `expired` (event `RunExpired`, the node skipped with cause `expired`). An expired run frees its concurrency slot. A run whose first node has started never expires. A bad value is `InvalidInput` and starts nothing. A child run takes no delay and no ttl. `journal.workflows.reschedule` (§ Operators) moves a start that has not happened yet.
+- `maxAttempts`, `timeout` and `priority` override how this run's steps run, for the run's whole life (`RunOverrides`). A step's retry and timeout are code, so a run can only narrow them. `maxAttempts` (a whole number, 1 to `RUN_OVERRIDE_LIMITS.maxAttempts`, 100) caps the tries of every step: the step's `retry` (or the default) still picks the wait and which errors retry, but a step that reached `maxAttempts` tries is dead, and the run follows `onDeadStep`. `timeout` is an age longer than 0 (at most `RUN_OVERRIDE_LIMITS.timeoutMs`, about 24 days): each step and undo attempt is aborted after it, or after the step's own `timeout` when that is shorter. `priority` is an integer within 32 bits, the scale of an effect's `priority` (§ When a job runs): the run's step and timer jobs, retries included, are claimed in that order among due jobs (default 0, higher first). A bad value is `InvalidInput` and starts nothing. A child run takes none of them: it runs as its definition says. The run stores them as `maxAttempts`, `stepTimeoutMs` and `priority` (null when not given), and the readers return them.
 - A step or an undo changes its run's metadata and tags with `ctx.metadata` and `ctx.tags`: `set(patch)` merges a JSON object into the top level, `increment(key, by = 1)` adds to a number (a missing key counts as 0), `append(key, value)` pushes onto an array (a missing key starts one), `remove(key)` drops a key, and `tags.add(...tags)` adds the tags the run does not have yet. Each call is its own command and one event on the run (`MetadataChanged` with the `change`, or `RunTagged` with the new tags; a call that adds no tag writes none). It commits at once, not with the step's checkpoint, so a reader sees the progress while the step still runs, under the attempt's fence: an attempt that has ended writes nothing. A call never rejects, so it may be left un-awaited (`void ctx.metadata.increment('done')`). It returns `{ metadata }` or `{ tags }` after the change, or a refusal: `CommandConflict` once the run has finished, `CommandInvalid` for a value of the wrong type (`increment` on a non-number, `append` on a non-array), metadata over 256 KiB after the change, or more than 10 tags. A database failure or a lost fence is returned as a failure too. None of these fail the step, even when they arrive after it settled, and none needs `accept`. A retried attempt runs its calls again: `set` and `remove` end with the same metadata, `increment` and `append` apply once more per attempt. Changes are allowed while the run is running, parked or compensating. `journal.workflows.setMetadata` and `addTags` (§ Operators) make the same changes from outside a run.
 - `def.startBatch` takes `{ items, batchId? }` and starts many runs of one workflow in one transaction. Each item is what `def.start` takes, and there are 1 to `BATCH_LIMIT` (1000) items. It returns `{ batchId, runs }`: `runs[i]` is item i's outcome, `{ runId }` or its refusal (`WorkflowBusy`, `CommandConflict`, `CommandInvalid`). Each item runs in its own savepoint, so a refused item rolls back only itself and the others start. An item that does not fit the start schema, or a wrong number of items, is a caller bug: the whole batch is `InvalidInput` and nothing starts. The default batch id is `wfb_<random>`; every run stores it in `batchId`. `journal.workflows.batch(db, batchId)` counts its runs by state, and `runs(db, { batchId })` lists them (§ Operators).
 - `def.signal(name)` takes `{ runId, deliveryId, payload }`. `name` must be a signal one of the `waitFor` nodes declares. `deliveryId` is the sender's own id, such as the webhook event id. It returns a `status`: `woke` (the run moved on), `kept` (stored; the run takes it when it reaches the wait), `duplicate` (this `deliveryId` was seen) or `finished` (the run is over, so it was dropped) or `no-run` (no run of this workflow has that id, or the id belongs to another workflow; nothing is stored). `no-run` is a status, not a failure, so a webhook for a missing run is answered 200 and the provider stops resending. The operator verb `journal.workflows.signal` names a specific run and still refuses an unknown one.
@@ -1161,7 +1162,7 @@ A run whose version is no longer registered, or whose definition has other nodes
 
 ### Operators
 
-`journal.workflows` reads runs and moves them by hand.
+`journal.workflows` reads runs and moves them by hand. A run's `state` (`RunState`) is one of `queued` (waiting for a slot, `onBusy: 'queue'`), `running`, `parked`, `compensating`, `completed`, `failed`, `cancelled` or `expired`. `runs` filters by it, and `counts` and `batch` count by it.
 
 | Call                                                       | What it does                                                                                                                                |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1176,13 +1177,25 @@ A run whose version is no longer registered, or whose definition has other nodes
 | `checkResult(db, { runId, path, result })`                 | Says whether `resolveStep` would take `result`. Writes nothing.                                                                             |
 | `skipUndo(db, { runId, path }, op)`                        | Gives up a failed undo. `op.reason` is required. The path joins `residual` and compensation goes on.                                        |
 | `signal(db, { runId, name, deliveryId, payload }, op)`     | Delivers a signal from JSON, checked by the run's own version.                                                                              |
-| `cancel(db, { runId, reason }, op)`                        | Cancels a run of any workflow.                                                                                                              |
+| `cancel(db, { runId, reason }, op)`                        | Cancels a run of any workflow. A queued run ends `cancelled` at once: nothing ran, so nothing is undone.                                    |
 | `setMetadata(db, { runId, change }, op)`                   | Changes the metadata of an unfinished run, like `ctx.metadata`. `change` is `{ kind: 'set', patch }`, `{ kind: 'increment', key, by }`, `{ kind: 'append', key, value }` or `{ kind: 'remove', key }`. Returns `{ metadata }`. |
 | `addTags(db, { runId, tags }, op)`                         | Adds tags to an unfinished run, like `ctx.tags.add`. Returns `{ tags }`.                                                                    |
-| `replay(db, { runId, overrides? }, op)`                    | Starts a new run of the run's workflow at the newest registered version, under a new id, with the old run's input, `scope`, `tags` and `metadata`; `overrides` replaces any of them and may add `delay` and `ttl`. Works for a finished or an unfinished run. The new run's `replayOf` is the old id and its `RunStarted` carries the operator; the old run is unchanged. Its children are not copied: the new run starts its own. It is a start: the input is checked by the newest input schema (`InvalidInput` when it no longer fits), and the concurrency gate applies (`WorkflowBusy`; with `onBusy: 'join'`, the running run's id). Returns `{ runId }`. `CommandNotFound` for no such run. |
-| `reschedule(db, { runId, delay } \| { runId, at }, op)`     | Moves the start of a run whose first node has not started: the first node is due at the new time (`delay` from now, or `at`; a past time is now), and `ttl` and the deadline count from it. One `RunRescheduled` event. Returns `{ startAt }` (ISO). `CommandConflict` once the first node has started, `CommandNotFound` for no such run. |
+| `replay(db, { runId, overrides? }, op)`                    | Starts a new run of the run's workflow at the newest registered version, under a new id, with the old run's input, `scope`, `tags` and `metadata`; `overrides` replaces any of them and may add `delay` and `ttl`. The old run's `maxAttempts`, `timeout` and `priority` are kept too, unless `overrides` gives others. Works for a finished or an unfinished run. The new run's `replayOf` is the old id and its `RunStarted` carries the operator; the old run is unchanged. Its children are not copied: the new run starts its own. It is a start: the input is checked by the newest input schema (`InvalidInput` when it no longer fits), and the concurrency gate applies (`WorkflowBusy`; with `onBusy: 'join'`, the running run's id). Returns `{ runId }`. `CommandNotFound` for no such run. |
+| `reschedule(db, { runId, delay } \| { runId, at }, op)`     | Moves the start of a run whose first node has not started: the first node is due at the new time (`delay` from now, or `at`; a past time is now), and `ttl` and the deadline count from it. One `RunRescheduled` event. Returns `{ startAt }` (ISO). A queued run moves too: it stays queued, and its first node is due at the new time once it is promoted. `CommandConflict` once the first node has started, `CommandNotFound` for no such run. |
 
 `op` is `{ actor, reason?, executionId? }`, as for the job verbs. The run's events record it. A step or timer job belongs to its run: the raw job verbs (`journal.retry`, `discard`, `cancel`) refuse it with `JOB_MANAGED`.
+
+`journal.limits` reads and changes the limits of `concurrency` (§ Concurrency and limits). A name is a `j.limit` name or `workflow/<workflow name>`. An unknown name is `CommandNotFound`. Each verb records `op` on its event and returns the limit after it.
+
+| Call | What it does |
+| --- | --- |
+| `list(db)` | Every limit the registered workflows hold, by name. Each one: `workflows` (the ones that hold it), `code` (the values in code), `override` (an operator's `total` and `perKey`), `keys` (key overrides that have not expired, each `{ key, perKey, until }`), `effective` (what a start is checked against), `paused`, `running` (the unfinished runs that hold a slot now) and `queued` (the queued runs that wait for one). |
+| `get(db, name)` | One limit, as `list` shows it. |
+| `override(db, { name, total?, perKey? }, op)` | Replaces the code's `total` or `perKey` until `reset`; at least one, each 0 or more. `CommandInvalid` for a workflow without `concurrency`, or a `perKey` where no start has a key. |
+| `override(db, { name, key, perKey, ttl? }, op)` | Sets the `perKey` of one key until `ttl` runs out (default `'7d'`, at most `'30d'`). A `ttl` past 30 days is `InvalidInput`. |
+| `reset(db, { name, key? }, op)` | Back to the code values: of one key, or without `key` all the overrides of the limit. The pause stays. |
+| `pause(db, { name }, op)` | Admits no new run that holds the limit. Running runs finish. |
+| `resume(db, { name }, op)` | Admits runs again. |
 
 ```ts continue
 // One row per name, version and state: here `payments.refund` v1 has one `completed` and one `cancelled` run.
@@ -1199,7 +1212,21 @@ if (events.at(-1)?.type !== 'RunCancelled') throw new Error('the history ends wi
 await client.close();
 ```
 
-`journalWorkflowsModule({ journal, db, meta, payload? })` from `@arki/journal/foreman` puts the same reads and verbs in Foreman, with previews and approvals. `meta(permit)` gives the meta of the commands it runs; its `actorId` is written on the run's events. The ids are `workflow.runs`, `.run`, `.counts`, `.stranded`, `.history` (permission `workflow:read`), `workflow.retryStep` (`journal:retry`, low risk), `workflow.signal` (`workflow:signal`, medium), `workflow.resolveStep` and `workflow.skipUndo` (`workflow:resolve`, high), and `workflow.cancel` (`workflow:cancel`, high). Its refusals are `JOURNAL_WORKFLOWS_ERROR_CODES`, `ARKI_JOURNAL_E010` to `E017`.
+`journalWorkflowsModule({ journal, db, meta, payload? })` from `@arki/journal/foreman` puts the same reads and verbs in Foreman, with previews and approvals. `meta(permit)` gives the meta of the commands it runs; its `actorId` is written on the run's or limit's events. Each verb has its own permission, so an operator who may tag runs may not replay them or pause a limit:
+
+| Id                                                                                                                                         | Kind   | Permission            | Risk   |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------ | --------------------- | ------ |
+| `workflow.runs`, `workflow.run`, `workflow.counts`, `workflow.stranded`, `workflow.history`, `workflow.limits.list`, `workflow.limits.get` | read   | `workflow:read`       | read   |
+| `workflow.retryStep`                                                                                                                       | action | `journal:retry`       | low    |
+| `workflow.setMetadata`, `workflow.addTags`                                                                                                 | action | `workflow:metadata`   | low    |
+| `workflow.signal`                                                                                                                          | action | `workflow:signal`     | medium |
+| `workflow.reschedule`                                                                                                                      | action | `workflow:reschedule` | medium |
+| `workflow.replay`                                                                                                                          | action | `workflow:replay`     | medium |
+| `workflow.resolveStep`, `workflow.skipUndo`                                                                                                | action | `workflow:resolve`    | high   |
+| `workflow.cancel`                                                                                                                          | action | `workflow:cancel`     | high   |
+| `workflow.limits.pause`, `workflow.limits.resume`, `workflow.limits.override`, `workflow.limits.reset`                                     | action | `workflow:limits`     | high   |
+
+The run reads show `scope`, `tags`, `rootId`, `batchId`, `replayOf`, `startAt`, `delayedUntil`, `ttlAt` and the overrides (`maxAttempts`, `stepTimeoutMs`, `priority`); `metadata` is shown as the `payload` option allows. `workflow.runs` filters by `state` (`queued` and `expired` too), `name`, `version`, `parentId`, `stuck`, `tag`, `scope`, `rootId`, `batchId`, `from` and `to`. A run action's approval is taken on the run's revision: its version less its metadata and tag changes, so `setMetadata` and `addTags` void no approval, not even each other's, while any event that moves the run does. A limit action's approval is taken on the limit's `version` (`LimitView.version`), which only operator changes move; runs that take or free a slot do not. `workflow.replay` also takes a finished run. Its refusals are `JOURNAL_WORKFLOWS_ERROR_CODES`, `ARKI_JOURNAL_E010` to `E017` (a stale limit approval is `E010` too). The newer verbs answer the journal's own refusals with their codes and statuses: `journal.not_found` (an unknown limit), `journal.invalid` (too many tags, an override of a limit that caps nothing), `journal.conflict` (a reschedule of a run that has started) and `journal.workflow_busy` (a replay at a busy key, with its `limitName` and `reason`).
 
 ### Start on an event
 
@@ -1260,7 +1287,7 @@ if (thanked?.run.output !== 'thanks for 500') throw new Error('the order started
 await client.close();
 ```
 
-### Concurrency
+### Concurrency and limits
 
 `concurrency: { key, limit, onBusy }` on the workflow caps how many unfinished runs share one key, such as one sync per account. `key` gets the parsed input and returns a string of 1 to 256 characters. A parked run counts: it still holds its slot until it ends.
 
@@ -1277,11 +1304,59 @@ const sync = j
 
 - At the limit, `onBusy: 'refuse'` returns `WorkflowBusy` (`journal.workflow_busy`, status 409). Its data names the key, the limit and the running run ids of the caller's own `scope`, oldest first. No run is created.
 - At the limit, `onBusy: 'join'` returns the oldest running run of the caller's own `scope` instead of a new one, so the caller follows the run already under way. With none in its scope, the start is `WorkflowBusy`.
+- At the limit, `onBusy: 'queue'` creates the run all the same, in the state `queued`, and returns its `{ runId }`. Its events are `RunStarted` and `RunQueued` (which names the busy limit and `reason`). No node is scheduled and no job exists for it, so it does no work and holds no slot: no limit counts a queued run. Below, § Queued runs.
 - The limit counts every run with the key, whatever its scope, so a key can cap work across tenants. What a start gets back never crosses its scope: the key comes from input, and two tenants can share one.
 - The same start again (same `id`, same input) is the same run, never a busy key.
-- A child run (`child`, `map`) is never joined: the run it would join reports to another parent. A busy child is `WorkflowBusy`, and its parent's node fails like any child that cannot start.
+- A child run (`child`, `map`) is never joined: the run it would join reports to another parent. A busy child is `WorkflowBusy`, and its parent's node fails like any child that cannot start. A child of a workflow with `onBusy: 'queue'` queues instead, and its parent stays parked until it is promoted and ends.
 - A `startOn` start that is busy and refused leaves its job dead with `WorkflowBusy`.
 - The check runs inside the start's transaction, under a transaction-scoped advisory lock on the workflow name and the key. Two starts of one key on two connections take turns, so a race never overfills a key.
+
+`concurrency` takes more limits than one per key. A start is admitted only when every limit it holds has room.
+
+- `limit` caps the unfinished runs per `key` (it needs `key`), and `total` caps all unfinished runs of the workflow, whatever the key. Together they are the workflow's own limit, named `workflow/<workflow name>`.
+- `shared` lists at most two limits made with `j.limit({ name, total?, perKey? })`. Each one counts every unfinished run that holds it, across all the workflows that list it. Its `perKey` counts the runs with this start's `key`, so a workflow that lists a limit with `perKey` needs a `key`.
+- `onBusy: 'join'` joins only when the workflow's own `limit` is full: it answers the oldest run of the same workflow, key and scope. A full `total` or shared limit is `WorkflowBusy`.
+- `onBusy: 'queue'` queues on any limit that blocks the start: full or paused, its own or a shared one.
+- `WorkflowBusy` data also names the limit (`limitName`) and why (`reason`, one of `LIMIT_BUSY_REASONS`: `'full'` or `'paused'`). `limit` is the count that is reached, and `key` is `null` for a start without a key (only a `total` limit can block one).
+- Every limit name a definition uses is known once it is composed: no separate registration. Two `j.limit`s with one name and other values make `compose` throw `BAD_DEFINITION`.
+- Each limit has its own lock. A start takes it shared, then an exclusive lock per count it makes (`total`, or `perKey` of its key), in one sorted order. So two starts that count the same thing take turns, and starts of other keys do not wait.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+// Three uploads at a time in all, and one per account, whichever workflow starts them.
+const uploads = j.limit({ name: 'uploads', total: 3, perKey: 1 });
+
+const importCsv = j
+  .workflow('imports.csv', {
+    version: 1,
+    input: z.object({ accountId: z.string() }),
+    concurrency: { key: ({ accountId }) => accountId, total: 10, shared: [uploads], onBusy: 'refuse' },
+  })
+  .step('load', ({ input }) => load(input.accountId))
+  .finish();
+```
+
+An operator changes a limit at runtime with `journal.limits` (§ Operators), without a deploy. The change is stored in `journal_limits` with an event on the `journal.limit` entity that names the operator.
+
+- `override(db, { name, total?, perKey? }, op)` replaces the code values until `reset`. `override(db, { name, key, perKey, ttl? }, op)` sets the `perKey` of one key, for `ttl` (`LIMIT_KEY_TTL`: 7 days by default, at most 30 days). An expired key override is ignored. `0` admits no run, so `perKey: 0` on a key blocks it.
+- `pause(db, { name }, op)` admits no new run of any workflow that holds the limit: `WorkflowBusy` with `reason: 'paused'`, and no join (a workflow with `onBusy: 'queue'` queues the run). Runs that already hold it go on to their end. `resume` admits runs again. Pausing `workflow/<name>` stops one workflow, also one without `concurrency`: such a start reads only its pause, one primary-key lookup that finds nothing when no operator changed the limit.
+- A verb takes the limit's lock exclusive, so it waits for the starts that are reading the limit. Once it returns, every new start sees the change.
+
+#### Queued runs
+
+A queued run waits for a slot. It starts (is promoted) when a slot can free, in the same transaction as the change that freed it:
+
+- a run that held one of its limits ends (`completed`, `failed`, `cancelled` or `expired`): first the queued runs of that run's key, then any that hold one of its limits;
+- an operator raises or resets an override, or resumes the limit (`journal.limits`, below): the queued runs of that limit;
+- a key override runs out: it has no event of its own, so each `LimitKeyOverridden` queues a `workflow.limitTimer` job at its `until`, which looks at the queued runs of the limit then.
+
+Promotion checks every limit of the candidate with the same gate and locks a start uses. The oldest queued run goes first (by when it was queued, then id). A candidate that still does not fit stays queued, and so do the later ones that the same busy limit blocks (of the same key, for a `perKey`): runs of one key start in the order they queued, and another key does not wait behind them. Each promotion checks at most `LIMIT_BOUNDS.promoteTries` (50) candidates; the rest wait for the next run end or operator change. So a run blocked only by a `total` can wait for several later changes when more than 50 older queued runs are blocked on other keys. Promotion never waits for a lock: a candidate that needs a limit lock another transaction holds (one the change has not taken already) stays queued for a later change, so a run end and a start never wait on each other in opposite orders. A promoted run gets `RunDequeued` and its first `NodeScheduled`, due at its `delay` start (`start_at`) when that is still ahead, else now.
+
+- A queued run's `ttl` counts from when it was due, as for any run. If it is still queued at `ttl_at`, its `workflow.timer` job ends it `expired` (`RunExpired`, with no node skipped: it never had one). Promotion skips a run past its `ttl_at`.
+- A deadline counts from when the run was due too: a queued run past it fails, like any run.
+- `cancel` ends a queued run `cancelled` at once (`CancelRequested`, `RunCancelled`): nothing ran, so nothing is undone. It frees nothing.
+- `reschedule` moves a queued run's `start_at` (and its `ttl_at` and deadline, which count from it). It stays queued; once promoted, its first node is due at the new time.
+- `replay` is a start: through the gate, so it may queue.
+- `journal.limits.get` and `list` show `queued`, the queued runs that hold the limit, next to `running`.
 
 ### Lifecycle hooks
 
@@ -1569,11 +1644,17 @@ The procedure must have `journal` and a `db` the journal can write through on it
 
 ## Tables
 
-`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps` and `workflowSignals`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps`, `workflowSignals` and `limits`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
 
 `workflowRuns` has three nullable columns for start timing: `start_at` (the planned start of a delayed run), `ttl_at` (when a run that has not started expires) and `ttl_ms` (the `ttl`, so `reschedule` can move `ttl_at`). Its `state` may be `expired`. An app upgrading from an earlier version generates a migration for them.
 
 `workflowRuns` also has `batch_id` (the batch of `def.startBatch` that started the run, indexed by `workflow_runs_batch_id_idx`) and `replay_of` (the run that `journal.workflows.replay` started this one from). Both are nullable `varchar(256)`. An app upgrading generates a migration for them; old runs keep `null`.
+
+`workflowRuns` has three nullable `integer` columns for the run's overrides: `max_attempts`, `step_timeout_ms` and `priority`, from `def.start`. An app upgrading generates a migration for them (`drizzle-kit generate`); old runs keep `null`, so their steps run as their definitions say.
+
+`workflowRuns.state` may be `queued` (`onBusy: 'queue'`), and a partial index on the queued runs, `workflow_runs_queued_idx` on `(started_at, id) where state = 'queued'`, finds the oldest one a freed slot promotes. An app upgrading generates a migration for it (`drizzle-kit generate`).
+
+`workflowRuns` has `limits` (`text[] not null default '{}'`): the shared limits (`concurrency.shared`) the run holds, with a GIN index on the unfinished runs (`workflow_runs_limits_idx`). A workflow's own limit is not listed: it counts the runs by `name`, so runs started before this column count too. `limits` (`journal_limits`) is the `journal.limit` entity: `name varchar(256) primary key`, `paused boolean not null default false`, `total integer`, `per_key integer`, `keys jsonb not null default '{}'` (per key `{ perKey, until }`) and `version`. A limit nobody changed has no row. An app upgrading generates a migration for both (`drizzle-kit generate`).
 
 **Export every table on its own.** drizzle-kit collects only a schema module's top-level exports, so a table that sits only inside the `journalTables()` object never gets a migration. Export each one, and add `ExportsEveryJournalTable` from `@arki/journal/pg` so a table added in a later version fails the build until you export it:
 

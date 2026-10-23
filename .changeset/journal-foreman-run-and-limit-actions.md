@@ -1,0 +1,7 @@
+---
+'@arki/journal': minor
+---
+
+Foreman can change runs and limits. `journalWorkflowsModule` gains the actions `workflow.setMetadata` and `workflow.addTags` (permission `workflow:metadata`, low risk), `workflow.reschedule` (`workflow:reschedule`, medium), `workflow.replay` (`workflow:replay`, medium), and `workflow.limits.pause`, `.resume`, `.override` and `.reset` (`workflow:limits`, high), plus the reads `workflow.limits.list` and `workflow.limits.get` (`workflow:read`). Each verb has its own permission, so an operator who may tag runs may not replay them or pause a limit. Every action previews what it will do and refuses a stale approval with `ARKI_JOURNAL_E010`. A run action's approval is taken on the run's revision, which metadata and tag changes do not move: two metadata actions in a row both apply, and neither voids a cancel. A limit action's approval is taken on the limit's version, which runs that take a slot do not move. The newer actions answer the journal's own refusals with their codes, statuses and data (`journal.workflow_busy` for a replay at a busy key, `journal.conflict` for a reschedule of a run that has started).
+
+The run reads show `batchId`, `replayOf`, `startAt`, `maxAttempts`, `stepTimeoutMs` and `priority`, and `workflow.runs` filters by `batchId`. `LimitView` gains `version`: the `journal.limit` entity's version, 0 until an operator first changes the limit. No migration.

@@ -4,16 +4,28 @@
  */
 
 /**
- * Every state `workflow_runs.state` stores. `expired`: the run's `ttl` passed before its first node started, so it
- * never ran. A delayed run is `running`: a reader derives `delayedUntil` from `start_at`.
+ * Every state `workflow_runs.state` stores. `queued`: a limit was busy and the workflow's `onBusy` is `'queue'`, so
+ * the run waits for a slot; it is unfinished but holds none. `expired`: the run's `ttl` passed before its first node
+ * started, so it never ran. A delayed run is `running`: a reader derives `delayedUntil` from `start_at`.
  */
-export const RUN_STATES = ['running', 'parked', 'compensating', 'completed', 'failed', 'cancelled', 'expired'] as const;
+export const RUN_STATES = [
+  'queued',
+  'running',
+  'parked',
+  'compensating',
+  'completed',
+  'failed',
+  'cancelled',
+  'expired',
+] as const;
 
 /** Every status `workflow_steps.status` stores. */
 export const STEP_STATUSES = ['scheduled', 'done', 'skipped', 'failed'] as const;
 
 /** A stored status plus `running`, which is never stored: a reader derives it from the step's job. */
 export const STEP_VIEW_STATUSES = [...STEP_STATUSES, 'running'] as const;
+/** What a step row stores, plus `running`, which is never stored: it is derived from the step's job. */
+export type StepStatus = (typeof STEP_VIEW_STATUSES)[number];
 
 /**
  * What a signal delivery reports. `kept`: stored, the run is not waiting for it yet. `woke`: stored and the run moved
@@ -22,6 +34,15 @@ export const STEP_VIEW_STATUSES = [...STEP_STATUSES, 'running'] as const;
  */
 export const SIGNAL_STATUSES = ['kept', 'woke', 'duplicate', 'finished', 'no-run'] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
+
+/** Why a limit refuses a start (`WorkflowBusy.reason`): it is `full`, or an operator `paused` it. */
+export const LIMIT_BUSY_REASONS = ['full', 'paused'] as const;
+
+/**
+ * What a start does when a limit it holds is busy (`concurrency.onBusy`): `refuse` returns `WorkflowBusy`, `join`
+ * answers the oldest running run of the key, `queue` creates the run `queued` until a slot frees.
+ */
+export const ON_BUSY = ['refuse', 'join', 'queue'] as const;
 
 /** Every phase `workflow_steps.phase` stores: `do` runs the step, `undo` compensates it. */
 export const STEP_PHASES = ['do', 'undo'] as const;

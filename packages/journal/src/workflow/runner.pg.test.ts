@@ -18,6 +18,7 @@ import { isFailure, orThrow } from '@arki/failure';
 
 import { WorkflowBusy } from '../errors.js';
 import { j, tables } from '../test-support.js';
+import { limitLockId } from './limits.js';
 
 const workflowMeta = { actorId: 'system:workflow' };
 const caller = { actorId: 'usr_test' };
@@ -104,7 +105,56 @@ const gated = j
   .step('load', () => 'loaded')
   .finish();
 
-const journal = j.compose({ workflows: [racing, gated], workflowMeta });
+/** Three uploads at a time and one per account, across two workflows: each count is taken under its own lock. */
+const uploads = j.limit({ name: 'test.uploads', total: 3, perKey: 1 });
+const uploadOf = (name: string) =>
+  j
+    .workflow(name, {
+      version: 1,
+      input: z.object({ account: z.string() }),
+      concurrency: { key: ({ account }) => account, shared: [uploads], onBusy: 'refuse' },
+    })
+    .step('load', () => 'loaded')
+    .finish();
+const uploadA = uploadOf('test.upload-a');
+const uploadB = uploadOf('test.upload-b');
+
+/** How many `load` bodies of the queued workflow run at once, and the most seen: the limit must cap it. */
+const inFlight = { now: 0, most: 0 };
+/** One load per account at a time; a busy start queues, and a run end starts the next. */
+const queuedLoad = j
+  .workflow('test.queued-load', {
+    version: 1,
+    input: z.object({ account: z.string(), n: z.int() }),
+    concurrency: { key: ({ account }) => account, limit: 1, onBusy: 'queue' },
+  })
+  .step('load', async () => {
+    inFlight.now += 1;
+    inFlight.most = Math.max(inFlight.most, inFlight.now);
+    await sleep(5);
+    inFlight.now -= 1;
+    return 'loaded';
+  })
+  .finish();
+
+/** One run at a time across two parked workflows: a run of one ends, a queued run of the other is the candidate. */
+const pgSlot = j.limit({ name: 'test.pg-slot', total: 1 });
+const slotted = (name: string) =>
+  j
+    .workflow(name, {
+      version: 1,
+      input: z.object({}),
+      concurrency: { shared: [pgSlot], onBusy: 'queue' },
+    })
+    .waitFor('go', { signal: 'go', schema: z.object({}) })
+    .finish();
+const slotHolder = slotted('test.pg-slot-a');
+const slotWaiter = slotted('test.pg-slot-b');
+
+const journal = j.compose({
+  workflows: [racing, gated, uploadA, uploadB, queuedLoad, slotHolder, slotWaiter],
+  workflowMeta,
+});
 journal.hooks.command.around(async (ctx, next) => {
   if (ctx.name === 'workflow.checkpoint' && holdAt === 'checkpoint') {
     checkpoints += 1;
@@ -196,6 +246,112 @@ describe('concurrency gate under concurrent starts', () => {
       .from(tables.workflowRuns)
       .where(eq(tables.workflowRuns.concurrencyKey, account));
     expect(rows).toHaveLength(2);
+  });
+
+  it('twelve starts of two workflows that share a limit, on two connections at once, never overfill its total or a key', async () => {
+    const accounts = Array.from({ length: 6 }, (_, n) => `acc_upload_${Date.now()}_${n}`);
+    // Each account is started by both workflows, so the per-key count and the total race at the same time.
+    const starts = accounts.flatMap((account, n) => [
+      journal.run(n % 2 === 0 ? dbA : dbB, uploadA.start, { input: { account } }, caller),
+      journal.run(n % 2 === 0 ? dbB : dbA, uploadB.start, { input: { account } }, caller),
+    ]);
+    const outcomes = await Promise.all(starts);
+    expect(outcomes.filter(outcome => !isFailure(outcome))).toHaveLength(3);
+    expect(outcomes.filter(outcome => WorkflowBusy.is(outcome))).toHaveLength(9);
+    const rows = await dbA
+      .select({ account: tables.workflowRuns.concurrencyKey })
+      .from(tables.workflowRuns)
+      .where(sql`${tables.workflowRuns.limits} @> array['test.uploads']::text[]`);
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map(row => row.account)).size).toBe(3);
+  });
+});
+
+describe('the queue under concurrent ends and starts', () => {
+  it('starts and run ends on two connections at once never run more than the limit, and every queued run ends', async () => {
+    const account = `acc_queue_${Date.now()}`;
+    const startOne = (n: number) =>
+      journal.run(n % 2 === 0 ? dbA : dbB, queuedLoad.start, { input: { account, n } }, caller);
+    // Two workers, one per connection: a run end on one can meet a start or another end on the other.
+    const drainBoth = async () => {
+      for (let pass = 0; pass < 200; pass++) {
+        const [a, b] = await Promise.all([journal.drain(dbA), journal.drain(dbB)]);
+        if (orThrow(a) === 0 && orThrow(b) === 0) return;
+      }
+      throw new Error('the queued runs did not settle');
+    };
+    const first = await Promise.all([0, 1, 2, 3].map(n => startOne(n)));
+    // The second wave lands while the workers end runs and promote the queue.
+    const [second] = await Promise.all([Promise.all([4, 5, 6, 7].map(n => startOne(n))), drainBoth()]);
+    await drainBoth();
+    expect([...first, ...second].filter(outcome => isFailure(outcome))).toEqual([]);
+    const rows = await dbA
+      .select({
+        id: tables.workflowRuns.id,
+        state: tables.workflowRuns.state,
+        startedAt: tables.workflowRuns.startedAt,
+        finishedAt: tables.workflowRuns.finishedAt,
+      })
+      .from(tables.workflowRuns)
+      .where(eq(tables.workflowRuns.concurrencyKey, account));
+    // None is left queued: each slot that freed started the next run.
+    expect(rows.map(row => row.state)).toEqual(Array.from({ length: 8 }, () => 'completed'));
+    expect(inFlight.most).toBe(1);
+    // Each run held the slot from its start (or its dequeue) to its end, and no two of those spans overlap.
+    const dequeued = await dbA
+      .select({ id: tables.events.entityId, at: sql<string>`${tables.events.data} ->> 'at'` })
+      .from(tables.events)
+      .where(eq(tables.events.type, 'RunDequeued'));
+    const spans = rows
+      .map(row => ({
+        from: new Date(dequeued.find(event => event.id === row.id)?.at ?? row.startedAt).getTime(),
+        to: row.finishedAt?.getTime() ?? Number.POSITIVE_INFINITY,
+      }))
+      .toSorted((a, b) => a.from - b.from);
+    for (const [index, span] of spans.entries()) {
+      expect(span.from).toBeGreaterThanOrEqual(spans[index - 1]?.to ?? 0);
+    }
+  });
+});
+
+describe('a promotion never waits for a lock', () => {
+  it('a run end whose candidate needs a lock another connection holds commits at once and leaves it queued; a later change promotes it', async () => {
+    const holder = orThrow(await journal.run(dbA, slotHolder.start, { input: {} }, caller)).runId;
+    const waiter = orThrow(await journal.run(dbA, slotWaiter.start, { input: {} }, caller)).runId;
+    const stateOf = async (id: string) => {
+      const [row] = await dbA
+        .select({ state: tables.workflowRuns.state })
+        .from(tables.workflowRuns)
+        .where(eq(tables.workflowRuns.id, id));
+      return row?.state;
+    };
+    // The holder parks on its wait, so the signal below ends it.
+    for (let pass = 0; pass < 20; pass++) if (orThrow(await journal.drain(dbA)) === 0) break;
+    expect(await stateOf(holder)).toBe('parked');
+    expect(await stateOf(waiter)).toBe('queued');
+    // Another session holds the lock of the waiter's own limit, which the holder's end has not taken.
+    const other = await poolB.connect();
+    const lockId = limitLockId('workflow/test.pg-slot-b');
+    try {
+      await other.query('select pg_advisory_lock(hashtextextended($1, 0))', [lockId]);
+      const ended = journal.run(
+        dbA,
+        slotHolder.signal('go'),
+        { runId: holder, deliveryId: `go:${holder}`, payload: {} },
+        caller,
+      );
+      const waited = await Promise.race([ended.then(() => 'committed'), sleep(5000).then(() => 'waiting')]);
+      expect(waited).toBe('committed');
+      orThrow(await ended);
+      expect(await stateOf(holder)).toBe('completed');
+      expect(await stateOf(waiter)).toBe('queued');
+    } finally {
+      await other.query('select pg_advisory_unlock(hashtextextended($1, 0))', [lockId]);
+      other.release();
+    }
+    // A later change (here an operator verb on the limit) looks again, and now the lock is free.
+    orThrow(await journal.limits.override(dbA, { name: 'test.pg-slot', total: 1 }, { actor: 'usr_ops' }));
+    expect(await stateOf(waiter)).toBe('running');
   });
 });
 

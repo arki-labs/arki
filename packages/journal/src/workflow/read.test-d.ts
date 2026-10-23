@@ -25,7 +25,7 @@ describe('journal.workflows, as types', () => {
     expectTypeOf<StepView['status']>().toEqualTypeOf<'scheduled' | 'done' | 'skipped' | 'failed' | 'running'>();
     expectTypeOf<RunDetail['residual']>().toEqualTypeOf<readonly string[]>();
     expectTypeOf<RunState>().toEqualTypeOf<
-      'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled' | 'expired'
+      'queued' | 'running' | 'parked' | 'compensating' | 'completed' | 'failed' | 'cancelled' | 'expired'
     >();
   });
 
