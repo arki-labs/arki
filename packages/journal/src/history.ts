@@ -1,16 +1,17 @@
 /**
  * Reading the log: decoding stored events, the log queries, history-completeness
  * checks, and `replay`, `verify`, `repair`, `rerun`.
- * May import `fold`, `storage`, `store`, leaf files, and result types from `api`.
+ * May import `event-log`, `fold`, `storage`, `store`, leaf files, and result types from `api`.
  * Must not import `journal`, `write`, `command` or `worker`.
  */
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import type { SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, isSchemaFailure } from '@arki/failure';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
+import type { EventLog, EventLogPosition } from './event-log.js';
 import type { JournalTables, StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
 import type {
@@ -27,6 +28,7 @@ import type {
 } from './types.js';
 import { debugReplay } from './debug.js';
 import { JournalError } from './errors.js';
+import { globalOrderOf, logOn } from './event-log.js';
 import { findEventDefinition, fold, hasDeclaredEventType } from './fold.js';
 import { rollbackOnFailure } from './rollback.js';
 import {
@@ -44,8 +46,10 @@ import {
 export type HistoryDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = {
   readonly metaSchema: Meta;
   readonly tables: JournalTables;
-  /** Entity rows and each entity's log. `forget` and `rerun` still query `tables` for what only they need. */
+  /** Entity rows. `forget` still queries `tables` for the cursor lock and the job copies. */
   readonly store: PgStore;
+  /** Where the events are. Bound to the caller's handle when it joins transactions. */
+  readonly log: EventLog;
 };
 
 /**
@@ -105,7 +109,6 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
 ) {
   type MetaOut = SchemaOutput<Meta>;
   const { metaSchema } = deps;
-  const eventsTable = deps.tables.events;
   const { jobs: jobsTable, jobArchive } = deps.tables;
 
   /**
@@ -117,7 +120,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
    * one, one step at a time. Each step parses with its own `from` schema first, so a bad
    * row names the version it failed at. Data already at the current version is returned as is.
    */
-  const upcast = (row: typeof eventsTable.$inferSelect, def: AnyEventDef, at: string): unknown => {
+  const upcast = (row: StoredEventRow, def: AnyEventDef, at: string): unknown => {
     const fail = (why: string): never => {
       throw new JournalError('REPLAY_FAILED', row.kind, row.entityId, `${at}: ${why}`);
     };
@@ -143,7 +146,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   };
 
   const decodeStoredEvent = <Id extends string>(
-    row: typeof eventsTable.$inferSelect,
+    row: StoredEventRow,
     def: AnyEventDef | undefined,
     id: Id,
   ): Recorded<string, unknown, MetaOut, Id> | SchemaFailure => {
@@ -197,7 +200,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     });
   };
 
-  const loadHistory = (db: DbHandle, kind: string, id: string) => deps.store.bind(db).events.history(kind, id);
+  const loadHistory = (db: DbHandle, kind: string, id: string) => logOn(deps.log, db).stream(kind, id);
 
   const replayFrom = async <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -364,16 +367,15 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
               `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
             );
           }
-          const [stamped] = await tx
-            .update(eventsTable)
-            .set({
-              data: form.data,
-              schemaVersion: def.version,
-              erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())`,
-            })
-            .where(eq(eventsTable.seq, row.seq))
-            .returning({ erasedAt: eventsTable.erasedAt });
-          if (stamped === undefined) throw new Error(`journal: forget: event ${row.id} vanished under the row lock`);
+          const log = logOn(deps.log, tx);
+          if (log.erase === undefined)
+            throw new JournalError(
+              'NO_HISTORY',
+              entity.kind,
+              id,
+              'forget: this event log cannot rewrite events in place',
+            );
+          const stamped = await log.erase(row, { data: form.data, schemaVersion: def.version });
           // Every effect job carries a copy of its event in `args`, and the archive keeps finished jobs
           // for days. Both copies get the same erased data, schema version and stamp as the event row.
           const erasedCopy = JSON.stringify({
@@ -403,27 +405,20 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   const rerun = async <Tx extends TransactionSource<Tx>>(
     db: TransactionSource<Tx>,
     projection: Projection<MetaOut, Tx>,
-    opts?: { readonly afterSeq?: number; readonly batchSize?: number },
+    opts?: { readonly after?: EventLogPosition | null; readonly batchSize?: number },
   ): Promise<{ readonly events: number } | SchemaFailure> => {
     const batchSize = opts?.batchSize ?? 100;
     for (const entity of projection.entities) assertStoredEvents(entity, projection.name, 'rerun');
     const kinds = projection.entities.map(entity => entity.kind);
-    let cursor = opts?.afterSeq ?? 0;
+    let position = opts?.after ?? null;
     let count = 0;
     if (kinds.length === 0 || projection.types.size === 0) return { events: 0 };
     for (;;) {
-      const rows = await db
-        .select()
-        .from(eventsTable)
-        .where(
-          and(
-            gt(eventsTable.seq, cursor),
-            inArray(eventsTable.kind, kinds),
-            inArray(eventsTable.type, [...projection.types]),
-          ),
-        )
-        .orderBy(asc(eventsTable.seq))
-        .limit(batchSize);
+      const { events: rows, next } = await globalOrderOf(logOn(deps.log, db), 'rerun').after(position, {
+        kinds,
+        types: [...projection.types],
+        limit: batchSize,
+      });
       if (rows.length === 0) break;
       const refusal = rollbackOnFailure<void | SchemaFailure>();
       const result = await db
@@ -441,7 +436,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
         .catch(refusal.recover);
       if (isFailure(result)) return result;
       count += rows.length;
-      cursor = rows.at(-1)?.seq ?? cursor;
+      position = next;
       if (rows.length < batchSize) break;
     }
     debugReplay.debug('rerun {projectionName}: {count} events', { projectionName: projection.name, count });

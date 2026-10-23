@@ -82,18 +82,20 @@ describe('async projections', () => {
     orThrow(await place(orderId(++next), customer));
     expect(await placedFor(customer), 'not applied inside the write').toBe(0);
     const before = await cursorOf('async-counts');
-    expect(before?.lag).toBeGreaterThan(0);
+    expect(before?.behind).toBe(true);
+    expect(before?.distance).toBeGreaterThan(0);
 
     const first = await journal.catchUp(db, { batchSize: 1 });
     expect(first.scanned).toBe(2); // one event per projection
     expect(await placedFor(customer)).toBe(1);
     await journal.catchUp(db);
     expect(await placedFor(customer)).toBe(2);
-    // The cursor advanced over every event, matching or not: lag is zero, so "caught up" is a real answer.
+    // The cursor advanced over every event, matching or not: nothing is behind, so "caught up" is a real answer.
     const cursor = await cursorOf('async-counts');
-    expect(cursor?.lag).toBe(0);
+    expect(cursor?.behind).toBe(false);
+    expect(cursor?.distance).toBe(0);
     const [top] = await db.select({ seq: sql<number>`max(seq)::int` }).from(tables.events);
-    expect(cursor?.seq).toBe(top?.seq);
+    expect(cursor?.position).toBe(String(top?.seq));
   });
 
   it('one projection failing does not hold the others, and its batch is retried next pass', async () => {
@@ -106,12 +108,12 @@ describe('async projections', () => {
     expect(await placedFor(customer), 'the healthy projection advanced').toBe(1);
     expect(paidLog).toEqual([]);
     const stuck = await cursorOf('async-paid');
-    expect(stuck?.lag, 'the failed one did not move').toBeGreaterThan(0);
+    expect(stuck?.behind, 'the failed one did not move').toBe(true);
     failPaid = false;
     await journal.catchUp(db);
     expect(paidLog).toEqual([id]);
     const moved = await cursorOf('async-paid');
-    expect(moved?.lag).toBe(0);
+    expect(moved?.behind).toBe(false);
   });
 
   it('reset clears the read model and rewinds the cursor in one transaction; catchUp rebuilds it', async () => {
@@ -124,7 +126,7 @@ describe('async projections', () => {
     });
     expect(await placedFor(customer)).toBe(0);
     const rewound = await cursorOf('async-counts');
-    expect(rewound?.seq).toBe(0);
+    expect(rewound?.position).toBeNull();
     await journal.catchUp(db, { batchSize: 1000 });
     expect(await placedFor(customer)).toBe(1);
     expect(() => journal.rerun(db, counts)).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));

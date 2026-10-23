@@ -61,7 +61,7 @@ import { trackRefusals } from './refusals.js';
 import { assertRetention, effectOverrides, resolveRetention } from './retention.js';
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
-import { createPgStore } from './store.js';
+import { createBuiltInEventLog, createPgStore } from './store.js';
 import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
@@ -308,12 +308,14 @@ function createJournal<
   // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
   // call, so the worker loop, `run`, a bound runner and an effect's `ctx.run` always use the methods the object holds.
   const store = createPgStore({ tables, wakeChannel });
-  const history = createHistory<Meta>({ metaSchema, tables, store });
+  const eventLog = createBuiltInEventLog({ tables });
+  const history = createHistory<Meta>({ metaSchema, tables, store, log: eventLog });
   const inlineProjections = projections.filter(projection => projection.lane === 'inline');
   const asyncProjections = projections.filter(projection => projection.lane === 'async');
   const { write, adopt, writeWithValidatedMeta } = createWriter<Meta, Tx>({
     metaSchema,
     store,
+    log: eventLog,
     projections: inlineProjections,
     asyncProjections,
     effects,
@@ -396,8 +398,8 @@ function createJournal<
     history,
     attemptOn,
   });
-  const catching = createCatchUp<Meta, Tx>({ tables, projections: asyncProjections, history });
-  const dispatch = createTapDispatch<Meta, WorkerDb>({ tables, taps, history });
+  const catching = createCatchUp<Meta, Tx>({ tables, log: eventLog, projections: asyncProjections, history });
+  const dispatch = createTapDispatch<Meta, WorkerDb>({ log: eventLog, taps, history });
   const workers = createWorkers<WorkerDb>({
     drain: (db, opts) => journal.drain(db, opts),
     catchUp: (db, opts) => journal.catchUp(db, opts),

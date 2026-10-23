@@ -1,7 +1,7 @@
 /**
  * The write path: the write algorithm, version ordering of inserted events, and
  * telling an append conflict from other database errors.
- * May import `api`, `fold`, `history`, `storage`, `store`, `transaction-guard` and leaf files.
+ * May import `api`, `event-log`, `fold`, `history`, `storage`, `store`, `transaction-guard` and leaf files.
  * Must not import `journal`, `command` or `worker`.
  */
 import { sql } from 'drizzle-orm';
@@ -13,6 +13,7 @@ import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
+import type { EventLog, EventToAppend } from './event-log.js';
 import type { History } from './history.js';
 import type { StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
@@ -31,6 +32,7 @@ import type {
 } from './types.js';
 import { debugWrite } from './debug.js';
 import { JournalError } from './errors.js';
+import { logOn } from './event-log.js';
 import { fold, hasDeclaredEventType } from './fold.js';
 import { correlationId, eventId, jobId } from './id.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
@@ -78,8 +80,10 @@ export type WriteDeps<
   Tx extends TransactionSource<Tx>,
 > = {
   readonly metaSchema: Meta;
-  /** Rows, the event log, jobs and the wake signal. A unique violation comes back from it as `CONFLICT`. */
+  /** Rows, the write order, jobs and the wake signal. A unique violation comes back from it as `CONFLICT`. */
   readonly store: PgStore;
+  /** Where stored events go. Bound to the write's savepoint when it joins transactions. */
+  readonly log: EventLog;
   /** Inline projections only: they run inside the write. */
   readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   /** Async projections: the write only wakes the worker when a recorded event matches one. */
@@ -138,7 +142,8 @@ export function createWriter<
         // Before the row lock, so every journal transaction takes its locks in the same
         // order (append lock, then rows) and two commands writing two entities cannot deadlock.
         const storage = deps.store.bind(sp);
-        await storage.events.takeAppendLock();
+        const log = logOn(deps.log, sp);
+        await storage.seq.lock();
         const loaded = await storage.rows.load(entity, id, true);
         if (loaded !== null && !isRowOf(entity.table, loaded)) {
           throw new Error(`journal: ${entity.kind} ${id} row is missing columns`);
@@ -179,9 +184,7 @@ export function createWriter<
         // whether the row predates the journal or its entity kept no events until now.
         const stored = row?.version ?? 0;
         const latestLogVersion =
-          !transient && (adopting || row === null || stored === 0)
-            ? await storage.events.highestVersion(entity.kind, id)
-            : 0;
+          !transient && (adopting || row === null || stored === 0) ? await log.highestVersion(entity.kind, id) : 0;
         if (row !== null && stored === 0 && latestLogVersion > 0) {
           throw new JournalError(
             'CONFLICT',
@@ -275,34 +278,25 @@ export function createWriter<
             correlationId: trace.correlationId,
           });
         }
-        let inserted: readonly StoredEventRow[];
-        if (transient) {
-          // No log row. The stamped events have the stored row's shape, so the rest of the write
-          // (decode, fold, projections, effect jobs) is the same in both modes. They live in this
-          // write's result and in the effect jobs' `args`, nowhere else.
-          const stamps = await storage.events.stamp(eventRows.length);
-          inserted = eventRows.map((eventRow, index) => {
-            const stamp = stamps[index];
-            if (stamp === undefined)
-              throw new Error(`journal: ${stamps.length} stamps for ${eventRows.length} transient events`);
-            return { ...eventRow, seq: stamp.seq, recordedAt: stamp.recordedAt, erasedAt: null };
+        // Every event gets its `seq` and `recordedAt` from the app database first, in both modes,
+        // so the rest of the write (decode, fold, projections, effect jobs) is the same for both. A
+        // transient entity's events live in this write's result and the effect jobs' `args` only.
+        const stamps = await storage.seq.stamp(eventRows.length);
+        const appended: EventToAppend[] = eventRows.map((eventRow, index) => {
+          const stamp = stamps[index];
+          if (stamp === undefined) throw new Error(`journal: ${stamps.length} stamps for ${eventRows.length} events`);
+          return { ...eventRow, seq: stamp.seq, recordedAt: stamp.recordedAt };
+        });
+        const inserted: StoredEventRow[] = appended.map(event => ({ ...event, erasedAt: null }));
+        // A taken version is `CONFLICT`, a changed entity id `ID_MISMATCH`: both throw, and the
+        // throw rolls the savepoint back with whatever the log took.
+        if (!transient)
+          await log.append({
+            kind: entity.kind,
+            entityId: id,
+            expectedVersion: baseVersion,
+            events: appended,
           });
-        } else {
-          inserted = await storage.events.append(entity, id, eventRows);
-        }
-
-        // The log must hold the id as given: a cut or changed `entity_id` would split the history.
-        // This throw rolls the savepoint back with the inserted events.
-        for (const stored of inserted) {
-          if (stored.entityId !== id) {
-            throw new JournalError(
-              'ID_MISMATCH',
-              entity.kind,
-              id,
-              `the log stored the entity id ${JSON.stringify(stored.entityId)} but the id given is ${JSON.stringify(id)}`,
-            );
-          }
-        }
 
         // Reducers, projections and the caller see the stored events, decoded the same
         // way replay decodes them. A hand-built pending event may carry keys the schema
@@ -316,7 +310,7 @@ export function createWriter<
         }
         const recorded = decoded.filter(event => hasDeclaredEventType(entity, event));
         if (recorded.length !== pending.length) {
-          throw new Error(`journal: insert returned ${recorded.length} of ${pending.length} events`);
+          throw new Error(`journal: decoding gave ${recorded.length} of ${pending.length} events`);
         }
 
         // Adopt folds from nothing, as replay will, and must land on the stored row.
@@ -377,8 +371,8 @@ export function createWriter<
           }
         }
 
-        // Every effect job carries its event: `args` is the stored row as inserted (or as stamped in
-        // memory), so the worker runs it without reading `journal_events` back. `eventSeq` points at
+        // Every effect job carries its event: `args` is the stored row as stamped, the same row the
+        // log holds, so the worker runs it without reading the log back. `eventSeq` points at
         // a log row, so a transient entity's job leaves it null.
         const storedBySeq = new Map(inserted.map(stored => [stored.seq, stored]));
         const jobs = [];

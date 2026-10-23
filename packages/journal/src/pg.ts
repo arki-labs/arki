@@ -17,6 +17,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
+import type { EventLogPosition } from './event-log.js';
 import type { WorkflowShape } from './workflow/shape.js';
 import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js';
 
@@ -246,8 +247,11 @@ export function journalTables(schema?: PgSchema) {
   const cursors = table('journal_cursors', {
     /** The async projection's name. */
     name: varchar('name', { length: 128 }).primaryKey(),
-    /** Global scan progress: every event with a seq at or below this was looked at, matching or not. */
-    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    /**
+     * Global scan progress: every event up to this position was looked at, matching or not. The
+     * log's own cursor (the built-in log writes a seq as text). Null: nothing scanned yet.
+     */
+    position: text('position').$type<EventLogPosition>(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   });
 

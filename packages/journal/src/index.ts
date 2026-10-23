@@ -146,4 +146,5 @@ export {
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';
+export type { EventLogPosition, ProjectionCursor } from './event-log.js';
 export type { Around, HookPoint } from './hooks.js';

@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { orThrow } from '@arki/failure';
 
+import { EventLogPosition } from './event-log.js';
 import { j, meta, openDb, orderId, orders, tables } from './test-support.js';
 
 // One stored event type, `MemoNoteSet`, as three releases of an app declared it.
@@ -157,7 +158,8 @@ describe('upcasters', () => {
     const id = await releaseOneMemo('rerun me');
     const [opening] = await history(id);
 
-    orThrow(await journal.rerun(db, notes, { afterSeq: (opening?.seq ?? 1) - 1 }));
+    // The built-in log's position is the seq as text: start just before the opening event.
+    orThrow(await journal.rerun(db, notes, { after: EventLogPosition.parse(String((opening?.seq ?? 1) - 1)) }));
     expect(seen).toEqual([{ note: 'rerun me', by: 'unknown', pinned: false }]);
   });
 

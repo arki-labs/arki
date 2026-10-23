@@ -9,6 +9,7 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
 import type { CommandFailure } from './errors.js';
+import type { EventLogPosition, ProjectionCursor } from './event-log.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
 import type { ResolvedRetention } from './retention.js';
@@ -400,20 +401,20 @@ export type Journal<
    * Rewind an async projection to the start. `clear` runs on the same transaction, after the
    * cursor is locked and before it is rewound, so the read model is emptied and refilled with
    * no batch landing in between. To rebuild without downtime, deploy the projection under a
-   * new name into a new table instead, wait for `cursors` to show lag 0, then switch reads.
+   * new name into a new table instead, wait until `cursors` no longer shows it `behind`, then switch reads.
    */
   reset(
     db: RootDb & TransactionSource<Tx>,
     projection: Projection<SchemaOutput<Meta>, Tx>,
     clear?: (tx: Tx) => Promise<void>,
   ): Promise<void>;
-  /** Per async projection: its cursor and how far behind the newest event it is, in seqs. */
-  cursors(db: DbHandle): Promise<readonly { readonly name: string; readonly seq: number; readonly lag: number }[]>;
-  /** Walk the log after sequence number `afterSeq` and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
+  /** Per async projection: its position in the log, whether the log holds newer events, and how many positions behind it is when the log can tell. */
+  cursors(db: DbHandle): Promise<readonly ProjectionCursor[]>;
+  /** Walk the log after position `after` (`null` or left out: from the start) and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
   rerun(
     db: TransactionSource<Tx>,
     projection: Projection<SchemaOutput<Meta>, Tx>,
-    opts?: { readonly afterSeq?: number; readonly batchSize?: number },
+    opts?: { readonly after?: EventLogPosition | null; readonly batchSize?: number },
   ): Promise<{ readonly events: number } | SchemaFailure>;
   /**
    * Run up to `batchSize` due jobs. Returns how many jobs were claimed. Root database only.

@@ -13,8 +13,8 @@
   storage seams only: the founder dropped the memory store on 2026-10-23
   (see slice 4), in `3dcaaaf33f`. Slice 5 finished the docs: most of it
   shipped with slices 2 to 4; the commit that adds this line puts the
-  setting in `llms.txt` and the `journal` skill. Sections 1 to 5 are done;
-  section 8 is next.
+  setting in `llms.txt` and the `journal` skill. Sections 1 to 5 are done.
+  Slice 6 in the commit that adds this sentence (see 8.8).
 - **Scope:** `@arki/journal` only. Apps change only if they opt in.
 - **Inputs:** four read-only agent reports (Fable) from 2026-10-22: domain
   core, write path, event-log dependents, prior decisions + prior art. Then
@@ -413,6 +413,27 @@ those entities are paused, then flip the setting.
   with `bind(tx)`. `seq` assigned before the insert. `journal_cursors`
   position becomes text, with an upgrade note (a schema change). Contract
   test suite, run against the built-in log.
+
+  **Done (2026-10-23).** Names as proposed in 8.3 (founder). Four changes
+  from 8.3, found while building it:
+  - A log that joins the transaction has no connection of its own, so its
+    methods exist only through `bind(db)`. The top-level methods belong to
+    a log that cannot join. `logOn(log, db)` picks.
+  - `erase` returns `{ erasedAt }`: `forget` copies the stamp into the
+    effect jobs' `args`, and a second erase keeps the first stamp.
+  - `EventLogPosition` is a Zod brand, so the schema is the type's source.
+  - Taps keep reading by seq range, through the built-in log's own
+    `seqRange`: the wake signal carries seqs, and 8.5 refuses taps on other
+    logs.
+
+  The interface and the contract suite (`src/event-log-contract.ts`, the
+  `@arki/lock` shape: plain `{ name, run }` cases, `ContractSkip`) stay
+  internal until slice 7b lets an app pass a log. Only `EventLogPosition`
+  and `ProjectionCursor` are public, because `cursors` and `rerun` name
+  them. The built-in `append` uses one `insert ... on conflict do nothing`:
+  a short insert is a repeat (success) or a taken version (`CONFLICT`, after
+  removing what it inserted). On the root database it opens its own
+  transaction. It keeps the entity id read-back check.
 - **Slice 7a: Ordered job streams.** `stream` and `stream_position` columns
   for any job kind, the generic claim clause, the `purgeDead` rule, the
   `forward` job kind, and the lag API.

@@ -2,10 +2,10 @@
  * The async lane: job claims under a lease, the retry policy, `drain` (one batch),
  * the worker loop around it, waking sleeping workers, and counting jobs no
  * effect of this journal can claim.
- * May import `fold`, `history`, `storage` and leaf files.
+ * May import `event-log`, `fold`, `history`, `storage`, `store` (types) and leaf files.
  * Must not import `journal`, `api`, `write` or `command`.
  */
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
@@ -14,11 +14,13 @@ import { attempt, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 import { ensure } from '@arki/schema';
 
+import type { EventLog, EventLogPosition, ProjectionCursor } from './event-log.js';
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
 import { StoredEventRow } from './pg.js';
 import type { EffectRetention, ResolvedRetention } from './retention.js';
+import type { BuiltInEventLog } from './store.js';
 import type {
   AcceptFailure,
   DbHandle,
@@ -40,6 +42,7 @@ import type {
 import { callbackDefect } from './callback.js';
 import { debugDrain, debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
+import { globalOrderOf, logOn } from './event-log.js';
 import { findEventDefinition } from './fold.js';
 import { bindHandlers } from './handlers.js';
 import { attemptId, leaseToken } from './id.js';
@@ -524,7 +527,9 @@ export type CatchUpDeps<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
 > = {
-  readonly tables: JournalTables;
+  readonly tables: Pick<JournalTables, 'cursors'>;
+  /** The log the projections follow, in its global order. */
+  readonly log: EventLog;
   readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
 };
@@ -535,25 +540,25 @@ export function createCatchUp<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
 >(deps: CatchUpDeps<Meta, Tx>) {
-  const { events: eventsTable, cursors: cursorsTable } = deps.tables;
+  const { cursors: cursorsTable } = deps.tables;
   const { decodeStoredEvent } = deps.history;
   const byName = new Map(deps.projections.map(projection => [projection.name, projection]));
 
-  /** The cursor row, created at 0 if missing, locked for this transaction. */
-  const lockCursor = async (tx: DbHandle, name: string): Promise<number> => {
-    await tx.insert(cursorsTable).values({ name, seq: 0 }).onConflictDoNothing();
+  /** The cursor row, created at the start (`null`) if missing, locked for this transaction. */
+  const lockCursor = async (tx: DbHandle, name: string): Promise<EventLogPosition | null> => {
+    await tx.insert(cursorsTable).values({ name, position: null }).onConflictDoNothing();
     const [row] = await tx
-      .select({ seq: cursorsTable.seq })
+      .select({ position: cursorsTable.position })
       .from(cursorsTable)
       .where(eq(cursorsTable.name, name))
       .for('update');
     if (row === undefined) throw new Error(`journal: cursor "${name}" vanished while locked`);
-    return row.seq;
+    return row.position;
   };
 
   /**
-   * One batch for one projection: lock its cursor, scan the next events in seq order,
-   * apply the matching ones, move the cursor to the last event scanned, commit. The
+   * One batch for one projection: lock its cursor, scan the next events in the log's order,
+   * apply the matching ones, move the cursor to where the scan ended, commit. The
    * cursor is global scan progress, so lag reaches zero and two workers cannot apply
    * one batch twice: the second waits on the row lock and starts after the first moved it.
    */
@@ -564,14 +569,10 @@ export function createCatchUp<
   ) =>
     db.transaction(async tx => {
       const from = await lockCursor(tx, projection.name);
-      const rows = await tx
-        .select()
-        .from(eventsTable)
-        .where(gt(eventsTable.seq, from))
-        .orderBy(asc(eventsTable.seq))
-        .limit(batchSize);
-      const last = rows.at(-1);
-      if (last === undefined) return 0;
+      const { events: rows, next } = await globalOrderOf(logOn(deps.log, tx), 'an async projection').after(from, {
+        limit: batchSize,
+      });
+      if (rows.length === 0) return 0;
       const kinds = new Set(projection.entities.map(entity => entity.kind));
       for (const row of rows) {
         if (!kinds.has(row.kind) || !projection.types.has(row.type)) continue;
@@ -582,7 +583,7 @@ export function createCatchUp<
       }
       await tx
         .update(cursorsTable)
-        .set({ seq: last.seq, updatedAt: sql`now()` })
+        .set({ position: next, updatedAt: sql`now()` })
         .where(eq(cursorsTable.name, projection.name));
       return rows.length;
     });
@@ -627,21 +628,22 @@ export function createCatchUp<
       await clear?.(tx);
       await tx
         .update(cursorsTable)
-        .set({ seq: 0, updatedAt: sql`now()` })
+        .set({ position: null, updatedAt: sql`now()` })
         .where(eq(cursorsTable.name, projection.name));
     });
   };
 
-  const cursors = async (
-    db: DbHandle,
-  ): Promise<readonly { readonly name: string; readonly seq: number; readonly lag: number }[]> => {
-    const [top] = await db.select({ seq: max(eventsTable.seq) }).from(eventsTable);
-    const latest = top?.seq ?? 0;
+  const cursors = async (db: DbHandle): Promise<readonly ProjectionCursor[]> => {
+    const order = globalOrderOf(logOn(deps.log, db), 'an async projection');
+    const top = await order.top();
     const rows = await db.select().from(cursorsTable);
-    const stored = new Map(rows.map(row => [row.name, row.seq]));
+    const stored = new Map(rows.map(row => [row.name, row.position]));
     return deps.projections.map(projection => {
-      const seq = stored.get(projection.name) ?? 0;
-      return { name: projection.name, seq, lag: Math.max(0, latest - seq) };
+      const position = stored.get(projection.name) ?? null;
+      const behind = top !== null && position !== top;
+      return order.distance === undefined
+        ? { name: projection.name, position, behind }
+        : { name: projection.name, position, behind, distance: order.distance(position, top) };
     });
   };
 
@@ -650,7 +652,8 @@ export function createCatchUp<
 
 /** What tap dispatch needs from the journal. */
 export type TapDispatchDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb> = {
-  readonly tables: Pick<JournalTables, 'events'>;
+  /** Taps follow the built-in log only: they read the seq range the wake signal announced. */
+  readonly log: Pick<BuiltInEventLog, 'bind'>;
   /** As composed: a tap may still have needs. Each dispatch binds them from its `services`. */
   readonly taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
@@ -674,7 +677,6 @@ export function createTapDispatch<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   AppDb extends RootDb,
 >(deps: TapDispatchDeps<Meta, AppDb>) {
-  const eventsTable = deps.tables.events;
   const kinds = [...new Set(deps.taps.flatMap(tap => tap.entities.map(entity => entity.kind)))];
   const types = [...new Set(deps.taps.flatMap(tap => [...tap.types]))];
 
@@ -688,18 +690,7 @@ export function createTapDispatch<
     const range = parseRange(payload);
     if (range === undefined) return;
     const { taps } = bindHandlers({ effects: [], taps: deps.taps }, services);
-    const rows = await db
-      .select()
-      .from(eventsTable)
-      .where(
-        and(
-          gte(eventsTable.seq, range.from),
-          lte(eventsTable.seq, range.to),
-          inArray(eventsTable.kind, kinds),
-          inArray(eventsTable.type, types),
-        ),
-      )
-      .orderBy(asc(eventsTable.seq));
+    const rows = await deps.log.bind(db).seqRange(range, { kinds, types });
     for (const row of rows) {
       for (const tap of taps) {
         if (!tap.types.has(row.type) || !tap.entities.some(entity => entity.kind === row.kind)) continue;
