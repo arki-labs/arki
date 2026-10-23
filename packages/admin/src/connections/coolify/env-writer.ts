@@ -14,8 +14,12 @@ import { coolifyOptionsSchema } from './client';
  * Every variable is stored runtime-only, literal and outside previews. Coolify makes a new
  * variable build-time too unless told otherwise, and a version that does not know the flag
  * drops it silently. So before a real value is sent, the writer stores a harmless probe,
- * checks the flags Coolify kept, and deletes it. It never reads values back, and it never
- * logs or echoes a request or response body.
+ * checks the flags Coolify kept, and deletes it.
+ *
+ * Coolify also copies every new variable into the application's preview environment, where
+ * `is_shown_once` is not copied. A key written for production must not ride along into PR
+ * previews, so after each write the writer deletes the preview copies of the keys it wrote.
+ * It reads back names and flags only, never values, and never logs or echoes a body.
  */
 
 const logger = getLogger('arki:admin:coolify');
@@ -49,8 +53,30 @@ const storedFlagsSchema = z.array(
 
 type StoredFlags = z.output<typeof storedFlagsSchema>[number];
 
+/** An application's variables as `GET /envs` lists them. A strict object: values are dropped while parsing. */
+const listedEnvsSchema = z.array(z.object({ uuid: z.string().min(1), key: z.string(), is_preview: z.boolean() }));
+
 const runtimeOnly = (row: StoredFlags | undefined) =>
   row !== undefined && row.is_runtime && !row.is_buildtime && !row.is_preview;
+
+/** Parses an answer with a strict schema; on a mismatch, names the request, never the body. */
+function answerOf<S extends z.ZodType>(text: string, schema: S, request: string): z.output<S> {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = undefined;
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new AdminError(
+      ADMIN_ERROR_CODES.invalidOutput,
+      `Coolify's answer to ${request} does not have the expected shape.`,
+      'Check the variables in Coolify by hand: each must have "Build variable" off. The Coolify API may have changed.',
+    );
+  }
+  return parsed.data;
+}
 
 /** Write-capable Coolify client for environment variables. Nothing is read from the environment. */
 export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
@@ -68,7 +94,7 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
   const { token } = parsed.data;
   const doFetch = options.fetch;
 
-  async function send(method: 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<string> {
+  async function send(method: 'GET' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<string> {
     let response: Response;
     try {
       response = await doFetch(`${apiBase}${path}`, {
@@ -134,21 +160,23 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
         is_shown_once: entry.secret,
       })),
     });
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = undefined;
-    }
-    const flags = storedFlagsSchema.safeParse(body);
-    if (!flags.success) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.invalidOutput,
-        `Coolify's answer to PATCH ${path} does not list the stored flags.`,
-        'Check the variables in Coolify by hand: each must have "Build variable" off. The Coolify API may have changed.',
-      );
-    }
-    return flags.data;
+    return answerOf(text, storedFlagsSchema, `PATCH ${path}`);
+  }
+
+  /** Deletes the variables `pick` selects. Lists uuids, names and flags only. */
+  async function deleteEnvs(
+    applicationUuid: string,
+    pick: (env: z.output<typeof listedEnvsSchema>[number]) => boolean,
+  ) {
+    const path = `/applications/${segment(applicationUuid)}/envs`;
+    const listed = answerOf(await send('GET', path), listedEnvsSchema, `GET ${path}`);
+    for (const env of listed.filter(entry => pick(entry))) await send('DELETE', `${path}/${segment(env.uuid)}`);
+  }
+
+  /** Deletes the preview copies of `keys`, which Coolify makes for every new variable. */
+  async function removePreviewCopies(applicationUuid: string, keys: readonly string[]) {
+    const wanted = new Set(keys);
+    await deleteEnvs(applicationUuid, env => env.is_preview && wanted.has(env.key));
   }
 
   /** Stores a harmless probe, checks Coolify kept it runtime-only, and deletes it. */
@@ -157,14 +185,13 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
       { key: COOLIFY_RUNTIME_PROBE_KEY, value: 'runtime-only', secret: false },
     ]);
     const row = stored.find(entry => entry.key === COOLIFY_RUNTIME_PROBE_KEY);
-    if (row !== undefined) {
-      await send('DELETE', `/applications/${segment(applicationUuid)}/envs/${segment(row.uuid)}`).catch(() => {
-        logger.debug('coolify probe {key} was not deleted from {app}', {
-          key: COOLIFY_RUNTIME_PROBE_KEY,
-          app: applicationUuid,
-        });
+    // Both copies: the probe and the preview copy Coolify made of it.
+    await deleteEnvs(applicationUuid, env => env.key === COOLIFY_RUNTIME_PROBE_KEY).catch(() => {
+      logger.debug('coolify probe {key} was not deleted from {app}', {
+        key: COOLIFY_RUNTIME_PROBE_KEY,
+        app: applicationUuid,
       });
-    }
+    });
     if (!runtimeOnly(row)) {
       throw new AdminError(
         ADMIN_ERROR_CODES.protocolUnsupported,
@@ -178,7 +205,8 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
     /**
      * Writes `entries` to one application, runtime-only. Probes first, so a Coolify that would
      * store them build-time gets no real value. Throws when any stored flag comes back wrong.
-     * A changed variable takes effect on the application's next deploy.
+     * Then deletes the preview copies Coolify made of them. A changed variable takes effect
+     * on the application's next deploy.
      */
     async write(applicationUuid: string, entries: readonly CoolifyEnvEntry[]): Promise<{ keys: string[] }> {
       const checked = z.array(coolifyEnvEntrySchema).min(1).safeParse(entries);
@@ -202,8 +230,16 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
           'In Coolify, turn "Build variable" off for these keys before the next deploy.',
         );
       }
-      return { keys: checked.data.map(entry => entry.key) };
+      const keys = checked.data.map(entry => entry.key);
+      await removePreviewCopies(applicationUuid, keys);
+      return { keys };
     },
+
+    /**
+     * Deletes the preview copies of `keys` on one application, leaving the production variables.
+     * For variables written before the writer removed them itself.
+     */
+    removePreviewCopies,
   };
 }
 

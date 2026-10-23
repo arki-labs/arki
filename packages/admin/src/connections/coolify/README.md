@@ -24,6 +24,8 @@ Sources (read 2026-10-14):
 
 Why it probes first: the bulk endpoint's documented body has no build-time flag, but the controller reads `is_runtime` and `is_buildtime` and makes a **new** variable both build-time and runtime when they are missing (`ApplicationsController::create_bulk_envs`, v4.x, read 2026-10-23). A version that does not know the field drops it silently. So the writer first stores `ARKI_ADMIN_RUNTIME_ONLY_PROBE`, checks the flags in the answer, and deletes it. Only then is a real value sent, and the stored flags are checked again.
 
+Why it deletes preview copies: Coolify 4.4.7 copies every new variable into the application's preview environment, without `is_shown_once` (seen on a live instance, 2026-10-23). A production key must not reach PR previews unhidden, so after each write the writer lists the application's variables (`GET /applications/{uuid}/envs`, names and flags only) and deletes the preview copies of the keys it wrote. `removePreviewCopies(applicationUuid, keys)` does the same for variables written before.
+
 It never reads values back: the answer is parsed with a strict schema that keeps `uuid`, `key` and the flags only. Errors carry the method, path and status, never a body, because a 422 can quote the submitted value.
 
 ## Flow

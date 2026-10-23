@@ -45,6 +45,8 @@ const { values: args } = parseArgs({
     dataset: { type: 'string', multiple: true },
     /** Test queries per set, the first N by id: the same slice for every reranker. */
     queries: { type: 'string', default: '100' },
+    /** Which BEIR sets to run, comma-separated. Default: all three. */
+    sets: { type: 'string', default: 'scifact,nfcorpus,fiqa' },
     'on-too-long': { type: 'string', default: 'truncate' },
     'tei-url': { type: 'string' },
     'tei-model': { type: 'string', default: 'BAAI/bge-reranker-v2-m3' },
@@ -53,6 +55,7 @@ const { values: args } = parseArgs({
   },
 });
 const sliceSize = z.coerce.number().int().positive().parse(args.queries);
+const beirSets = z.array(z.enum(['scifact', 'nfcorpus', 'fiqa'])).parse(args.sets.split(',').map(name => name.trim()));
 const onTooLong = z.enum(['truncate', 'split']).parse(args['on-too-long']);
 
 type Candidate = {
@@ -208,7 +211,14 @@ const percentile = (values: readonly number[], share: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))] ?? Number.NaN;
 };
 
-async function runSet(set: RetrievalSet, rerankers: ReadonlyMap<string, Reranker>, notRun: readonly Candidate[]) {
+/** Appends one row per reranker to `rows` and calls `save` after each, so a stopped run keeps what it finished. */
+async function runSet(
+  set: RetrievalSet,
+  rerankers: ReadonlyMap<string, Reranker>,
+  notRun: readonly Candidate[],
+  rows: Row[],
+  save: () => Promise<void>,
+) {
   const slice = new Set(
     set.queries
       .map(query => query.id)
@@ -219,12 +229,14 @@ async function runSet(set: RetrievalSet, rerankers: ReadonlyMap<string, Reranker
   const first = await firstStage(set);
   const dense = await scoreGroup(set, first, included);
   const passages = new Map(set.corpus.map(passage => [passage.id, passage.text]));
-  const rows: Row[] = notRun.map(candidate => ({
-    set: set.name,
-    reranker: candidate.key,
-    dense,
-    note: `not run: ${candidate.missing ?? ''}`,
-  }));
+  rows.push(
+    ...notRun.map(candidate => ({
+      set: set.name,
+      reranker: candidate.key,
+      dense,
+      note: `not run: ${candidate.missing ?? ''}`,
+    })),
+  );
 
   for (const [key, reranker] of rerankers) {
     const rankings = new Map<string, readonly string[]>();
@@ -247,6 +259,7 @@ async function runSet(set: RetrievalSet, rerankers: ReadonlyMap<string, Reranker
     }
     if (failure !== undefined) {
       rows.push({ set: set.name, reranker: key, dense, note: `failed: ${failure}` });
+      await save();
       continue;
     }
     rows.push({
@@ -256,8 +269,8 @@ async function runSet(set: RetrievalSet, rerankers: ReadonlyMap<string, Reranker
       reranked: await scoreGroup(set, rankings, included),
       msPerQuery: { p50: percentile(times, 0.5), p95: percentile(times, 0.95) },
     });
+    await save();
   }
-  return rows;
 }
 
 const wanted = args.rerankers?.split(',').map(key => key.trim());
@@ -276,18 +289,20 @@ for (const candidate of chosen) {
 }
 
 const sets: RetrievalSet[] = [];
-for (const name of ['scifact', 'nfcorpus', 'fiqa'] as const)
-  sets.push(await loadRetrievalSet(await ensureDataset(name)));
+for (const name of beirSets) sets.push(await loadRetrievalSet(await ensureDataset(name)));
 for (const folder of args.dataset ?? []) {
   const set = await loadRetrievalSet(folder);
   if (set.queries.length === 0) progress(`${set.name}: no graded queries yet, skipped`);
   else sets.push(set);
 }
 
+const out = path.join(ROOT, 'eval-results', `rerank-${new Date().toISOString().replaceAll(':', '-')}.json`);
+await mkdir(path.dirname(out), { recursive: true });
 const rows: Row[] = [];
+const save = () => writeFile(out, JSON.stringify({ depth: DEPTH, sliceSize, onTooLong, rows }, undefined, 2));
 for (const set of sets) {
   progress(`${set.name}: ${set.corpus.length} passages, ${Math.min(sliceSize, set.queries.length)} queries`);
-  rows.push(...(await runSet(set, rerankers, notRun)));
+  await runSet(set, rerankers, notRun, rows, save);
 }
 for (const reranker of rerankers.values()) await reranker.dispose?.();
 
@@ -318,7 +333,4 @@ if (local.length > 0) {
   );
 }
 
-const out = path.join(ROOT, 'eval-results', `rerank-${new Date().toISOString().replaceAll(':', '-')}.json`);
-await mkdir(path.dirname(out), { recursive: true });
-await writeFile(out, JSON.stringify({ depth: DEPTH, sliceSize, onTooLong, rows }, undefined, 2));
 progress(`results: ${out}`);

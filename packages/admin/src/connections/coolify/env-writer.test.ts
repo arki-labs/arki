@@ -5,6 +5,7 @@
  * error or a log line.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
 import { COOLIFY_RUNTIME_PROBE_KEY, createCoolifyEnvWriter } from './index';
@@ -20,17 +21,26 @@ type Stored = {
   is_runtime: boolean;
   is_buildtime: boolean;
   is_preview: boolean;
+  is_shown_once: boolean;
 };
 type Mode = 'current' | 'ignores-buildtime-flag' | 'buildtime-for-app-key' | 'refuses';
 
+const bulkBodySchema = z.object({
+  data: z.array(
+    z.object({ key: z.string(), value: z.string(), is_buildtime: z.boolean().optional(), is_shown_once: z.boolean() }),
+  ),
+});
+
 /**
- * Behaves like Coolify's bulk endpoint: a new variable is build-time and runtime unless the
- * request says otherwise. `ignores-buildtime-flag` is a version that drops the field.
+ * Behaves like Coolify 4.4.7: a new variable is build-time and runtime unless the request says
+ * otherwise, and gets a preview copy without `is_shown_once`. `ignores-buildtime-flag` is a
+ * version that drops the field. `GET /envs` returns values, as for a token that may read them.
  */
 function fakeCoolify(mode: Mode) {
-  const store = new Map<string, Stored>();
+  const rows: Stored[] = [];
   const requests: { method: string; path: string; body: string }[] = [];
   let next = 0;
+  const newUuid = () => `env-${String((next += 1))}`;
   const answer = (input: Parameters<typeof fetch>[0], init?: RequestInit): Response => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = init?.method ?? 'GET';
@@ -42,36 +52,39 @@ function fakeCoolify(mode: Mode) {
         { status: 422 },
       );
     }
+    if (method === 'GET') return Response.json(rows);
     if (method === 'DELETE') {
       const uuid = url.pathname.split('/').at(-1) ?? '';
-      for (const [key, row] of store) if (row.uuid === uuid) store.delete(key);
+      const index = rows.findIndex(row => row.uuid === uuid);
+      if (index !== -1) rows.splice(index, 1);
       return Response.json({ message: 'Environment variable deleted.' });
     }
-    const { data } = JSON.parse(body) as {
-      data: { key: string; value: string; is_buildtime?: boolean; is_preview: boolean }[];
-    };
-    const rows = data.map(item => {
+    const written = bulkBodySchema.parse(JSON.parse(body)).data.map(item => {
       const buildtime =
         mode === 'ignores-buildtime-flag' || (mode === 'buildtime-for-app-key' && item.key === 'FOREMAN_APP_KEY')
           ? true
           : (item.is_buildtime ?? true);
+      const fields = { value: item.value, is_runtime: true, is_buildtime: buildtime };
+      const existing = rows.find(row => row.key === item.key && !row.is_preview);
+      if (existing !== undefined) {
+        Object.assign(existing, fields, { is_shown_once: item.is_shown_once });
+        return existing;
+      }
       const row: Stored = {
-        uuid: store.get(item.key)?.uuid ?? `env-${String((next += 1))}`,
+        uuid: newUuid(),
         key: item.key,
-        value: item.value,
-        is_runtime: true,
-        is_buildtime: buildtime,
-        is_preview: item.is_preview,
+        is_preview: false,
+        is_shown_once: item.is_shown_once,
+        ...fields,
       };
-      store.set(item.key, row);
+      rows.push(row, { ...row, uuid: newUuid(), is_preview: true, is_shown_once: false });
       return row;
     });
-    // A token that may read sensitive data gets values back: the writer must drop them.
-    return Response.json(rows, { status: 201 });
+    return Response.json(written, { status: 201 });
   };
   const impl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise.resolve(answer(input, init));
   const writer = createCoolifyEnvWriter({ baseUrl: BASE, token: 'write-token', fetch: vi.fn(impl) });
-  return { writer, store, requests };
+  return { writer, rows, requests };
 }
 
 const entries = [
@@ -81,14 +94,19 @@ const entries = [
 
 describe('coolify env writer', () => {
   it('probes, then writes every entry runtime-only, literal, outside previews, private keys shown once', async () => {
-    const { writer, store, requests } = fakeCoolify('current');
+    const { writer, rows, requests } = fakeCoolify('current');
     expect(await writer.write(APP, entries)).toEqual({ keys: ['FOREMAN_APP_ID', 'FOREMAN_APP_KEY'] });
 
-    expect(requests.map(request => request.method)).toEqual(['PATCH', 'DELETE', 'PATCH']);
     expect(requests[0]?.body).toContain(COOLIFY_RUNTIME_PROBE_KEY);
-    expect(store.has(COOLIFY_RUNTIME_PROBE_KEY)).toBe(false);
+    const writes = requests.filter(request => request.method === 'PATCH');
+    expect(writes).toHaveLength(2);
+    // No real value goes out before the probe passed and was cleaned up.
+    const realWrite = writes[1];
+    if (realWrite === undefined) throw new Error('no real write');
+    const firstReal = requests.indexOf(realWrite);
+    expect(requests.slice(0, firstReal).some(request => request.body.includes(PRIVATE_KEY))).toBe(false);
 
-    const sent = JSON.parse(requests[2]?.body ?? '{}') as { data: Record<string, unknown>[] };
+    const sent = z.object({ data: z.array(z.record(z.string(), z.unknown())) }).parse(JSON.parse(realWrite.body));
     expect(sent.data).toEqual([
       expect.objectContaining({
         key: 'FOREMAN_APP_ID',
@@ -107,7 +125,29 @@ describe('coolify env writer', () => {
         is_shown_once: true,
       }),
     ]);
-    expect(store.get('FOREMAN_APP_KEY')?.is_buildtime).toBe(false);
+    expect(rows.find(row => row.key === 'FOREMAN_APP_KEY' && !row.is_preview)?.is_buildtime).toBe(false);
+  });
+
+  // A production identity key must not ride along into PR previews, unhidden.
+  it('leaves no preview copy of a written key, and no probe at all', async () => {
+    const { writer, rows } = fakeCoolify('current');
+    await writer.write(APP, entries);
+    expect(rows.map(row => `${row.key}${row.is_preview ? ' (preview)' : ''}`)).toEqual([
+      'FOREMAN_APP_ID',
+      'FOREMAN_APP_KEY',
+    ]);
+    expect(rows.find(row => row.key === 'FOREMAN_APP_KEY')?.is_shown_once).toBe(true);
+  });
+
+  it('removes preview copies left by an earlier write, leaving production variables', async () => {
+    const { writer, rows } = fakeCoolify('current');
+    await writer.write(APP, entries);
+    const appKey = rows.find(row => row.key === 'FOREMAN_APP_KEY');
+    if (appKey === undefined) throw new Error('no FOREMAN_APP_KEY row');
+    rows.push({ ...appKey, uuid: 'env-old-preview', is_preview: true, is_shown_once: false });
+    await writer.removePreviewCopies(APP, ['FOREMAN_APP_KEY', COOLIFY_RUNTIME_PROBE_KEY]);
+    expect(rows.filter(row => row.is_preview)).toEqual([]);
+    expect(rows.map(row => row.key)).toEqual(['FOREMAN_APP_ID', 'FOREMAN_APP_KEY']);
   });
 
   it('sends no real value to a Coolify that would store it build-time', async () => {
