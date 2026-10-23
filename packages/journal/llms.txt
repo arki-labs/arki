@@ -34,6 +34,7 @@
 - [Operate and retain jobs](docs/agent-guide.md#operate-and-retain-jobs): states, paged reads, verbs with `op`, retention, archive sink. Long form: [Operating the jobs](README.md#operating-the-jobs) and [Retention and archive](README.md#retention-and-archive)
 - Inbox and relay recipes: [Inbox](README.md#inbox), [Relay recipe](README.md#relay-recipe)
 - [Add a durable workflow](docs/agent-guide.md#workflows): steps, waits, undo, versions, operators, `workflowHarness`. Long form: [Workflows](README.md#workflows). Must survive a restart or wait for hours → `j.workflow`; steps inside one request → `createFlow` from `@arki/ai`
+- Keep only the row, no events: `j.entity(kind, table, { events: 'transient' })`, or `initJournal({ tables, events: 'transient' })` for every entity. See [Transient events](README.md#transient-events)
 - [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), with the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs)
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
 
@@ -46,6 +47,7 @@
 - Any running worker can claim any job. Run the worker in the process that holds what its effects talk to (for example an in-memory emitter).
 - A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row. A soft delete is a normal patch.
 - Version 1 means created by the journal. A row that existed before the journal starts at version 2. `adopt` takes a row at any version with no history and makes it version 1; that is also how an entity goes from `events: 'transient'` to `'stored'`.
+- Events are stored unless the entity says `events: 'transient'`. A transient entity still gets reducers, inline projections and effects; async projections and taps on it are refused at `compose`, and replay, verify, repair, forget, rerun and adopt throw `NO_HISTORY`. `workflow.run` always stores its events.
 - Pass ids exactly as they are stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
 

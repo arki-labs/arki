@@ -11,7 +11,10 @@
   `git commit` took the staged slice 2 hunks. The content is the reviewed
   slice 2; only the message is wrong. Slice 3 in `96eff79424`. Slice 4 as
   storage seams only: the founder dropped the memory store on 2026-10-23
-  (see slice 4).
+  (see slice 4), in `3dcaaaf33f`. Slice 5 finished the docs: most of it
+  shipped with slices 2 to 4; the commit that adds this line puts the
+  setting in `llms.txt` and the `journal` skill. Sections 1 to 5 are done;
+  section 8 is next.
 - **Scope:** `@arki/journal` only. Apps change only if they opt in.
 - **Inputs:** four read-only agent reports (Fable) from 2026-10-22: domain
   core, write path, event-log dependents, prior decisions + prior art. Then
