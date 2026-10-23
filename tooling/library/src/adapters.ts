@@ -38,7 +38,6 @@ export const ADAPTERS = new Set([
   'google',
   'mistral',
   'bedrock',
-  'poll',
 ]);
 
 /** True when the export subpath (`./react`, `./comparison/server`) is an adapter entry: its first segment is in {@link ADAPTERS}. */
