@@ -6,10 +6,12 @@
  * calls it never loads the SDK. A missing peer is the
  * value `ModelUnavailable { reason: 'peer-missing' }`, returned by that first call.
  */
+import { z } from 'zod';
 import { isFailure } from '@arki/failure';
 
 import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
@@ -38,6 +40,17 @@ export type OpenAIModelOptions = {
   readonly baseURL?: string;
 };
 
+/** `OpenAIModelOptions`, checked by `createOpenAIModel`; a type test locks it to the type. */
+export const openaiModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+    })
+    .readonly(),
+);
+
 type OpenAIFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens'>;
 
 const OPENAI_FACTS: Readonly<Record<string, OpenAIFacts>> = {
@@ -63,11 +76,12 @@ async function loadSdk(id: string, apiKey: string, baseURL: string | undefined) 
  * @example
  * const model = createOpenAIModel({ id: 'text-embedding-3-small', apiKey: process.env.OPENAI_API_KEY ?? '' });
  */
-export function createOpenAIModel(options: OpenAIModelOptions) {
+export function createOpenAIModel(input: OpenAIModelOptions) {
+  const options = parseOptions(openaiModelOptionsSchema, input, 'openai');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'text-embedding-3-small';
   const facts = OPENAI_FACTS[id];
   if (facts === undefined) return ConfigurationFailure({ message: `openai model ${id} is not in the facts table` });
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'openai needs an apiKey' });
 
   let sdk: ReturnType<typeof loadSdk> | undefined;
 

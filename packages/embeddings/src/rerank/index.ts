@@ -5,12 +5,16 @@
  * (`createCohereReranker` in `./cohere`, `createTransformersReranker` in `./transformers`, …);
  * this entry holds the shape they share, `rerank()` and the cache. No provider code, no peer.
  */
+import { z } from 'zod';
+
 import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import { assert } from '@arki/schema';
 
 import type { EmbedFailure } from '../failures.js';
 import type { CacheStore, TokenCount, Usage } from '../types.js';
 import { Cancelled, InputTooLong, InvalidOutput } from '../failures.js';
+import { functionSchema, objectSchema, withOptionsJson } from '../schemas.js';
 import { sha256Hex } from '../sha256.js';
 import { addTokens, CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -38,6 +42,11 @@ export type RerankCallOptions = {
   readonly truncate?: boolean;
   readonly signal?: AbortSignal;
 };
+
+/** `RerankCallOptions`, a type test locks it to the type. */
+export const rerankCallOptionsSchema = withOptionsJson(
+  z.object({ truncate: z.boolean().optional(), signal: objectSchema<AbortSignal>().optional() }).readonly(),
+);
 
 /**
  * A reranking model with its server fixed. `rerank` is one request of at most `maxDocuments`
@@ -75,6 +84,21 @@ export type RerankOptions<Item> = {
   readonly onTooLong?: 'fail' | 'truncate' | 'split';
   readonly signal?: AbortSignal;
 };
+
+/**
+ * `RerankOptions`, checked by `rerank`; a type test locks it to the type at `Item = unknown` (a
+ * function field is checked as a function, so the item type is not part of the schema).
+ */
+export const rerankOptionsSchema = withOptionsJson(
+  z
+    .object({
+      text: functionSchema<RerankOptions<unknown>['text']>(),
+      topK: z.number().int().nonnegative().optional(),
+      onTooLong: z.enum(['fail', 'truncate', 'split']).optional(),
+      signal: objectSchema<AbortSignal>().optional(),
+    })
+    .readonly(),
+);
 
 /** The text one request scores, and the item it belongs to. A split item has several. */
 type Window = { readonly item: number; readonly text: string };
@@ -152,11 +176,8 @@ export async function rerank<Item>(
   items: readonly Item[],
   options: RerankOptions<Item>,
 ) {
+  assert(options, rerankOptionsSchema, { at: 'rerank options' });
   const { text, topK, onTooLong = 'fail', signal } = options;
-  invariant(
-    topK === undefined || (Number.isInteger(topK) && topK >= 0),
-    () => `topK must be a whole number ≥ 0, got ${topK}`,
-  );
   // A custom reranker with 0 or NaN here would never advance through the requests.
   invariant(
     Number.isInteger(reranker.maxDocuments) && reranker.maxDocuments >= 1,
@@ -237,6 +258,11 @@ export type RerankCacheOptions = {
   readonly ttlMs?: number;
 };
 
+/** `RerankCacheOptions`, checked by `withRerankCache`; a type test locks it to the type. */
+export const rerankCacheOptionsSchema = withOptionsJson(
+  z.object({ namespace: z.string().optional(), ttlMs: z.number().positive().optional() }).readonly(),
+);
+
 const log = getLogger('arki:embeddings');
 const encoder = new TextEncoder();
 
@@ -264,6 +290,8 @@ function decodeScore(bytes: Uint8Array | undefined): number | undefined {
  * const cached = withRerankCache(reranker, memoryCacheStore({ maxEntries: 100_000 }));
  */
 export function withRerankCache(reranker: Reranker, store: CacheStore, options: RerankCacheOptions = {}): Reranker {
+  // Returns a `Reranker`, never a failure, so a bad option is a bug in the caller and throws.
+  assert(options, rerankCacheOptionsSchema, { at: 'withRerankCache options' });
   const { namespace = '', ttlMs } = options;
   const keyOf = (query: string, document: string, truncate: boolean) =>
     sha256Hex(

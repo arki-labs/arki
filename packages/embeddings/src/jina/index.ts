@@ -2,12 +2,14 @@
  * `@arki/embeddings/jina`: Jina AI over plain `fetch` (`POST /v1/embeddings`). No SDK and no peer,
  * so it runs on every runtime that has `fetch`. Hosted only.
  */
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 
@@ -59,6 +61,18 @@ export type JinaModelOptions = {
   readonly fetch?: FetchLike;
 };
 
+/** `JinaModelOptions`, checked by `createJinaModel`; a type test locks it to the type. */
+export const jinaModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
+
 type JinaFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens' | 'maxBatch' | 'maxBatchTokens'>;
 
 // https://api.jina.ai/openapi.json and https://jina.ai/embeddings/ (read 2026-10-22): v3 is 1024 dims,
@@ -100,7 +114,9 @@ function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
  * @example
  * const model = createJinaModel({ apiKey: process.env['JINA_API_KEY'] ?? '' });
  */
-export function createJinaModel(options: JinaModelOptions) {
+export function createJinaModel(input: JinaModelOptions) {
+  const options = parseOptions(jinaModelOptionsSchema, input, 'jina');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'jina-embeddings-v3';
   const facts = JINA_FACTS[id];
   if (facts === undefined) {
@@ -108,7 +124,6 @@ export function createJinaModel(options: JinaModelOptions) {
       message: `jina model ${id} is not in the facts table (${Object.keys(JINA_FACTS).join(', ')})`,
     });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'jina apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.jina.ai/v1').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 
@@ -181,5 +196,5 @@ export function createJinaModel(options: JinaModelOptions) {
   return model;
 }
 
-export { createJinaReranker } from './rerank.js';
+export { createJinaReranker, jinaRerankerOptionsSchema } from './rerank.js';
 export type { JinaRerankerOptions } from './rerank.js';

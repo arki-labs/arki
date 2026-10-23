@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
@@ -15,10 +17,12 @@ import type {
   NativeInput,
   Quantization,
 } from './types.js';
+import { QUANTIZATIONS } from './types.js';
 import { Cancelled, InputTooLong, InvalidOutput, UnsupportedInput } from './failures.js';
 import { calibrationId, quantize } from './quantize.js';
 import { spaceOf } from './space.js';
 import { IMAGE_MIME_TYPES, imageMimeType } from './image.js';
+import { objectSchema, parseOptions, withOptionsJson } from './schemas.js';
 import { countTokens } from './tokens.js';
 
 /** Output options an embedder is created with. */
@@ -33,6 +37,24 @@ export type EmbedderOptions = {
   readonly calibration?: Int8Calibration;
   readonly log?: EmbeddingsLogger;
 };
+
+/** `EmbedderOptions`, checked by `createEmbedder`; a type test locks it to the type. */
+export const embedderOptionsSchema = withOptionsJson(
+  z
+    .object({
+      dimensions: z.number().int().positive().optional(),
+      quantization: z.enum(QUANTIZATIONS).exclude(['float32']).optional(),
+      calibration: z
+        .object({
+          min: z.custom<Float32Array>(value => value instanceof Float32Array, 'expected a Float32Array'),
+          max: z.custom<Float32Array>(value => value instanceof Float32Array, 'expected a Float32Array'),
+        })
+        .readonly()
+        .optional(),
+      log: objectSchema<EmbeddingsLogger>().optional(),
+    })
+    .readonly(),
+);
 
 /** The size refusal shared by the factory and per-call options: only the native size or a listed truncation. */
 function checkDimensions(model: EmbeddingModel, dimensions: number) {
@@ -67,9 +89,11 @@ function outputPlan(
  * provider cannot produce with `UnsupportedInput`, never a throw.
  *
  * @example
- * const embedder = createEmbedder(model, { dimensions: 512 }); // an Embedder, or UnsupportedInput
+ * const embedder = createEmbedder(model, { dimensions: 512 }); // an Embedder, UnsupportedInput or ConfigurationFailure
  */
-export function createEmbedder(model: EmbeddingModel, options: EmbedderOptions = {}) {
+export function createEmbedder(model: EmbeddingModel, input: EmbedderOptions = {}) {
+  const options = parseOptions(embedderOptionsSchema, input, 'embedder');
+  if (isFailure(options)) return options;
   const dimensions = options.dimensions ?? model.dimensions;
   const refused = checkDimensions(model, dimensions);
   if (refused) return refused;

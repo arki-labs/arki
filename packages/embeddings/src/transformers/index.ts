@@ -9,9 +9,12 @@ import { z } from 'zod';
 
 import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import type { SchemaWithJson } from '@arki/schema';
 
 import type { EmbeddingModel, Instruction, NativeRequest } from '../types.js';
 import { Cancelled, InvalidOutput, ModelUnavailable } from '../failures.js';
+import { instructionSchema, parseOptions, withOptionsJson } from '../schemas.js';
+import { deviceSchema, dtypeSchema, progressCallbackSchema } from './fields.js';
 import { EMBEDDINGGEMMA_2_INSTRUCTION, EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
 import { l2Normalize } from '../vector.js';
 
@@ -34,6 +37,24 @@ export type TransformersModelOptions = {
   /** Overrides the prefixes; required to get them for an id other than EmbeddingGemma. */
   readonly instruction?: Instruction;
 };
+
+/** `TransformersModelOptions`, checked by `createTransformersModel`; a type test locks it to the type. */
+// Annotated: declaration emit cannot name the peer's `ProgressCallback` inside an inferred type. The
+// assignment fails to compile when zod's output does not fit `TransformersModelOptions`; the other direction
+// (no field forgotten) is the "keep every options field" test in `schemas.test.ts`.
+export const transformersModelOptionsSchema: SchemaWithJson<TransformersModelOptions, TransformersModelOptions> = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      revision: z.string().min(1).optional(),
+      dtype: dtypeSchema.optional(),
+      device: deviceSchema.optional(),
+      cacheDir: z.string().min(1).optional(),
+      onProgress: progressCallbackSchema.optional(),
+      instruction: instructionSchema.optional(),
+    })
+    .readonly(),
+);
 
 const EMBEDDINGGEMMA_ID = 'onnx-community/embeddinggemma-300m-ONNX';
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -216,7 +237,9 @@ async function load(
  * const embedder = createEmbedder(model);
  * @fix `peer-missing`: `bun add @huggingface/transformers`. `unreachable`: check the network or `cacheDir`.
  */
-export async function createTransformersModel(options: TransformersModelOptions = {}) {
+export async function createTransformersModel(input: TransformersModelOptions = {}) {
+  const options = parseOptions(transformersModelOptionsSchema, input, 'transformers');
+  if (isFailure(options)) return options;
   const id = options.id ?? EMBEDDINGGEMMA_ID;
   const facts = TRANSFORMERS_FACTS[id];
   const revision = options.revision ?? facts?.revision ?? 'main';
@@ -288,5 +311,5 @@ export async function createTransformersModel(options: TransformersModelOptions 
   return model;
 }
 
-export { createTransformersReranker } from './rerank.js';
+export { createTransformersReranker, transformersRerankerOptionsSchema } from './rerank.js';
 export type { TransformersRerankerOptions } from './rerank.js';

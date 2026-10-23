@@ -9,9 +9,13 @@ import { z } from 'zod';
 
 import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import type { SchemaWithJson } from '@arki/schema';
+import { assert } from '@arki/schema';
 
 import type { Reranker, RerankHit } from '../rerank/index.js';
 import { Cancelled, InputTooLong, InvalidOutput, ModelUnavailable, UnsupportedInput } from '../failures.js';
+import { withOptionsJson } from '../schemas.js';
+import { deviceSchema, dtypeSchema, progressCallbackSchema } from './fields.js';
 
 export type TransformersRerankerOptions = {
   /** Hugging Face model id. Default `'onnx-community/bge-reranker-v2-m3-ONNX'`. */
@@ -33,6 +37,25 @@ export type TransformersRerankerOptions = {
   /** Qwen3-Reranker only: the task line. Default: its card's web-search instruction. */
   readonly instruction?: string;
 };
+
+/** `TransformersRerankerOptions`, checked by `createTransformersReranker`; a type test locks it to the type. */
+// Annotated: declaration emit cannot name the peer's `ProgressCallback` inside an inferred type. The
+// assignment fails to compile when zod's output does not fit `TransformersRerankerOptions`; the other direction
+// (no field forgotten) is the "keep every options field" test in `schemas.test.ts`.
+export const transformersRerankerOptionsSchema: SchemaWithJson<TransformersRerankerOptions, TransformersRerankerOptions> = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      revision: z.string().min(1).optional(),
+      dtype: dtypeSchema.optional(),
+      device: deviceSchema.optional(),
+      cacheDir: z.string().min(1).optional(),
+      onProgress: progressCallbackSchema.optional(),
+      maxInputTokens: z.number().int().positive().optional(),
+      instruction: z.string().optional(),
+    })
+    .readonly(),
+);
 
 type Kind = 'cross-encoder' | 'qwen3';
 
@@ -103,14 +126,15 @@ type Scorer = (
 export async function createTransformersReranker(
   options: TransformersRerankerOptions = {},
 ): Promise<Reranker | ReturnType<typeof ModelUnavailable> | ReturnType<typeof InvalidOutput>> {
+  // Checked before the load, so a misuse never leaves an ONNX session behind. This factory's return
+  // type has no `ConfigurationFailure`, and it threw on a bad `maxInputTokens` before, so it still throws.
+  assert(options, transformersRerankerOptionsSchema, { at: 'createTransformersReranker options' });
   const id = options.id ?? BGE_ID;
   const facts = RERANK_FACTS[id];
   const kind = facts?.kind ?? 'cross-encoder';
   const revision = options.revision ?? facts?.revision ?? 'main';
   const log = getLogger('arki:embeddings');
   const limit = options.maxInputTokens ?? 1024;
-  // Checked before the load, so a misuse never leaves an ONNX session behind.
-  invariant(Number.isInteger(limit) && limit > 0, () => `maxInputTokens must be a positive integer, got ${limit}`);
 
   let transformers: typeof Transformers;
   try {

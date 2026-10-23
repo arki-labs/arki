@@ -1,3 +1,9 @@
+import { z } from 'zod';
+
+import { assert } from '@arki/schema';
+
+import { withOptionsJson } from './schemas.js';
+
 /** Options of {@link normalizeText}. */
 export type NormalizeTextOptions = {
   /**
@@ -6,6 +12,9 @@ export type NormalizeTextOptions = {
    */
   readonly romanianDiacritics?: boolean;
 };
+
+/** `NormalizeTextOptions`, checked by `normalizeText`; a type test locks it to the type. */
+export const normalizeTextOptionsSchema = withOptionsJson(z.object({ romanianDiacritics: z.boolean().optional() }).readonly());
 
 /** Cedilla letter → comma-below letter. Read after NFC, which composes `s` + U+0327 into `ş`. */
 const COMMA_BELOW: Readonly<Record<string, string>> = { ş: 'ș', ţ: 'ț', Ş: 'Ș', Ţ: 'Ț' };
@@ -19,6 +28,7 @@ const COMMA_BELOW: Readonly<Record<string, string>> = { ş: 'ș', ţ: 'ț', Ş: 
  * normalizeText('  Ştefan   şi\nţara ', { romanianDiacritics: true }); // 'Ștefan și țara'
  */
 export function normalizeText(text: string, options: NormalizeTextOptions = {}): string {
+  assert(options, normalizeTextOptionsSchema, { at: 'normalizeText options' });
   const collapsed = text.normalize('NFC').replaceAll(/\s+/g, ' ').trim();
   return options.romanianDiacritics === true
     ? collapsed.replaceAll(/[şţ]/gi, letter => COMMA_BELOW[letter] ?? letter)

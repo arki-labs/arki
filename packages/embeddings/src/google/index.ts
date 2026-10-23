@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type { EmbeddingModel, Instruction, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { GEMINI_EMBEDDING_2_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
@@ -45,6 +46,18 @@ export type GoogleModelOptions = {
   /** Replaces the global `fetch`; tests inject a stub here. */
   readonly fetch?: FetchLike;
 };
+
+/** `GoogleModelOptions`, checked by `createGoogleModel`; a type test locks it to the type. */
+export const googleModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 type GoogleFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens'> & {
   /** `001` takes a `taskType` field. `embedding-2` does not: it takes text prefixes instead. */
@@ -138,11 +151,12 @@ async function loadSdk(id: string, options: GoogleModelOptions) {
  * @example
  * const model = createGoogleModel({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? '' });
  */
-export function createGoogleModel(options: GoogleModelOptions) {
+export function createGoogleModel(input: GoogleModelOptions) {
+  const options = parseOptions(googleModelOptionsSchema, input, 'google');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'gemini-embedding-001';
   const facts = GOOGLE_FACTS[id];
   if (facts === undefined) return ConfigurationFailure({ message: `google model ${id} is not in the facts table` });
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'google needs an apiKey' });
 
   let sdk: ReturnType<typeof loadSdk> | undefined;
 

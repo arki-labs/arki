@@ -127,12 +127,13 @@ describe('embedMany', () => {
   });
 
   // A bad concurrency once started no worker and answered a "successful" batch with zero vectors.
+  // The options schema now refuses it, so it is a caller bug that throws, never an empty success.
   it.each([Number.NaN, 0, -2, Number.POSITIVE_INFINITY])(
-    'concurrency %s still embeds every input instead of returning an empty success',
+    'concurrency %s is refused instead of returning an empty success',
     async concurrency => {
-      const batch = await embedMany(embedderOver(echoTexts, { maxBatch: 2 }), texts(5), { concurrency });
-      if (isFailure(batch)) throw new Error(batch.message);
-      expect(batch.vectors.map(vector => vector[0])).toEqual([1, 2, 3, 4, 5]);
+      await expect(embedMany(embedderOver(echoTexts, { maxBatch: 2 }), texts(5), { concurrency })).rejects.toThrow(
+        'concurrency',
+      );
     },
   );
 

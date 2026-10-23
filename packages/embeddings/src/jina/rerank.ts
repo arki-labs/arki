@@ -1,4 +1,5 @@
 /** A Jina AI reranker over plain `fetch` (`POST /v1/rerank`). No SDK and no peer. */
+import { isFailure } from '@arki/failure';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
@@ -13,6 +14,7 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -24,6 +26,18 @@ export type JinaRerankerOptions = {
   readonly baseURL?: string;
   readonly fetch?: FetchLike;
 };
+
+/** `JinaRerankerOptions`, checked by `createJinaReranker`; a type test locks it to the type. */
+export const jinaRerankerOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 // https://jina.ai/reranker/ (read 2026-10-23): context per model, query plus one document. Jina
 // chunks a longer document on its side and states no per-request document limit; 1000 keeps a
@@ -49,7 +63,9 @@ const responseSchema = z.object({
  * @example
  * const reranker = createJinaReranker({ apiKey: process.env['JINA_API_KEY'] ?? '' });
  */
-export function createJinaReranker(options: JinaRerankerOptions): Reranker | ConfigurationFailure {
+export function createJinaReranker(input: JinaRerankerOptions): Reranker | ConfigurationFailure {
+  const options = parseOptions(jinaRerankerOptionsSchema, input, 'jina reranker');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'jina-reranker-v2-base-multilingual';
   const maxInputTokens = JINA_RERANK_TOKENS[id];
   if (maxInputTokens === undefined) {
@@ -57,7 +73,6 @@ export function createJinaReranker(options: JinaRerankerOptions): Reranker | Con
       message: `jina reranker ${id} is not in the facts table (${Object.keys(JINA_RERANK_TOKENS).join(', ')})`,
     });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'jina apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.jina.ai/v1').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 

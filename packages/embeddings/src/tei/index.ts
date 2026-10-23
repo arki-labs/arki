@@ -3,6 +3,7 @@
  * (`POST /rerank`, a sequence-classification model such as `BAAI/bge-reranker-v2-m3`). Plain
  * `fetch`, no peer. TEI serves one model per server, so the operator states its limits.
  */
+import { isFailure } from '@arki/failure';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
@@ -17,6 +18,7 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -36,6 +38,21 @@ export type TeiRerankerOptions = {
   readonly fetch?: FetchLike;
 };
 
+/** `TeiRerankerOptions`, checked by `createTeiReranker`; a type test locks it to the type. */
+export const teiRerankerOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }),
+      apiKey: z.string().min(1).optional(),
+      revision: z.string().min(1).optional(),
+      maxDocuments: z.number().int().positive().optional(),
+      maxInputTokens: z.number().int().positive().optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
+
 /** https://huggingface.github.io/text-embeddings-inference/openapi.json (read 2026-10-23): a bare array. */
 const responseSchema = z.array(z.object({ index: z.number().int().nonnegative(), score: z.number() }));
 /** TEI's error body. */
@@ -53,23 +70,12 @@ const computeTokensSchema = z.coerce.number().int().nonnegative();
  * const reranker = createTeiReranker({ id: 'BAAI/bge-reranker-v2-m3', baseURL: 'http://127.0.0.1:8080', maxInputTokens: 1024 });
  * if (isFailure(reranker)) throw new Error(reranker.message);
  */
-export function createTeiReranker(options: TeiRerankerOptions): Reranker | ConfigurationFailure {
+export function createTeiReranker(input: TeiRerankerOptions): Reranker | ConfigurationFailure {
+  const options = parseOptions(teiRerankerOptionsSchema, input, 'tei reranker');
+  if (isFailure(options)) return options;
   const { id } = options;
-  if (id === '') return ConfigurationFailure({ message: 'tei reranker needs a model id' });
-  if (!/^https?:\/\//.test(options.baseURL)) {
-    return ConfigurationFailure({ message: `tei baseURL must be an http(s) URL, got "${options.baseURL}"` });
-  }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'tei apiKey is empty; omit it or set it' });
   const maxDocuments = options.maxDocuments ?? 32;
   const maxInputTokens = options.maxInputTokens ?? 512;
-  for (const [field, value] of [
-    ['maxDocuments', maxDocuments],
-    ['maxInputTokens', maxInputTokens],
-  ] as const) {
-    if (!Number.isInteger(value) || value <= 0) {
-      return ConfigurationFailure({ message: `tei ${field} must be a positive integer, got ${value}` });
-    }
-  }
   const baseURL = options.baseURL.replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 

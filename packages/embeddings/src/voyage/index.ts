@@ -2,12 +2,14 @@
  * `@arki/embeddings/voyage`: Voyage AI over plain `fetch` (`POST /v1/embeddings`; the multimodal
  * models use `POST /v1/multimodalembeddings`). No SDK and no peer, so it runs on every runtime that has `fetch`.
  */
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { toBase64 } from '../base64.js';
@@ -59,6 +61,18 @@ export type VoyageModelOptions = {
   readonly baseURL?: string;
   readonly fetch?: FetchLike;
 };
+
+/** `VoyageModelOptions`, checked by `createVoyageModel`; a type test locks it to the type. */
+export const voyageModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 type VoyageFacts = Pick<
   EmbeddingModel,
@@ -121,13 +135,14 @@ function itemOf(input: NativeInput) {
  * @example
  * const model = createVoyageModel({ id: 'voyage-3.5', apiKey: process.env['VOYAGE_API_KEY'] ?? '' });
  */
-export function createVoyageModel(options: VoyageModelOptions) {
+export function createVoyageModel(input: VoyageModelOptions) {
+  const options = parseOptions(voyageModelOptionsSchema, input, 'voyage');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'voyage-3.5';
   const facts = VOYAGE_FACTS[id];
   if (facts === undefined) {
     return ConfigurationFailure({ message: `voyage model ${id} is not in the facts table (${Object.keys(VOYAGE_FACTS).join(', ')})` });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'voyage apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.voyageai.com/v1').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 
@@ -223,5 +238,5 @@ export function createVoyageModel(options: VoyageModelOptions) {
   return model;
 }
 
-export { createVoyageReranker } from './rerank.js';
+export { createVoyageReranker, voyageRerankerOptionsSchema } from './rerank.js';
 export type { VoyageRerankerOptions } from './rerank.js';

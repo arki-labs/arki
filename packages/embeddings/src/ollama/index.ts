@@ -2,11 +2,14 @@
  * `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk).
  * No SDK and no peer, so it runs on every runtime that has `fetch`.
  */
+import { z } from 'zod';
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, instructionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION, NOMIC_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { countTokens } from '../tokens.js';
@@ -44,6 +47,20 @@ export type OllamaModelOptions = {
   readonly instruction?: Instruction;
   readonly fetch?: FetchLike;
 };
+
+/** `OllamaModelOptions`, checked by `createOllamaModel`; a type test locks it to the type. */
+export const ollamaModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      keepAlive: z.union([z.string().min(1), z.number()]).optional(),
+      dimensions: z.number().int().positive().optional(),
+      instruction: instructionSchema.optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 type OllamaFacts = Pick<
   EmbeddingModel,
@@ -104,7 +121,9 @@ const withTag = (id: string): string => (id.includes(':') ? id : `${id}:latest`)
  * @example
  * const model = createOllamaModel({ id: 'qwen3-embedding:0.6b', baseURL: 'http://127.0.0.1:11434' });
  */
-export function createOllamaModel(options: OllamaModelOptions = {}) {
+export function createOllamaModel(input: OllamaModelOptions = {}) {
+  const options = parseOptions(ollamaModelOptionsSchema, input, 'ollama');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'qwen3-embedding:0.6b';
   const baseURL = (options.baseURL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));

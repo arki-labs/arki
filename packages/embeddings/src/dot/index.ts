@@ -2,8 +2,11 @@
  * `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `@arki/dot` is an optional peer;
  * importing this entry without it fails at module load, on purpose.
  */
+import { z } from 'zod';
+
 import type { Policy, RetryWaitFailure } from '@arki/resilience';
 import { infra } from '@arki/dot/unit';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { EmbedFailure } from '../failures.js';
@@ -12,9 +15,10 @@ import { memoryCacheStore, withCache } from '../cache.js';
 import { createEmbedder } from '../embedder.js';
 import { isEmbedFailure } from '../failures.js';
 import { withResilience } from '../resilience.js';
+import { functionSchema, objectSchema, parseOptions, withOptionsJson } from '../schemas.js';
 
 /** Options `embeddings()` takes. Everything is read once, at boot. */
-type EmbeddingsPluginOptions = {
+export type EmbeddingsPluginOptions = {
   /**
    * A model record, an `Embedder`, or a function returning one of them or a failure. The function
    * runs once, at boot: read the app's env there and build the model with its provider's
@@ -27,6 +31,20 @@ type EmbeddingsPluginOptions = {
   readonly resilience?: boolean | Policy<never, RetryWaitFailure>;
 };
 
+/** `EmbeddingsPluginOptions`, checked when `embeddings()` boots; a type test locks it to the type. */
+export const embeddingsPluginOptionsSchema = withOptionsJson(
+  z
+    .object({
+      model: z.union([
+        objectSchema<EmbeddingModel | Embedder>(),
+        functionSchema<() => EmbeddingModel | Embedder | EmbedFailure>(),
+      ]),
+      cache: z.union([z.boolean(), objectSchema<CacheStore>()]).optional(),
+      resilience: z.union([z.boolean(), objectSchema<Policy<never, RetryWaitFailure>>()]).optional(),
+    })
+    .readonly(),
+);
+
 function baseEmbedder(options: EmbeddingsPluginOptions): Embedder | EmbedFailure {
   const chosen = typeof options.model === 'function' ? options.model() : options.model;
   if (isEmbedFailure(chosen)) return chosen;
@@ -34,7 +52,10 @@ function baseEmbedder(options: EmbeddingsPluginOptions): Embedder | EmbedFailure
 }
 
 /** The base embedder with resilience inside and the cache outside, so a hit never waits on a retry. */
-function build(options: EmbeddingsPluginOptions): Embedder | EmbedFailure {
+function build(input: EmbeddingsPluginOptions): Embedder | EmbedFailure {
+  // A bad option is a configuration that does not build: the app boots with `embedder` null (see `embeddings`).
+  const options = parseOptions(embeddingsPluginOptionsSchema, input, 'embeddings plugin');
+  if (isFailure(options)) return options;
   const base = baseEmbedder(options);
   if (isEmbedFailure(base)) return base;
   const { cache = false, resilience = false } = options;

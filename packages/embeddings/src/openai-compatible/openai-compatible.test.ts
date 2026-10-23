@@ -109,7 +109,8 @@ describe('./openai-compatible', () => {
     const plain = createOpenAICompatibleModel({ ...base, id: 'Qwen/Qwen3-Embedding-8B', instruction: NO_INSTRUCTION });
     const other = createOpenAICompatibleModel({ ...base, id: 'bge-m3' });
     expect(isFailure(qwen) ? undefined : qwen.instruction).toBe(QWEN3_INSTRUCTION);
-    expect(isFailure(plain) ? undefined : plain.instruction).toBe(NO_INSTRUCTION);
+    // Equal, not the same object: the options schema returns a copy of the instruction the caller passed.
+    expect(isFailure(plain) ? undefined : plain.instruction).toEqual(NO_INSTRUCTION);
     expect(isFailure(other) ? undefined : other.instruction).toBe(NO_INSTRUCTION);
   });
 

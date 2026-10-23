@@ -6,11 +6,13 @@
  * call, not at import, exactly like `./google`. A missing peer is the value
  * `ModelUnavailable { reason: 'peer-missing' }`, returned by that first call.
  */
+import { z } from 'zod';
 import { isFailure } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
@@ -49,6 +51,22 @@ export type BedrockModelOptions = {
   /** Replaces the global `fetch`; tests inject a stub here. */
   readonly fetch?: FetchLike;
 };
+
+/** `BedrockModelOptions`, checked by `createBedrockModel`; a type test locks it to the type. */
+export const bedrockModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      region: z.string().min(1).optional(),
+      apiKey: z.string().min(1).optional(),
+      accessKeyId: z.string().min(1).optional(),
+      secretAccessKey: z.string().min(1).optional(),
+      sessionToken: z.string().min(1).optional(),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 /** The sizes Titan V2 accepts, native first. */
 const TITAN_SIZES = [1024, 512, 256] as const;
@@ -100,7 +118,9 @@ async function loadSdk(id: string, options: BedrockModelOptions) {
  * @example
  * const model = createBedrockModel({ region: 'us-east-1' });
  */
-export function createBedrockModel(options: BedrockModelOptions = {}) {
+export function createBedrockModel(input: BedrockModelOptions = {}) {
+  const options = parseOptions(bedrockModelOptionsSchema, input, 'bedrock');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'amazon.titan-embed-text-v2:0';
   const facts = BEDROCK_FACTS[id];
   if (facts === undefined) {

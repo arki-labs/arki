@@ -1,4 +1,5 @@
 /** A Voyage AI reranker over plain `fetch` (`POST /v1/rerank`). No SDK and no peer. */
+import { isFailure } from '@arki/failure';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
@@ -13,6 +14,7 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -24,6 +26,18 @@ export type VoyageRerankerOptions = {
   readonly baseURL?: string;
   readonly fetch?: FetchLike;
 };
+
+/** `VoyageRerankerOptions`, checked by `createVoyageReranker`; a type test locks it to the type. */
+export const voyageRerankerOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 // https://docs.voyageai.com/reference/reranker-api (read 2026-10-23): tokens of query plus one
 // document; at most 1000 documents. A request also caps query tokens × documents + document tokens
@@ -49,7 +63,9 @@ const responseSchema = z.object({
  * @example
  * const reranker = createVoyageReranker({ apiKey: process.env['VOYAGE_API_KEY'] ?? '', id: 'rerank-2.5-lite' });
  */
-export function createVoyageReranker(options: VoyageRerankerOptions): Reranker | ConfigurationFailure {
+export function createVoyageReranker(input: VoyageRerankerOptions): Reranker | ConfigurationFailure {
+  const options = parseOptions(voyageRerankerOptionsSchema, input, 'voyage reranker');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'rerank-2.5';
   const maxInputTokens = VOYAGE_RERANK_TOKENS[id];
   if (maxInputTokens === undefined) {
@@ -57,7 +73,6 @@ export function createVoyageReranker(options: VoyageRerankerOptions): Reranker |
       message: `voyage reranker ${id} is not in the facts table (${Object.keys(VOYAGE_RERANK_TOKENS).join(', ')})`,
     });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'voyage apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.voyageai.com/v1').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 

@@ -26,7 +26,10 @@ export type {
   Usage,
 } from './types.js';
 export type { EmbedderOptions } from './embedder.js';
+export { embedderOptionsSchema } from './embedder.js';
 export type { EmbedManyOptions } from './embed.js';
+export { embedManyOptionsSchema } from './embed.js';
+export { embedOptionsSchema } from './schemas.js';
 export {
   Cancelled,
   ConfigurationFailure,
@@ -44,6 +47,7 @@ export { createEmbedder } from './embedder.js';
 export { embed, embedMany } from './embed.js';
 export { embedStream } from './stream.js';
 export type { EmbedStreamOptions } from './stream.js';
+export { embedStreamOptionsSchema } from './stream.js';
 export {
   E5_INSTRUCTION,
   EMBEDDINGGEMMA_INSTRUCTION,
@@ -58,6 +62,7 @@ export { calibrateInt8, hamming, quantize, unpackBits } from './quantize.js';
 export { countTokens } from './tokens.js';
 export { normalizeText } from './normalize.js';
 export type { NormalizeTextOptions } from './normalize.js';
+export { normalizeTextOptionsSchema } from './normalize.js';
 export { withMiddleware } from './middleware.js';
 export { withResilience } from './resilience.js';
 export { memoryCacheStore, withCache } from './cache.js';

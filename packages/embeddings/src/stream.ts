@@ -1,9 +1,13 @@
+import { z } from 'zod';
+
 import { isFailure } from '@arki/failure';
+import { assert } from '@arki/schema';
 
 import type { EmbedFailure } from './failures.js';
 import type { Embedder, Embedding, EmbeddingBatch, EmbedInput, EmbedOptions, TokenCount, Usage } from './types.js';
-import { embedMany } from './embed.js';
+import { embedChunks } from './embed.js';
 import { InputTooLong, InvalidOutput } from './failures.js';
+import { embedOptionsFields, functionSchema, withOptionsJson } from './schemas.js';
 
 /** `embedStream` options: the per-call options, the text of each item, and how far ahead it may run. */
 export type EmbedStreamOptions<Item> = EmbedOptions & {
@@ -14,6 +18,20 @@ export type EmbedStreamOptions<Item> = EmbedOptions & {
   /** Items read from the source and not yet delivered, at most. Default 64. */
   readonly maxPending?: number;
 };
+
+/**
+ * `EmbedStreamOptions`, checked by `embedStream`; a type test locks it to the type at `Item = unknown`
+ * (a function field is checked as a function, so the item type is not part of the schema).
+ */
+export const embedStreamOptionsSchema = withOptionsJson(
+  embedOptionsFields
+    .extend({
+      text: functionSchema<EmbedStreamOptions<unknown>['text']>(),
+      concurrency: z.number().int().positive().optional(),
+      maxPending: z.number().int().positive().optional(),
+    })
+    .readonly(),
+);
 
 /** Usage of an item that shares a request with an earlier item: that item already carries the cost. */
 function nothing(tokens: TokenCount): Usage {
@@ -53,10 +71,8 @@ export function embedStream<Item>(
   source: Iterable<Item> | AsyncIterable<Item>,
   options: EmbedStreamOptions<Item>,
 ): ReadableStream<{ readonly item: Item; readonly result: Embedding | EmbedFailure }> {
-  const { text, concurrency = 2, maxPending = 64, signal, ...embedOptions } = options;
-  // NaN, Infinity, 0 or a negative count would never read: fall back to one.
-  const lanes = Number.isFinite(concurrency) && concurrency >= 1 ? Math.floor(concurrency) : 1;
-  const room = Number.isFinite(maxPending) && maxPending >= 1 ? Math.floor(maxPending) : 1;
+  assert(options, embedStreamOptionsSchema, { at: 'embedStream options' });
+  const { text, concurrency: lanes = 2, maxPending: room = 64, signal, ...embedOptions } = options;
   const width = Math.min(embedder.model.maxBatch, room);
 
   const controller = new AbortController();
@@ -90,7 +106,7 @@ export function embedStream<Item>(
     while (windows.length < lanes && pending < room && !exhausted && !controller.signal.aborted) {
       const items = await gather();
       if (items.length === 0) return;
-      const result = embedMany(
+      const result = embedChunks(
         embedder,
         items.map(item => text(item)),
         { ...embedOptions, concurrency: 1, signal: controller.signal },

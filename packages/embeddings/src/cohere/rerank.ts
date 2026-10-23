@@ -4,6 +4,8 @@
  */
 import { z } from 'zod';
 
+import { isFailure } from '@arki/failure';
+
 import type { FetchLike } from '../http.js';
 import type { Reranker, RerankProviderName } from '../rerank/index.js';
 import type { TokenCount } from '../types.js';
@@ -17,6 +19,7 @@ import {
   UnsupportedInput,
 } from '../failures.js';
 import { retryAfterMs } from '../http.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type CohereRerankerOptions = {
@@ -43,6 +46,33 @@ export type CohereCompatibleRerankerOptions = {
   readonly maxInputTokens?: number;
   readonly fetch?: FetchLike;
 };
+
+/** `CohereRerankerOptions`, checked by `createCohereReranker`; a type test locks it to the type. */
+export const cohereRerankerOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
+
+/** `CohereCompatibleRerankerOptions`, checked by `createCohereCompatibleReranker`; a type test locks it. */
+export const cohereCompatibleRerankerOptionsSchema = withOptionsJson(
+  z
+    .object({
+      baseURL: z.url({ protocol: /^https?$/ }),
+      id: z.string().min(1),
+      apiKey: z.string().min(1).optional(),
+      revision: z.string().min(1).optional(),
+      maxDocuments: z.number().int().positive().optional(),
+      maxInputTokens: z.number().int().positive().optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 // https://docs.cohere.com/docs/rerank (read 2026-10-23): context is query plus one document. Cohere
 // advises at most 1000 documents per request. 32k is read as 32 000, the smaller reading.
@@ -187,7 +217,9 @@ function protocolReranker(wire: Wire): Reranker {
  * if (isFailure(reranker)) throw new Error(reranker.message);
  * const ranked = await rerank(reranker, 'refund policy', hits, { text: hit => hit.text, topK: 10 });
  */
-export function createCohereReranker(options: CohereRerankerOptions): Reranker | ConfigurationFailure {
+export function createCohereReranker(input: CohereRerankerOptions): Reranker | ConfigurationFailure {
+  const options = parseOptions(cohereRerankerOptionsSchema, input, 'cohere reranker');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'rerank-v3.5';
   const maxInputTokens = COHERE_RERANK_TOKENS[id];
   if (maxInputTokens === undefined) {
@@ -195,7 +227,6 @@ export function createCohereReranker(options: CohereRerankerOptions): Reranker |
       message: `cohere reranker ${id} is not in the facts table (${Object.keys(COHERE_RERANK_TOKENS).join(', ')})`,
     });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'cohere apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.cohere.com/v2').replace(/\/+$/, '');
   return protocolReranker({
     provider: 'cohere',
@@ -219,26 +250,12 @@ export function createCohereReranker(options: CohereRerankerOptions): Reranker |
  * const reranker = createCohereCompatibleReranker({ baseURL: 'http://127.0.0.1:7997', id: 'BAAI/bge-reranker-v2-m3', maxInputTokens: 1024 });
  */
 export function createCohereCompatibleReranker(
-  options: CohereCompatibleRerankerOptions,
+  input: CohereCompatibleRerankerOptions,
 ): Reranker | ConfigurationFailure {
-  if (options.id === '') return ConfigurationFailure({ message: 'cohere-compatible reranker needs a model id' });
-  if (!/^https?:\/\//.test(options.baseURL)) {
-    return ConfigurationFailure({
-      message: `cohere-compatible baseURL must be an http(s) URL, got "${options.baseURL}"`,
-    });
-  }
-  if (options.apiKey === '')
-    return ConfigurationFailure({ message: 'cohere-compatible apiKey is empty; omit it or set it' });
+  const options = parseOptions(cohereCompatibleRerankerOptionsSchema, input, 'cohere-compatible reranker');
+  if (isFailure(options)) return options;
   const maxDocuments = options.maxDocuments ?? 1000;
   const maxInputTokens = options.maxInputTokens ?? 512;
-  for (const [field, value] of [
-    ['maxDocuments', maxDocuments],
-    ['maxInputTokens', maxInputTokens],
-  ] as const) {
-    if (!Number.isInteger(value) || value <= 0) {
-      return ConfigurationFailure({ message: `cohere-compatible ${field} must be a positive integer, got ${value}` });
-    }
-  }
   const reranker = protocolReranker({
     provider: 'cohere-compatible',
     id: options.id,

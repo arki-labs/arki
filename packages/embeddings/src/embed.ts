@@ -1,9 +1,13 @@
+import { z } from 'zod';
+
 import { isFailure } from '@arki/failure';
+import { assert } from '@arki/schema';
 
 import type { EmbedFailure } from './failures.js';
 import type { EmbedInput, EmbedOptions, Embedder, Embedding, EmbeddingBatch, Usage } from './types.js';
 import { Cancelled, InputTooLong, InvalidOutput } from './failures.js';
 import { pack } from './pack.js';
+import { embedOptionsFields, embedOptionsSchema, functionSchema, withOptionsJson } from './schemas.js';
 import { addTokens } from './tokens.js';
 
 /** `embedMany` options: the per-call options plus how many chunks run at once and a progress callback. */
@@ -11,6 +15,16 @@ export type EmbedManyOptions = EmbedOptions & {
   readonly concurrency?: number;
   readonly onProgress?: (done: number, total: number, usage: Usage) => void;
 };
+
+/** `EmbedManyOptions`, checked by `embedMany`; a type test locks it to the type. */
+export const embedManyOptionsSchema = withOptionsJson(
+  embedOptionsFields
+    .extend({
+      concurrency: z.number().int().positive().optional(),
+      onProgress: functionSchema<NonNullable<EmbedManyOptions['onProgress']>>().optional(),
+    })
+    .readonly(),
+);
 
 function addUsage(a: Usage, b: Usage): Usage {
   const loadMs = a.loadMs === undefined && b.loadMs === undefined ? undefined : (a.loadMs ?? 0) + (b.loadMs ?? 0);
@@ -37,6 +51,16 @@ export async function embedMany(
   embedder: Embedder,
   inputs: readonly EmbedInput[],
   options: EmbedManyOptions = {},
+): Promise<EmbeddingBatch | EmbedFailure> {
+  assert(options, embedManyOptionsSchema, { at: 'embedMany options' });
+  return embedChunks(embedder, inputs, options);
+}
+
+/** `embedMany` after its options check, for callers that already checked theirs (`embed`, `embedStream`). */
+export async function embedChunks(
+  embedder: Embedder,
+  inputs: readonly EmbedInput[],
+  options: EmbedManyOptions,
 ): Promise<EmbeddingBatch | EmbedFailure> {
   const { concurrency = 2, onProgress, signal, ...embedOptions } = options;
   if (signal?.aborted) return Cancelled();
@@ -98,11 +122,9 @@ export async function embedMany(
     }
   };
 
-  // NaN, Infinity, 0 or a negative count would start no worker at all: fall back to one.
-  const requested = Number.isFinite(concurrency) && concurrency >= 1 ? Math.floor(concurrency) : 1;
   try {
     // Workers never reject, so this waits for every chunk in flight.
-    await Promise.all(Array.from({ length: Math.min(requested, chunks.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker));
   } finally {
     signal?.removeEventListener('abort', stop);
   }
@@ -125,7 +147,8 @@ export async function embed(
   input: EmbedInput,
   options: EmbedOptions = {},
 ): Promise<Embedding | EmbedFailure> {
-  const batch = await embedMany(embedder, [input], options);
+  assert(options, embedOptionsSchema, { at: 'embed options' });
+  const batch = await embedChunks(embedder, [input], options);
   if (isFailure(batch)) return batch;
   const vector = batch.vectors[0];
   if (vector === undefined) return InvalidOutput({ reason: 'count: expected 1 vector, got 0' });

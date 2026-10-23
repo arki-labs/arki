@@ -64,13 +64,13 @@ describe('createEmbedder validates every response', () => {
   it('refuses dimensions outside matryoshka', () => {
     const refused = createEmbedder(stubModel(echoTexts, { matryoshka: [4, 2] }), { dimensions: 3 });
     expect(isFailure(refused) && refused.code).toBe('embeddings.unsupported_input');
-    expect(isFailure(refused) && refused.data.part).toBe('dimensions');
+    expect(UnsupportedInput.is(refused) && refused.data.part).toBe('dimensions');
     // Client-side int8 needs the corpus's shared range; without it there is no right scale.
     const uncalibrated = createEmbedder(stubModel(echoTexts), { quantization: 'int8' });
-    expect(isFailure(uncalibrated) && uncalibrated.data.part).toBe('quantization');
+    expect(UnsupportedInput.is(uncalibrated) && uncalibrated.data.part).toBe('quantization');
     // Binary packs eight dimensions per byte; 4 dimensions do not fill one.
     const unpackable = createEmbedder(stubModel(echoTexts), { quantization: 'binary' });
-    expect(isFailure(unpackable) && unpackable.data.part).toBe('dimensions');
+    expect(UnsupportedInput.is(unpackable) && unpackable.data.part).toBe('dimensions');
   });
 
   // Qwen3 was trained with the prefix on queries and without it on documents.
@@ -148,7 +148,7 @@ describe('createEmbedder makes the dtype the provider cannot', () => {
       quantization: 'int8',
       calibration,
     });
-    expect(isFailure(refused) && refused.data.part).toBe('dimensions');
+    expect(UnsupportedInput.is(refused) && refused.data.part).toBe('dimensions');
     const embedder = createEmbedder(stubModel(eight, { dimensions: 8, matryoshka: [4] }), { calibration });
     if (isFailure(embedder)) throw new Error(embedder.message);
     const call = await embedder.embed(['a'], { quantization: 'int8' });

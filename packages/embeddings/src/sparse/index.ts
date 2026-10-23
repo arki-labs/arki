@@ -8,6 +8,8 @@
 import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
+import { isFailure } from '@arki/failure';
+import { assert } from '@arki/schema';
 
 import type { EmbedFailure } from '../failures.js';
 import type { FetchLike } from '../http.js';
@@ -24,6 +26,7 @@ import {
 } from '../failures.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
+import { objectSchema, functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { isSameSpace, spaceId } from '../space.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -50,6 +53,11 @@ export type SparseEmbedOptions = {
   readonly onTooLong?: 'fail' | 'truncate';
   readonly signal?: AbortSignal;
 };
+
+/** `SparseEmbedOptions`, checked by the embedder's `embed`; a type test locks it to the type. */
+export const sparseEmbedOptionsSchema = withOptionsJson(
+  z.object({ onTooLong: z.enum(['fail', 'truncate']).optional(), signal: objectSchema<AbortSignal>().optional() }).readonly(),
+);
 
 /** A sparse model with its server fixed. `embed` is one request of at most `maxBatch` texts, no retry. */
 export type SparseEmbedder = {
@@ -80,6 +88,24 @@ export type SparseModelOptions = {
   readonly fetch?: FetchLike;
   readonly log?: EmbeddingsLogger;
 };
+
+/** `SparseModelOptions`, checked by `createSparseModel`; a type test locks it to the type. */
+export const sparseModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }),
+      apiKey: z.string().min(1).optional(),
+      revision: z.string().min(1).optional(),
+      dimensions: z.number().int().positive(),
+      vocabulary: z.string().min(1).optional(),
+      maxBatch: z.number().int().positive().optional(),
+      maxInputTokens: z.number().int().positive().optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+      log: objectSchema<EmbeddingsLogger>().optional(),
+    })
+    .readonly(),
+);
 
 /** `/embed_sparse` answers one list of `{ index, value }` per input, in input order. */
 const sparseResponseSchema = z.array(z.array(z.object({ index: z.number().int().nonnegative(), value: z.number() })));
@@ -155,20 +181,10 @@ function inputTooLong(texts: readonly string[], max: number) {
  * if (isFailure(splade)) throw new Error(splade.message);
  * const batch = await splade.embed(['what is a sparse vector?'], {});
  */
-export function createSparseModel(options: SparseModelOptions): SparseEmbedder | ConfigurationFailure {
+export function createSparseModel(input: SparseModelOptions): SparseEmbedder | ConfigurationFailure {
+  const options = parseOptions(sparseModelOptionsSchema, input, 'sparse');
+  if (isFailure(options)) return options;
   const { id, dimensions } = options;
-  if (id === '') return ConfigurationFailure({ message: 'sparse needs a model id' });
-  if (!/^https?:\/\//.test(options.baseURL)) {
-    return ConfigurationFailure({ message: `sparse baseURL must be an http(s) URL, got "${options.baseURL}"` });
-  }
-  if (!Number.isInteger(dimensions) || dimensions <= 0) {
-    return ConfigurationFailure({
-      message: `sparse dimensions (the vocabulary size) must be a positive integer, got ${dimensions}`,
-    });
-  }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'sparse apiKey is empty; omit it or set it' });
-  if (options.vocabulary === '')
-    return ConfigurationFailure({ message: 'sparse vocabulary is empty; omit it or set it' });
 
   const baseURL = options.baseURL.replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
@@ -191,7 +207,9 @@ export function createSparseModel(options: SparseModelOptions): SparseEmbedder |
     vocabulary: space.vocabulary,
   });
 
-  const embed: SparseEmbedder['embed'] = async (texts, { onTooLong, signal }) => {
+  const embed: SparseEmbedder['embed'] = async (texts, callOptions) => {
+    assert(callOptions, sparseEmbedOptionsSchema, { at: 'sparse embed options' });
+    const { onTooLong, signal } = callOptions;
     if (signal?.aborted) return Cancelled();
     if (texts.length > maxBatch) return UnsupportedInput({ index: maxBatch, part: 'batch' });
     if (texts.length === 0)

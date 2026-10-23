@@ -2,11 +2,14 @@
  * `@arki/embeddings/cohere`: Cohere over plain `fetch` (`POST /v2/embed`). No SDK and no peer, so
  * it runs on every runtime that has `fetch`. `embed-v4.0` also takes images, through the v2 `inputs` field.
  */
+import { z } from 'zod';
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { toBase64 } from '../base64.js';
@@ -37,6 +40,18 @@ export type CohereModelOptions = {
   readonly baseURL?: string;
   readonly fetch?: FetchLike;
 };
+
+/** `CohereModelOptions`, checked by `createCohereModel`; a type test locks it to the type. */
+export const cohereModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 type CohereFacts = Pick<
   EmbeddingModel,
@@ -99,13 +114,14 @@ function contentOf(input: NativeInput) {
  * @example
  * const model = createCohereModel({ id: 'embed-v4.0', apiKey: process.env['COHERE_API_KEY'] ?? '' });
  */
-export function createCohereModel(options: CohereModelOptions) {
+export function createCohereModel(input: CohereModelOptions) {
+  const options = parseOptions(cohereModelOptionsSchema, input, 'cohere');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'embed-v4.0';
   const facts = COHERE_FACTS[id];
   if (facts === undefined) {
     return ConfigurationFailure({ message: `cohere model ${id} is not in the facts table (${Object.keys(COHERE_FACTS).join(', ')})` });
   }
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'cohere apiKey is empty' });
   const baseURL = (options.baseURL ?? 'https://api.cohere.com').replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
 
@@ -193,5 +209,10 @@ export function createCohereModel(options: CohereModelOptions) {
   return model;
 }
 
-export { createCohereCompatibleReranker, createCohereReranker } from './rerank.js';
+export {
+  cohereCompatibleRerankerOptionsSchema,
+  cohereRerankerOptionsSchema,
+  createCohereCompatibleReranker,
+  createCohereReranker,
+} from './rerank.js';
 export type { CohereCompatibleRerankerOptions, CohereRerankerOptions } from './rerank.js';

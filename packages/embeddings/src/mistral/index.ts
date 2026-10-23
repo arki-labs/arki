@@ -5,11 +5,13 @@
  * at import, exactly like `./openai`. A missing peer is the value
  * `ModelUnavailable { reason: 'peer-missing' }`, returned by that first call.
  */
+import { z } from 'zod';
 import { isFailure } from '@arki/failure';
 
 import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
+import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
@@ -40,6 +42,18 @@ export type MistralModelOptions = {
   /** Replaces the global `fetch`; tests inject a stub here. */
   readonly fetch?: FetchLike;
 };
+
+/** `MistralModelOptions`, checked by `createMistralModel`; a type test locks it to the type. */
+export const mistralModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      apiKey: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
 
 type MistralFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInputTokens'>;
 
@@ -83,11 +97,12 @@ async function loadSdk(id: string, options: MistralModelOptions) {
  * @example
  * const model = createMistralModel({ apiKey: process.env.MISTRAL_API_KEY ?? '' });
  */
-export function createMistralModel(options: MistralModelOptions) {
+export function createMistralModel(input: MistralModelOptions) {
+  const options = parseOptions(mistralModelOptionsSchema, input, 'mistral');
+  if (isFailure(options)) return options;
   const id = options.id ?? 'mistral-embed';
   const facts = MISTRAL_FACTS[id];
   if (facts === undefined) return ConfigurationFailure({ message: `mistral model ${id} is not in the facts table` });
-  if (options.apiKey === '') return ConfigurationFailure({ message: 'mistral needs an apiKey' });
 
   let sdk: ReturnType<typeof loadSdk> | undefined;
 

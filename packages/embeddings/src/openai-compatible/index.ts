@@ -3,12 +3,14 @@
  * TEI, vLLM, LM Studio, a proxy) over plain `fetch`. No SDK and no peer, so it runs everywhere
  * `fetch` does. The server does not say what it serves, so the caller states `dimensions`.
  */
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 import { z } from 'zod';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { functionSchema, instructionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 
@@ -75,6 +77,25 @@ export type OpenAICompatibleModelOptions = {
   readonly fetch?: FetchLike;
 };
 
+/** `OpenAICompatibleModelOptions`, checked by `createOpenAICompatibleModel`; a type test locks it to the type. */
+export const openaiCompatibleModelOptionsSchema = withOptionsJson(
+  z
+    .object({
+      id: z.string().min(1),
+      baseURL: z.url({ protocol: /^https?$/ }),
+      apiKey: z.string().min(1).optional(),
+      dimensions: z.number().int().positive(),
+      maxBatch: z.number().int().positive().optional(),
+      maxBatchTokens: z.number().int().positive().optional(),
+      maxInputTokens: z.number().int().positive().optional(),
+      normalized: z.boolean().optional(),
+      instruction: instructionSchema.optional(),
+      label: z.string().min(1).optional(),
+      fetch: functionSchema<FetchLike>().optional(),
+    })
+    .readonly(),
+);
+
 /** `usage.prompt_tokens` when the server reports it. */
 function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
   const usage = body['usage'];
@@ -91,17 +112,11 @@ function reportedTokens(body: Readonly<Record<string, unknown>>): TokenCount {
  * @example
  * const model = createOpenAICompatibleModel({ id: 'Qwen/Qwen3-Embedding-8B', baseURL: 'https://api.example.com/v1', dimensions: 4096 });
  */
-export function createOpenAICompatibleModel(options: OpenAICompatibleModelOptions) {
+export function createOpenAICompatibleModel(input: OpenAICompatibleModelOptions) {
+  const options = parseOptions(openaiCompatibleModelOptionsSchema, input, 'openai-compatible');
+  if (isFailure(options)) return options;
   const { id, dimensions } = options;
   const label = options.label ?? 'openai-compatible';
-  if (id === '') return ConfigurationFailure({ message: `${label} needs a model id` });
-  if (!/^https?:\/\//.test(options.baseURL)) {
-    return ConfigurationFailure({ message: `${label} baseURL must be an http(s) URL, got "${options.baseURL}"` });
-  }
-  if (!Number.isInteger(dimensions) || dimensions <= 0) {
-    return ConfigurationFailure({ message: `${label} dimensions must be a positive integer, got ${dimensions}` });
-  }
-  if (options.apiKey === '') return ConfigurationFailure({ message: `${label} apiKey is empty; omit it or set it` });
 
   const baseURL = options.baseURL.replace(/\/+$/, '');
   const send: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
