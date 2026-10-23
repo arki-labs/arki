@@ -856,6 +856,7 @@ first null
 - `@arki/db/libsql` — `createLibsqlDb`: a libSQL database with writes queued per process. Needs the optional peer `@libsql/client`.
 - `@arki/db/sqlite` — re-export of `drizzle-orm/sqlite-core`, plus `idColumns`, `instant` (integer milliseconds) and `sqliteColumns({ prefix? })`, the SQLite column kit.
 - `@arki/db/columns` — `ColumnKit`, `ColumnSpec` and `TableOf`: the types a package writes its tables against.
+- `@arki/db/dialect` — `dialectOf(db)` (`'pg' | 'sqlite'`, read from the Drizzle database's class), `isTransaction`, `isLibsql`, `DIALECTS`. Portable: loads only `drizzle-orm`.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.
 - `@arki/db/bun` — Bun-SQL driver entry (also routed via the `bun` condition on `./init`).
 - `@arki/db/client` — types-only client surface reserved for future Tier-3 sync work.

@@ -100,6 +100,11 @@
       "import": "./dist/columns.js",
       "default": "./dist/columns.js"
     },
+    "./dialect": {
+      "types": "./dist/dialect.d.ts",
+      "import": "./dist/dialect.js",
+      "default": "./dist/dialect.js"
+    },
     "./temporal": {
       "types": "./dist/temporal.d.ts",
       "import": "./dist/temporal.js",
