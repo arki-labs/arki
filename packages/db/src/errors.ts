@@ -9,6 +9,10 @@ import { defineFailure } from '@arki/failure';
  */
 import { findDatabaseError } from './sql-state.js';
 
+export type { DatabaseErrorFacts } from './sql-state.js';
+/** The SQL-standard SQLSTATE (and constraint, on Postgres) of a database error, on either dialect. */
+export { findDatabaseError } from './sql-state.js';
+
 /** SQLSTATE `unique_violation`. */
 const UNIQUE_VIOLATION = '23505';
 

@@ -118,7 +118,7 @@ What is different:
 
 - **One write transaction at a time per process.** SQLite has one writer. `@libsql/client` runs every connection on the one JavaScript thread, so a second writer cannot wait inside SQLite. Instead `@arki/db` queues local calls: a transaction keeps its turn until it commits or rolls back, and other calls wait for it. Keep transactions short. Inside a transaction, query through `tx`: a query on the root `db` waits for the transaction to end, so it never returns.
 - **Several processes on one file work, with retries.** Another process's lock reaches you as `SQLITE_BUSY`, which `runTransaction` retries like a Postgres `40001`.
-- **Errors read as SQLSTATE.** A duplicate key is `23505`, a broken foreign key `23503`, a missing value `23502`, a failed check `23514`. SQLite names columns, not constraints, so `isUniqueViolation(error, 'some_constraint')` is always false there.
+- **Errors read as SQLSTATE.** A duplicate key is `23505`, a broken foreign key `23503`, a missing value `23502`, a failed check `23514`. `findDatabaseError(error)` from `@arki/db/errors` returns `{ sqlState, constraint }` on either dialect. SQLite names columns, not constraints, so `isUniqueViolation(error, 'some_constraint')` is always false there.
 - **No isolation levels.** SQLite is serializable already. Transactions start with `BEGIN IMMEDIATE`.
 - **No schemas.** `migrationsSchema` does not apply; the bookkeeping table sits in the main database.
 - **Only libSQL.** bun:sqlite, node:sqlite and better-sqlite3 commit when an async callback returns, so a throw after an `await` keeps its writes. `runTransaction` refuses them with `ARKI_DB_TX_E007`.
