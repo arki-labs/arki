@@ -72,6 +72,7 @@ export type {
   CoreHandles,
   DefinedFeature,
   DepsOf,
+  EntrypointServicesOf,
   DomainServiceHandle,
   Entrypoint,
   EntrypointOnly,

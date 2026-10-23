@@ -14,7 +14,7 @@ import { orThrow, UnexpectedDefect } from '@arki/failure';
 import type { UnitNeeds } from '../unit-contract.js';
 import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
-import { defineFeature, instanceOf, mountFeatures, routerFor } from '../feature.js';
+import { defineFeature, entrypointOnly, instanceOf, mountFeatures, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { rpc } from '../orpc.js';
@@ -121,6 +121,26 @@ describe('feature.instance(): a second copy under `<name>#<instance>`', () => {
     } finally {
       orThrow(await app.dispose());
     }
+  });
+
+  // Why: `entrypointOnly` keeps a handle (the gateway's db) away from usecases. A rebind swaps the
+  // provider, not the rule, so the lazy form of a rebound entrypoint-only need must stay flagged;
+  // if it lost the flag, the need would reach the usecases' deps after `feature.instance(...)`.
+  it('keeps a lazy entrypointOnly need entrypoint-only after a rebind', () => {
+    const probe = defineFeature('reports.probe')
+      .needs({ db: entrypointOnly(database.provides.db).lazy })
+      .usecases({})
+      .entrypoints();
+    const parent = defineFeature('reports')
+      .needs({ db: database.provides.db })
+      .features(probe)
+      .usecases({})
+      .provides({})
+      .entrypoints();
+    const eu = parent.instance('eu', { db: databaseEu.provides.dbEu });
+    const rebound = eu.features[0].units()[0].needs['db'];
+    // The EU lazy form, still flagged entrypoint-only, with the EU lazy form as its origin.
+    expect(rebound).toMatchObject({ entrypointOnly: true, origin: databaseEu.provides.dbEu.lazy });
   });
 
   it('follows the rebind for a lazy child need, with the new lazy form', async () => {

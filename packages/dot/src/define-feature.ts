@@ -616,6 +616,7 @@ export type CoreHandles<TName extends string, N extends NeedsShape, U> = Entrypo
 };
 
 declare const CoreServicesTag: unique symbol;
+declare const EntrypointServicesTag: unique symbol;
 
 /**
  * The feature up to `.usecases()`: name, handles and (type only) the
@@ -626,6 +627,8 @@ export type FeatureCore<TName extends string, N extends NeedsShape, U> = {
   readonly name: TName;
   readonly handles: CoreHandles<TName, N, U>;
   readonly [CoreServicesTag]?: EntrypointServices<N, U>;
+  /** What this stage's `.entrypoints(...)` hand every entrypoint; read it with {@link EntrypointServicesOf}. */
+  readonly [EntrypointServicesTag]?: EntrypointServices<N, U>;
 };
 
 /** Any feature logic stage — the constraint entrypoint factories take (`schedules(logic, defs)`). */
@@ -638,6 +641,14 @@ export type AnyFeatureCore = { readonly name: string; readonly handles: NeedsSha
  * (entrypoint-only needs + `usecases`).
  */
 export type DepsOf<C> = C extends { readonly [CoreServicesTag]?: infer D } ? D : never;
+
+/**
+ * What the entrypoints of a stage receive, at any stage: the entrypoint-only needs and `usecases`
+ * (empty before `.usecases()`). Entrypoint factories in adapter packages (`endpoints(core, build)`,
+ * `schedules(core, defs)`) type their handler with it. `DepsOf` is not the same before `.usecases()`:
+ * there it is what a usecase may ask for, which entrypoints never receive.
+ */
+export type EntrypointServicesOf<C> = C extends { readonly [EntrypointServicesTag]?: infer D } ? D : never;
 
 declare const FeatureParamsTag: unique symbol;
 /** The type arguments of a finished feature, carried so `instance()` can re-derive a child's type under the new name. */
@@ -1876,17 +1887,22 @@ function markEntrypointOnly(handle: Service<unknown>): Service<unknown> {
 function followRebind(witness: Service<unknown>, follow: ReadonlyMap<object, Service<unknown>>): Service<unknown> {
   const base = canonical(witness);
   const direct = follow.get(base);
-  // A rebound `entrypointOnly` need stays entrypoint-only: the flag belongs to the alias, not to the old handle.
-  if (direct !== undefined) {
-    const flagged = (witness as Provenance).entrypointOnly === true && (direct as Provenance).entrypointOnly !== true;
-    return flagged ? markEntrypointOnly(direct) : direct;
-  }
+  if (direct !== undefined) return keepEntrypointOnly(witness, direct);
   for (const [from, to] of follow) {
     if (lazyFormOf(from) !== base) continue;
     const lazy = lazyFormOf(to);
-    return typeof lazy === 'object' && lazy !== null ? lazy : to;
+    return keepEntrypointOnly(witness, typeof lazy === 'object' && lazy !== null ? lazy : to);
   }
   return witness;
+}
+
+/**
+ * A rebound `entrypointOnly` need stays entrypoint-only, in either form: the flag belongs to the
+ * alias, not to the old handle, so a rebind that drops it would hand a usecase the entrypoint's db.
+ */
+function keepEntrypointOnly(witness: Service<unknown>, rebound: Service<unknown>): Service<unknown> {
+  const flagged = (witness as Provenance).entrypointOnly === true && (rebound as Provenance).entrypointOnly !== true;
+  return flagged ? markEntrypointOnly(rebound) : rebound;
 }
 
 /**

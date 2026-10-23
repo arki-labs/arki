@@ -11,7 +11,14 @@
  */
 import { expectTypeOf } from 'vitest';
 
-import type { DepsOf, EntrypointOnlyNeeds, EntrypointServices, ProvidesDeps, requestServices } from '../feature.js';
+import type {
+  DepsOf,
+  EntrypointOnlyNeeds,
+  EntrypointServices,
+  EntrypointServicesOf,
+  ProvidesDeps,
+  requestServices,
+} from '../feature.js';
 import type { KernelCtx, Provided } from '../unit-contract.js';
 import { defineFeature, domainService, entrypointOnly, providesOf, servicesOf } from '../feature.js';
 import { infra } from '../index.js';
@@ -102,3 +109,18 @@ defineFeature('gateway')
   .needs(providesOf([peer]))
   // @ts-expect-error -- a provides factory receives `{ usecases }` only; servicesOf must not accept it
   .provides({ rpc: ctx => servicesOf(ctx, [peer]) });
+
+// (7) `EntrypointServicesOf` is what entrypoints receive at ANY stage; adapter packages type their
+// handlers with it (`endpoints(core, build)`, `schedules(core, defs)`). Before `.usecases()`, `DepsOf`
+// is what a usecase may ask for: plain needs and infra, no entrypoint-only need. A health-probe
+// route on a feature with no usecases would then lose its `db` and be offered a `mailer` the
+// runtime never passes.
+const _probeDeps = defineFeature('probe').needs({
+  db: entrypointOnly(database.provides.db),
+  mailer: mail.provides.mailer,
+});
+expectTypeOf<keyof EntrypointServicesOf<typeof _probeDeps>>().toEqualTypeOf<'db' | 'usecases'>();
+expectTypeOf<EntrypointServicesOf<typeof _probeDeps>['db']>().toEqualTypeOf<Db>();
+expectTypeOf<keyof DepsOf<typeof _probeDeps>>().toEqualTypeOf<'mailer'>();
+// After `.usecases()` the two agree.
+expectTypeOf<Flat<EntrypointServicesOf<typeof logic>>>().toEqualTypeOf<Flat<DepsOf<typeof logic>>>();
