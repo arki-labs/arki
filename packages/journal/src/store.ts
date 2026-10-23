@@ -174,6 +174,21 @@ export function createPgStore(deps: { readonly tables: JournalTables; readonly w
       enqueue: async (queued: readonly PgInsertValue<JournalTables['jobs']>[]): Promise<void> => {
         if (queued.length > 0) await db.insert(jobsTable).values([...queued]);
       },
+
+      /** The last version a forward job of `stream` still carries, dead ones included. `null`: none pending. */
+      pendingTop: async (stream: string): Promise<number | null> => {
+        const [top] = await db
+          .select({
+            // -1 when the stream has no forward job: an aggregate over no rows is null, which `mapWith` would not see.
+            version:
+              sql`coalesce(max(${jobsTable.streamPosition} + jsonb_array_length(${jobsTable.args}->'events')), -1)`.mapWith(
+                Number,
+              ),
+          })
+          .from(jobsTable)
+          .where(and(eq(jobsTable.kind, 'forward'), eq(jobsTable.stream, stream)));
+        return top === undefined || top.version < 0 ? null : top.version;
+      },
     };
 
     /**

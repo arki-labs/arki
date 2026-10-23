@@ -13,7 +13,7 @@ import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
-import type { EventLog, EventToAppend } from './event-log.js';
+import type { EventToAppend, JoinedLog } from './event-log.js';
 import type { History } from './history.js';
 import type { StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
@@ -32,7 +32,7 @@ import type {
 } from './types.js';
 import { debugWrite } from './debug.js';
 import { JournalError } from './errors.js';
-import { logOn } from './event-log.js';
+import { routeOf, streamOf } from './event-log.js';
 import { fold, hasDeclaredEventType } from './fold.js';
 import { correlationId, eventId, jobId } from './id.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
@@ -82,8 +82,8 @@ export type WriteDeps<
   readonly metaSchema: Meta;
   /** Rows, the write order, jobs and the wake signal. A unique violation comes back from it as `CONFLICT`. */
   readonly store: PgStore;
-  /** Where stored events go. Bound to the write's savepoint when it joins transactions. */
-  readonly log: EventLog;
+  /** The built-in log: where `'stored'` events go, bound to the write's savepoint. */
+  readonly log: JoinedLog;
   /** Inline projections only: they run inside the write. */
   readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   /** Async projections: the write only wakes the worker when a recorded event matches one. */
@@ -126,7 +126,9 @@ export function createWriter<
     opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
   ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure> => {
     const adopting = opts?.mode === 'adopt';
-    const transient = entity.eventStorage === 'transient';
+    const route = routeOf(entity.eventStorage, deps.log);
+    const transient = route.mode === 'transient';
+    const forwarded = route.mode === 'forwarded';
     const expectedVersion = opts?.expectedVersion;
     if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
       throw new Error(`journal: expectedVersion must be a whole number, zero or more, got ${String(expectedVersion)}`);
@@ -142,7 +144,6 @@ export function createWriter<
         // Before the row lock, so every journal transaction takes its locks in the same
         // order (append lock, then rows) and two commands writing two entities cannot deadlock.
         const storage = deps.store.bind(sp);
-        const log = logOn(deps.log, sp);
         await storage.seq.lock();
         const loaded = await storage.rows.load(entity, id, true);
         if (loaded !== null && !isRowOf(entity.table, loaded)) {
@@ -182,9 +183,19 @@ export function createWriter<
         // A transient entity has no log: the row's version is the base, 0 when there is no row.
         // Adopt reads the log top for a row at any version: it takes a row whose log is empty,
         // whether the row predates the journal or its entity kept no events until now.
+        // A forwarded entity's log lags the row, so only a create reads it: the last pending forward job
+        // says where the entity's history ends, and the log does when none is pending. A job leaves
+        // this table only after its append, so reading the jobs first misses nothing. The log read
+        // happens under the append lock: a create of a forwarded entity waits on its log once.
         const stored = row?.version ?? 0;
+        const readsLogTop = !transient && (adopting || row === null || stored === 0);
         const latestLogVersion =
-          !transient && (adopting || row === null || stored === 0) ? await log.highestVersion(entity.kind, id) : 0;
+          readsLogTop && route.mode === 'forwarded'
+            ? ((await storage.jobs.pendingTop(streamOf(entity.kind, id))) ??
+              (await route.log.highestVersion(entity.kind, id)))
+            : readsLogTop && route.mode === 'joined'
+              ? await route.log.bind(sp).highestVersion(entity.kind, id)
+              : 0;
         if (row !== null && stored === 0 && latestLogVersion > 0) {
           throw new JournalError(
             'CONFLICT',
@@ -222,7 +233,8 @@ export function createWriter<
               : stored === 0
                 ? 1
                 : stored;
-        if (row === null && latestLogVersion > 0) {
+        // A forwarded entity's log may be behind or far away; the row's own checks guard it instead.
+        if (row === null && latestLogVersion > 0 && !forwarded) {
           const checked = await assertLogSaysGone(sp, entity, id, latestLogVersion);
           if (isFailure(checked)) return refusal.settle(checked);
         }
@@ -290,8 +302,8 @@ export function createWriter<
         const inserted: StoredEventRow[] = appended.map(event => ({ ...event, erasedAt: null }));
         // A taken version is `CONFLICT`, a changed entity id `ID_MISMATCH`: both throw, and the
         // throw rolls the savepoint back with whatever the log took.
-        if (!transient)
-          await log.append({
+        if (route.mode === 'joined')
+          await route.log.bind(sp).append({
             kind: entity.kind,
             entityId: id,
             expectedVersion: baseVersion,
@@ -397,6 +409,19 @@ export function createWriter<
               });
             }
           }
+        }
+        // A forwarded entity's events leave with the commit, in one job per write, in version order.
+        if (forwarded) {
+          const generated = jobId();
+          if (isFailure(generated)) return refusal.settle(generated);
+          jobs.push({
+            id: generated,
+            kind: 'forward' as const,
+            jobName: entity.kind,
+            args: { events: inserted },
+            stream: streamOf(entity.kind, id),
+            streamPosition: baseVersion,
+          });
         }
         await storage.jobs.enqueue(jobs);
         const seqs = recorded.map(event => event.seq);

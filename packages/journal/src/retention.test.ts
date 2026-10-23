@@ -139,6 +139,8 @@ describe('ndjsonArchiveSink', () => {
       archivedAt,
       keepUntil: null,
       exportedAt: null,
+      stream: null,
+      streamPosition: null,
     }) satisfies ArchivedJob;
 
   it('writes one file per batch under a key built from the first row, and one JSON line per row', async () => {

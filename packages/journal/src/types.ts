@@ -5,6 +5,8 @@ import type { Failure, SchemaFailure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
+import type { EventLog } from './event-log.js';
+import type { JobKind } from './pg.js';
 import type { EffectRetention } from './retention.js';
 import type { StepPhase } from './workflow/states.js';
 
@@ -244,12 +246,14 @@ export type Reducers<Tbl extends EntityTable, Meta, Key extends string = 'id'> =
 };
 
 /**
- * Whether an entity's events are kept. `'stored'`: every write appends its events to
+ * Whether and where an entity's events are kept. `'stored'`: every write appends its events to
  * `journal_events`, and replay, verify, repair, forget, rerun, async projections and taps
  * work. `'transient'`: the events exist only inside the write (inline projections, the
  * write's result) and in the effect jobs they queue; nothing reads them back later.
+ * An `EventLog`: the events go to that log. One that joins the transaction is written with
+ * the row; one that cannot is forwarded: a `forward` job appends them after the commit.
  */
-export type EventStorage = 'stored' | 'transient';
+export type EventStorage = 'stored' | 'transient' | EventLog;
 
 /** An entity: a kind, its table and key column, and the events and reducers declared so far. */
 export type EntityDef<
@@ -528,7 +532,7 @@ export type EffectHookContext<Meta = unknown> = {
  * Pending jobs no handler of this worker can claim, per kind and name: an effect this
  * journal does not have, or a queue job the runner does not know.
  */
-export type StrandedJobs = { readonly kind: 'effect' | 'queue'; readonly name: string; readonly jobs: number };
+export type StrandedJobs = { readonly kind: JobKind; readonly name: string; readonly jobs: number };
 
 /** One `kind = 'queue'` row as the worker hands it to a runner. `args` is the stored JSON, not yet parsed. */
 export type ScheduledJob = {

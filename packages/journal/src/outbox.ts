@@ -15,13 +15,14 @@ import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { ensure } from '@arki/schema';
 
+import type { ForwardedLog } from './event-log.js';
 import type { JournalTables } from './pg.js';
-import { StoredEventRow } from './pg.js';
 import type { ArchivedJob, ArchiveOutcome, EffectRetention, ResolvedKeep, ResolvedRetention } from './retention.js';
 import type { DbHandle } from './types.js';
 import type { JobRow } from './worker.js';
 import { JournalError } from './errors.js';
 import { jobId as newJobId, operationId as newOperationId } from './id.js';
+import { ForwardArgs, StoredEventRow } from './pg.js';
 import { keepFor, keepUntil, MAX_SWEEP_BATCH, retryableForMs } from './retention.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 
@@ -72,26 +73,35 @@ export type EventHeader = {
 
 export type JobWithState = JobRow & { readonly state: JobState };
 
+/** An event's header: who, which version, what type, when. Never its data or meta. */
+const headerOf = (stored: StoredEventRow): EventHeader => ({
+  seq: stored.seq,
+  id: stored.id,
+  kind: stored.kind,
+  entityId: stored.entityId,
+  version: stored.version,
+  type: stored.type,
+  recordedAt: stored.recordedAt,
+});
+
 /** The header of the event an effect job carries in `args`. A bad copy is a library bug, so it throws. */
-const eventHeaderOf = (jobId: string, args: unknown): EventHeader => {
-  const stored = ensure(args, StoredEventRow, { at: `journal: effect job ${jobId} args` });
-  return {
-    seq: stored.seq,
-    id: stored.id,
-    kind: stored.kind,
-    entityId: stored.entityId,
-    version: stored.version,
-    type: stored.type,
-    recordedAt: stored.recordedAt,
-  };
-};
+const eventHeaderOf = (jobId: string, args: unknown): EventHeader =>
+  headerOf(ensure(args, StoredEventRow, { at: `journal: effect job ${jobId} args` }));
 
 /**
  * A row as the archive sink receives it. An effect row's `args` is its copy of the event, data and meta included.
  * The sink is outside the database, where `forget` cannot reach, so it gets only the event header.
  */
-const forExport = (row: ArchivedJob): ArchivedJob =>
-  row.kind === 'effect' && row.args !== null ? { ...row, args: eventHeaderOf(row.id, row.args) } : row;
+const forExport = (row: ArchivedJob): ArchivedJob => {
+  if (row.args === null) return row;
+  if (row.kind === 'effect') return { ...row, args: eventHeaderOf(row.id, row.args) };
+  // A forward row carries the whole write: each event goes out as its header only.
+  if (row.kind === 'forward') {
+    const { events } = ensure(row.args, ForwardArgs, { at: `journal: forward job ${row.id} args` });
+    return { ...row, args: { events: events.map(event => headerOf(event)) } };
+  }
+  return row;
+};
 
 export type JobDetail = JobWithState & {
   /** Null on a queue job. */
@@ -131,6 +141,8 @@ export type JobOpsDeps = {
   readonly wake: () => void;
   /** The per-effect retention override of a job row (the worker's lookup, shared). Default: none. */
   readonly overrideFor?: (job: { readonly effect: string | null }) => EffectRetention | undefined;
+  /** Per entity kind, the log its forward jobs append to: `discard` asks it whether a forward job's events landed. */
+  readonly forwarded?: ReadonlyMap<string, ForwardedLog>;
 };
 
 const idRows = z.object({ id: z.string() }).array();
@@ -513,11 +525,11 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         )
         INSERT INTO ${jobArchive} (
           id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
-          last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id
+          last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id, stream, stream_position
         )
         SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
           g.last_error, ${args.outcome}::varchar, coalesce(log.entries, '[]'::jsonb), g.replay_of, ${args.finishedAt},
-          ${until}::timestamptz, g.run_id
+          ${until}::timestamptz, g.run_id, g.stream, g.stream_position
         FROM gone g LEFT JOIN log ON log.job_id = g.id
         RETURNING id
       `);
@@ -562,6 +574,32 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
     );
   };
 
+  /**
+   * A dead forward job may leave only once its log holds every version it carries: the log was
+   * written some other way (a diverged stream), or the job died after its append. Otherwise its
+   * events would be lost, and every later job of the stream would wait on the gap for good.
+   */
+  const assertForwardLanded = async (tx: DbHandle, id: string): Promise<void> => {
+    const [job] = await tx
+      .select({ kind: jobsTable.kind, jobName: jobsTable.jobName, args: jobsTable.args })
+      .from(jobsTable)
+      .where(eq(jobsTable.id, id))
+      .limit(1);
+    if (job?.kind !== 'forward' || job.jobName === null) return;
+    const log = deps.forwarded?.get(job.jobName);
+    const { events } = ensure(job.args, ForwardArgs, { at: `journal: forward job ${id} args` });
+    const last = events.at(-1);
+    if (last === undefined) return;
+    const top = log === undefined ? 0 : await log.highestVersion(last.kind, last.entityId);
+    if (top < last.version)
+      throw new JournalError(
+        'FORWARD_PENDING',
+        'job',
+        id,
+        `its log ends at version ${top}, below version ${last.version} this job carries; retry the job instead, or the events are lost`,
+      );
+  };
+
   /** A dead job leaves the hot table. It lands in the archive as `discarded` unless the policy keeps nothing. */
   const discard = async (
     db: DbHandle,
@@ -573,6 +611,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
       db,
       async tx => {
         await assertUnmanaged(tx, jobsTable, id);
+        await assertForwardLanded(tx, id);
         const removed = await removeJobs(tx, {
           where: and(eq(jobsTable.id, id), isNotNull(jobsTable.deadAt)),
           outcome: 'discarded',
@@ -606,6 +645,14 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
       db,
       async tx => {
         await assertUnmanaged(tx, jobsTable, id);
+        const [held] = await tx.select({ kind: jobsTable.kind }).from(jobsTable).where(eq(jobsTable.id, id)).limit(1);
+        if (held?.kind === 'forward')
+          throw new JournalError(
+            'FORWARD_PENDING',
+            'job',
+            id,
+            'a forward job carries events its log does not have yet; cancelling it would lose them for good',
+          );
         const removed = await removeJobs(tx, {
           where: and(
             eq(jobsTable.id, id),
@@ -737,7 +784,16 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
       async tx => {
         // A per-effect `retryableFor` longer than the journal's keeps its dead jobs retryable past `olderThan`.
         const removed = await removeJobs(tx, {
-          where: and(isNotNull(jobsTable.deadAt), sql`${jobsTable.deadAt} < ${iso(opts.olderThan)}`, scope),
+          where: and(
+            isNotNull(jobsTable.deadAt),
+            sql`${jobsTable.deadAt} < ${iso(opts.olderThan)}`,
+            scope,
+            // A dead job that later jobs of its stream wait behind stays: purging it would let them past the gap.
+            or(
+              isNull(jobsTable.stream),
+              sql`not exists (select 1 from ${jobsTable} as later where later.stream = ${jobsTable.stream} and later.stream_position > ${jobsTable.streamPosition})`,
+            ),
+          ),
           limit,
           eligible: row =>
             row.deadAt !== null && row.deadAt.getTime() <= Date.now() - retryableForMs(policy, overrideOf(row)),
@@ -790,6 +846,9 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
             args: source.args,
             dedupeKey: source.dedupeKey,
             priority: source.priority,
+            // Same stream and position: a replayed forward job runs in its place, and the log acks a repeat.
+            stream: source.stream,
+            streamPosition: source.streamPosition,
             replayOf: source.id,
           })
           .onConflictDoNothing()
@@ -837,7 +896,10 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
         const reservedId = newOperationId();
         if (isFailure(reservedId)) return reservedId;
         try {
-          await sink.write(rows.map(forExport), { signal: opts?.signal ?? new AbortController().signal });
+          await sink.write(
+            rows.map(row => forExport(row)),
+            { signal: opts?.signal ?? new AbortController().signal },
+          );
         } catch (error) {
           debug.warn('exportArchive: sink {sink} failed, {count} rows stay unexported: {failed}', {
             sink: sink.name,

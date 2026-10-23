@@ -14,11 +14,11 @@ import { attempt, isFailure, orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 import { ensure } from '@arki/schema';
 
-import type { EventLog, EventLogPosition, ProjectionCursor } from './event-log.js';
+import type { EventLog, EventLogPosition, ForwardedLog, ForwardLag, ProjectionCursor } from './event-log.js';
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
-import { StoredEventRow } from './pg.js';
+import { ForwardArgs, StoredEventRow } from './pg.js';
 import type { EffectRetention, ResolvedRetention } from './retention.js';
 import type { BuiltInEventLog } from './store.js';
 import type {
@@ -41,7 +41,7 @@ import type {
 } from './types.js';
 import { callbackDefect } from './callback.js';
 import { debugDrain, debugWorker } from './debug.js';
-import { JournalError } from './errors.js';
+import { isJournalError, JournalError } from './errors.js';
 import { globalOrderOf, logOn } from './event-log.js';
 import { findEventDefinition } from './fold.js';
 import { bindHandlers } from './handlers.js';
@@ -113,7 +113,27 @@ export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unkn
   ) => EffectAttempt<Run>;
   /** The journal's resolved archive policy. Default: completed jobs kept 7 days. */
   readonly retention?: ResolvedRetention;
+  /** Per entity kind, the log its `forward` jobs append to. Empty: no forward lane. */
+  readonly forwarded?: ReadonlyMap<string, ForwardedLog>;
 };
+
+/** A forward job whose log is still below the version its events follow: an earlier batch has not landed. */
+class ForwardBehind extends Error {
+  override readonly name = 'ForwardBehind';
+}
+
+/** How long a forward job waits for the batch before it. It never dies of waiting: the stream must stay whole. */
+const FORWARD_BEHIND_DELAY_MS = 5000;
+
+/**
+ * Only the head of a stream is claimable: a job with a lower position in the same stream, waiting,
+ * running or dead, holds the ones after it. A job with no stream is not held.
+ */
+const streamHead = (jobsTable: JournalTables['jobs']) =>
+  or(
+    isNull(jobsTable.stream),
+    sql`not exists (select 1 from ${jobsTable} as earlier where earlier.stream = ${jobsTable.stream} and earlier.stream_position < ${jobsTable.streamPosition})`,
+  );
 
 export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run>(
   deps: DrainDeps<Meta, AppDb, Run>,
@@ -123,6 +143,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
   const effectOverride = effectOverrides(deps.effects);
   const { decodeStoredEvent } = deps.history;
   const known = deps.effects.map(effect => effect.name);
+  const forwarded = deps.forwarded ?? new Map<string, ForwardedLog>();
 
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
@@ -144,7 +165,11 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
             or(
               known.length > 0 ? and(eq(jobsTable.kind, 'effect'), inArray(jobsTable.effect, known)) : undefined,
               queued.length > 0 ? and(eq(jobsTable.kind, 'queue'), inArray(jobsTable.jobName, [...queued])) : undefined,
+              forwarded.size > 0
+                ? and(eq(jobsTable.kind, 'forward'), inArray(jobsTable.jobName, [...forwarded.keys()]))
+                : undefined,
             ),
+            streamHead(jobsTable),
           ),
         )
         .orderBy(desc(jobsTable.priority), asc(jobsTable.availableAt))
@@ -287,6 +312,52 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     return { outcome, retryReason: caught !== undefined && outcome === caught.defect ? caught.cause : outcome };
   };
 
+  /**
+   * One forward job: the write's events, appended to the entity's log at the version they follow.
+   * The log's top decides: below it, an earlier batch has not landed, so the job waits; at it or
+   * above, `append` takes the batch or acks it as a repeat. Other events at those versions mean
+   * something else wrote to the log: `FORWARD_DIVERGED`, and the job dies at once.
+   */
+  const runForward = async (job: JobRow): Promise<void> => {
+    if (job.jobName === null || job.streamPosition === null)
+      throw new Error(`journal: forward job ${job.id} has no entity kind or stream position`);
+    const log = forwarded.get(job.jobName);
+    if (log === undefined) throw new Error(`journal: forward job ${job.id}: no event log for "${job.jobName}"`);
+    const { events } = ensure(job.args, ForwardArgs, { at: `journal: forward job ${job.id} args` });
+    const [first] = events;
+    if (first === undefined) throw new Error(`journal: forward job ${job.id} carries no events`);
+    const expectedVersion = job.streamPosition;
+    const top = await log.highestVersion(first.kind, first.entityId);
+    if (top < expectedVersion)
+      throw new ForwardBehind(
+        `the log of ${first.kind} ${first.entityId} ends at version ${top}, below ${expectedVersion}: an earlier batch has not landed`,
+      );
+    try {
+      await log.append({
+        kind: first.kind,
+        entityId: first.entityId,
+        expectedVersion,
+        events: events.map(({ erasedAt, ...event }) => event),
+      });
+    } catch (error) {
+      if (!isJournalError(error, 'CONFLICT')) throw error;
+      throw new JournalError(
+        'FORWARD_DIVERGED',
+        first.kind,
+        first.entityId,
+        `versions ${expectedVersion + 1} to ${expectedVersion + events.length} hold other events in the log`,
+        { cause: error },
+      );
+    }
+  };
+
+  /** When a failed forward job runs again. A diverged one never; a waiting one soon, without counting toward death. */
+  const forwardDelay = (job: JobRow, reason: unknown): number | undefined => {
+    if (reason instanceof ForwardBehind) return FORWARD_BEHIND_DELAY_MS;
+    if (isJournalError(reason, 'FORWARD_DIVERGED')) return undefined;
+    return defaultEffectRetry.delay(job.attempts, reason);
+  };
+
   /** The per-job retention override: a queue job's comes from its runner, an effect's from its schedule. */
   const overrideFor = (job: JobRow, runner: JobRunner<AppDb> | undefined): EffectRetention | undefined =>
     job.kind === 'queue' ? runner?.retention?.(scheduledJob(job)) : effectOverride(job);
@@ -321,10 +392,10 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       )
       INSERT INTO ${archiveTable} (
         id, kind, event_seq, effect, job_name, args, dedupe_key, priority, enqueued_at, attempts,
-        last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id
+        last_error, outcome, attempt_log, replay_of, finished_at, keep_until, run_id, stream, stream_position
       )
       SELECT g.id, g.kind, g.event_seq, g.effect, g.job_name, g.args, g.dedupe_key, g.priority, g.enqueued_at, g.attempts,
-        g.last_error, 'completed', log.entries, g.replay_of, now(), ${until}::timestamptz, g.run_id
+        g.last_error, 'completed', log.entries, g.replay_of, now(), ${until}::timestamptz, g.run_id, g.stream, g.stream_position
       FROM gone g CROSS JOIN log
     `);
   };
@@ -347,7 +418,9 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       const delayMs =
         job.kind === 'queue'
           ? runner?.retryDelay(scheduledJob(job), reason)
-          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, retryReason);
+          : job.kind === 'forward'
+            ? forwardDelay(job, reason)
+            : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, retryReason);
       const dead = delayMs === undefined;
       // The attempt closes only if the job update matched: a stale worker's lease token matches nothing, so it finishes nothing.
       await db.transaction(async tx => {
@@ -398,6 +471,8 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
         if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
         outcome = await runner.run(scheduledJob(job), { db, signal: ownSignal });
         retryReason = outcome;
+      } else if (job.kind === 'forward') {
+        await runForward(job);
       } else ({ outcome, retryReason } = await runEffect(db, job, effect, ownSignal));
       if (signal.aborted && isFailure(outcome)) {
         await releaseInterrupted();
@@ -437,8 +512,8 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     const signal = opts?.signal ?? new AbortController().signal;
     const runner = opts?.jobs;
     const queued = runner?.names ?? [];
-    // Nothing to claim. A journal with no effects still drains its runner's queue rows.
-    if (known.length === 0 && queued.length === 0) return 0;
+    // Nothing to claim. A journal with no effects still drains its runner's queue rows and its forward jobs.
+    if (known.length === 0 && queued.length === 0 && forwarded.size === 0) return 0;
 
     // One job is claimed at a time, right before it runs, so its lease starts
     // when its work starts. Claiming the whole batch up front would start every
@@ -464,7 +539,12 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
  * still have that handler. But once every worker runs the new code, a renamed or
  * removed handler leaves its jobs here for good, so they must be visible.
  */
-export function createStrandedJobs(deps: { readonly tables: JournalTables; readonly effectNames: readonly string[] }) {
+export function createStrandedJobs(deps: {
+  readonly tables: JournalTables;
+  readonly effectNames: readonly string[];
+  /** The entity kinds this journal forwards: a forward job of another kind waits for a journal that has its log. */
+  readonly forwarded?: ReadonlyMap<string, ForwardedLog>;
+}) {
   const { jobs: jobsTable } = deps.tables;
   const name = sql<string>`coalesce(${jobsTable.effect}, ${jobsTable.jobName})`;
   return async (
@@ -483,12 +563,36 @@ export function createStrandedJobs(deps: { readonly tables: JournalTables; reado
             eq(jobsTable.kind, 'queue'),
             queueNames.length > 0 ? notInArray(jobsTable.jobName, [...queueNames]) : undefined,
           );
+    const forwardKinds = [...(deps.forwarded?.keys() ?? [])];
+    const forwardRows = and(
+      eq(jobsTable.kind, 'forward'),
+      forwardKinds.length > 0 ? notInArray(jobsTable.jobName, forwardKinds) : undefined,
+    );
     return db
       .select({ kind: jobsTable.kind, name, jobs: sql<number>`count(*)::int` })
       .from(jobsTable)
-      .where(and(isNull(jobsTable.deadAt), or(effectRows, queueRows)))
+      .where(and(isNull(jobsTable.deadAt), or(effectRows, queueRows, forwardRows)))
       .groupBy(jobsTable.kind, name)
       .orderBy(asc(jobsTable.kind), asc(name));
+  };
+}
+
+/**
+ * How far forwarded logs are behind the rows: the forward jobs still in the table, dead ones
+ * included, and when the oldest was written. Zero pending means every forwarded log is current.
+ */
+export function createForwardLag(deps: { readonly tables: Pick<JournalTables, 'jobs'> }) {
+  const { jobs: jobsTable } = deps.tables;
+  return async (db: DbHandle): Promise<ForwardLag> => {
+    const [row] = await db
+      .select({
+        pending: sql`count(*)::int`.mapWith(Number),
+        dead: sql`count(${jobsTable.deadAt})::int`.mapWith(Number),
+        oldestEnqueuedAt: sql`min(${jobsTable.enqueuedAt})`.mapWith(jobsTable.enqueuedAt),
+      })
+      .from(jobsTable)
+      .where(eq(jobsTable.kind, 'forward'));
+    return { pending: row?.pending ?? 0, dead: row?.dead ?? 0, oldestEnqueuedAt: row?.oldestEnqueuedAt ?? null };
   };
 }
 
@@ -528,8 +632,8 @@ export type CatchUpDeps<
   Tx extends TransactionSource<Tx>,
 > = {
   readonly tables: Pick<JournalTables, 'cursors'>;
-  /** The log the projections follow, in its global order. */
-  readonly log: EventLog;
+  /** The log a projection follows, in its global order: the one log its entities share. */
+  readonly logOf: (projection: Pick<Projection, 'entities'>) => EventLog;
   readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
 };
@@ -569,7 +673,10 @@ export function createCatchUp<
   ) =>
     db.transaction(async tx => {
       const from = await lockCursor(tx, projection.name);
-      const { events: rows, next } = await globalOrderOf(logOn(deps.log, tx), 'an async projection').after(from, {
+      const { events: rows, next } = await globalOrderOf(
+        logOn(deps.logOf(projection), tx),
+        'an async projection',
+      ).after(from, {
         limit: batchSize,
       });
       if (rows.length === 0) return 0;
@@ -634,17 +741,19 @@ export function createCatchUp<
   };
 
   const cursors = async (db: DbHandle): Promise<readonly ProjectionCursor[]> => {
-    const order = globalOrderOf(logOn(deps.log, db), 'an async projection');
-    const top = await order.top();
     const rows = await db.select().from(cursorsTable);
     const stored = new Map(rows.map(row => [row.name, row.position]));
-    return deps.projections.map(projection => {
+    // Each projection against the top of its own log.
+    const read = deps.projections.map(async projection => {
+      const order = globalOrderOf(logOn(deps.logOf(projection), db), 'an async projection');
+      const top = await order.top();
       const position = stored.get(projection.name) ?? null;
       const behind = top !== null && position !== top;
       return order.distance === undefined
         ? { name: projection.name, position, behind }
         : { name: projection.name, position, behind, distance: order.distance(position, top) };
     });
+    return Promise.all(read);
   };
 
   return { catchUp, reset, cursors };

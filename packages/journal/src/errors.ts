@@ -12,6 +12,8 @@ export type JournalErrorCode =
   | 'VERSION_MISMATCH'
   | 'NO_HISTORY'
   | 'HISTORY_GAP'
+  | 'FORWARD_PENDING'
+  | 'FORWARD_DIVERGED'
   | 'REPLAY_FAILED'
   | 'UNSTABLE_SCHEMA'
   | 'ID_MISMATCH'
@@ -63,6 +65,14 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   NO_HISTORY: {
     what: 'a complete history that starts at version 1 is not available',
     next: "Replay and repair cannot rebuild this row. Check whether the row existed before the journal, or restore the missing events. An entity declared with events: 'transient' keeps none, and the history verbs never apply to it",
+  },
+  FORWARD_PENDING: {
+    what: 'events of this entity are still on their way to its event log',
+    next: 'A forward job has not appended them yet, so the log is behind the row. Run the worker, or retry a dead forward job, and call again once `forwardLag` shows none for the entity',
+  },
+  FORWARD_DIVERGED: {
+    what: "the event log holds other events at this entity's versions",
+    next: 'Something other than this journal wrote to the log. The forward job is dead and its stream waits. Check what wrote there, then `discard` the job (the log already holds its versions) and `repair` the row from the log, or remove the foreign events',
   },
   HISTORY_GAP: {
     what: 'the log has a hole, or the row is newer than a log that says it is alive',

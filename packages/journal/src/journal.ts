@@ -27,6 +27,7 @@ import { isFailure } from '@arki/failure';
 import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
 import type { Fence } from './command.js';
 import type { EntityBuilder } from './entity.js';
+import type { EventLog, ForwardedLog } from './event-log.js';
 import type { JournalTables } from './pg.js';
 import type { JobRetention } from './retention.js';
 import type {
@@ -52,6 +53,7 @@ import { createCommandRunner } from './command.js';
 import { debugDrain } from './debug.js';
 import { defineEntity } from './entity.js';
 import { JournalError } from './errors.js';
+import { routeOf } from './event-log.js';
 import { defineEvent } from './event.js';
 import { bindEffectFrom, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
@@ -62,7 +64,14 @@ import { assertRetention, effectOverrides, resolveRetention } from './retention.
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
 import { createBuiltInEventLog, createPgStore } from './store.js';
-import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
+import {
+  createCatchUp,
+  createDrain,
+  createForwardLag,
+  createStrandedJobs,
+  createTapDispatch,
+  createWorkers,
+} from './worker.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
@@ -146,6 +155,8 @@ function createInit<
   defaultEventStorage: EventStorage,
 ): JournalDefinitions<Meta, Tx, AppDb> {
   type MetaOut = SchemaOutput<Meta>;
+  /** Per entity kind, the log its forward jobs append to: the worker reads it to run them. */
+  const forwardedLogs = new Map<string, ForwardedLog>();
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
     table: Tbl,
@@ -163,6 +174,17 @@ function createInit<
   ) {
     // Resolved here, the one place that sees both the entity's setting and the journal's default.
     const eventStorage = options?.events ?? defaultEventStorage;
+    if (typeof eventStorage === 'object' && !eventStorage.canJoinTransaction) {
+      const known = forwardedLogs.get(kind);
+      if (known !== undefined && known !== eventStorage)
+        throw new JournalError(
+          'BAD_DEFINITION',
+          'entity',
+          kind,
+          `journal: entity "${kind}" is declared twice with two different event logs; one kind has one log, or its forward jobs would not know where to go`,
+        );
+      forwardedLogs.set(kind, eventStorage);
+    }
     if (options?.key !== undefined) {
       return defineEntity<K, Tbl, MetaOut, string>(kind, table, options.key, eventStorage);
     }
@@ -224,7 +246,7 @@ function createInit<
       );
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
-      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, {
+      return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, forwardedLogs, {
         commands: workflows.operate,
         registry: workflows.started,
         meta: config.workflowMeta,
@@ -247,20 +269,37 @@ function assertUniqueNames(
   }
 }
 
-/** Throws when a handler that reads the log back names an entity whose events are transient. */
+/**
+ * Throws when a handler that reads the log back cannot: an entity keeps no events, a tap follows a
+ * forwarded entity (taps read the seq range the wake signal carries, from `journal_events`), the
+ * entities live in different logs, or a forwarded log has no global order to walk.
+ */
 function assertStoredEntities(
   kind: 'projection' | 'tap',
   handler: { readonly name: string; readonly entities: readonly Pick<AnyEntity, 'kind' | 'eventStorage'>[] },
 ): void {
-  const transient = handler.entities.find(entity => entity.eventStorage === 'transient');
-  if (transient === undefined) return;
   const what = kind === 'projection' ? 'async projection' : 'tap';
-  throw new JournalError(
-    'BAD_DEFINITION',
-    kind,
-    handler.name,
-    `journal: ${what} "${handler.name}" reads stored events, but entity "${transient.kind}" is declared with events: 'transient' and keeps none; use an inline projection or an effect, or store the entity's events`,
-  );
+  const refuse = (detail: string): never => {
+    throw new JournalError('BAD_DEFINITION', kind, handler.name, `journal: ${what} "${handler.name}" ${detail}`);
+  };
+  const transient = handler.entities.find(entity => entity.eventStorage === 'transient');
+  if (transient !== undefined)
+    refuse(
+      `reads stored events, but entity "${transient.kind}" is declared with events: 'transient' and keeps none; use an inline projection or an effect, or store the entity's events`,
+    );
+  const elsewhere = handler.entities.find(entity => typeof entity.eventStorage === 'object');
+  if (kind === 'tap' && elsewhere !== undefined)
+    refuse(
+      `follows entity "${elsewhere.kind}", whose events go to its own event log; a tap reads only journal_events, so use an effect or an async projection`,
+    );
+  const logs = new Set(handler.entities.map(entity => entity.eventStorage));
+  if (logs.size > 1)
+    refuse('reads entities whose events live in different logs; one projection walks one log, so split it in two');
+  const [log] = logs;
+  if (typeof log === 'object' && !log.canJoinTransaction && log.all === undefined)
+    refuse(
+      `reads entity "${elsewhere?.kind ?? ''}", whose event log has no global order to walk; use an inline projection or an effect`,
+    );
 }
 
 function createJournal<
@@ -275,6 +314,8 @@ function createJournal<
   effects: readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
   taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = [],
   retentionOption?: JobRetention,
+  /** Per entity kind, the forwarded log of `j.entity`. Live: an entity defined after compose still counts. */
+  forwardedLogs: ReadonlyMap<string, ForwardedLog> = new Map(),
   /** What `journal.workflows` needs: the operator verbs, the registered code, and the meta their events are recorded with. */
   workflowWiring?: {
     readonly commands: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['operate'];
@@ -397,8 +438,14 @@ function createJournal<
     retention,
     history,
     attemptOn,
+    forwarded: forwardedLogs,
   });
-  const catching = createCatchUp<Meta, Tx>({ tables, log: eventLog, projections: asyncProjections, history });
+  // `assertStoredEntities` held each async projection to one log, so its first entity's log is the one.
+  const logOfProjection = (projection: Pick<Projection, 'entities'>): EventLog => {
+    const route = routeOf(projection.entities[0]?.eventStorage ?? 'stored', eventLog);
+    return route.mode === 'transient' ? eventLog : route.log;
+  };
+  const catching = createCatchUp<Meta, Tx>({ tables, logOf: logOfProjection, projections: asyncProjections, history });
   const dispatch = createTapDispatch<Meta, WorkerDb>({ log: eventLog, taps, history });
   const workers = createWorkers<WorkerDb>({
     drain: (db, opts) => journal.drain(db, opts),
@@ -411,13 +458,19 @@ function createJournal<
         ? undefined
         : { everyMs: retention.sweep.everyMs, run: (db, signal) => sweepOnce(db, signal) },
   });
-  const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
+  const strandedJobs = createStrandedJobs({
+    tables,
+    effectNames: effects.map(effect => effect.name),
+    forwarded: forwardedLogs,
+  });
   const { sweepOnce, ...jobOps } = createJobOps({
     tables,
     retention,
     wake: () => journal.wake(),
     overrideFor: effectOverride,
+    forwarded: forwardedLogs,
   });
+  const forwardLag = createForwardLag({ tables });
 
   const workflowReads = createWorkflowReads({ tables, registry: workflowWiring?.registry ?? new Map() });
   /** The meta of the events the verbs write: the one `compose` was given for the workflow runner. */
@@ -490,6 +543,7 @@ function createJournal<
     catchUp: (db, opts) => catching.catchUp(db, opts),
     reset: (db, projection, clear) => catching.reset(db, projection, clear),
     cursors: db => catching.cursors(db),
+    forwardLag: db => forwardLag(db),
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),

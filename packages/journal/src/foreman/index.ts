@@ -38,7 +38,9 @@ import type {
   RootDb,
   TransactionSource,
 } from '../index.js';
+import type { JobKind } from '../pg.js';
 import { isJournalError } from '../index.js';
+import { JOB_KINDS } from '../pg.js';
 
 export {
   foremanReceiptTables,
@@ -129,7 +131,7 @@ export type OperationSummary = z.output<typeof OperationSummary>;
 export const ArchivedSummary = z
   .object({
     id: z.string(),
-    kind: z.enum(['effect', 'queue']),
+    kind: z.enum(JOB_KINDS),
     /** The effect name, or the queue job name. */
     name: z.string(),
     eventSeq: z.number().int().nullable(),
@@ -153,7 +155,7 @@ export type ArchivedSummary = z.output<typeof ArchivedSummary>;
 export const JobSummary = z
   .object({
     id: z.string(),
-    kind: z.enum(['effect', 'queue']),
+    kind: z.enum(JOB_KINDS),
     /** The effect name, or the queue job name. */
     name: z.string(),
     state: z.enum(['ready', 'delayed', 'running', 'dead']),
@@ -291,7 +293,7 @@ const toOperation = (row: JobOperation): z.input<typeof OperationSummary> => ({
  */
 function payloadFor(
   mode: 'hidden' | 'redacted',
-  job: { readonly kind: 'effect' | 'queue'; readonly args: unknown },
+  job: { readonly kind: JobKind; readonly args: unknown },
 ): { payload?: string } {
   if (mode === 'hidden' || job.kind !== 'queue' || job.args === null || job.args === undefined) return {};
   return { payload: redactSecrets(canonicalJson(jsonValueSchema.parse(job.args))) };
@@ -452,7 +454,7 @@ export function journalJobsModule<
         counts: z.array(
           z
             .object({
-              kind: z.enum(['effect', 'queue']),
+              kind: z.enum(JOB_KINDS),
               name: z.string(),
               ready: z.number().int(),
               delayed: z.number().int(),
@@ -477,9 +479,7 @@ export function journalJobsModule<
     input: emptyInput,
     output: z
       .object({
-        stranded: z.array(
-          z.object({ kind: z.enum(['effect', 'queue']), name: z.string(), jobs: z.number().int() }).strict(),
-        ),
+        stranded: z.array(z.object({ kind: z.enum(JOB_KINDS), name: z.string(), jobs: z.number().int() }).strict()),
       })
       .strict(),
     load: async (_input, _ctx: Record<string, never>) => {

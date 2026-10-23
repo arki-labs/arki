@@ -7,7 +7,7 @@
 import { z } from 'zod';
 
 import type { JournalTables } from './pg.js';
-import type { DbHandle } from './types.js';
+import type { DbHandle, EventStorage } from './types.js';
 
 /** An event as a log stores and returns it: the `journal_events` row shape. */
 export type StoredEvent = JournalTables['events']['$inferSelect'];
@@ -98,8 +98,37 @@ export type ProjectionCursor = {
   readonly distance?: number;
 };
 
+/** `journal.forwardLag`: forward jobs not yet appended (`dead` of them stopped), and the oldest one's age. */
+export type ForwardLag = {
+  readonly pending: number;
+  readonly dead: number;
+  readonly oldestEnqueuedAt: Date | null;
+};
+
 /** The log's global order. Async projections and `rerun` walk it; a log without one cannot serve them. */
 export function globalOrderOf(log: EventLogReads, what: string): NonNullable<EventLogReads['all']> {
   if (log.all === undefined) throw new Error(`journal: ${what} needs an event log with a global order`);
   return log.all;
 }
+
+/** A log that joins the row's transaction, and one that cannot. */
+export type JoinedLog = Extract<EventLog, { readonly canJoinTransaction: true }>;
+export type ForwardedLog = Extract<EventLog, { readonly canJoinTransaction: false }>;
+
+/**
+ * Where a write sends an entity's events: into a log inside the row's transaction (`'stored'` is
+ * the built-in log), to a log that cannot join, through a `forward` job, or nowhere.
+ */
+export type EventRoute =
+  | { readonly mode: 'joined'; readonly log: JoinedLog }
+  | { readonly mode: 'forwarded'; readonly log: ForwardedLog }
+  | { readonly mode: 'transient' };
+
+export function routeOf(storage: EventStorage, builtIn: JoinedLog): EventRoute {
+  if (storage === 'transient') return { mode: 'transient' };
+  if (storage === 'stored') return { mode: 'joined', log: builtIn };
+  return storage.canJoinTransaction ? { mode: 'joined', log: storage } : { mode: 'forwarded', log: storage };
+}
+
+/** A forwarded entity's job stream: its forward jobs run one after another, in version order. */
+export const streamOf = (kind: string, entityId: string): string => `${kind}/${entityId}`;

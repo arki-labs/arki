@@ -21,6 +21,10 @@ import type { EventLogPosition } from './event-log.js';
 import type { WorkflowShape } from './workflow/shape.js';
 import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js';
 
+/** What a job row is: one effect run, one queue job, or one write's events on their way to an outside log. */
+export const JOB_KINDS = ['effect', 'queue', 'forward'] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
 /**
  * The journal tables. Call this once in the app's schema module so
  * `drizzle-kit generate` creates them. The library never creates tables at
@@ -67,17 +71,21 @@ export function journalTables(schema?: PgSchema) {
     {
       /** `job_xxx`. Pass it on as an idempotency key. */
       id: varchar('id').primaryKey(),
-      /** `effect`: an effect's job for one event. `queue`: a job scheduled by a runner (`@arki/queue/outbox`). */
-      kind: varchar('kind', { length: 8 }).notNull().default('effect').$type<'effect' | 'queue'>(),
+      /**
+       * `effect`: an effect's job for one event. `queue`: a job scheduled by a runner (`@arki/queue/outbox`).
+       * `forward`: one write's events on their way to an event log outside the app database.
+       */
+      kind: varchar('kind', { length: 8 }).notNull().default('effect').$type<JobKind>(),
       /** `effect` rows of a stored event: its seq. Null for a transient entity's event, which has no row. The worker never reads the event by it; `args` holds the copy it runs. */
       eventSeq: bigint('event_seq', { mode: 'number' }).references(() => events.seq),
       /** Set on `effect` rows only. */
       effect: varchar('effect', { length: 128 }),
-      /** Set on `queue` rows only: the persisted job name the runner looks up. */
+      /** `queue` rows: the persisted job name the runner looks up. `forward` rows: the entity kind whose log takes the events. */
       jobName: varchar('job_name', { length: 128 }),
       /**
        * `queue` rows: the job's input as plain JSON, parsed by the runner.
        * `effect` rows: the job's own copy of the `journal_events` row it is for, decoded by `StoredEventRow`.
+       * `forward` rows: `{ events }`, the write's events in that same shape, decoded by `ForwardArgs`.
        */
       args: jsonb('args'),
       /** `queue` rows only, optional: one unfinished row per job name and key. */
@@ -100,9 +108,20 @@ export function journalTables(schema?: PgSchema) {
        * before the column. No foreign key: the job outlives a pruned run row until the sweeper archives it.
        */
       runId: varchar('run_id', { length: 256 }),
+      /**
+       * Jobs of one stream run in `stream_position` order: one is claimable only once no job of its
+       * stream with a lower position is left in this table, dead ones included. A `forward` job's
+       * stream is `kind/entityId` and its position the version its events follow. Null: no order.
+       */
+      stream: varchar('stream', { length: 384 }),
+      streamPosition: integer('stream_position'),
     },
     t => [
       unique('journal_jobs_event_seq_effect_unique').on(t.eventSeq, t.effect),
+      // One job per stream position: the claim order and the purge rule both rely on it.
+      uniqueIndex('journal_jobs_stream_position_unique')
+        .on(t.stream, t.streamPosition)
+        .where(sql`${t.stream} is not null`),
       // One job per event and effect for transient events too, whose `event_seq` is null: an archive
       // replay of such a job cannot run the effect twice.
       uniqueIndex('journal_jobs_effect_event_id_unique')
@@ -111,12 +130,13 @@ export function journalTables(schema?: PgSchema) {
       index('journal_jobs_due_idx')
         .on(t.priority.desc(), t.availableAt)
         .where(sql`${t.deadAt} is null`),
-      // Each kind sets its own columns and leaves the other kind's empty. An effect row's `event_seq`
-      // is optional: a transient entity's event has no row to point at.
+      // Each kind sets its own columns and leaves the other kinds' empty. An effect row's `event_seq`
+      // is optional: a transient entity's event has no row to point at. A forward row is always in a stream.
       check(
         'journal_jobs_kind_check',
-        sql`(${t.kind} = 'effect' and ${t.effect} is not null and ${t.args} is not null and ${t.jobName} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
+        sql`(${t.kind} = 'effect' and ${t.effect} is not null and ${t.args} is not null and ${t.jobName} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null) or (${t.kind} = 'forward' and ${t.jobName} is not null and ${t.args} is not null and ${t.stream} is not null and ${t.streamPosition} is not null and ${t.eventSeq} is null and ${t.effect} is null and ${t.dedupeKey} is null)`,
       ),
+      check('journal_jobs_stream_check', sql`(${t.stream} is null) = (${t.streamPosition} is null)`),
       uniqueIndex('journal_jobs_queue_dedupe_unique')
         .on(t.jobName, t.dedupeKey)
         .where(sql`${t.dedupeKey} is not null`),
@@ -152,7 +172,7 @@ export function journalTables(schema?: PgSchema) {
     {
       /** The finished job's id (`job_xxx`). */
       id: varchar('id').primaryKey(),
-      kind: varchar('kind', { length: 8 }).notNull().$type<'effect' | 'queue'>(),
+      kind: varchar('kind', { length: 8 }).notNull().$type<JobKind>(),
       /** No foreign key: the archive outlives whatever the app does to its events. */
       eventSeq: bigint('event_seq', { mode: 'number' }),
       effect: varchar('effect', { length: 128 }),
@@ -175,8 +195,14 @@ export function journalTables(schema?: PgSchema) {
       exportedAt: timestamp('exported_at', { withTimezone: true, mode: 'date' }),
       /** The workflow run the job belonged to. Null for other jobs and for rows archived before the column. */
       runId: varchar('run_id', { length: 256 }),
+      /** The job's stream and position, as in `journal_jobs`. A replay keeps them. */
+      stream: varchar('stream', { length: 384 }),
+      streamPosition: integer('stream_position'),
     },
     t => [
+      index('journal_job_archive_stream_idx')
+        .on(t.stream)
+        .where(sql`${t.stream} is not null`),
       index('journal_job_archive_run_id_idx')
         .on(t.runId)
         .where(sql`${t.runId} is not null`),
@@ -422,6 +448,12 @@ export const StoredEventRow = z.object({
   schemaVersion: z.int(),
 });
 export type StoredEventRow = JournalTables['events']['$inferSelect'];
+/**
+ * A `forward` job's `args`: one write's events for one entity, oldest first, each in the stored-event
+ * shape. Written by the writer, so a parse failure is a library bug.
+ */
+export const ForwardArgs = z.object({ events: z.array(StoredEventRow).min(1) });
+export type ForwardArgs = z.output<typeof ForwardArgs>;
 /** The node manifest a run stores in `workflow_runs.shape`, the type of that column. */
 export type { WorkflowShape } from './workflow/shape.js';
 

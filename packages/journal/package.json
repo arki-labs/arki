@@ -82,6 +82,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./event-log-contract": {
+      "types": "./dist/event-log-contract.d.ts",
+      "import": "./dist/event-log-contract.js",
+      "default": "./dist/event-log-contract.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -5,17 +5,9 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/journal`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`, `backoff`, `combineRunners`, `initJournal`; and 116 more.
-- `@arki/journal/pg`: `StoredEventRow`, `journalTables`; types `ExportsEveryJournalTable`, `JournalTables`, `WorkflowShape`.
-- `@arki/journal/foreman`: @arki/journal/foreman. `ArchivedSummary`, `AttemptSummary`, `JOURNAL_JOBS_ERROR_CODES`, `JOURNAL_WORKFLOWS_ERROR_CODES`, `JobSummary`, `OperationSummary`, `foremanReceiptTables`, `journalJobsModule`, `journalReceiptStore`, `journalWorkflowsModule`; types `ForemanReceiptTables`, `JournalJobsModuleOptions`; and 2 more.
-- `@arki/journal/http`: The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `responseCache`.
-- `@arki/journal/http/webhooks`: Outgoing webhooks on the journal's job table: @arki/journal/http/webhooks. `WEBHOOK_ERROR_CODES`, `WebhookError`, `webhookSender`, `webhookTables`; types `DispatchInput`, `SubscribeInput`, `WebhookSender`, `WebhookSenderOptions`, `WebhookTables`, `WebhookTx`.
-- `@arki/journal/dot`: `@arki/dot` adapter, in two parts:. `JOURNAL_ACTION_META_SCHEMA`, `JOURNAL_PLUGIN_ERROR_CODES`, `JOURNAL_PROJECTIONS_KIND`, `journal`, `journalEffects`, `journalHandlers`, `journalProjections`, `journalWorker`, `journalWorkflows`; types `JobsSource`, `JournalDeclarations`, `JournalDirectOptions`; and 9 more.
-- `@arki/journal/errors`: `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`, `isJournalError`; types `CommandFailure`, `JournalErrorCode`.
-- `@arki/journal/contract`: Everything an oRPC contract needs from the journal, browser-safe: the failures a command or a workflow operation returns (for the contract's error map). `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`; types `CommandFailure`.
-- `@arki/journal/orpc`: `@orpc/server` adapter: what an oRPC client sees when a command fails, and who runs it. `actorRun`, `commandErrors`, `idempotent`, `toORPCError`; types `ActorRunContext`, `IdempotentOptions`, `RunContext`.
-- `@arki/journal/projection`: `dot explain --as journal-flow`: which event starts which effect. `project`; types `JournalFlowDocument`, `JournalFlowEdge`.
-- `@arki/journal/testing`: Test helper: an in-memory PGlite with a schema pushed, the fixture every journal test rebuilds by hand. `openJournalDb`, `workflowHarness`.
+- `@arki/journal`: `BATCH_LIMIT`, `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `EventLogPosition`, `JournalError`, `RUN_FIELD_LIMITS`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`; and 141 more.
+- http/* (2 paths): The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `@arki/journal/http`, `@arki/journal/http/webhooks`.
+- one path each: `@arki/journal/pg`, `@arki/journal/foreman`, `@arki/journal/dot`, `@arki/journal/errors`, `@arki/journal/contract`, `@arki/journal/orpc`, `@arki/journal/projection`, `@arki/journal/testing`, `@arki/journal/event-log-contract`.
 <!-- llms:end -->
 
 ## Start here
@@ -34,6 +26,7 @@
 - [Operate and retain jobs](docs/agent-guide.md#operate-and-retain-jobs): states, paged reads, verbs with `op`, retention, archive sink. Long form: [Operating the jobs](README.md#operating-the-jobs) and [Retention and archive](README.md#retention-and-archive)
 - Inbox and relay recipes: [Inbox](README.md#inbox), [Relay recipe](README.md#relay-recipe)
 - [Add a durable workflow](docs/agent-guide.md#workflows): steps, waits, undo, versions, operators, `workflowHarness`. Long form: [Workflows](README.md#workflows). Must survive a restart or wait for hours → `j.workflow`; steps inside one request → `createFlow` from `@arki/ai`
+- Keep events in another store (another Postgres, an event store): `j.entity(kind, table, { events: log })`. See [Events in another store](README.md#events-in-another-store)
 - Keep only the row, no events: `j.entity(kind, table, { events: 'transient' })`, or `initJournal({ tables, events: 'transient' })` for every entity. See [Transient events](README.md#transient-events)
 - [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), with the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs)
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
@@ -48,6 +41,7 @@
 - A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row. A soft delete is a normal patch.
 - Version 1 means created by the journal. A row that existed before the journal starts at version 2. `adopt` takes a row at any version with no history and makes it version 1; that is also how an entity goes from `events: 'transient'` to `'stored'`.
 - Events are stored unless the entity says `events: 'transient'`. A transient entity still gets reducers, inline projections and effects; async projections and taps on it are refused at `compose`, and replay, verify, repair, forget, rerun and adopt throw `NO_HISTORY`. `workflow.run` always stores its events.
+- `events` also takes an event log. One that cannot join the transaction is forwarded: a `forward` job appends the events after the commit, one entity's jobs in version order. History verbs throw `FORWARD_PENDING` until it ran; `journal.forwardLag(db)` shows what waits. Test an adapter with `eventLogContract` from `@arki/journal/event-log-contract`.
 - Pass ids exactly as they are stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
 

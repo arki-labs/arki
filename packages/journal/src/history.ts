@@ -11,7 +11,7 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, isSchemaFailure } from '@arki/failure';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
-import type { EventLog, EventLogPosition } from './event-log.js';
+import type { EventLogPosition, JoinedLog } from './event-log.js';
 import type { JournalTables, StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
 import type {
@@ -28,7 +28,7 @@ import type {
 } from './types.js';
 import { debugReplay } from './debug.js';
 import { JournalError } from './errors.js';
-import { globalOrderOf, logOn } from './event-log.js';
+import { globalOrderOf, routeOf, streamOf } from './event-log.js';
 import { findEventDefinition, fold, hasDeclaredEventType } from './fold.js';
 import { rollbackOnFailure } from './rollback.js';
 import {
@@ -48,8 +48,8 @@ export type HistoryDeps<Meta extends StandardSchemaV1<unknown, Record<string, un
   readonly tables: JournalTables;
   /** Entity rows. `forget` still queries `tables` for the cursor lock and the job copies. */
   readonly store: PgStore;
-  /** Where the events are. Bound to the caller's handle when it joins transactions. */
-  readonly log: EventLog;
+  /** The built-in log: where `'stored'` events are. An entity with its own log reads that one. */
+  readonly log: JoinedLog;
 };
 
 /**
@@ -95,7 +95,7 @@ function assertStoredEvents(
   id: string,
   verb: string,
 ): void {
-  if (entity.eventStorage === 'stored') return;
+  if (entity.eventStorage !== 'transient') return;
   throw new JournalError(
     'NO_HISTORY',
     entity.kind,
@@ -200,7 +200,37 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     });
   };
 
-  const loadHistory = (db: DbHandle, kind: string, id: string) => logOn(deps.log, db).stream(kind, id);
+  /** The entity's own log on `db`: bound when it joins transactions, used as it is when it cannot. */
+  const logAt = (db: DbHandle, entity: { readonly kind: string; readonly eventStorage: EventStorage }) => {
+    const route = routeOf(entity.eventStorage, deps.log);
+    if (route.mode === 'transient')
+      throw new JournalError('NO_HISTORY', entity.kind, '', `entity "${entity.kind}" keeps no events`);
+    return route.mode === 'joined' ? route.log.bind(db) : route.log;
+  };
+
+  /** A forwarded entity's log is behind while a forward job for it waits: the verb would read an old history. */
+  const assertNothingForwarding = async (
+    db: DbHandle,
+    entity: { readonly kind: string; readonly eventStorage: EventStorage },
+    id: string,
+    verb: string,
+  ): Promise<void> => {
+    if (routeOf(entity.eventStorage, deps.log).mode !== 'forwarded') return;
+    const pending = await deps.store.bind(db).jobs.pendingTop(streamOf(entity.kind, id));
+    if (pending !== null)
+      throw new JournalError(
+        'FORWARD_PENDING',
+        entity.kind,
+        id,
+        `${verb}: a forward job still carries version ${pending}, so the event log is behind the row`,
+      );
+  };
+
+  const loadHistory = (
+    db: DbHandle,
+    entity: { readonly kind: string; readonly eventStorage: EventStorage },
+    id: string,
+  ) => logAt(db, entity).stream(entity.kind, id);
 
   const replayFrom = async <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -210,7 +240,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     throughVersion?: number,
   ) => {
     // The whole log, so `throughVersion` cannot hide an incomplete history behind an empty result.
-    const rows = await loadHistory(db, entity.kind, id);
+    const rows = await loadHistory(db, entity, id);
     const first = rows[0];
     if (first === undefined && current !== null) {
       throw new JournalError('NO_HISTORY', entity.kind, id, 'the row exists but the log holds no event for it');
@@ -260,7 +290,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     id: EntityId<Tbl, Key>,
     latestLogVersion: number,
   ): Promise<void | SchemaFailure> => {
-    const rows = await loadHistory(db, entity.kind, id);
+    const rows = await loadHistory(db, entity, id);
     if (rows[0]?.version !== 1) return;
     const events = decodeHistory(entity, id, rows);
     if (isFailure(events)) return events;
@@ -282,6 +312,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   ): Promise<ReplayResult<Tbl, E, MetaOut, Key> | SchemaFailure> => {
     assertStoredEvents(entity, id, 'replay');
     assertExactId(entity, id);
+    await assertNothingForwarding(db, entity, id, 'replay');
     const current = await deps.store.bind(db).rows.load(entity, id, false);
     return replayFrom(db, entity, id, current, opts?.throughVersion);
   };
@@ -293,6 +324,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   ): Promise<VerifyResult<Tbl, Key> | SchemaFailure> => {
     assertStoredEvents(entity, id, 'verify');
     assertExactId(entity, id);
+    await assertNothingForwarding(db, entity, id, 'verify');
     const loaded = await deps.store.bind(db).rows.load(entity, id, false);
     assertStoredId(entity, loaded, id);
     if (loaded !== null && !isRowOf(entity.table, loaded)) {
@@ -319,6 +351,8 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     assertExactId(entity, id);
     return db.transaction(async tx => {
       const current = await deps.store.bind(tx).rows.load(entity, id, true);
+      // Under the row lock: no write can queue a forward job between the check and the rebuild.
+      await assertNothingForwarding(tx, entity, id, 'repair');
       assertStoredId(entity, current, id);
       const replayed = await replayFrom(tx, entity, id, current);
       if (isFailure(replayed)) return replayed;
@@ -348,8 +382,10 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
         // The row lock first, so no write lands between the rewrite and the repair. Then every
         // async cursor, so no projection batch in flight commits the data after it was erased.
         await deps.store.bind(tx).rows.load(entity, id, true);
+        // A pending forward job would append the data as it was, after the erase.
+        await assertNothingForwarding(tx, entity, id, 'forget');
         await tx.select({ name: deps.tables.cursors.name }).from(deps.tables.cursors).for('update');
-        const rows = await loadHistory(tx, entity.kind, id);
+        const rows = await loadHistory(tx, entity, id);
         let erased = 0;
         for (const row of rows) {
           const def = entity.events.get(row.type);
@@ -367,7 +403,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
               `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
             );
           }
-          const log = logOn(deps.log, tx);
+          const log = logAt(tx, entity);
           if (log.erase === undefined)
             throw new JournalError(
               'NO_HISTORY',
@@ -391,6 +427,23 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
             .update(jobArchive)
             .set({ args: sql`${jobArchive.args} || ${erasedCopy}::jsonb` })
             .where(and(eq(jobArchive.kind, 'effect'), sql`${jobArchive.args}->>'id' = ${row.id}`));
+          // A finished forward job keeps the write's events in the archive too: erase this one there.
+          await tx
+            .update(jobArchive)
+            .set({
+              args: sql`
+                jsonb_set(${jobArchive.args}, '{events}', (
+                  select jsonb_agg(case when e->>'id' = ${row.id} then e || ${erasedCopy}::jsonb else e end order by at)
+                  from jsonb_array_elements(${jobArchive.args}->'events') with ordinality as x(e, at)))
+              `,
+            })
+            .where(
+              and(
+                eq(jobArchive.kind, 'forward'),
+                eq(jobArchive.stream, streamOf(entity.kind, id)),
+                sql`${jobArchive.args}->'events' @> ${JSON.stringify([{ id: row.id }])}::jsonb`,
+              ),
+            );
           erased += 1;
         }
         // The row must match the history it now has. Repair on `tx` is a savepoint.
@@ -412,9 +465,11 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     const kinds = projection.entities.map(entity => entity.kind);
     let position = opts?.after ?? null;
     let count = 0;
-    if (kinds.length === 0 || projection.types.size === 0) return { events: 0 };
+    const [first] = projection.entities;
+    if (first === undefined || projection.types.size === 0) return { events: 0 };
     for (;;) {
-      const { events: rows, next } = await globalOrderOf(logOn(deps.log, db), 'rerun').after(position, {
+      // `compose` holds a projection to one log, so the first entity's log is every entity's.
+      const { events: rows, next } = await globalOrderOf(logAt(db, first), 'rerun').after(position, {
         kinds,
         types: [...projection.types],
         limit: batchSize,

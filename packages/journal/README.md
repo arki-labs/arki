@@ -276,6 +276,33 @@ A transient write does everything a stored write does except the `journal_events
 
 Two things to know. `version` counts one row's lifetime, not the id's: a transient entity created again after a delete starts at version 1, where a stored entity continues from its last event. And `forget` is refused, so personal data in a transient event lives only in the effect jobs' `args`, until the job leaves the archive (`retention.archive`).
 
+### Events in another store
+
+`events` also takes an event log: an object with `append`, `stream` and `highestVersion`, and optionally a global order (`all`) and `erase` (the `EventLog` type). It can live in another Postgres database, an event store or any append-only store. Check an adapter with the suite in `@arki/journal/event-log-contract`: `eventLogContract(makeLog)` returns plain `{ name, run }` cases for any test runner, and a case that does not apply to the log throws `ContractSkip`.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+const order = j.entity('order', orders, { events: kurrentLog }); // this entity's events go to that log
+```
+
+A log that joins the row's transaction (`canJoinTransaction: true`, `bind(db)`) is written with the row, as `'stored'` is. A log that cannot join is **forwarded**. The write commits the row, inline projections, effect jobs and one `forward` job that carries its events, all in the app database. The worker appends them to the log after the commit. The row is always right; the log lags.
+
+- **Order.** One entity's forward jobs form a stream (`stream` and `stream_position` on `journal_jobs`). A job runs only once no earlier job of its stream is left in the table, dead ones included, so the log never gets a hole.
+- **The ladder.** Before it appends, the worker reads the log's top. Below the job's version: an earlier batch has not landed, so the job waits and tries again; it never dies of waiting. At or above: `append` takes the batch, or acks it when the same event ids are already there. Other events at those versions are `FORWARD_DIVERGED`: something else wrote to the log, and the job dies at once.
+- **A diverged stream.** Find what wrote to the log. Then `discard` the dead job (it is allowed only once the log holds every version the job carries) and `repair` the row from the log, or remove the foreign events and `retry` the job. `cancel` never takes a forward job, and `purgeDead` keeps a dead job that later jobs of its stream wait behind.
+- **Lag.** `journal.forwardLag(db)` returns `{ pending, dead, oldestEnqueuedAt }`. Effects run from the write's own events, so an effect may run before the log has its event.
+- **Versions.** A create on a missing row continues the version count: from the last pending forward job, or from the log when none is pending. That one read of the log happens while the write holds the append lock.
+
+| Feature                                                   | forwarded                                                  |
+| --------------------------------------------------------- | ---------------------------------------------------------- |
+| Row, version check, inline projections, effects, receipts | works                                                      |
+| `replay`, `verify`, `repair`                              | read the log; `FORWARD_PENDING` while a forward job waits  |
+| `forget`                                                  | needs `erase`; `FORWARD_PENDING` while a forward job waits |
+| Async projections, `rerun`                                | need `all`; all of a projection's entities share one log   |
+| Taps                                                      | refused at `compose`: they read only `journal_events`      |
+| Durable workflows                                         | `workflow.run` always uses the built-in log                |
+
+One entity kind has one log: declaring it twice with two different logs is `BAD_DEFINITION`. A forward job carries the write's events in `args`, and the archive keeps finished jobs (7 days by default): `forget` erases the archived copy too, and the archive sink gets only the event headers.
+
 ### Rows that existed before the journal
 
 A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row. They also need every version up to the top, and a live row no newer than its log, and throw `HISTORY_GAP` otherwise: an event lost after it was written must be restored, not folded around.

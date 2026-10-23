@@ -9,7 +9,7 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
 import type { CommandFailure } from './errors.js';
-import type { EventLogPosition, ProjectionCursor } from './event-log.js';
+import type { EventLogPosition, ForwardLag, ProjectionCursor } from './event-log.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
 import type { ResolvedRetention } from './retention.js';
@@ -410,6 +410,12 @@ export type Journal<
   ): Promise<void>;
   /** Per async projection: its position in the log, whether the log holds newer events, and how many positions behind it is when the log can tell. */
   cursors(db: DbHandle): Promise<readonly ProjectionCursor[]>;
+  /**
+   * How far the forwarded event logs are behind the rows: forward jobs still waiting or dead, and
+   * when the oldest was written. Effects run from the write's own events, so they may run before
+   * the log has them.
+   */
+  forwardLag(db: DbHandle): Promise<ForwardLag>;
   /** Walk the log after position `after` (`null` or left out: from the start) and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
   rerun(
     db: TransactionSource<Tx>,

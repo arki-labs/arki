@@ -14,7 +14,10 @@
   (see slice 4), in `3dcaaaf33f`. Slice 5 finished the docs: most of it
   shipped with slices 2 to 4; the commit that adds this line puts the
   setting in `llms.txt` and the `journal` skill. Sections 1 to 5 are done.
-  Slice 6 in the commit that adds this sentence (see 8.8).
+  Slice 6 in `a0a2f54671` (see 8.8). That commit also carries three
+  `packages/auth` renames (pure moves) another session had staged; left in
+  place (founder). Slices 7a and 7b in one commit, the one that adds this
+  sentence (founder: merge them; see 8.8).
 - **Scope:** `@arki/journal` only. Apps change only if they opt in.
 - **Inputs:** four read-only agent reports (Fable) from 2026-10-22: domain
   core, write path, event-log dependents, prior decisions + prior art. Then
@@ -441,6 +444,34 @@ those entities are paused, then flip the setting.
   write-path skips, the diverged operator path (`discard` check,
   `reconcile`), `forget` with forward jobs, and the refusals in 8.5 (taps
   refused).
+  **7a and 7b done together (2026-10-23, founder).** Alone, 7a's parts had
+  no producer. What shipped, and where it differs from 8.4:
+  - A forward job names its entity kind in `job_name`, so every name
+    column (Foreman counts, stranded jobs, logs) works unchanged; the
+    stream is `kind/entityId`.
+  - A create on a missing row continues the version count. The writer
+    takes it from the last pending forward job of the stream, and from
+    the log's `highestVersion` only when none is pending. A job leaves
+    the table only after its append, so this order misses nothing. Cost:
+    on that path, one log read under the append lock. 8.4 said the writer
+    skips the log read entirely; that would restart at version 1 and
+    diverge. Log-says-gone stays skipped for forwarded entities.
+  - No `reconcile` verb: once the dead job is discarded, `repair` reads
+    the entity's own log, so the two verbs cover it.
+  - No `awaitForwarded`: tests drain; `forwardLag` gives
+    `{ pending, dead, oldestEnqueuedAt }`.
+  - A log that can join is always written in the transaction. Forwarding
+    one on purpose is not offered yet.
+  - `forget` also erases the event in archived forward jobs of the stream.
+    The archive sink gets only the event headers.
+  - The interface is public now, with `eventLogContract` at
+    `@arki/journal/event-log-contract`.
+  - The tests use the built-in log on a second PGlite, as a log that
+    cannot join. That is close to slice 8. The order it offers through
+    `all` is only safe while one worker appends, so slice 8 still needs
+    its own global order (8.10).
+  - `llms.txt` went over its 8 KiB budget, so `arki-llms` switched its
+    import paths to the short grouped form.
 - **Slice 8: Another Postgres database adapter**, plus `copyLog` (the first
   place a store switch will be tried). Cheapest end-to-end check of 6–7.
 - **Slice 9: KurrentDB adapter.**
