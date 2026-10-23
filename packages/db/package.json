@@ -95,6 +95,11 @@
       "import": "./dist/sqlite.js",
       "default": "./dist/sqlite.js"
     },
+    "./columns": {
+      "types": "./dist/columns.d.ts",
+      "import": "./dist/columns.js",
+      "default": "./dist/columns.js"
+    },
     "./temporal": {
       "types": "./dist/temporal.d.ts",
       "import": "./dist/temporal.js",

@@ -95,3 +95,6 @@ export function idColumns<TSchema extends z.ZodType & z.core.$ZodType<string>>(
 }
 
 export * from 'drizzle-orm/sqlite-core';
+export type { SqliteColumnsOptions } from './columns-sqlite.js';
+export { sqliteColumns } from './columns-sqlite.js';
+export { instant } from './sqlite-instant.js';

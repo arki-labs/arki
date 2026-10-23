@@ -105,3 +105,6 @@ export const instant = customType<{ data: Instant; driverData: string; config: I
   toDriver: instantToDriver,
   fromDriver: instantFromDriver,
 });
+
+/** The builder `instant(name)` returns. */
+export type PgInstantBuilder = ReturnType<typeof instant>;
