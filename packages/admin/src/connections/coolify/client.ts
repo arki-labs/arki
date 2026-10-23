@@ -23,7 +23,8 @@ export const COOLIFY_SUPPORTED_MAJOR = 4;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-const optionsSchema = z.object({
+/** The options both Coolify factories check at construction. */
+export const coolifyOptionsSchema = z.object({
   baseUrl: z.url({ protocol: /^https?$/ }),
   token: z.string().min(1),
   timeoutMs: z.number().int().positive().optional(),
@@ -68,7 +69,7 @@ function parseVersion(raw: string): CoolifyVersionProbe {
 
 /** Read-only Coolify client. Every method is a GET. */
 export function createCoolifyClient(options: CoolifyClientOptions) {
-  const parsed = optionsSchema.safeParse(options);
+  const parsed = coolifyOptionsSchema.safeParse(options);
   if (!parsed.success) {
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidConfig,

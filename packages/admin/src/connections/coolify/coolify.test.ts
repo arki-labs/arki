@@ -75,7 +75,8 @@ describe('coolify-conformance: fixture replay', () => {
     const { client, calls } = clientFor(fullRoutes);
     const [app] = await client.listApplications();
     const [project] = await client.listProjects();
-    const environment = project === undefined ? undefined : (await client.listEnvironments(project.uuid))[0];
+    const projectEnvironments = project === undefined ? [] : await client.listEnvironments(project.uuid);
+    const [environment] = projectEnvironments;
     expect(environment?.id).toBe(app?.environment_id);
     expect(environment?.project_id).toBe(project?.id);
     expect(project?.name).toBe('Example');

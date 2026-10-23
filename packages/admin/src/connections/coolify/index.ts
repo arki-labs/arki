@@ -5,6 +5,12 @@ export {
   type CoolifyClientOptions,
   type CoolifyVersionProbe,
 } from './client';
+export {
+  COOLIFY_RUNTIME_PROBE_KEY,
+  createCoolifyEnvWriter,
+  type CoolifyEnvEntry,
+  type CoolifyEnvWriter,
+} from './env-writer';
 export { confirmHint } from './reconcile';
 export type {
   CoolifyApplication,
