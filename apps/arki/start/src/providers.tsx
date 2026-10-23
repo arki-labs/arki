@@ -1,18 +1,17 @@
+import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
+import { lazy, Suspense } from 'react';
+import { FullscreenProvider } from '@fleet/react-fullscreen';
+import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
 import { createStore, Provider } from 'jotai';
-import { DevTools } from 'jotai-devtools';
 import { NuqsAdapter } from 'nuqs/adapters/tanstack-router';
 
-import type { NavContextType } from '@fleet/sitekit/nav-context.tsx';
-import { FullscreenProvider } from '@fleet/react-fullscreen';
-import { useIsClient } from '@arki/ui/hooks/is-client';
 import { ArkiAuthProvider } from '@arki/auth/tanstack-start';
 import { clearCachesOnUserChange } from '@arki/tanstack-start/pwa/client';
-import { NavContextProvider } from '@fleet/sitekit/nav-context.tsx';
-import { useTheme } from '@arki/ui/theme';
+import { useIsClient } from '@arki/ui/hooks/is-client';
 import { Toaster } from '@arki/ui/sonner';
+import { useTheme } from '@arki/ui/theme';
 import { TooltipProvider } from '@arki/ui/tooltip';
 
-import { env } from './env';
 import { authClient } from './features/auth/client';
 import { DBProvider } from './lib/db/provider';
 import { ORPCReactProvider } from './lib/orpc/client';
@@ -20,14 +19,24 @@ import { LocaleProvider } from './shared/locale-provider';
 
 const customStore = createStore();
 
+// `import.meta.env.MODE` is replaced by a literal at build time, so production builds drop
+// jotai-devtools (and the Mantine copy it bundles) entirely.
+const DevTools =
+  import.meta.env.MODE === 'production'
+    ? null
+    : lazy(() => import('jotai-devtools').then(module => ({ default: module.DevTools })));
+
 function DevToolsWrapper() {
   const { resolvedTheme } = useTheme();
   const isClient = useIsClient();
 
-  if (!isClient) return null;
-  if (env.MODE === 'production') return null;
+  if (!isClient || !DevTools) return null;
 
-  return <DevTools position="bottom-right" store={customStore} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} />;
+  return (
+    <Suspense fallback={null}>
+      <DevTools position="bottom-right" store={customStore} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} />
+    </Suspense>
+  );
 }
 
 // Add your navigation items here
