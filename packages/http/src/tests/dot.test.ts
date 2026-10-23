@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { DepsOf } from '@arki/dot/feature';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { defineApp, DotLifecycleErrorCode, infra, rename, service, token } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
@@ -132,6 +132,31 @@ describe('http() plugin', () => {
     expect(await res.json()).toEqual([{ id: 'o1' }]);
     // Route contracts belong to the feature; the entrypoint declares none of its own.
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders:orders.list']);
+
+    await orThrow(app.dispose());
+  });
+
+  // Why: an `entrypointOnly` need exists for what only a driving adapter holds (a health
+  // probe's db handle, a transaction middleware's db). `endpoints()` is a driving adapter,
+  // so its build must receive that need, typed, even on a feature with no usecases at all.
+  it('hands endpoints(core, build) the feature\'s entrypointOnly needs, before .usecases() too', async () => {
+    const probeCore = defineFeature('probe').needs({ ordersDb: entrypointOnly(ordersDbPlugin.provides.ordersDb) });
+    const probe = probeCore.entrypoints(
+      coreEndpoints(probeCore, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()), {
+        contracts: [listOrders],
+      }),
+    );
+
+    const app = await orThrow(
+      defineApp('http-entrypoint-only-test')
+        .infra(ordersDbPlugin)
+        .features([probe])
+        .entrypoints(http({ port: 0 }))
+        .boot(),
+    );
+
+    const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
+    expect(await res.json()).toEqual([{ id: 'o1' }]);
 
     await orThrow(app.dispose());
   });

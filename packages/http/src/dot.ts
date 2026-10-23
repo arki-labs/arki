@@ -40,7 +40,7 @@
  * adapter only makes sense inside a DOT app.
  */
 
-import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureCore, EntrypointBinder, EntrypointServicesOf } from '@arki/dot/feature';
 import type { Deferred, DotConfigureContext, EmptyShape, Token, Unit } from '@arki/dot/unit';
 import { entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, resolveDeferred, unit } from '@arki/dot/unit';
@@ -288,8 +288,8 @@ export type EndpointsEntrypoint<TServices> = {
 /**
  * Declare a `defineFeature` feature's HTTP surface, in its `.entrypoints(...)`.
  * `build` runs once, at the feature's boot, with what every entrypoint gets —
- * the feature's needs, its private infra and `usecases` — typed from the core,
- * so a routes file of its own needs no annotation:
+ * the feature's `usecases` and its `entrypointOnly(...)` needs — typed from the
+ * core at any stage, so a routes file of its own needs no annotation:
  *
  * ```ts
  * // entrypoints/routes.ts — `import type { core }` only
@@ -304,9 +304,9 @@ export type EndpointsEntrypoint<TServices> = {
  */
 export function endpoints<C extends AnyFeatureCore>(
   _core: C,
-  build: (services: DepsOf<C>) => RouteBundle,
+  build: (services: EntrypointServicesOf<C>) => RouteBundle,
   options: { readonly contracts?: readonly ContractLike[] } = {},
-): EndpointsEntrypoint<DepsOf<C>> {
+): EndpointsEntrypoint<EntrypointServicesOf<C>> {
   // `_core` is a type witness: the feature hands its own services to `resolve` when it boots.
   return {
     kind: 'routes',
