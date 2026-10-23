@@ -92,7 +92,7 @@ function ErrorsPage() {
       {count === 0 ? (
         <div className="e-nomatch" data-testid="errors-empty">
           <p className="e-nomatch-title">
-            No code matches <code>{query}</code>.
+            No code matches <code>{query}</code>. Nothing is broken here, which is rare for an error index.
           </p>
           <p className="e-muted">The search looks at codes, package names and the first line of what happened.</p>
           <ul>

@@ -2,6 +2,8 @@
 
 Can a developer who has never seen arki install it, change an app, debug a failure and upgrade it using only public materials? This test finds where they stop. Every stop is a docs or product issue.
 
+We want the stranger to get lost, then write down where. Every stop is a docs or product bug.
+
 Plan task: T4.14 in [`docs/plans/2026-10-17-arki-now-tier.md`](../plans/2026-10-17-arki-now-tier.md). Demo standard: [`demos.md`](demos.md).
 
 ## Public materials only
@@ -22,7 +24,7 @@ Run them in order. Give each task 30 minutes. Stop the clock while the tester wa
 | --- | --- | --- |
 | 1 | **Install.** Create an app with `dot new`, start it and open it in a browser. | The app answers on its port. `dot doctor --json` exits 0. |
 | 2 | **Change.** Add a feature with one stored record and one API call, and show the record on a page. | The record survives a restart. |
-| 3 | **Debug.** Break the dependency order on purpose (the mistake in the Dot quick start), read the `DOT_*` error and fix it from `/errors`. | The tester names the error code and fixes it without help. |
+| 3 | **Debug.** Be a gremlin: break the dependency order on purpose (the mistake in the Dot quick start), read the `DOT_*` error and fix it from `/errors`. | The tester names the error code and fixes it without help. |
 | 4 | **Upgrade.** Move the app to the next published `@arki/dot` minor with the upgrade guide. | Typecheck and start pass on the new version. |
 
 ## What to record per stop

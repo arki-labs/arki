@@ -132,11 +132,11 @@ function PackagesPage() {
       ) : (
         <div className="pk-empty">
           {query === '' ? (
-            <p className="pk-empty-title">No package has this status.</p>
+            <p className="pk-empty-title">No package has this status. The shelf is empty.</p>
           ) : (
             <>
               <p className="pk-empty-title">
-                No package matches <code>{query}</code>.
+                No package matches <code>{query}</code>. Not even a stray bolt.
               </p>
               <p className="pk-empty-hint">
                 The filter looks at package names and the first line of each README. Error codes and API names live

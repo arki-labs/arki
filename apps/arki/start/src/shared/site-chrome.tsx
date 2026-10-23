@@ -142,7 +142,7 @@ export function SiteFooter() {
     <footer className="foot mono">
       <div className="bar">
         <span>arki.dev</span>
-        <span>{pathname}</span>
+        <span>{pathname === '/' ? 'ground floor' : pathname}</span>
         <a href="/llms.txt">llms.txt</a>
       </div>
     </footer>

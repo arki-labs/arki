@@ -412,7 +412,7 @@ const WRITE_STEP_MS = 850;
 const WRITE_PANES = {
   event: {
     title: 'journal_events · new row',
-    text: 'seq 43 · v2 · OrderPaid · { amount: 4800 }',
+    text: 'seq 43 · v2 · OrderPaid · { amount: 950 }',
     note: 'appended first · write.ts:272',
   },
   row: {
@@ -675,7 +675,7 @@ function WebhookSheet({ interactive }: Readonly<{ interactive: boolean }>) {
           <div className={cn('home-pane', runs > 0 ? 'is-committed' : 'is-empty')}>
             <strong>journal_receipts</strong>
             {runs > 0
-              ? `key: 'stripe:evt_1Ab3' · command: 'payOrder' · input: { orderId: '${ORDER_ID}', amount: 4800 } · result: { value: … } · command_id: 'cmd_8d1'`
+              ? `key: 'stripe:evt_1Ab3' · command: 'payOrder' · input: { orderId: '${ORDER_ID}', amount: 950 } · result: { value: … } · command_id: 'cmd_8d1'`
               : 'no receipt'}
             <small>key · command · input · result · command_id</small>
           </div>
@@ -900,7 +900,7 @@ function RepairSheet({ interactive }: Readonly<{ interactive: boolean }>) {
                   <span className={cn(forgotten && 'is-erased')}>OrderPlaced</span>
                 </td>
                 <td className="home-data">
-                  {forgotten ? "{ customerId: '', total: 4800 }" : ORDER_EVENTS.OrderPlaced}
+                  {forgotten ? "{ customerId: '', total: 950 }" : ORDER_EVENTS.OrderPlaced}
                 </td>
                 <td className="home-data">{forgotten ? '2026-10-21 14:02' : 'null'}</td>
               </tr>

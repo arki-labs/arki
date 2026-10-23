@@ -46,6 +46,7 @@ const NOT_FOR = [
   'You want plugins loaded from disk or config. Dot never auto-loads.',
   'The program has one or two services. A function with try/finally is shorter.',
   'You need a scope per request. Dot has one service graph per app.',
+  'You are building a shed. A shed needs no blueprint.',
 ] as const;
 
 /** The mental model: what a function returns, what a unit needs, and who owns running work. */

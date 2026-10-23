@@ -2,6 +2,7 @@
 
 The words ARKI docs use, one plain sentence each. The "formerly" column lists old
 names that still appear in older pages, so you can match them to the current word.
+Think of it as the site plan: every term is a room, and each row says where its door is.
 
 | Term | What it means | Where to read | Formerly |
 |---|---|---|---|

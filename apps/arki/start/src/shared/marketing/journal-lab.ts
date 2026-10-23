@@ -14,9 +14,9 @@ export const JOURNAL_NPM_VERSION = '0.2.1';
 
 /** The order entity's events (README.md:69–71), with the data this simulation appends. */
 export const ORDER_EVENTS = {
-  OrderPlaced: "{ customerId: 'cus_12', total: 4800 }",
-  OrderPaid: '{ amount: 4800 }',
-  OrderCancelled: "{ reason: 'customer asked' }",
+  OrderPlaced: "{ customerId: 'cus_ada', total: 950 }",
+  OrderPaid: '{ amount: 950 }',
+  OrderCancelled: "{ reason: 'ordered funghi, received a mushroom' }",
 } as const;
 export type OrderEvent = keyof typeof ORDER_EVENTS;
 
@@ -26,11 +26,11 @@ export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export type OrderRow = Readonly<Record<OrderColumn, string>>;
 
 /** The id of the one order every bench uses. */
-export const ORDER_ID = 'ord_7f3';
+export const ORDER_ID = 'ord_42';
 
 /** One reducer of README.md:75–77: what `event` does to the row. Null: no row (not created yet, or deleted). */
 function reduceOrder(row: OrderRow | null, event: OrderEvent, version: string): OrderRow | null {
-  if (event === 'OrderPlaced') return { customer_id: 'cus_12', total: '4800', status: 'placed', version };
+  if (event === 'OrderPlaced') return { customer_id: 'cus_ada', total: '950', status: 'placed', version };
   if (event === 'OrderPaid') return row === null ? null : { ...row, status: 'paid', version };
   return null;
 }
@@ -175,7 +175,7 @@ export const REPAIR_START: RepairState = { edits: { status: true, total: false }
 
 /** The row the events rebuild: what `verify` expects. */
 export function expectedRow(state: RepairState): OrderRow {
-  return { customer_id: state.forgotten ? "''" : 'cus_12', total: '4800', status: 'paid', version: '2' };
+  return { customer_id: state.forgotten ? "''" : 'cus_ada', total: '950', status: 'paid', version: '2' };
 }
 
 /** The row in the table: the expected one with the hand edits on top. */
@@ -259,7 +259,7 @@ export const SIGNAL = 'provider.refund.settled';
 const SETTLED_AT = "{ settledAt: '2026-10-21T14:02:00Z' }";
 
 const STARTED: readonly RunRow[] = [
-  { type: 'RunStarted', node: '', note: "payments.refund v1 · input { paymentId: 'pay_3x', amount: 4800 }" },
+  { type: 'RunStarted', node: '', note: "payments.refund v1 · input { paymentId: 'pay_3x', amount: 950 }" },
   { type: 'NodeScheduled', node: 'hold', note: `key '${RUN_ID}:hold:do'` },
 ];
 const HELD: readonly RunRow[] = [
@@ -275,7 +275,7 @@ const FINISHED: readonly RunRow[] = [
   { type: 'RunCompleted', node: '', note: `output { refundId: 're_5t8', settledAt: '2026-10-21T14:02:00Z' }` },
 ];
 const CANCELLED: readonly RunRow[] = [
-  { type: 'CancelRequested', node: '', note: "reason: 'customer withdrew'" },
+  { type: 'CancelRequested', node: '', note: "reason: 'pizza arrived as a calzone'" },
   {
     type: 'CompensationStarted',
     node: '',

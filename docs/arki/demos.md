@@ -1,6 +1,6 @@
 # Demo bar
 
-The standard every arki demo meets. Terms: [wave, candidate, X-ray](./glossary.md).
+The standard every arki demo meets. No demo ships on vibes. Terms: [wave, candidate, X-ray](./glossary.md).
 
 ## 1. What a demo is
 
@@ -46,7 +46,7 @@ One Markdown table. One row per gap. A script parses it, so keep the columns.
 | `Found` | Phase or date when it was found. |
 | `Status` | `open`, `fixed in <pkg>@<version>`, or `adopted here`. Add a short note after a dash. |
 
-A gap is evidence for the framework. Fix the package, not the demo.
+A gap is evidence for the framework. Fix the package, not the demo. Found a gap? Good. That is the demo doing its job.
 
 ## 4. Scenario contract
 

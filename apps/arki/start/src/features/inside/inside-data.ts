@@ -44,8 +44,8 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/docs/di.md',
-          lines: '547-551',
-          code: '  .needs({\n    db: database.provides.db, // typed from the provider\n    cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager\n  })\n  .provides({ reports: ({ db }) => makeReports(db) })',
+          lines: '646-649',
+          code: '  .needs({\n    db: database.provides.db, // typed from the provider\n    cache: cache.provides.kv.lazy, // a Lazy<T>, even if the provider is eager\n  })',
         },
       },
       {
