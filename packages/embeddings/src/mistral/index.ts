@@ -7,12 +7,29 @@
  */
 import { isFailure } from '@arki/failure';
 
-import type { EmbeddingModel, NativeRequest } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
-import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
+import { countTokens, truncateByEstimate } from '../tokens.js';
+
+// Mistral's 400 wording is undocumented, so this pattern stays loose: a miss turns InputTooLong (which a caller can
+// split and retry) into an opaque InvalidOutput.
+const TOO_LONG = /context length|context window|maximum context|too many tokens|input length|longer than|too long|exceeds? the (?:maximum|max|context)/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type MistralModelOptions = {
   /** Default `'mistral-embed'`. */
@@ -110,8 +127,8 @@ export function createMistralModel(options: MistralModelOptions) {
         return ConfigurationFailure({ message: `mistral refused the API key (${status})` });
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (status === 400 && mentionsContextLength(`${error.message} ${error.responseBody ?? ''}`)) {
-        return providerInputTooLong(model, texts);
+      if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
+        return inputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `mistral answered ${status}: ${error.message.slice(0, 200)}` });
     }

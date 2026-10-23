@@ -11,14 +11,30 @@ import { isFailure } from '@arki/failure';
 import { is } from '@arki/schema';
 import { z } from 'zod';
 
-import type { EmbeddingModel, Instruction, NativeInput, NativeInputsRequest, NativeRequest, Purpose } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import type { EmbeddingModel, Instruction, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import { retryAfterMs } from '../http.js';
 import { GEMINI_EMBEDDING_2_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
-import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
+import { countTokens, truncateByEstimate } from '../tokens.js';
 import { l2Normalize } from '../vector.js';
 import { toBase64 } from '../base64.js';
+
+// Gemini's wording as seen in API errors ("exceeds the maximum number of tokens", "input token count ... exceeds"). Not in the API reference.
+const TOO_LONG = /exceeds the maximum number of tokens|input token count/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type GoogleModelOptions = {
   /** Default `'gemini-embedding-001'`. */
@@ -175,8 +191,8 @@ export function createGoogleModel(options: GoogleModelOptions) {
         return ConfigurationFailure({ message: `google refused the API key (${status})` });
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (status === 400 && mentionsContextLength(`${error.message} ${error.responseBody ?? ''}`)) {
-        return providerInputTooLong(model, texts);
+      if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
+        return inputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `google answered ${status}: ${error.message.slice(0, 200)}` });
     }
@@ -223,7 +239,7 @@ export function createGoogleModel(options: GoogleModelOptions) {
         return ConfigurationFailure({ message: `google refused the API key (${response.status})` });
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (response.status === 400 && mentionsContextLength(text)) return providerInputTooLong(model, texts);
+      if (response.status === 400 && TOO_LONG.test(text)) return inputTooLong(model, texts);
       return InvalidOutput({ reason: `google answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

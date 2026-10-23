@@ -15,20 +15,22 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
-import type { Embedder, EmbeddingModel, EmbeddingModelRef, EmbedFailure } from '@arki/embeddings';
+import type { Embedder, EmbeddingModel, EmbedFailure } from '@arki/embeddings';
 import {
   createEmbedder,
   embedMany,
   isEmbedFailure,
   l2Normalize,
   QWEN3_INSTRUCTION,
-  resolveEmbeddingModel,
   resolveSpace,
   spaceId,
 } from '@arki/embeddings';
+import { createGoogleModel } from '@arki/embeddings/google';
 import { createOllamaModel } from '@arki/embeddings/ollama';
+import { createOpenAIModel } from '@arki/embeddings/openai';
 import { createOpenAICompatibleModel } from '@arki/embeddings/openai-compatible';
 import { createTransformersModel } from '@arki/embeddings/transformers';
+import { createVoyageModel } from '@arki/embeddings/voyage';
 
 import type { RetrievalSet } from './quality/beir.js';
 import type { GroupScores } from './quality/retrieval.js';
@@ -62,11 +64,11 @@ type Candidate = {
   readonly build: () => EmbeddingModel | EmbedFailure | Promise<EmbeddingModel | EmbedFailure>;
 };
 
-const hosted = (key: string, ref: EmbeddingModelRef, needs: string): Candidate => ({
+const hosted = (key: string, label: string, needs: string, build: (apiKey: string) => EmbeddingModel | EmbedFailure): Candidate => ({
   key,
-  label: `${ref} (hosted)`,
+  label: `${label} (hosted)`,
   needs,
-  build: () => resolveEmbeddingModel(ref, process.env),
+  build: () => build(process.env[needs] ?? ''),
 });
 
 const CANDIDATES: readonly Candidate[] = [
@@ -107,9 +109,13 @@ const CANDIDATES: readonly Candidate[] = [
     label: 'EmbeddingGemma 2 q8, Transformers.js (trial, E1)',
     build: () => createTransformersModel({ id: 'onnx-community/embeddinggemma-2-ONNX', cacheDir: MODEL_CACHE }),
   },
-  hosted('openai-3-small', 'openai:text-embedding-3-small', 'OPENAI_API_KEY'),
-  hosted('voyage-3.5', 'voyage:voyage-3.5', 'VOYAGE_API_KEY'),
-  hosted('gemini-2', 'google:gemini-embedding-2', 'GOOGLE_GENERATIVE_AI_API_KEY'),
+  hosted('openai-3-small', 'openai text-embedding-3-small', 'OPENAI_API_KEY', apiKey =>
+    createOpenAIModel({ id: 'text-embedding-3-small', apiKey }),
+  ),
+  hosted('voyage-3.5', 'voyage voyage-3.5', 'VOYAGE_API_KEY', apiKey => createVoyageModel({ id: 'voyage-3.5', apiKey })),
+  hosted('gemini-2', 'google gemini-embedding-2', 'GOOGLE_GENERATIVE_AI_API_KEY', apiKey =>
+    createGoogleModel({ id: 'gemini-embedding-2', apiKey }),
+  ),
 ];
 
 const progress = (line: string): void => {

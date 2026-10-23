@@ -9,11 +9,27 @@
 import { isFailure } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
-import type { EmbeddingModel, NativeRequest } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
-import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
+import { countTokens, truncateByEstimate } from '../tokens.js';
+
+// Titan's wording for an over-long text ("Too many input tokens"). Not in the AWS docs; seen in Bedrock error reports.
+const TOO_LONG = /too many input tokens/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type BedrockModelOptions = {
   /** Default `'amazon.titan-embed-text-v2:0'`. */
@@ -45,10 +61,6 @@ type BedrockFacts = Pick<EmbeddingModel, 'dimensions' | 'matryoshka' | 'maxInput
 const BEDROCK_FACTS: Readonly<Record<string, BedrockFacts>> = {
   'amazon.titan-embed-text-v2:0': { dimensions: 1024, matryoshka: TITAN_SIZES, maxInputTokens: 8192 },
 };
-
-/** Titan's wording for an over-long text. Not in the docs, so matched with the shared pattern plus this one. */
-const mentionsInputTokens = (text: string): boolean =>
-  mentionsContextLength(text) || /too many input tokens/i.test(text);
 
 /** Loads both peers and builds the SDK model once. Any import failure means the peer is not installed. */
 async function loadSdk(id: string, options: BedrockModelOptions) {
@@ -145,8 +157,8 @@ export function createBedrockModel(options: BedrockModelOptions = {}) {
         });
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (status === 400 && mentionsInputTokens(`${error.message} ${error.responseBody ?? ''}`)) {
-        return providerInputTooLong(model, texts);
+      if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
+        return inputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `bedrock answered ${status}: ${error.message.slice(0, 200)}` });
     }

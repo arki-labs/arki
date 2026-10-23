@@ -37,7 +37,6 @@ import {
   norm,
   normalizeText,
   QWEN3_INSTRUCTION,
-  resolveEmbeddingModel,
   spaceId,
   withCache,
   withMiddleware,
@@ -66,10 +65,9 @@ describe('public types of the root entry', () => {
     expectTypeOf(isSameSpace).returns.toEqualTypeOf<boolean>();
   });
 
-  it('createEmbedder and resolveEmbeddingModel return a value or a failure, never throw for expected cases', () => {
+  it('createEmbedder returns a value or a failure, never throws for expected cases', () => {
     expectTypeOf(createEmbedder).parameter(0).toEqualTypeOf<EmbeddingModel>();
     expectTypeOf(createEmbedder).returns.toMatchTypeOf<Embedder | EmbedFailure>();
-    expectTypeOf(resolveEmbeddingModel).returns.toMatchTypeOf<EmbeddingModel | EmbedFailure>();
   });
 
   it('vector helpers take typed arrays and answer numbers', () => {

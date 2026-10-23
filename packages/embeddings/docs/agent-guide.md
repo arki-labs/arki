@@ -9,7 +9,7 @@ Read this before changing code that turns text into vectors. The [README](../REA
 - **`embedMany`** packs inputs by `maxBatch` and `maxBatchTokens`, runs chunks with bounded concurrency, keeps input order, and is all or nothing.
 - **`embedStream`** is the corpus form: a pull-based `ReadableStream` of `{ item, result }` in source order, one result per item, failures included.
 - A **space** (`EmbeddingSpace`) is what must match for two vectors to be comparable. `spaceId(space)` is its stored string form. A different space means re-embed, never mix.
-- **`resolveEmbeddingModel`** picks the model from a ref, `EMBEDDING_MODEL`, or the first configured provider in the order `ollama → openai → voyage → google`. It is pure.
+- **`createXModel`** in each provider's entry (`createOllamaModel` in `./ollama`, `createOpenAIModel` in `./openai`, …) builds the model from options your app passes. The package reads no environment variables, and creating a model touches no network.
 - Every expected failure is a returned `@arki/failure` value. `isEmbedFailure` recognises any of them.
 - **`withResilience`** and **`withMiddleware`** wrap an embedder and return an embedder. Retries live only there: adapters never retry.
 
@@ -18,10 +18,11 @@ Read this before changing code that turns text into vectors. The [README](../REA
 ### Embed documents
 
 ```ts run
-import { createEmbedder, embedMany, resolveEmbeddingModel, spaceId } from '@arki/embeddings';
+import { createEmbedder, spaceId } from '@arki/embeddings';
+import { createOllamaModel } from '@arki/embeddings/ollama';
 import { isFailure } from '@arki/failure';
 
-const model = resolveEmbeddingModel('ollama:qwen3-embedding:0.6b', {});
+const model = createOllamaModel({ id: 'qwen3-embedding:0.6b', baseURL: 'http://127.0.0.1:11434' });
 if (isFailure(model)) throw new Error(model.message);
 const embedder = createEmbedder(model);
 if (isFailure(embedder)) throw new Error(embedder.message);
@@ -33,20 +34,21 @@ console.log(spaceId(embedder.space));
 ### Keep an index and a model in step
 
 ```ts
-import type { EmbeddingSpace } from '@arki/embeddings';
-import { resolveEmbeddingModel } from '@arki/embeddings';
+import type { Embedder, EmbeddingSpace } from '@arki/embeddings';
+import { isSameSpace, resolveSpace, SpaceMismatch } from '@arki/embeddings';
 import { isFailure } from '@arki/failure';
 
-export function modelForIndex(storedSpace: EmbeddingSpace, env: Record<string, string | undefined>) {
-  const model = resolveEmbeddingModel(undefined, env, { requiredSpace: storedSpace });
-  if (isFailure(model)) return model; // SpaceMismatch when the configured model is another space
-  return model;
+export async function checkIndex(embedder: Embedder, storedSpace: EmbeddingSpace) {
+  const space = await resolveSpace(embedder); // reads Ollama's digest, embeds nothing
+  if (isFailure(space)) return space;
+  // Another space means re-embed the corpus, never mix vectors from two models.
+  return isSameSpace(storedSpace, space) ? space : SpaceMismatch({ expected: storedSpace, actual: space });
 }
 ```
 
 ### Use a hosted or self-hosted server
 
-- OpenAI: set `OPENAI_API_KEY` (and optionally `EMBEDDING_MODEL=openai:text-embedding-3-small`). Install the peers `ai` and `@ai-sdk/openai`; without them the first call returns `ModelUnavailable` with `reason: 'peer-missing'`.
+- OpenAI: `createOpenAIModel({ apiKey })` from `@arki/embeddings/openai`, with the key your app reads. Install the peers `ai` and `@ai-sdk/openai`; without them the first call returns `ModelUnavailable` with `reason: 'peer-missing'`.
 - Any server with an OpenAI-style `/embeddings` route: `createOpenAICompatibleModel({ id, baseURL, dimensions })` from `@arki/embeddings/openai-compatible`.
 
 ### Test code that embeds
@@ -141,9 +143,9 @@ export async function top10(query: string, candidates: readonly { readonly id: s
 - The same text is the same input only byte for byte. The embedder never normalises text; call `normalizeText` yourself, the same way on documents and queries.
 - Retry only through `withResilience`. It retries `RateLimited` and an unreachable model, nothing else; never wrap `embed` in a loop of your own.
 - An instruction's prefixes are frozen per `version`. Changing one without bumping `version` mixes two spaces under one space id.
-- `resolveEmbeddingModel` returns before the network is touched, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call, or `await resolveSpace(embedder)` before comparing with stored space ids.
+- Creating a model never touches the network, so Ollama's `revision` is `undefined` until the first call. Read `embedder.space` again after a call, or `await resolveSpace(embedder)` before comparing with stored space ids.
 - Client-side int8 needs one `calibrateInt8` range for the whole corpus; keep it with the index. Binary packs most significant bit first and needs a size that is a multiple of 8.
-- Cohere, Mistral and OpenAI-compatible servers are never picked by provider order; name them in the ref or `EMBEDDING_MODEL`.
+- Never read `process.env` inside a library or feature to pick a provider. The app reads its env once and builds the model; in a Dot app, inside the `embeddings({ model: () => … })` function, which runs at boot.
 - Test against a real model offline with `recordEmbedder` once and `fixtureEmbedder` after; a request that was not recorded is `InvalidOutput`, never a made-up vector.
 - Never catch to hide a thrown error from a custom `embed`. It is a bug in that code.
 - `embeddings()` publishes `null` when nothing resolves. A feature that embeds must handle `null`, not assume a model.

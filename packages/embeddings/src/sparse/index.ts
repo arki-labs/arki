@@ -22,7 +22,7 @@ import {
   SpaceMismatch,
   UnsupportedInput,
 } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { isSameSpace, spaceId } from '../space.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
@@ -233,7 +233,7 @@ export function createSparseModel(options: SparseModelOptions): SparseEmbedder |
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (response.status === 503) return ModelUnavailable({ model: id, reason: 'unreachable' });
       // TEI: "`inputs` must have less than 512 tokens. Given: 600" (422, Validation).
-      if (/must have less than \d+ (?:tokens|characters)/.test(message) || mentionsContextLength(message)) {
+      if (/must have less than \d+ (?:tokens|characters)/.test(message)) {
         return inputTooLong(texts, maxInputTokens);
       }
       if (/batch size/.test(message)) return UnsupportedInput({ index: -1, part: 'batch' });

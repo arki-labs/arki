@@ -89,11 +89,6 @@
       "import": "./dist/bedrock/index.js",
       "default": "./dist/bedrock/index.js"
     },
-    "./env": {
-      "types": "./dist/env/index.d.ts",
-      "import": "./dist/env/index.js",
-      "default": "./dist/env/index.js"
-    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js",
@@ -147,7 +142,6 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",

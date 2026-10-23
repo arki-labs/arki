@@ -1,4 +1,5 @@
-import type { EmbeddingModel, EmbeddingSpace, Quantization } from './types.js';
+import type { Embedder, EmbeddingModel, EmbeddingSpace, Quantization } from './types.js';
+import { Cancelled } from './failures.js';
 
 const QUANTIZATION_TAG = { float32: 'f32', int8: 'i8', binary: 'bin' } as const satisfies Record<Quantization, string>;
 
@@ -56,4 +57,21 @@ export function spaceOf(
     instructionVersion: model.instruction.version,
   };
   return model.revision === undefined ? space : { ...space, revision: model.revision };
+}
+
+/**
+ * The embedder's space with its revision known, to compare with a stored space id before anything
+ * is embedded. Ollama reads its model digest (one metadata request, no embedding); other models
+ * answer at once. A digest it cannot read is `ModelUnavailable` (`unreachable` or `not-pulled`).
+ *
+ * @example
+ * const space = await resolveSpace(embedder);
+ * if (!isFailure(space) && !isSameSpace(storedSpace, space)) return SpaceMismatch({ expected: storedSpace, actual: space });
+ */
+export async function resolveSpace(embedder: Embedder, options: { readonly signal?: AbortSignal } = {}) {
+  if (options.signal?.aborted) return Cancelled();
+  const missing = await embedder.model.loadRevision?.(options.signal);
+  if (options.signal?.aborted) return Cancelled();
+  if (missing !== undefined) return missing;
+  return embedder.space;
 }

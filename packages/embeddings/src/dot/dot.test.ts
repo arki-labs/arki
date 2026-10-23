@@ -27,11 +27,12 @@ describe('embeddings()', () => {
     expect(second).toMatchObject({ usage: { cacheHits: 1 } });
   });
 
-  it('missing config provides null and logs once', async () => {
+  // A missing key must turn embeddings off, not stop the app from booting.
+  it('a model that does not build provides null and logs once', async () => {
     using log = fakeLog();
     const app = await orThrow(
       defineApp('emb-none')
-        .infra(embeddings({ env: () => ({}) }))
+        .infra(embeddings({ model: () => ConfigurationFailure({ message: 'OLLAMA_BASE_URL is not set' }) }))
         .boot(),
     );
 
@@ -60,21 +61,21 @@ describe('embeddings()', () => {
     expect(refused.services.embedder).toBeNull();
   });
 
-  it('resolves a ref through resolveEmbeddingModel, reading env only at boot', async () => {
-    let reads = 0;
+  // The app reads its env inside the function, so defining the plugin at import never touches it.
+  it('runs the model function once, at boot, not when the plugin is defined', async () => {
+    let builds = 0;
     const plugin = embeddings({
-      model: 'ollama:nomic-embed-text',
-      env: () => {
-        reads++;
-        return { OLLAMA_BASE_URL: 'http://127.0.0.1:1' };
+      model: () => {
+        builds++;
+        return fakeEmbedder({ dimensions: 4 }).model;
       },
     });
-    expect(reads).toBe(0);
+    expect(builds).toBe(0);
 
-    const app = await orThrow(defineApp('emb-ref').infra(plugin).boot());
+    const app = await orThrow(defineApp('emb-boot').infra(plugin).boot());
 
-    expect(reads).toBe(1);
-    expect(app.services.embedder?.space).toMatchObject({ provider: 'ollama', model: 'nomic-embed-text' });
+    expect(builds).toBe(1);
+    expect(app.services.embedder?.space).toMatchObject({ provider: 'fake', dimensions: 4 });
   });
 
   it('publishes Embedder | null, so a feature must handle the unconfigured app', () => {

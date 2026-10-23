@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_2_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`; and 55 more.
+- `@arki/embeddings`: text → vectors behind one `Embedder` shape. `Cancelled`, `ConfigurationFailure`, `E5_INSTRUCTION`, `EMBEDDINGGEMMA_2_INSTRUCTION`, `EMBEDDINGGEMMA_INSTRUCTION`, `GEMINI_EMBEDDING_2_INSTRUCTION`, `InputTooLong`, `InvalidOutput`, `ModelUnavailable`, `NOMIC_INSTRUCTION`, `NO_INSTRUCTION`, `QWEN3_INSTRUCTION`; and 52 more.
 - `@arki/embeddings/ollama`: a local Ollama server over `fetch` (`/api/embed`, one request per chunk). `createOllamaModel`; types `OllamaModelOptions`.
 - `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK. `createOpenAIModel`; types `OpenAIModelOptions`.
 - `@arki/embeddings/openai-compatible`: any server that speaks OpenAI's `POST /embeddings` (Nebius, TEI, vLLM, LM Studio, a proxy) over plain `fetch`. `createOpenAICompatibleModel`; types `OpenAICompatibleModelOptions`.
@@ -18,7 +18,6 @@
 - `@arki/embeddings/rerank`: put search hits in order of relevance to one query. `RERANK_PROVIDERS`, `rerank`, `withRerankCache`; types `RerankCacheOptions`, `RerankCallOptions`, `RerankHit`, `RerankOptions`, `RerankProviderName`, `RerankResult`, `Reranker`.
 - `@arki/embeddings/tei`: a reranker on a Hugging Face Text Embeddings Inference server (`POST /rerank`, a sequence-classification model such as `BAAI/bge-reranker-v2-m3`). `createTeiReranker`; types `TeiRerankerOptions`.
 - `@arki/embeddings/bedrock`: Amazon Titan Text Embeddings on AWS Bedrock through the AI SDK. `createBedrockModel`; types `BedrockModelOptions`.
-- `@arki/embeddings/env`: validates the embedding variables with `@arki/env`. `resolveEmbeddingConfig`.
 - `@arki/embeddings/testing`: a deterministic fake embedder and fake reranker for tests, and real vectors recorded once and replayed offline. `fakeEmbedder`, `fakeReranker`, `fixtureEmbedder`, `recordEmbedder`; types `FakeEmbedderOptions`, `FakeRerankerOptions`.
 - `@arki/embeddings/kv`: a `CacheStore` over an `@arki/kv` client (or anything with its `get` and `set`), so `withCache` shares vectors across processes through Redis. `kvCacheStore`.
 - `@arki/embeddings/dot`: the app's one embedder as a Dot unit. `embeddings`.
@@ -48,5 +47,5 @@
 - The embedder never changes input text (call `normalizeText` yourself), and `fakeEmbedder` is not semantic.
 - Retry only through `withResilience`: it retries `RateLimited` and an unreachable model, nothing else.
 - A cache key covers the space and the exact text; `embeddings()` from `./dot` publishes `null` when nothing resolves.
-- `resolveEmbeddingModel` never touches the network. Cohere, Mistral and OpenAI-compatible servers resolve only when named in the ref.
+- The package reads no environment variables. Build the model with the provider's `createXModel` from your app's own settings; creating it never touches the network.
 - `resolveSpace(embedder)` learns Ollama's digest before stale-row checks. Int8 needs one shared `calibrateInt8` range; binary packs MSB first.

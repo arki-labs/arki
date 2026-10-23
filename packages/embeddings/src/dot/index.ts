@@ -7,42 +7,28 @@ import { infra } from '@arki/dot/unit';
 import { getLogger } from '@arki/log';
 
 import type { EmbedFailure } from '../failures.js';
-import type { CacheStore, Embedder, EmbeddingModel, EmbeddingModelRef, EnvSource } from '../types.js';
+import type { CacheStore, Embedder, EmbeddingModel } from '../types.js';
 import { memoryCacheStore, withCache } from '../cache.js';
 import { createEmbedder } from '../embedder.js';
 import { isEmbedFailure } from '../failures.js';
 import { withResilience } from '../resilience.js';
-import { resolveEmbeddingModel } from '../resolve.js';
-
-/** What the plugin builds from: a ref to resolve, a model record, or an embedder an app built itself. */
-type ModelChoice = EmbeddingModelRef | EmbeddingModel | Embedder;
 
 /** Options `embeddings()` takes. Everything is read once, at boot. */
 type EmbeddingsPluginOptions = {
   /**
-   * A ref (`'ollama:qwen3-embedding:0.6b'`), a model record, an `Embedder`, or a function returning
-   * one of the last two or a failure. Absent: `resolveEmbeddingModel` picks from `env`.
+   * A model record, an `Embedder`, or a function returning one of them or a failure. The function
+   * runs once, at boot: read the app's env there and build the model with its provider's
+   * `createXModel` (a `ConfigurationFailure` for a missing key turns embeddings off, not the app).
    */
-  readonly model?: ModelChoice | (() => EmbeddingModel | Embedder | EmbedFailure);
+  readonly model: EmbeddingModel | Embedder | (() => EmbeddingModel | Embedder | EmbedFailure);
   /** `true`: `withCache` over a `memoryCacheStore()`; a store: `withCache` over it. Default `false`. */
   readonly cache?: boolean | CacheStore;
   /** `true`: `withResilience` with its default policy; a policy: that one. Default `false`. */
   readonly resilience?: boolean | Policy<never, RetryWaitFailure>;
-  /** Where a ref or `EMBEDDING_MODEL` is resolved from. Default `process.env`. */
-  readonly env?: () => EnvSource;
 };
-
-/** `process.env`, or an empty map on runtimes without `process`. */
-function processEnv(): EnvSource {
-  return typeof process === 'undefined' ? {} : process.env;
-}
 
 function baseEmbedder(options: EmbeddingsPluginOptions): Embedder | EmbedFailure {
   const chosen = typeof options.model === 'function' ? options.model() : options.model;
-  if (chosen === undefined || typeof chosen === 'string') {
-    const model = resolveEmbeddingModel(chosen, (options.env ?? processEnv)());
-    return isEmbedFailure(model) ? model : createEmbedder(model);
-  }
   if (isEmbedFailure(chosen)) return chosen;
   return 'embed' in chosen ? chosen : createEmbedder(chosen);
 }
@@ -60,14 +46,18 @@ function build(options: EmbeddingsPluginOptions): Embedder | EmbedFailure {
 
 /**
  * Publish `embedder`: the app's one `Embedder`, built once at boot. A configuration that does not
- * resolve (no provider set, a bad ref, a size the model refuses) is logged once at `warn` and
+ * build (a missing key, a size the model refuses) is logged once at `warn` and
  * `embedder` is `null`, so the app boots and features that embed degrade instead of failing it.
  *
  * @example
- * defineApp('reader').infra(embeddings({ model: 'ollama:qwen3-embedding:0.6b', cache: true }));
+ * const embedding = embeddings({
+ *   model: () => createOllamaModel({ id: 'qwen3-embedding:0.6b', baseURL: process.env['OLLAMA_BASE_URL'] }),
+ *   cache: true,
+ * });
+ * defineApp('reader').infra(embedding);
  * // in a feature: needs: { embedder: embedding.provides.embedder } → Embedder | null
  */
-export function embeddings(options: EmbeddingsPluginOptions = {}) {
+export function embeddings(options: EmbeddingsPluginOptions) {
   return infra({
     name: 'embeddings',
     provides: {

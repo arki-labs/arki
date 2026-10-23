@@ -6,7 +6,7 @@ import { isFailure } from '@arki/failure';
 import type { FetchLike } from '../http.js';
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
-import { InvalidOutput, RateLimited } from '../failures.js';
+import { InputTooLong, InvalidOutput, RateLimited } from '../failures.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { createOpenAICompatibleModel } from './index.js';
 
@@ -74,6 +74,16 @@ describe('./openai-compatible', () => {
       const batch = await embedMany(embedder, ['a', 'b', 'c']);
       expect(InvalidOutput.is(batch)).toBe(true);
     }
+  });
+
+  // A 400 does not say which input is too long; the adapter names the one with the most tokens.
+  it('a 400 about length is InputTooLong naming the longest input', async () => {
+    const { embedder } = nebius(() =>
+      Promise.resolve(new Response('{"error":"input exceeds the maximum context length"}', { status: 400 })),
+    );
+    const batch = await embedMany(embedder, ['b', 'a'.repeat(40)]);
+    expect(InputTooLong.is(batch)).toBe(true);
+    if (InputTooLong.is(batch)) expect(batch.data).toMatchObject({ index: 1, tokens: { basis: 'estimated', count: 10 } });
   });
 
   it('maps 429 with retry-after', async () => {

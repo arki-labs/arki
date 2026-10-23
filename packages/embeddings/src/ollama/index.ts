@@ -5,11 +5,28 @@
 import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
-import type { EmbeddingModel, Instruction, NativeRequest } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { retryAfterMs } from '../http.js';
 import { EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION, NOMIC_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
-import { providerInputTooLong } from '../tokens.js';
+import { countTokens } from '../tokens.js';
+
+// Ollama words a 400 for an over-long input two ways: "input exceeds maximum context length" (recorded in
+// __fixtures__/embed-too-long.json) and "the input length exceeds the context length" (newer servers, from memory).
+const TOO_LONG = /input (?:length )?exceeds (?:the |maximum )?context length/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type OllamaModelOptions = {
   /** Default `'qwen3-embedding:0.6b'`. */
@@ -176,8 +193,8 @@ export function createOllamaModel(options: OllamaModelOptions = {}) {
         const wait = retryAfterMs(name => response.headers.get(name));
         return RateLimited(wait === undefined ? {} : { retryAfterMs: wait });
       }
-      if (response.status === 400 && mentionsContextLength(text)) {
-        return providerInputTooLong(model, texts);
+      if (response.status === 400 && TOO_LONG.test(text)) {
+        return inputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `ollama answered ${response.status}: ${text.slice(0, 200)}` });
     }

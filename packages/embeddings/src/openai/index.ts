@@ -2,17 +2,33 @@
  * `@arki/embeddings/openai`: OpenAI embedding models through the AI SDK.
  *
  * The SDK peers (`@ai-sdk/openai`, `ai`) are loaded with a dynamic `import()` on the first call, not
- * at import. That is what lets the pure root `resolveEmbeddingModel` build an OpenAI record without
- * the root ever naming an SDK type or requiring the peer to be installed. A missing peer is the
+ * at import, so `createOpenAIModel` builds a record without the peer installed and an app that never
+ * calls it never loads the SDK. A missing peer is the
  * value `ModelUnavailable { reason: 'peer-missing' }`, returned by that first call.
  */
 import { isFailure } from '@arki/failure';
 
-import type { EmbeddingModel, NativeRequest } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
-import { providerInputTooLong, truncateByEstimate } from '../tokens.js';
+import { countTokens, truncateByEstimate } from '../tokens.js';
+
+// OpenAI's context_length_exceeded error reads "This model's maximum context length is N tokens, however you requested ...".
+const TOO_LONG = /maximum context length/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type OpenAIModelOptions = {
   /** Default `'text-embedding-3-small'`. */
@@ -92,8 +108,8 @@ export function createOpenAIModel(options: OpenAIModelOptions) {
         return ConfigurationFailure({ message: `openai refused the API key (${status})` });
       }
       if (status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (status === 400 && mentionsContextLength(`${error.message} ${error.responseBody ?? ''}`)) {
-        return providerInputTooLong(model, texts);
+      if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
+        return inputTooLong(model, texts);
       }
       return InvalidOutput({ reason: `openai answered ${status}: ${error.message.slice(0, 200)}` });
     }

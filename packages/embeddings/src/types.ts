@@ -19,8 +19,6 @@ export const EMBEDDING_PROVIDERS = [
 ] as const;
 export type EmbeddingProviderName = (typeof EMBEDDING_PROVIDERS)[number];
 
-/** `provider:model`, e.g. `'ollama:qwen3-embedding:0.6b'`. Everything after the first `:` is the model id. */
-export type EmbeddingModelRef = `${EmbeddingProviderName}:${string}`;
 
 /** Why a text is embedded. Asymmetric models prefix queries and documents differently. */
 export const PURPOSES = ['query', 'document', 'similarity', 'classification', 'clustering'] as const;
@@ -191,8 +189,6 @@ export type CacheStore = {
   set(key: string, value: Uint8Array, ttlMs?: number): Promise<void>;
 };
 
-/** Where `resolveEmbeddingModel` reads variables from: `process.env`, `import.meta.env`, or a plain record. */
-export type EnvSource = Readonly<Record<string, string | undefined>>;
 
 /** The logger `createEmbedder` writes lifecycle records to. `@arki/log` exports no `Logger` name. */
 export type EmbeddingsLogger = ReturnType<typeof getLogger>;

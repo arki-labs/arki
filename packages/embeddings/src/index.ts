@@ -11,11 +11,9 @@ export type {
   Embedding,
   EmbeddingBatch,
   EmbeddingModel,
-  EmbeddingModelRef,
   EmbeddingProviderName,
   EmbeddingSpace,
   EmbeddingsLogger,
-  EnvSource,
   Instruction,
   Int8Calibration,
   NativeEmbeddings,
@@ -41,12 +39,11 @@ export {
   isEmbedFailure,
 } from './failures.js';
 export type { EmbedFailure } from './failures.js';
-export { isSameSpace, spaceId } from './space.js';
+export { isSameSpace, resolveSpace, spaceId } from './space.js';
 export { createEmbedder } from './embedder.js';
 export { embed, embedMany } from './embed.js';
 export { embedStream } from './stream.js';
 export type { EmbedStreamOptions } from './stream.js';
-export { resolveEmbeddingModel, resolveSpace } from './resolve.js';
 export {
   E5_INSTRUCTION,
   EMBEDDINGGEMMA_INSTRUCTION,

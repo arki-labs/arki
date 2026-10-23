@@ -8,16 +8,16 @@ Text → vectors for ARKI. One `Embedder` shape over every provider, every respo
 bun add @arki/embeddings @arki/failure
 ```
 
-`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./rerank`, `./tei`, `./env` and `./testing` need no peer.
+`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./rerank`, `./tei` and `./testing` need no peer.
 
 ## Quick start
 
-Embed documents with whichever provider the environment configures. The imports come from `@arki/embeddings` and `@arki/failure`.
+Build the model with its provider's factory, from your app's own settings, then embed. The imports come from `@arki/embeddings`, `@arki/embeddings/ollama` and `@arki/failure`.
 
 ```ts from="examples/index-documents.ts#embed-documents"
-/** Picks the model from the environment, then embeds every text. The first failure comes back as the value. */
-export async function embedDocuments(texts: readonly string[], env: EnvSource) {
-  const model = resolveEmbeddingModel(undefined, env); // ollama → openai → voyage → google
+/** Builds the model from the app's own settings, then embeds every text. The first failure comes back as the value. */
+export async function embedDocuments(texts: readonly string[], ollamaBaseURL: string) {
+  const model = createOllamaModel({ id: 'qwen3-embedding:0.6b', baseURL: ollamaBaseURL });
   if (isFailure(model)) return model;
   const embedder = createEmbedder(model);
   if (isFailure(embedder)) return embedder;
@@ -25,11 +25,11 @@ export async function embedDocuments(texts: readonly string[], env: EnvSource) {
 }
 ```
 
-Call it with `process.env`. Store `spaceId(batch.space)` next to your index, so you can tell later which model made the vectors.
+The package never reads environment variables: your app reads its own (with `@arki/env` or any schema) and passes keys and URLs to `createXModel`, so which provider runs is a line of your code, not a variable. Store `spaceId(batch.space)` next to your index, so you can tell later which model made the vectors.
 
 - **Checked output.** Every response must have one vector per input, the expected dimensions, only finite numbers and a non-zero norm. Anything else is `InvalidOutput`, and the whole batch is discarded.
 - **All or nothing.** `embedMany` packs inputs by the model's `maxBatch` and `maxBatchTokens`, runs chunks with bounded concurrency (default 2) and keeps input order. The first failure cancels the remaining chunks and is returned with no vectors.
-- **Spaces.** `EmbeddingSpace` says which vectors are comparable: provider, model, revision, dimensions, normalisation, dtype and instruction version. Store `spaceId(space)` next to your index; `isSameSpace` and `resolveEmbeddingModel(…, undefined, { requiredSpace })` refuse a different one with `SpaceMismatch`.
+- **Spaces.** `EmbeddingSpace` says which vectors are comparable: provider, model, revision, dimensions, normalisation, dtype and instruction version. Store `spaceId(space)` next to your index; `isSameSpace(stored, await resolveSpace(embedder))` tells a different one apart before anything is embedded; answer `SpaceMismatch` then, never a silent re-embed.
 
 To add vectors to an existing index, refuse a different space before any request is sent:
 
@@ -58,7 +58,7 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 
 | Entry                                | What it is                                                                                                                                                                                                                                                                                                                                                                                         | Peers                                     |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `embedStream`, `withResilience`, `withCache`, `memoryCacheStore`, `withTelemetry`, `withMiddleware`, `resolveEmbeddingModel`, `resolveSpace`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `truncate`, `quantize`, `calibrateInt8`, `unpackBits`, `hamming`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                                      |
+| `@arki/embeddings`                   | types, `createEmbedder`, `embed`, `embedMany`, `embedStream`, `withResilience`, `withCache`, `memoryCacheStore`, `withTelemetry`, `withMiddleware`, `resolveSpace`, `spaceId`, `isSameSpace`, `cosine`, `l2Normalize`, `norm`, `truncate`, `quantize`, `calibrateInt8`, `unpackBits`, `hamming`, `countTokens`, `normalizeText`, the `*_INSTRUCTION` tables, the failures | none                                      |
 | `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                                                                                                                                                                                  | none                                      |
 | `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                                                                                                                                                                                  | `@ai-sdk/openai`, `ai` (optional)         |
 | `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                                                                                                                                                                    | none                                      |
@@ -71,17 +71,13 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/sparse`            | `createSparseModel({ id, baseURL, dimensions, … })`: SPLADE sparse vectors from TEI's `/embed_sparse`; `requireSparseSpace`                                                                                                                                                                                                                                                                        | none                                      |
 | `@arki/embeddings/rerank`            | `rerank(reranker, query, items, { text, topK?, onTooLong?, signal? })`, `withRerankCache(reranker, store)`, the `Reranker` type                                                                                                                                                                                                                                                                    | none                                      |
 | `@arki/embeddings/tei`               | `createTeiReranker({ id, baseURL, maxDocuments?, maxInputTokens? })`: a reranker on a TEI server's `/rerank`                                                                                                                                                                                                                                                                                       | none                                      |
-| `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                                                                                                                                                                                  | none                                      |
 | `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                                                                                                                      | none                                      |
 | `@arki/embeddings/dot`               | `embeddings({ model?, cache?, resilience?, env? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                                                                                                            | `@arki/dot` (optional)                    |
 | `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default; `await createTransformersReranker({ id?, dtype?, … })`: bge-reranker-v2-m3 `q8` or Qwen3-Reranker-0.6B in process                                                                                                              | `@huggingface/transformers` (optional)    |
 | `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline; `fakeReranker({ scores?, maxDocuments?, maxInputTokens? })`                                                                                                                                                                         | none                                      |
 
-`resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
+Creating a model never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
-### Variables
-
-`EMBEDDING_MODEL` (`provider:model`, e.g. `ollama:qwen3-embedding:0.6b`), `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `VOYAGE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COHERE_API_KEY`, `MISTRAL_API_KEY`, `JINA_API_KEY`, for Bedrock `AWS_REGION` with `AWS_BEARER_TOKEN_BEDROCK` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, and for a self-hosted server `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_DIMENSIONS` (the server does not report its size) and `OPENAI_COMPATIBLE_API_KEY`. Without `EMBEDDING_MODEL`, the first configured provider in the order `ollama → openai → voyage → google` wins. Cohere, Mistral, Jina, Bedrock and OpenAI-compatible servers are used only when named, e.g. `EMBEDDING_MODEL=cohere:embed-v4.0` or `openai-compatible:BAAI/bge-m3`. Nothing configured is `ConfigurationFailure`.
 
 ## Failure behaviour
 
@@ -131,7 +127,7 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 
 ## Dot plugin
 
-`embeddings({ model?, cache?, resilience?, env? })` from `@arki/embeddings/dot` publishes `embedder` (`Embedder | null`), built once at boot. `model` is a ref, a model record, an `Embedder`, or a function returning one of the last two or a failure; without it, `resolveEmbeddingModel` reads `env` (default `process.env`). `cache: true` adds `withCache` over a `memoryCacheStore()`, or pass a store; `resilience: true` adds `withResilience`, or pass a policy. The cache sits outside the retries. A configuration that does not resolve is logged once at `warn` and `embedder` is `null`, so the app boots and features degrade.
+`embeddings({ model, cache?, resilience? })` from `@arki/embeddings/dot` publishes `embedder` (`Embedder | null`), built once at boot. `model` is a model record, an `Embedder`, or a function returning one of them or a failure; the function runs at boot, so read your env there. `cache: true` adds `withCache` over a `memoryCacheStore()`, or pass a store; `resilience: true` adds `withResilience`, or pass a policy. The cache sits outside the retries. A model that does not build (a missing key returned as `ConfigurationFailure`) is logged once at `warn` and `embedder` is `null`, so the app boots and features degrade.
 
 `withMiddleware(embedder, ...middleware)` wraps `embed` with your own `EmbedMiddleware` functions. The first one is outermost: it sees the call first and the result last.
 
@@ -407,7 +403,7 @@ No published numbers yet. README numbers come only from `bun run bench --profile
 ## Documentation
 
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.
-- [Set up embeddings](docs/recipes/set-up-embeddings.md): Ollama by default, `EMBEDDING_MODEL`, OpenAI when configured.
+- [Set up embeddings](docs/recipes/set-up-embeddings.md): Ollama locally, a hosted provider from your own settings.
 - [llms.txt](llms.txt): the import map.
 
 ## Support

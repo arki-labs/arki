@@ -7,7 +7,7 @@ import { is, recordSchema } from '@arki/schema';
 
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
-import { resolveSpace } from '../resolve.js';
+import { resolveSpace } from '../space.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { createOllamaModel } from './index.js';
 

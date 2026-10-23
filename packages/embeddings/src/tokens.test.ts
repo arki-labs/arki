@@ -11,7 +11,7 @@ import { InputTooLong } from './failures.js';
 import { createOllamaModel } from './ollama/index.js';
 import { createOpenAICompatibleModel } from './openai-compatible/index.js';
 import { echoTexts, stubModel } from './tests/stub-model.js';
-import { countTokens, providerInputTooLong, truncateByEstimate } from './tokens.js';
+import { countTokens, truncateByEstimate } from './tokens.js';
 
 const fixture = (name: string): string => readFileSync(new URL(`ollama/__fixtures__/${name}`, import.meta.url), 'utf8');
 
@@ -166,17 +166,5 @@ describe('onTooLong', () => {
     expect(sent[0]).toMatchObject({ input: ['aaaaaaa'] });
     expect(truncateByEstimate('a'.repeat(7) + '😀', 2).isWellFormed()).toBe(true);
     expect(truncateByEstimate('a'.repeat(6) + '😀', 2)).toBe('aaaaaa😀');
-  });
-});
-
-describe('providerInputTooLong', () => {
-  // A provider's 400 does not say which input; the tokenizer, not the character length, finds it.
-  it('names the input with the most tokens by the record tokenizer, with that count', () => {
-    const model = stubModel(echoTexts, { maxInputTokens: 8, countTokens: text => (text.startsWith('字') ? 50 : 1) });
-    expect(providerInputTooLong(model, ['a'.repeat(40), '字字']).data).toEqual({
-      index: 1,
-      tokens: { basis: 'counted', count: 50 },
-      max: 8,
-    });
   });
 });

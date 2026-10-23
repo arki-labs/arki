@@ -1,5 +1,4 @@
 import type { EmbeddingModel, EmbedInput, TokenCount } from './types.js';
-import { InputTooLong } from './failures.js';
 
 /** The text part of an input; `''` for an image-only input. */
 export function textOf(input: EmbedInput): string {
@@ -40,23 +39,6 @@ export function truncateByEstimate(text: string, maxTokens: number): string {
   // A high surrogate last lost its low half to the cut. Checked by code unit, without the `u` flag:
   // `isWellFormed` is not on every runtime.
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
-}
-
-/**
- * The `InputTooLong` for a provider's "context length exceeded" answer, which does not say which
- * input it was. Names the input with the most tokens by `countTokens(model, text)`: the likeliest
- * culprit, with that count.
- */
-export function providerInputTooLong(model: EmbeddingModel, texts: readonly string[]) {
-  let index = 0;
-  let tokens: TokenCount = { basis: 'unknown' };
-  for (const [position, text] of texts.entries()) {
-    const counted = countTokens(model, text);
-    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
-    index = position;
-    tokens = counted;
-  }
-  return InputTooLong({ index, tokens, max: model.maxInputTokens });
 }
 
 const BASIS_STRENGTH = { reported: 3, counted: 2, estimated: 1, unknown: 0 } as const;

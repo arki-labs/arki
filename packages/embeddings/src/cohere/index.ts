@@ -6,11 +6,28 @@ import { is, recordSchema } from '@arki/schema';
 
 import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
-import { mentionsContextLength, retryAfterMs } from '../http.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
+import { retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { toBase64 } from '../base64.js';
-import { providerInputTooLong } from '../tokens.js';
+import { countTokens } from '../tokens.js';
+
+// Cohere's 400 wording is undocumented, so this pattern stays loose: a miss turns InputTooLong (which a caller can
+// split and retry) into an opaque InvalidOutput.
+const TOO_LONG = /context length|context window|maximum context|too many tokens|input length|longer than|too long|exceeds? the (?:maximum|max|context)/i;
+
+/** `InputTooLong` naming the input with the most tokens by `countTokens`: the likeliest culprit, with that count. */
+function inputTooLong(model: EmbeddingModel, texts: readonly string[]) {
+  let index = 0;
+  let tokens: TokenCount = { basis: 'unknown' };
+  for (const [position, text] of texts.entries()) {
+    const counted = countTokens(model, text);
+    if (counted.basis === 'unknown' || (tokens.basis !== 'unknown' && counted.count <= tokens.count)) continue;
+    index = position;
+    tokens = counted;
+  }
+  return InputTooLong({ index, tokens, max: model.maxInputTokens });
+}
 
 export type CohereModelOptions = {
   /** Default `'embed-v4.0'`. */
@@ -129,7 +146,7 @@ export function createCohereModel(options: CohereModelOptions) {
         return ConfigurationFailure({ message: `cohere refused the API key (${response.status})` });
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
-      if (response.status === 400 && mentionsContextLength(text)) return providerInputTooLong(model, texts);
+      if (response.status === 400 && TOO_LONG.test(text)) return inputTooLong(model, texts);
       return InvalidOutput({ reason: `cohere answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

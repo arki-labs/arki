@@ -8,7 +8,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 2. Every provider answer goes through the output check in `src/embedder.ts` (count, dimensions, finite numbers, non-zero norm). A model record's `embedTexts` returns raw vectors and never validates them itself.
 3. `embedMany` is all or nothing. Never return partial vectors from a failed batch.
 4. The root imports no provider SDK, no `process.env` and no `node:*`. A provider SDK is an optional peer, loaded on the first call, and a missing one is `ModelUnavailable { reason: 'peer-missing' }`.
-5. `resolveEmbeddingModel` is pure. It never touches the network. A revision the provider reports later (Ollama's digest) is read on the first call.
+5. The package reads no environment variables and creating a model never touches the network. Apps pass keys and URLs to `createXModel`. A revision the provider reports later (Ollama's digest) is read on the first call.
 6. Vectors from different spaces are never mixed. `EmbeddingSpace` holds everything that must match; a change to a prompt changes `instructionVersion`, so it is a new space.
 7. The library never changes input text. Normalising is the caller's job, and the cache key must hash the exact text sent.
 8. A new failure is defined once in `src/failures.ts` with `defineFailure`, with JSDoc `@fix` and `@verify`, and listed in `EMBED_FAILURES`.
