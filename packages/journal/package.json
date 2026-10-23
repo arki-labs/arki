@@ -92,6 +92,11 @@
       "import": "./dist/postgres.js",
       "default": "./dist/postgres.js"
     },
+    "./kurrentdb": {
+      "types": "./dist/kurrentdb.d.ts",
+      "import": "./dist/kurrentdb.js",
+      "default": "./dist/kurrentdb.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -143,6 +148,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@kurrent/kurrentdb-client": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
@@ -152,6 +158,7 @@
     "drizzle-kit": "catalog:drizzle",
     "esbuild": "catalog:",
     "pg": "catalog:drizzle",
+    "testcontainers": "catalog:testing",
     "vitest": "catalog:"
   },
   "peerDependencies": {
@@ -159,6 +166,7 @@
     "@arki/dot": "workspace:*",
     "@arki/http": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@kurrent/kurrentdb-client": "catalog:",
     "@orpc/server": "catalog:backend",
     "drizzle-kit": "catalog:drizzle"
   },
@@ -173,6 +181,9 @@
       "optional": true
     },
     "@electric-sql/pglite": {
+      "optional": true
+    },
+    "@kurrent/kurrentdb-client": {
       "optional": true
     },
     "@orpc/server": {

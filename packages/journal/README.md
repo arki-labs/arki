@@ -35,7 +35,7 @@ npm install @arki/journal
 
 The tables live in your Drizzle schema (`journalTables()` from `@arki/journal/pg`). Create them with your migration tool.
 
-Optional peers: `@arki/dot`, `@orpc/server`, `@arki/http`, `@electric-sql/pglite` and `drizzle-kit` (only for `@arki/journal/testing`).
+Optional peers: `@arki/dot`, `@orpc/server`, `@arki/http`, `@kurrent/kurrentdb-client` (only for `@arki/journal/kurrentdb`), `@electric-sql/pglite` and `drizzle-kit` (only for `@arki/journal/testing`).
 
 ## Quick start
 
@@ -142,7 +142,7 @@ await worker.start();
 
 ## Runtime support
 
-The core and `@arki/journal/errors` hold no driver. They load on Node, Bun, Deno and in the browser. `bun run test:runtimes` proves that. The write path needs a Drizzle database on Postgres, so it runs where your driver runs (Node, Bun). `@arki/journal/testing` runs an in-memory PGlite for tests.
+The core and `@arki/journal/errors` hold no driver. They load on Node, Bun, Deno and in the browser. `bun run test:runtimes` proves that. The write path needs a Drizzle database on Postgres, so it runs where your driver runs (Node, Bun). `@arki/journal/testing` runs an in-memory PGlite for tests. `@arki/journal/kurrentdb` runs where `@kurrent/kurrentdb-client` runs (gRPC: Node and Bun); its tests use Node.
 
 ## Commands
 
@@ -317,6 +317,24 @@ const order = j.entity('order', orders, { events: storeLog });
 ```
 
 It has every part of the log: `all`, so async projections and `rerun` work, and `erase`, so `forget` works. Workers append to different entities at the same time, so a later row can commit before an earlier one. `all` therefore orders events by the appending transaction (`transaction_id`, then `seq`), and reads only rows below the oldest transaction still open on that server. A reader never moves past a row that could still commit behind it. The cost: one long transaction on that Postgres server holds async projections back until it ends. Its positions look like `"transaction id:seq"` and have no `distance`.
+
+#### KurrentDB
+
+`kurrentEvents` from `@arki/journal/kurrentdb` keeps an entity's events in KurrentDB (formerly EventStoreDB), through `@kurrent/kurrentdb-client`. Its entities are forwarded.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+import { KurrentDBClient } from '@kurrent/kurrentdb-client';
+import { kurrentEvents } from '@arki/journal/kurrentdb';
+
+const client = KurrentDBClient.connectionString`kurrentdb://localhost:2113?tls=false`;
+const order = j.entity('order', orders, { events: kurrentEvents({ client }) });
+```
+
+- **Streams.** One entity is one stream, `<kind>-<entityId>`, so KurrentDB's `$ce-<kind>` category groups a kind. A kind must not contain `-` (`BAD_DEFINITION`). `prefix` puts every stream of the log under one name, such as `'billing.'`, for several apps or test runs on one cluster.
+- **Events.** The event's type and data are KurrentDB's own fields; everything else of the journal event sits in its metadata under `journal`. Data must be a JSON object, array or string. KurrentDB takes only UUID event ids, so each event gets a UUIDv5 of its journal id, and a retried append carries the same ids.
+- **Appends.** Each batch is one atomic append with the stream's expected revision. A repeat KurrentDB does not recognise is read back and acked when the same journal events are there.
+- **Order.** `all` reads `$all`, which is KurrentDB's commit order. Positions look like `"commit:prepare"` and have no `distance`.
+- **forget** is refused (`NO_HISTORY`): KurrentDB cannot rewrite an event in place. A `copyLog` into KurrentDB carries an erased event's erased data, without the erase stamp.
 
 #### Switching an entity's store
 

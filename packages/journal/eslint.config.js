@@ -5,24 +5,38 @@ const dotOnlyInBridge = {
   group: ['@arki/dot', '@arki/dot/*'],
   message: '`@arki/dot` is an optional peer. Only `src/dot.ts` may import it, so the core entry loads without it.',
 };
+const kurrentOnlyInAdapter = {
+  group: ['@kurrent/*'],
+  message:
+    '`@kurrent/kurrentdb-client` is an optional peer. Only `src/kurrentdb.ts` may import it, so the core entry loads without it.',
+};
 const orpcOnlyInAdapter = {
   group: ['@orpc/*'],
   message: '`@orpc/server` is an optional peer. Only `src/orpc.ts` may import it, so the core entry loads without it.',
 };
 
-// `src/dot.ts`, `src/orpc.ts` and `src/foreman/` are the adapters; `src/test-support.ts` is test scaffolding.
+// `src/dot.ts`, `src/orpc.ts`, `src/kurrentdb.ts` and `src/foreman/` are the adapters; `src/test-support.ts` is test scaffolding.
 export default [
-  ...library({ adapters: ['src/dot.ts', 'src/orpc.ts', 'src/foreman/*.ts', 'src/test-support.ts'] }),
+  ...library({
+    adapters: ['src/dot.ts', 'src/orpc.ts', 'src/kurrentdb.ts', 'src/foreman/*.ts', 'src/test-support.ts'],
+  }),
   // `failure/must-use` and `failure/no-blind-accept`: a returned failure is never thrown away or accepted unchecked.
   failure.configs.recommended,
   {
     // The core may not import the optional peers (features live in `@arki/dot/feature`).
     files: ['src/**/*.ts'],
-    ignores: ['src/**/*.test.ts', 'src/dot.ts', 'src/orpc.ts', 'src/foreman/*.ts', 'src/test-support.ts'],
+    ignores: [
+      'src/**/*.test.ts',
+      'src/dot.ts',
+      'src/orpc.ts',
+      'src/kurrentdb.ts',
+      'src/foreman/*.ts',
+      'src/test-support.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...portableImportPatterns, dotOnlyInBridge, orpcOnlyInAdapter] },
+        { patterns: [...portableImportPatterns, dotOnlyInBridge, orpcOnlyInAdapter, kurrentOnlyInAdapter] },
       ],
     },
   },
@@ -34,6 +48,13 @@ export default [
         'error',
         { patterns: [...portableImportPatterns, orpcOnlyInAdapter] },
       ],
+    },
+  },
+  {
+    // The KurrentDB adapter is the one file that may import `@kurrent/kurrentdb-client`.
+    files: ['src/kurrentdb.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [...portableImportPatterns, dotOnlyInBridge, orpcOnlyInAdapter] }],
     },
   },
   {

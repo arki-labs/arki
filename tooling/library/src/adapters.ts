@@ -27,6 +27,7 @@ export const ADAPTERS = new Set([
   'msw',
   'connections',
   'redis',
+  'kurrentdb',
   'file',
   'eslint',
   'contract',

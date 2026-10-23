@@ -65,8 +65,14 @@ describe('postgresEvents all', () => {
     const reader = postgresEvents({ db: dbB, tables: storeTables });
     const all = reader.all;
     if (all === undefined) throw new Error('postgresEvents has a global order');
-    const held = Promise.withResolvers<void>();
-    const inA = Promise.withResolvers<void>();
+    let release: (() => void) | undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let appended: (() => void) | undefined;
+    const inA = new Promise<void>(resolve => {
+      appended = resolve;
+    });
     const a = dbA.transaction(async tx => {
       await postgresEvents({ db: tx, tables: storeTables }).append({
         kind: 'overlap',
@@ -74,10 +80,10 @@ describe('postgresEvents all', () => {
         expectedVersion: 0,
         events: [eventOf(20, 'a')],
       });
-      inA.resolve();
-      await held.promise;
+      appended?.();
+      await held;
     });
-    await inA.promise;
+    await inA;
     await reader.append({ kind: 'overlap', entityId: 'b', expectedVersion: 0, events: [eventOf(10, 'b')] });
 
     const seen: string[] = [];
@@ -90,7 +96,7 @@ describe('postgresEvents all', () => {
     await read();
     expect(seen).toEqual([]);
 
-    held.resolve();
+    release?.();
     await a;
     await read();
     expect(seen).toEqual(['a', 'b']);

@@ -7,7 +7,7 @@
 <!-- llms:start -->
 - `@arki/journal`: `BATCH_LIMIT`, `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `EventLogPosition`, `JournalError`, `RUN_FIELD_LIMITS`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`; and 141 more.
 - http/* (2 paths): The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `@arki/journal/http`, `@arki/journal/http/webhooks`.
-- one path each: `@arki/journal/pg`, `@arki/journal/foreman`, `@arki/journal/dot`, `@arki/journal/errors`, `@arki/journal/contract`, `@arki/journal/orpc`, `@arki/journal/projection`, `@arki/journal/testing`, `@arki/journal/event-log-contract`, `@arki/journal/postgres`.
+- one path each: `@arki/journal/pg`, `@arki/journal/foreman`, `@arki/journal/dot`, `@arki/journal/errors`, `@arki/journal/contract`, `@arki/journal/orpc`, `@arki/journal/projection`, `@arki/journal/testing`, `@arki/journal/event-log-contract`, `@arki/journal/postgres`, `@arki/journal/kurrentdb`.
 <!-- llms:end -->
 
 ## Start here
@@ -43,6 +43,7 @@
 - Events are stored unless the entity says `events: 'transient'`. A transient entity still gets reducers, inline projections and effects; async projections and taps on it are refused at `compose`, and replay, verify, repair, forget, rerun and adopt throw `NO_HISTORY`. `workflow.run` always stores its events.
 - `events` also takes an event log. One that cannot join the transaction is forwarded: a `forward` job appends the events after the commit, one entity's jobs in version order. History verbs throw `FORWARD_PENDING` until it ran; `journal.forwardLag(db)` shows what waits. Test an adapter with `eventLogContract` from `@arki/journal/event-log-contract`.
 - `postgresEvents({ db, tables: eventLogTables() })` from `@arki/journal/postgres` keeps events in another Postgres database, with `all` and `erase`. To switch an entity's store: pause its writes, `journal.copyLog(db, entity, { to })`, flip `events`, `reset` its async projections.
+- `kurrentEvents({ client, prefix? })` from `@arki/journal/kurrentdb` keeps events in KurrentDB: one stream per entity (`<kind>-<id>`, no `-` in the kind), `all` over `$all`, no `forget`.
 - Pass ids exactly as they are stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
 

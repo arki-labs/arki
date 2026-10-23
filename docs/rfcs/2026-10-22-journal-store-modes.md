@@ -394,9 +394,10 @@ The adapter contract ships as a test suite (proposed
 version, all-or-nothing batches, idempotent retry by event id, the
 lower/equal/higher ladder, stream order, `all` order, and `bind(tx)`
 read-your-writes. Every adapter, the built-in one included, must pass it.
-MongoDB and KurrentDB adapters ship as separate packages so the core takes
-no driver dependency (names proposed: `@arki/journal-mongodb`,
-`@arki/journal-kurrentdb`).
+MongoDB and KurrentDB adapters ship as subpaths of `@arki/journal`
+(`@arki/journal/kurrentdb`, later `@arki/journal/mongodb`) with the
+driver as an optional peer, so the core takes no driver dependency
+(founder, 2026-10-23; first proposed as separate packages).
 
 ### 8.7 Switching an entity's store
 
@@ -498,6 +499,24 @@ those entities are paused, then flip the setting.
     after the flip (documented), and a foreign position is refused by
     `postgresEvents`. The old log keeps its copy.
 - **Slice 9: KurrentDB adapter.**
+  **Done (2026-10-23).** `kurrentEvents({ client, prefix? })` from the
+  subpath `@arki/journal/kurrentdb`, with `@kurrent/kurrentdb-client`
+  1.3.1 as an optional peer (founder: a subpath like `@arki/pubsub/redis`,
+  not the separate package 8.6 proposed). Checked against a real server
+  (`kurrentplatform/kurrentdb:26.2.3`) before building:
+  - Event ids must be UUIDs, so each is a UUIDv5 of the journal id; the
+    rest of the journal event goes in the metadata under `journal`, parsed
+    back with the stored-event schema.
+  - The same UUIDs at the expected revision are acked by the server. A
+    repeat it does not recognise fails on the revision; the adapter reads
+    the stream back and acks the same journal events (tested by copying an
+    event into a stream under another UUID).
+  - `readAll` starts at the position given, so `after` skips the event at
+    the cursor. `$all` is commit order, so no horizon is needed.
+  - `prefix` gives each contract case its own streams, since KurrentDB
+    cannot be emptied; it also lets apps share a cluster.
+  - No `erase`, so `forget` is refused. A `copyLog` into KurrentDB keeps an
+    erased event's data but not its stamp.
 - **Slice 10: MongoDB adapter**, after picking its batch layout and global
   order.
 
