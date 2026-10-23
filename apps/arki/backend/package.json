@@ -11,7 +11,8 @@
     "./db": "./src/db.ts",
     "./env": "./src/env.ts",
     "./api": "./src/api.ts",
-    "./fleet": "./src/features/fleet/handler.ts"
+    "./fleet": "./src/features/fleet/handler.ts",
+    "./foreman": "./src/features/fleet/foreman.ts"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo node_modules",

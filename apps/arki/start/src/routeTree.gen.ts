@@ -51,6 +51,7 @@ import { Route as PostsSlugRouteImport } from './routes/posts/$slug';
 import { Route as PostsFeedDotxmlRouteImport } from './routes/posts/feed[.]xml';
 import { Route as AppProfileIndexRouteImport } from './routes/_app/profile/index';
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$';
+import { Route as ApiForemanSplatRouteImport } from './routes/api/foreman/$';
 import { Route as ApiOrpcSplatRouteImport } from './routes/api/orpc.$';
 import { Route as BackofficeBackofficeIndexRouteImport } from './routes/backoffice/_backoffice/index';
 import { Route as DocsGuidesIndexRouteImport } from './routes/docs/guides/index';
@@ -272,6 +273,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any);
+const ApiForemanSplatRoute = ApiForemanSplatRouteImport.update({
+  id: '/api/foreman/$',
+  path: '/api/foreman/$',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const ApiOrpcSplatRoute = ApiOrpcSplatRouteImport.update({
   id: '/api/orpc/$',
   path: '/api/orpc/$',
@@ -373,6 +379,7 @@ export interface FileRoutesByFullPath {
   '/packages/': typeof PackagesIndexRoute;
   '/posts/': typeof PostsIndexRoute;
   '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/foreman/$': typeof ApiForemanSplatRoute;
   '/api/orpc/$': typeof ApiOrpcSplatRoute;
   '/docs/guides/$slug': typeof DocsGuidesSlugRoute;
   '/packages/$name/api.json': typeof PackagesNameApiDotjsonRoute;
@@ -418,6 +425,7 @@ export interface FileRoutesByTo {
   '/packages': typeof PackagesIndexRoute;
   '/posts': typeof PostsIndexRoute;
   '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/foreman/$': typeof ApiForemanSplatRoute;
   '/api/orpc/$': typeof ApiOrpcSplatRoute;
   '/docs/guides/$slug': typeof DocsGuidesSlugRoute;
   '/packages/$name/api.json': typeof PackagesNameApiDotjsonRoute;
@@ -474,6 +482,7 @@ export interface FileRoutesById {
   '/packages/': typeof PackagesIndexRoute;
   '/posts/': typeof PostsIndexRoute;
   '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/foreman/$': typeof ApiForemanSplatRoute;
   '/api/orpc/$': typeof ApiOrpcSplatRoute;
   '/docs/guides/$slug': typeof DocsGuidesSlugRoute;
   '/packages/$name/api.json': typeof PackagesNameApiDotjsonRoute;
@@ -529,6 +538,7 @@ export interface FileRouteTypes {
     | '/packages/'
     | '/posts/'
     | '/api/auth/$'
+    | '/api/foreman/$'
     | '/api/orpc/$'
     | '/docs/guides/$slug'
     | '/packages/$name/api.json'
@@ -574,6 +584,7 @@ export interface FileRouteTypes {
     | '/packages'
     | '/posts'
     | '/api/auth/$'
+    | '/api/foreman/$'
     | '/api/orpc/$'
     | '/docs/guides/$slug'
     | '/packages/$name/api.json'
@@ -629,6 +640,7 @@ export interface FileRouteTypes {
     | '/packages/'
     | '/posts/'
     | '/api/auth/$'
+    | '/api/foreman/$'
     | '/api/orpc/$'
     | '/docs/guides/$slug'
     | '/packages/$name/api.json'
@@ -666,6 +678,7 @@ export interface RootRouteChildren {
   AboutIndexRoute: typeof AboutIndexRoute;
   FeedbackIndexRoute: typeof FeedbackIndexRoute;
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
+  ApiForemanSplatRoute: typeof ApiForemanSplatRoute;
   ApiOrpcSplatRoute: typeof ApiOrpcSplatRoute;
 }
 
@@ -965,6 +978,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/api/foreman/$': {
+      id: '/api/foreman/$';
+      path: '/api/foreman/$';
+      fullPath: '/api/foreman/$';
+      preLoaderRoute: typeof ApiForemanSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/api/orpc/$': {
       id: '/api/orpc/$';
       path: '/api/orpc/$';
@@ -1227,6 +1247,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutIndexRoute: AboutIndexRoute,
   FeedbackIndexRoute: FeedbackIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiForemanSplatRoute: ApiForemanSplatRoute,
   ApiOrpcSplatRoute: ApiOrpcSplatRoute,
 };
 export const routeTree = rootRouteImport
