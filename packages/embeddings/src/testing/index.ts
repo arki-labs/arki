@@ -1,6 +1,6 @@
 /**
- * `@arki/embeddings/testing`: a deterministic fake embedder for tests, and real vectors recorded
- * once and replayed offline.
+ * `@arki/embeddings/testing`: a deterministic fake embedder and fake reranker for tests, and real
+ * vectors recorded once and replayed offline.
  *
  * The fake is NOT semantic. Equal text gives an identical unit vector; different text gives an
  * unrelated one. A test that asserts ranking by meaning passes or fails for the wrong reason with
@@ -14,7 +14,8 @@ import { getLogger } from '@arki/log';
 import type { EmbedFailure } from '../failures.js';
 import type { EmbedInput, EmbedOptions, Embedder, Embedding, EmbeddingModel, NativeRequest } from '../types.js';
 import { buildEmbedder } from '../embedder.js';
-import { Cancelled, ConfigurationFailure, InvalidOutput } from '../failures.js';
+import type { Reranker } from '../rerank/index.js';
+import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, UnsupportedInput } from '../failures.js';
 import { withMiddleware } from '../middleware.js';
 import { sha256Hex } from '../sha256.js';
 import { isSameSpace } from '../space.js';
@@ -294,4 +295,52 @@ export function fixtureEmbedder(recordings: unknown) {
       )?.space ?? base,
     embed,
   } satisfies Embedder;
+}
+
+export type FakeRerankerOptions = {
+  /** A fixed score per exact document text. Any other document gets a seeded score in [0, 1). */
+  readonly scores?: Readonly<Record<string, number>>;
+  /** Different seeds give unrelated scores for the same pair. Default 0. */
+  readonly seed?: number;
+  /** Default 1000. */
+  readonly maxDocuments?: number;
+  /** Default 512, counted as `rerank()` estimates without a tokenizer: characters / 4. */
+  readonly maxInputTokens?: number;
+};
+
+/** Tokens as `rerank()` estimates them without a tokenizer. */
+const estimate = (text: string) => Math.ceil(text.length / 4);
+
+/**
+ * A seeded, deterministic, not-semantic reranker. Like a real one it refuses more than
+ * `maxDocuments` documents and, unless told to truncate, a query and document over `maxInputTokens`.
+ *
+ * @example
+ * const reranker = fakeReranker({ scores: { 'the answer': 0.9 }, maxDocuments: 2 });
+ */
+export function fakeReranker(options: FakeRerankerOptions = {}): Reranker {
+  const { scores = {}, seed = 0, maxDocuments = 1000, maxInputTokens = 512 } = options;
+  const scoreOf = (query: string, document: string) =>
+    Object.hasOwn(scores, document) ? (scores[document] ?? 0) : hashText(seed, `${query}\u0000${document}`) / 4_294_967_296;
+  return {
+    provider: 'fake',
+    id: 'fake-reranker',
+    local: true,
+    maxDocuments,
+    maxInputTokens,
+    rerank(query, documents, { truncate, signal }) {
+      if (signal?.aborted) return Promise.resolve(Cancelled());
+      if (documents.length > maxDocuments) return Promise.resolve(UnsupportedInput({ index: maxDocuments, part: 'batch' }));
+      for (const [index, document] of documents.entries()) {
+        const count = estimate(query) + estimate(document);
+        if (truncate !== true && count > maxInputTokens) {
+          return Promise.resolve(InputTooLong({ index, tokens: { basis: 'estimated', count }, max: maxInputTokens }));
+        }
+      }
+      const hits = documents
+        .map((document, index) => ({ index, score: scoreOf(query, document) }))
+        .sort((left, right) => right.score - left.score);
+      return Promise.resolve({ hits, usage: { tokens: { basis: 'unknown' }, requests: 1, cacheHits: 0 } });
+    },
+  };
 }

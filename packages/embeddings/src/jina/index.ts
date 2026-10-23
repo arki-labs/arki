@@ -141,3 +141,6 @@ export function createJinaModel(options: JinaModelOptions) {
   };
   return model;
 }
+
+export { createJinaReranker } from './rerank.js';
+export type { JinaRerankerOptions } from './rerank.js';

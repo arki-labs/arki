@@ -1,9 +1,4 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-/** @type {import('typescript-eslint').Config} */
-export default [
-  {
-    ignores: ['dist/**'],
-  },
-  ...baseConfig,
-];
+// `./dot` runs inside a Dot server app and reads `process.env` there.
+export default library({ adapters: ['src/dot/**'] });

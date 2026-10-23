@@ -16,7 +16,8 @@ import type {
   NormalizeTextOptions,
   TokenCount,
 } from './index.js';
-import type { createTransformersModel } from './transformers/index.js';
+import type { rerank, RERANK_PROVIDERS, Reranker, RerankProviderName } from './rerank/index.js';
+import type { createTransformersModel, createTransformersReranker } from './transformers/index.js';
 import {
   Cancelled,
   cosine,
@@ -125,5 +126,41 @@ describe('public types of the root entry', () => {
 
   it('normalizeText is a pure string → string helper the embedder never calls', () => {
     expectTypeOf(normalizeText).toEqualTypeOf<(text: string, options?: NormalizeTextOptions) => string>();
+  });
+});
+
+describe('./rerank public types', () => {
+  it('rerank() hands back the caller’s own item type on every hit, or a failure value', () => {
+    type Hit = { readonly id: string; readonly text: string };
+    type Ranked = Exclude<Awaited<ReturnType<typeof rerank<Hit>>>, EmbedFailure>;
+    expectTypeOf<Ranked['hits'][number]['item']>().toEqualTypeOf<Hit>();
+    expectTypeOf<Ranked['hits'][number]['score']>().toEqualTypeOf<number>();
+    expectTypeOf<Extract<Awaited<ReturnType<typeof rerank<Hit>>>, EmbedFailure>>().toMatchTypeOf<EmbedFailure>();
+  });
+
+  it('every reranker factory answers a Reranker, so rerank() and withRerankCache take any of them', async () => {
+    const { withRerankCache } = await import('./rerank/index.js');
+    const { createCohereCompatibleReranker, createCohereReranker } = await import('./cohere/index.js');
+    const { createVoyageReranker } = await import('./voyage/index.js');
+    const { createJinaReranker } = await import('./jina/index.js');
+    const { createTeiReranker } = await import('./tei/index.js');
+    const { fakeReranker } = await import('./testing/index.js');
+    expectTypeOf(withRerankCache).returns.toEqualTypeOf<Reranker>();
+    for (const created of [
+      createCohereReranker({ apiKey: 'k' }),
+      createCohereCompatibleReranker({ baseURL: 'http://x', id: 'm' }),
+      createVoyageReranker({ apiKey: 'k' }),
+      createJinaReranker({ apiKey: 'k' }),
+      createTeiReranker({ baseURL: 'http://x', id: 'm' }),
+    ]) {
+      expectTypeOf(created).toMatchTypeOf<Reranker | EmbedFailure>();
+    }
+    expectTypeOf<Awaited<ReturnType<typeof createTransformersReranker>>>().toMatchTypeOf<Reranker | EmbedFailure>();
+    expectTypeOf(fakeReranker).returns.toEqualTypeOf<Reranker>();
+  });
+
+  it('a reranker names its provider from the one RERANK_PROVIDERS list', () => {
+    expectTypeOf<Reranker['provider']>().toEqualTypeOf<RerankProviderName>();
+    expectTypeOf<RerankProviderName>().toEqualTypeOf<(typeof RERANK_PROVIDERS)[number]>();
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Text embeddings — providers, factory, and rerankers.
+ * Text embeddings — providers and factory. Rerankers moved to `@arki/embeddings` (`rerank()` in `./rerank`).
  *
  * Recommendation grid (from STATE-OF-THE-ART.md):
  *   - Privacy-max    → ollama (Qwen3-Embedding-4B/8B) or openai-compatible (TEI on RTX 4090)
@@ -103,5 +103,3 @@ export {
 // Core type
 export type { EmbeddingProvider } from '../types';
 
-// Rerankers (siblings of embeddings)
-export * as rerankers from './rerankers';

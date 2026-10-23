@@ -2,7 +2,8 @@
 // `.cache/datasets/` (gitignored). Run: `bun bench/quality/datasets.ts`; the eval calls it too.
 //
 // SciFact and NFCorpus are BEIR's two smallest retrieval sets, from MTEB's copies on Hugging Face,
-// whole corpora with the test qrels. RO-STS (sentence pairs scored 0-5) is a Romanian similarity
+// whole corpora with the test qrels. FiQA (financial questions, long forum answers) feeds the rerank
+// eval, where long documents test the chunk policy. RO-STS (sentence pairs scored 0-5) is a Romanian similarity
 // diagnostic, not retrieval. The Romanian retrieval set lives in `fleet/embeddings-eval`.
 
 import { createHash } from 'node:crypto';
@@ -16,6 +17,7 @@ type RemoteFile = { readonly file: string; readonly url: string; readonly sha256
 /** Commit of each source, read on 2026-10-21. */
 const SCIFACT = 'https://huggingface.co/datasets/mteb/scifact/resolve/cf10ab6856b15b0e670ef8ae5dae4e266c12d035';
 const NFCORPUS = 'https://huggingface.co/datasets/mteb/nfcorpus/resolve/52ac3f19d3449632d9f00aab0ad34a110fc03816';
+const FIQA = 'https://huggingface.co/datasets/mteb/fiqa/resolve/5e59eeb3a7df6b85882112b747008547c21587ea';
 const RO_STS =
   'https://raw.githubusercontent.com/dumitrescustefan/RO-STS/98b5804b454892c70815777fe03e874ea7f20f1b/dataset/text-similarity';
 
@@ -52,6 +54,23 @@ export const DATASETS = {
       file: 'qrels/test.tsv',
       url: `${NFCORPUS}/qrels/test.tsv`,
       sha256: 'f8fba6ef3d4dd9c3a242a8ba4ae38276fc3622fce7dcbae764766d564542fd2a',
+    },
+  ],
+  fiqa: [
+    {
+      file: 'corpus.jsonl',
+      url: `${FIQA}/corpus.jsonl`,
+      sha256: 'a5e31bffdcbab9dbe0ff849faa170a6e71b60587ff3a99a4272584183e64d729',
+    },
+    {
+      file: 'queries.jsonl',
+      url: `${FIQA}/queries.jsonl`,
+      sha256: '95edd2939eda9de0b5bdae18352eb9b677a133d5965ec55dc911c863f9af7bb9',
+    },
+    {
+      file: 'qrels/test.tsv',
+      url: `${FIQA}/qrels/test.tsv`,
+      sha256: '6adc2a640dcdd22bb8b3858f89107adef2a7c3db20a63550dfa7a0f71e379e44',
     },
   ],
   'ro-sts': [

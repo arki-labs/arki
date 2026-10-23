@@ -8,7 +8,7 @@ Text → vectors for ARKI. One `Embedder` shape over every provider, every respo
 bun add @arki/embeddings @arki/failure
 ```
 
-`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./env` and `./testing` need no peer.
+`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./rerank`, `./tei`, `./env` and `./testing` need no peer.
 
 ## Quick start
 
@@ -62,18 +62,20 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/ollama`            | `createOllamaModel({ id?, baseURL?, keepAlive?, dimensions?, fetch? })` over `fetch` `/api/embed`                                                                                                                                                                                                                                                                                                  | none                                      |
 | `@arki/embeddings/openai`            | `createOpenAIModel({ id?, apiKey, baseURL? })` through the AI SDK                                                                                                                                                                                                                                                                                                                                  | `@ai-sdk/openai`, `ai` (optional)         |
 | `@arki/embeddings/openai-compatible` | `createOpenAICompatibleModel({ id, baseURL, dimensions, apiKey?, … })` for any server that speaks `/embeddings`                                                                                                                                                                                                                                                                                    | none                                      |
-| `@arki/embeddings/voyage`            | `createVoyageModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `voyage-3.5` by default, `input_type` from the purpose, native int8 and binary                                                                                                                                                                                                                                                | none                                      |
-| `@arki/embeddings/cohere`            | `createCohereModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `embed-v4.0` by default, `input_type` from the purpose (always sent), native int8 and binary                                                                                                                                                                                                                                  | none                                      |
+| `@arki/embeddings/voyage`            | `createVoyageModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `voyage-3.5` by default, `input_type` from the purpose, native int8 and binary; `createVoyageReranker({ id?, apiKey })`: `rerank-2.5` by default                                                                                                                                                                              | none                                      |
+| `@arki/embeddings/cohere`            | `createCohereModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `embed-v4.0` by default, `input_type` from the purpose (always sent), native int8 and binary; `createCohereReranker({ id?, apiKey })` (`rerank-v3.5`) and `createCohereCompatibleReranker({ baseURL, id })` for Infinity, vLLM and llama.cpp                                                                                  | none                                      |
 | `@arki/embeddings/google`            | `createGoogleModel({ id?, apiKey, baseURL?, fetch? })` through the AI SDK: `gemini-embedding-001` (`taskType` from the purpose) or `gemini-embedding-2` (prefixes)                                                                                                                                                                                                                                 | `@ai-sdk/google`, `ai` (optional)         |
 | `@arki/embeddings/mistral`           | `createMistralModel({ id?, apiKey, baseURL?, fetch? })` through the AI SDK: `mistral-embed`                                                                                                                                                                                                                                                                                                        | `@ai-sdk/mistral`, `ai` (optional)        |
-| `@arki/embeddings/jina`              | `createJinaModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `jina-embeddings-v3` (1024 dims, sizes 1–1024), `task` from the purpose                                                                                                                                                                                                                                                         | none                                      |
+| `@arki/embeddings/jina`              | `createJinaModel({ id?, apiKey, baseURL?, fetch? })` over `fetch`: `jina-embeddings-v3` (1024 dims, sizes 1–1024), `task` from the purpose; `createJinaReranker({ id?, apiKey })`: `jina-reranker-v2-base-multilingual` by default                                                                                                                                                                 | none                                      |
 | `@arki/embeddings/bedrock`           | `createBedrockModel({ id?, region?, apiKey?, accessKeyId?, secretAccessKey?, sessionToken? })` through the AI SDK: Titan Text Embeddings V2 (1024/512/256). Node and Bun only                                                                                                                                                                                                                      | `@ai-sdk/amazon-bedrock`, `ai` (optional) |
 | `@arki/embeddings/sparse`            | `createSparseModel({ id, baseURL, dimensions, … })`: SPLADE sparse vectors from TEI's `/embed_sparse`; `requireSparseSpace`                                                                                                                                                                                                                                                                        | none                                      |
+| `@arki/embeddings/rerank`            | `rerank(reranker, query, items, { text, topK?, onTooLong?, signal? })`, `withRerankCache(reranker, store)`, the `Reranker` type                                                                                                                                                                                                                                                                    | none                                      |
+| `@arki/embeddings/tei`               | `createTeiReranker({ id, baseURL, maxDocuments?, maxInputTokens? })`: a reranker on a TEI server's `/rerank`                                                                                                                                                                                                                                                                                       | none                                      |
 | `@arki/embeddings/env`               | `resolveEmbeddingConfig(env)`: validates the embedding variables with `@arki/env`                                                                                                                                                                                                                                                                                                                  | none                                      |
 | `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                                                                                                                      | none                                      |
 | `@arki/embeddings/dot`               | `embeddings({ model?, cache?, resilience?, env? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                                                                                                            | `@arki/dot` (optional)                    |
-| `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default                                                                                                                                                                                                                                 | `@huggingface/transformers` (optional)    |
-| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline                                                                                                                                                                                                                                      | none                                      |
+| `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default; `await createTransformersReranker({ id?, dtype?, … })`: bge-reranker-v2-m3 `q8` or Qwen3-Reranker-0.6B in process                                                                                                              | `@huggingface/transformers` (optional)    |
+| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline; `fakeReranker({ scores?, maxDocuments?, maxInputTokens? })`                                                                                                                                                                         | none                                      |
 
 `resolveEmbeddingModel` is pure: it never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
@@ -260,6 +262,61 @@ An input can be `{ image, mimeType?, text? }`. PNG, JPEG, GIF and WebP are recog
 
 `@arki/embeddings/sparse` makes SPLADE vectors (`{ indices: Uint32Array; values: Float32Array }`, indices ascending) from a [TEI](https://github.com/huggingface/text-embeddings-inference) server started with `--pooling splade`, for example with the Apache-2.0 `opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1`. Each index is a token of the model's vocabulary, so the space carries a `vocabulary`; `requireSparseSpace` answers `SpaceMismatch` when two vocabularies differ. BGE-M3's sparse output needs TEI pull request [#899](https://github.com/huggingface/text-embeddings-inference/pull/899) first. `@arki/ai`'s Qdrant provider stores a sparse vector next to the dense one.
 
+## Reranking
+
+A reranker reads the query and each document together and scores how well the document answers it. It is slower than comparing vectors and much better at the top of a list, so the usual shape is: search for 50 candidates, rerank them, keep 10. `rerank()` is in `@arki/embeddings/rerank`; each reranker lives in its provider's entry.
+
+```ts
+import { rerank } from '@arki/embeddings/rerank';
+import { createTransformersReranker } from '@arki/embeddings/transformers';
+import { isFailure } from '@arki/failure';
+
+const hits = [
+  { id: 'a', text: 'Berlin is the capital of Germany.' },
+  { id: 'b', text: 'Paris is the capital and largest city of France.' },
+];
+
+export async function best() {
+  const reranker = await createTransformersReranker();
+  if (isFailure(reranker)) return reranker;
+  const ranked = await rerank(reranker, 'What is the capital of France?', hits, { text: hit => hit.text, topK: 1 });
+  await reranker.dispose?.();
+  return ranked; // { hits: [{ item: { id: 'b', … }, index: 1, score: 0.98 }], usage } or a failure value
+}
+```
+
+- `rerank()` splits the items over the reranker's `maxDocuments` and merges the scores, then keeps `topK`. A per-request cut would keep each request's local winners, not the best overall.
+- Each hit carries your item, its index in `items` and its score. Equal scores keep input order.
+- Scores are per pair, so scores from two requests compare. Their range is the model's: Cohere, Voyage, Jina, TEI and the local rerankers answer 0–1.
+
+### Long documents: the chunk policy
+
+A document that does not fit beside the query (`maxInputTokens` counts query plus one document) follows `onTooLong`:
+
+| `onTooLong`        | What happens                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `'fail'` (default) | `InputTooLong` naming the item, before any request. Nothing is lost without you knowing.                                                                                       |
+| `'truncate'`       | The whole document is sent and the provider cuts its end off.                                                                                                                  |
+| `'split'`          | The document is scored as overlapping windows that each fit (a quarter overlaps), and the item gets its best window's score: a long answer is as relevant as its best passage. |
+
+Tokens are counted with the reranker's tokenizer when it has one (`./transformers`), else estimated at 4 characters per token. The estimate undercounts Romanian (near 3 characters per token) and CJK text (near 1). Cohere and Jina cut or chunk long documents on their side and have no switch to refuse them, so for those the estimate is the only check under `'fail'`. Without a tokenizer, `'split'` sizes its windows at 2 characters per token, so most text fits; a denser script that still overflows is refused (`InputTooLong`), never cut.
+
+### Rerankers
+
+| Reranker                                                                        | Entry            | Reads (tokens, query + document) |             Per request |
+| ------------------------------------------------------------------------------- | ---------------- | -------------------------------: | ----------------------: |
+| `createTransformersReranker()` bge-reranker-v2-m3                               | `./transformers` |                  1024 by default |                      16 |
+| `createTransformersReranker({ id: 'onnx-community/Qwen3-Reranker-0.6B-ONNX' })` | `./transformers` |                  1024 by default | 16 (one model run each) |
+| `createCohereReranker()` `rerank-v3.5`; v4 and v5 read 32 000                   | `./cohere`       |                             4096 |                    1000 |
+| `createCohereCompatibleReranker({ baseURL, id })`                               | `./cohere`       |               you state it (512) |     you state it (1000) |
+| `createVoyageReranker()` `rerank-2.5`, `-lite`, `rerank-2`, `-2-lite`           | `./voyage`       |                           32 000 |                    1000 |
+| `createJinaReranker()` v2 multilingual; `jina-reranker-v3`, `-m0`               | `./jina`         |                             1024 |                    1000 |
+| `createTeiReranker({ id, baseURL })`                                            | `./tei`          |               you state it (512) |       you state it (32) |
+
+The local rerankers download their weights on first use: 570 MB for bge-reranker-v2-m3 `q8`, 1.2 GB for Qwen3-Reranker-0.6B `q8`. With `q8` weights a score moves by up to 0.002 with the other documents in its batch; `fp16` holds it to 3e-6.
+
+`withRerankCache(reranker, store)` keeps one score per provider, model, revision, truncation, query and document in any `CacheStore` (`memoryCacheStore()`, `kvCacheStore(kv)`); a repeat costs no request.
+
 ## Limits
 
 - **A request is one provider call of at most `maxBatch` inputs and `maxBatchTokens` tokens.** `embedMany` splits larger work for you. One input that alone costs more than `maxBatchTokens` is refused with `InputTooLong` before any request is sent.
@@ -311,6 +368,8 @@ export async function record(real: Embedder, corpus: readonly string[]) {
 // In every test run after that: the same calls answer the same vectors, offline.
 export const replay = fixtureEmbedder(JSON.parse(readFileSync('__fixtures__/qwen3.json', 'utf8')));
 ```
+
+`fakeReranker({ scores })` is the reranker counterpart: a document listed in `scores` gets that score, any other a seeded one, and like a real reranker it refuses more than `maxDocuments` documents or a pair over `maxInputTokens`.
 
 ## Quality
 

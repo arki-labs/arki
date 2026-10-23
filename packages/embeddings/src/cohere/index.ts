@@ -175,3 +175,6 @@ export function createCohereModel(options: CohereModelOptions) {
   };
   return model;
 }
+
+export { createCohereCompatibleReranker, createCohereReranker } from './rerank.js';
+export type { CohereCompatibleRerankerOptions, CohereRerankerOptions } from './rerank.js';

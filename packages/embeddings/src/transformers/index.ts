@@ -287,3 +287,6 @@ export async function createTransformersModel(options: TransformersModelOptions 
   };
   return model;
 }
+
+export { createTransformersReranker } from './rerank.js';
+export type { TransformersRerankerOptions } from './rerank.js';

@@ -46,5 +46,5 @@ export function vectorsByIndex(data: readonly unknown[], count: number): readonl
     rows.push({ index, embedding });
   }
   // `count` distinct indices in 0..count-1: sorting by index is exactly input order.
-  return rows.toSorted((left, right) => left.index - right.index).map(row => row.embedding);
+  return [...rows].sort((left, right) => left.index - right.index).map(row => row.embedding);
 }

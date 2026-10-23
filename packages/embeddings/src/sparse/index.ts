@@ -117,7 +117,7 @@ function toSparseVector(
   row: readonly { readonly index: number; readonly value: number }[],
   size: number,
 ): SparseVector | string {
-  const sorted = row.toSorted((left, right) => left.index - right.index);
+  const sorted = [...row].sort((left, right) => left.index - right.index);
   const indices = new Uint32Array(sorted.length);
   const values = new Float32Array(sorted.length);
   for (const [position, { index, value }] of sorted.entries()) {

@@ -74,6 +74,16 @@
       "import": "./dist/sparse/index.js",
       "default": "./dist/sparse/index.js"
     },
+    "./rerank": {
+      "types": "./dist/rerank/index.d.ts",
+      "import": "./dist/rerank/index.js",
+      "default": "./dist/rerank/index.js"
+    },
+    "./tei": {
+      "types": "./dist/tei/index.d.ts",
+      "import": "./dist/tei/index.js",
+      "default": "./dist/tei/index.js"
+    },
     "./bedrock": {
       "types": "./dist/bedrock/index.d.ts",
       "import": "./dist/bedrock/index.js",
@@ -127,6 +137,7 @@
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
     "eval": "bun run build && bun bench/quality.eval.ts",
+    "eval:rerank": "bun run build && bun bench/quality/rerank.eval.ts",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",

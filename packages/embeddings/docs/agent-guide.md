@@ -118,6 +118,22 @@ The source is read only as fast as the loop runs. Stop early with `break`: that 
 
 `await createTransformersModel()` from `@arki/embeddings/transformers` loads EmbeddingGemma `q8` (about 316 MB on the first run) with the peer `@huggingface/transformers`. It is async and returns `ModelUnavailable` as a value when the peer, the model or the network is missing. Call `model.dispose?.()` when done. Not for Hermes.
 
+### Rerank search hits
+
+Search wide (50 candidates), rerank, keep the best 10. The reranker comes from its provider's entry; `rerank()` from `./rerank`.
+
+```ts
+import { rerank } from '@arki/embeddings/rerank';
+import { createVoyageReranker } from '@arki/embeddings/voyage';
+import { isFailure } from '@arki/failure';
+
+export async function top10(query: string, candidates: readonly { readonly id: string; readonly text: string }[]) {
+  const reranker = createVoyageReranker({ apiKey: process.env['VOYAGE_API_KEY'] ?? '', id: 'rerank-2.5-lite' });
+  if (isFailure(reranker)) return reranker;
+  return rerank(reranker, query, candidates, { text: candidate => candidate.text, topK: 10, onTooLong: 'split' });
+}
+```
+
 ## Rules that bite
 
 - Check every result with `isFailure` before reading `vectors`. A failed `embedMany` has none.
@@ -134,6 +150,9 @@ The source is read only as fast as the loop runs. Stop early with `break`: that 
 - `withTelemetry` never logs input text unless `recordInputs: true`. Keep it that way for user content.
 - A `./transformers` record is unusable after `dispose()`: a call then throws. Dispose once, when every user is done.
 - Do not switch an existing corpus to `./transformers` (or any other model) without re-embedding it: the space changes.
+- `rerank()` refuses a document that does not fit beside the query (`InputTooLong` naming the item) unless you pass `onTooLong: 'truncate'` or `'split'`. `'split'` costs one scored pair per window.
+- Call a reranker through `rerank()`, not `reranker.rerank()`: the method is one request as given, with no length check, no split and no `topK`.
+- A reranker's scores mean nothing to another model. `withRerankCache` keys on provider, model and revision, so sharing one store is safe; a hand-made score table is not.
 
 ## Errors
 

@@ -183,3 +183,6 @@ export function createVoyageModel(options: VoyageModelOptions) {
   };
   return model;
 }
+
+export { createVoyageReranker } from './rerank.js';
+export type { VoyageRerankerOptions } from './rerank.js';

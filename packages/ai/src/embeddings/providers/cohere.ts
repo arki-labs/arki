@@ -9,7 +9,7 @@
  * of any major 2026 cloud embedding model per the STATE-OF-THE-ART survey).
  * Supports MRL truncation via the `dimensions` config.
  *
- * Reranking is exposed as a separate concept under `embeddings/rerankers/cohere.ts`.
+ * Reranking lives in `@arki/embeddings/cohere` (`createCohereReranker`).
  */
 
 import { createCohere } from '@ai-sdk/cohere';
