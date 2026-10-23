@@ -81,7 +81,8 @@ describe('runTransaction: settings', () => {
       ),
     );
     expect(configs).toHaveLength(4);
-    expect(configs[0]).toEqual({ isolationLevel: 'serializable' });
+    // One config for every dialect: Postgres reads the isolation level, SQLite the behavior.
+    expect(configs[0]).toEqual({ isolationLevel: 'serializable', behavior: 'immediate' });
     expect(error).toMatchObject({ code: TransactionConflict.code, data: { attempts: 4 } });
   });
 

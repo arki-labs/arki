@@ -12,8 +12,6 @@
  * Portable: no driver, no oRPC. Jobs, scripts and journal effects use it
  * directly; `@arki/db/orpc` builds its middleware on it.
  */
-import { is } from 'drizzle-orm';
-import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import type { Clock } from '@arki/clock';
@@ -22,8 +20,9 @@ import { UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
-import type { TransactionalDb } from './composition.js';
+import type { TransactionConfig, TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
+import { isTransaction } from './dialect.js';
 import { TransactionCancelled, TransactionConflict, TransactionDefect } from './errors.js';
 import { classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
 import { findDatabaseError } from './sql-state.js';
@@ -104,7 +103,7 @@ export function parseTransactionSettings(settings: TransactionSettings): Resolve
  * it takes no isolation level, so the work would silently run at the outer level.
  */
 function assertTransactionRoot(db: object): void {
-  if (!is(db, PgAsyncTransaction)) return;
+  if (!isTransaction(db)) return;
   throw new DbTransactionError({
     code: DB_TRANSACTION_ERROR_CODES.transactionAsRoot,
     message:
@@ -145,12 +144,15 @@ export async function runTransaction<Tx, T>(
     }
   });
 
+  // Postgres reads the isolation level. SQLite has one writer, so it is serializable anyway;
+  // it reads `behavior`, and `immediate` takes the write lock up front.
+  const config: TransactionConfig = { isolationLevel: isolation, behavior: 'immediate' };
   let attempts = 0;
   try {
     const outcome = await policy.execute(async () => {
       signal?.throwIfAborted();
       attempts += 1;
-      const result = await transactionAttempt(db, tx => work(tx, attempts), { isolationLevel: isolation }, signal);
+      const result = await transactionAttempt(db, tx => work(tx, attempts), config, signal);
       if ('value' in result) return result;
       if (TransactionConflict.is(result.failure)) throw result.failure.cause;
       return { value: result.failure };

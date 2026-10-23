@@ -43,6 +43,14 @@ export const DB_TRANSACTION_ERROR_CODES = {
    * @verify bun run test -- src/transaction.test.ts
    */
   transactionAsRoot: 'ARKI_DB_TX_E006',
+  /**
+   * The database is SQLite on a driver other than libSQL (bun:sqlite, node:sqlite, better-sqlite3, sqlite-proxy).
+   * Those commit when an async callback returns, not when it settles, so a throw after an `await` keeps its writes.
+   *
+   * @fix Open the database with `createLibsqlDb` from `@arki/db/libsql`, or `db({ driver: 'libsql' })`.
+   * @verify bun run test -- src/transaction.sqlite.test.ts
+   */
+  unsafeSqliteDriver: 'ARKI_DB_TX_E007',
 } as const;
 
 export type DbTransactionErrorCode = (typeof DB_TRANSACTION_ERROR_CODES)[keyof typeof DB_TRANSACTION_ERROR_CODES];

@@ -1,11 +1,11 @@
 /** Private owned boundary shared by serializable retries and savepoint-capable openers. */
-import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
 
 import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
-import type { TransactionalDb } from './composition.js';
+import type { TransactionConfig, TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
+import { dialectOf, isLibsql } from './dialect.js';
 import {
   TRANSACTION_FAILURES,
   TransactionCancelled,
@@ -16,9 +16,25 @@ import {
   TransactionUnavailable,
 } from './errors.js';
 import { findDatabaseError } from './sql-state.js';
-import { DbTransactionError } from './transaction-errors.js';
+import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
 
 const log = getLogger('arki:db:outcome');
+
+/**
+ * Refuse SQLite on a sync driver. It runs the callback, then commits when the
+ * callback returns, not when its promise settles: after the first `await`, other
+ * queries run inside the open transaction and a later throw cannot roll back
+ * (docs/arki/research/17-multi-database/spike/results.md).
+ */
+function assertSafeDriver(db: object): void {
+  if (dialectOf(db) !== 'sqlite' || isLibsql(db)) return;
+  throw new DbTransactionError({
+    code: DB_TRANSACTION_ERROR_CODES.unsafeSqliteDriver,
+    message:
+      '[db] this SQLite driver commits when an async callback returns, so a throw after an await keeps its writes.',
+    remediation: "Open the database with createLibsqlDb from '@arki/db/libsql', or db({ driver: 'libsql' }).",
+  });
+}
 
 /** Connection codes emitted by the supported drivers' host networking stack. */
 const CONNECTION_ERROR_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN']);
@@ -27,9 +43,10 @@ const CONNECTION_ERROR_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT
 export async function transactionAttempt<Tx, T>(
   db: TransactionalDb<Tx>,
   work: (tx: Tx) => Promise<T>,
-  config?: PgTransactionConfig,
+  config?: TransactionConfig,
   signal?: AbortSignal,
 ): Promise<{ value: T | TransactionFailure } | { failure: TransactionFailure }> {
+  assertSafeDriver(db);
   const rollback = new Error('Transaction callback returned a failure');
   let refused: { value: T | TransactionFailure } | undefined;
   let workCompleted = false;

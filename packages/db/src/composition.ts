@@ -1,4 +1,5 @@
 import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
+import type { SQLiteTransactionConfig } from 'drizzle-orm/sqlite-core';
 
 import type { TransactionFailure } from './transaction.js';
 import { runTransactionOnce } from './owned-transaction.js';
@@ -98,13 +99,20 @@ export function composeSchema<const TSlices extends readonly SchemaSlice[]>(
 }
 
 /**
- * A database that can open a transaction: Drizzle's `db.transaction(fn, config)`.
- * `config` sets the isolation level (`runTransaction` passes `serializable`). A
- * `transaction` that takes no config still fits.
+ * A database that can open a transaction: Drizzle's `db.transaction(fn, config)`,
+ * on Postgres or SQLite. `config` is one object both dialects read: Postgres its
+ * isolation level (`runTransaction` passes `serializable`), SQLite its `behavior`.
+ * A `transaction` that takes either dialect's config, or none, fits.
  */
 export type TransactionalDb<TTransaction> = {
-  transaction<TResult>(fn: (tx: TTransaction) => Promise<TResult>, config?: PgTransactionConfig): Promise<TResult>;
+  transaction<TResult>(
+    fn: (tx: TTransaction) => Promise<TResult>,
+    config?: TransactionConfig,
+  ): Promise<TResult>;
 };
+
+/** A transaction config every dialect accepts: each driver reads its own keys. */
+export type TransactionConfig = PgTransactionConfig & SQLiteTransactionConfig;
 
 export type UnitOfWorkScopes<TFactories extends Record<string, (tx: never) => unknown>> = {
   readonly [K in keyof TFactories]: ReturnType<TFactories[K]>;

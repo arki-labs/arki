@@ -18,6 +18,8 @@
  */
 import type { Client, InArgs, InStatement, ResultSet, Transaction, TransactionMode } from '@libsql/client';
 
+import { findDatabaseError } from './sql-state.js';
+
 /** Wrap `client` so every call, and every transaction for its whole life, takes its turn in order. */
 export function queueWrites(client: Client): Client {
   let last: Promise<void> = Promise.resolve();
@@ -52,6 +54,13 @@ export function queueWrites(client: Client): Client {
       try {
         return holdTurn(await client.transaction(mode), release);
       } catch (error) {
+        // Workaround for @libsql/client 0.18 (libsql 0.5.29): when BEGIN fails with SQLITE_BUSY
+        // (another process holds the write lock), the failed statement is not finalized until
+        // garbage collection, and its pooled connection then fails every COMMIT with "SQL
+        // statements in progress". Reopening the pool drops that connection. Safe here: this call
+        // holds the turn, so no other call is using a connection. Remove once libSQL finalizes
+        // failed statements (repro: packages/db/src/transaction.sqlite.test.ts, "another process").
+        if (findDatabaseError(error)?.sqlState === '40001') client.reconnect();
         release();
         throw error;
       }
