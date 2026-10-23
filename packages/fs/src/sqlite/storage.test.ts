@@ -17,7 +17,7 @@ import type { StorageHarness, UserId } from '../lifecycle/storage.behavior.js';
 import type { FileRow, FileStorage, OwnerOf } from './index.js';
 import { describeFileStorage, userId } from '../lifecycle/storage.behavior.js';
 import { memoryUploadAdapter } from '../testing.js';
-import { nowMs } from './clock.js';
+import { sqliteNowMs as nowMs } from '@arki/db/sqlite';
 import { filesTable, fileStorage } from './index.js';
 
 const files = filesTable(sqliteColumns(), { owner: userId });

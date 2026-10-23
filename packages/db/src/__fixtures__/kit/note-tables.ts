@@ -49,7 +49,11 @@ export function noteTables<D extends Dialect>(c: ColumnKit<D>) {
     noteId: c.id(noteId).foreignKey('note_id', () => notes.id, { onDelete: 'cascade' }),
     parentId: c.id(noteId).optionalReference('parent_id'),
   });
-  return { notes, comments };
+  const noteEvents = c.table('note_events', {
+    seq: c.serial('seq'),
+    noteId: c.id(noteId).reference('note_id'),
+  });
+  return { notes, comments, noteEvents };
 }
 
 export const pgNotes = pg.pgTable('notes', {
@@ -80,4 +84,8 @@ export const pgComments = pg.pgTable('comments', {
   id: pg.text('id').primaryKey(),
   noteId: pgIdColumns(noteId).foreignKey('note_id', () => pgNotes.id, { onDelete: 'cascade' }),
   parentId: pgIdColumns(noteId).optionalReference('parent_id'),
+});
+export const pgNoteEvents = pg.pgTable('note_events', {
+  seq: pg.bigserial('seq', { mode: 'number' }).primaryKey(),
+  noteId: pgIdColumns(noteId).reference('note_id'),
 });

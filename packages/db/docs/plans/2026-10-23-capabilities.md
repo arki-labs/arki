@@ -37,7 +37,7 @@ Created with `turbo gen package` (location `packages`, layer `platform`).
 
 **Contract (`.`):**
 
-```ts
+```ts skip="sketch of the contract"
 type PubSub = {
   publish(channel: string, payload: string): Promise<void>;
   subscribe(channel: string, onMessage: (payload: string) => void): Promise<Unsubscribe>;

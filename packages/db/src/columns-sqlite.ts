@@ -27,6 +27,7 @@ import { invariant } from '@arki/failure';
 import type {
   AnyColumnSpec,
   ApplyFlags,
+  Call,
   ColumnDefinition,
   ColumnFlags,
   ColumnKind,
@@ -43,6 +44,7 @@ import { createColumnKit, replayColumn } from './columns.js';
 import { tagColumnSchema } from './id-columns-shared.js';
 import type { SqliteInstantBuilder } from './sqlite-instant.js';
 import { instant } from './sqlite-instant.js';
+import { sqliteNowMs } from './sqlite-now.js';
 
 /** The builder `sqliteBase` makes for each kind. */
 type SqliteBase<K extends ColumnKind, F> = {
@@ -52,6 +54,8 @@ type SqliteBase<K extends ColumnKind, F> = {
   id: SQLiteTextBuilder<TextEnum>;
   integer: SQLiteIntegerBuilder;
   bigint: SQLiteIntegerBuilder;
+  // The primary key is part of the column, not a replayed modifier.
+  serial: Call<SQLiteIntegerBuilder, 'primaryKey'>;
   boolean: SQLiteBooleanBuilder;
   json: SQLiteTextJsonBuilder;
   timestamp: SQLiteTimestampBuilder;
@@ -149,6 +153,9 @@ function sqliteBase(definition: ColumnDefinition) {
     case 'bigint': {
       return integer(name, { mode: 'number' });
     }
+    case 'serial': {
+      return integer(name, { mode: 'number' }).primaryKey({ autoIncrement: true });
+    }
     case 'boolean': {
       return integer(name, { mode: 'boolean' });
     }
@@ -166,7 +173,7 @@ function sqliteBase(definition: ColumnDefinition) {
 
 function sqliteColumn(definition: ColumnDefinition) {
   const builder = sqliteBase(definition);
-  replayColumn(builder, definition.ops, { now: sql`(cast(unixepoch('subsec') * 1000 as integer))`, columnOf: sqliteColumnOf });
+  replayColumn(builder, definition.ops, { now: sqliteNowMs, columnOf: sqliteColumnOf });
   return definition.schema ? tagColumnSchema(builder, definition.schema) : builder;
 }
 

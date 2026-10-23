@@ -21,8 +21,8 @@ import { createInsertSchema } from '@arki/contracts/drizzle';
 import { Temporal } from '@arki/date/types';
 import { orThrow } from '@arki/failure';
 
-import { noteId, noteTables, pgComments, pgNotes } from './__fixtures__/kit/note-tables.js';
-import { comments, notes } from './__fixtures__/kit/sqlite-schema.js';
+import { noteId, noteTables, pgComments, pgNoteEvents, pgNotes } from './__fixtures__/kit/note-tables.js';
+import { comments, noteEvents, notes } from './__fixtures__/kit/sqlite-schema.js';
 import { pgColumns } from './columns-pg.js';
 import { sqliteColumns } from './columns-sqlite.js';
 import { createLibsqlDb } from './libsql.js';
@@ -45,8 +45,8 @@ async function sqlStateOf(write: Promise<unknown>): Promise<string | undefined> 
 describe('pgColumns', () => {
   it('builds tables drizzle-kit cannot tell from the hand-written ones, so switching needs no migration', async () => {
     const kit = noteTables(pgColumns());
-    const handWritten = await generateDrizzleJson({ notes: pgNotes, comments: pgComments });
-    const built = await generateDrizzleJson({ notes: kit.notes, comments: kit.comments });
+    const handWritten = await generateDrizzleJson({ notes: pgNotes, comments: pgComments, noteEvents: pgNoteEvents });
+    const built = await generateDrizzleJson({ notes: kit.notes, comments: kit.comments, noteEvents: kit.noteEvents });
 
     expect(await generateMigration(handWritten, built)).toEqual([]);
     // The comparison is not empty because both sides are empty.
@@ -61,7 +61,7 @@ describe('pgColumns', () => {
 });
 
 describe('sqliteColumns, through drizzle-kit and migrateDb on libSQL', () => {
-  const relations = defineRelations({ notes, comments });
+  const relations = defineRelations({ notes, comments, noteEvents });
   let dir: string;
   let opened: ReturnType<typeof createLibsqlDb<typeof relations>>;
 
@@ -135,6 +135,18 @@ describe('sqliteColumns, through drizzle-kit and migrateDb on libSQL', () => {
     expect(await sqlStateOf(opened.db.insert(comments).values({ id: 'c2', noteId: 'note_missing' }))).toBe('23503');
     await opened.db.delete(notes).where(eq(notes.id, note.id));
     expect(await opened.db.select().from(comments).where(eq(comments.id, 'c1'))).toEqual([]);
+  });
+
+  it('numbers serial rows in insert order, and never reuses a deleted id', async () => {
+    const [note] = await opened.db.insert(notes).values({ title: 'Events', slug: 'events', tags: [] }).returning();
+    if (!note) throw new Error('insert returned no row');
+    const [first] = await opened.db.insert(noteEvents).values({ noteId: note.id }).returning();
+    if (!first) throw new Error('insert returned no row');
+    await opened.db.delete(noteEvents).where(eq(noteEvents.seq, first.seq));
+    const [second] = await opened.db.insert(noteEvents).values({ noteId: note.id }).returning();
+    if (!second) throw new Error('insert returned no row');
+    // `autoincrement`: a cursor reader never sees an old id come back.
+    expect(second.seq).toBeGreaterThan(first.seq);
   });
 
   it('refuses a row that breaks a table check', async () => {

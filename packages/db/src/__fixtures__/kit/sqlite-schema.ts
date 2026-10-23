@@ -2,4 +2,4 @@
 import { sqliteColumns } from '../../columns-sqlite.js';
 import { noteTables } from './note-tables.js';
 
-export const { notes, comments } = noteTables(sqliteColumns({ prefix: 'app_' }));
+export const { notes, comments, noteEvents } = noteTables(sqliteColumns({ prefix: 'app_' }));

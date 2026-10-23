@@ -18,7 +18,7 @@ import type { FilesTable } from '../lifecycle/table.js';
 import type { SignedUploadAdapter } from '../storage/types.js';
 import { createFileStorage } from '../lifecycle/storage.js';
 import { claimDue } from './cleanup.js';
-import { nowMs } from './clock.js';
+import { sqliteNowMs as nowMs } from '@arki/db/sqlite';
 
 /**
  * The root Drizzle database (`createLibsqlDb` from `@arki/db/libsql`). Pass the

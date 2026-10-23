@@ -6,7 +6,7 @@ import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
 import type { FilesTable } from '../lifecycle/table.js';
 import type { FilesDb } from './storage.js';
-import { nowMs } from './clock.js';
+import { sqliteNowMs as nowMs } from '@arki/db/sqlite';
 
 /**
  * Claims due rows with one `UPDATE … WHERE id IN (SELECT … LIMIT n) RETURNING`

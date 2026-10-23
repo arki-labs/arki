@@ -11,7 +11,7 @@ import { expectTypeOf } from 'vitest';
 
 import type { Settings } from './__fixtures__/kit/note-tables.js';
 import type { ColumnKit, Dialect } from './columns.js';
-import { noteId, noteTables, pgNotes, settingsSchema, STATUSES } from './__fixtures__/kit/note-tables.js';
+import { noteId, noteTables, pgNoteEvents, pgNotes, settingsSchema, STATUSES } from './__fixtures__/kit/note-tables.js';
 import { pgColumns } from './columns-pg.js';
 import { sqliteColumns } from './columns-sqlite.js';
 import { idColumns as sqliteIdColumns, instant as sqliteInstant } from './sqlite.js';
@@ -66,6 +66,15 @@ declare const sqliteDb: LibSQLDatabase;
 expectTypeOf(pgDb.select().from(pgKit.notes)).resolves.toEqualTypeOf<(typeof pgNotes.$inferSelect)[]>();
 expectTypeOf(sqliteDb.select().from(sqliteKit.notes)).resolves.toEqualTypeOf<(typeof sqliteNotes.$inferSelect)[]>();
 expectTypeOf(sqliteKit.comments.$inferSelect.noteId).toEqualTypeOf(sqliteNotes.$inferSelect.id);
+
+// `serial` is the dialect's auto-increment primary key, read as a number.
+const sqliteNoteEvents = sqlite.sqliteTable('note_events', {
+  seq: sqlite.integer('seq', { mode: 'number' }).primaryKey({ autoIncrement: true }),
+  noteId: sqliteIdColumns(noteId).reference('note_id'),
+});
+expectTypeOf(pgKit.noteEvents.seq).toEqualTypeOf(pgNoteEvents.seq);
+expectTypeOf(pgKit.noteEvents.$inferInsert).toEqualTypeOf(pgNoteEvents.$inferInsert);
+expectTypeOf(sqliteKit.noteEvents).toEqualTypeOf(sqliteNoteEvents);
 
 // A kit table keeps Drizzle's dialect check.
 // @ts-expect-error -- a SQLite table cannot be read through a Postgres db

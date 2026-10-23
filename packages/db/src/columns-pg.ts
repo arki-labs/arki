@@ -3,6 +3,7 @@ import type { Column } from 'drizzle-orm';
 import { is, SQL, sql } from 'drizzle-orm';
 import type {
   PgBigInt53Builder,
+  PgBigSerial53Builder,
   PgBooleanBuilder,
   PgBuildColumns,
   PgCharBuilder,
@@ -19,6 +20,7 @@ import type {
 } from 'drizzle-orm/pg-core';
 import {
   bigint,
+  bigserial,
   boolean,
   char,
   check,
@@ -40,6 +42,7 @@ import { invariant } from '@arki/failure';
 import type {
   AnyColumnSpec,
   ApplyFlags,
+  Call,
   ColumnDefinition,
   ColumnFlags,
   ColumnKind,
@@ -64,6 +67,8 @@ type PgBase<K extends ColumnKind, F> = {
   id: PgVarcharBuilder;
   integer: PgIntegerBuilder;
   bigint: PgBigInt53Builder;
+  // The primary key is part of the column, not a replayed modifier.
+  serial: Call<PgBigSerial53Builder, 'primaryKey'>;
   boolean: PgBooleanBuilder;
   json: PgJsonbBuilder;
   timestamp: PgTimestampBuilder;
@@ -133,6 +138,9 @@ function pgBase(definition: ColumnDefinition) {
     }
     case 'bigint': {
       return bigint(name, { mode: 'number' });
+    }
+    case 'serial': {
+      return bigserial(name, { mode: 'number' }).primaryKey();
     }
     case 'boolean': {
       return boolean(name);

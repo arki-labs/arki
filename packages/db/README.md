@@ -154,7 +154,7 @@ const onSqlite = noteTables(sqliteColumns({ prefix: 'notes_' })); // SQLite has 
 ```
 
 - **Same types as hand-written tables.** `noteTables(pgColumns())` has exactly the type `pgTable('notes', { … })` would have, and the SQLite tables exactly the type of `sqliteTable`. Rows, inserts, `$type<…>()` and drizzle-kit work unchanged. On Postgres, drizzle-kit cannot tell a kit table from the hand-written one, so moving a package's tables to the kit needs no migration.
-- **Columns:** `text` (with `enum`), `varchar`, `char`, `integer`, `bigint` (a JS `number`), `boolean`, `json` (typed by `$type` or checked by a Zod schema, as `jsonColumn` does), `timestamp` (`Date`), `instant` (`Temporal.Instant`), and `id(declaration)` for ids declared with `defineId`. Modifiers mirror Drizzle's: `notNull`, `primaryKey`, `default`, `defaultNow`, `$defaultFn`, `$onUpdateFn`, `$type`, `unique`, `references`. Extras: `index`, `uniqueIndex` (with `.where()` for a partial index), `unique`, `check`, `desc`.
+- **Columns:** `text` (with `enum`), `varchar`, `char`, `integer`, `bigint` (a JS `number`), `serial` (an auto-incrementing primary key: `bigserial` on Postgres, `autoincrement` on SQLite), `boolean`, `json` (typed by `$type` or checked by a Zod schema, as `jsonColumn` does), `timestamp` (`Date`), `instant` (`Temporal.Instant`), and `id(declaration)` for ids declared with `defineId`. Modifiers mirror Drizzle's: `notNull`, `primaryKey`, `default`, `defaultNow`, `$defaultFn`, `$onUpdateFn`, `$type`, `unique`, `references`. Extras: `index`, `uniqueIndex` (with `.where()` for a partial index), `unique`, `check`, `desc`.
 - **On SQLite:** `jsonb` becomes JSON `text`, timestamps become integer milliseconds, and `varchar(n)` / `char(n)` become `text` plus a `CHECK` on `length()`, so the Postgres limit still holds. Index names take the prefix, because SQLite index names are global to the database.
 - **Queries stay per dialect.** Drizzle's Postgres and SQLite query builders are different classes, so one query body cannot take either database. A package keeps one query file per dialect, each fully typed, and runs one behavior test suite against both.
 
@@ -854,7 +854,7 @@ first null
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`, plus `pgColumns(schema?)`, the Postgres column kit.
 - `@arki/db/libsql` — `createLibsqlDb`: a libSQL database with writes queued per process. Needs the optional peer `@libsql/client`.
-- `@arki/db/sqlite` — re-export of `drizzle-orm/sqlite-core`, plus `idColumns`, `instant` (integer milliseconds) and `sqliteColumns({ prefix? })`, the SQLite column kit.
+- `@arki/db/sqlite` — re-export of `drizzle-orm/sqlite-core`, plus `idColumns`, `instant` (integer milliseconds), `sqliteNowMs` (the database clock in milliseconds, SQLite's `now()`) and `sqliteColumns({ prefix? })`, the SQLite column kit.
 - `@arki/db/columns` — `ColumnKit`, `ColumnSpec` and `TableOf`: the types a package writes its tables against.
 - `@arki/db/dialect` — `dialectOf(db)` (`'pg' | 'sqlite'`, read from the Drizzle database's class), `isTransaction`, `isLibsql`, `DIALECTS`. Portable: loads only `drizzle-orm`.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.

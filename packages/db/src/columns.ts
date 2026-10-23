@@ -28,7 +28,18 @@ import type { InstantColumnConfig } from './temporal.js';
 export type { Dialect } from './dialect.js';
 
 /** The column kinds the kit builds. */
-export type ColumnKind = 'text' | 'varchar' | 'char' | 'integer' | 'bigint' | 'boolean' | 'json' | 'timestamp' | 'instant' | 'id';
+export type ColumnKind =
+  | 'text'
+  | 'varchar'
+  | 'char'
+  | 'integer'
+  | 'bigint'
+  | 'serial'
+  | 'boolean'
+  | 'json'
+  | 'timestamp'
+  | 'instant'
+  | 'id';
 
 export type TextEnum = [string, ...string[]];
 
@@ -74,7 +85,7 @@ export type ColumnDefinition = {
 };
 
 /** The JS value a column holds, before `$type`. */
-type BaseValue<K extends ColumnKind, F extends ColumnFlags> = K extends 'integer' | 'bigint'
+type BaseValue<K extends ColumnKind, F extends ColumnFlags> = K extends 'integer' | 'bigint' | 'serial'
   ? number
   : K extends 'boolean'
     ? boolean
@@ -158,7 +169,7 @@ export type AnyColumnSpec<D extends Dialect> = ColumnSpec<D, ColumnKind, ColumnF
 export type EnumOf<F> = F extends { enum: infer E extends TextEnum } ? E : TextEnum;
 
 /** The builder Drizzle's own method returns, `this` bound to the concrete builder `B`. */
-type Call<B, M extends string> = B extends Record<M, (...args: never[]) => infer R> ? R : never;
+export type Call<B, M extends string> = B extends Record<M, (...args: never[]) => infer R> ? R : never;
 type Step<B, M extends string, On> = On extends true ? Call<B, M> : B;
 
 /**
@@ -389,6 +400,11 @@ export type ColumnKit<D extends Dialect> = {
   integer(name?: string): ColumnSpec<D, 'integer'>;
   /** A 64-bit integer read as a JS `number` (`bigint` mode `'number'` on Postgres). */
   bigint(name?: string): ColumnSpec<D, 'bigint'>;
+  /**
+   * An auto-incrementing integer primary key, read as a JS `number`: `bigserial` on Postgres,
+   * `integer primary key autoincrement` on SQLite. Ids only grow, so a reader can keep a cursor.
+   */
+  serial(name?: string): ColumnSpec<D, 'serial'>;
   boolean(name?: string): ColumnSpec<D, 'boolean'>;
   /** `jsonb` on Postgres, JSON `text` on SQLite. With a Zod schema, typed and checked by it. */
   json<TSchema extends z.ZodType>(
@@ -432,6 +448,7 @@ export function createColumnKit<D extends Dialect>(dialect: D, table: TableBuild
     char: (name, options) => new ColumnSpec(definition('char', name, { enum: options.enum, length: options.length })),
     integer: (name) => new ColumnSpec(definition('integer', name)),
     bigint: (name) => new ColumnSpec(definition('bigint', name)),
+    serial: (name) => new ColumnSpec(definition('serial', name)),
     boolean: (name) => new ColumnSpec(definition('boolean', name)),
     json,
     timestamp: (name, options) => new ColumnSpec(definition('timestamp', name, { withTimezone: options?.withTimezone })),
