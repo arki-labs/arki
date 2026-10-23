@@ -1,0 +1,18 @@
+# @arki/pubsub
+
+> <!-- One or two sentences. What it is. What it is not. -->
+
+## Import paths
+<!-- one bullet per exports subpath; group long lists -->
+- `@arki/pubsub`: the core. `name`.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+<!-- one link per task in the guide's Task map -->
+
+## Rules that bite
+<!-- one sentence each; the mistakes agents make -->

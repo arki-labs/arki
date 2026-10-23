@@ -1,0 +1,129 @@
+{
+  "name": "@arki/pubsub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Publish and subscribe with one contract over memory, a polled message table (Postgres or SQLite), Postgres LISTEN/NOTIFY and Redis.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "pubsub",
+    "notify",
+    "listen",
+    "postgres",
+    "sqlite",
+    "redis"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/pubsub"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js",
+      "default": "./dist/memory.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "docs/**",
+    "llms.txt",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:docs": "arki-doc-examples",
+    "test:pg": "vitest run --config vitest.containers.config.ts src/pg",
+    "test:redis": "vitest run --config vitest.containers.config.ts src/redis",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/log": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/db": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "drizzle-kit": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
+    "ioredis": "catalog:",
+    "pg": "catalog:drizzle",
+    "testcontainers": "catalog:testing",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/db": "workspace:*",
+    "drizzle-orm": "catalog:drizzle",
+    "ioredis": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@arki/db": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  }
+}
