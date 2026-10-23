@@ -97,6 +97,11 @@
       "import": "./dist/kurrentdb.js",
       "default": "./dist/kurrentdb.js"
     },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

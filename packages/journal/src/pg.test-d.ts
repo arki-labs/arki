@@ -1,15 +1,6 @@
-import type { z } from 'zod';
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { ExportsEveryJournalTable, JournalTables, StoredEventRow } from './pg.js';
-
-describe('StoredEventRow', () => {
-  it('decodes an effect job’s `args` to exactly the `journal_events` row type, so the worker runs the same shape the writer stored', () => {
-    // The table is the one source of the row type. The schema only brings the JSON copy back (dates
-    // become strings in jsonb); this check fails as soon as a column is added to one and not the other.
-    expectTypeOf<z.output<typeof StoredEventRow>>().toEqualTypeOf<JournalTables['events']['$inferSelect']>();
-  });
-});
+import type { ExportsEveryJournalTable, JournalTables } from './pg.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it.
 // A schema module as drizzle-kit sees it: one top-level export per table.

@@ -10,11 +10,11 @@ import { z } from 'zod';
 
 import { ensure } from '@arki/schema';
 
-import type { ForwardedLog, StoredEvent } from './event-log.js';
+import type { EventLogPosition, ForwardedLog, StoredEvent } from './event-log.js';
 import type { EventLogTables } from './pg.js';
 import type { DbHandle } from './types.js';
 import { JournalError } from './errors.js';
-import { EventLogPosition } from './event-log.js';
+import { eventLogPositionSchema } from './zod.js';
 
 /** A position in this log: the appending transaction's id, then the event's seq, as `xid:seq`. */
 const PostgresPosition = z
@@ -26,7 +26,7 @@ const PostgresPosition = z
   });
 
 const positionOf = (at: { readonly xid: string; readonly seq: number }): EventLogPosition =>
-  ensure(`${at.xid}:${at.seq}`, EventLogPosition);
+  ensure(`${at.xid}:${at.seq}`, eventLogPositionSchema);
 
 /**
  * Events here are appended by many workers at once, and the app's seq is stamped before the

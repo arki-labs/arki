@@ -1710,19 +1710,23 @@ An entity table needs a string key column that is primary or unique (`id` by def
 
 ## Public imports
 
-| Import                        | What it holds                                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `@arki/journal`               | the portable core: `initJournal`, `need`, `jobId`, the command failures                                           |
-| `@arki/journal/pg`            | `journalTables()`, the table definitions                                                                          |
-| `@arki/journal/errors`        | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
-| `@arki/journal/contract`      | browser-safe, for oRPC contracts: `COMMAND_FAILURES`, the command and workflow failures, `CommandFailure`         |
-| `@arki/journal/dot`           | the optional `@arki/dot` unit and feature slice (see Dot)                                                       |
-| `@arki/journal/orpc`          | the optional oRPC error mapping (see Rejected rules)                                                              |
-| `@arki/journal/http`          | `responseCache`, the Postgres cache for HTTP idempotency                                                          |
-| `@arki/journal/http/webhooks` | outgoing webhooks on the job table                                                                                |
-| `@arki/journal/foreman`       | the Foreman job console and workflow console                                                                      |
-| `@arki/journal/projection`    | the projection entry for Dot tooling                                                                              |
-| `@arki/journal/testing`       | `openJournalDb(schema)`: in-memory PGlite with the schema pushed; `workflowHarness`, for workflow tests           |
+| Import                             | What it holds                                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `@arki/journal`                    | the portable core: `initJournal`, `need`, `jobId`, the command failures                                           |
+| `@arki/journal/pg`                 | `journalTables()`, the table definitions                                                                          |
+| `@arki/journal/errors`             | the command failures, `JournalError`, `isJournalError`. No Drizzle import, for browser code that matches on codes |
+| `@arki/journal/contract`           | browser-safe, for oRPC contracts: `COMMAND_FAILURES`, the command and workflow failures, `CommandFailure`         |
+| `@arki/journal/dot`                | the optional `@arki/dot` unit and feature slice (see Dot)                                                         |
+| `@arki/journal/orpc`               | the optional oRPC error mapping (see Rejected rules)                                                              |
+| `@arki/journal/http`               | `responseCache`, the Postgres cache for HTTP idempotency                                                          |
+| `@arki/journal/http/webhooks`      | outgoing webhooks on the job table                                                                                |
+| `@arki/journal/foreman`            | the Foreman job console and workflow console                                                                      |
+| `@arki/journal/projection`         | the projection entry for Dot tooling                                                                              |
+| `@arki/journal/testing`            | `openJournalDb(schema)`: in-memory PGlite with the schema pushed; `workflowHarness`, for workflow tests           |
+| `@arki/journal/zod`                | the Zod schemas that decode stored values: `storedEventRowSchema`, `forwardArgsSchema`, `eventLogPositionSchema`  |
+| `@arki/journal/postgres`           | `postgresEvents`: an event log in another Postgres database                                                       |
+| `@arki/journal/kurrentdb`          | `kurrentEvents`: an event log in KurrentDB (optional peer `@kurrent/kurrentdb-client`)                            |
+| `@arki/journal/event-log-contract` | `eventLogContract`, `ContractSkip`: the conformance suite for an event log adapter                                |
 
 ## Failure behaviour
 

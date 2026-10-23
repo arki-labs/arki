@@ -47,6 +47,14 @@ database values retain their existing representation; the receiving codec or
 validated storage contract restores the domain type from its source definition.
 A compile-time brand does not replace runtime validation or authorization.
 
+A brand that public signatures name is a TypeScript type, not a Zod brand. Declare
+it with a `unique symbol`: `declare const positionBrand: unique symbol;` and
+`type Position = string & { readonly [positionBrand]: true }`. The schema that makes
+it is `z.custom<Position>(value => is(value, base))`, where `base` holds the real
+check. It sits in the package's `./zod` entry, and an exact two-way type test locks
+it to the type. So public `.d.ts` files never name Zod (`TYPES_E001`), the check
+stays a schema, and the brand comes from one place, never from a cast (A-43).
+
 Verification rejects cross-kind ID assignment, including IDs with identical
 formats, and raw values passed to branded APIs. Exact inference tests and real
 storage/transport round trips prove that brands survive composition and are

@@ -16,12 +16,12 @@ import { orThrow } from '@arki/failure';
 import { ensure } from '@arki/schema';
 
 import { ContractSkip, eventLogContract } from './event-log-contract.js';
-import { EventLogPosition } from './event-log.js';
 import { initJournal } from './journal.js';
 import { eventLogTables } from './pg.js';
 import { postgresEvents } from './postgres.js';
 import { OrderNoted, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 import { openJournalDb } from './testing.js';
+import { eventLogPositionSchema } from './zod.js';
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -118,7 +118,7 @@ describe('an entity on postgresEvents', () => {
     // here as if it were this log's, it would start at a random point; it must fail instead.
     const all = storeLog.all;
     expect(all).toBeDefined();
-    await expect(all?.after(ensure('42', EventLogPosition), { limit: 10 })).rejects.toThrow(/transaction id:seq/);
+    await expect(all?.after(ensure('42', eventLogPositionSchema), { limit: 10 })).rejects.toThrow(/transaction id:seq/);
   });
 });
 

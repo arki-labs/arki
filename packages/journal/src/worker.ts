@@ -18,7 +18,7 @@ import type { EventLog, EventLogPosition, ForwardedLog, ForwardLag, ProjectionCu
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
-import { ForwardArgs, StoredEventRow } from './pg.js';
+import { forwardArgsSchema, storedEventRowSchema } from './zod.js';
 import type { EffectRetention, ResolvedRetention } from './retention.js';
 import type { BuiltInEventLog } from './store.js';
 import type {
@@ -264,7 +264,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
     // The job's own copy of the stored row, never `journal_events`: the entity may keep no event
     // rows. Decoded as replay decodes a row, so the upcasters apply to a job from an older release.
-    const eventRow = ensure(job.args, StoredEventRow, { at: `journal: effect job ${job.id} args` });
+    const eventRow = ensure(job.args, storedEventRowSchema, { at: `journal: effect job ${job.id} args` });
     const event = decodeStoredEvent(
       eventRow,
       findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
@@ -323,7 +323,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
       throw new Error(`journal: forward job ${job.id} has no entity kind or stream position`);
     const log = forwarded.get(job.jobName);
     if (log === undefined) throw new Error(`journal: forward job ${job.id}: no event log for "${job.jobName}"`);
-    const { events } = ensure(job.args, ForwardArgs, { at: `journal: forward job ${job.id} args` });
+    const { events } = ensure(job.args, forwardArgsSchema, { at: `journal: forward job ${job.id} args` });
     const [first] = events;
     if (first === undefined) throw new Error(`journal: forward job ${job.id} carries no events`);
     const expectedVersion = job.streamPosition;

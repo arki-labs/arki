@@ -22,7 +22,8 @@ import type { DbHandle } from './types.js';
 import type { JobRow } from './worker.js';
 import { JournalError } from './errors.js';
 import { jobId as newJobId, operationId as newOperationId } from './id.js';
-import { ForwardArgs, StoredEventRow } from './pg.js';
+import type { StoredEventRow } from './pg.js';
+import { forwardArgsSchema, storedEventRowSchema } from './zod.js';
 import { keepFor, keepUntil, MAX_SWEEP_BATCH, retryableForMs } from './retention.js';
 import { isReturnedFailure, rollbackOnFailure } from './rollback.js';
 
@@ -86,7 +87,7 @@ const headerOf = (stored: StoredEventRow): EventHeader => ({
 
 /** The header of the event an effect job carries in `args`. A bad copy is a library bug, so it throws. */
 const eventHeaderOf = (jobId: string, args: unknown): EventHeader =>
-  headerOf(ensure(args, StoredEventRow, { at: `journal: effect job ${jobId} args` }));
+  headerOf(ensure(args, storedEventRowSchema, { at: `journal: effect job ${jobId} args` }));
 
 /**
  * A row as the archive sink receives it. An effect row's `args` is its copy of the event, data and meta included.
@@ -97,7 +98,7 @@ const forExport = (row: ArchivedJob): ArchivedJob => {
   if (row.kind === 'effect') return { ...row, args: eventHeaderOf(row.id, row.args) };
   // A forward row carries the whole write: each event goes out as its header only.
   if (row.kind === 'forward') {
-    const { events } = ensure(row.args, ForwardArgs, { at: `journal: forward job ${row.id} args` });
+    const { events } = ensure(row.args, forwardArgsSchema, { at: `journal: forward job ${row.id} args` });
     return { ...row, args: { events: events.map(event => headerOf(event)) } };
   }
   return row;
@@ -587,7 +588,7 @@ function buildJobOps(deps: JobOpsDeps, managed: 'refuse' | 'allow') {
       .limit(1);
     if (job?.kind !== 'forward' || job.jobName === null) return;
     const log = deps.forwarded?.get(job.jobName);
-    const { events } = ensure(job.args, ForwardArgs, { at: `journal: forward job ${id} args` });
+    const { events } = ensure(job.args, forwardArgsSchema, { at: `journal: forward job ${id} args` });
     const last = events.at(-1);
     if (last === undefined) return;
     const top = log === undefined ? 0 : await log.highestVersion(last.kind, last.entityId);

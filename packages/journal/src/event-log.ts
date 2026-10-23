@@ -4,8 +4,6 @@
  * the app database before any append, so one event shape serves every log.
  * Imports only `pg` (types) and leaf files.
  */
-import { z } from 'zod';
-
 import type { JournalTables } from './pg.js';
 import type { DbHandle, EventStorage } from './types.js';
 
@@ -14,13 +12,14 @@ export type StoredEvent = JournalTables['events']['$inferSelect'];
 /** An event to append. `erasedAt` is the log's own, set by `erase`. */
 export type EventToAppend = Omit<StoredEvent, 'erasedAt'>;
 
+declare const eventLogPositionBrand: unique symbol;
 /**
  * A log's own cursor into its global order: opaque, compared only by the log that made it.
  * The built-in log uses the event's `seq` as text. A store with another order (a commit
- * position, a resume token) uses its own form.
+ * position, a resume token) uses its own form. `eventLogPositionSchema` in
+ * `@arki/journal/zod` is the one way to make one.
  */
-export const EventLogPosition = z.string().min(1).brand('EventLogPosition');
-export type EventLogPosition = z.output<typeof EventLogPosition>;
+export type EventLogPosition = string & { readonly [eventLogPositionBrand]: true };
 
 export type EventLogReads = {
   /** One entity's events, oldest first. */

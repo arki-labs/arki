@@ -13,11 +13,11 @@ import { getTableConfig, PgAsyncTransaction } from 'drizzle-orm/pg-core';
 import { isUniqueViolation } from '@arki/db/errors';
 import { ensure } from '@arki/schema';
 
-import type { EventLog, EventLogReads, EventLogWrites } from './event-log.js';
+import type { EventLog, EventLogPosition, EventLogReads, EventLogWrites } from './event-log.js';
 import type { JournalTables } from './pg.js';
 import type { AnyEntity, AnyEventDef, DbHandle, EntityDef, EntityId, EntityTable, ReducerRow, Row } from './types.js';
 import { JournalError } from './errors.js';
-import { EventLogPosition } from './event-log.js';
+import { eventLogPositionSchema } from './zod.js';
 import { isRowOf } from './storage.js';
 
 /**
@@ -226,7 +226,7 @@ export function createPgStore(deps: { readonly tables: JournalTables; readonly w
 export type PgStore = ReturnType<typeof createPgStore>;
 
 /** The built-in log's position for a seq: the seq as text. */
-const positionOf = (at: number): EventLogPosition => ensure(String(at), EventLogPosition);
+const positionOf = (at: number): EventLogPosition => ensure(String(at), eventLogPositionSchema);
 /** Only positions the built-in log made reach it, so each is a seq written as text. */
 const seqAt = (position: EventLogPosition | null): number => (position === null ? 0 : Number(position));
 

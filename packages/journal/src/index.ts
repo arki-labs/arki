@@ -146,8 +146,8 @@ export {
 export { jobId } from './id.js';
 export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';
-export { EventLogPosition } from './event-log.js';
 export type {
+  EventLogPosition,
   EventLog,
   EventLogReads,
   EventLogWrites,

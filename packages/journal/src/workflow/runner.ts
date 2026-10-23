@@ -30,7 +30,7 @@ import { ensure, parseAsync } from '@arki/schema';
 import type { Command, CommandContext, JournalDefinitions, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
 import type { CommandFailure } from '../errors.js';
 import type { JournalTables } from '../pg.js';
-import { StoredEventRow } from '../pg.js';
+import { storedEventRowSchema } from '../zod.js';
 import type { JobRetention, ResolvedRetention, RetentionAge } from '../retention.js';
 import type {
   DbHandle,
@@ -2336,7 +2336,7 @@ export function createWorkflows<
     return rows.map(row => ({
       id: row.id,
       node: jobNodeSchema.parse(
-        row.args === null ? {} : (ensure(row.args, StoredEventRow, { at: `journal: job ${row.id} args` }).data ?? {}),
+        row.args === null ? {} : (ensure(row.args, storedEventRowSchema, { at: `journal: job ${row.id} args` }).data ?? {}),
       ),
     }));
   };

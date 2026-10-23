@@ -16,7 +16,6 @@ import {
   uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { z } from 'zod';
 
 import type { EventLogPosition } from './event-log.js';
 import type { WorkflowShape } from './workflow/shape.js';
@@ -455,41 +454,16 @@ export function eventLogTables(schema?: PgSchema) {
 
 export type EventLogTables = ReturnType<typeof eventLogTables>;
 
-/** A `timestamptz` column after a JSON round trip: an ISO string in, a `Date` out. */
-const jsonTimestamp = z.codec(z.iso.datetime({ offset: true }), z.date(), {
-  decode: text => new Date(text),
-  encode: date => date.toISOString(),
-});
-
 /**
- * A `journal_events` row as an effect job's `args` holds it: the row the write inserted, after the
- * jsonb round trip. Its output is exactly the row type (`JournalTables['events']['$inferSelect']`),
- * so the worker decodes the copy as it would decode the stored row. The type is the table's; this
- * schema only brings the timestamps back from their JSON strings.
+ * A `journal_events` row as an effect job's `args` holds it, decoded: the row the write inserted.
+ * `storedEventRowSchema` in `@arki/journal/zod` brings the jsonb copy back to this type.
  */
-export const StoredEventRow = z.object({
-  seq: z.int(),
-  id: z.string(),
-  kind: z.string(),
-  entityId: z.string(),
-  version: z.int(),
-  type: z.string(),
-  data: z.unknown(),
-  meta: z.unknown(),
-  recordedAt: jsonTimestamp,
-  commandId: z.string().nullable(),
-  causeSeq: z.int().nullable(),
-  correlationId: z.string().nullable(),
-  erasedAt: jsonTimestamp.nullable(),
-  schemaVersion: z.int(),
-});
 export type StoredEventRow = JournalTables['events']['$inferSelect'];
 /**
  * A `forward` job's `args`: one write's events for one entity, oldest first, each in the stored-event
- * shape. Written by the writer, so a parse failure is a library bug.
+ * shape. Decoded by `forwardArgsSchema` in `@arki/journal/zod`.
  */
-export const ForwardArgs = z.object({ events: z.array(StoredEventRow).min(1) });
-export type ForwardArgs = z.output<typeof ForwardArgs>;
+export type ForwardArgs = { events: StoredEventRow[] };
 /** The node manifest a run stores in `workflow_runs.shape`, the type of that column. */
 export type { WorkflowShape } from './workflow/shape.js';
 

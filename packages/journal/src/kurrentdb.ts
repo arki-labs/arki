@@ -20,17 +20,16 @@ import { z } from 'zod';
 
 import { ensure } from '@arki/schema';
 
-import type { EventToAppend, ForwardedLog, StoredEvent } from './event-log.js';
+import type { EventLogPosition, EventToAppend, ForwardedLog, StoredEvent } from './event-log.js';
 import { JournalError } from './errors.js';
-import { EventLogPosition } from './event-log.js';
-import { StoredEventRow } from './pg.js';
+import { eventLogPositionSchema, storedEventRowSchema } from './zod.js';
 
 /**
  * Everything of a journal event KurrentDB has no field for, in the event's metadata under
  * `journal`. The type and the data are KurrentDB's own fields; `erasedAt` never applies, because
  * KurrentDB cannot rewrite an event.
  */
-const JournalMetadata = z.object({ journal: StoredEventRow.omit({ type: true, data: true, erasedAt: true }) });
+const JournalMetadata = z.object({ journal: storedEventRowSchema.omit({ type: true, data: true, erasedAt: true }) });
 /** KurrentDB stores JSON event data as an object, an array or a string. */
 const KurrentData = z.union([z.record(z.string(), z.unknown()), z.array(z.unknown()), z.string()]);
 
@@ -43,7 +42,7 @@ const KurrentPosition = z
     return { commit: BigInt(text.slice(0, at)), prepare: BigInt(text.slice(at + 1)) };
   });
 
-const positionOf = (at: Position): EventLogPosition => ensure(`${at.commit}:${at.prepare}`, EventLogPosition);
+const positionOf = (at: Position): EventLogPosition => ensure(`${at.commit}:${at.prepare}`, eventLogPositionSchema);
 const isAfter = (a: Position, b: Position): boolean =>
   a.commit > b.commit || (a.commit === b.commit && a.prepare > b.prepare);
 
