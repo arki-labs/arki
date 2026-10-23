@@ -1,17 +1,18 @@
 /**
  * Reading the log: decoding stored events, the log queries, history-completeness
  * checks, and `replay`, `verify`, `repair`, `rerun`.
- * May import `fold`, `storage`, leaf files, and result types from `api`.
+ * May import `fold`, `storage`, `store`, leaf files, and result types from `api`.
  * Must not import `journal`, `write`, `command` or `worker`.
  */
-import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import type { SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, isSchemaFailure } from '@arki/failure';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
-import type { JournalTables } from './pg.js';
+import type { JournalTables, StoredEventRow } from './pg.js';
+import type { PgStore } from './store.js';
 import type {
   AnyEventDef,
   DbHandle,
@@ -34,17 +35,17 @@ import {
   assertStoredValues,
   deepFreeze,
   isRowOf,
-  loadRow,
   safeParse,
   sameValue,
-  saveReplayed,
   toRecord,
 } from './storage.js';
 
-/** What the log functions need from the journal: the meta schema and the journal tables. */
+/** What the log functions need from the journal: the meta schema, the journal tables and its store. */
 export type HistoryDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = {
   readonly metaSchema: Meta;
   readonly tables: JournalTables;
+  /** Entity rows and each entity's log. `forget` and `rerun` still query `tables` for what only they need. */
+  readonly store: PgStore;
 };
 
 /**
@@ -196,20 +197,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     });
   };
 
-  const loadHistory = async (db: DbHandle, kind: string, id: string) =>
-    db
-      .select()
-      .from(eventsTable)
-      .where(and(eq(eventsTable.kind, kind), eq(eventsTable.entityId, id)))
-      .orderBy(asc(eventsTable.version));
-
-  const highestVersion = async (db: DbHandle, kind: string, id: string): Promise<number> => {
-    const [top] = await db
-      .select({ version: max(eventsTable.version) })
-      .from(eventsTable)
-      .where(and(eq(eventsTable.kind, kind), eq(eventsTable.entityId, id)));
-    return top?.version ?? 0;
-  };
+  const loadHistory = (db: DbHandle, kind: string, id: string) => deps.store.bind(db).events.history(kind, id);
 
   const replayFrom = async <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -245,7 +233,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   const decodeHistory = <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     entity: EntityDef<string, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
-    rows: Awaited<ReturnType<typeof loadHistory>>,
+    rows: readonly StoredEventRow[],
   ) => {
     const events: Recorded<string, unknown, MetaOut, EntityId<Tbl, Key>>[] = [];
     for (const row of rows) {
@@ -291,7 +279,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   ): Promise<ReplayResult<Tbl, E, MetaOut, Key> | SchemaFailure> => {
     assertStoredEvents(entity, id, 'replay');
     assertExactId(entity, id);
-    const current = await loadRow(db, entity, id, false);
+    const current = await deps.store.bind(db).rows.load(entity, id, false);
     return replayFrom(db, entity, id, current, opts?.throughVersion);
   };
 
@@ -302,7 +290,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
   ): Promise<VerifyResult<Tbl, Key> | SchemaFailure> => {
     assertStoredEvents(entity, id, 'verify');
     assertExactId(entity, id);
-    const loaded = await loadRow(db, entity, id, false);
+    const loaded = await deps.store.bind(db).rows.load(entity, id, false);
     assertStoredId(entity, loaded, id);
     if (loaded !== null && !isRowOf(entity.table, loaded)) {
       throw new Error(`journal: ${entity.kind} ${id} row is missing columns`);
@@ -327,7 +315,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     assertStoredEvents(entity, id, 'repair');
     assertExactId(entity, id);
     return db.transaction(async tx => {
-      const current = await loadRow(tx, entity, id, true);
+      const current = await deps.store.bind(tx).rows.load(entity, id, true);
       assertStoredId(entity, current, id);
       const replayed = await replayFrom(tx, entity, id, current);
       if (isFailure(replayed)) return replayed;
@@ -337,7 +325,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
         id,
         value3: expected === null ? 'delete' : `v${expected.version}`,
       });
-      const saved = await saveReplayed(tx, entity, id, current, expected);
+      const saved = await deps.store.bind(tx).rows.saveReplayed(entity, id, current, expected);
       // Throwing rolls the transaction back, so the row stays as it was.
       if (saved !== null && expected !== null) assertStoredValues(entity, id, expected, saved, Object.keys(expected));
       return saved;
@@ -356,7 +344,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
       .transaction(async tx => {
         // The row lock first, so no write lands between the rewrite and the repair. Then every
         // async cursor, so no projection batch in flight commits the data after it was erased.
-        await loadRow(tx, entity, id, true);
+        await deps.store.bind(tx).rows.load(entity, id, true);
         await tx.select({ name: deps.tables.cursors.name }).from(deps.tables.cursors).for('update');
         const rows = await loadHistory(tx, entity.kind, id);
         let erased = 0;
@@ -388,7 +376,11 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
           if (stamped === undefined) throw new Error(`journal: forget: event ${row.id} vanished under the row lock`);
           // Every effect job carries a copy of its event in `args`, and the archive keeps finished jobs
           // for days. Both copies get the same erased data, schema version and stamp as the event row.
-          const erasedCopy = JSON.stringify({ data: form.data, schemaVersion: def.version, erasedAt: stamped.erasedAt });
+          const erasedCopy = JSON.stringify({
+            data: form.data,
+            schemaVersion: def.version,
+            erasedAt: stamped.erasedAt,
+          });
           await tx
             .update(jobsTable)
             .set({ args: sql`${jobsTable.args} || ${erasedCopy}::jsonb` })
@@ -456,7 +448,7 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     return { events: count };
   };
 
-  return { decodeStoredEvent, highestVersion, assertLogSaysGone, replay, verify, repair, forget, rerun };
+  return { decodeStoredEvent, assertLogSaysGone, replay, verify, repair, forget, rerun };
 }
 
 export type History<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = ReturnType<

@@ -2,10 +2,10 @@
  * Command execution: parse the input, open the transaction, give the handler a
  * context bound to it, and refuse to close while an operation is still running.
  * A returned failure rolls the transaction back and is the run's result.
- * May import `api`, `write` (types), `storage`, `transaction-guard` and leaf files.
+ * May import `api`, `write` (types), `storage`, `store` (types), `transaction-guard` and leaf files.
  * Must not import `journal`, `history` or `worker`.
  */
-import { eq, is } from 'drizzle-orm';
+import { is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
 import type { SchemaFailure } from '@arki/failure';
@@ -17,7 +17,7 @@ import { parseAsync } from '@arki/schema';
 import type { Command, CommandContext, RunOptions } from './api.js';
 import type { CommandFailure } from './errors.js';
 import type { HookPointInternal } from './hooks.js';
-import type { JournalTables } from './pg.js';
+import type { PgStore } from './store.js';
 import type { CommandHookContext, DbHandle, Trace, TransactionSource } from './types.js';
 import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
@@ -44,7 +44,8 @@ export type CommandDeps<
   readonly wake: () => void;
   /** The command hooks. Frozen by the first run. */
   readonly hooks: HookPointInternal<CommandHookContext<SchemaOutput<Meta>>>;
-  readonly tables: Pick<JournalTables, 'receipts'>;
+  /** Claims and settles idempotency receipts. */
+  readonly store: PgStore;
 };
 
 /**
@@ -59,12 +60,10 @@ export function createCommandRunner<
 >(deps: CommandDeps<Meta, Tx>) {
   type MetaOut = SchemaOutput<Meta>;
   const { metaSchema, writeWithValidatedMeta, hooks } = deps;
-  const receipts = deps.tables.receipts;
 
   /**
    * Take the key for this run, or find the run that holds it. Returns `{ replay }` with the
-   * stored result when a finished run holds the key with the same command and input. The
-   * insert waits on an uncommitted holder, so a concurrent repeat sees its outcome.
+   * stored result when a finished run holds the key with the same command and input.
    */
   const claimReceipt = async (
     tx: DbHandle,
@@ -73,15 +72,10 @@ export function createCommandRunner<
     input: unknown,
     own: string,
   ): Promise<{ readonly replay: unknown } | CommandConflict | undefined> => {
-    const inserted = await tx
-      .insert(receipts)
-      .values({ key, command: name, input: throughJson(input) ?? null, commandId: own })
-      .onConflictDoNothing()
-      .returning({ key: receipts.key });
-    if (inserted.length > 0) return undefined;
-    const [held] = await tx.select().from(receipts).where(eq(receipts.key, key));
-    if (held === undefined)
-      throw new Error(`journal: idempotency key ${JSON.stringify(key)} vanished while it was being claimed`);
+    const held = await deps.store
+      .bind(tx)
+      .receipts.claim({ key, command: name, input: throughJson(input) ?? null, commandId: own });
+    if (held === undefined) return undefined;
     // Only a run inside this transaction can see an unfinished receipt: a concurrent one waited on the insert.
     if (held.result === null)
       throw new Error(
@@ -104,10 +98,7 @@ export function createCommandRunner<
         name,
         `the result of command "${name}" does not survive JSON storage; a command run with an idempotency key must return plain data, because a repeat returns the stored result`,
       );
-    await tx
-      .update(receipts)
-      .set({ result: stored === undefined ? {} : { value: stored } })
-      .where(eq(receipts.key, key));
+    await deps.store.bind(tx).receipts.settle(key, stored === undefined ? {} : { value: stored });
   };
 
   /**

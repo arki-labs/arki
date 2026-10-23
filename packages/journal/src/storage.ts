@@ -1,10 +1,10 @@
 /**
- * The entity row and stored values: load and save the row, exact-id checks, value
- * comparison, the JSON round-trip check, freezing, and the root-database guard.
+ * Stored values: exact-id checks, value comparison, the JSON round-trip check,
+ * freezing, and the root-database guard. Reading and writing rows is `store`'s job.
  * Imports only leaf files (`types`, `errors`). Must not import `journal`, `api`,
  * `write`, `command`, `history` or `worker`.
  */
-import { eq, getTableColumns, is } from 'drizzle-orm';
+import { getTableColumns, is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
 import type { SchemaFailure } from '@arki/failure';
@@ -12,35 +12,12 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import type {
-  AnyEntity,
-  AnyEventDef,
-  DbHandle,
-  EntityDef,
-  EntityId,
-  EntityTable,
-  ReducerRow,
-  RootDb,
-  Row,
-} from './types.js';
+import type { AnyEntity, EntityTable, RootDb, Row } from './types.js';
 import { JournalError } from './errors.js';
 
 /** A select row has every column of its table. The check is real; the guard narrows. */
 export function isRowOf<Tbl extends EntityTable>(table: Tbl, value: object): value is Row<Tbl> {
   return Object.keys(getTableColumns(table)).every(column => column in value);
-}
-
-type EntityRowSource = Pick<AnyEntity, 'table' | 'keyColumn'>;
-
-export async function loadRow(
-  db: DbHandle,
-  entity: EntityRowSource,
-  id: string,
-  lock: boolean,
-): Promise<object | null> {
-  const query = db.select().from(entity.table).where(eq(entity.keyColumn, id)).limit(1);
-  const rows = lock ? await query.for('update') : await query;
-  return rows[0] ?? null;
 }
 
 /**
@@ -92,30 +69,6 @@ export function assertStoredId(entity: Pick<AnyEntity, 'kind' | 'key'>, row: obj
       `the stored key is ${JSON.stringify(stored)} but the id given is ${JSON.stringify(id)}; use the stored form`,
     );
   }
-}
-
-/** Insert, update or delete the row so it matches `next`. Returns the stored row. */
-export async function saveReplayed<Tbl extends EntityTable, Key extends string>(
-  db: DbHandle,
-  entity: EntityDef<string, Tbl, AnyEventDef, unknown, Key>,
-  id: EntityId<Tbl, Key>,
-  current: object | null,
-  next: ReducerRow<Tbl, Key> | null,
-): Promise<Row<Tbl> | null> {
-  const erased: EntityTable = entity.table;
-  if (next === null) {
-    if (current !== null) await db.delete(erased).where(eq(entity.keyColumn, id));
-    return null;
-  }
-  const saved =
-    current === null
-      ? await db.insert(erased).values(next).returning()
-      : await db.update(erased).set(next).where(eq(entity.keyColumn, id)).returning();
-  const row = saved[0];
-  if (row === undefined || !isRowOf(entity.table, row)) {
-    throw new Error(`journal: saving ${id} returned no complete row`);
-  }
-  return row;
 }
 
 export function toRecord(value: object): Record<string, unknown> {

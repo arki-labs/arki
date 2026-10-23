@@ -248,6 +248,8 @@ By default every entity keeps its events: `initJournal({ tables })` means `initJ
 const j = initJournal({ tables, events: 'stored' }); // the journal default; 'transient' flips every entity
 const draft = j.entity('draft', drafts, { events: 'transient' }); // this entity keeps no events
 const order = j.entity('order', orders, { events: 'stored' }); // stored, even under a transient default
+A row insert that hits a unique constraint is `CONFLICT` too, for every entity: a create that lost a race, or a column value another row already holds. The write rolls back with its events. To give the caller a clear answer on the retry, check a value that must be unique inside `events` and return a failure when it is taken.
+
 ```
 
 A transient write does everything a stored write does except the `journal_events` insert: the append lock, the row lock, `expectedVersion`, the rules in `events`, the reducers, the row save, inline projections and effect jobs. The recorded events exist in memory. They get a real `seq` from the events table's own sequence, so `seq` stays the global write order across both kinds, and `recordedAt` from the transaction's `now()`; the write returns them as usual. An effect job for such an event has `event_seq` null and the event's copy in `args`, as every effect job does. Two creates of one id that race are `CONFLICT`, caught by the row's own key instead of the log's index.

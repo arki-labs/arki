@@ -61,6 +61,7 @@ import { assertRetention, effectOverrides, resolveRetention } from './retention.
 import { isReturnedFailure } from './rollback.js';
 import { isPlainObject } from './storage.js';
 import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
+import { createPgStore } from './store.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
 import { createWriter } from './write.js';
@@ -301,17 +302,17 @@ function createJournal<
 
   // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
   // call, so the worker loop, `run`, a bound runner and an effect's `ctx.run` always use the methods the object holds.
-  const history = createHistory<Meta>({ metaSchema, tables });
+  const store = createPgStore({ tables, wakeChannel });
+  const history = createHistory<Meta>({ metaSchema, tables, store });
   const inlineProjections = projections.filter(projection => projection.lane === 'inline');
   const asyncProjections = projections.filter(projection => projection.lane === 'async');
   const { write, adopt, writeWithValidatedMeta } = createWriter<Meta, Tx>({
     metaSchema,
-    tables,
+    store,
     projections: inlineProjections,
     asyncProjections,
     effects,
     history,
-    wakeChannel,
   });
   const commandHooks = createHookPoint<CommandHookContext<SchemaOutput<Meta>>>('command');
   const effectHooks = createHookPoint<EffectHookContext<SchemaOutput<Meta>>>('effect');
@@ -320,7 +321,7 @@ function createJournal<
     writeWithValidatedMeta,
     wake: () => journal.wake(),
     hooks: commandHooks,
-    tables,
+    store,
   });
   // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
   type WorkerDb = AppDb & TransactionSource<Tx>;

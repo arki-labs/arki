@@ -1,25 +1,23 @@
 /**
  * The write path: the write algorithm, version ordering of inserted events, and
  * telling an append conflict from other database errors.
- * May import `api`, `fold`, `history`, `storage`, `transaction-guard` and leaf files.
+ * May import `api`, `fold`, `history`, `storage`, `store`, `transaction-guard` and leaf files.
  * Must not import `journal`, `command` or `worker`.
  */
-import { and, eq, sql } from 'drizzle-orm';
-import { getTableConfig } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { isUniqueViolation } from '@arki/db/errors';
 import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
 import type { History } from './history.js';
-import type { JournalTables, StoredEventRow } from './pg.js';
+import type { StoredEventRow } from './pg.js';
+import type { PgStore } from './store.js';
 import type {
   AnyEventDef,
-  DbHandle,
   Effect,
   EntityDef,
   EntityId,
@@ -42,24 +40,11 @@ import {
   assertStoredId,
   assertStoredValues,
   isRowOf,
-  loadRow,
   sameValue,
-  saveReplayed,
   showValue,
   toRecord,
 } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
-
-/**
- * The append lock: `pg_advisory_xact_lock(namespace, key)`, taken at the start of
- * every write and held until the transaction commits. `seq` is a bigserial, assigned
- * at insert, so without it two transactions can commit in the other order: a reader
- * that checkpointed at the later seq never sees the earlier one. With it, seq order is
- * commit order, and `seq > cursor` is a safe cursor. Cost: event appends across the
- * app commit one transaction at a time. The namespace is 'JRNL' as an int (0x4a524e4c).
- */
-const APPEND_LOCK_NAMESPACE = 1_247_301_196;
-const APPEND_LOCK_KEY = 1;
 
 /**
  * When a job is due, from the effect's schedule. A delay counts from the transaction's
@@ -93,16 +78,15 @@ export type WriteDeps<
   Tx extends TransactionSource<Tx>,
 > = {
   readonly metaSchema: Meta;
-  readonly tables: JournalTables;
+  /** Rows, the event log, jobs and the wake signal. A unique violation comes back from it as `CONFLICT`. */
+  readonly store: PgStore;
   /** Inline projections only: they run inside the write. */
   readonly projections: readonly Projection<SchemaOutput<Meta>, Tx>[];
   /** Async projections: the write only wakes the worker when a recorded event matches one. */
   readonly asyncProjections: readonly Pick<Projection, 'types' | 'entities'>[];
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
   readonly effects: readonly Pick<Effect<SchemaOutput<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
-  readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'highestVersion' | 'assertLogSaysGone'>;
-  /** Notified at commit with the seq range of every nonempty append. */
-  readonly wakeChannel: string;
+  readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'assertLogSaysGone'>;
 };
 
 /** What `events` returned, once it is known not to be a failure: an array of events. */
@@ -114,27 +98,7 @@ export function createWriter<
 >(deps: WriteDeps<Meta, Tx>) {
   type MetaOut = SchemaOutput<Meta>;
   const { metaSchema, projections, asyncProjections, effects } = deps;
-  const { events: eventsTable, jobs: jobsTable } = deps.tables;
-  const { decodeStoredEvent, highestVersion, assertLogSaysGone } = deps.history;
-
-  /**
-   * The stamps a transient entity's events get instead of a log row: `seq` from the events table's
-   * own sequence and `recordedAt` from the transaction's `now()`, in one round trip, decoded by the
-   * columns themselves. The seq is spent without a row, so it stays the global write order;
-   * `causeSeq` has no foreign key, so a seq with no row is safe to point at.
-   */
-  const eventsTableConfig = getTableConfig(eventsTable);
-  const eventsTableName =
-    eventsTableConfig.schema === undefined
-      ? `"${eventsTableConfig.name}"`
-      : `"${eventsTableConfig.schema}"."${eventsTableConfig.name}"`;
-  const stampTransient = (db: DbHandle, count: number) =>
-    db
-      .select({
-        seq: sql`nextval(pg_get_serial_sequence(${eventsTableName}, ${eventsTable.seq.name}))`.mapWith(eventsTable.seq),
-        recordedAt: sql`now()`.mapWith(eventsTable.recordedAt),
-      })
-      .from(sql`generate_series(1, ${count}::int)`);
+  const { decodeStoredEvent, assertLogSaysGone } = deps.history;
 
   /**
    * `write` with `getValidatedMeta` giving the parsed and checked meta. `journal.write`
@@ -173,10 +137,9 @@ export function createWriter<
       const savepoint = tx.transaction(async sp => {
         // Before the row lock, so every journal transaction takes its locks in the same
         // order (append lock, then rows) and two commands writing two entities cannot deadlock.
-        // Re-entrant inside one transaction, so nested commands take it once.
-        await sp.execute(sql`select pg_advisory_xact_lock(${APPEND_LOCK_NAMESPACE}::int, ${APPEND_LOCK_KEY}::int)`);
-        const erased: EntityTable = entity.table;
-        const loaded = await loadRow(sp, entity, id, true);
+        const storage = deps.store.bind(sp);
+        await storage.events.takeAppendLock();
+        const loaded = await storage.rows.load(entity, id, true);
         if (loaded !== null && !isRowOf(entity.table, loaded)) {
           throw new Error(`journal: ${entity.kind} ${id} row is missing columns`);
         }
@@ -216,7 +179,9 @@ export function createWriter<
         // whether the row predates the journal or its entity kept no events until now.
         const stored = row?.version ?? 0;
         const latestLogVersion =
-          !transient && (adopting || row === null || stored === 0) ? await highestVersion(sp, entity.kind, id) : 0;
+          !transient && (adopting || row === null || stored === 0)
+            ? await storage.events.highestVersion(entity.kind, id)
+            : 0;
         if (row !== null && stored === 0 && latestLogVersion > 0) {
           throw new JournalError(
             'CONFLICT',
@@ -315,7 +280,7 @@ export function createWriter<
           // No log row. The stamped events have the stored row's shape, so the rest of the write
           // (decode, fold, projections, effect jobs) is the same in both modes. They live in this
           // write's result and in the effect jobs' `args`, nowhere else.
-          const stamps = await stampTransient(sp, eventRows.length);
+          const stamps = await storage.events.stamp(eventRows.length);
           inserted = eventRows.map((eventRow, index) => {
             const stamp = stamps[index];
             if (stamp === undefined)
@@ -323,21 +288,7 @@ export function createWriter<
             return { ...eventRow, seq: stamp.seq, recordedAt: stamp.recordedAt, erasedAt: null };
           });
         } else {
-          inserted = await sp
-            .insert(eventsTable)
-            .values(eventRows)
-            .returning()
-            .catch((error: unknown) => {
-              if (isUniqueViolation(error))
-                throw new JournalError(
-                  'CONFLICT',
-                  entity.kind,
-                  id,
-                  `version ${baseVersion + 1} is already in the log: another writer appended it first, or the row is behind its history`,
-                  { cause: error },
-                );
-              throw error;
-            });
+          inserted = await storage.events.append(entity, id, eventRows);
         }
 
         // The log must hold the id as given: a cut or changed `entity_id` would split the history.
@@ -371,7 +322,6 @@ export function createWriter<
         // Adopt folds from nothing, as replay will, and must land on the stored row.
         const { row: next, recreated, reducerColumns } = fold(entity, adopting ? null : row, id, recorded, 'write');
         const finalVersion = baseVersion + recorded.length;
-        const atBase = and(eq(entity.keyColumn, id), eq(erased.version, stored));
         let saved: Row<typeof entity.table> | null = null;
         if (adopting && row !== null && next !== null) {
           const want = toRecord(next);
@@ -386,50 +336,27 @@ export function createWriter<
             );
           }
           // Only the version moves. The values are the row's own, checked above.
-          const updated = await sp.update(erased).set({ version: finalVersion }).where(atBase).returning();
-          const updatedRow = updated[0];
-          if (updatedRow === undefined)
+          const updated = await storage.rows.update(entity, id, { version: finalVersion }, stored);
+          if (updated === undefined)
             throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
-          if (!isRowOf(entity.table, updatedRow))
-            throw new Error(`journal: ${entity.kind} ${id} update returned a partial row`);
-          saved = updatedRow;
+          saved = updated;
         } else if (row === null && next !== null) {
-          saved = await saveReplayed(sp, entity, id, null, next).catch((error: unknown) => {
-            // A transient entity has no log index to catch two creates of one id. The row's own key
-            // does, and the loser gets the code a stored entity's loser gets.
-            if (transient && isUniqueViolation(error))
-              throw new JournalError(
-                'CONFLICT',
-                entity.kind,
-                id,
-                'the row insert hit a unique constraint: another writer created this row first, or a column value is already taken',
-                { cause: error },
-              );
-            throw error;
-          });
+          // A transient entity has no log index to catch two creates of one id. The row's own key
+          // does, and the store turns the loser's unique violation into `CONFLICT`.
+          saved = await storage.rows.insert(entity, id, next);
         } else if (row !== null && next !== null && recreated) {
           // A reducer deleted the row and a create followed in the same write. Delete
           // then insert, so columns the create omits get their defaults, not the old values.
-          const deleted = await sp.delete(erased).where(atBase).returning({ version: erased.version });
-          if (deleted.length === 0)
+          if (!(await storage.rows.remove(entity, id, stored)))
             throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
-          saved = await saveReplayed(sp, entity, id, null, next);
+          saved = await storage.rows.insert(entity, id, next);
         } else if (row !== null && next !== null) {
-          const updated = await sp
-            .update(erased)
-            .set({ ...next, version: finalVersion })
-            .where(atBase)
-            .returning();
-          const updatedRow = updated[0];
-          if (updatedRow === undefined)
+          const updated = await storage.rows.update(entity, id, { ...next, version: finalVersion }, stored);
+          if (updated === undefined)
             throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
-          if (!isRowOf(entity.table, updatedRow))
-            throw new Error(`journal: ${entity.kind} ${id} update returned a partial row`);
-          saved = updatedRow;
-        } else if (row !== null && next === null) {
-          const deleted = await sp.delete(erased).where(atBase).returning({ version: erased.version });
-          if (deleted.length === 0)
-            throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
+          saved = updated;
+        } else if (row !== null && next === null && !(await storage.rows.remove(entity, id, stored))) {
+          throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
         }
 
         // A create may come back normalised by the database; the events are already
@@ -477,13 +404,9 @@ export function createWriter<
             }
           }
         }
-        if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);
-        // Postgres delivers NOTIFY at commit, so every listening worker in every process hears
-        // exactly the commits that happened, with the seq range to read. Never the events themselves.
+        await storage.jobs.enqueue(jobs);
         const seqs = recorded.map(event => event.seq);
-        await sp.execute(
-          sql`select pg_notify(${deps.wakeChannel}, ${JSON.stringify({ from: Math.min(...seqs), to: Math.max(...seqs) })})`,
-        );
+        await storage.wake({ from: Math.min(...seqs), to: Math.max(...seqs) });
         // Work for the worker: jobs, plus an async projection that wants one of these events.
         const forAsync = recorded.some(event =>
           asyncProjections.some(p => p.types.has(event.type) && p.entities.some(e => e.kind === entity.kind)),

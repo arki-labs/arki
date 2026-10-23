@@ -9,7 +9,9 @@
   this line. Slice 2 landed inside `2c462f04ed` ("feat(eslint):
   domain-services joins the feature layers"): another session's plain
   `git commit` took the staged slice 2 hunks. The content is the reviewed
-  slice 2; only the message is wrong.
+  slice 2; only the message is wrong. Slice 3 in `96eff79424`. Slice 4 as
+  storage seams only: the founder dropped the memory store on 2026-10-23
+  (see slice 4).
 - **Scope:** `@arki/journal` only. Apps change only if they opt in.
 - **Inputs:** four read-only agent reports (Fable) from 2026-10-22: domain
   core, write path, event-log dependents, prior decisions + prior art. Then
@@ -123,6 +125,20 @@ can see the journal default, and stored on `EntityDef`. Standalone
    since it cannot tell which ones write with Drizzle. Receipts in memory are
    single-process only; say so. Exported as `@arki/journal/memory`
    (`memoryStore()`), next to `./pg`.
+
+   **Done as seams only (2026-10-23, founder).** The memory store was
+   dropped. Every journal API types the transaction as a Drizzle Postgres
+   handle (`TransactionSource` / `DbHandle`, about 180 type references), and
+   commands get it as `tx`. A store with no database has no such handle to
+   give them, and an app's commands, typed with one `Tx`, could not run on a
+   memory journal without loosening that type everywhere. PGlite in memory
+   (`openJournalDb` in `@arki/journal/testing`) already runs the journal with
+   no server and the same commands. What shipped: `src/store.ts`, one
+   Postgres store built once per journal, `bind(db)` giving rows, events,
+   receipts, jobs and wake. Its types are inferred from the implementation;
+   slice 6 writes the `EventLog` interface when a second log exists. The
+   row insert's unique violation is `CONFLICT` for every entity now, not
+   only transient ones.
 5. **Docs.** `packages/journal/AGENTS.md` Law 1 becomes: "One change is one
    table row and, when the entity's events are stored, one immutable event row,
    written in one transaction." Update README (including `adopt`),
@@ -145,7 +161,7 @@ can see the journal default, and stored on `EntityDef`. Standalone
   projections and effects. (Rejected: `store: 'row'`, since the row is stored
   in both modes; `history: 'none'`, the review's pick.) No new error code: setup
   refusals use `BAD_DEFINITION`, runtime refusals use `NO_HISTORY`. Memory
-  runner: `@arki/journal/memory`, `memoryStore()`.
+  runner: `@arki/journal/memory`, `memoryStore()` (dropped, see slice 4).
 - **Q-2 `seq` (answered).** Take it from the events table's own sequence in
   one round trip (`nextval` over `generate_series(1, n)`; the sequence name
   comes from `getTableConfig(tables.events)`, as `src/journal.ts:252`
