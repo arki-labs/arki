@@ -4,7 +4,7 @@ Typed schedules for TypeScript. A schedule is a name, a `cron` pattern or an `ev
 
 - A handler returns a value or a declared failure. Every run reports one status: `ran`, `refused`, `handler-failed`, and the skip and lock outcomes.
 - Two kinds: in process (the default) and durable (`durable: true`, through `@arki/queue`).
-- One replica at a time with a `lock`. A Dot adapter and oRPC cron routes.
+- One replica at a time with a `lock`, on any `@arki/lock` lease store: `pgLease` on Postgres, `sqliteLease` on SQLite, `redisStore` on Redis. A Dot adapter and oRPC cron routes.
 - No hidden retries. The runtime runs the handler once per tick.
 
 ## Install

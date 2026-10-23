@@ -94,6 +94,9 @@ schedules(core, [
   `createLocks` returns. A schedule with `lock` and no `locks` service is a
   compile error (and
   `ARKI_SCHEDULE_E009` at boot for code that skips the types).
+- On SQLite, the store is `sqliteLease(db, { ttl: '30s' })` from
+  `@arki/lock/sqlite`, with the `db` from `createLibsqlDb`. Schedulers that
+  share the database file run each tick once.
 - The lock is held while the handler runs, not for a fixed time. There is no
   key-value lease any more: that path is gone.
 - `holdAtLeast` defaults to `1s`. The lock stays held at least that long after

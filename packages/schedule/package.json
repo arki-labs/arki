@@ -81,12 +81,14 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/lock": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@libsql/client": "^0.18.0",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@orpc/contract": "catalog:backend",
     "@orpc/openapi": "catalog:backend",
