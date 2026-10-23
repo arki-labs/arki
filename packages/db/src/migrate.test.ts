@@ -11,6 +11,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,7 +19,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defineApp, infra, service } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
-import type { MigratableDb } from './migrate.js';
 import { db, dbMigrations } from './dot.js';
 import { migrateDb, readMigrations } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -81,7 +81,8 @@ describe('dbMigrations()', () => {
     let seenLabels: string[] = [];
     const reader = infra({
       name: 'reader',
-      needs: { db: service<MigratableDb<typeof relations>>() },
+      // The reader names its own driver type; MigratableDb is what migrateDb accepts, not a query handle.
+      needs: { db: service<PgliteDatabase<typeof relations>>() },
       async boot({ db: handle }) {
         seenLabels = (await handle.select().from(widgets)).map(row => row.label);
       },

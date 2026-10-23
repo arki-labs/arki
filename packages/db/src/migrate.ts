@@ -23,13 +23,15 @@
  * ```
  */
 import type { AnyRelations } from 'drizzle-orm';
+import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import type { MigrationMeta } from 'drizzle-orm/migrator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { sql } from 'drizzle-orm';
+import { is, sql } from 'drizzle-orm';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { getMigrationsToRun } from 'drizzle-orm/migrator.utils';
 import { migrate } from 'drizzle-orm/pg-core';
+import { migrateAsync, SQLiteAsyncDatabase } from 'drizzle-orm/sqlite-core';
 
 import { z } from '@arki/contracts';
 
@@ -37,7 +39,9 @@ import { debugInit } from './debug.js';
 
 /** Any handle the `db` plugin publishes. */
 export type MigratableDb<TRelations extends AnyRelations = AnyRelations> =
-  NodePgDatabase<TRelations> | PgliteDatabase<TRelations>;
+  | NodePgDatabase<TRelations>
+  | PgliteDatabase<TRelations>
+  | LibSQLDatabase<TRelations>;
 
 /** One migration as drizzle's migrator consumes it. Re-exported so apps can type a generated module. */
 export type { MigrationMeta } from 'drizzle-orm/migrator';
@@ -57,7 +61,7 @@ type MigrationSource =
 export type MigrateDbOptions = MigrationSource & {
   /** Override drizzle's bookkeeping table (`__drizzle_migrations`). */
   readonly migrationsTable?: string;
-  /** Override the schema the bookkeeping table lives in (`drizzle`). */
+  /** Override the schema the bookkeeping table lives in (`drizzle`). Postgres only: SQLite has no schemas. */
   readonly migrationsSchema?: string;
 };
 
@@ -91,6 +95,14 @@ export async function pendingMigrations<TRelations extends AnyRelations>(
   options: MigrateDbOptions,
 ): Promise<string[]> {
   const local = sourceOf(options);
+  if (is(db, SQLiteAsyncDatabase)) {
+    // SQLite has no schemas: the table sits in the main database.
+    const name = options.migrationsTable ?? '__drizzle_migrations';
+    const found = await db.all(sql`select 1 from sqlite_master where type = 'table' and name = ${name}`);
+    if (found.length === 0) return local.map(migration => migration.name);
+    const applied = z.array(appliedRowSchema).parse(await db.all(sql`select * from ${sql.identifier(name)}`));
+    return getMigrationsToRun({ localMigrations: local, dbMigrations: applied }).map(migration => migration.name);
+  }
   const table = `"${options.migrationsSchema ?? 'drizzle'}"."${options.migrationsTable ?? '__drizzle_migrations'}"`;
   const exists = await db.execute(sql`select to_regclass(${table}) is not null as "exists"`);
   const found = z.array(z.object({ exists: z.boolean() })).parse(exists.rows);
@@ -113,6 +125,12 @@ export async function migrateDb<TRelations extends AnyRelations>(
 ): Promise<void> {
   const migrations = sourceOf(options);
   debugInit.debug('[migrate] applying {migrationsLength} migration(s)', { migrationsLength: migrations.length });
+  if (is(db, SQLiteAsyncDatabase)) {
+    // SQLite has no schemas, so `migrationsSchema` does not apply.
+    await migrateAsync(migrations, db, { migrationsTable: options.migrationsTable ?? '__drizzle_migrations' });
+    debugInit.debug('[migrate] migrations applied');
+    return;
+  }
   await migrate(migrations, db, {
     // Drizzle's config type requires the folder even though this step only
     // reads the table/schema names; the list above is already in memory.
