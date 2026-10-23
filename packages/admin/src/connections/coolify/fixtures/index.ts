@@ -2,6 +2,7 @@
 export const APP_UUID = 'app00000example';
 export const DEPLOY_UUID = 'dep00000example';
 export const SERVER_UUID = 'srv00000example';
+export const PROJECT_UUID = 'prj00000example';
 
 export const applications = [
   {
@@ -15,6 +16,11 @@ export const applications = [
     git_commit_sha: 'abc1234',
     build_pack: 'nixpacks',
     updated_at: '2026-01-02T03:04:05.000000Z',
+    environment_id: 3,
+    base_directory: '/',
+    dockerfile_location: '/apps/example/Dockerfile',
+    docker_compose_location: '/docker-compose.yaml',
+    watch_paths: 'apps/example/**',
     settings: { is_static: false },
     future_field: 'tolerated',
   },
@@ -42,6 +48,12 @@ export const servers = [
     ip: '192.0.2.10',
     settings: { is_reachable: true, is_usable: true },
   },
+];
+
+export const projects = [{ id: 2, uuid: PROJECT_UUID, name: 'Example', description: null }];
+
+export const environments = [
+  { id: 3, name: 'production', project_id: 2, created_at: '2026-01-02T03:04:05.000000Z', description: null },
 ];
 
 export const unreachableServer = { ...servers[0], settings: { is_reachable: false, is_usable: false } };

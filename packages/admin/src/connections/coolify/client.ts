@@ -8,6 +8,8 @@ import {
   coolifyApplicationSchema,
   coolifyDeploymentListSchema,
   coolifyDeploymentSchema,
+  coolifyEnvironmentListSchema,
+  coolifyProjectListSchema,
   coolifyServerListSchema,
   coolifyServerSchema,
 } from './schemas';
@@ -159,6 +161,10 @@ export function createCoolifyClient(options: CoolifyClientOptions) {
     getDeployment: (uuid: string) => get(`/deployments/${segment(uuid)}`, coolifyDeploymentSchema),
     listServers: () => get('/servers', coolifyServerListSchema),
     getServer: (uuid: string) => get(`/servers/${segment(uuid)}`, coolifyServerSchema),
+    listProjects: () => get('/projects', coolifyProjectListSchema),
+    /** A project's environments. An application's `environment_id` is one of their `id`s. */
+    listEnvironments: (projectUuid: string) =>
+      get(`/projects/${segment(projectUuid)}/environments`, coolifyEnvironmentListSchema),
     /** Installed-version probe, so Foreman can warn on an unsupported Coolify. */
     probeVersion: async (): Promise<CoolifyVersionProbe> => parseVersion(await getText('/version')),
   };

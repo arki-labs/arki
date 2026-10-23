@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
-import { APP_UUID, applications, DEPLOY_UUID, deployment, SERVER_UUID, servers, unreachableServer } from './fixtures';
+import {
+  APP_UUID,
+  applications,
+  DEPLOY_UUID,
+  deployment,
+  environments,
+  PROJECT_UUID,
+  projects,
+  SERVER_UUID,
+  servers,
+  unreachableServer,
+} from './fixtures';
 import { confirmHint, createCoolifyClient, parseWebhookHint, verifyWebhookSecret } from './index';
 
 const TOKEN = '12|super-secret-token-value';
@@ -37,6 +48,8 @@ const fullRoutes: Routes = {
   '/api/v1/servers': { body: servers },
   [`/api/v1/servers/${SERVER_UUID}`]: { body: servers[0] },
   '/api/v1/version': { body: '"v4.0.0-beta.434"', text: true },
+  '/api/v1/projects': { body: projects },
+  [`/api/v1/projects/${PROJECT_UUID}/environments`]: { body: environments },
 };
 
 describe('coolify-conformance: fixture replay', () => {
@@ -55,6 +68,20 @@ describe('coolify-conformance: fixture replay', () => {
     expect(await client.probeVersion()).toEqual({ version: 'v4.0.0-beta.434', major: 4, supported: true });
     expect(calls.every(c => c.method === 'GET' && c.auth === `Bearer ${TOKEN}`)).toBe(true);
     expect(calls.some(c => c.url.endsWith('?skip=0&take=5'))).toBe(true);
+  });
+
+  // Discovery groups apps by project and finds their source: the API joins app -> environment -> project by id.
+  it("names an application's project and build paths from the project and environment reads", async () => {
+    const { client, calls } = clientFor(fullRoutes);
+    const [app] = await client.listApplications();
+    const [project] = await client.listProjects();
+    const environment = project === undefined ? undefined : (await client.listEnvironments(project.uuid))[0];
+    expect(environment?.id).toBe(app?.environment_id);
+    expect(environment?.project_id).toBe(project?.id);
+    expect(project?.name).toBe('Example');
+    expect(app?.dockerfile_location).toBe('/apps/example/Dockerfile');
+    expect(app?.watch_paths).toBe('apps/example/**');
+    expect(calls.every(c => c.method === 'GET')).toBe(true);
   });
 
   it('accepts a bare array deployment list and flags an unsupported major version', async () => {

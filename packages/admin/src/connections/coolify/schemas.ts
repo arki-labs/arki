@@ -17,6 +17,27 @@ export const coolifyApplicationSchema = z.looseObject({
   git_commit_sha: nullableString,
   build_pack: nullableString,
   updated_at: nullableString,
+  /** Joins to {@link coolifyEnvironmentSchema}'s `id`, which names the project. */
+  environment_id: z.number().int().nullish(),
+  /** Where the build runs, from the repository root (`/micro/scraper`). */
+  base_directory: nullableString,
+  /** The Dockerfile, relative to `base_directory` (`/apps/web/start/Dockerfile`). */
+  dockerfile_location: nullableString,
+  docker_compose_location: nullableString,
+  /** Paths whose change triggers a deploy, one pattern per line. */
+  watch_paths: nullableString,
+});
+
+export const coolifyProjectSchema = z.looseObject({
+  id: z.number().int(),
+  uuid: z.string().min(1),
+  name: z.string(),
+});
+
+export const coolifyEnvironmentSchema = z.looseObject({
+  id: z.number().int(),
+  name: z.string(),
+  project_id: z.number().int(),
 });
 
 export const coolifyDeploymentSchema = z.looseObject({
@@ -52,7 +73,11 @@ export const coolifyServerSchema = z.looseObject({
 
 export const coolifyApplicationListSchema = z.array(coolifyApplicationSchema);
 export const coolifyServerListSchema = z.array(coolifyServerSchema);
+export const coolifyProjectListSchema = z.array(coolifyProjectSchema);
+export const coolifyEnvironmentListSchema = z.array(coolifyEnvironmentSchema);
 
 export type CoolifyApplication = z.infer<typeof coolifyApplicationSchema>;
 export type CoolifyDeployment = z.infer<typeof coolifyDeploymentSchema>;
 export type CoolifyServer = z.infer<typeof coolifyServerSchema>;
+export type CoolifyProject = z.infer<typeof coolifyProjectSchema>;
+export type CoolifyEnvironment = z.infer<typeof coolifyEnvironmentSchema>;
