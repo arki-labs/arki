@@ -36,6 +36,11 @@
       "import": "./dist/memory.js",
       "default": "./dist/memory.js"
     },
+    "./pg": {
+      "types": "./dist/pg/index.d.ts",
+      "import": "./dist/pg/index.js",
+      "default": "./dist/pg/index.js"
+    },
     "./poll": {
       "types": "./dist/poll/index.d.ts",
       "import": "./dist/poll/index.js",

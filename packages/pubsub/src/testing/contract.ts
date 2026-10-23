@@ -214,7 +214,7 @@ export function describePubSubContract<Tx>(
           code: 'payload',
         });
         // Bytes, not characters: `é` is two bytes in UTF-8.
-        await expect(pubsub.publish(channel, 'é'.repeat(MAX_PAYLOAD_BYTES / 2 + 1))).rejects.toMatchObject({
+        await expect(pubsub.publish(channel, 'é'.repeat(Math.floor(MAX_PAYLOAD_BYTES / 2) + 1))).rejects.toMatchObject({
           code: 'payload',
         });
         // The largest channel and payload go through.

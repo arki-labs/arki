@@ -4,8 +4,8 @@ import { PubSubError } from './errors.js';
 /** A channel name: a Postgres identifier of 1 to 63 characters of `[a-z0-9_]`. */
 export const CHANNEL_PATTERN = /^[a-z0-9_]{1,63}$/;
 
-/** The largest payload, in UTF-8 bytes: the limit of Postgres NOTIFY. */
-export const MAX_PAYLOAD_BYTES = 8000;
+/** The largest payload, in UTF-8 bytes. Postgres NOTIFY refuses 8000 bytes or more, so the limit is 7999. */
+export const MAX_PAYLOAD_BYTES = 7999;
 
 const utf8 = new TextEncoder();
 

@@ -1,9 +1,11 @@
 /** The transaction capability is in the types: only backends that can join a transaction have `publishIn`. */
-import type { EmptyRelations } from 'drizzle-orm';
+import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
 import type { LibSQLDatabase, LibSQLRunResult } from 'drizzle-orm/libsql';
-import type { PgAsyncTransaction } from 'drizzle-orm/pg-core';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { PgAsyncTransaction, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import type { PgliteDatabase, PgliteQueryResultHKT } from 'drizzle-orm/pglite';
 import type { SQLiteAsyncTransaction } from 'drizzle-orm/sqlite-core';
+import pg from 'pg';
 import { expectTypeOf, test } from 'vitest';
 
 import { pgColumns } from '@arki/db/pg';
@@ -11,10 +13,12 @@ import { sqliteColumns } from '@arki/db/sqlite';
 
 import type { PubSub, Unsubscribe } from './index.js';
 import { memoryPubSub } from './memory.js';
+import { pgPubSub } from './pg/index.js';
 import { pollPubSub, pubsubTable } from './poll/index.js';
 
 declare const pgDb: PgliteDatabase;
 declare const sqliteDb: LibSQLDatabase;
+declare const nodePgDb: NodePgDatabase;
 const pgTable = pubsubTable(pgColumns());
 const sqliteTable = pubsubTable(sqliteColumns());
 
@@ -55,4 +59,17 @@ test("pollPubSub's publishIn takes the database's own transaction type, inferred
   void pollPubSub({ db: pgDb, table: sqliteTable });
   // @ts-expect-error -- the table must be built with the database's dialect
   void pollPubSub({ db: sqliteDb, table: pgTable });
+});
+
+test("pgPubSub's publishIn takes any Drizzle Postgres transaction, never a database or a SQLite one", () => {
+  const pubsub = pgPubSub({ pool: new pg.Pool() });
+  expectTypeOf<Parameters<typeof pubsub.publishIn>[0]>().toEqualTypeOf<
+    PgAsyncTransaction<PgQueryResultHKT, AnyRelations>
+  >();
+  void pgDb.transaction(tx => pubsub.publishIn(tx, 'orders', 'ord_1'));
+  void nodePgDb.transaction(tx => pubsub.publishIn(tx, 'orders', 'ord_1'));
+  // @ts-expect-error -- a root database sends at once; only a transaction defers to commit
+  void pubsub.publishIn(pgDb, 'orders', 'ord_1');
+  // @ts-expect-error -- a SQLite transaction cannot run pg_notify
+  void sqliteDb.transaction(tx => pubsub.publishIn(tx, 'orders', 'ord_1'));
 });

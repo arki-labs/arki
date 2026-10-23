@@ -13,7 +13,7 @@ export const PUBSUB_ERROR_CODES = {
    */
   channel: 'ARKI_PUBSUB_E001',
   /**
-   * The payload is longer than 8000 bytes in UTF-8 (the NOTIFY limit).
+   * The payload is 8000 bytes or more in UTF-8 (NOTIFY refuses it; the limit is 7999).
    *
    * @fix Send an id and let the subscriber read the rest from the database.
    * @verify bun run test -- src/testing/memory.contract.test.ts
