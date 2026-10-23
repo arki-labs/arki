@@ -13,6 +13,7 @@ export const ADAPTERS = new Set([
   'tanstack-start',
   'orpc',
   'pg',
+  'libsql',
   'vite',
   'server',
   'cli',

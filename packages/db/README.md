@@ -49,7 +49,7 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 ## When not to use this
 
 - You want a query builder or an ORM of your own. This package configures Drizzle. It does not hide it.
-- You need a database other than Postgres. The runtimes are node-postgres, Bun SQL and PGlite. All speak Postgres. Hosted Postgres works: see [Hosted Postgres](#hosted-postgres).
+- You need a database other than Postgres or SQLite. Postgres runs on node-postgres, Bun SQL and PGlite; hosted Postgres works too (see [Hosted Postgres](#hosted-postgres)). SQLite runs on libSQL (see [SQLite (libSQL)](#sqlite-libsql)). MySQL is not supported.
 - You want retries for any error. Only SQLSTATE `40001` and `40P01` are retried. Everything else runs once.
 - You need exactly-once effects inside a transaction. A `fetch` in a retried handler runs again. Move effects after the commit.
 - You need a migration tool. `dbMigrations()` applies pending migrations at boot. Writing them is `drizzle-kit`.
@@ -61,6 +61,8 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 | `@arki/db/transaction`, `@arki/db/orpc` | yes  | yes                                   | yes  | yes     | blocked |
 | `@arki/db/init` (node-postgres)         | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no     |
 | `@arki/db/runtime-local` (PGlite)       | yes  | yes                                   | no   | no      | no     |
+| `@arki/db/libsql` (SQLite)              | yes  | yes                                   | no   | no      | no     |
+| `@arki/db/sqlite` (tables, `idColumns`) | yes  | yes                                   | no   | no      | no     |
 
 `@arki/db/transaction` and `@arki/db/orpc` are portable: no driver. `bun run test:runtimes` runs them on each runtime. The driver entries need a server runtime with sockets or a file system.
 
@@ -99,6 +101,30 @@ pgLease(services.db, { ttl, listen: () => services.sessionPool.connect() });
 Run migrations against `DB_DIRECT_URL` too. Neon requires it, and a migration that takes a lock needs the session to last.
 
 Without Dot, `resolveDirectUrl({ url, directUrl })` from `@arki/db/pg` returns the URL to give your own listen pool, or a `db.session_needs_direct_url` failure when `url` is a known pooler.
+
+## SQLite (libSQL)
+
+An app can keep its own tables in SQLite: a local file, `:memory:`, or a Turso / libSQL server. Install the optional peer `@libsql/client`, then pick the driver:
+
+```ts skip="needs @libsql/client and a Dot app; see src/dot.test.ts"
+import { db } from '@arki/db/dot';
+
+export const database = db({ driver: 'libsql', relations, url: () => env.DB_URL }); // DB_URL=file:./data/app.db
+```
+
+Without Dot, `createLibsqlDb({ url, relations })` from `@arki/db/libsql` returns `{ db, close }`. Tables come from `@arki/db/sqlite`, which re-exports `drizzle-orm/sqlite-core` and adds `idColumns`. Then `runTransaction`, `createUnitOfWork`, `isUniqueViolation`, `migrateDb` and `dbMigrations()` work as they do on Postgres.
+
+What is different:
+
+- **One write transaction at a time per process.** SQLite has one writer. `@libsql/client` runs every connection on the one JavaScript thread, so a second writer cannot wait inside SQLite. Instead `@arki/db` queues local calls: a transaction keeps its turn until it commits or rolls back, and other calls wait for it. Keep transactions short. Inside a transaction, query through `tx`: a query on the root `db` waits for the transaction to end, so it never returns.
+- **Several processes on one file work, with retries.** Another process's lock reaches you as `SQLITE_BUSY`, which `runTransaction` retries like a Postgres `40001`.
+- **Errors read as SQLSTATE.** A duplicate key is `23505`, a broken foreign key `23503`, a missing value `23502`, a failed check `23514`. SQLite names columns, not constraints, so `isUniqueViolation(error, 'some_constraint')` is always false there.
+- **No isolation levels.** SQLite is serializable already. Transactions start with `BEGIN IMMEDIATE`.
+- **No schemas.** `migrationsSchema` does not apply; the bookkeeping table sits in the main database.
+- **Only libSQL.** bun:sqlite, node:sqlite and better-sqlite3 commit when an async callback returns, so a throw after an `await` keeps its writes. `runTransaction` refuses them with `ARKI_DB_TX_E007`.
+- **Still Postgres-only:** the tables that `@arki/auth`, `@arki/payments`, `@arki/fs` and other packages ship, and `@arki/journal`, `@arki/lock` and `@arki/live`.
+
+The measurements behind these rules are in `docs/arki/research/17-multi-database/spike/results.md` in the Arki repository.
 
 ## Usage
 

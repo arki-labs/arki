@@ -1,0 +1,5 @@
+---
+'@arki/db': minor
+---
+
+SQLite through libSQL. `db({ driver: 'libsql', url })` and `createLibsqlDb` (`@arki/db/libsql`) open a local file, `:memory:` or a Turso / libSQL server; `@libsql/client` is an optional peer. `@arki/db/sqlite` re-exports `drizzle-orm/sqlite-core` and adds `idColumns`. `runTransaction`, `createUnitOfWork`, `isUniqueViolation`, `migrateDb`, `pendingMigrations` and `dbMigrations()` work on it: SQLite errors read as SQL-standard SQLSTATEs (`SQLITE_BUSY` is the retryable `40001`), and local writers take turns instead of failing with `SQLITE_BUSY`. New: `dialectOf`, `isTransaction`, `isLibsql`; `ARKI_DB_TX_E007` refuses SQLite drivers other than libSQL; `ARKI_DB_PLUGIN_E005` catches a URL that belongs to the other driver. `TransactionalDb`'s config is now `TransactionConfig` (`PgTransactionConfig & SQLiteTransactionConfig`), and `runTransaction` passes `{ isolationLevel: 'serializable', behavior: 'immediate' }`. `MigratableDb` now includes `LibSQLDatabase`: code that used it as its own query handle should name its driver's database type.
