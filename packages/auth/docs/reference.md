@@ -213,7 +213,7 @@ import { appKeyOf, authDefinition, bindings, db, ensureProfile } from './fixture
 createAuth(authDefinition, {
   ...bindings, // db, tables and runtime
   on: {
-    // `appContext` is an extra session column: createAuthTables(schema, { columns: { session: { appContext } } }).
+    // `appContext` is an extra session column: createAuthTables(c, { columns: { session: { appContext } } }).
     sessionCreating: ({ request }) => ({ appContext: appKeyOf(request) }),
     sessionCreated: ({ userId }) => ensureProfile(db, { accountId: userId }),
   },
@@ -301,13 +301,13 @@ A 429 answer always carries `Retry-After`.
 
 A database made with the old setup works unchanged: `pg/upgrade.test.ts` signs in an old user with an old password hash and keeps an old session alive. Only the code that declares the tables changes.
 
-1. Replace the hand-written tables with one `createAuthTables(schema, options)` call that matches your columns:
+1. Replace the hand-written tables with one `createAuthTables(pgColumns(schema), options)` call that matches your columns:
    - `naming: 'camel'` when the columns are `emailVerified`; `'snake'` (default) when they are `email_verified`.
    - `fill: 'database'` when the database fills `createdAt`, `updatedAt` and `emailVerified` (`DEFAULT now()`); `fill: 'app'` when Drizzle's `$defaultFn` does.
    - `columns.<table>` adds your own columns. A standard key replaces that column, for example `account: { accessTokenExpiresAt: timestamp('expiresAt') }`.
 2. Give every id column a `$defaultFn`. The engine runs with `generateId: false`, so the old `createPrefixedIdHook` is gone. The `*IdColumns` helpers on `@arki/auth/pg` (or any `idColumns` / `createIdFactory` result from `@arki/db`) have one. Old ids stay valid: they are plain strings to read.
 3. Run `drizzle-kit generate`. The migration must be empty. If it is not, adjust `naming` and `columns` until it is.
-4. With `workspaces`, add the workspace tables from `createWorkspaceTables` (`@arki/auth/pg/workspaces`) and two session columns: `session: { activeOrganizationId: text(...), activeTeamId: text(...) }`. Without them the auth refuses to boot (`ARKI_AUTH_E007`).
+4. With `workspaces`, add the workspace tables from `createWorkspaceTables` (`@arki/auth/pg/workspaces`) and two session columns: `session: { activeOrganizationId: c.text(...), activeTeamId: c.text(...) }`. Without them the auth refuses to boot (`ARKI_AUTH_E007`).
 5. Expose extra user columns by name in `user.fields`. Delete the old `user.additionalFields` object: it is derived from the table now.
 
 The column sets `authUserColumns`, `authSessionColumns`, `authAccountColumns` and `authVerificationColumns` are for apps that must build a table by hand. They take the same `naming` and `fill`.

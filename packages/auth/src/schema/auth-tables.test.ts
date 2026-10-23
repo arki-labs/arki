@@ -1,13 +1,22 @@
-import { getTableConfig, jsonb, pgSchema, text, timestamp } from 'drizzle-orm/pg-core';
+import { getTableConfig, pgSchema } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { authAccountColumns, authSessionColumns, authUserColumns, authVerificationColumns, createAuthTables } from './index.js';
+import { pgColumns } from '@arki/db/pg';
 
-const schema = pgSchema('test_app');
+import {
+  authAccountColumns,
+  authSessionColumns,
+  authUserColumns,
+  authVerificationColumns,
+  createAuthTables,
+} from './auth-tables.js';
+
+const c = pgColumns(pgSchema('test_app'));
 
 const idSource = (prefix: string) => ({
   primaryColumn: () =>
-    text('id')
+    c
+      .text('id')
       .primaryKey()
       .$defaultFn(() => `${prefix}_x`),
   createForeignKeyFactory: () => ({ marker: prefix }),
@@ -25,43 +34,43 @@ const column = (table: Parameters<typeof getTableConfig>[0], name: string) => {
 
 describe('column sets', () => {
   it('spell column names in snake case by default', () => {
-    const User = schema.table('users', authUserColumns({ id: text('id').primaryKey(), fill: 'app' }));
+    const User = c.table('users', authUserColumns(c, { id: c.text('id').primaryKey(), fill: 'app' }));
     expect(columnNames(User)).toEqual(['id', 'name', 'email', 'email_verified', 'image', 'created_at', 'updated_at']);
   });
 
   it('keep the key as the column name with naming camel', () => {
-    const Verification = schema.table(
+    const Verification = c.table(
       'verifications',
-      authVerificationColumns({ id: text('id').primaryKey(), naming: 'camel', fill: 'app' }),
+      authVerificationColumns(c, { id: c.text('id').primaryKey(), naming: 'camel', fill: 'app' }),
     );
     expect(columnNames(Verification)).toEqual(['id', 'identifier', 'value', 'expiresAt', 'createdAt', 'updatedAt']);
   });
 
   it('let a later key replace a column and keep its position out of the way', () => {
-    const Account = schema.table('accounts', {
-      ...authAccountColumns({
-        id: text('id').primaryKey(),
-        userId: text('userId').notNull(),
+    const Account = c.table('accounts', {
+      ...authAccountColumns(c, {
+        id: c.text('id').primaryKey(),
+        userId: c.text('userId').notNull(),
         naming: 'camel',
         fill: 'app',
       }),
-      accessTokenExpiresAt: timestamp('expiresAt'),
+      accessTokenExpiresAt: c.timestamp('expiresAt'),
     });
     const names = columnNames(Account);
     expect(names).toContain('expiresAt');
     expect(names).not.toContain('accessTokenExpiresAt');
   });
 
-  it('hand out fresh builders on every call', () => {
-    const first = authSessionColumns({ id: text('id'), userId: text('user_id'), fill: 'app' });
-    const second = authSessionColumns({ id: text('id'), userId: text('user_id'), fill: 'app' });
+  it('hand out fresh specs on every call', () => {
+    const first = authSessionColumns(c, { id: c.text('id'), userId: c.text('user_id'), fill: 'app' });
+    const second = authSessionColumns(c, { id: c.text('id'), userId: c.text('user_id'), fill: 'app' });
     expect(first.token).not.toBe(second.token);
   });
 });
 
 describe('fill', () => {
-  const js = createAuthTables(schema, { ids, fill: 'app' });
-  const sql = createAuthTables(schema, { ids, fill: 'database' });
+  const js = createAuthTables(c, { ids, fill: 'app' });
+  const sql = createAuthTables(c, { ids, fill: 'database' });
 
   it("'app' fills timestamps and emailVerified from code, never from the database", () => {
     expect(column(js.User, 'created_at')).toEqual({ notNull: true, sqlDefault: false, jsDefault: true });
@@ -88,12 +97,12 @@ describe('fill', () => {
 });
 
 describe('createAuthTables', () => {
-  const tables = createAuthTables(schema, {
+  const tables = createAuthTables(c, {
     ids,
     fill: 'app',
     columns: {
-      user: { tweaks: jsonb('tweaks').notNull() },
-      account: { accessTokenExpiresAt: timestamp('expires_at') },
+      user: { tweaks: c.json('tweaks').notNull() },
+      account: { accessTokenExpiresAt: c.timestamp('expires_at') },
     },
   });
 
@@ -109,7 +118,7 @@ describe('createAuthTables', () => {
   });
 
   it('adds nothing on its own: without columns, users has the standard columns only', () => {
-    const bare = createAuthTables(schema, { ids, fill: 'app' });
+    const bare = createAuthTables(c, { ids, fill: 'app' });
     expect(columnNames(bare.User)).toEqual([
       'id',
       'name',

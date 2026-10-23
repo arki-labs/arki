@@ -1,9 +1,10 @@
-import type { AnyPgColumnBuilder } from 'drizzle-orm/pg-core';
-import { timestamp } from 'drizzle-orm/pg-core';
+import type { AnyColumnSpec, ColumnKit, ColumnSpec, ColumnValue, Dialect } from '@arki/db/columns';
 
 /**
  * Options shared by the auth and the workspace table factories, and the
- * column makers that read them.
+ * column makers that read them. Dialect-free: the columns are the column
+ * kit's specs (`@arki/db/columns`), so the same tables build on Postgres and
+ * on SQLite.
  */
 
 /** How column names are spelled in the database: `email_verified` or `emailVerified`. */
@@ -36,10 +37,16 @@ export function columnNamer(naming: AuthColumnNaming = 'snake'): ColumnNamer {
   return naming === 'camel' ? keepKey : toSnakeCase;
 }
 
-/** Something that makes the primary key column of one table. The lib never makes ids. */
-export type PrimaryColumnSource<TBuilder extends AnyPgColumnBuilder> = {
-  primaryColumn: () => TBuilder;
+/** Something that makes the primary key column of one table, e.g. `c.id(noteId)`. The lib never makes ids. */
+export type PrimaryColumnSource<TSpec> = {
+  primaryColumn: () => TSpec;
 };
+
+/** The columns a table factory takes on top of its own: column kit specs of the same dialect. */
+export type ColumnSpecs<D extends Dialect> = Record<string, AnyColumnSpec<D>>;
+
+/** The value a spec's column holds: the `$type` when set, else the kind's value. */
+export type SpecValue<TSpec> = TSpec extends ColumnSpec<Dialect, infer K, infer F> ? ColumnValue<K, F> : never;
 
 export const now = () => /* @__PURE__ */ new Date();
 
@@ -60,7 +67,9 @@ export function byFill<TApp, TDatabase>(makers: {
 }
 
 /** A `NOT NULL` timestamp that is filled on insert: by the app (`'app'`) or by the database (`'database'`). */
-export const filledAt = byFill({
-  app: name => timestamp(name).notNull().$defaultFn(now),
-  database: name => timestamp(name).notNull().defaultNow(),
-});
+export function filledAt<D extends Dialect>(c: ColumnKit<D>) {
+  return byFill({
+    app: name => c.timestamp(name).notNull().$defaultFn(now),
+    database: name => c.timestamp(name).notNull().defaultNow(),
+  });
+}

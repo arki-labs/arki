@@ -1,5 +1,7 @@
 import { jsonb } from 'drizzle-orm/pg-core';
 
+import type { ColumnKit, Dialect } from '@arki/db/columns';
+
 /**
  * Default payload written to the User.tweaks column when a user is first
  * created. Empty global = use design-system defaults. Empty pageScoped = no
@@ -22,4 +24,14 @@ export const EMPTY_TWEAKS = {
  */
 export function tweaksColumn(name = 'tweaks') {
   return jsonb(name).$type<typeof EMPTY_TWEAKS>();
+}
+
+/**
+ * The same tweaks store as a column kit spec, for tables written with the kit, such as
+ * `createAuthTables`' `columns.user`: `jsonb` on Postgres, JSON text on SQLite.
+ *
+ *   tweaks: tweaksSpec(c).notNull().default(EMPTY_TWEAKS),
+ */
+export function tweaksSpec<D extends Dialect>(c: ColumnKit<D>, name = 'tweaks') {
+  return c.json(name).$type<typeof EMPTY_TWEAKS>();
 }

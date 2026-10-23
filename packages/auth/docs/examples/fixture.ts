@@ -1,16 +1,11 @@
 // The app pieces the docs examples use but do not define: a Notes app's auth tables,
 // its definitions, its env and a real auth on an in-memory database.
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
 import { defineAuth } from '@arki/auth';
-import {
-  accountIdColumns,
-  createAuthTables,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from '@arki/auth/pg';
+import { authIdSources, createAuthTables } from '@arki/auth/pg';
 import { TEST_AUTH_SECRET, testAuth } from '@arki/auth/testing';
+import { pgColumns } from '@arki/db/pg';
 import { infra } from '@arki/dot/unit';
 import { KV } from '@arki/kv';
 
@@ -32,21 +27,15 @@ export const env = {
 export const kv = new KV('redis://localhost:6379', 'notes');
 
 // The four auth tables, with a `plan` user column and an `appContext` session column.
-export const authTables = createAuthTables(pgSchema('notes'), {
+const c = pgColumns(pgSchema('notes'));
+export const authTables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
     },
-    session: { appContext: text('app_context') },
+    session: { appContext: c.text('app_context') },
   },
 });
 

@@ -2,18 +2,17 @@
  * Auth tables with one extra session column, `appContext`: the app a session belongs to, as
  * games-platform and kapodopera write it on every new session.
  */
-import { pgSchema, varchar } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
-import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from '../pg/ids.js';
-import { createAuthTables } from '../pg/schema/index.js';
+import { pgColumns } from '@arki/db/pg';
 
-export const sessionTables = createAuthTables(pgSchema('games'), {
+import { authIdSources } from '../pg/ids.js';
+import { createAuthTables } from '../schema/auth-tables.js';
+
+const c = pgColumns(pgSchema('games'));
+
+export const sessionTables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
-  columns: { session: { appContext: varchar('app_context', { length: 50 }) } },
+  ids: authIdSources,
+  columns: { session: { appContext: c.varchar('app_context', { length: 50 }) } },
 });

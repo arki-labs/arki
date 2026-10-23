@@ -1,31 +1,26 @@
-import type {
-  AnyPgColumn,
-  AnyPgColumnBuilder,
-  PgBuildColumns,
-  PgSchema,
-  PgTableWithColumns,
-} from 'drizzle-orm/pg-core';
-import { boolean, text, timestamp } from 'drizzle-orm/pg-core';
+import type { Column } from 'drizzle-orm';
 
-import type { AuthColumnFill, AuthColumnOptions, PrimaryColumnSource } from './column-options.js';
+import type { AnyColumnSpec, ColumnKit, Dialect } from '@arki/db/columns';
+
+import type { AuthColumnFill, AuthColumnOptions, ColumnSpecs, PrimaryColumnSource, SpecValue } from './column-options.js';
 import { byFill, columnNamer, filledAt, now } from './column-options.js';
 
 export type { AuthColumnFill, AuthColumnNaming, AuthColumnOptions, PrimaryColumnSource } from './column-options.js';
 
 /**
- * Drizzle tables and column sets for the four Better Auth core tables.
+ * Drizzle tables and column sets for the four Better Auth core tables, written
+ * once against the column kit (`@arki/db/columns`): `pgColumns(schema)` builds
+ * them on Postgres, `sqliteColumns({ prefix })` on SQLite.
  *
- * `createAuthTables(schema, options)` builds all four tables in one call. The
- * app passes its pgSchema, its id columns, who fills the defaulted columns (`fill`),
- * how columns are spelled (`naming`) and its extra or replaced columns
- * (`columns`). The lib never makes ids.
+ * `createAuthTables(c, options)` builds all four tables in one call. The app
+ * passes its kit, its id columns, who fills the defaulted columns (`fill`), how
+ * columns are spelled (`naming`) and its extra or replaced columns (`columns`).
+ * The lib never makes ids.
  *
- * Each `auth*Columns(options)` returns a plain record of fresh column builders
- * for apps that must build a table themselves. A key written after the spread
- * replaces that column.
+ * Each `auth*Columns(c, options)` returns a plain record of fresh column specs
+ * for apps that must build a table themselves (`c.table(name, columns)`). A key
+ * written after the spread replaces that column.
  */
-
-type ColumnMap = Record<string, AnyPgColumnBuilder>;
 
 /**
  * The app's own columns for one table: any key but `id`, which comes from
@@ -33,136 +28,136 @@ type ColumnMap = Record<string, AnyPgColumnBuilder>;
  * an index signature would make `keyof` of the extras `string` inside the
  * factory, and the standard `id` column would no longer be findable there.
  */
-export type ExtraColumns<TColumns> = { [K in keyof TColumns]: K extends 'id' ? never : AnyPgColumnBuilder };
+export type ExtraColumns<D extends Dialect, TColumns> = {
+  [K in keyof TColumns]: K extends 'id' ? never : AnyColumnSpec<D>;
+};
 
 /** No extra columns: what a table gets when `columns` leaves it out. */
 type NoColumns = Record<never, never>;
 
-/** Timestamps Better Auth writes itself on insert; `'database'` adds a database default anyway. */
-const writtenAt = byFill({
-  app: name => timestamp(name).notNull(),
-  database: name => timestamp(name).notNull().defaultNow(),
-});
+/** The fill-aware column makers of one kit. */
+function authColumnMakers<D extends Dialect>(c: ColumnKit<D>) {
+  return {
+    filledAt: filledAt(c),
+    /** Timestamps Better Auth writes itself on insert; `'database'` adds a database default anyway. */
+    writtenAt: byFill({
+      app: name => c.timestamp(name).notNull(),
+      database: name => c.timestamp(name).notNull().defaultNow(),
+    }),
+    /** Verification timestamps: Better Auth's own shape is nullable with a JS default. */
+    verificationAt: byFill({
+      app: name => c.timestamp(name).$defaultFn(now),
+      database: name => c.timestamp(name).notNull().defaultNow(),
+    }),
+    emailVerified: byFill({
+      app: name =>
+        c
+          .boolean(name)
+          .notNull()
+          .$defaultFn(() => false),
+      database: name => c.boolean(name).notNull().default(false),
+    }),
+  };
+}
 
-/** Verification timestamps: Better Auth's own shape is nullable with a JS default. */
-const verificationAt = byFill({
-  app: name => timestamp(name).$defaultFn(now),
-  database: name => timestamp(name).notNull().defaultNow(),
-});
-
-const emailVerified = byFill({
-  app: name =>
-    boolean(name)
-      .notNull()
-      .$defaultFn(() => false),
-  database: name => boolean(name).notNull().default(false),
-});
-
-export type AuthUserOptions<TId extends AnyPgColumnBuilder, TFill extends AuthColumnFill> = AuthColumnOptions<TFill> & {
-  /** The primary key column, e.g. `userIdColumns.primaryColumn()`. */
+export type AuthUserOptions<TId, TFill extends AuthColumnFill> = AuthColumnOptions<TFill> & {
+  /** The primary key column, e.g. `c.id(userId).primaryColumn()`. */
   id: TId;
 };
 
-export type AuthSessionOptions<
-  TId extends AnyPgColumnBuilder,
-  TUserId extends AnyPgColumnBuilder,
-  TFill extends AuthColumnFill,
-> = AuthColumnOptions<TFill> & {
+export type AuthSessionOptions<TId, TUserId, TFill extends AuthColumnFill> = AuthColumnOptions<TFill> & {
   /** The primary key column. */
   id: TId;
   /** The column that points at the user, already finished with its `.references(...)`. */
   userId: TUserId;
 };
 
-export type AuthAccountOptions<
-  TId extends AnyPgColumnBuilder,
-  TUserId extends AnyPgColumnBuilder,
-  TFill extends AuthColumnFill,
-> = AuthSessionOptions<TId, TUserId, TFill>;
+export type AuthAccountOptions<TId, TUserId, TFill extends AuthColumnFill> = AuthSessionOptions<TId, TUserId, TFill>;
 
-export type AuthVerificationOptions<
-  TId extends AnyPgColumnBuilder,
-  TFill extends AuthColumnFill,
-> = AuthColumnOptions<TFill> & {
+export type AuthVerificationOptions<TId, TFill extends AuthColumnFill> = AuthColumnOptions<TFill> & {
   /** The primary key column. */
   id: TId;
 };
 
 /** Columns of the Better Auth `user` model. */
-export function authUserColumns<TId extends AnyPgColumnBuilder, TFill extends AuthColumnFill>({
-  id,
-  naming,
-  fill,
-}: AuthUserOptions<TId, TFill>) {
+export function authUserColumns<D extends Dialect, TId extends AnyColumnSpec<D>, TFill extends AuthColumnFill>(
+  c: ColumnKit<D>,
+  { id, naming, fill }: AuthUserOptions<TId, TFill>,
+) {
   const name = columnNamer(naming);
+  const make = authColumnMakers(c);
   return {
     id,
-    name: text(name('name')).notNull(),
-    email: text(name('email')).notNull().unique(),
-    emailVerified: emailVerified(fill, name('emailVerified')),
-    image: text(name('image')),
-    createdAt: filledAt(fill, name('createdAt')),
-    updatedAt: filledAt(fill, name('updatedAt')),
+    name: c.text(name('name')).notNull(),
+    email: c.text(name('email')).notNull().unique(),
+    emailVerified: make.emailVerified(fill, name('emailVerified')),
+    image: c.text(name('image')),
+    createdAt: make.filledAt(fill, name('createdAt')),
+    updatedAt: make.filledAt(fill, name('updatedAt')),
   };
 }
 
 /** Columns of the Better Auth `session` model. */
 export function authSessionColumns<
-  TId extends AnyPgColumnBuilder,
-  TUserId extends AnyPgColumnBuilder,
+  D extends Dialect,
+  TId extends AnyColumnSpec<D>,
+  TUserId extends AnyColumnSpec<D>,
   TFill extends AuthColumnFill,
->({ id, userId, naming, fill }: AuthSessionOptions<TId, TUserId, TFill>) {
+>(c: ColumnKit<D>, { id, userId, naming, fill }: AuthSessionOptions<TId, TUserId, TFill>) {
   const name = columnNamer(naming);
+  const make = authColumnMakers(c);
   return {
     id,
-    expiresAt: timestamp(name('expiresAt')).notNull(),
-    token: text(name('token')).notNull().unique(),
-    createdAt: writtenAt(fill, name('createdAt')),
-    updatedAt: writtenAt(fill, name('updatedAt')),
-    ipAddress: text(name('ipAddress')),
-    userAgent: text(name('userAgent')),
+    expiresAt: c.timestamp(name('expiresAt')).notNull(),
+    token: c.text(name('token')).notNull().unique(),
+    createdAt: make.writtenAt(fill, name('createdAt')),
+    updatedAt: make.writtenAt(fill, name('updatedAt')),
+    ipAddress: c.text(name('ipAddress')),
+    userAgent: c.text(name('userAgent')),
     userId,
   };
 }
 
 /** Columns of the Better Auth `account` model. */
 export function authAccountColumns<
-  TId extends AnyPgColumnBuilder,
-  TUserId extends AnyPgColumnBuilder,
+  D extends Dialect,
+  TId extends AnyColumnSpec<D>,
+  TUserId extends AnyColumnSpec<D>,
   TFill extends AuthColumnFill,
->({ id, userId, naming, fill }: AuthAccountOptions<TId, TUserId, TFill>) {
+>(c: ColumnKit<D>, { id, userId, naming, fill }: AuthAccountOptions<TId, TUserId, TFill>) {
   const name = columnNamer(naming);
+  const make = authColumnMakers(c);
   return {
     id,
-    accountId: text(name('accountId')).notNull(),
-    providerId: text(name('providerId')).notNull(),
+    accountId: c.text(name('accountId')).notNull(),
+    providerId: c.text(name('providerId')).notNull(),
     userId,
-    accessToken: text(name('accessToken')),
-    refreshToken: text(name('refreshToken')),
-    idToken: text(name('idToken')),
-    accessTokenExpiresAt: timestamp(name('accessTokenExpiresAt')),
-    refreshTokenExpiresAt: timestamp(name('refreshTokenExpiresAt')),
-    scope: text(name('scope')),
-    password: text(name('password')),
-    createdAt: writtenAt(fill, name('createdAt')),
-    updatedAt: writtenAt(fill, name('updatedAt')),
+    accessToken: c.text(name('accessToken')),
+    refreshToken: c.text(name('refreshToken')),
+    idToken: c.text(name('idToken')),
+    accessTokenExpiresAt: c.timestamp(name('accessTokenExpiresAt')),
+    refreshTokenExpiresAt: c.timestamp(name('refreshTokenExpiresAt')),
+    scope: c.text(name('scope')),
+    password: c.text(name('password')),
+    createdAt: make.writtenAt(fill, name('createdAt')),
+    updatedAt: make.writtenAt(fill, name('updatedAt')),
   };
 }
 
 /** Columns of the Better Auth `verification` model. */
-export function authVerificationColumns<TId extends AnyPgColumnBuilder, TFill extends AuthColumnFill>({
-  id,
-  naming,
-  fill,
-}: AuthVerificationOptions<TId, TFill>) {
+export function authVerificationColumns<D extends Dialect, TId extends AnyColumnSpec<D>, TFill extends AuthColumnFill>(
+  c: ColumnKit<D>,
+  { id, naming, fill }: AuthVerificationOptions<TId, TFill>,
+) {
   const name = columnNamer(naming);
+  const make = authColumnMakers(c);
   return {
     id,
-    identifier: text(name('identifier')).notNull(),
-    value: text(name('value')).notNull(),
-    expiresAt: timestamp(name('expiresAt')).notNull(),
-    createdAt: verificationAt(fill, name('createdAt')),
-    updatedAt: verificationAt(fill, name('updatedAt')),
+    identifier: c.text(name('identifier')).notNull(),
+    value: c.text(name('value')).notNull(),
+    expiresAt: c.timestamp(name('expiresAt')).notNull(),
+    createdAt: make.verificationAt(fill, name('createdAt')),
+    updatedAt: make.verificationAt(fill, name('updatedAt')),
   };
 }
 
@@ -171,52 +166,41 @@ export function authVerificationColumns<TId extends AnyPgColumnBuilder, TFill ex
  * the standard column. `id` is named on its own so that the factory can read
  * `Table.id` while the extras are still a type parameter.
  */
-/**
- * One auth table, typed exactly as `schema.table(name, columns)` returns it. Written out because
- * the compiler's declaration output otherwise loses the table name inside the column types
- * (`tableName: TTableName`), and a select over the published table then reads every column as
- * nullable.
- */
-type AuthTable<TName extends string, TColumns extends Record<string, AnyPgColumnBuilder>> = PgTableWithColumns<{
-  name: TName;
-  schema: string;
-  columns: PgBuildColumns<TName, TColumns>;
-  dialect: 'pg';
-}>;
-
-function authTable<TName extends string, TColumns extends Record<string, AnyPgColumnBuilder>>(
-  schema: PgSchema,
-  name: TName,
-  columns: TColumns,
-): AuthTable<TName, TColumns> {
-  return schema.table(name, columns);
-}
-
 function withColumns<
-  TBase extends ColumnMap & { id: AnyPgColumnBuilder },
-  TExtra extends ExtraColumns<TExtra> | undefined,
->(base: TBase, extra: TExtra): Pick<TBase, 'id'> & Omit<TBase, keyof NonNullable<TExtra>> & NonNullable<TExtra> {
+  D extends Dialect,
+  TBase extends ColumnSpecs<D> & { id: AnyColumnSpec<D> },
+  TExtra extends ExtraColumns<D, TExtra> | undefined,
+>(
+  base: TBase,
+  extra: TExtra,
+): Pick<TBase, 'id'> & Omit<TBase, keyof NonNullable<TExtra>> & NonNullable<TExtra> {
   return { ...base, ...extra };
 }
 
-/** The user id source also makes foreign keys that point at the user table. */
-type UserIdSource<TBuilder extends AnyPgColumnBuilder, TForeignKeys> = PrimaryColumnSource<TBuilder> & {
-  createForeignKeyFactory: (reference: () => AnyPgColumn) => TForeignKeys;
+/**
+ * The user id source also makes foreign keys that point at the user table.
+ * `createForeignKeyFactory` is a method, so a dialect's own factory (taking
+ * `() => PgColumn` or `() => SQLiteColumn`) fits where the user table's `id` is
+ * typed as a plain `Column`; a factory of the other dialect still does not.
+ */
+export type UserIdSource<TSpec, TForeignKeys> = PrimaryColumnSource<TSpec> & {
+  createForeignKeyFactory(reference: () => Column): TForeignKeys;
 };
 
 export type CreateAuthTablesOptions<
-  TUserId extends AnyPgColumnBuilder,
-  TSessionId extends AnyPgColumnBuilder,
-  TAccountId extends AnyPgColumnBuilder,
-  TVerificationId extends AnyPgColumnBuilder,
+  D extends Dialect,
+  TUserId extends AnyColumnSpec<D>,
+  TSessionId extends AnyColumnSpec<D>,
+  TAccountId extends AnyColumnSpec<D>,
+  TVerificationId extends AnyColumnSpec<D>,
   TForeignKeys,
   TFill extends AuthColumnFill,
-  TUserColumns extends ExtraColumns<TUserColumns>,
-  TSessionColumns extends ExtraColumns<TSessionColumns>,
-  TAccountColumns extends ExtraColumns<TAccountColumns>,
-  TVerificationColumns extends ExtraColumns<TVerificationColumns>,
+  TUserColumns extends ExtraColumns<D, TUserColumns>,
+  TSessionColumns extends ExtraColumns<D, TSessionColumns>,
+  TAccountColumns extends ExtraColumns<D, TAccountColumns>,
+  TVerificationColumns extends ExtraColumns<D, TVerificationColumns>,
 > = AuthColumnOptions<TFill> & {
-  /** The app's id sources. The lib never makes ids. */
+  /** The app's id sources, e.g. `authIdSources` from `@arki/auth/pg`. The lib never makes ids. */
   ids: {
     user: UserIdSource<TUserId, TForeignKeys>;
     session: PrimaryColumnSource<TSessionId>;
@@ -242,39 +226,37 @@ export type CreateAuthTablesOptions<
  *
  * @example
  * ```typescript
- * export const { User, Session, Account, Verification, userForeignKeys } = createAuthTables(schema, {
+ * const c = pgColumns(schema);
+ * export const { User, Session, Account, Verification, userForeignKeys } = createAuthTables(c, {
  *   fill: 'app',
- *   ids: {
- *     user: userIdColumns,
- *     session: sessionIdColumns,
- *     account: accountIdColumns,
- *     verification: verificationIdColumns,
- *   },
+ *   ids: authIdSources,
  *   columns: {
- *     user: { tweaks: tweaksColumn().notNull().default(EMPTY_TWEAKS) },
+ *     user: { tweaks: tweaksSpec(c).notNull().default(EMPTY_TWEAKS) },
  *   },
  * });
  * ```
  */
 export function createAuthTables<
-  TUserId extends AnyPgColumnBuilder,
-  TSessionId extends AnyPgColumnBuilder,
-  TAccountId extends AnyPgColumnBuilder,
-  TVerificationId extends AnyPgColumnBuilder,
+  D extends Dialect,
+  TUserId extends AnyColumnSpec<D>,
+  TSessionId extends AnyColumnSpec<D>,
+  TAccountId extends AnyColumnSpec<D>,
+  TVerificationId extends AnyColumnSpec<D>,
   TForeignKeys,
   TFill extends AuthColumnFill,
-  TUserColumns extends ExtraColumns<TUserColumns> = NoColumns,
-  TSessionColumns extends ExtraColumns<TSessionColumns> = NoColumns,
-  TAccountColumns extends ExtraColumns<TAccountColumns> = NoColumns,
-  TVerificationColumns extends ExtraColumns<TVerificationColumns> = NoColumns,
+  TUserColumns extends ExtraColumns<D, TUserColumns> = NoColumns,
+  TSessionColumns extends ExtraColumns<D, TSessionColumns> = NoColumns,
+  TAccountColumns extends ExtraColumns<D, TAccountColumns> = NoColumns,
+  TVerificationColumns extends ExtraColumns<D, TVerificationColumns> = NoColumns,
 >(
-  schema: PgSchema,
+  c: ColumnKit<D>,
   {
     ids,
     naming,
     fill,
     columns,
   }: CreateAuthTablesOptions<
+    D,
     TUserId,
     TSessionId,
     TAccountId,
@@ -289,42 +271,36 @@ export function createAuthTables<
 ) {
   const name = columnNamer(naming);
 
-  const User = authTable(
-    schema,
-    'users',
-    withColumns(authUserColumns({ id: ids.user.primaryColumn(), naming, fill }), columns?.user),
-  );
+  const User = c.table('users', withColumns(authUserColumns(c, { id: ids.user.primaryColumn(), naming, fill }), columns?.user));
 
   const userForeignKeys = ids.user.createForeignKeyFactory(() => User.id);
 
   const userReference = () =>
-    text(name('userId'))
+    c
+      .text(name('userId'))
       .notNull()
-      .$type<typeof User.id._.data>()
+      .$type<SpecValue<TUserId>>()
       .references(() => User.id, { onDelete: 'cascade' });
 
-  const Account = authTable(
-    schema,
+  const Account = c.table(
     'accounts',
     withColumns(
-      authAccountColumns({ id: ids.account.primaryColumn(), userId: userReference(), naming, fill }),
+      authAccountColumns(c, { id: ids.account.primaryColumn(), userId: userReference(), naming, fill }),
       columns?.account,
     ),
   );
 
-  const Session = authTable(
-    schema,
+  const Session = c.table(
     'sessions',
     withColumns(
-      authSessionColumns({ id: ids.session.primaryColumn(), userId: userReference(), naming, fill }),
+      authSessionColumns(c, { id: ids.session.primaryColumn(), userId: userReference(), naming, fill }),
       columns?.session,
     ),
   );
 
-  const Verification = authTable(
-    schema,
+  const Verification = c.table(
     'verifications',
-    withColumns(authVerificationColumns({ id: ids.verification.primaryColumn(), naming, fill }), columns?.verification),
+    withColumns(authVerificationColumns(c, { id: ids.verification.primaryColumn(), naming, fill }), columns?.verification),
   );
 
   return { User, Session, Account, Verification, userForeignKeys };

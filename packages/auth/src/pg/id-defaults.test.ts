@@ -3,17 +3,17 @@
  * insert a null id at the first sign-up, found only in production. Boot refuses it instead.
  */
 import { PGlite } from '@electric-sql/pglite';
-import { pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { pgColumns } from '@arki/db/pg';
 import { mailer } from '@arki/mail';
 import { mailSink } from '@arki/mail/testing';
 
 import { allTables, authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES } from '../errors.js';
-import { authSessionColumns } from './schema/index.js';
+import { authSessionColumns } from '../schema/auth-tables.js';
 import { createAuth } from './index.js';
 
 const client = new PGlite('memory://');
@@ -23,10 +23,11 @@ const mail = mailer({ transport: mailSink(), from: 'Notes <hi@notes.test>' });
 const runtime = () => ({ url: 'http://localhost:3000', secret: undefined, production: false });
 const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'] });
 
-/** A hand-written session table: `text('id').primaryKey()` has no default. */
-const PlainSession = pgTable(
+/** A hand-written session table: `c.text('id').primaryKey()` has no default. */
+const c = pgColumns();
+const PlainSession = c.table(
   'sessions',
-  authSessionColumns({ id: text('id').primaryKey(), userId: text('user_id').notNull(), fill: 'app' }),
+  authSessionColumns(c, { id: c.text('id').primaryKey(), userId: c.text('user_id').notNull(), fill: 'app' }),
 );
 
 const buildWithPlainSession = () =>

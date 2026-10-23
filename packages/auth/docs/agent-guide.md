@@ -17,44 +17,33 @@ Read this before changing code that signs users in or reads who is calling. [`ll
 
 ### Add sign-in to an app
 
-1. Build the tables with `createAuthTables` (`src/schema/index.ts`, exported from `@arki/auth/pg`).
+1. Build the tables with `createAuthTables` (`src/schema/auth-tables.ts`, exported from `@arki/auth/pg` and `@arki/auth/sqlite`).
 2. Declare the auth with `defineAuth` (`src/definition.ts`) in a file both the backend and the start app import.
 3. Add the Dot unit `auth(definition, bindings)` (`src/dot.ts`) after the `db` and `mail` units.
 4. Name the types: `type Auth = AuthOf<typeof authn>` and `type Principal = PrincipalOf<Auth>`.
 5. Serve `auth.handler` on `/api/auth/*` and put `await auth.principal(request.headers)` in the request context.
 
 ```ts
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
 import type { PrincipalOf } from '@arki/auth';
 import type { AuthOf } from '@arki/auth/dot';
 import type { KV } from '@arki/kv';
 import { defineAuth } from '@arki/auth';
 import { auth } from '@arki/auth/dot';
-import {
-  accountIdColumns,
-  createAuthTables,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from '@arki/auth/pg';
+import { authIdSources, createAuthTables } from '@arki/auth/pg';
+import { pgColumns } from '@arki/db/pg';
 
 declare const env: { readonly URL: string; readonly AUTH_SECRET: string | undefined; readonly NODE_ENV: string };
 declare const kv: KV;
 
-export const authTables = createAuthTables(pgSchema('notes'), {
+const c = pgColumns(pgSchema('notes'));
+export const authTables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
     },
   },
 });
@@ -154,31 +143,20 @@ A name that is not a column does not compile, and throws `ARKI_AUTH_E001` at boo
 3. `lastMagicLink(mail, email)` or `lastLink(mail, template, email)` reads the link from the latest mail.
 
 ```ts run
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
 import { defineAuth } from '@arki/auth';
-import {
-  accountIdColumns,
-  createAuthTables,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from '@arki/auth/pg';
+import { authIdSources, createAuthTables } from '@arki/auth/pg';
 import { actingAs, testAuth } from '@arki/auth/testing';
+import { pgColumns } from '@arki/db/pg';
 
-const tables = createAuthTables(pgSchema('notes'), {
+const c = pgColumns(pgSchema('notes'));
+const tables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
     },
   },
 });

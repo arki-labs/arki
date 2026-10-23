@@ -53,14 +53,14 @@ export type {
 export { assertAuthSecret } from './secret.js';
 export { additionalFieldsFromColumns } from './fields.js';
 export { authLinkInput } from './mail.js';
-export { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from './ids.js';
+export { accountIdColumns, authIdSources, sessionIdColumns, userIdColumns, verificationIdColumns } from './ids.js';
 export {
   authAccountColumns,
   authSessionColumns,
   authUserColumns,
   authVerificationColumns,
   createAuthTables,
-} from './schema/index.js';
+} from '../schema/auth-tables.js';
 export type {
   AuthColumnFill,
   AuthColumnNaming,
@@ -68,7 +68,8 @@ export type {
   CreateAuthTablesOptions,
   ExtraColumns,
   PrimaryColumnSource,
-} from './schema/index.js';
+  UserIdSource,
+} from '../schema/auth-tables.js';
 
 /**
  * Builds the auth from its definition and the app's bindings. Every mistake a deployment can make

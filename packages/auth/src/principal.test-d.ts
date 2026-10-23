@@ -2,30 +2,26 @@
  * The principal's user type comes from the app's table: the branded id, the exposed column's own
  * type, and nothing the definition did not expose.
  */
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { UserId } from './ids.js';
 import type { PrincipalFor } from './pg/types.js';
 import type { PrincipalOf } from './principal.js';
-import { defineAuth } from './definition.js';
-import { accountIdColumns, sessionIdColumns, userIdColumns, verificationIdColumns } from './pg/ids.js';
-import { createAuthTables } from './pg/schema/index.js';
+import { pgColumns } from '@arki/db/pg';
 
-const tables = createAuthTables(pgSchema('notes'), {
+import { defineAuth } from './definition.js';
+import { authIdSources } from './pg/ids.js';
+import { createAuthTables } from './schema/auth-tables.js';
+
+const c = pgColumns(pgSchema('notes'));
+const tables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
-      stripeCustomerId: text('stripe_customer_id'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
+      stripeCustomerId: c.text('stripe_customer_id'),
     },
   },
 });

@@ -60,31 +60,19 @@ This builds sign-in for an app called Notes: password, magic link and Google, on
 
 ```ts
 // backend/src/features/auth/model/tables.ts
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
-import {
-  accountIdColumns,
-  createAuthTables,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from '@arki/auth/pg';
+import { authIdSources, createAuthTables } from '@arki/auth/pg';
+import { pgColumns } from '@arki/db/pg';
 
-const schema = pgSchema('notes');
+const c = pgColumns(pgSchema('notes'));
 
-export const authTables = createAuthTables(schema, {
+export const authTables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
     },
   },
 });
@@ -244,31 +232,20 @@ The form shows only the methods the definition enables.
 
 ```ts run
 // backend/src/features/profile/__tests__/me.test.ts
-import { pgSchema, text } from 'drizzle-orm/pg-core';
+import { pgSchema } from 'drizzle-orm/pg-core';
 
 import { defineAuth } from '@arki/auth';
-import {
-  accountIdColumns,
-  createAuthTables,
-  sessionIdColumns,
-  userIdColumns,
-  verificationIdColumns,
-} from '@arki/auth/pg';
+import { authIdSources, createAuthTables } from '@arki/auth/pg';
 import { actingAs, testAuth } from '@arki/auth/testing';
+import { pgColumns } from '@arki/db/pg';
 
-const tables = createAuthTables(pgSchema('notes'), {
+const c = pgColumns(pgSchema('notes'));
+const tables = createAuthTables(c, {
   fill: 'app',
-  ids: {
-    user: userIdColumns,
-    session: sessionIdColumns,
-    account: accountIdColumns,
-    verification: verificationIdColumns,
-  },
+  ids: authIdSources,
   columns: {
     user: {
-      plan: text('plan', { enum: ['free', 'pro'] })
-        .notNull()
-        .default('free'),
+      plan: c.text('plan', { enum: ['free', 'pro'] }).notNull().default('free'),
     },
   },
 });

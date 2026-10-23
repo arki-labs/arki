@@ -1,15 +1,19 @@
 import { getTableConfig, pgSchema, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import { pgColumns } from '@arki/db/pg';
+
 import { createWorkspaceTables } from './schema.js';
 
 const schema = pgSchema('test_app');
+const c = pgColumns(schema);
 
 const User = schema.table('users', { id: text('id').primaryKey() });
 
 const idSource = (prefix: string) => ({
   primaryColumn: () =>
-    text('id')
+    c
+      .text('id')
       .primaryKey()
       .$defaultFn(() => `${prefix}_x`),
 });
@@ -35,7 +39,7 @@ const foreignKeys = (table: Parameters<typeof getTableConfig>[0]) =>
   });
 
 describe('createWorkspaceTables', () => {
-  const tables = createWorkspaceTables(schema, { naming: 'camel', fill: 'database', user: User, ids });
+  const tables = createWorkspaceTables(c, { naming: 'camel', fill: 'database', user: User, ids });
 
   it('builds the five organization-plugin tables', () => {
     expect(
@@ -65,7 +69,7 @@ describe('createWorkspaceTables', () => {
   });
 
   it("follows naming and fill: 'snake' + 'app' spells organization_id and fills from code", () => {
-    const js = createWorkspaceTables(schema, { fill: 'app', user: User, ids });
+    const js = createWorkspaceTables(c, { fill: 'app', user: User, ids });
     expect(getTableConfig(js.Member).columns.map(c => c.name)).toEqual([
       'id',
       'organization_id',
