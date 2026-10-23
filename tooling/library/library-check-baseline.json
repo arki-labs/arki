@@ -42,6 +42,11 @@
     },
     {
       "package": "@arki/admin",
+      "error": "TYPES_E001 export \"./panels\" exposes Zod types: ZodArray, ZodBoolean, ZodEnum, ZodNull, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
+    },
+    {
+      "package": "@arki/admin",
       "error": "TYPES_E001 export \"./receipts\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },

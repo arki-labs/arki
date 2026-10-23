@@ -90,6 +90,29 @@ Reads, actions and signals take any Standard Schema (Zod, Valibot, ArkType, hand
 
 Output is only as narrow as its schema. Zod and Valibot objects drop keys they do not declare; an ArkType object keeps them unless it declares `'+': 'delete'`. If a `load` returns a whole database row, use a schema that drops undeclared keys, or pick the fields yourself, so a secret column never reaches the admin client.
 
+### Generic panels
+
+A panel names a renderer that Foreman bundles; a manifest never ships code. `@arki/admin/panels` holds the answer shapes of the two generic ones, so a module gets a finished screen without Foreman code of its own:
+
+- `arki.board` (`PANEL_RENDERER.board`): number cards under group headings. A read returns `boardOutputSchema`: each card has a `format` (`count`, `usd`, `percent`, `duration`) and a `tone` (`ok`, `warn`, `bad`, `idle`). `value: null` means not measured and shows a dash.
+- `arki.rows` (`PANEL_RENDERER.rows`): a table. A read returns `rowsOutputSchema`: `columns` (key, label, format), `rows`, `total` and the `empty` text. The read's input becomes a filter bar. Each action the panel lists becomes a button on every row that holds all of the action's required input keys, with the row's values as the input. An action with no required input becomes one button above the table.
+
+Use the schema itself as the read's `output`, so the app and Foreman parse the same shape.
+
+```ts
+import { boardOutputSchema, PANEL_RENDERER } from '@arki/admin/panels';
+
+const today = defineRead({
+  id: 'shop.today', summary: 'How the shop is doing today', permission: 'shop:read',
+  input: z.object({}), output: boardOutputSchema,
+  load: async () => ({ cards: [{ key: 'orders', label: 'Orders', group: 'Sales', value: 12, format: 'count', tone: 'ok' }] }),
+});
+const shop = defineModule({
+  id: 'shop', version: '1.0.0', reads: { today }, actions: {},
+  panels: [{ id: 'today', renderer: PANEL_RENDERER.board, read: 'today', actions: [] }],
+});
+```
+
 `core.health` has two reads, `core.health.status` and `core.health.checks`, in the v1 `fleetHealthSchema` shape. `core.manifest.get` returns the same manifest as `GET /api/foreman/manifest`. `core.receipts.get` is there when the app passes `receipts`. Both attachments add them for you (`withCoreModules`).
 
 ## Module errors

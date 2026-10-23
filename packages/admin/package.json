@@ -44,6 +44,11 @@
       "import": "./src/module.ts",
       "default": "./src/module.ts"
     },
+    "./panels": {
+      "types": "./dist/src/panels.d.ts",
+      "import": "./src/panels.ts",
+      "default": "./src/panels.ts"
+    },
     "./core": {
       "types": "./dist/src/core.d.ts",
       "import": "./src/core.ts",
