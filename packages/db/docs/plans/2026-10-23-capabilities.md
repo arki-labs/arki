@@ -2,6 +2,7 @@
 
 Date: 2026-10-23
 Source: [`docs/arki/research/17-multi-database/design.md`](../../../../docs/arki/research/17-multi-database/design.md) § 3.4 and § 5, Tier 3.
+Status: built 2026-10-23, with two founder changes made during the build (below, "Changes while building").
 Category: clean. A new leaf package with one contract and four backends behind their own entries; a lease store that mirrors `pgLease`; one new kit column kind.
 
 ## Goal
@@ -17,6 +18,11 @@ The features that today need Postgres's LISTEN/NOTIFY or advisory locks get a ba
 - **No dialect helpers over Drizzle.** The design's `claim()`, `now()`, `addSeconds()`, `jsonGet()` are dropped: each package keeps plain per-dialect query files (the Tier 2 rule: no abstraction over Drizzle's query API, no lost inference). Only a tiny SQL fragment everyone repeats gets one shared export: `sqliteNowMs` in `@arki/db/sqlite`.
 - **Names:** one factory per backend, each in its own entry: `memoryPubSub`, `pollPubSub`, `pgPubSub`, `redisPubSub`.
 - **Publishing inside a transaction is a typed capability.** Every backend has `publish(channel, payload)` (sends now). Backends that can join the writer's transaction (pg, poll) also have `publishIn(tx, channel, payload)`, and their type says so. Redis and memory do not, so a caller that needs commit-time delivery cannot pick them by mistake.
+
+## Changes while building (2026-10-23)
+
+- **Dedicated integrations, Drizzle style** (founder: "less abstractions, more things like drizzle: dedicated integrations for each that you import and use directly"). The generic `pollPubSub` (one backend picking Postgres or SQLite queries) became `sqlitePubSub` in `./sqlite`, plain SQLite code; the Postgres poll variant is dropped, since Postgres has `pgPubSub` and pooled hosts reach LISTEN through `sessionPool`. The tables below that mention `pollPubSub` describe the first draft.
+- **Payload limit 7999 bytes,** not 8000: a real Postgres refuses a NOTIFY payload of exactly 8000 bytes (container test).
 
 ## Layering
 
