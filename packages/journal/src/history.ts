@@ -11,7 +11,7 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, isSchemaFailure } from '@arki/failure';
 
 import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
-import type { EventLogPosition, JoinedLog } from './event-log.js';
+import type { EventLog, EventLogPosition, JoinedLog } from './event-log.js';
 import type { JournalTables, StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
 import type {
@@ -28,7 +28,7 @@ import type {
 } from './types.js';
 import { debugReplay } from './debug.js';
 import { JournalError } from './errors.js';
-import { globalOrderOf, routeOf, streamOf } from './event-log.js';
+import { globalOrderOf, logOn, routeOf, streamOf } from './event-log.js';
 import { findEventDefinition, fold, hasDeclaredEventType } from './fold.js';
 import { rollbackOnFailure } from './rollback.js';
 import {
@@ -498,7 +498,77 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
     return { events: count };
   };
 
-  return { decodeStoredEvent, assertLogSaysGone, replay, verify, repair, forget, rerun };
+  /**
+   * Copy one entity kind's events from the log it uses now into `to`, for a store switch. Events
+   * go across as stored: same ids, versions, seqs and schema versions, and an erased event is
+   * erased again where `to` can. Appends repeat safely, so a copy cut short runs again from the
+   * start. Writes to the kind must be paused until the setting is flipped.
+   */
+  const copyLog = async (
+    db: DbHandle,
+    entity: { readonly kind: string; readonly eventStorage: EventStorage },
+    opts: { readonly to: 'stored' | EventLog; readonly batchSize?: number },
+  ): Promise<{ readonly events: number }> => {
+    const batchSize = opts.batchSize ?? 500;
+    assertStoredEvents(entity, '', 'copyLog');
+    const route = routeOf(entity.eventStorage, deps.log);
+    const target = opts.to === 'stored' ? deps.log : opts.to;
+    if (route.mode !== 'transient' && route.log === target)
+      throw new JournalError(
+        'BAD_DEFINITION',
+        entity.kind,
+        '',
+        `copyLog: entity "${entity.kind}" already uses that log`,
+      );
+    const [waiting] = await db
+      .select({ id: jobsTable.id })
+      .from(jobsTable)
+      .where(and(eq(jobsTable.kind, 'forward'), eq(jobsTable.jobName, entity.kind)))
+      .limit(1);
+    if (waiting !== undefined)
+      throw new JournalError(
+        'FORWARD_PENDING',
+        entity.kind,
+        '',
+        'copyLog: forward jobs still carry events of this kind, so the log is behind the rows; drain them first',
+      );
+    const from = globalOrderOf(logAt(db, entity), 'copyLog');
+    const to = logOn(target, db);
+    let position: EventLogPosition | null = null;
+    let copied = 0;
+    for (;;) {
+      const { events, next } = await from.after(position, { kinds: [entity.kind], limit: batchSize });
+      // The order keeps each entity's versions in sequence, so a run of one entity is one append.
+      let start = 0;
+      while (start < events.length) {
+        const first = events[start];
+        if (first === undefined) break;
+        let end = start + 1;
+        while (events[end]?.entityId === first.entityId) end += 1;
+        const run = events.slice(start, end);
+        await to.append({
+          kind: entity.kind,
+          entityId: first.entityId,
+          expectedVersion: first.version - 1,
+          events: run.map(({ position: _position, erasedAt: _erasedAt, ...event }) => event),
+        });
+        if (to.erase !== undefined) {
+          for (const event of run) {
+            if (event.erasedAt !== null)
+              await to.erase(event, { data: event.data, schemaVersion: event.schemaVersion });
+          }
+        }
+        start = end;
+      }
+      copied += events.length;
+      position = next;
+      if (events.length < batchSize) break;
+    }
+    debugReplay.debug('copyLog {kind}: {count} events', { kind: entity.kind, count: copied });
+    return { events: copied };
+  };
+
+  return { decodeStoredEvent, assertLogSaysGone, replay, verify, repair, forget, rerun, copyLog };
 }
 
 export type History<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>> = ReturnType<

@@ -9,7 +9,7 @@ import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { EntityBuilder } from './entity.js';
 import type { CommandFailure } from './errors.js';
-import type { EventLogPosition, ForwardLag, ProjectionCursor } from './event-log.js';
+import type { EventLog, EventLogPosition, ForwardLag, ProjectionCursor } from './event-log.js';
 import type { HookPoint } from './hooks.js';
 import type { JobOps } from './outbox.js';
 import type { ResolvedRetention } from './retention.js';
@@ -416,6 +416,18 @@ export type Journal<
    * the log has them.
    */
   forwardLag(db: DbHandle): Promise<ForwardLag>;
+  /**
+   * Copy an entity kind's events from the log it uses now into `to` (`'stored'`: the built-in
+   * log), to switch its store. Pause writes to the kind, copy, flip its `events` setting, then
+   * `reset` the async projections that read it: their positions belong to the old log. The old
+   * log keeps its copy. Refused while forward jobs of the kind wait (`FORWARD_PENDING`) and for a
+   * log without a global order. Safe to run again after a crash: appends repeat as no-ops.
+   */
+  copyLog<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+    db: DbHandle,
+    entity: EntityDef<K, Tbl, E, SchemaOutput<Meta>, Key>,
+    opts: { readonly to: 'stored' | EventLog; readonly batchSize?: number },
+  ): Promise<{ readonly events: number }>;
   /** Walk the log after position `after` (`null` or left out: from the start) and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
   rerun(
     db: TransactionSource<Tx>,

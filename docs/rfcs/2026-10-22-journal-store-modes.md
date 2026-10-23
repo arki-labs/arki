@@ -474,6 +474,29 @@ those entities are paused, then flip the setting.
     import paths to the short grouped form.
 - **Slice 8: Another Postgres database adapter**, plus `copyLog` (the first
   place a store switch will be tried). Cheapest end-to-end check of 6–7.
+  **Done (2026-10-23).** Names picked by the founder:
+  `postgresEvents({ db, tables })` from `@arki/journal/postgres`, tables
+  from `eventLogTables()` in `@arki/journal/pg`, and
+  `journal.copyLog(db, entity, { to })`. What shipped:
+  - The store's `journal_events` keeps the app's `seq` (a plain `bigint`, not
+    a serial) and adds `transaction_id xid8 default pg_current_xact_id()`.
+    `all` reads the top first (the newest row below
+    `pg_snapshot_xmin(pg_current_snapshot())`), then rows up to it in
+    `(transaction_id, seq)` order. The position is `"xid:seq"`, with no
+    `distance`. A real-Postgres test with two connections holds one append
+    open while a later one commits; without the horizon the cursor passes
+    the later row and loses the earlier one.
+  - Founder direction while building it: dedicated integrations, like
+    Drizzle's driver modules, instead of a shared layer. So
+    `postgresEvents` has its own queries; it shares only the column list
+    (`eventColumns`) with the built-in table, which is unchanged.
+  - `copyLog` walks the current log's `all` for one kind and appends each
+    entity's run of events to `to`, then erases again what was erased. It
+    is refused while forward jobs of the kind wait, onto the same log, and
+    for a transient entity. Repeats are no-ops, so it can run again.
+    Positions are not moved: the projections that read the kind are `reset`
+    after the flip (documented), and a foreign position is refused by
+    `postgresEvents`. The old log keeps its copy.
 - **Slice 9: KurrentDB adapter.**
 - **Slice 10: MongoDB adapter**, after picking its batch layout and global
   order.

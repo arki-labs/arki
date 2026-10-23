@@ -544,6 +544,7 @@ function createJournal<
     reset: (db, projection, clear) => catching.reset(db, projection, clear),
     cursors: db => catching.cursors(db),
     forwardLag: db => forwardLag(db),
+    copyLog: (db, entity, opts) => history.copyLog(db, entity, opts),
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),

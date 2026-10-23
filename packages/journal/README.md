@@ -303,6 +303,32 @@ A log that joins the row's transaction (`canJoinTransaction: true`, `bind(db)`) 
 
 One entity kind has one log: declaring it twice with two different logs is `BAD_DEFINITION`. A forward job carries the write's events in `args`, and the archive keeps finished jobs (7 days by default): `forget` erases the archived copy too, and the archive sink gets only the event headers.
 
+#### Another Postgres database
+
+`postgresEvents` from `@arki/journal/postgres` keeps an entity's events in a second Postgres database. Put `eventLogTables()` from `@arki/journal/pg` in that database's schema module and migrate it there. The log cannot join the app's transaction, so its entities are forwarded.
+
+```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
+import { eventLogTables } from '@arki/journal/pg';
+import { postgresEvents } from '@arki/journal/postgres';
+
+export const eventStoreTables = eventLogTables(); // in the event store's schema module
+const storeLog = postgresEvents({ db: eventStoreDb, tables: eventStoreTables });
+const order = j.entity('order', orders, { events: storeLog });
+```
+
+It has every part of the log: `all`, so async projections and `rerun` work, and `erase`, so `forget` works. Workers append to different entities at the same time, so a later row can commit before an earlier one. `all` therefore orders events by the appending transaction (`transaction_id`, then `seq`), and reads only rows below the oldest transaction still open on that server. A reader never moves past a row that could still commit behind it. The cost: one long transaction on that Postgres server holds async projections back until it ends. Its positions look like `"transaction id:seq"` and have no `distance`.
+
+#### Switching an entity's store
+
+Changing `events` on an entity that already has events is a migration, not a setting. After a switch to a new log, the first forward job expects version N, the new log is at 0, and the job waits forever. A switch back would make the next write leave a gap. Copy the history first:
+
+1. Pause writes to the kind and drain its forward jobs.
+2. `await journal.copyLog(db, order, { to: storeLog })` copies the kind's events from the log it uses now into `to` (`'stored'` is the built-in log). Ids, versions, seqs and schema versions stay as they are, and an erased event is erased again where `to` can erase. It is refused while forward jobs of the kind wait (`FORWARD_PENDING`), onto the log the kind already uses (`BAD_DEFINITION`), and from a log without `all`. It is safe to run again after a crash: an event that is already there is skipped.
+3. Flip the entity's `events` setting, deploy, and resume writes.
+4. `reset` the async projections that read the kind: their positions belong to the old log.
+
+The old log keeps its copy. Delete it yourself if it holds personal data, because `forget` reaches only the log the entity uses.
+
 ### Rows that existed before the journal
 
 A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row. They also need every version up to the top, and a live row no newer than its log, and throw `HISTORY_GAP` otherwise: an event lost after it was written must be restored, not folded around.

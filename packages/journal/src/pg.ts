@@ -4,6 +4,7 @@ import {
   bigint,
   bigserial,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -25,6 +26,36 @@ import type { RUN_STATES, StepPhase, STEP_STATUSES } from './workflow/states.js'
 export const JOB_KINDS = ['effect', 'queue', 'forward'] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
+/** An event row's columns: the app database's `journal_events`, and an outside log's table (`eventLogTables`). */
+const eventColumns = () => ({
+  /** Global order. `rerun` walks the log by this. */
+  seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+  /** `evt_xxx`. */
+  id: varchar('id').notNull().unique(),
+  kind: varchar('kind', { length: 64 }).notNull(),
+  entityId: varchar('entity_id', { length: 256 }).notNull(),
+  /** 1, 2, 3 per entity. */
+  version: integer('version').notNull(),
+  type: varchar('type', { length: 128 }).notNull(),
+  data: jsonb('data').notNull(),
+  meta: jsonb('meta').notNull(),
+  recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  // Stamped by the library, never by the app. Null on rows written before these columns existed.
+  /** The `cmd_` id of the command run that wrote this event. Null for a bare `journal.write`. */
+  commandId: varchar('command_id'),
+  /** Inside an effect's `ctx.run`: the seq of the event the job was for. Else null. */
+  causeSeq: bigint('cause_seq', { mode: 'number' }),
+  /** Shared by every event of one chain: inherited from the cause event or the parent run, else new per root run. */
+  correlationId: varchar('correlation_id'),
+  /** Set by `forget` when `data` was rewritten to the event's erased form. */
+  erasedAt: timestamp('erased_at', { withTimezone: true, mode: 'date' }),
+  /** The event's schema version when `data` was written. Older rows are upcast on read. */
+  schemaVersion: integer('schema_version').notNull().default(1),
+});
+
+/** Postgres `xid8`: a 64-bit transaction id that never wraps around, read as decimal text. */
+const xid8 = customType<{ data: string; driverData: string }>({ dataType: () => 'xid8' });
+
 /**
  * The journal tables. Call this once in the app's schema module so
  * `drizzle-kit generate` creates them. The library never creates tables at
@@ -33,38 +64,10 @@ export type JobKind = (typeof JOB_KINDS)[number];
 export function journalTables(schema?: PgSchema) {
   const table: PgTableFn<string | undefined> = schema === undefined ? pgTable : schema.table;
 
-  const events = table(
-    'journal_events',
-    {
-      /** Global order. `rerun` walks the log by this. */
-      seq: bigserial('seq', { mode: 'number' }).primaryKey(),
-      /** `evt_xxx`. */
-      id: varchar('id').notNull().unique(),
-      kind: varchar('kind', { length: 64 }).notNull(),
-      entityId: varchar('entity_id', { length: 256 }).notNull(),
-      /** 1, 2, 3 per entity. */
-      version: integer('version').notNull(),
-      type: varchar('type', { length: 128 }).notNull(),
-      data: jsonb('data').notNull(),
-      meta: jsonb('meta').notNull(),
-      recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-      // Stamped by the library, never by the app. Null on rows written before these columns existed.
-      /** The `cmd_` id of the command run that wrote this event. Null for a bare `journal.write`. */
-      commandId: varchar('command_id'),
-      /** Inside an effect's `ctx.run`: the seq of the event the job was for. Else null. */
-      causeSeq: bigint('cause_seq', { mode: 'number' }),
-      /** Shared by every event of one chain: inherited from the cause event or the parent run, else new per root run. */
-      correlationId: varchar('correlation_id'),
-      /** Set by `forget` when `data` was rewritten to the event's erased form. */
-      erasedAt: timestamp('erased_at', { withTimezone: true, mode: 'date' }),
-      /** The event's schema version when `data` was written. Older rows are upcast on read. */
-      schemaVersion: integer('schema_version').notNull().default(1),
-    },
-    t => [
-      unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),
-      index('journal_events_correlation_id_idx').on(t.correlationId),
-    ],
-  );
+  const events = table('journal_events', eventColumns(), t => [
+    unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),
+    index('journal_events_correlation_id_idx').on(t.correlationId),
+  ]);
 
   const jobs = table(
     'journal_jobs',
@@ -418,6 +421,39 @@ export function journalTables(schema?: PgSchema) {
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;
+
+/**
+ * The tables of an event log in another Postgres database, for `postgresEvents`. Put this in that
+ * database's schema module, so `drizzle-kit generate` creates it there. `seq` is the app
+ * database's, given by each append; `transaction_id` is the order this database adds.
+ */
+export function eventLogTables(schema?: PgSchema) {
+  const table: PgTableFn<string | undefined> = schema === undefined ? pgTable : schema.table;
+
+  const events = table(
+    'journal_events',
+    {
+      ...eventColumns(),
+      /** The app database's seq, as the write stamped it. Appends come in any order, so it is not this table's order. */
+      seq: bigint('seq', { mode: 'number' }).primaryKey(),
+      /**
+       * The transaction that appended the event. `all` reads only rows below every transaction
+       * still open, in `(transaction_id, seq)` order, so no row can commit behind a read.
+       */
+      transactionId: xid8('transaction_id')
+        .notNull()
+        .default(sql`pg_current_xact_id()`),
+    },
+    t => [
+      unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),
+      index('journal_events_order_idx').on(t.transactionId, t.seq),
+    ],
+  );
+
+  return { events };
+}
+
+export type EventLogTables = ReturnType<typeof eventLogTables>;
 
 /** A `timestamptz` column after a JSON round trip: an ISO string in, a `Date` out. */
 const jsonTimestamp = z.codec(z.iso.datetime({ offset: true }), z.date(), {

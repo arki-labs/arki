@@ -87,6 +87,11 @@
       "import": "./dist/event-log-contract.js",
       "default": "./dist/event-log-contract.js"
     },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js",
+      "default": "./dist/postgres.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
