@@ -2,7 +2,7 @@
   "name": "@arki/lock",
   "version": "0.1.0",
   "private": false,
-  "description": "Distributed locks and semaphores — one API over memory, Postgres, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
+  "description": "Distributed locks and semaphores — one API over memory, Postgres, SQLite, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
   "keywords": [
     "arki",
     "typescript",
@@ -12,6 +12,7 @@
     "distributed-lock",
     "advisory-lock",
     "postgres",
+    "sqlite",
     "redis"
   ],
   "homepage": "https://arki.dev",
@@ -46,6 +47,11 @@
       "types": "./dist/pg/lease.d.ts",
       "import": "./dist/pg/lease.js",
       "default": "./dist/pg/lease.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "import": "./dist/sqlite/index.js",
+      "default": "./dist/sqlite/index.js"
     },
     "./redis": {
       "types": "./dist/redis/index.d.ts",
@@ -112,6 +118,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",

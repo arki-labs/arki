@@ -49,7 +49,7 @@ export async function sendInvoices(send: () => Promise<number>): Promise<string>
 
 ### Protect a write that cannot be undone
 
-1. Use a lease store: `pgLease` or `redisStore`.
+1. Use a lease store: `pgLease`, `sqliteLease` or `redisStore`.
 2. Read `fence` from the callback context.
 3. Put the fence in the same statement as the write, and refuse an older number.
 

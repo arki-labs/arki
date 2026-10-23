@@ -1,6 +1,6 @@
 # @arki/lock
 
-Distributed locks and semaphores for TypeScript. One API over memory, Postgres, Redis and file stores.
+Distributed locks and semaphores for TypeScript. One API over memory, Postgres, SQLite, Redis and file stores.
 
 - **Four verbs, three lock types.** `tryRun`, `run`, `tryAcquire` and `acquire` work on a mutex, a semaphore and a read/write lock.
 - **Contention is a value.** A lock that someone else holds is the `LockHeld` failure (`lock.held`, from `@arki/failure`), returned, not thrown.
@@ -64,7 +64,7 @@ export async function overlap(): Promise<[string, string]> {
 
 ## Runtime support
 
-Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Postgres, Redis and file stores need their client and a server runtime.
+Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Postgres, SQLite, Redis and file stores need their client and a server runtime.
 
 ## Public imports
 
@@ -74,6 +74,7 @@ Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Po
 | `@arki/lock/memory`   | `memoryStore`                                                            | none                      |
 | `@arki/lock/pg`       | `pgSession`, `pgTransaction`                                             | `drizzle-orm`             |
 | `@arki/lock/pg/lease` | `pgLease`, `ensureLockTable`                                             | `drizzle-orm`             |
+| `@arki/lock/sqlite`   | `sqliteLease`, `ensureLockTable`                                         | `drizzle-orm`             |
 | `@arki/lock/redis`    | `redisStore`                                                             | `ioredis`                 |
 | `@arki/lock/file`     | `fileStore`                                                              | none                      |
 | `@arki/lock/dot`      | `locks()` unit for `@arki/dot`                                           | `@arki/dot`               |
@@ -267,12 +268,13 @@ The values each store declares today:
 | `pgSession(db)`               | hold  | cluster | native                      | yes                     | no        | none        | immediate               | none  | node, bun, deno                  |
 | `pgTransaction(tx)`           | hold  | cluster | native                      | yes                     | no        | none        | immediate (on rollback) | none  | node, bun, deno                  |
 | `pgLease(db, { ttl })`        | lease | cluster | poll, or wake with `listen` | no                      | yes       | durable     | after ttl               | store | node, bun, deno                  |
+| `sqliteLease(db, { ttl })`    | lease | cluster | poll                        | no                      | yes       | durable     | after ttl               | store | node, bun, deno                  |
 | `redisStore(client, { ttl })` | lease | cluster | wake, or poll               | yes                     | yes       | best-effort | after ttl               | store | node, bun, deno                  |
 | `fileStore(dir)`              | lease | host    | poll                        | no                      | no        | none        | after `stale`           | host  | node, bun, deno                  |
 
 `pgTransaction` also declares `releasedBy: 'transaction'`. `redisStore` reports `wait: 'poll'` once its pub/sub channel has failed or was switched off.
 
-Each store's entry also exports its guarantees as a value, for tests: `memoryGuarantees`, `pgSessionGuarantees`, `pgTransactionGuarantees`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`, `redisGuarantees` (with `wait: 'wake'`) and `fileGuarantees`.
+Each store's entry also exports its guarantees as a value, for tests: `memoryGuarantees`, `pgSessionGuarantees`, `pgTransactionGuarantees`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`, `sqliteLeaseGuarantees`, `redisGuarantees` (with `wait: 'wake'`) and `fileGuarantees`.
 
 What the words cost you:
 
@@ -334,6 +336,30 @@ console.info(locks.store.guarantees.fence); // 'durable'
 - Release keeps the row (`token = NULL`). If it deleted the row, the fence would start again at 1.
 - `wait` is `'poll'` unless you give `listen: () => pool.connect()`. With `listen`, waiters wake on release through `LISTEN`/`NOTIFY`. `listen` must be a direct connection: `LISTEN` hears nothing through PgBouncer in transaction mode. In a Dot app, `listen: () => services.sessionPool.connect()` gives one (`@arki/db`, [Hosted Postgres](../db/README.md#hosted-postgres)).
 - A semaphore key is one row. Its holders live in a `holders jsonb` column on that row. `ensureLockTable` adds the column only when it is missing, so a boot does not take an `ACCESS EXCLUSIVE` lock.
+
+### `sqliteLease`
+
+The `pgLease` model on SQLite: a lease row in a table, with a fence that never goes backwards. Time comes from SQLite's clock, in milliseconds.
+
+```ts
+import type { SqliteLeaseDb } from '@arki/lock/sqlite';
+import { createLocks } from '@arki/lock';
+import { ensureLockTable, sqliteLease } from '@arki/lock/sqlite';
+
+// In an app: `createLibsqlDb({ url: 'file:app.db', relations }).db` from `@arki/db/libsql`, passed as it is.
+declare const db: SqliteLeaseDb;
+await ensureLockTable(db); // safe to call on every boot
+const locks = createLocks({ store: sqliteLease(db, { ttl: '30s' }), namespace: 'billing' });
+console.info(locks.store.guarantees.wait); // 'poll'
+```
+
+- Pass the `db` from `createLibsqlDb`. Lock statements then take their turn in its write queue with the app's own writes. Pass the database, never a transaction handle: a rollback would undo an acquire. Unlike `pgLease`, this is not checked.
+- `ensureLockTable(db)` creates the table. Or copy `LEASE_TABLE_SQL` (or `leaseTableSql('name')`) into your own migration. The default table is `arki_lock`. Times are integer milliseconds; semaphore holders are a JSON `text` column.
+- Release keeps the row (`token = NULL`), so the fence never starts again at 1.
+- **Waiters poll.** There is no wake-up on release. A blocked caller retries with backoff (50 ms to 1 s), so it notices a freed key up to about a second late.
+- **One writer per file.** When another process holds SQLite's write lock, a statement fails with `SQLITE_BUSY` and nothing ran. An acquire reads that as "held right now" and the manager tries again. A renewal that meets it is retried until the deadline. A release that meets it is reported as a release error, and the key frees after `ttl`.
+- Every process opens the same file on a local disk. SQLite's locks are not reliable over a network file system. A libSQL server (Turso) also works; then every client of that server is kept apart.
+- Needs SQLite 3.42 or newer (`unixepoch('subsec')`). libSQL has it.
 
 ### `redisStore`
 

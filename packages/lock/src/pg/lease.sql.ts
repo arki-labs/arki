@@ -44,7 +44,8 @@ export function tableIdentifier(table: string): SQL {
 /** The DDL for the default table name. */
 export const LEASE_TABLE_SQL = leaseTableSql(DEFAULT_LEASE_TABLE);
 
-function quotedTable(table: string): string {
+/** The table name as quoted SQL text, for DDL. Throws `LockError{code:'config'}` like {@link tableIdentifier}. */
+export function quotedTable(table: string): string {
   const parsed = tableNameSchema.safeParse(table);
   if (!parsed.success) {
     throw new LockError({
