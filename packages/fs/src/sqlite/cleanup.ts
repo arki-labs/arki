@@ -4,7 +4,6 @@
  */
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
-import type { FileId } from '../files/schemas.js';
 import type { FilesTable } from '../lifecycle/table.js';
 import type { FilesDb } from './storage.js';
 import { nowMs } from './clock.js';
@@ -20,12 +19,7 @@ import { nowMs } from './clock.js';
  * The claim pushes `cleanup_at` out with backoff (1 min, doubling, at most
  * 1 day), in milliseconds: `instant` columns are integer milliseconds here.
  */
-export async function claimDue(
-  db: FilesDb,
-  files: FilesTable<'sqlite'>,
-  bucket: string,
-  batch: number,
-): Promise<{ id: FileId; key: string }[]> {
+export async function claimDue(db: FilesDb, files: FilesTable<'sqlite'>, bucket: string, batch: number) {
   return db.transaction(async tx => {
     const due = tx
       .select({ id: files.id })

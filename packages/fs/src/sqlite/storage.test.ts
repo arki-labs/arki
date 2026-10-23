@@ -7,6 +7,7 @@ import { generateDrizzleJson, generateMigration } from 'drizzle-kit/payload/sqli
 import { count, defineRelations, desc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { findDatabaseError } from '@arki/db/errors';
 import { createLibsqlDb } from '@arki/db/libsql';
 import { sqliteColumns } from '@arki/db/sqlite';
 import { orThrow } from '@arki/failure';
@@ -72,10 +73,11 @@ describe('filesTable on SQLite', () => {
       limits: { maxSize: 10, allowedMime: ['*/*'] },
     });
     const ticket = orThrow(await storage.createUpload(orThrow(userId.create()), { mime: 'text/plain', size: 1 }));
-    await expect(db.run(sql`update files set ${assignment} where id = ${ticket.fileId}`)).rejects.toMatchObject({
-      // 275 is SQLITE_CONSTRAINT_CHECK, which `@arki/db` reads as SQLSTATE 23514 (check_violation).
-      cause: { code: 'SQLITE_CONSTRAINT', rawCode: 275, message: expect.stringContaining(check) },
-    });
+    const error: unknown = await db
+      .run(sql`update files set ${assignment} where id = ${ticket.fileId}`)
+      .catch((error_: unknown) => error_);
+    expect(findDatabaseError(error)?.sqlState).toBe('23514');
+    expect(error).toMatchObject({ cause: { message: expect.stringContaining(check) } });
   });
 });
 

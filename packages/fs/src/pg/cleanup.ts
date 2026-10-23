@@ -4,7 +4,6 @@
  */
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
-import type { FileId } from '../files/schemas.js';
 import type { FilesTable } from '../lifecycle/table.js';
 import type { FilesDb } from './storage.js';
 
@@ -14,12 +13,7 @@ import type { FilesDb } from './storage.js';
  * `cleanup_at` out with backoff (1 min, doubling, at most 1 day) before any
  * delete.
  */
-export async function claimDue(
-  db: FilesDb,
-  files: FilesTable<'pg'>,
-  bucket: string,
-  batch: number,
-): Promise<{ id: FileId; key: string }[]> {
+export async function claimDue(db: FilesDb, files: FilesTable<'pg'>, bucket: string, batch: number) {
   const due = db
     .select({ id: files.id })
     .from(files)

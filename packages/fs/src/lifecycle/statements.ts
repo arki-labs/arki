@@ -6,7 +6,7 @@
  * the database clock.
  */
 import type { FileId } from '../files/schemas.js';
-import type { FileRow, FilesTable, OwnerOf } from './table.js';
+import type { FileRow, FilesTable } from './table.js';
 
 /** What a dialect's statements need from the parsed `fileStorage` options. */
 export type StatementConfig = {
@@ -16,13 +16,8 @@ export type StatementConfig = {
   readonly graceSeconds: number;
 };
 
-export type PendingFile<T extends FilesTable> = {
-  readonly id: FileId;
-  readonly ownerId: OwnerOf<T>;
-  readonly key: string;
-  readonly mime: string;
-  readonly size: number;
-};
+/** The columns the lifecycle sets on a new row; the statement adds bucket, status and deadlines. */
+export type PendingFile<T extends FilesTable> = Pick<FileRow<T>, 'id' | 'ownerId' | 'key' | 'mime' | 'size'>;
 
 export type FileStatements<T extends FilesTable> = {
   /** The row with this id in the bound bucket. */
@@ -35,12 +30,12 @@ export type FileStatements<T extends FilesTable> = {
   /** pending → deleting, due once a late PUT can no longer land. */
   reject(id: FileId): Promise<void>;
   /** pending → ready, only while the confirm window (`cleanup_at`) is open. */
-  markReady(id: FileId, proof: { etag: string | null; sha256: string | null }): Promise<FileRow<T> | undefined>;
+  markReady(id: FileId, proof: Pick<FileRow<T>, 'etag' | 'sha256'>): Promise<FileRow<T> | undefined>;
   /**
    * pending or ready → deleting. A pending object may still receive a PUT until
    * `expires_at` + grace, so it is due only after that; a ready one is due now.
    */
-  markDeleting(id: FileId): Promise<{ key: string; due: boolean } | undefined>;
+  markDeleting(id: FileId): Promise<(Pick<FileRow<T>, 'key'> & { due: boolean }) | undefined>;
   /** Deletes the row, only while it is deleting. */
   deleteRow(id: FileId): Promise<void>;
   /**
@@ -49,5 +44,5 @@ export type FileStatements<T extends FilesTable> = {
    * doubling, at most 1 day), so a failing object cannot starve later rows and
    * two sweepers never take the same row.
    */
-  claimDue(batch: number): Promise<{ id: FileId; key: string }[]>;
+  claimDue(batch: number): Promise<Pick<FileRow<T>, 'id' | 'key'>[]>;
 };

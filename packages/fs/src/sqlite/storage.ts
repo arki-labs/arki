@@ -14,7 +14,7 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 
 import type { FileStatements, StatementConfig } from '../lifecycle/statements.js';
 import type { FileStorage, FileStorageOptions } from '../lifecycle/storage.js';
-import type { FileRow, FilesTable } from '../lifecycle/table.js';
+import type { FilesTable } from '../lifecycle/table.js';
 import type { SignedUploadAdapter } from '../storage/types.js';
 import { createFileStorage } from '../lifecycle/storage.js';
 import { claimDue } from './cleanup.js';
@@ -35,7 +35,7 @@ function sqliteStatements<T extends FilesTable<'sqlite'>>(
   const graceMs = config.graceSeconds * 1000;
 
   return {
-    async read(id): Promise<FileRow<T> | undefined> {
+    async read(id) {
       const [row] = await db
         .select()
         .from(files)
@@ -65,7 +65,7 @@ function sqliteStatements<T extends FilesTable<'sqlite'>>(
         .where(and(eq(files.id, id), eq(files.status, 'pending')));
     },
 
-    async markReady(id, { etag, sha256 }): Promise<FileRow<T> | undefined> {
+    async markReady(id, { etag, sha256 }) {
       const [ready] = await db
         .update(files)
         .set({ status: 'ready', etag, sha256, confirmedAt: nowMs, cleanupAt: null })
