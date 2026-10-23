@@ -55,7 +55,7 @@ Next: [Set up AI](docs/recipes/set-up-ai.md) takes you from nothing to a first m
 
 ## Runtime support
 
-Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
+Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/drizzle/sqlite`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
 
 ## Public imports
 
@@ -66,7 +66,8 @@ Node (the workspace tests on Node 26) and Bun. The root and the server entries (
 | `@arki/ai/safety` | Prompt-injection checks, PII redaction, output filtering. |
 | `@arki/ai/dot` | `vectorIndex` and `llm` plugins for a Dot app. `llm` checks the provider at boot. |
 | `@arki/ai/testing` | `createFakeLLMProvider`: scripted answers and usage, no HTTP. For tests. |
-| `@arki/ai/drizzle` | The erasure tombstone table and outbox. |
+| `@arki/ai/drizzle` | The erasure tombstone table and its Postgres outbox. |
+| `@arki/ai/drizzle/sqlite` | The same table and outbox on SQLite (libSQL). |
 | `@arki/ai/react` | Chat, streaming text and search components and hooks. |
 
 `llms.txt` lists every export. The package also exposes a `./*` subpath pattern for files under `src/`; treat those as unstable.
@@ -132,6 +133,44 @@ const draftStory = createFlow<StoryState, StoryContext>({
   },
 });
 ```
+
+## SQLite
+
+The tombstone table is written once. Pass it the column kit for your database. The outbox has one file per database, because Drizzle's Postgres and SQLite query builders are different classes.
+
+```ts
+import { pgSchema } from 'drizzle-orm/pg-core';
+
+import { createTombstoneTable, tombstoneOutbox } from '@arki/ai/drizzle';
+import { pgColumns } from '@arki/db/pg';
+
+type UserId = `u_${string}`;
+
+const tombstones = createTombstoneTable<'pg', UserId, 'vtmb_'>(pgColumns(pgSchema('app')), {
+  name: 'vector_tombstones',
+  idPrefix: 'vtmb_',
+});
+export const outbox = tombstoneOutbox(tombstones.table);
+```
+
+```ts
+import { createTombstoneTable, sqliteTombstoneOutbox } from '@arki/ai/drizzle/sqlite';
+import { sqliteColumns } from '@arki/db/sqlite';
+
+type UserId = `u_${string}`;
+
+const tombstones = createTombstoneTable<'sqlite', UserId, 'vtmb_'>(sqliteColumns(), {
+  name: 'vector_tombstones',
+  idPrefix: 'vtmb_',
+});
+export const outbox = sqliteTombstoneOutbox(tombstones.table);
+```
+
+SQLite limits that apply here:
+
+- Timestamps keep milliseconds, not microseconds. Rows written in the same millisecond drain in id order.
+- `varchar(256)` columns become `text` with a `CHECK (length(col) <= 256)`.
+- Tables are not `STRICT`: raw SQL can store a wrongly typed value. Drizzle-typed writes are unaffected.
 
 ## Failure behaviour
 

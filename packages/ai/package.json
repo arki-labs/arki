@@ -56,6 +56,11 @@
       "import": "./src/drizzle/index.ts",
       "node": "./src/drizzle/index.ts"
     },
+    "./drizzle/sqlite": {
+      "types": "./dist/src/drizzle/sqlite.d.ts",
+      "import": "./src/drizzle/sqlite.ts",
+      "node": "./src/drizzle/sqlite.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
@@ -168,11 +173,13 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@mastra/core": "catalog:",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "arktype": "catalog:",
+    "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",

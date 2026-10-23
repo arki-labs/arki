@@ -13,6 +13,7 @@
 - `@arki/ai/dot`: Dot plugins: `vectorIndex(...)` (the app's embedder and vector index) and `llm(...)` (the app's text-generation provider, checked at boot). `llm`, `vectorIndex`; types `LlmPluginOptions`, `VectorIndexPluginOptions`.
 - `@arki/ai/testing`: a deterministic fake model provider for tests. `createFakeLLMProvider`; types `FakeAnswer`, `FakeCall`, `FakeLLMProvider`, `FakeLLMProviderOptions`.
 - `@arki/ai/drizzle`: Erasure outbox for a vector index, on Drizzle + Postgres. `TOMBSTONE_DELETE_CHUNK`, `TOMBSTONE_INSERT_CHUNK`, `createTombstoneTable`, `tombstoneOutbox`; types `TombstoneDb`, `TombstoneTable`, `TombstoneTableOptions`.
+- `@arki/ai/drizzle/sqlite`: The same outbox on Drizzle + SQLite (libSQL). `TOMBSTONE_DELETE_CHUNK`, `TOMBSTONE_INSERT_CHUNK`, `createTombstoneTable`, `sqliteTombstoneOutbox`; types `SqliteTombstoneDb`, `SqliteTombstoneTable`, `TombstoneTableOptions`.
 <!-- llms:end -->
 
 ## Start here
