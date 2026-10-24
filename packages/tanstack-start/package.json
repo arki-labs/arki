@@ -183,6 +183,7 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
     "jsdom": "catalog:text-processing",
+    "nitro": "catalog:tanstack/start",
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "vitest": "catalog:"
@@ -194,6 +195,7 @@
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@sentry/tanstackstart-react": "catalog:",
+    "nitro": "catalog:tanstack/start",
     "react": "catalog:react",
     "react-dom": "catalog:react"
   },
@@ -214,6 +216,9 @@
       "optional": true
     },
     "@sentry/tanstackstart-react": {
+      "optional": true
+    },
+    "nitro": {
       "optional": true
     }
   }

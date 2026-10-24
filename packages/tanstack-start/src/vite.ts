@@ -1,4 +1,7 @@
+import { resolve } from 'node:path';
+
 import type { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import type { NitroModule } from 'nitro/types';
 import type { Plugin } from 'vite';
 
 /**
@@ -17,6 +20,38 @@ import type { Plugin } from 'vite';
 const FLEET_SERVER_ONLY_PACKAGES = ['@arki/admin'] as const;
 
 /**
+ * Makes a request for a missing build asset get Nitro's own 404, which carries
+ * no `Cache-Control`.
+ *
+ * Nitro's Vite plugin serves the client `assets/` folder as part of the root
+ * public dir, which falls through to the app, and adds
+ * `public, max-age=31536000, immutable` to every `/assets/**` response. So a
+ * chunk this server does not have (during a deploy swap, new HTML reaches the
+ * old container) gets the app's not-found HTML page, cached for a year. On
+ * 2026-10-24 Cloudflare held such a 404 for every JS chunk of hyphenateit.com,
+ * and no page ran its JS.
+ *
+ * Registering `/assets` as its own public-asset base with `fallthrough: false`
+ * sends a miss to Nitro's static handler, which deletes `Cache-Control` before
+ * it throws the 404 (`nitro/dist/runtime/internal/static.mjs`). The asset
+ * manifest is one scan of `output.publicDir`, so no file is listed twice.
+ * Production only: in dev, Vite serves the modules itself.
+ */
+const missingAssetsNotCached: NitroModule = {
+  name: 'arki:tanstack-start:missing-assets-not-cached',
+  setup(nitro) {
+    if (nitro.options.dev) return;
+    // Nitro's Vite plugin sets the client `assetsDir` to `buildAssetsDir`, else Vite's default.
+    const assetsDir = nitro.options.buildAssetsDir ?? 'assets';
+    nitro.options.publicAssets.push({
+      baseURL: `/${assetsDir}`,
+      dir: resolve(nitro.options.output.publicDir, assetsDir),
+      fallthrough: false,
+    });
+  },
+};
+
+/**
  * Vite plugin for Foreman-federated TanStack Start apps.
  *
  * Excludes server-only packages reached through the `GET /api/fleet` handler
@@ -25,10 +60,14 @@ const FLEET_SERVER_ONLY_PACKAGES = ['@arki/admin'] as const;
  * conditions. No-op for the client/SSR bundles themselves — TanStack Start
  * already strips `server.handlers` from the client output.
  *
+ * Also installs a Nitro module (Nitro's Vite plugin installs any plugin's
+ * `nitro` field) so a missing `/assets/*` file is never cached as a 404 for a
+ * year. See `missingAssetsNotCached`.
+ *
  * Add to a TanStack Start app's `plugins` whenever the app mounts the
  * `routes/api/fleet.ts` snapshot endpoint (i.e. it is part of the fleet).
  */
-export function fleetVite(): Plugin {
+export function fleetVite(): Plugin & { nitro: NitroModule } {
   return {
     name: 'arki:tanstack-start:fleet',
     config() {
@@ -38,6 +77,7 @@ export function fleetVite(): Plugin {
         },
       };
     },
+    nitro: missingAssetsNotCached,
   };
 }
 
