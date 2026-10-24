@@ -29,6 +29,13 @@ const workspaceRoot = new URL('../../../../', import.meta.url);
 const workspaceFile = (path: string) => readFileSync(new URL(path, workspaceRoot), 'utf8');
 const fileLines = (path: string) => workspaceFile(path).split('\n');
 
+// The page is server rendered and readable before React hydrates; a click or scroll before that is lost. Wait for the
+// marker `__root.tsx` sets once every handler is attached.
+const gotoHome = async (page: Page) => {
+  await page.goto('/');
+  await page.locator('html[data-hydrated="true"]').waitFor({ state: 'attached' });
+};
+
 /** Every line of an excerpt, in the order shown. */
 const linesOf = (excerpt: Excerpt) => excerpt.parts.flatMap(part => part.lines);
 
@@ -46,7 +53,7 @@ const word = (page: Page, text: string) => page.locator('.home-code button.tk-te
  * so this scrolls there the way a reader does, then waits for the controls the code brings.
  */
 const openJournal = async (page: Page) => {
-  await page.goto('/');
+  await gotoHome(page);
   await page.locator('#step-remember').evaluate(floor => floor.scrollIntoView());
   await expect(sheet(page, 'J-100').getByRole('button', { name: 'Reset' })).toBeVisible();
 };
@@ -55,7 +62,7 @@ test.describe('/ build path', () => {
   // WHY: the page promises a build order (define, wire, feature, remember, serve, inspect), so the sections must run
   // in that order and show the real code of each step, or the "floors" are only decoration.
   test('six build steps in order, each with its excerpts', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const steps = page.locator('section[data-floor]');
     await expect(steps).toHaveCount(6);
     await expect(steps.locator('h2')).toHaveText(BUILD_STEPS.map(step => step.title));
@@ -69,7 +76,7 @@ test.describe('/ build path', () => {
   // WHY: the mental model band claims three ideas with real code behind each; the code must be on the page, or the
   // claims are only copy.
   test('the mental model band shows its three parts, each with its excerpt', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const band = page.locator('section[aria-labelledby="home-model"]');
     await expect(band.locator('h2')).toHaveText(MODEL_HEADLINE);
     await expect(band.locator('.home-model > div > b')).toHaveText(MODEL_PARTS.map(part => part.name));
@@ -141,7 +148,7 @@ test.describe('/ build path', () => {
   // WHY: readers pick a look once and expect the whole site to keep it; the choice must reach <html> and outlive a
   // reload, or every visit starts in the wrong mode.
   test('Candle dark sets the site theme and survives a reload', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const themes = page.getByRole('group', { name: 'Theme' });
     await expect(themes.getByRole('radio')).toHaveCount(4);
     const labels = await themes.locator('.home-swatch-label').allTextContents();
@@ -160,7 +167,7 @@ test.describe('/ build path', () => {
   // WHY: the picker must change the page, not only <html>'s class: each choice must be checked, put the matching
   // classes on <html> and repaint the page background.
   test('each theme is checked, sets its classes and repaints the page', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const themes = page.getByRole('group', { name: 'Theme' });
     const classes: Record<string, string[]> = {
       Light: [],
@@ -186,7 +193,7 @@ test.describe('/ build path', () => {
 
   // WHY: a radio group must work from the keyboard: arrow keys move the choice, and the page follows it.
   test('arrow keys move between the four themes', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const themes = page.getByRole('group', { name: 'Theme' });
     await themes.getByRole('radio', { name: /^Light/ }).click();
     await expect(themes.getByRole('radio', { name: /^Light/ })).toBeChecked();
@@ -199,7 +206,7 @@ test.describe('/ build path', () => {
   // WHY: with no stored choice the picker must show the mode the system resolved, or it would claim nothing is chosen.
   test('without a stored choice the picker marks the system mode', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
-    await page.goto('/');
+    await gotoHome(page);
     await expect(page.getByRole('radio', { name: /^Dark/ })).toBeChecked();
   });
 
@@ -233,7 +240,7 @@ test.describe('/ build path', () => {
   // or the drawing is a picture with no purpose. The page scrolls inside `.marketing`, so this scrolls like a reader.
   test('scrolling to a floor lights it and moves the bubble', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('/');
+    await gotoHome(page);
     const bubble = page.locator('.home-load-bubble');
     const before = await bubble.boundingBox();
     await page.mouse.move(600, 400);
@@ -245,7 +252,9 @@ test.describe('/ build path', () => {
       const after = await bubble.boundingBox();
       expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeGreaterThan(40);
     }).toPass();
-    await page.mouse.wheel(0, -4000);
+    // Wheel back up by the whole distance scrolled: a fixed delta stops short once the floors above grow.
+    const scrolled = await page.locator('.marketing').evaluate(scroller => scroller.scrollTop);
+    await page.mouse.wheel(0, -scrolled);
     await expect(page.locator('.home-floor.is-now')).toHaveCount(0);
   });
 
@@ -253,7 +262,7 @@ test.describe('/ build path', () => {
   // elevation follows what readers actually do.
   test('a real wheel scroll lights floors and moves the bubble', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('/');
+    await gotoHome(page);
     await page.mouse.move(600, 400);
     const bubble = page.locator('.home-load-bubble');
     const start = await bubble.boundingBox();
@@ -277,7 +286,7 @@ test.describe('/ build path', () => {
   // for all of it, and readers saw a crane that ignores their scroll. Every scroll must move it, even inside one floor.
   test('the bubble moves with the scroll inside one long floor', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('/');
+    await gotoHome(page);
     await page.mouse.move(600, 400);
     // The crane's drop, not the bubble's box: the bubble image also drifts on its own, forever.
     const load = page.locator('.home-load');
@@ -304,7 +313,7 @@ test.describe('/ build path', () => {
   // WHY: on a phone the strip is the map: it must mark the floor in view and jump to a floor when tapped.
   test('on a 390px phone the strip marks the floor in view and jumps to a floor', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/');
+    await gotoHome(page);
     const strip = page.getByRole('navigation', { name: 'Build steps' });
     await expect(strip.getByRole('link')).toHaveCount(6);
     await page.locator('section[data-floor="3"] h2').evaluate(heading => heading.scrollIntoView({ block: 'center' }));
@@ -319,7 +328,7 @@ test.describe('/ build path', () => {
   // WHY: motion must stop for readers who ask the system for less of it; the journal panes fade as they fill.
   test('reduced motion stills the journal pane fade', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/');
+    await gotoHome(page);
     const pane = page.locator('.home-chapter .home-pane').first();
     await expect(pane).toBeVisible();
     // A global rule may shorten transitions to a hair above zero instead of none; either way nothing visibly fades.
@@ -331,7 +340,7 @@ test.describe('/ build path', () => {
   for (const width of [320, 360, 390, 768, 1024, 1440]) {
     test(`no horizontal page scroll at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
-      await page.goto('/');
+      await gotoHome(page);
       const overflow = await page.evaluate(() => {
         const scroller = document.querySelector('.marketing') ?? document.documentElement;
         return scroller.scrollWidth - scroller.clientWidth;
@@ -343,7 +352,7 @@ test.describe('/ build path', () => {
   // WHY: the header must stay one compact row on a phone with all its links reachable from the keyboard.
   test('the header is one compact row at 360px and its four links are reachable', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
-    await page.goto('/');
+    await gotoHome(page);
     const header = await page.locator('header.home-bar').boundingBox();
     expect(header?.height ?? 999).toBeLessThan(70);
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
@@ -358,7 +367,7 @@ test.describe('/ build path', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/');
+    await gotoHome(page);
     const draw = await page.locator('.home-draw').boundingBox();
     const block = await page.locator('.home-titleblock').boundingBox();
     expect(block?.y ?? 0).toBeGreaterThan((draw?.y ?? 0) + (draw?.height ?? 0) - 2);
@@ -381,7 +390,7 @@ test.describe('/ build path', () => {
   // WHY: the marketing rules of this site: `expr`, `cas` and `bench` are never sold, and the journal's Dot adapters
   // stay off the page until an app uses them.
   test('unmarketed packages and claims appear nowhere on the page', async ({ page }) => {
-    await page.goto('/');
+    await gotoHome(page);
     const texts = await page.locator('body').allInnerTexts();
     const text = texts.join(' ');
     expect(text).not.toMatch(/\b(expr|cas|bench)\b/i);
@@ -409,7 +418,7 @@ test.describe('/ build path', () => {
 
     // WHY: keyboard readers must get the same explanation: Tab onto a word opens its tooltip.
     test('Tab reaches a glossary word and shows its tooltip', async ({ page }) => {
-      await page.goto('/');
+      await gotoHome(page);
       await expect(page.locator('button.tk-term').first()).toBeAttached();
       let focused = false;
       for (let press = 0; press < 80 && !focused; press += 1) {
@@ -439,7 +448,7 @@ test.describe('/ build path', () => {
 
     // WHY: selecting and copying code must give the exact source lines, buttons and colours included.
     test('copying a code block gives the excerpt text', async ({ page }) => {
-      await page.goto('/');
+      await gotoHome(page);
       const copied = await page
         .locator('#step-define .home-code')
         .nth(1)
@@ -466,7 +475,7 @@ test.describe('/ build path', () => {
     // WHY: the toggle is the reader's proof that the order is a type: the wrong order shows the compiler error, and
     // putting the database first makes it go away.
     test('the toggle shows the wrong order with its error, then the right one', async ({ page }) => {
-      await page.goto('/');
+      await gotoHome(page);
       const sheet = page.getByRole('article', { name: 'Elevation: providers below consumers.' });
       const toggle = sheet.getByRole('button', { name: 'Put the database first' });
       await expect(toggle).toHaveAttribute('aria-pressed', 'false');

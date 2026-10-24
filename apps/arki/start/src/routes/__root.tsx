@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useEffect } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Link, Outlet, ScriptOnce, Scripts } from '@tanstack/react-router';
 
@@ -60,6 +61,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootComponent() {
   const lang = getLocale();
+  // Hydration signal for e2e: this effect runs after every child effect, so once it is set the page's handlers are
+  // attached. A click before that lands on server HTML and is lost; `load` fires about a second earlier in dev.
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = 'true';
+  }, []);
 
   return (
     <RootDocument lang={lang}>
