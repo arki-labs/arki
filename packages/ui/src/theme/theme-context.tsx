@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 
 import type { ThemeDetectionOptions } from './script';
 import { themeDetectionFn } from './script';
@@ -141,16 +141,19 @@ export function ThemeProvider({
   forcedTheme,
   themeClasses,
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<string>(() => {
-    // During SSR, use default theme
-    if (typeof window === 'undefined') return normalizeTheme(defaultTheme, themes, defaultTheme);
+  // The first render must match the server's, which cannot read storage or the OS
+  // preference: React keeps mismatched attributes during hydration, so a stored theme
+  // read here would leave the server's default on screen. The layout effect below
+  // reads both before the first paint.
+  const [theme, setThemeState] = useState<string>(() => normalizeTheme(defaultTheme, themes, defaultTheme));
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>('light');
+  const [storageRead, setStorageRead] = useState(false);
 
-    // On client, read from storage or use default
-    const stored = getStoredTheme(storageKey);
-    return normalizeTheme(stored, themes, defaultTheme);
-  });
-
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => getSystemTheme());
+  useLayoutEffect(() => {
+    setThemeState(normalizeTheme(getStoredTheme(storageKey), themes, defaultTheme));
+    setSystemTheme(getSystemTheme());
+    setStorageRead(true);
+  }, [defaultTheme, storageKey, themes]);
 
   // Calculate resolved theme
   const resolvedTheme = useMemo<ResolvedTheme>(() => {
@@ -204,8 +207,10 @@ export function ThemeProvider({
 
   // Apply theme to document when it changes
   useEffect(() => {
+    // Until storage is read, the pre-paint script's classes are the right ones.
+    if (!storageRead) return;
     applyTheme(resolvedTheme, { attribute, enableColorScheme, themes, themeClasses }, disableTransitionOnChange);
-  }, [resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes, themeClasses]);
+  }, [storageRead, resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes, themeClasses]);
 
   // Listen for storage changes (cross-tab sync)
   useEffect(() => {
