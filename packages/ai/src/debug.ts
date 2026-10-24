@@ -7,12 +7,6 @@ import { getLogger } from '@arki/log';
 export const debugService = getLogger('ai:service');
 
 /**
- * Debug logger for embeddings operations
- * Enable with: DEBUG=ai:embeddings
- */
-export const debugEmbeddings = getLogger('ai:embeddings');
-
-/**
  * Debug logger for vector search operations
  * Enable with: DEBUG=ai:vector
  */

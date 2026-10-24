@@ -2,37 +2,12 @@
  * Core types and interfaces for AI operations
  */
 
-import type { EmbeddingSpace } from '@arki/embeddings';
+import type { Embedder, EmbeddingSpace } from '@arki/embeddings';
 import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
 import type { RAGServiceConfig } from './validation';
 
 export type { RAGServiceConfig, SearchMode, SearchSettings } from './validation';
-
-/**
- * Generic embedding provider interface
- */
-export type EmbeddingProvider = {
-  /**
-   * Generate embedding for a single text
-   */
-  getEmbedding(text: string): Promise<number[]>;
-
-  /**
-   * Generate embeddings for multiple texts (batch processing)
-   */
-  getEmbeddings(texts: string[]): Promise<number[][]>;
-
-  /**
-   * Get the dimension size of embeddings
-   */
-  getDimensions?(): number;
-
-  /**
-   * Clear any internal cache
-   */
-  clearCache?(): void;
-}
 
 /**
  * Vector search result
@@ -133,7 +108,7 @@ export type StreamingHandler = {
  * RAG (Retrieval-Augmented Generation) configuration
  */
 export type RAGConfig = {
-  embeddingProvider: EmbeddingProvider;
+  embedder: Embedder;
   vectorSearchProvider: VectorSearchProvider;
   aiService: RAGServiceConfig;
   chunkSize?: number;

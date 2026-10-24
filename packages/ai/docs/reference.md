@@ -26,23 +26,20 @@ const summary = await llm.generateStructuredData('Summarise: ...', z.object({ ti
 
 ## Embeddings and the vector index
 
-One env reader, local first. The core never reads `process.env`: pass the map in.
+Text to vectors is `@arki/embeddings`. This package stores and ranks vectors. The core never reads `process.env`: pass the map in.
 
-```ts skip="needs Ollama or OpenAI and a vector store"
-import { createEmbedder, createEmbeddingRuntime, createVectorIndex } from '@arki/ai';
+```ts skip="needs an embedder and a vector store"
+import { createVectorIndex } from '@arki/ai';
+import type { Embedder } from '@arki/embeddings';
 
-// EMBEDDING_PROVIDER, else Ollama (OLLAMA_BASE_URL / OLLAMA_HOST), else OpenAI, else null.
-const runtime = await createEmbeddingRuntime(process.env);
-const embedder = createEmbedder(runtime); // embedQuery(text, expectedDimensions?) gives { vector, selection } or null
+declare const embedder: Embedder; // from `createEmbedder(...)` in `@arki/embeddings`
 
-type Payload = { userId: string; kind: 'item' | 'chunk'; model: string; dimensions: number };
-const index =
-  runtime &&
-  createVectorIndex<Payload>(runtime, {
-    collection: 'app_embeddings',
-    payloadIndexes: ['userId', 'kind'],
-    env: process.env,
-  });
+type Payload = { userId: string; kind: 'item' | 'chunk' };
+const index = createVectorIndex<Payload>(embedder.space, {
+  collection: 'app_embeddings',
+  payloadIndexes: ['userId', 'kind'],
+  env: process.env,
+});
 // index.provider is Qdrant when QDRANT_URL is set (durable: true), else the in-memory store (durable: false).
 ```
 

@@ -31,6 +31,6 @@
 ## Rules that bite
 - With `LLM_PROVIDER` unset the provider is Ollama. A cloud key never overrides an Ollama signal.
 - `RateLimited` and `BudgetExceeded` are returned, not thrown. Check before you iterate a stream.
-- Embedding selection is read in one place and may be `null`. Handle `null`; never use a mock default.
+- This package stores and ranks vectors. It does not make them: use `@arki/embeddings`.
 - A tool result is checked against its `output` schema. A tool returns a failure for an expected outcome.
 - The server entries are not browser-safe.

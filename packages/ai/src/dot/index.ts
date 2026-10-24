@@ -17,7 +17,6 @@ import { isFailure } from '@arki/failure';
 import type { LLMProviderConfig } from '../ai-service/factory';
 import type { ProbeOptions } from '../ai-service/probe';
 import type { LLMProviderWithUsage } from '../ai-service/types';
-import type { EnvSource } from '../embeddings/runtime';
 import type { VectorSearchProvider } from '../types';
 import type { VectorIndex } from '../vector-search/vector-index';
 import { createLLMProvider } from '../ai-service/factory';
@@ -36,14 +35,14 @@ export type VectorIndexPluginOptions<P extends Record<string, unknown>> = {
   readonly space:
     EmbeddingSpace | Pick<Embedder, 'space'> | null | (() => EmbeddingSpace | Pick<Embedder, 'space'> | null);
   /** Where to read `QDRANT_*` and `VECTOR_BACKEND`. Defaults to `process.env`. */
-  readonly env?: () => EnvSource;
+  readonly env?: () => NodeJS.ProcessEnv;
   /** Use this provider instead of building one; treated as not durable unless `durable: true`. */
   readonly provider?: VectorSearchProvider<P>;
   readonly durable?: boolean;
 };
 
 /** `process.env`, or an empty map on runtimes without `process`. */
-function processEnv(): EnvSource {
+function processEnv(): NodeJS.ProcessEnv {
   return typeof process === 'undefined' ? {} : process.env;
 }
 

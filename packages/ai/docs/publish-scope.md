@@ -17,8 +17,6 @@ Goal: a small hard-dependency set. Everything heavy is an optional peer behind a
 | `@ai-sdk/provider` | devDependency | dev | - | Only types used in tests. |
 | `@ai-sdk/react` | optional peer | optional peer | `./react` | Only `react/hooks/useAIChat.tsx`. |
 | `react-markdown`, `remark-gfm`, `streamdown` | optional peer | optional peer | `./react/md` | Only `react/md.tsx` (moved from `./md` so it is a React adapter entry, which `arki-layers` L003 requires). |
-| `@ai-sdk/amazon-bedrock` | hard | optional peer | `./embeddings/bedrock` | Static import in the root embeddings factory. Needs lazy load. |
-| `@ai-sdk/cohere` | hard | optional peer | `./embeddings/cohere` | Same: root factory imports it. |
 | `@ai-sdk/google` | hard | optional peer | `./google` | Root `provider-router` and `createLLMProvider` import it. |
 | `@ai-sdk/groq` | hard | optional peer | `./groq` | Same. |
 | `@ai-sdk/mistral` | hard | optional peer | `./mistral` | Same. |
@@ -43,10 +41,9 @@ Target hard set (10): `ai`, `ai-sdk-ollama`, `@ai-sdk/openai`, `@ai-sdk/anthropi
 
 1. Replace the `./*` catch-all export with explicit entries. Keep the root server-safe.
 2. Make the six hard provider deps above optional peers:
-   - Load Google, Groq, Mistral, Cohere, Bedrock and Qdrant lazily (dynamic `import()` with a clear "install X" error) in `provider-router`, `createLLMProvider`, `embeddings/factory`, and `vector-search/factory`.
+   - Load Google, Groq, Mistral and Qdrant lazily (dynamic `import()` with a clear "install X" error) in `provider-router`, `createLLMProvider`, and `vector-search/factory`.
    - Or move them to explicit entries. Either way the root must stop importing them statically. Many apps import these from the root, so this is a breaking change; ship as a minor (0.x).
-3. Replace `*` ranges on `@huggingface/transformers`, `@mixedbread-ai/sdk`, `voyageai` with real ranges.
-4. Decide `@arki/async` (founder).
+3. Decide `@arki/async` (founder).
 
 ## Follow-up: `@mastra/core`
 

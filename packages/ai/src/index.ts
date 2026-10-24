@@ -5,7 +5,6 @@
 
 // Core types and interfaces
 export type {
-  EmbeddingProvider,
   VectorScrollPage,
   VectorSearchProvider,
   VectorSearchResult,
@@ -40,10 +39,7 @@ export { BudgetExceeded, PROVIDER_PROBLEMS, ProviderUnavailable, RateLimited } f
 // Input validation
 export {
   // Schemas
-  openaiEmbeddingConfigSchema,
-  mockEmbeddingConfigSchema,
   qdrantConfigSchema,
-  embeddingConfigSchema,
   vectorProviderConfigSchema,
   searchSettingsSchema,
   searchOptionsSchema,
@@ -54,10 +50,7 @@ export {
   documentsSchema,
   chatMessageSchema,
   // Types
-  type OpenAIEmbeddingConfig,
-  type MockEmbeddingConfig,
   type QdrantConfig,
-  type EmbeddingConfig,
   type VectorProviderConfig,
   type SearchOptions,
   type AIServiceConfig,
@@ -68,24 +61,6 @@ export {
   validateInput,
   validateInputAsync,
 } from './validation';
-
-// Embedding providers and interfaces
-export {
-  OpenAIEmbeddingProvider,
-  MockEmbeddingProvider,
-  createEmbeddingProvider,
-  buildQueryText,
-  createEmbedder,
-  createEmbeddingRuntime,
-  QWEN_QUERY_INSTRUCTION,
-  resolveEmbeddingSelection,
-  type Embedder,
-  type EmbeddingRuntime,
-  type EmbeddingSelection,
-  type EnvSource,
-  type EmbeddingProviderType,
-  type EmbeddingProviderConfig,
-} from './embeddings';
 
 // Vector search providers and interfaces
 export {

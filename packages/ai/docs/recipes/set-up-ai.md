@@ -36,7 +36,7 @@ A cloud key alone does not switch you from Ollama when Ollama is configured: set
 
 ## 4. Embeddings
 
-Embedding selection is separate: `EMBEDDING_PROVIDER` if set, else Ollama (when `OLLAMA_BASE_URL` or `OLLAMA_HOST` is set), else OpenAI (when `OPENAI_API_KEY` is set), else nothing. With nothing configured, the selection is `null` and your code must degrade. It never invents vectors.
+Embeddings are separate. This package no longer makes vectors: use `@arki/embeddings` (`createEmbedder`), then give `embedder.space` to `createVectorIndex`.
 
 ## Check it worked
 

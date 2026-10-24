@@ -10,7 +10,6 @@
  */
 import type { EmbeddingSpace } from '@arki/embeddings';
 
-import type { EnvSource } from '../embeddings/runtime';
 import type { VectorSearchProvider } from '../types';
 import { debugVector } from '../debug.ts';
 import { MockVectorProvider } from './providers/mock';
@@ -22,7 +21,7 @@ export type VectorIndexOptions<P extends Record<string, unknown>> = {
   /** Payload fields filtered on; each gets a keyword index. Keys of `P`, by construction. */
   payloadIndexes: readonly (keyof P & string)[];
   /** Reads `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_REPLICATION_FACTOR`, `VECTOR_BACKEND`. */
-  env: EnvSource;
+  env: NodeJS.ProcessEnv;
 };
 
 export type VectorIndex<P extends Record<string, unknown>> = {

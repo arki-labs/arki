@@ -13,31 +13,6 @@ import { sanitizerConfigSchema } from './safety/types';
 export { sanitizerConfigSchema } from './safety/types';
 
 /**
- * OpenAI Embedding configuration validation
- */
-export const openaiEmbeddingConfigSchema = z.object({
-  apiKey: z.string().optional(),
-  model: z.string().optional(),
-  baseUrl: z.string().optional(),
-  dimensions: z.number().optional(),
-  batchSize: z.number().positive().optional(),
-  cacheEnabled: z.boolean().optional(),
-});
-
-export type OpenAIEmbeddingConfig = z.infer<typeof openaiEmbeddingConfigSchema>;
-
-/**
- * Mock Embedding configuration validation
- */
-export const mockEmbeddingConfigSchema = z.object({
-  dimensions: z.number().positive().optional(),
-  simulateErrors: z.boolean().optional(),
-  errorRate: z.number().min(0).max(1).optional(),
-});
-
-export type MockEmbeddingConfig = z.infer<typeof mockEmbeddingConfigSchema>;
-
-/**
  * QDrant configuration validation
  */
 export const qdrantConfigSchema = z.object({
@@ -49,20 +24,6 @@ export const qdrantConfigSchema = z.object({
 });
 
 export type QdrantConfig = z.infer<typeof qdrantConfigSchema>;
-
-/**
- * Embedding provider configuration validation
- */
-export const embeddingConfigSchema = z.object({
-  type: z.enum(['openai', 'mock', 'cohere', 'anthropic']),
-  apiKey: z.string().optional(),
-  model: z.string().optional(),
-  batchSize: z.number().min(1).max(1000).optional(),
-  maxRetries: z.number().min(0).max(10).optional(),
-  cache: z.boolean().optional(),
-});
-
-export type EmbeddingConfig = z.infer<typeof embeddingConfigSchema>;
 
 /**
  * Vector search provider configuration validation

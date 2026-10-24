@@ -7,8 +7,8 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 1. Local models come first. With `LLM_PROVIDER` unset, the provider is Ollama. A cloud provider (OpenAI, Anthropic, Groq, Google, Mistral) needs an explicit signal: `LLM_PROVIDER` or a key. A key never overrides an Ollama signal. The auto-detect order is `ollama -> openai -> anthropic`.
 2. Never ship a stub as a runtime choice. No `'stub'` provider name. A missing key or an unreachable Ollama throws a `ConfigurationError` that names the fix. Test doubles are fine at the test boundary (`vi.mock`, an injected adapter).
 3. Cost telemetry names the resolved model. Never log a dollar value from a hardcoded model name. Log the model that served the call, or add `costEstimateBasis` next to the number.
-4. `src/embeddings/runtime.ts` is the only place that reads embedding selection from the environment (`EMBEDDING_PROVIDER`, else Ollama, else OpenAI, else `null`). The core takes the env map as an argument and never reads `process.env`. Only `@arki/ai/dot` passes `process.env`. There is no `mock` default.
-5. Apps never set their own embedding model or dimensions. `selection` carries them, and `createVectorIndex` sizes the collection from it.
+4. This package does not make vectors. Text to vectors is `@arki/embeddings`. The core takes the env map as an argument and never reads `process.env`. Only `@arki/ai/dot` passes `process.env`.
+5. Apps never set their own embedding model or dimensions. The `EmbeddingSpace` (`embedder.space`) carries them, and `createVectorIndex` sizes the collection from it.
 6. `runVectorReconciliation` acknowledges a tombstone only against a durable index (`VectorIndex.durable`). It re-checks every upserted batch with `stillCurrent(ids)`, so a point deleted during an upsert ends up deleted. `@arki/ai/drizzle` owns the tombstone table and outbox.
 7. Expected refusals are returned, never thrown: `RateLimited`, `BudgetExceeded`, and failures a tool returns. A provider that is down still throws.
 8. A tool result is checked against its `output` schema before the model sees it. A mismatch is a `ToolOutputError`.
@@ -19,7 +19,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 ## Changing this package
 
 - New provider service: `src/ai-service/<name>-service.ts`. Match `OllamaService`'s `generateStructured*` signatures, add the name to `LLMProviderConfig` in `src/ai-service/factory.ts` and to the model defaults there.
-- New embedding provider: `src/embeddings/`. Add it to the selection logic in `src/embeddings/runtime.ts` and nowhere else.
+- New embedding provider: not here. Add it to `@arki/embeddings`.
 - New failure: `src/failures.ts`, with JSDoc `@fix` and `@verify`.
 - New error class: `src/errors.ts`, with JSDoc `@fix` and `@verify`.
 - A new export needs an entry in `package.json` `exports` and a line in `src/index.ts` when it belongs to the root.

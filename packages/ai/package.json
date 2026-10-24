@@ -87,9 +87,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@ai-sdk/anthropic": "catalog:ai",
-    "@ai-sdk/cohere": "catalog:ai",
     "@ai-sdk/google": "catalog:ai",
     "@ai-sdk/groq": "catalog:ai",
     "@ai-sdk/mistral": "catalog:ai",
@@ -117,13 +115,7 @@
     "@arki/dot": {
       "optional": true
     },
-    "@huggingface/transformers": {
-      "optional": true
-    },
     "@mastra/core": {
-      "optional": true
-    },
-    "@mixedbread-ai/sdk": {
       "optional": true
     },
     "drizzle-orm": {
@@ -143,25 +135,19 @@
     },
     "streamdown": {
       "optional": true
-    },
-    "voyageai": {
-      "optional": true
     }
   },
   "peerDependencies": {
     "@ai-sdk/react": "catalog:ai",
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
-    "@huggingface/transformers": "*",
     "@mastra/core": "1.37.1",
-    "@mixedbread-ai/sdk": "*",
     "drizzle-orm": "catalog:drizzle",
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",
-    "streamdown": "catalog:ai",
-    "voyageai": "*"
+    "streamdown": "catalog:ai"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.25",

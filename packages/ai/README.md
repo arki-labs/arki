@@ -14,33 +14,15 @@ To run a model on your machine, install [Ollama](https://ollama.com) and pull th
 
 ## Quick start
 
-Pick what the app will call. Nothing leaves your machine until you call a model, and the embedding choice is a pure function of the environment map you pass in.
+Pick what the app will call. Nothing leaves your machine until you call a model. Text to vectors lives in `@arki/embeddings`, not here.
 
 ```ts from="examples/pick-provider.ts#pick-provider"
-/** What the app will call, given an environment map. Nothing is sent over the network. */
-export function describeSetup(environment: Readonly<Record<string, string | undefined>>) {
+/** What the app will call. Nothing is sent over the network. */
+export function describeSetup() {
   return {
     // `LLM_PROVIDER` and `LLM_MODEL` come from the process environment; ollama is the default.
     chatModel: resolveLlmModel(),
-    // The embedding choice is pure: pass the map in. `null` means nothing is configured.
-    embeddings: resolveEmbeddingSelection(environment),
   };
-}
-```
-
-With Ollama configured, the embedding selection is:
-
-```ts run expect
-import { resolveEmbeddingSelection } from '@arki/ai';
-
-console.log(resolveEmbeddingSelection({ OLLAMA_BASE_URL: 'http://127.0.0.1:11434' }));
-```
-
-```text
-{
-  type: "ollama",
-  model: "qwen3-embedding:0.6b",
-  dimensions: 1024,
 }
 ```
 

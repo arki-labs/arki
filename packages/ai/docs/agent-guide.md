@@ -7,7 +7,7 @@ Read this before changing code that calls a model. The [README](../README.md) is
 - A **provider** is chosen by `LLM_PROVIDER`. Unset means Ollama. `createLLMProvider()` returns an `LLMProviderWithUsage`: a `StructuredLLMProvider` (`generateStructuredData`, `generateText` and friends) plus `generateStructuredResult` and `generateTextResult`, which return `{ value, usage, provider, model }`. The services (`OllamaService`, `OpenAIService`, `AnthropicService`, ...) share the `StructuredLLMProvider` method shapes.
 - **`probeLLMProvider()`** says whether that provider can be called now. It returns `ProviderUnavailable` instead of throwing.
 - **`createFakeLLMProvider`** (`@arki/ai/testing`) is the test double: scripted answers, fixed usage, no HTTP.
-- **Embeddings** are selected once from an env map by `resolveEmbeddingSelection(env)`: `EMBEDDING_PROVIDER`, else Ollama, else OpenAI, else `null`.
+- **Embeddings** are not made here. Use `@arki/embeddings`; the vector index is sized from `embedder.space`.
 - The **vector index** (`createVectorIndex`) is Qdrant when `QDRANT_URL` is set (`durable: true`) and in memory otherwise. `runVectorReconciliation` drains erasure tombstones and repairs drift. It runs from cron.
 - The **tool loop** (`createAiSdkRuntime(...).runToolLoop`) streams `RuntimeEvent`s. Tools come from `defineAgentTool`, with an `inputSchema` and an `output` schema.
 - **`createFlow`** runs named nodes in memory. It is not durable.
@@ -61,23 +61,7 @@ Pass `answers` as a function of the call (`call.prompt`, `call.system`, `call.js
 
 ### Embed and search
 
-Resolve the selection from an env map. `null` means nothing is configured.
-
-```ts run expect
-import { resolveEmbeddingSelection } from '@arki/ai';
-
-console.log(resolveEmbeddingSelection({ EMBEDDING_PROVIDER: 'ollama' }));
-```
-
-```text
-{
-  type: "ollama",
-  model: "qwen3-embedding:0.6b",
-  dimensions: 1024,
-}
-```
-
-Build the index and the embedder from the runtime. See [Embeddings and the vector index](reference.md#embeddings-and-the-vector-index).
+Make vectors with `@arki/embeddings`. Build the index from `embedder.space`. See [Embeddings and the vector index](reference.md#embeddings-and-the-vector-index).
 
 ### Run a tool loop
 
@@ -108,7 +92,7 @@ Use `llm(() => config)` from `@arki/ai/dot`. It provides `llm` (an `LLMProviderW
 ## Rules that bite
 
 - Do not default to a cloud provider. Ollama first; a cloud provider needs `LLM_PROVIDER` or a key.
-- Do not read embedding variables anywhere except `src/embeddings/runtime.ts`.
+- Do not make vectors here. Use `@arki/embeddings`.
 - Do not iterate a stream before you check for `RateLimited`.
 - Do not log a cost from a hardcoded model name.
 - Pass the provider when you price a call (`priceOf` or `calculateLLMCost(..., { provider })`). Without it a local model is priced at the hosted default rate.
