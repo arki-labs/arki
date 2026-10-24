@@ -21,7 +21,7 @@ Removed environment variables (read nowhere in `@arki/ai` now): `EMBEDDING_PROVI
 
 Removed dependencies of `@arki/ai`: `@ai-sdk/amazon-bedrock`, `@ai-sdk/cohere`, and the optional peers `voyageai`, `@mixedbread-ai/sdk`, `@huggingface/transformers`.
 
-`@arki/testing/ai` adds `fromArkiEmbedder(embedder)`. It turns an `@arki/embeddings` embedder into the embedder the judge and `similarTo` take. A failure becomes a thrown `Error`. `@arki/embeddings` is an optional peer of `@arki/testing`.
+`fromArkiEmbedder(embedder)` turns an `@arki/embeddings` embedder into the embedder the `@arki/testing/ai` judge and `similarTo` take. A failure becomes a thrown `Error`. It lives in `@arki/embeddings/testing`, so the two packages depend one way only (embeddings → testing).
 
 Migration ledger (files that used the old embedding API, and the slice that moved each):
 

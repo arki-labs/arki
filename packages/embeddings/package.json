@@ -177,6 +177,7 @@
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@arki/dot": "workspace:*",
+    "@arki/testing": "workspace:*",
     "@huggingface/transformers": "catalog:ai",
     "ai": "catalog:ai"
   },
@@ -194,6 +195,9 @@
       "optional": true
     },
     "@arki/dot": {
+      "optional": true
+    },
+    "@arki/testing": {
       "optional": true
     },
     "@huggingface/transformers": {

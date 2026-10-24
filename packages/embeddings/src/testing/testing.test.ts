@@ -2,16 +2,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { isFailure } from '@arki/failure';
+import type { Embedder as JudgeEmbedder } from '@arki/testing/ai';
+import { cosine as judgeCosine } from '@arki/testing/ai';
 
 import { embed, embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
 import { Cancelled, InvalidOutput, RateLimited } from '../failures.js';
 import { cosine, norm } from '../vector.js';
 import { echoTexts, stubModel } from '../tests/stub-model.js';
-import { fakeEmbedder, fixtureEmbedder, recordEmbedder } from './index.js';
+import { fakeEmbedder, fixtureEmbedder, fromArkiEmbedder, recordEmbedder } from './index.js';
 
 describe('./testing fakeEmbedder', () => {
   // Tests compare vectors by equality; the fake must be reproducible on every run and runtime.
@@ -141,5 +143,27 @@ describe('recordEmbedder and fixtureEmbedder', () => {
       const refused = fixtureEmbedder(bad);
       expect(isFailure(refused) && refused.code).toBe('embeddings.configuration');
     }
+  });
+});
+
+describe('fromArkiEmbedder', () => {
+  it('returns the judge embedder of @arki/testing/ai, so the judge and similarTo take it as is', () => {
+    expectTypeOf(fromArkiEmbedder).returns.toEqualTypeOf<JudgeEmbedder>();
+  });
+
+  it('gives equal texts cosine 1 and different texts less, so similarTo can trust an @arki/embeddings embedder', async () => {
+    const embedder = fromArkiEmbedder(fakeEmbedder({ dimensions: 32 }));
+
+    const [first, same, other] = await embedder.embed(['canopy cools streets', 'canopy cools streets', 'bike lanes']);
+
+    expect(embedder.model).toBe('fake-32');
+    expect(judgeCosine(first ?? [], same ?? [])).toBeCloseTo(1, 6);
+    expect(judgeCosine(first ?? [], other ?? [])).toBeLessThan(0.99);
+  });
+
+  it('throws the failure message when the embedder fails, because a judge cannot go on without vectors', async () => {
+    const failing = fakeEmbedder({ dimensions: 8, failures: { bad: RateLimited({}) } });
+
+    await expect(fromArkiEmbedder(failing).embed(['bad'])).rejects.toThrow(/rate limiting/);
   });
 });

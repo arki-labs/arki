@@ -10,7 +10,7 @@ One `Embedder` shape over every provider, every response checked, every expected
 bun add @arki/embeddings @arki/failure
 ```
 
-`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./rerank`, `./tei` and `./testing` need no peer.
+`@arki/failure` gives you `isFailure`. The `./openai` entry also needs the optional peers `ai` and `@ai-sdk/openai`; `./transformers` needs the optional peer `@huggingface/transformers`. The root, `./ollama`, `./openai-compatible`, `./rerank`, `./tei` and `./testing` need no peer at run time. `fromArkiEmbedder` in `./testing` returns a type from the optional peer `@arki/testing`; install it when you use that function.
 
 ## Quick start
 
@@ -101,7 +101,7 @@ Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embedd
 | `@arki/embeddings/kv`                | `kvCacheStore(kv, { prefix? })`: a `CacheStore` over an `@arki/kv` client (anything with its `get` and `set`)                                                                                                                                                                                                                                                                                      | none                                      |
 | `@arki/embeddings/dot`               | `embeddings({ model, cache?, resilience? })`: the app's embedder as a Dot plugin                                                                                                                                                                                                                                                                                                            | `@arki/dot` (optional)                    |
 | `@arki/embeddings/transformers`      | `await createTransformersModel({ id?, revision?, dtype?, device?, cacheDir?, onProgress?, instruction? })`: a model run in process, EmbeddingGemma `q8` by default; `await createTransformersReranker({ id?, dtype?, … })`: bge-reranker-v2-m3 `q8` or Qwen3-Reranker-0.6B in process                                                                                                              | `@huggingface/transformers` (optional)    |
-| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline; `fakeReranker({ scores?, maxDocuments?, maxInputTokens? })`                                                                                                                                                                         | none                                      |
+| `@arki/embeddings/testing`           | `fakeEmbedder({ dimensions, seed?, failures?, delayMs? })`; `recordEmbedder(embedder, path)` and `fixtureEmbedder(recordings)` to replay a real model offline; `fakeReranker({ scores?, maxDocuments?, maxInputTokens? })`; `fromArkiEmbedder(embedder)`: any embedder as the `@arki/testing/ai` judge embedder                                                                                         | `@arki/testing` (optional, types only)    |
 
 Creating a model never touches the network. Ollama's model digest (the space `revision`) is read from `/api/tags` on the first call, so `revision` is `undefined` until then; `isSameSpace` tolerates a missing revision on one side. To compare with stored space ids before anything is embedded (a job that looks for stale rows), `await resolveSpace(embedder)` reads the digest without embedding and answers the full space, or `ModelUnavailable` (`unreachable` or `not-pulled`).
 
@@ -403,6 +403,15 @@ export async function record(real: Embedder, corpus: readonly string[]) {
 
 // In every test run after that: the same calls answer the same vectors, offline.
 export const replay = fixtureEmbedder(JSON.parse(readFileSync('__fixtures__/qwen3.json', 'utf8')));
+```
+
+`fromArkiEmbedder(embedder)` turns any embedder into the embedder that `similarTo` and the judge of `@arki/testing/ai` take. Texts go in as `purpose: 'document'`. A failure becomes a thrown `Error` with the failure's message, because a judge cannot go on without vectors.
+
+```ts
+import { fakeEmbedder, fromArkiEmbedder } from '@arki/embeddings/testing';
+
+// Pass it as `embedder` to `similarTo` or `toScore` from `@arki/testing/ai`.
+export const judgeEmbedder = fromArkiEmbedder(fakeEmbedder({ dimensions: 16 }));
 ```
 
 `fakeReranker({ scores })` is the reranker counterpart: a document listed in `scores` gets that score, any other a seeded one, and like a real reranker it refuses more than `maxDocuments` documents or a pair over `maxInputTokens`.

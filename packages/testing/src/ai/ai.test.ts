@@ -2,12 +2,9 @@
  * The AI kit on the real local Ollama: real judge, real embedder, no fakes of our own code.
  * Needs `gemma4:latest` and `nomic-embed-text:latest` installed (the kit never pulls).
  */
-import { RateLimited } from '@arki/embeddings';
-import { fakeEmbedder } from '@arki/embeddings/testing';
 import { describe, it } from 'vitest';
 
 import { ollama } from '../services/ollama.js';
-import { fromArkiEmbedder } from './from-arki-embedder.js';
 import { cosine, createEmbedder, createJudge } from './judge.js';
 import { UnscorableError } from './matcher.js';
 import { containsFacts, grounded, rubric, shape, similarTo } from './scorers.js';
@@ -143,22 +140,5 @@ describe('similarTo', { timeout: 180_000 }, () => {
     ).rejects.toThrow(/cosine similarity/);
     expect(cosine([1, 0], [0, 1])).toBe(0);
     expect(cosine([1, 2], [2, 4])).toBeCloseTo(1);
-  });
-});
-
-describe('fromArkiEmbedder', () => {
-  it('gives equal texts cosine 1 and different texts less, so similarTo can trust an @arki/embeddings embedder', async () => {
-    const embedder = fromArkiEmbedder(fakeEmbedder({ dimensions: 32 }));
-
-    const [first, same, other] = await embedder.embed(['canopy cools streets', 'canopy cools streets', 'bike lanes']);
-
-    expect(cosine(first ?? [], same ?? [])).toBeCloseTo(1, 6);
-    expect(cosine(first ?? [], other ?? [])).toBeLessThan(0.99);
-  });
-
-  it('throws the failure message when the embedder fails, because a judge cannot go on without vectors', async () => {
-    const failing = fakeEmbedder({ dimensions: 8, failures: { bad: RateLimited({}) } });
-
-    await expect(fromArkiEmbedder(failing).embed(['bad'])).rejects.toThrow(/rate limiting/);
   });
 });

@@ -1,6 +1,7 @@
 /**
  * `@arki/embeddings/testing`: a deterministic fake embedder and fake reranker for tests, and real
- * vectors recorded once and replayed offline.
+ * vectors recorded once and replayed offline. `fromArkiEmbedder` feeds an embedder to the
+ * `@arki/testing/ai` judge.
  *
  * The fake is NOT semantic. Equal text gives an identical unit vector; different text gives an
  * unrelated one. A test that asserts ranking by meaning passes or fails for the wrong reason with
@@ -21,6 +22,8 @@ import { sha256Hex } from '../sha256.js';
 import { isSameSpace } from '../space.js';
 import { embedRequestSchema, spaceSchema, tokenCountSchema } from '../schemas.js';
 import { NO_INSTRUCTION } from '../instructions.js';
+
+export { fromArkiEmbedder } from './from-arki-embedder.js';
 
 export type FakeEmbedderOptions = {
   readonly dimensions: number;

@@ -64,6 +64,8 @@ if ('vectors' in batch) console.log(batch.vectors.length);
 
 `fakeEmbedder` is deterministic and not semantic. Do not assert ranking by meaning against it.
 
+To score AI output with `similarTo` or the judge of `@arki/testing/ai`, wrap the embedder with `fromArkiEmbedder(embedder)` from `@arki/embeddings/testing`. It throws the failure's message when embedding fails.
+
 ### Retry rate limits and outages
 
 ```ts run

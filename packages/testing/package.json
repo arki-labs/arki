@@ -196,7 +196,6 @@
   },
   "peerDependencies": {
     "@arki/auth": "workspace:*",
-    "@arki/embeddings": "workspace:*",
     "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
@@ -206,9 +205,6 @@
   },
   "peerDependenciesMeta": {
     "@arki/auth": {
-      "optional": true
-    },
-    "@arki/embeddings": {
       "optional": true
     },
     "@playwright/test": {
