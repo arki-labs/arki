@@ -101,9 +101,12 @@ type KeyRow = { readonly call: string; readonly meaning: string };
 
 /** The three calls of avocabo's chain, in plain words: what each kind of unit is for. */
 const CHAIN_KEY = [
-  { call: '.infra(…)', meaning: 'What the app runs on: Postgres, a cache, mail, sign-in, locks.' },
-  { call: '.features(…)', meaning: 'What the app does: its features, and the RPC gateway in front of them.' },
-  { call: '.entrypoints(…)', meaning: 'How the world gets in: the web server and the cron clock.' },
+  {
+    call: '.infra(…)',
+    meaning: 'What the app runs on: Postgres, a cache, mail, sign-in, locks, vector search, audio storage.',
+  },
+  { call: '.features(…)', meaning: 'What the app does: its features.' },
+  { call: '.entrypoints(…)', meaning: 'How the world gets in: the cron clock, the RPC gateway and the web server.' },
 ] as const satisfies readonly KeyRow[];
 
 /** The waitlist feature's calls, in plain words. */

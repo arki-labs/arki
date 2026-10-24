@@ -77,7 +77,7 @@ export function changedColumns(events: readonly OrderEvent[]): ReadonlySet<Order
 
 // ── J-101 · pull the plug ────────────────────────────────────────────────────────────────────────────────────
 
-/** The four writes inside one transaction, in the order `write.ts` makes them (lines 272, 350, 378, 405). */
+/** The four writes inside one transaction, in the order `write.ts` makes them (lines 314, 368, 387, 434). */
 export const WRITE_STEPS = ['event', 'row', 'projection', 'job'] as const;
 export const PLUG_PHASES = ['idle', 'writing', 'cut', 'committed'] as const;
 /** What the worker did with the job: nothing yet, sent and acked, died after the send, ran it again. */

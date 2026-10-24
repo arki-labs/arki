@@ -25,7 +25,7 @@ export const GLOSSARY = {
     method: true,
   },
   entrypoints: {
-    text: 'Adds the ways into the app. Here that is the clock and TanStack Start.',
+    text: 'Adds the ways into the app. Here that is the clock, the RPC gateway and TanStack Start.',
     where: 'F1 · Define',
     method: true,
   },

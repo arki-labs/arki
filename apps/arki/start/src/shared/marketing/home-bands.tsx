@@ -20,16 +20,22 @@ const APPS = [
   {
     name: 'kapodopera',
     text: "Payments. The refund workflow starts from RefundApproved and waits for Stripe's signal.",
-    source: 'packages/payments/src/refunds/workflow.ts',
+    source: 'apps/kapodopera/backend/src/features/_shared/payments/journal.ts',
   },
-  { name: 'everseek', text: 'Webhooks write to the journal as the system actor.', source: 'actorId: null' },
+  {
+    name: 'everseek',
+    text: 'Webhooks write to the journal as the system actor.',
+    source: 'apps/everseek/backend/src/core/run-command.ts',
+  },
   {
     name: 'games-platform',
     text: 'Taps fan out realtime after commit, so subscribers never hear a rolled-back change.',
+    source: 'apps/games-platform/backend/src/journal.root.ts',
   },
   {
     name: 'foreman',
-    text: 'Audit log with an atomic staleness check: a stale write returns CommandConflict.',
+    text: 'Trust changes as journal events, with an atomic staleness check: a stale write returns CommandConflict.',
+    source: 'apps/foreman/backend/src/features/enrollment/journal.ts',
   },
   {
     name: 'faultline',

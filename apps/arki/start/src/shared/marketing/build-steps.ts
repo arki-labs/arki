@@ -58,7 +58,7 @@ export const DEFINE_UNIT = {
       path: DOT_README,
       from: 72,
       lines: [
-        "const app = await defineApp('acme')",
+        "const app = await defineApp('pizzeria')",
         '  .infra(database, stripe) // providers before consumers — enforced at compile time',
         '  .start();',
       ],
@@ -80,7 +80,7 @@ export const DEFINE_APP = {
       path: APP_FILE,
       from: 16,
       imports: true,
-      lines: ["import { defineApp, token } from '@arki/dot';"],
+      lines: ["import { defineApp, logHandlers, token } from '@arki/dot';"],
     },
     {
       id: 'import-start',
@@ -102,28 +102,32 @@ export const DEFINE_APP = {
       from: 23,
       imports: true,
       lines: [
+        "import { sentryErrors } from './entrypoints/middleware';",
         "import { gateway } from './entrypoints/gateway';",
         "import { database } from './infra/db';",
         "import { cache } from './infra/kv';",
         "import { authn } from './infra/auth';",
+        "import { audioStorage } from './infra/audio-storage';",
         "import { locking } from './infra/locks';",
         "import { appMail, emailClient } from './infra/mail/client';",
+        "import { embedding, vectorErasure, vectors } from './infra/vectors/vectors';",
       ],
     },
     {
       id: 'app',
       path: APP_FILE,
-      from: 39,
+      from: 42,
       lines: [
-        "export const app = defineApp('avocabo')",
-        '  .infra(database, cache, appMail, emailClient, authn, locking)',
-        '  .features([...features, gateway])',
+        "export const app = defineApp('avocabo', { observers: [sentryErrors, logHandlers()] })",
+        '  .infra(database, cache, appMail, emailClient, authn, locking, embedding, vectors, vectorErasure, audioStorage)',
+        '  .features(features)',
         '  .entrypoints(',
         '    hostClock,',
+        '    gateway,',
         '    tanstackStart({',
       ],
     },
-    { id: 'end', path: APP_FILE, from: 61, lines: ['    }),', '  );'] },
+    { id: 'end', path: APP_FILE, from: 65, lines: ['    }),', '  );'] },
   ],
 } as const satisfies Excerpt;
 
@@ -199,7 +203,7 @@ export const WIRE_FIX = {
     {
       id: 'right-order',
       path: QUICKSTART_APP,
-      from: 62,
+      from: 63,
       lines: ["export default defineApp('shop').infra(database, sessions).features([orders]);"],
     },
   ],
@@ -208,7 +212,7 @@ export const WIRE_FIX = {
 /** The type error, as the quickstart prints it: the guard's name, then the need nothing provides yet. */
 export const WIRE_ERROR = {
   path: QUICKSTART_FILE,
-  from: 113,
+  from: 115,
   lines: [
     "Property ''DOT: a unit in this list cannot be mounted at its position'' is missing in type ...",
     '  ... NeedsError<EmptyShape, WireNeeds<{ db: Handle<..., "db", "database">; }>> ...',
@@ -225,10 +229,10 @@ export const WIRE_ERROR_SOURCE = {
 export const FEATURE_LIST = {
   note: 'one line per feature',
   parts: [
-    { id: 'import', path: FEATURES_FILE, from: 47, lines: ["import { waitlist } from './features/waitlist/feature';"] },
-    { id: 'list', path: FEATURES_FILE, from: 52, lines: ['export const features = [', '  health,'] },
-    { id: 'waitlist', path: FEATURES_FILE, from: 73, lines: ['  waitlist,'] },
-    { id: 'end', path: FEATURES_FILE, from: 81, lines: ['] as const;'] },
+    { id: 'import', path: FEATURES_FILE, from: 48, lines: ["import { waitlist } from './features/waitlist/feature';"] },
+    { id: 'list', path: FEATURES_FILE, from: 53, lines: ['export const features = [', '  health,'] },
+    { id: 'waitlist', path: FEATURES_FILE, from: 74, lines: ['  waitlist,'] },
+    { id: 'end', path: FEATURES_FILE, from: 84, lines: ['] as const;'] },
   ],
 } as const satisfies Excerpt;
 
@@ -237,14 +241,14 @@ export const FEATURE_NEEDS = {
     {
       id: 'import-dot',
       path: `${WAITLIST}/feature.ts`,
-      from: 12,
+      from: 11,
       imports: true,
       lines: ["import { defineFeature, entrypointOnly } from '@arki/dot/feature';"],
     },
     {
       id: 'import-app',
       path: `${WAITLIST}/feature.ts`,
-      from: 17,
+      from: 15,
       imports: true,
       lines: [
         "import { database } from '../../infra/db';",
@@ -255,7 +259,7 @@ export const FEATURE_NEEDS = {
     {
       id: 'import-own',
       path: `${WAITLIST}/feature.ts`,
-      from: 22,
+      from: 20,
       imports: true,
       lines: [
         "import { limiter } from './infra/signup-limiter';",
@@ -266,7 +270,7 @@ export const FEATURE_NEEDS = {
     {
       id: 'needs',
       path: `${WAITLIST}/feature.ts`,
-      from: 32,
+      from: 30,
       lines: [
         "const waitlistDeps = defineFeature('waitlist')",
         '  // The store binds `db`, the signup limiter binds `kv`; usecases never see them.',
@@ -363,15 +367,15 @@ export const SERVE_APP = {
     {
       id: 'import-gateway',
       path: APP_FILE,
-      from: 23,
+      from: 24,
       imports: true,
       lines: ["import { gateway } from './entrypoints/gateway';"],
     },
-    { id: 'import-auth', path: APP_FILE, from: 26, imports: true, lines: ["import { authn } from './infra/auth';"] },
+    { id: 'import-auth', path: APP_FILE, from: 27, imports: true, lines: ["import { authn } from './infra/auth';"] },
     {
       id: 'serve',
       path: APP_FILE,
-      from: 44,
+      from: 48,
       lines: [
         '    tanstackStart({',
         '      needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler },',
@@ -429,13 +433,13 @@ export const EXPLAIN_COMMAND = {
     {
       id: 'explain',
       path: QUICKSTART_FILE,
-      from: 167,
+      from: 169,
       lines: ["dot explain --app src/app.ts --json | jq -c '.data.plugins[], .data.dependencies[]'"],
     },
     {
       id: 'output',
       path: QUICKSTART_FILE,
-      from: 189,
+      from: 191,
       lines: [
         '{"name":"database","role":"infra","dependencies":[],"provides":["db"]}',
         '{"name":"sessions","role":"infra","dependencies":["db"],"provides":["sessions"]}',
@@ -454,7 +458,7 @@ export const DOCTOR_COMMAND = {
     {
       id: 'doctor',
       path: QUICKSTART_FILE,
-      from: 205,
+      from: 207,
       lines: [
         "dot doctor --app src/app.ts --json | jq -c '.data.status, (.data.plugins[] | {plugin, status}), .data.issues'",
       ],
@@ -462,7 +466,7 @@ export const DOCTOR_COMMAND = {
     {
       id: 'output',
       path: QUICKSTART_FILE,
-      from: 230,
+      from: 232,
       lines: [
         '"success"',
         '{"plugin":"database","status":"ok"}',

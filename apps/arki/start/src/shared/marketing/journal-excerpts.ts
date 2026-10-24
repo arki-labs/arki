@@ -130,37 +130,40 @@ export const WRITE_ORDER = {
     {
       id: 'imports',
       path: WRITE_FILE,
-      from: 18,
+      from: 19,
       imports: true,
-      lines: ["import type { JournalTables } from './pg.js';"],
+      lines: ["import type { PgStore } from './store.js';"],
     },
     {
-      id: 'tables',
+      id: 'store',
       path: WRITE_FILE,
-      from: 115,
-      lines: ['  const { events: eventsTable, jobs: jobsTable } = deps.tables;'],
+      from: 154,
+      lines: ['        const storage = deps.store.bind(sp);'],
     },
     {
       id: 'event',
       path: WRITE_FILE,
-      from: 271,
-      lines: ['        const inserted = await sp', '          .insert(eventsTable)', '          .values(eventRows)'],
+      from: 314,
+      lines: [
+        '          await route.log.bind(sp).append({',
+        '            kind: entity.kind,',
+        '            entityId: id,',
+        '            expectedVersion: baseVersion,',
+        '            events: appended,',
+      ],
     },
     {
       id: 'row',
       path: WRITE_FILE,
-      from: 350,
+      from: 368,
       lines: [
-        '          const updated = await sp',
-        '            .update(erased)',
-        '            .set({ ...next, version: finalVersion })',
-        '            .where(atBase)',
+        '          const updated = await storage.rows.update(entity, id, { ...next, version: finalVersion }, stored);',
       ],
     },
     {
       id: 'projection',
       path: WRITE_FILE,
-      from: 377,
+      from: 386,
       lines: [
         '        for (const event of recorded) {',
         '          for (const projection of projections) {',
@@ -171,8 +174,8 @@ export const WRITE_ORDER = {
     {
       id: 'job',
       path: WRITE_FILE,
-      from: 405,
-      lines: ['        if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);'],
+      from: 434,
+      lines: ['        await storage.jobs.enqueue(jobs);'],
     },
   ],
 } as const satisfies Excerpt;
@@ -199,18 +202,16 @@ export const CLAIM_RECEIPT = {
       path: COMMAND_FILE,
       from: 76,
       lines: [
-        '    const inserted = await tx',
-        '      .insert(receipts)',
-        '      .values({ key, command: name, input: throughJson(input) ?? null, commandId: own })',
-        '      .onConflictDoNothing()',
-        '      .returning({ key: receipts.key });',
-        '    if (inserted.length > 0) return undefined;',
+        '    const held = await deps.store',
+        '      .bind(tx)',
+        '      .receipts.claim({ key, command: name, input: throughJson(input) ?? null, commandId: own });',
+        '    if (held === undefined) return undefined;',
       ],
     },
     {
       id: 'conflict',
       path: COMMAND_FILE,
-      from: 90,
+      from: 85,
       lines: [
         '    if (held.command !== name)',
         '      return CommandConflict({ detail: `the idempotency key is held by command "${held.command}", not "${name}"` });',
@@ -252,26 +253,26 @@ export const REFUND_STEPS = {
     {
       id: 'imports',
       path: README_FILE,
-      from: 821,
+      from: 977,
       imports: true,
       lines: ["import { z } from 'zod';"],
     },
     {
       id: 'hold',
       path: README_FILE,
-      from: 848,
+      from: 1004,
       lines: ["  .step('hold', ({ input, payments }) => payments.hold(input.paymentId, input.amount), {"],
     },
     {
       id: 'undo',
       path: README_FILE,
-      from: 849,
+      from: 1005,
       lines: ['    undo: ({ result, payments }) => payments.release(result.holdId),'],
     },
     {
       id: 'hold-end',
       path: README_FILE,
-      from: 850,
+      from: 1006,
       lines: [
         '  })',
         '  // `key` is the same on every try of this step: the provider dedupes on it. `output` checks the stored result, so',
@@ -281,7 +282,7 @@ export const REFUND_STEPS = {
     {
       id: 'payBack',
       path: README_FILE,
-      from: 853,
+      from: 1009,
       lines: [
         "  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, input.amount, key), {",
         '    output: z.object({ refundId: z.string() }),',
@@ -291,7 +292,7 @@ export const REFUND_STEPS = {
     {
       id: 'wait',
       path: README_FILE,
-      from: 856,
+      from: 1012,
       lines: [
         "  // The run parks here until the provider's webhook sends the signal.",
         "  .waitFor('settled', { signal: 'provider.refund.settled', schema: Settled, timeout: '3d' })",
@@ -304,17 +305,17 @@ export const REFUND_STEPS = {
 export const JOURNAL_VERBS = [
   {
     path: README_FILE,
-    line: 366,
+    line: 477,
     text: 'Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`',
   },
   {
     path: README_FILE,
-    line: 262,
+    line: 373,
     text: '`journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction.',
   },
   {
     path: README_FILE,
-    line: 260,
+    line: 371,
     text: "An event that can hold personal data declares its erased form: `j.event('MessageSent', schema, { erased: data => ({ ...data, content: '' }) })`.",
   },
 ] as const satisfies readonly SourceQuote[];
@@ -323,7 +324,7 @@ export const JOURNAL_VERBS = [
 export const JOURNAL_PROOFS = {
   throwingProjection: {
     path: 'packages/journal/src/journal.test.ts',
-    line: 239,
+    line: 245,
     text: 'a throwing projection rolls back events, row and jobs',
   },
   crashAfterSend: {
@@ -338,12 +339,12 @@ export const JOURNAL_PROOFS = {
   },
   verifyRepair: {
     path: 'packages/journal/src/journal.test.ts',
-    line: 577,
+    line: 583,
     text: 'verify reports a drifted row and repair fixes it from the log',
   },
   forget: {
     path: 'packages/journal/src/journal.test.ts',
-    line: 682,
+    line: 688,
     text: 'forget rewrites the events that have an erased form, stamps them, and repairs the row to match',
   },
   stepRerun: {

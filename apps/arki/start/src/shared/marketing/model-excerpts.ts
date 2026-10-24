@@ -30,7 +30,7 @@ export const RETURNS_VALUE_OR_FAILURE = {
         "const EmailTaken = defineFailure('user.email_taken', {",
         '  status: 409,',
         '  data: z.object({ email: z.string() }),',
-        "  message: 'email {email} is taken',",
+        "  message: 'email {email} is taken (someone beat you to it)',",
         '});',
       ],
     },

@@ -106,7 +106,7 @@ test.describe('/ build path', () => {
     for (const event of WORKFLOW_EVENTS) expect(machine, event).toContain(`'${event}'`);
     const readme = workspaceFile('packages/journal/README.md');
     for (const event of Object.keys(ORDER_EVENTS)) expect(readme, event).toContain(`j.event('${event}'`);
-    expect(fileLines('packages/journal/README.md')[856]).toContain(`signal: '${SIGNAL}'`);
+    expect(fileLines('packages/journal/README.md')[1012]).toContain(`signal: '${SIGNAL}'`);
     expect(fileLines('packages/journal/README.md')[92]).toContain("j.projection('customer-stats'");
     const tables = workspaceFile('packages/journal/src/pg.ts');
     for (const name of ['journal_events', 'journal_jobs', 'journal_receipts', 'erased_at', 'event_seq', 'command_id'])
