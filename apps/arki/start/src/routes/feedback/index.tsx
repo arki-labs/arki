@@ -4,6 +4,8 @@ import { NuqsAdapter } from 'nuqs/adapters/tanstack-router';
 import { FeedbackPageTemplateIn3Cards } from '@fleet/feedback/react';
 
 import config from '~/config';
+import { env } from '~/env';
+import { feedbackFormActions } from '~/features/feedback/actions/send-feedback';
 import { getDefaultMeta } from '~/shared-metadata';
 
 export const Route = createFileRoute('/feedback/')({
@@ -20,7 +22,12 @@ function FeedbackPage() {
   // rather than relying on the signed-in providers.
   return (
     <NuqsAdapter>
-      <FeedbackPageTemplateIn3Cards appTitle={config.appTitle} supportEmail={`support@${config.appDomain}`} />
+      <FeedbackPageTemplateIn3Cards
+        appTitle={config.appTitle}
+        supportEmail={`support@${config.appDomain}`}
+        actions={feedbackFormActions}
+        turnstileSiteKey={env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY}
+      />
     </NuqsAdapter>
   );
 }
