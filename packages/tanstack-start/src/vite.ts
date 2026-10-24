@@ -64,8 +64,8 @@ const missingAssetsNotCached: NitroModule = {
  * `nitro` field) so a missing `/assets/*` file is never cached as a 404 for a
  * year. See `missingAssetsNotCached`.
  *
- * Add to a TanStack Start app's `plugins` whenever the app mounts the
- * `routes/api/fleet.ts` snapshot endpoint (i.e. it is part of the fleet).
+ * Every TanStack Start app in the fleet adds it to `plugins`, and so does the
+ * application template.
  */
 export function fleetVite(): Plugin & { nitro: NitroModule } {
   return {
