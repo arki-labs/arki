@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import type { ThemeDetectionOptions } from './script';
 import { themeDetectionFn } from './script';
@@ -129,6 +129,14 @@ function applyTheme(
   themeDetectionFn({ ...options, forcedTheme: theme, enableSystem: false });
 }
 
+/** Hydration-only snapshot: nothing changes after mount, so there is nothing to subscribe to. */
+const unsubscribeFromNothing = (): void => undefined;
+function subscribeToNothing(): () => void {
+  return unsubscribeFromNothing;
+}
+const isClient = () => true;
+const isServer = () => false;
+
 export function ThemeProvider({
   children,
   attribute = 'class',
@@ -141,19 +149,16 @@ export function ThemeProvider({
   forcedTheme,
   themeClasses,
 }: ThemeProviderProps) {
-  // The first render must match the server's, which cannot read storage or the OS
-  // preference: React keeps mismatched attributes during hydration, so a stored theme
-  // read here would leave the server's default on screen. The layout effect below
-  // reads both before the first paint.
-  const [theme, setThemeState] = useState<string>(() => normalizeTheme(defaultTheme, themes, defaultTheme));
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>('light');
-  const [storageRead, setStorageRead] = useState(false);
-
-  useLayoutEffect(() => {
-    setThemeState(normalizeTheme(getStoredTheme(storageKey), themes, defaultTheme));
-    setSystemTheme(getSystemTheme());
-    setStorageRead(true);
-  }, [defaultTheme, storageKey, themes]);
+  // False while React hydrates server HTML, true after. The server cannot read storage or
+  // the OS preference, and React keeps mismatched attributes during hydration, so reading
+  // them in the first client render would leave the server's default theme on screen.
+  const hydrated = useSyncExternalStore(subscribeToNothing, isClient, isServer);
+  // A theme chosen in this tab (setTheme) or another tab (storage event) wins over storage.
+  const [chosenTheme, setThemeState] = useState<string | null>(null);
+  const [watchedSystemTheme, setSystemTheme] = useState<ResolvedTheme | null>(null);
+  const theme =
+    chosenTheme ?? normalizeTheme(hydrated ? getStoredTheme(storageKey) : defaultTheme, themes, defaultTheme);
+  const systemTheme = watchedSystemTheme ?? (hydrated ? getSystemTheme() : 'light');
 
   // Calculate resolved theme
   const resolvedTheme = useMemo<ResolvedTheme>(() => {
@@ -207,10 +212,11 @@ export function ThemeProvider({
 
   // Apply theme to document when it changes
   useEffect(() => {
-    // Until storage is read, the pre-paint script's classes are the right ones.
-    if (!storageRead) return;
+    // While hydrating, the theme is still the server's default; the pre-paint script's
+    // classes are the right ones, so leave them alone.
+    if (!hydrated) return;
     applyTheme(resolvedTheme, { attribute, enableColorScheme, themes, themeClasses }, disableTransitionOnChange);
-  }, [storageRead, resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes, themeClasses]);
+  }, [hydrated, resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes, themeClasses]);
 
   // Listen for storage changes (cross-tab sync)
   useEffect(() => {

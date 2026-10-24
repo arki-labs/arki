@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('theme provider hydration', () => {
-  it('shows the stored theme after hydrating server HTML that could not read storage', async () => {
+  it('shows the stored theme after hydrating server HTML that could not read storage', () => {
     // The server has no localStorage, so it renders the default theme.
     const container = document.createElement('div');
     container.innerHTML = renderToString(app);
@@ -47,7 +47,7 @@ describe('theme provider hydration', () => {
     // The visitor chose dark on an earlier visit.
     localStorage.setItem(storageKey, 'dark');
     const onRecoverableError = vi.fn();
-    await act(async () => {
+    act(() => {
       hydrateRoot(container, app, { onRecoverableError });
     });
 
@@ -55,7 +55,7 @@ describe('theme provider hydration', () => {
     expect(onRecoverableError).not.toHaveBeenCalled();
   });
 
-  it('never applies the default theme over the pre-painted stored one, so the page does not flash', async () => {
+  it('never applies the default theme over the pre-painted stored one, so the page does not flash', () => {
     const container = document.createElement('div');
     container.innerHTML = renderToString(app);
     document.body.append(container);
@@ -74,7 +74,7 @@ describe('theme provider hydration', () => {
     const observer = new MutationObserver(record);
     observer.observe(root, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
 
-    await act(async () => {
+    act(() => {
       hydrateRoot(container, app);
     });
 
