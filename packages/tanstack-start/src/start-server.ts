@@ -33,6 +33,8 @@ import { getLogger } from '@arki/log';
 
 import type { StartRequestContext, StartServices, WithStart } from './request-context';
 
+export { withForwardedProto } from './forwarded-proto';
+
 const log = getLogger('arki:tanstack-start');
 
 /** Start's request handler, as `startServer` calls it. */

@@ -143,3 +143,23 @@ React Compiler is not a helper here: it is `@vitejs/plugin-react`'s own option, 
 | `zodCompiled()`    | Server bundle only: prepends `import 'zod/compile'` to the server entry, so every schema the server constructs (oRPC inputs, server function validators, env) parses through a compiled validator. Schemas the compiler cannot model fall back to the interpreter. |
 | `oneChunkPerRoute` | `codeSplittingOptions` that keeps a route's loader in the route's own chunk. The default leaves every loader in the entry chunk, so the first page downloads every route's validators and server-function stubs.                                                   |
 | `fleetVite()`      | Excludes `@arki/admin` from the client dev dep-scan for apps that mount the `/api/fleet` snapshot route.                                                                                                                                                           |
+
+## Behind a TLS proxy: `withForwardedProto` from `@arki/tanstack-start/server`
+
+A proxy that ends TLS (nginx, Traefik, a CDN) talks plain HTTP to the app and adds `X-Forwarded-Proto: https`. Code that builds an absolute URL from `request.url` then points an HTTPS browser at `http://…`. Paraglide's locale redirect (`/` → `/ro`) is the common case: the browser lands on the wrong server.
+
+`withForwardedProto(request)` rebuilds a GET or HEAD request with an `https:` URL when that header says `https`. Every other request comes back as the same object. Requests with a body are never copied, because copying would read the stream. Call it once, before the locale middleware:
+
+```ts
+import { startServer, withForwardedProto } from '@arki/tanstack-start/server';
+
+export const server = startServer(app, {
+  hot: import.meta.hot,
+  handler: (incoming, options) => {
+    const request = withForwardedProto(incoming);
+    return paraglideMiddleware(request, () => startHandler(request, options));
+  },
+});
+```
+
+The header is trusted as sent. Behind a proxy that overwrites it, that is correct. Without a proxy, a client can only change the scheme of URLs built for its own response.
