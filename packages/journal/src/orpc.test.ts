@@ -7,6 +7,7 @@
 import { call, ORPCError, os } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 
+import { TransactionDefect } from '@arki/db/errors';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
 import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, JournalError } from './errors.js';
@@ -63,6 +64,23 @@ describe('toORPCError', () => {
 
     expect(mapped).toBeInstanceOf(ORPCError);
     expect(mapped).toMatchObject({ code: 'CONFLICT', status: 409, message: RETRY_MESSAGE });
+  });
+
+  it('turns the TransactionDefect a command run returns for a journal CONFLICT into the same 409, so a stale version is not a 500', () => {
+    const returned = TransactionDefect({
+      cause: new JournalError('CONFLICT', 'order', 'ord_secret', 'version 3 already exists'),
+    });
+
+    const mapped = toORPCError(returned);
+
+    expect(mapped).toMatchObject({ code: 'CONFLICT', status: 409, message: RETRY_MESSAGE });
+    expect(JSON.stringify(mapped)).not.toContain('ord_secret');
+  });
+
+  it('keeps any other TransactionDefect as the failure it is, because only a CONFLICT is safe to retry', () => {
+    const returned = TransactionDefect({ cause: new JournalError('NO_ROW', 'order', 'ord_1') });
+
+    expect(toORPCError(returned)).toMatchObject({ code: TransactionDefect.code, status: returned.status });
   });
 
   it('does not carry the original error along, because a host may log or serialize `cause` and the journal message names the entity id', () => {

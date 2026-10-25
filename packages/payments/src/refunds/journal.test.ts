@@ -24,9 +24,9 @@ import type { Instant } from '@arki/date';
 import type { FailureOf } from '@arki/failure';
 import type { CommandConflict, CommandFailure, CommandInvalid, CommandRunner } from '@arki/journal';
 import { fromDate } from '@arki/date';
-import { TransactionRejected } from '@arki/db/errors';
+import { TransactionDefect } from '@arki/db/errors';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
-import { CommandNotFound } from '@arki/journal';
+import { CommandNotFound, isJournalError } from '@arki/journal';
 
 import type { PaymentId } from '../core/types.js';
 import type { AppDb, AppTx } from '../test-support.js';
@@ -370,10 +370,12 @@ describe('what a payment can refund, checked inside the command', () => {
     const eventsBefore = await countEvents(db);
     const refused = await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta);
 
-    expect(TransactionRejected.is(refused)).toBe(true);
-    if (!TransactionRejected.is(refused)) throw new Error('expected the database to reject the duplicate refund');
-    expect(refused.data.sqlState).toBe('23505');
-    expect(refused.cause).toMatchObject({ cause: { constraint: 'refunds_one_pending_per_payment_idx' } });
+    // The journal reports the row insert's unique violation as `JournalError('CONFLICT')`; the command's
+    // transaction returns that as `TransactionDefect`. `RefundService` maps it to `DuplicatePendingRefund`.
+    expect(TransactionDefect.is(refused)).toBe(true);
+    if (!TransactionDefect.is(refused)) throw new Error('expected the database to reject the duplicate refund');
+    expect(isJournalError(refused.cause, 'CONFLICT')).toBe(true);
+    expect(refused.cause).toMatchObject({ cause: { cause: { constraint: 'refunds_one_pending_per_payment_idx' } } });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await db.select().from(refunds).where(eq(refunds.paymentId, paymentId))).toHaveLength(1);
   });

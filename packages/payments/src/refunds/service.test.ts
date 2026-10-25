@@ -26,6 +26,7 @@ import {
   TransactionUnavailable,
 } from '@arki/db/errors';
 import { isFailure, orThrow } from '@arki/failure';
+import { JournalError } from '@arki/journal';
 import { money } from '@arki/money';
 
 import type { CoreWrites } from '../core/journal.js';
@@ -519,7 +520,9 @@ describe('two requests at once for one payment', () => {
 
     expect(DuplicatePendingRefund.is(refused)).toBe(true);
     if (!DuplicatePendingRefund.is(refused)) throw new Error('expected the pending-refund refusal');
-    expect(TransactionRejected.is(refused.cause)).toBe(true);
+    // The journal reports the insert's unique violation as `JournalError('CONFLICT')`, so the
+    // transaction returns `TransactionDefect`; the service still knows it as the lost race.
+    expect(TransactionDefect.is(refused.cause)).toBe(true);
     expect(JSON.stringify(refused)).not.toContain('constraint');
     const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
     expect(rows).toHaveLength(1);
@@ -557,6 +560,12 @@ describe('transaction failures before a refund is requested', () => {
     TransactionCommitUncertain({ cause: pendingConflict }),
     TransactionCancelled({ cause: pendingConflict }),
     TransactionDefect({ cause: pendingConflict }),
+    // A journal conflict on another constraint is not the pending-refund race.
+    TransactionDefect({
+      cause: new JournalError('CONFLICT', 'refund', 'ref_x', undefined, {
+        cause: Object.assign(new Error('another unique constraint'), { constraint: 'refunds_pkey' }),
+      }),
+    }),
     TransactionRejected({ sqlState: '23503' }, { cause: pendingConflict }),
     TransactionRejected(
       { sqlState: '23505' },

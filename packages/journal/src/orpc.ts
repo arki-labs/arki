@@ -16,6 +16,7 @@
 import type { IntersectPick } from '@orpc/server';
 import { ORPCError, os } from '@orpc/server';
 
+import { TransactionDefect } from '@arki/db/errors';
 import { isFailure } from '@arki/failure';
 
 import type { RunOptions } from './api.js';
@@ -34,6 +35,7 @@ const CONFLICT_MESSAGE = 'This was changed by another request. Reload the curren
  *   status, message and data: what `orThrowRpc` from `@arki/failure/orpc` throws for a failure the
  *   contract does not list. A contract that lists it with `errorMap` gets it typed instead.
  * - A `JournalError` with code `CONFLICT` becomes an `ORPCError('CONFLICT')`, a 409 the client can retry.
+ *   So does the `TransactionDefect` that `journal.run` returns for it: the same lost race, after the rollback.
  * - Anything else is returned unchanged: the app decides what it means.
  *
  * The original error is NOT attached as `cause`. The journal's message names the entity kind and
@@ -41,11 +43,12 @@ const CONFLICT_MESSAGE = 'This was changed by another request. Reload the curren
  * in a middleware placed inside this one.
  */
 export function toORPCError(error: unknown): unknown {
+  // Checked before any failure: a command run returns a CONFLICT its writes threw as `TransactionDefect`.
+  if (isJournalError(error, 'CONFLICT') || (TransactionDefect.is(error) && isJournalError(error.cause, 'CONFLICT'))) {
+    return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE });
+  }
   if (isFailure(error)) {
     return new ORPCError(error.code, { status: error.status, message: error.message, data: error.data });
-  }
-  if (isJournalError(error, 'CONFLICT')) {
-    return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE });
   }
   return error;
 }

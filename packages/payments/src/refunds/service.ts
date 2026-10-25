@@ -3,8 +3,9 @@ import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { toMillis } from '@arki/date';
-import { TransactionRejected } from '@arki/db/errors';
+import { TransactionDefect, TransactionRejected } from '@arki/db/errors';
 import { isFailure } from '@arki/failure';
+import { isJournalError } from '@arki/journal';
 import { getLogger } from '@arki/log';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
@@ -85,6 +86,19 @@ function isPendingRefundConflict(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Whether the refund write lost the race to another pending refund for the same payment.
+ * Two shapes say so. A journal command throws `JournalError('CONFLICT')` for a row insert's
+ * unique violation, and its transaction returns that as `TransactionDefect`. A plain database
+ * write returns `TransactionRejected` with SQLSTATE 23505. Any other failure is kept as it is.
+ */
+function lostPendingRefundRace(failure: unknown): boolean {
+  if (TransactionDefect.is(failure)) {
+    return isJournalError(failure.cause, 'CONFLICT') && isPendingRefundConflict(failure.cause);
+  }
+  return TransactionRejected.is(failure) && failure.data.sqlState === '23505' && isPendingRefundConflict(failure.cause);
+}
+
 /** A refund in these statuses has been, or will be, paid back, so it counts against what the payment can still refund. */
 function refundHoldsMoney(status: Refund['status']): boolean {
   return status === 'pending' || status === 'approved' || status === 'processing' || status === 'completed';
@@ -141,7 +155,7 @@ export class RefundService {
       metadata: JSON.stringify({}),
     });
     // Two requests can pass eligibility together; only this unique index proves another is pending.
-    if (TransactionRejected.is(refund) && refund.data.sqlState === '23505' && isPendingRefundConflict(refund.cause)) {
+    if (lostPendingRefundRace(refund)) {
       return DuplicatePendingRefund({ paymentId: data.paymentId }, { cause: refund });
     }
     if (isFailure(refund)) return refund;
