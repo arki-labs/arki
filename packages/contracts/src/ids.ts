@@ -132,7 +132,12 @@ function prefixedIdSchema<const P extends string>(prefix: P) {
 }
 
 function prefixedId<const P extends string>(prefix: P) {
-  return idDeclaration(prefix, prefixedIdSchema(prefix));
+  // Name the id type here. Zod infers a deferred conditional for a generic prefix, and a
+  // dependent's emitted `.d.ts` (`createTombstoneTable<TPrefix>` in `@arki/ai`) printed it as `never`.
+  // The branded path keeps Zod's type: TypeScript drops a generic `.brand<Kind>()` on this
+  // annotated schema to `idDeclaration`'s constraint, which erases the brand.
+  const schema: z.ZodTemplateLiteral<`${P}${string}`> = prefixedIdSchema(prefix);
+  return idDeclaration(prefix, schema);
 }
 
 function brandedId<const P extends string, const Kind extends string>(prefix: P, _kind: Kind, format?: IdFormat) {
