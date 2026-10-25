@@ -167,6 +167,7 @@
     "arktype": "catalog:",
     "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
+    "esbuild": "catalog:",
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",
     "streamdown": "catalog:ai",
