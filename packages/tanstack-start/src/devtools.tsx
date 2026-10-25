@@ -22,8 +22,13 @@
  *
  * Apps can override every default via props.
  */
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { Component, lazy, Suspense, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { createStore } from 'jotai';
+
+import { getLogger } from '@arki/log';
+
+const log = getLogger('arki:tanstack-start');
 
 const isDev = import.meta.env.DEV;
 
@@ -95,8 +100,32 @@ export function DevTools(props: DevToolsProps = {}) {
   if (!isDev || !LazyDevToolsImpl || !mounted) return null;
 
   return (
-    <Suspense fallback={null}>
-      <LazyDevToolsImpl {...props} />
-    </Suspense>
+    <DevToolsBoundary>
+      <Suspense fallback={null}>
+        <LazyDevToolsImpl {...props} />
+      </Suspense>
+    </DevToolsBoundary>
   );
+}
+
+/**
+ * Keeps a devtools failure inside the devtools. The lazy chunk is large
+ * (jotai-devtools alone is ~8 MB in dev), so a proxy that cuts responses short
+ * or a stale Vite optimize hash makes its `import()` reject. Without this, the
+ * rejection reaches the root route and the whole page stops rendering.
+ */
+class DevToolsBoundary extends Component<{ readonly children: ReactNode }, { readonly failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: Error) {
+    log.warn('Devtools failed to load; the app keeps running without them', { error });
+  }
+
+  override render() {
+    return this.state.failed ? null : this.props.children;
+  }
 }
