@@ -51,8 +51,19 @@ Node (the workspace tests on Node 26) and Bun. The root and the server entries (
 | `@arki/ai/drizzle` | The erasure tombstone table and its Postgres outbox. |
 | `@arki/ai/drizzle/sqlite` | The same table and outbox on SQLite (libSQL). |
 | `@arki/ai/react` | Chat, streaming text and search components and hooks. |
+| `@arki/ai/react/md` | Markdown rendering for chat output (`react-markdown` with GFM, or Streamdown). |
+| `@arki/ai/env` | The package's environment schema and parsed `env`. |
+| `@arki/ai/sdk` | A re-export of the AI SDK (`ai`), so apps use the version this package was built with. |
+| `@arki/ai/anthropic`, `/google`, `/groq`, `/mistral`, `/openai` | One module per cloud provider, imported directly. |
+| `@arki/ai/mastra` | The bridge to Mastra agents. |
+| `@arki/ai/transcription` | Speech-to-text through Deepgram. |
+| `@arki/ai/runtime/index` | The tool-loop runtime on its own. |
+| `@arki/ai/validation` | The config and input schemas, `validateInput`. |
+| `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation` | Service types and `StructuredGenerator`. |
+| `@arki/ai/capabilities/ask`, `/episode-analysis`, `/pips`, `/queue` | Ready-made capabilities on a `StructuredLLMProvider`. |
+| `@arki/ai/capabilities/podhop` | PodHop moment selection and narration. Node only: it runs the macOS `say` command. |
 
-`llms.txt` lists every export. The package also exposes a `./*` subpath pattern for files under `src/`; treat those as unstable.
+`llms.txt` lists every export. Every import path is listed in `package.json` `exports`; no other path under `src/` resolves. The root entry reaches no Node built-in, so it bundles for the browser.
 
 ## Use it
 

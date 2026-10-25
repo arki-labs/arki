@@ -5,15 +5,12 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/ai`: Comprehensive AI, RAG, and Vector Search Library Provides reusable AI infrastructure for all Arki projects. `AIError`, `AnthropicService`, `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `ConfigurationError`, `ContentAnalysisSchema`, `CostCircuitBreaker`, `CostEstimator`; and 199 more.
-- `@arki/ai/react`: React components and hooks for AI functionality. `AIChat`, `SearchInterface`, `StreamingText`, `Typewriter`, `initialRuntimeUiState`, `runtimeEventReducer`, `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`; types `AIChatProps`, `ChatMessage`; and 20 more.
-- `@arki/ai/react/index`: React components and hooks for AI functionality. `AIChat`, `SearchInterface`, `StreamingText`, `Typewriter`, `initialRuntimeUiState`, `runtimeEventReducer`, `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`; types `AIChatProps`, `ChatMessage`; and 20 more.
-- `@arki/ai/cost`: Cost Management Module. `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `CostCircuitBreaker`, `CostEstimator`, `DEFAULT_BUDGET_LIMITS`, `DEFAULT_CIRCUIT_CONFIG`, `DEFAULT_PRICING`, `LLM_PRICING`; and 33 more.
-- `@arki/ai/safety`: Safety Module. `BASE_ISSUE_TYPES`, `BaseInputSanitizer`, `CONTENT_RATINGS`, `DEFAULT_INJECTION_PATTERNS`, `DEFAULT_OUTPUT_FILTER_CONFIG`, `DEFAULT_PII_PATTERNS`, `DEFAULT_SANITIZER_CONFIG`, `OutputContentFilter`, `PIIRedactor`, `PromptInjectionDetector`, `SANITIZATION_RESULTS`, `createInputSanitizer`; and 21 more.
-- `@arki/ai/dot`: Dot units: `vectorIndex(...)` (the app's vector index) and `llm(...)` (the app's text-generation provider, checked at boot). `llm`, `vectorIndex`; types `LlmPluginOptions`, `VectorIndexPluginOptions`.
-- `@arki/ai/testing`: a deterministic fake model provider for tests. `createFakeLLMProvider`; types `FakeAnswer`, `FakeCall`, `FakeLLMProvider`, `FakeLLMProviderOptions`.
-- `@arki/ai/drizzle`: Erasure outbox for a vector index, on Drizzle + Postgres (the SQLite twin is @arki/ai/drizzle/sqlite). `TOMBSTONE_DELETE_CHUNK`, `TOMBSTONE_INSERT_CHUNK`, `createTombstoneTable`, `tombstoneOutbox`; types `TombstoneDb`, `TombstoneTable`, `TombstoneTableOptions`.
-- `@arki/ai/drizzle/sqlite`: Erasure outbox for a vector index, on Drizzle + SQLite (libSQL). `TOMBSTONE_DELETE_CHUNK`, `TOMBSTONE_INSERT_CHUNK`, `createTombstoneTable`, `sqliteTombstoneOutbox`; types `SqliteTombstoneDb`, `SqliteTombstoneTable`, `TombstoneTableOptions`.
+- `@arki/ai`: Comprehensive AI, RAG, and Vector Search Library Provides reusable AI infrastructure for all Arki projects. `AIError`, `AnthropicService`, `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `ConfigurationError`, `ContentAnalysisSchema`, `CostCircuitBreaker`, `CostEstimator`; and 196 more.
+- react/* (3 paths): React components and hooks for AI functionality. `@arki/ai/react`, `@arki/ai/react/index`, `@arki/ai/react/md`.
+- drizzle/* (2 paths): Erasure outbox for a vector index, on Drizzle + Postgres (the SQLite twin is @arki/ai/drizzle/sqlite). `@arki/ai/drizzle`, `@arki/ai/drizzle/sqlite`.
+- ai-service/* (2 paths): `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation`.
+- capabilities/* (5 paths): `@arki/ai/capabilities/ask`, `@arki/ai/capabilities/episode-analysis`, `@arki/ai/capabilities/pips`, `@arki/ai/capabilities/queue`, `@arki/ai/capabilities/podhop`.
+- one path each: `@arki/ai/cost`, `@arki/ai/safety`, `@arki/ai/dot`, `@arki/ai/testing`, `@arki/ai/env`, `@arki/ai/sdk`, `@arki/ai/anthropic`, `@arki/ai/google`, `@arki/ai/groq`, `@arki/ai/mistral`, `@arki/ai/openai`, `@arki/ai/mastra`, `@arki/ai/transcription`, `@arki/ai/validation`, `@arki/ai/runtime/index`.
 <!-- llms:end -->
 
 ## Start here

@@ -36,6 +36,4 @@ export {
   type ConnectionType,
 } from './connection-classification';
 
-export { selectPodHopMoments, type HopSelection, type HopTranscript } from './podhop';
-
 export { analyzeEpisode, analysisDocumentSchema, transcriptDocumentSchema } from './episode-analysis';

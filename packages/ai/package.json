@@ -26,10 +26,10 @@
       "import": "./src/react/index.ts",
       "browser": "./src/react/index.ts"
     },
-    "./react/*": {
-      "types": "./dist/src/react/*.d.ts",
-      "import": "./src/react/*.tsx",
-      "browser": "./src/react/*.tsx"
+    "./react/md": {
+      "types": "./dist/src/react/md.d.ts",
+      "import": "./src/react/md.tsx",
+      "browser": "./src/react/md.tsx"
     },
     "./cost": {
       "types": "./dist/src/cost/index.d.ts",
@@ -61,10 +61,95 @@
       "import": "./src/drizzle/sqlite.ts",
       "node": "./src/drizzle/sqlite.ts"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./env": {
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
+    },
+    "./sdk": {
+      "types": "./dist/src/sdk.d.ts",
+      "import": "./src/sdk.ts",
+      "node": "./src/sdk.ts"
+    },
+    "./anthropic": {
+      "types": "./dist/src/anthropic.d.ts",
+      "import": "./src/anthropic.ts",
+      "node": "./src/anthropic.ts"
+    },
+    "./google": {
+      "types": "./dist/src/google.d.ts",
+      "import": "./src/google.ts",
+      "node": "./src/google.ts"
+    },
+    "./groq": {
+      "types": "./dist/src/groq.d.ts",
+      "import": "./src/groq.ts",
+      "node": "./src/groq.ts"
+    },
+    "./mistral": {
+      "types": "./dist/src/mistral.d.ts",
+      "import": "./src/mistral.ts",
+      "node": "./src/mistral.ts"
+    },
+    "./openai": {
+      "types": "./dist/src/openai.d.ts",
+      "import": "./src/openai.ts",
+      "node": "./src/openai.ts"
+    },
+    "./mastra": {
+      "types": "./dist/src/mastra.d.ts",
+      "import": "./src/mastra.ts",
+      "node": "./src/mastra.ts"
+    },
+    "./transcription": {
+      "types": "./dist/src/transcription.d.ts",
+      "import": "./src/transcription.ts",
+      "node": "./src/transcription.ts"
+    },
+    "./validation": {
+      "types": "./dist/src/validation.d.ts",
+      "import": "./src/validation.ts",
+      "node": "./src/validation.ts"
+    },
+    "./runtime/index": {
+      "types": "./dist/src/runtime/index.d.ts",
+      "import": "./src/runtime/index.ts",
+      "node": "./src/runtime/index.ts"
+    },
+    "./ai-service/types": {
+      "types": "./dist/src/ai-service/types.d.ts",
+      "import": "./src/ai-service/types.ts",
+      "node": "./src/ai-service/types.ts"
+    },
+    "./ai-service/structured-generation": {
+      "types": "./dist/src/ai-service/structured-generation.d.ts",
+      "import": "./src/ai-service/structured-generation.ts",
+      "node": "./src/ai-service/structured-generation.ts"
+    },
+    "./capabilities/ask": {
+      "types": "./dist/src/capabilities/ask.d.ts",
+      "import": "./src/capabilities/ask.ts",
+      "node": "./src/capabilities/ask.ts"
+    },
+    "./capabilities/episode-analysis": {
+      "types": "./dist/src/capabilities/episode-analysis.d.ts",
+      "import": "./src/capabilities/episode-analysis.ts",
+      "node": "./src/capabilities/episode-analysis.ts"
+    },
+    "./capabilities/pips": {
+      "types": "./dist/src/capabilities/pips.d.ts",
+      "import": "./src/capabilities/pips.ts",
+      "node": "./src/capabilities/pips.ts"
+    },
+    "./capabilities/queue": {
+      "types": "./dist/src/capabilities/queue.d.ts",
+      "import": "./src/capabilities/queue.ts",
+      "node": "./src/capabilities/queue.ts"
+    },
+    "./capabilities/podhop": {
+      "types": "./dist/src/capabilities/podhop.d.ts",
+      "import": "./src/capabilities/podhop.ts",
+      "node": "./src/capabilities/podhop.ts"
     },
     "./package.json": "./package.json"
   },

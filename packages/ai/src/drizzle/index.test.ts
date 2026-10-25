@@ -11,6 +11,7 @@ import { generateDrizzleJson, generateMigration } from 'drizzle-kit/payload/sqli
 import { defineRelations, sql } from 'drizzle-orm';
 import { pgSchema } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
+import * as v from 'valibot';
 import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { IdGenerationFailure, IdOf, z } from '@arki/contracts';
@@ -165,6 +166,22 @@ describe('createTombstoneTable on Postgres', () => {
       userId: UserId;
       createdAt: typeof PgTombstone.$inferSelect.createdAt;
     }>();
+  });
+});
+
+// An app may declare its user id with any validator. The table takes a Standard Schema, so a Valibot (or ArkType)
+// declaration types `user_id` exactly as a Zod `defineId` does, and the caller still writes no type arguments.
+describe('createTombstoneTable user-id schema', () => {
+  it('takes any Standard Schema and types the user column with its output', () => {
+    const memberId = { schema: v.picklist(['mbr_owner', 'mbr_guest']) };
+    const { table } = createTombstoneTable(pgKit, { name: 'member_tombstones', idPrefix: 'mtmb_', userId: memberId });
+    expect(table.userId.name).toBe('user_id');
+    expectTypeOf<(typeof table.$inferSelect)['userId']>().toEqualTypeOf<'mbr_owner' | 'mbr_guest'>();
+  });
+
+  it('refuses a schema whose output is not a string, since `user_id` is a varchar', () => {
+    // @ts-expect-error -- a numeric user id cannot type a varchar column
+    createTombstoneTable(pgKit, { name: 'numeric_tombstones', idPrefix: 'ntmb_', userId: { schema: v.number() } });
   });
 });
 

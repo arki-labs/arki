@@ -5,8 +5,9 @@
  * `@arki/db/sqlite`. This file imports no dialect runtime, so one module
  * serves both.
  */
+import type { IdDeclaration } from '@arki/contracts';
 import type { ColumnKit, Dialect } from '@arki/db/columns';
-import type { z } from '@arki/contracts';
+import type { StandardSchemaV1 } from '@arki/schema';
 import { defineId } from '@arki/contracts';
 
 export type TombstoneTableOptions<TPrefix extends string, TUserId extends string> = {
@@ -14,8 +15,11 @@ export type TombstoneTableOptions<TPrefix extends string, TUserId extends string
   name: string;
   /** Id prefix, e.g. `vtmb_`; arbitrary stored prefix bytes, including empty strings, are preserved. */
   idPrefix: TPrefix;
-  /** The app's user-id declaration, e.g. `defineId('usr_')`; `user_id` is typed by its schema. */
-  userId: { readonly schema: z.ZodType<TUserId> };
+  /**
+   * The app's user-id declaration, e.g. `defineId('usr_')`; `user_id` is typed by its schema's output.
+   * Any Standard Schema works (Zod, Valibot, ArkType).
+   */
+  userId: { readonly schema: StandardSchemaV1<unknown, TUserId> };
 };
 
 /**
@@ -28,7 +32,8 @@ export function createTombstoneTable<D extends Dialect, TPrefix extends string, 
   c: ColumnKit<D>,
   { name, idPrefix }: TombstoneTableOptions<TPrefix, TUserId>,
 ) {
-  const id = defineId(idPrefix);
+  // Named so the published types say `IdDeclaration` instead of spelling out its Zod schema.
+  const id: IdDeclaration<TPrefix> = defineId(idPrefix);
   const table = c.table(
     name,
     {

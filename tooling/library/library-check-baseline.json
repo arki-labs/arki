@@ -67,11 +67,6 @@
     },
     {
       "package": "@arki/ai",
-      "error": "TYPES_E001 export \"./cost\" exposes Zod types: ZodNumber, ZodObject, ZodString",
-      "reason": "Now-tier baseline 2026-10-17"
-    },
-    {
-      "package": "@arki/ai",
       "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodURL, ZodUnion, ZodUnknown",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },

@@ -3,7 +3,6 @@
  * Production-ready implementation with advanced features
  */
 
-import { createHash } from 'node:crypto';
 import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-rest';
 
 import type { EmbeddingSpace } from '@arki/embeddings';
@@ -29,13 +28,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 const SPARSE_VECTOR_NAME = 'sparse';
 
-function toPointId(id: string | number): string | number {
+async function toPointId(id: string | number): Promise<string | number> {
   if (typeof id === 'number') return id;
   if (/^\d+$/.test(id)) return Number(id);
   if (UUID_RE.test(id)) return id;
   // Deterministic UUIDv5-style derivation: SHA-1 the ID, then force the version (5) and RFC-4122
   // variant nibbles into a well-formed UUID string. Qdrant validates the format, not v5 semantics.
-  const h = createHash('sha1').update(id).digest('hex'); // 40 hex chars
+  // WebCrypto (global on Node, Bun, Deno and browsers) keeps the root entry free of `node:crypto`;
+  // it hashes the same UTF-8 bytes, so stored point ids do not change.
+  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(id));
+  const h = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''); // 40 hex chars
   const variant = ((Number.parseInt(h.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
@@ -306,7 +308,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const client = await this.getClient();
 
     const point: QdrantSchemas['PointStruct'] = {
-      id: toPointId(id),
+      id: await toPointId(id),
       // With a sparse vector the dense one goes under the default name `''`.
       vector: sparseVector === undefined ? vector : { '': vector, [SPARSE_VECTOR_NAME]: sparseVector },
       payload: {
@@ -396,7 +398,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const page = await client.scroll(this.collectionName, {
       filter: this.flatFilter(filter),
       limit,
-      ...(offset === undefined ? {} : { offset: toPointId(offset) }),
+      ...(offset === undefined ? {} : { offset: await toPointId(offset) }),
       with_payload: true,
       with_vector: false,
     });
@@ -410,7 +412,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
-      points: [toPointId(id)],
+      points: [await toPointId(id)],
       wait: true,
     });
     debugVector.debug('[Qdrant] Document deleted successfully: {successfully}', { successfully: id });
@@ -421,7 +423,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
-      points: ids.map(id => toPointId(id)),
+      points: await Promise.all(ids.map(id => toPointId(id))),
       wait: true,
     });
     debugVector.debug('[Qdrant] Batch deletion completed (count: {count})', { count: ids.length });
@@ -536,7 +538,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     try {
       const points = await client.retrieve(this.collectionName, {
-        ids: [toPointId(id)],
+        ids: [await toPointId(id)],
         with_payload: true,
         with_vector: false,
       });
