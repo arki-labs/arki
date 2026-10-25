@@ -58,7 +58,8 @@ Node (the workspace tests on Node 26) and Bun. The root and the server entries (
 | `@arki/ai/mastra` | The bridge to Mastra agents. |
 | `@arki/ai/transcription` | Speech-to-text through Deepgram. |
 | `@arki/ai/runtime/index` | The tool-loop runtime on its own. |
-| `@arki/ai/validation` | The config and input schemas, `validateInput`. |
+| `@arki/ai/validation` | The config and input types, and `validateInput` for any Standard Schema. |
+| `@arki/ai/zod` | The package's Zod schemas: request bodies (`askQuestionSchema`, `queueOrderSchema`), stored documents (`transcriptDocumentSchema`, `analysisDocumentSchema`), config and `CommonSchemas`. The capability, `validation`, `transcription` and `structured-generation` entries expose plain TS types only. |
 | `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation` | Service types and `StructuredGenerator`. |
 | `@arki/ai/capabilities/ask`, `/episode-analysis`, `/pips`, `/queue` | Ready-made capabilities on a `StructuredLLMProvider`. |
 | `@arki/ai/capabilities/podhop` | PodHop moment selection and narration. Node only: it runs the macOS `say` command. |

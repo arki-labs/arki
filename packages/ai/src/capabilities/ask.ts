@@ -3,19 +3,14 @@ import { z } from 'zod';
 import type { HopTranscript } from './podhop';
 import { OllamaService } from '../ai-service/ollama-service';
 
-export const askQuestionSchema = z.object({
-  question: z.string().trim().min(1).max(2000),
-  at: z.number().finite().nonnegative(),
-  sourceHash: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
-  history: z
-    .array(z.object({ question: z.string().max(2000), answer: z.string().max(8000) }))
-    .max(6)
-    .default([]),
-});
-export type AskQuestion = z.infer<typeof askQuestionSchema>;
+/** A listener's question at a moment of the episode. Parse request bodies with `askQuestionSchema` (`@arki/ai/zod`). */
+export type AskQuestion = {
+  question: string;
+  /** Seconds into the episode the question was asked at. */
+  at: number;
+  sourceHash?: string;
+  history: { question: string; answer: string }[];
+};
 
 // Models sometimes echo reference IDs despite the prompt; expose real source times instead.
 export function askCitationLabels(text: string | null, sources: { id: string; start: number }[]) {

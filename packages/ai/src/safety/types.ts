@@ -7,8 +7,6 @@
  * @module safety/types
  */
 
-import { z } from '@arki/contracts';
-
 // ============================================
 // Result Types
 // ============================================
@@ -79,24 +77,22 @@ export type SanitizationReport<TIssueType extends string = BaseIssueType> = {
 /**
  * A pattern used for detecting issues in input.
  */
-export const detectionPatternSchema = z.object({
+export type DetectionPattern = {
   /** Regular expression pattern to match */
-  pattern: z.instanceof(RegExp),
+  pattern: RegExp;
   /** Human-readable description of what this pattern detects */
-  description: z.string(),
-});
-
-export type DetectionPattern = z.infer<typeof detectionPatternSchema>;
+  description: string;
+};
 
 /**
  * A pattern for PII detection with replacement text.
  */
-export const piiPatternSchema = detectionPatternSchema.extend({
+export type PIIPattern = {
+  pattern: RegExp;
+  description: string;
   /** Text to replace matched content with */
-  replacement: z.string(),
-});
-
-export type PIIPattern = z.infer<typeof piiPatternSchema>;
+  replacement: string;
+};
 
 // ============================================
 // Configuration Types
@@ -104,25 +100,24 @@ export type PIIPattern = z.infer<typeof piiPatternSchema>;
 
 /**
  * Programmatic configuration for the base input sanitizer, including RegExp rules.
+ * Its runtime schema is `sanitizerConfigSchema` (`./schemas`).
  */
-export const sanitizerConfigSchema = z.object({
+export type SanitizerConfig = {
   /** Maximum allowed input length in characters */
-  maxInputLength: z.number().min(1).optional(),
+  maxInputLength?: number;
   /** Whether to detect and block prompt injection attempts */
-  detectPromptInjection: z.boolean().optional(),
+  detectPromptInjection?: boolean;
   /** Whether to detect and redact PII */
-  redactPII: z.boolean().optional(),
+  redactPII?: boolean;
   /** Whether to strip dangerous control characters */
-  stripDangerousCharacters: z.boolean().optional(),
+  stripDangerousCharacters?: boolean;
   /** Whether to normalize whitespace */
-  normalizeWhitespace: z.boolean().optional(),
+  normalizeWhitespace?: boolean;
   /** Custom prompt injection patterns to add */
-  customInjectionPatterns: z.array(detectionPatternSchema).optional(),
+  customInjectionPatterns?: DetectionPattern[];
   /** Custom PII patterns to add */
-  customPIIPatterns: z.array(piiPatternSchema).optional(),
-});
-
-export type SanitizerConfig = z.infer<typeof sanitizerConfigSchema>;
+  customPIIPatterns?: PIIPattern[];
+};
 
 /**
  * Default configuration for the sanitizer.

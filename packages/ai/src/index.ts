@@ -38,7 +38,6 @@ export { BudgetExceeded, PROVIDER_PROBLEMS, ProviderUnavailable, RateLimited } f
 
 // Input validation
 export {
-  // Schemas
   qdrantConfigSchema,
   vectorProviderConfigSchema,
   searchSettingsSchema,
@@ -49,6 +48,8 @@ export {
   documentSchema,
   documentsSchema,
   chatMessageSchema,
+} from './validation-schemas';
+export {
   // Types
   type QdrantConfig,
   type VectorProviderConfig,

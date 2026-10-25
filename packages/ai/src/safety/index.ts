@@ -135,10 +135,8 @@ export type {
   SuggestedEdit,
 } from './types';
 
+export { detectionPatternSchema, piiPatternSchema, sanitizerConfigSchema } from './schemas';
 export {
-  detectionPatternSchema,
-  piiPatternSchema,
-  sanitizerConfigSchema,
   // Input sanitization constants
   BASE_ISSUE_TYPES,
   DEFAULT_SANITIZER_CONFIG,

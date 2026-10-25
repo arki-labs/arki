@@ -3,47 +3,31 @@ import { z } from '@arki/contracts';
 import type { LLMProviderConfig } from '../ai-service/factory';
 import type { StructuredLLMProvider } from '../ai-service/types';
 import { createLLMProvider } from '../ai-service/factory';
+import { analysisDocumentSchema, transcriptDocumentSchema } from './schemas';
 
-export const transcriptDocumentSchema = z.object({
-  language: z.string().min(2).max(40),
-  duration: z.number().finite().positive(),
-  segments: z
-    .array(
-      z.object({
-        start: z.number().finite().nonnegative(),
-        end: z.number().finite().positive(),
-        text: z.string().min(1),
-        speaker: z.string().min(1),
-        confidence: z.number().min(0).max(1).optional(),
-      }),
-    )
-    .min(1)
-    .max(100000),
-  provider: z.string(),
-  model: z.string(),
-});
-export type TranscriptDocument = z.infer<typeof transcriptDocumentSchema>;
-export const passageSchema = z.object({
-  start: z.number().finite().nonnegative(),
-  end: z.number().finite().positive(),
-  title: z.string().min(1),
-  evidence: z.string().min(1),
-});
-export const analysisDocumentSchema = z.object({
-  summary: z.string().min(1),
-  chapters: z.array(passageSchema).min(1).max(1000),
-  topics: z.array(z.string()).max(100),
-  entities: z
-    .array(z.object({ name: z.string(), type: z.string(), evidence: z.string(), start: z.number().nonnegative() }))
-    .max(1000),
-  pips: z.array(passageSchema).max(1000),
-  speakers: z
-    .array(z.object({ id: z.string(), name: z.string().nullable(), evidence: z.string().nullable() }))
-    .max(1000),
-  model: z.string(),
-  version: z.string(),
-});
-export type AnalysisDocument = z.infer<typeof analysisDocumentSchema>;
+/** A diarized transcript of one episode. Its runtime schema is `transcriptDocumentSchema` (`@arki/ai/zod`). */
+export type TranscriptDocument = {
+  language: string;
+  duration: number;
+  segments: { start: number; end: number; text: string; speaker: string; confidence?: number }[];
+  provider: string;
+  model: string;
+};
+
+/** A timed passage with its verbatim source evidence. */
+type Passage = { start: number; end: number; title: string; evidence: string };
+
+/** A grounded analysis of one episode. Its runtime schema is `analysisDocumentSchema` (`@arki/ai/zod`). */
+export type AnalysisDocument = {
+  summary: string;
+  chapters: Passage[];
+  topics: string[];
+  entities: { name: string; type: string; evidence: string; start: number }[];
+  pips: Passage[];
+  speakers: { id: string; name: string | null; evidence: string | null }[];
+  model: string;
+  version: string;
+};
 
 const outputSchema = analysisDocumentSchema.omit({ model: true, version: true });
 const normalize = (value: string) => value.replace(/\s+/gu, ' ').trim();

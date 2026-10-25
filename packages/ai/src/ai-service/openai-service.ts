@@ -18,7 +18,8 @@ import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import { rateLimiters } from '../utils/rate-limiter';
-import { aiServiceConfigSchema, validateInput } from '../validation';
+import { validateInput } from '../validation';
+import { aiServiceConfigSchema } from '../validation-schemas';
 
 type ChatMessage = ModelMessage;
 

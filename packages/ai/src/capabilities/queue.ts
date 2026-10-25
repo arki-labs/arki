@@ -2,26 +2,10 @@ import { z } from 'zod';
 
 import { OllamaService } from '../ai-service/ollama-service';
 
-export const queueOrderSchema = z
-  .object({
-    episodes: z
-      .array(
-        z.object({
-          id: z.string().min(1).max(2000),
-          mediaKey: z.string().regex(/^[a-f0-9]{64}$/),
-          sourceHash: z
-            .string()
-            .regex(/^[a-f0-9]{64}$/)
-            .optional(),
-          title: z.string().max(2000),
-          summary: z.string().max(12000),
-        }),
-      )
-      .min(2)
-      .max(40),
-  })
-  .refine(v => new Set(v.episodes.map(e => e.id)).size === v.episodes.length, 'Duplicate episodes');
-export type QueueOrderInput = z.infer<typeof queueOrderSchema>;
+/** Episodes to put in listening order. Parse request bodies with `queueOrderSchema` (`@arki/ai/zod`). */
+export type QueueOrderInput = {
+  episodes: { id: string; mediaKey: string; sourceHash?: string; title: string; summary: string }[];
+};
 export type QueueEvidence = { id: string; text: string; basis: string };
 
 export function validateQueueOrder(ids: string[], proposed: string[]) {

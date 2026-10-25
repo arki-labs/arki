@@ -10,7 +10,7 @@
 - drizzle/* (2 paths): Erasure outbox for a vector index, on Drizzle + Postgres (the SQLite twin is @arki/ai/drizzle/sqlite). `@arki/ai/drizzle`, `@arki/ai/drizzle/sqlite`.
 - ai-service/* (2 paths): `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation`.
 - capabilities/* (5 paths): `@arki/ai/capabilities/ask`, `@arki/ai/capabilities/episode-analysis`, `@arki/ai/capabilities/pips`, `@arki/ai/capabilities/queue`, `@arki/ai/capabilities/podhop`.
-- one path each: `@arki/ai/cost`, `@arki/ai/safety`, `@arki/ai/dot`, `@arki/ai/testing`, `@arki/ai/env`, `@arki/ai/sdk`, `@arki/ai/anthropic`, `@arki/ai/google`, `@arki/ai/groq`, `@arki/ai/mistral`, `@arki/ai/openai`, `@arki/ai/mastra`, `@arki/ai/transcription`, `@arki/ai/validation`, `@arki/ai/runtime/index`.
+- one path each: `@arki/ai/cost`, `@arki/ai/safety`, `@arki/ai/dot`, `@arki/ai/testing`, `@arki/ai/env`, `@arki/ai/sdk`, `@arki/ai/anthropic`, `@arki/ai/google`, `@arki/ai/groq`, `@arki/ai/mistral`, `@arki/ai/openai`, `@arki/ai/mastra`, `@arki/ai/transcription`, `@arki/ai/validation`, `@arki/ai/zod`, `@arki/ai/runtime/index`.
 <!-- llms:end -->
 
 ## Start here

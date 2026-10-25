@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { queueOrderSchema, validateQueueOrder } from './queue';
+import { validateQueueOrder } from './queue';
+import { queueOrderSchema } from './schemas';
 
 describe('Queue ordering preserves listener choices', () => {
   it('accepts a permutation and an unchanged order', () => {

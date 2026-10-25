@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { askCitationLabels, askPassages, askQuestionSchema } from './ask';
+import { askCitationLabels, askPassages } from './ask';
+import { askQuestionSchema } from './schemas';
 
 describe('Ask evidence retrieval', () => {
   it('renders echoed source IDs as measured timestamps and rejects unknown references', () => {

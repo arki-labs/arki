@@ -13,8 +13,13 @@ import type { SemanticSearchService } from './semantic-search/search-service';
 import type { RAGConfig, RAGServiceConfig, SearchMode, SearchSettings } from './types';
 import type { AIServiceConfig, SearchOptions } from './validation';
 import { classifyIntent } from './capabilities/intent-classification';
-import { sanitizerConfigSchema } from './safety/types';
-import { aiServiceConfigSchema, ragServiceConfigSchema, searchOptionsSchema, searchSettingsSchema } from './validation';
+import { sanitizerConfigSchema } from './safety/schemas';
+import {
+  aiServiceConfigSchema,
+  ragServiceConfigSchema,
+  searchOptionsSchema,
+  searchSettingsSchema,
+} from './validation-schemas';
 
 /** The provider's untyped JSON crosses the same schema boundary as a real model response. */
 function providerFor(output: unknown): StructuredLLMProvider {
@@ -37,7 +42,7 @@ describe('schema-derived search and service configuration', () => {
     expectTypeOf<SearchSettings>().toEqualTypeOf<z.output<typeof searchSettingsSchema>>();
     expectTypeOf<SearchSettings>().toEqualTypeOf<Omit<SearchOptions, 'query' | 'filters'>>();
     expectTypeOf<SearchMode>().toEqualTypeOf<NonNullable<SearchOptions['mode']>>();
-    expectTypeOf<SearchOptions>().toEqualTypeOf<z.output<typeof searchOptionsSchema>>();
+    expectTypeOf<SearchOptions>().branded.toEqualTypeOf<z.output<typeof searchOptionsSchema>>();
     expectTypeOf<Parameters<SemanticSearchService['search']>[0]>().toEqualTypeOf<SearchOptions>();
 
     const settings: SearchSettings = { mode: 'hybrid', limit: 20, scoreThreshold: 0.5 };

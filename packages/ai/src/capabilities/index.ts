@@ -36,4 +36,5 @@ export {
   type ConnectionType,
 } from './connection-classification';
 
-export { analyzeEpisode, analysisDocumentSchema, transcriptDocumentSchema } from './episode-analysis';
+export { analyzeEpisode } from './episode-analysis';
+export { analysisDocumentSchema, transcriptDocumentSchema } from './schemas';

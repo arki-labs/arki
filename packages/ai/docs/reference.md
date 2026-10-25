@@ -118,4 +118,4 @@ export function ChatPanel() {
 
 ## Types and validation
 
-Search and service configuration types are inferred from their runtime schemas: `searchSettingsSchema`, `searchOptionsSchema`, `ragServiceConfigSchema` and `aiServiceConfigSchema`. `SearchSettings` holds query-less search settings; `SearchOptions` adds the required query and optional payload filters. `sanitizerConfigSchema` is available from `@arki/ai/safety` and `@arki/ai/validation`; custom injection and PII rules take real `RegExp` instances.
+Search and service configuration types are plain TS types, and each one is the source. Their runtime schemas come from `@arki/ai/zod`: `searchSettingsSchema`, `searchOptionsSchema`, `ragServiceConfigSchema` and `aiServiceConfigSchema`, locked to the types by exact two-way type tests. `SearchSettings` holds query-less search settings; `SearchOptions` adds the required query and optional payload filters. `sanitizerConfigSchema` is available from `@arki/ai/safety`; custom injection and PII rules take real `RegExp` instances.

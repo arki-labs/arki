@@ -111,6 +111,11 @@
       "import": "./src/validation.ts",
       "node": "./src/validation.ts"
     },
+    "./zod": {
+      "types": "./dist/src/zod.d.ts",
+      "import": "./src/zod.ts",
+      "node": "./src/zod.ts"
+    },
     "./runtime/index": {
       "types": "./dist/src/runtime/index.d.ts",
       "import": "./src/runtime/index.ts",

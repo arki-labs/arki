@@ -1,6 +1,10 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, expectTypeOf, test, vi } from 'vitest';
 
+import type { z } from '@arki/contracts';
+
+import type { DiarizedTranscript } from './transcription';
 import { transcribeDiarizedAudio } from './transcription';
+import { diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -45,4 +49,13 @@ test('rejects oversized response before parsing', async () => {
     {},
   );
   await expect(transcribeDiarizedAudio(new Uint8Array([1]), options)).rejects.toThrow('byte limit');
+});
+
+// `./transcription` exposes plain TS types (the source); the schemas that parse the same data are internal.
+// These exact two-way tests keep them equal, so the published types never drift from what is parsed.
+test('the options and the transcript are exactly what the schemas take and return', () => {
+  expectTypeOf<Parameters<typeof transcribeDiarizedAudio>[1]>().toEqualTypeOf<
+    z.input<typeof transcriptionOptionsSchema>
+  >();
+  expectTypeOf<DiarizedTranscript>().toEqualTypeOf<z.output<typeof diarizedTranscriptSchema>>();
 });

@@ -4,26 +4,18 @@ import { z } from 'zod';
 
 import { OllamaService } from '../ai-service/ollama-service';
 import { debugService } from '../debug';
+import { hopSelectionSchema } from './schemas';
 
-export const hopSelectionSchema = z.object({
-  language: z.enum(['en', 'ro', 'es', 'de']),
-  mixedLanguage: z.boolean(),
-  moments: z
-    .array(
-      z.object({
-        title: z.string().min(1).max(100),
-        introduction: z.string().min(1).max(500),
-        evidence: z.string().min(1).max(600),
-      }),
-    )
-    .min(1)
-    .max(6),
-});
-export type HopSelection = z.infer<typeof hopSelectionSchema>;
+/** The moments chosen for a guided route; its runtime schema is `hopSelectionSchema` (`@arki/ai/zod`). */
+export type HopSelection = {
+  language: keyof typeof podHopVoices;
+  mixedLanguage: boolean;
+  moments: { title: string; introduction: string; evidence: string }[];
+};
 export type HopTranscript = { language: string; segments: { start: number; end: number; text: string }[] };
 
 /** Local, evidence-grounded route planning. Transcript contents are untrusted source data. */
-export async function selectPodHopMoments(transcript: HopTranscript, model = 'gemma4') {
+export async function selectPodHopMoments(transcript: HopTranscript, model = 'gemma4'): Promise<HopSelection> {
   const llm = new OllamaService({ model, temperature: 0.2, maxRetries: 0, think: false });
   const texts = transcript.segments.map(segment => segment.text.trim());
   const anchors = texts.filter(text => text.length >= 25 && texts.indexOf(text) === texts.lastIndexOf(text));

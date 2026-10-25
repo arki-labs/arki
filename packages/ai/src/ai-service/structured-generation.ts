@@ -6,6 +6,7 @@
 import type { StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 import type { StructuredLLMProvider } from './types';
+import { CommonSchemas } from './structured-generation-schemas';
 
 export type StructuredGenerationOptions = {
   temperature?: number;
@@ -13,82 +14,20 @@ export type StructuredGenerationOptions = {
   systemPrompt?: string;
 }
 
-/**
- * Common schema definitions for structured generation
- */
-export const CommonSchemas = {
-  /**
-   * Summary generation schema
-   */
-  summary: z.object({
-    title: z.string(),
-    summary: z.string(),
-    keyPoints: z.array(z.string()),
-    tags: z.array(z.string()).optional(),
-  }),
-
-  /**
-   * Question-Answer schema
-   */
-  qa: z.object({
-    question: z.string(),
-    answer: z.string(),
-    confidence: z.number().min(0).max(1),
-    sources: z.array(z.string()).optional(),
-  }),
-
-  /**
-   * Classification schema
-   */
-  classification: z.object({
-    category: z.string(),
-    subcategory: z.string().optional(),
-    confidence: z.number().min(0).max(1),
-    reasoning: z.string().optional(),
-  }),
-
-  /**
-   * Entity extraction schema
-   */
-  entities: z.object({
-    entities: z.array(z.object({
-      text: z.string(),
-      type: z.string(),
-      startIndex: z.number().optional(),
-      endIndex: z.number().optional(),
-    })),
-  }),
-
-  /**
-   * Sentiment analysis schema
-   */
-  sentiment: z.object({
-    sentiment: z.enum(['positive', 'negative', 'neutral', 'mixed']),
-    score: z.number().min(-1).max(1),
-    emotions: z.array(z.string()).optional(),
-    reasoning: z.string().optional(),
-  }),
-
-  /**
-   * Translation schema
-   */
-  translation: z.object({
-    originalText: z.string(),
-    translatedText: z.string(),
-    targetLanguage: z.string(),
-    confidence: z.number().min(0).max(1).optional(),
-  }),
-
-  /**
-   * Code generation schema
-   */
-  code: z.object({
-    language: z.string(),
-    code: z.string(),
-    explanation: z.string().optional(),
-    dependencies: z.array(z.string()).optional(),
-  }),
+// The result of each `StructuredGenerator` task. The schemas the model answers against are `CommonSchemas`
+// (`./structured-generation-schemas`); `../zod.test.ts` locks every type below to its schema.
+type StructuredSummary = { title: string; summary: string; keyPoints: string[]; tags?: string[] };
+type QuestionAnswer = { question: string; answer: string; confidence: number; sources?: string[] };
+type TextClassification = { category: string; subcategory?: string; confidence: number; reasoning?: string };
+type ExtractedEntities = { entities: { text: string; type: string; startIndex?: number; endIndex?: number }[] };
+type SentimentAnalysis = {
+  sentiment: 'positive' | 'negative' | 'neutral' | 'mixed';
+  score: number;
+  emotions?: string[];
+  reasoning?: string;
 };
+type Translation = { originalText: string; translatedText: string; targetLanguage: string; confidence?: number };
+type GeneratedCode = { language: string; code: string; explanation?: string; dependencies?: string[] };
 
 /**
  * Helper class for common structured generation tasks
@@ -106,7 +45,7 @@ export class StructuredGenerator {
   async generateSummary(
     text: string,
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<StructuredSummary> {
     const prompt = `Please provide a comprehensive summary of the following text:
 
 "${text}"
@@ -130,7 +69,7 @@ Include a title, main summary, and key points.`;
     question: string,
     context: string,
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<QuestionAnswer> {
     const prompt = `Based on the following context, answer the question.
 
 Context: "${context}"
@@ -156,7 +95,7 @@ Provide your answer with a confidence score.`;
     text: string,
     categories: string[],
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<TextClassification> {
     const prompt = `Classify the following text into one of these categories: ${categories.join(', ')}
 
 Text: "${text}"
@@ -180,7 +119,7 @@ Provide the classification with confidence score and reasoning.`;
     text: string,
     entityTypes: string[] = [],
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<ExtractedEntities> {
     const typesHint = entityTypes.length > 0
       ? `Focus on these entity types: ${entityTypes.join(', ')}`
       : 'Extract all relevant entities';
@@ -206,7 +145,7 @@ Text: "${text}"`;
   async analyzeSentiment(
     text: string,
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<SentimentAnalysis> {
     const prompt = `Analyze the sentiment of the following text:
 
 "${text}"
@@ -230,7 +169,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
     text: string,
     targetLanguage: string,
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<Translation> {
     const prompt = `Translate the following text to ${targetLanguage}:
 
 "${text}"`;
@@ -252,7 +191,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
     description: string,
     language: string,
     options: StructuredGenerationOptions = {}
-  ) {
+  ): Promise<GeneratedCode> {
     const prompt = `Generate ${language} code for the following requirement:
 
 "${description}"

@@ -1,55 +1,17 @@
-import { z } from '@arki/contracts';
+import { deepgramResponseSchema, diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
 
-const optionsSchema = z.object({
-  deepgramKey: z.string().trim().min(1),
-  transcriptionModel: z.string().trim().min(1).default('nova-3'),
-});
-const transcriptSchema = z
-  .object({
-    language: z.string().min(2),
-    duration: z.number().finite().positive(),
-    provider: z.literal('deepgram'),
-    model: z.string(),
-    segments: z
-      .array(
-        z.object({
-          start: z.number().finite().nonnegative(),
-          end: z.number().finite().nonnegative(),
-          text: z.string().trim().min(1),
-          speaker: z.string(),
-          confidence: z.number().finite().min(0).max(1),
-        }),
-      )
-      .min(1),
-  })
-  .superRefine((value, context) => {
-    let previous = -1;
-    for (const segment of value.segments) {
-      if (segment.start < previous || segment.end <= segment.start || segment.end > value.duration)
-        context.addIssue({ code: 'custom', message: 'Invalid transcript interval' });
-      previous = segment.start;
-    }
-  });
-export type DiarizedTranscript = z.infer<typeof transcriptSchema>;
-const time = z.number().finite().nonnegative();
-const deepgramSchema = z.object({
-  metadata: z.object({ duration: z.number().finite().positive() }),
-  results: z.object({
-    channels: z.array(z.object({ detected_language: z.string().min(2) })).min(1),
-    utterances: z
-      .array(
-        z.object({
-          start: time,
-          end: time,
-          transcript: z.string().trim().min(1),
-          speaker: z.number().int().nonnegative(),
-          confidence: z.number().finite().min(0).max(1),
-        }),
-      )
-      .min(1)
-      .max(100000),
-  }),
-});
+/** Deepgram settings for one transcription. `transcriptionModel` defaults to `nova-3`. */
+type TranscriptionOptions = { deepgramKey: string; transcriptionModel?: string };
+
+/** A diarized transcript: timed, speaker-labelled segments in source order. */
+export type DiarizedTranscript = {
+  language: string;
+  duration: number;
+  provider: 'deepgram';
+  model: string;
+  segments: { start: number; end: number; text: string; speaker: string; confidence: number }[];
+};
+
 async function requestJSON(url: string | URL, init: RequestInit, byteLimit: number): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 180000);
@@ -89,10 +51,10 @@ async function requestJSON(url: string | URL, init: RequestInit, byteLimit: numb
 
 export async function transcribeDiarizedAudio(
   bytes: Uint8Array,
-  input: z.input<typeof optionsSchema>,
+  input: TranscriptionOptions,
   signal?: AbortSignal,
 ): Promise<DiarizedTranscript> {
-  const options = optionsSchema.parse(input);
+  const options = transcriptionOptionsSchema.parse(input);
   if (!bytes.byteLength) throw new Error('Audio is empty');
   const url = new URL('https://api.deepgram.com/v1/listen');
   for (const [key, value] of Object.entries({
@@ -103,7 +65,7 @@ export async function transcribeDiarizedAudio(
     smart_format: 'true',
   }))
     url.searchParams.set(key, value);
-  const raw = deepgramSchema.parse(
+  const raw = deepgramResponseSchema.parse(
     await requestJSON(
       url,
       {
@@ -115,7 +77,7 @@ export async function transcribeDiarizedAudio(
       8 * 1024 * 1024,
     ),
   );
-  return transcriptSchema.parse({
+  return diarizedTranscriptSchema.parse({
     language: raw.results.channels[0]!.detected_language,
     duration: raw.metadata.duration,
     segments: raw.results.utterances.map(segment => ({

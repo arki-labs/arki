@@ -15,7 +15,8 @@ import { GenerationError, getErrorMessage } from '../errors';
 import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
 import { rateLimiters } from '../utils/rate-limiter';
-import { aiServiceConfigSchema, validateInput } from '../validation';
+import { validateInput } from '../validation';
+import { aiServiceConfigSchema } from '../validation-schemas';
 import { DEFAULT_ANTHROPIC_MODEL } from './factory';
 
 type ChatMessage = ModelMessage;
