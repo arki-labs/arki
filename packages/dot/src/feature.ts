@@ -271,7 +271,13 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
 // `infra.fromFeatures` / `entrypoint.fromFeatures` replace `driven` / `driver`.
 // They live with the unit constructors; this entry re-exports them for adapters.
 export { entrypoint, infra, unit } from './unit-contract.js';
-export type { EntrypointBinder, InfraBinder, UnitBinder } from './unit-contract.js';
+export type {
+  EntrypointBinder,
+  FeaturesContext,
+  FromFeaturesDefinition,
+  InfraBinder,
+  UnitBinder,
+} from './unit-contract.js';
 
 /** Where a feature publishes its slice record. */
 function sliceKeyOf(f: AnyDefinedFeature): `feature.${string}` {

@@ -25,9 +25,9 @@ const factories = { db: () => resource(open, close) };
 const boot = () => ({ watch: child(watch), flush: cleanup(flush) });
 const direct = infra({ name: 'direct', provides: factories, boot });
 const _renamed = rename(direct, { db: 'renamedDb' });
-const driving = entrypoint.fromFeatures(() => direct);
+const driving = entrypoint.fromFeatures({ name: 'direct', provides: factories, boot });
 const _drivingBound = bindEntrypoint(driving, []);
-const _drivenBound = infra.fromFeatures(() => direct).bind([]);
+const _drivenBound = infra.fromFeatures({ name: 'direct', provides: factories, boot }).bind([]);
 const factory = initUnits.context<{ count: number; db: SuccessOf<typeof open> }>().create();
 const byKeys = factory.infra({ name: 'keys', needs: ['count'], provides: factories, boot });
 const _byWitness = factory.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, boot });
@@ -89,7 +89,7 @@ expectTypeOf<string extends UnitCloseFailure<OwnedForms>['code'] ? true : false>
 const _directApp = defineApp('direct').infra(direct);
 const _drivingApp = defineApp('driver').features([]).entrypoints(driving);
 const _drivenApp = defineApp('driven')
-  .infra(infra.fromFeatures(() => direct))
+  .infra(infra.fromFeatures({ name: 'direct', provides: factories, boot }))
   .features([]);
 const _allApp = defineApp('all').infra(direct);
 const _infraApp = defineApp('infra').infra(direct);

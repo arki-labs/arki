@@ -173,6 +173,14 @@ app.services.scheduler.names; // ['send-digest']
 await app.services.scheduler.trigger('send-digest');
 ```
 
+A later entrypoint needs it by handle, so its type is never restated:
+
+```ts skip="excerpt: it uses names this page does not define"
+const hostClock = schedule({ clock: 'host' });
+const cron = entrypoint({ name: 'cron', needs: { scheduler: hostClock.provides.scheduler } });
+// defineApp('news').features([digest]).entrypoints(hostClock, cron)
+```
+
 `trigger(name)` resolves a `ScheduleOutcome`: a run result (see
 [Run results](#run-results)), or `unknown` for a name the entrypoint does not
 run. A trigger works once the app has booted, before `start()` too. After

@@ -39,11 +39,8 @@ const chainOfDirect = defineFeature('object').infra(direct).entrypoints();
 const factory = initUnits.context<{ count: number; db: SuccessOf<typeof open> }>().create();
 const _forms = {
   renamed: rename(direct, { db: 'otherDb' }),
-  driving: bindEntrypoint(
-    entrypoint.fromFeatures(() => direct),
-    [],
-  ),
-  driven: infra.fromFeatures(() => direct).bind([]),
+  driving: bindEntrypoint(entrypoint.fromFeatures({ name: 'direct', provides: factories, ...hooks }), []),
+  driven: infra.fromFeatures({ name: 'direct', provides: factories, ...hooks }).bind([]),
   keys: factory.infra({ name: 'keys', needs: ['count'], provides: factories, ...hooks }),
   witness: factory.infra({ name: 'witness', needs: { count: service<number>() }, provides: factories, ...hooks }),
 };
@@ -83,9 +80,9 @@ const _directApp = defineApp('direct').infra(direct);
 const _objectApp = defineApp('object').features([chainOfDirect]);
 const _drivingApp = defineApp('driving')
   .features([])
-  .entrypoints(entrypoint.fromFeatures(() => direct));
+  .entrypoints(entrypoint.fromFeatures({ name: 'direct', provides: factories, ...hooks }));
 const _drivenApp = defineApp('driven')
-  .infra(infra.fromFeatures(() => direct))
+  .infra(infra.fromFeatures({ name: 'direct', provides: factories, ...hooks }))
   .features([]);
 expectTypeOf<FailureOf<typeof _objectApp.configure>>().toEqualTypeOf<FailureOf<typeof _directApp.configure>>();
 expectTypeOf<FailureOf<typeof _objectApp.boot>>().toEqualTypeOf<FailureOf<typeof _directApp.boot>>();
@@ -216,8 +213,9 @@ expectTypeOf<Extract<FailureOf<typeof _overriddenApp.start>, FailureOf<typeof Re
 >();
 expectTypeOf<Extract<FailureOf<typeof _overriddenApp.start>, FailureOf<typeof StartRefused>>>().toEqualTypeOf<never>();
 
-const _overriddenDriven = infra.fromFeatures(() => _overridden);
-const _overriddenDriver = entrypoint.fromFeatures(() => _overridden);
+// A declaration's own hook is the source of its phase failures, as on `infra()`.
+const _overriddenDriven = infra.fromFeatures({ ...hooks, name: 'direct', start: () => ReplacementRefused() });
+const _overriddenDriver = entrypoint.fromFeatures({ ...hooks, name: 'direct', start: () => ReplacementRefused() });
 const _overriddenDrivenApp = defineApp('driven-override').infra(_overriddenDriven);
 const _driverApp = defineApp('driver-override').entrypoints(_overriddenDriver);
 expectTypeOf<

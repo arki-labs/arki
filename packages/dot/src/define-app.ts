@@ -218,7 +218,7 @@ type RefusedUnits<TUnits extends readonly unknown[], TRefused extends UnitRole> 
   readonly [K in keyof TUnits]: TUnits[K] extends { readonly role: TRefused }
     ? TUnits[K] extends { readonly name: infer N extends string }
       ? N
-      : `${TRefused}.fromFeatures(...)`
+      : never
     : never;
 }[number];
 
@@ -242,7 +242,7 @@ export type SideGuard<TUnits extends readonly unknown[], TRefused extends UnitRo
   ? [BareUnits<TUnits>] extends [never]
     ? unknown
     : {
-        readonly 'DOT: a bare unit() has no role. Write infra({...}) or entrypoint({...}); unit() belongs inside fromFeatures': BareUnits<TUnits>;
+        readonly 'DOT: a bare unit() has no role. Write infra({...}) or entrypoint({...})': BareUnits<TUnits>;
       }
   : [TRefused] extends ['entrypoint']
     ? { readonly 'DOT: an entrypoint cannot be mounted as infra. Mount it with .entrypoints(...)': RefusedUnits<TUnits, TRefused> }
@@ -533,7 +533,7 @@ function misplacedIn(units: readonly (AnyUnit | EntrypointBinder | InfraBinder)[
       (step.role === 'infra' && (role === 'feature' || role === 'domain-service'))
     )
       return [];
-    return [{ name: 'bind' in unit ? `${role}.fromFeatures(...)` : unit.name, role, step: step.name }];
+    return [{ name: unit.name, role, step: step.name }];
   });
 }
 

@@ -12,11 +12,11 @@
  * `outboxPlugin()` provides `schedule` (transactional scheduling, `@arki/queue/outbox`), and
  * `outboxJobs()` lets `journalWorker({ jobs })` run the same `jobs(...)` slices from Postgres.
  */
-import type { AnyDefinedFeature, AnyFeatureSlice, EntrypointBinder } from '@arki/dot/feature';
+import type { AnyDefinedFeature, AnyFeatureSlice, EntrypointBinder, FeaturesContext } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
 import type { RootDb } from '@arki/journal';
 import type { JobsSource } from '@arki/journal/dot';
-import { entrypoint, handlerObserverOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -602,99 +602,104 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
   const blocking = options.blocking ?? false;
   const needs: WorkerShape<TNeeds> = { ...options.needs, queue: service<QueueClient>() };
 
-  return entrypoint.fromFeatures(features => {
-    let started = false;
-    let handle: QueueInstance | undefined;
-    let startup: Promise<QueueInstance | void> | undefined;
-
-    const runStartup = async (ctx: CtxOf<WorkerShape<TNeeds>>): Promise<QueueInstance> => {
-      const start = async (): Promise<QueueInstance> => {
-        const client = queueClientOf(ctx, pluginName);
-        const { registry, services } = bootedJobs(ctx, features);
-        const resolvedContext = await options.context(ctx);
-        const instance = options.q.createQueue({
-          connection: client.connection,
-          keyPrefix: client.keyPrefix,
-          createContext: () => resolvedContext,
-        });
-        await instance.register(registry, { services });
-        await instance.start();
-        return instance;
-      };
-
-      const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pluginName)]);
-      handle = runtime;
-      return runtime;
+  const runStartup = async (
+    ctx: CtxOf<WorkerShape<TNeeds>> & FeaturesContext<QueueWorkerState>,
+  ): Promise<QueueInstance> => {
+    const start = async (): Promise<QueueInstance> => {
+      const client = queueClientOf(ctx, pluginName);
+      const { registry, services } = bootedJobs(ctx, ctx.$features);
+      const resolvedContext = await options.context(ctx);
+      const instance = options.q.createQueue({
+        connection: client.connection,
+        keyPrefix: client.keyPrefix,
+        createContext: () => resolvedContext,
+      });
+      await instance.register(registry, { services });
+      await instance.start();
+      return instance;
     };
 
-    return unit<WorkerShape<TNeeds>, EmptyShape>({
-      name: pluginName,
-      needs,
-      actions: queueConsumerActions(declaredRegistry(features)),
-      configure(ctx) {
-        ctx.declareProvides('queue-worker');
-      },
-      async start(ctx) {
-        if (started || startup !== undefined) {
-          throw queuePluginError({
-            code: QUEUE_PLUGIN_ERROR_CODES.doubleStart,
-            message: `[queue] worker "${pluginName}" was started twice.`,
-            remediation: 'Call app.start() once, or call app.stop() before starting the queue worker again.',
-            docsSlug: 'arki-queue-e002',
-          });
-        }
+    const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pluginName)]);
+    ctx.$state.handle = runtime;
+    return runtime;
+  };
 
-        started = true;
-        if (blocking) {
-          startup = runStartup(ctx);
-          try {
-            await startup;
-          } catch (error) {
-            startup = undefined;
-            handle = undefined;
-            started = false;
-            throw error;
-          }
-          return;
-        }
-
-        startup = runStartup(ctx).catch((error: unknown) => {
-          observeQueue(() =>
-            debugWorker.debug('[{pluginName}] Queue worker startup failed', {
-              pluginName,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-          started = false;
-          handle = undefined;
+  return entrypoint.fromFeatures({
+    name: pluginName,
+    needs,
+    state: (): QueueWorkerState => ({ started: false, handle: undefined, startup: undefined }),
+    actions: features => queueConsumerActions(declaredRegistry(features)),
+    configure(ctx) {
+      ctx.declareProvides('queue-worker');
+    },
+    async start(ctx) {
+      const state = ctx.$state;
+      if (state.started || state.startup !== undefined) {
+        throw queuePluginError({
+          code: QUEUE_PLUGIN_ERROR_CODES.doubleStart,
+          message: `[queue] worker "${pluginName}" was started twice.`,
+          remediation: 'Call app.start() once, or call app.stop() before starting the queue worker again.',
+          docsSlug: 'arki-queue-e002',
         });
-      },
-      async stop() {
-        if (!started && startup === undefined && handle === undefined) {
-          throw queuePluginError({
-            code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
-            message: `[queue] worker "${pluginName}" was stopped before it started.`,
-            remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
-            docsSlug: 'arki-queue-e003',
-          });
-        }
+      }
 
-        const runtime = handle ?? (await startup);
-        startup = undefined;
-        handle = undefined;
-        started = false;
-        await runtime?.stop();
-      },
-      async dispose() {
-        const runtime = handle ?? (await startup);
-        startup = undefined;
-        handle = undefined;
-        started = false;
-        await runtime?.stop();
-      },
-    });
+      state.started = true;
+      if (blocking) {
+        state.startup = runStartup(ctx);
+        try {
+          await state.startup;
+        } catch (error) {
+          state.startup = undefined;
+          state.handle = undefined;
+          state.started = false;
+          throw error;
+        }
+        return;
+      }
+
+      state.startup = runStartup(ctx).catch((error: unknown) => {
+        observeQueue(() =>
+          debugWorker.debug('[{pluginName}] Queue worker startup failed', {
+            pluginName,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        state.started = false;
+        state.handle = undefined;
+      });
+    },
+    async stop({ $state: state }) {
+      if (!state.started && state.startup === undefined && state.handle === undefined) {
+        throw queuePluginError({
+          code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
+          message: `[queue] worker "${pluginName}" was stopped before it started.`,
+          remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
+          docsSlug: 'arki-queue-e003',
+        });
+      }
+
+      const runtime = state.handle ?? (await state.startup);
+      state.startup = undefined;
+      state.handle = undefined;
+      state.started = false;
+      await runtime?.stop();
+    },
+    async dispose({ $state: state }) {
+      const runtime = state.handle ?? (await state.startup);
+      state.startup = undefined;
+      state.handle = undefined;
+      state.started = false;
+      await runtime?.stop();
+    },
   });
 }
+
+/** One app's worker: whether it started, the startup in flight, and the queue it runs. */
+type QueueWorkerState = {
+  started: boolean;
+  handle: QueueInstance | undefined;
+  startup: Promise<QueueInstance | void> | undefined;
+};
 
 export type OutboxPluginOptions = OutboxOptions & {
   readonly name?: string;

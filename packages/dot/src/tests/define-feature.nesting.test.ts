@@ -38,7 +38,6 @@ import {
 } from '../feature.js';
 import { defineApp, fake, infra } from '../index.js';
 import { rpc } from '../orpc.js';
-import { unit } from '../unit-contract.js';
 import { createDb, database } from './fixtures/nested-digest/db.js';
 import { digest } from './fixtures/nested-digest/digest/feature.js';
 import { compile, compileLogic } from './fixtures/nested-digest/digest/features/compile/feature.js';
@@ -152,21 +151,20 @@ describe('assembly (Astra round 1 #4): one normalized node list for every adapte
   it('hands drivers (.entrypoints) and driven adapters (.infra) the same list, so each node is read once', async () => {
     const seenByDriver: string[] = [];
     const seenByDriven: string[] = [];
-    const scheduler = entrypoint.fromFeatures(features =>
-      unit({
-        name: 'scheduler',
-        provides: {
-          scheduled: ctx => {
-            for (const f of features)
-              seenByDriver.push(...((sliceOf(ctx, f)['schedules'] as string[] | undefined) ?? []));
-            return seenByDriver;
-          },
+    const scheduler = entrypoint.fromFeatures({
+      name: 'scheduler',
+      provides: {
+        scheduled: ctx => {
+          for (const f of ctx.$features)
+            seenByDriver.push(...((sliceOf(ctx, f)['schedules'] as string[] | undefined) ?? []));
+          return seenByDriver;
         },
-      }),
-    );
-    const collector = infra.fromFeatures(features =>
-      unit({ name: 'collector', provides: { collected: () => features.map(f => f.name) } }),
-    );
+      },
+    });
+    const collector = infra.fromFeatures({
+      name: 'collector',
+      provides: { collected: ({ $features }) => $features.map(f => f.name) },
+    });
     const app = orThrow(
       await defineApp('adapters').infra(database, collector).features([digest]).entrypoints(scheduler).start(),
     );

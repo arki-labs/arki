@@ -41,9 +41,9 @@
  */
 
 import type { AnyDefinedFeature, AnyFeatureCore, EntrypointBinder, EntrypointServicesOf } from '@arki/dot/feature';
-import type { Deferred, DotConfigureContext, EmptyShape, Token, Unit } from '@arki/dot/unit';
+import type { Deferred, DotConfigureContext, EmptyShape, Token } from '@arki/dot/unit';
 import { entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/feature';
-import { DotUnitError, resolveDeferred, unit } from '@arki/dot/unit';
+import { DotUnitError, resolveDeferred } from '@arki/dot/unit';
 
 import type { ObserveBinding, RouteBundle, RpcBinding } from './bundle.js';
 import type { ContractLike } from './contract.js';
@@ -186,6 +186,8 @@ type PluginState = {
   /** The engine with the in-flight gauge and the app middleware around every route. */
   served: Engine | undefined;
   handle: ListenHandle | undefined;
+  /** Requests in flight, so `stop` drains them before it closes the server. */
+  gauge: InflightGauge;
 };
 
 type InflightGauge = {
@@ -337,27 +339,25 @@ export function http<const TBundles extends readonly BundleToken[] = readonly []
     needs[tok.key] = tok;
   }
 
-  // Erasure seam: the bound plugin is Unit<{}, HttpServices> because its
-  // needs record is runtime-built; the cast re-attaches the token-derived
-  // needs so the builder's guard checks bundle provision at `.entrypoints()`.
+  // Erasure seam: the bound unit has `{}` needs because its needs record is
+  // runtime-built; the cast re-attaches the token-derived needs so the
+  // builder's guard checks bundle provision at `.entrypoints()`.
   // Same seam as rename()/testUnit() in the kernel.
-  return entrypoint.fromFeatures(
-    features =>
-      bindHttp(options, bundleTokens, needs, features) as unknown as Unit<BundleNeeds<TBundles>, HttpServices>,
-  );
+  return httpFromFeatures(options, bundleTokens, needs) as unknown as EntrypointBinder<
+    BundleNeeds<TBundles>,
+    HttpServices
+  >;
 }
 
-function bindHttp(
+function httpFromFeatures(
   options: HttpOptions<readonly BundleToken[]>,
   bundleTokens: readonly BundleToken[],
-  needs: Record<string, BundleToken>,
-  features: readonly AnyDefinedFeature[],
-): Unit<EmptyShape, HttpServices> {
-  const state: PluginState = { served: undefined, handle: undefined };
-  const gauge: InflightGauge = { count: 0, waiters: [] };
-
-  return unit<EmptyShape, HttpServices>({
+  needs: EmptyShape,
+) {
+  return entrypoint.fromFeatures({
     name: 'http',
+    // One app's server: each app that mounts this binder listens on its own.
+    state: (): PluginState => ({ served: undefined, handle: undefined, gauge: { count: 0, waiters: [] } }),
     // Compile-time/runtime seam: the precise needs shape is derived from
     // `options.bundles` in http()'s return-type cast; here the runtime
     // record rides in under the EmptyShape default. The kernel re-checks
@@ -388,7 +388,7 @@ function bindHttp(
           }
           bundles.push(bundle);
         }
-        for (const f of features) {
+        for (const f of ctx.$features) {
           const routes = featureRoutes(ctx, f);
           if (routes === undefined) continue;
           const instance = instanceOf(f.name);
@@ -401,6 +401,8 @@ function bindHttp(
 
         // The gauge is the outermost layer, so drain-on-shutdown counts every
         // request, including those Bun matches natively.
+        const { $state: state } = ctx;
+        const gauge = state.gauge;
         const tracking: HttpMiddleware = async (req, next) => {
           gauge.count += 1;
           try {
@@ -429,7 +431,7 @@ function bindHttp(
         return httpServer;
       },
     },
-    async start() {
+    async start({ $state: state }) {
       const served = state.served;
       if (served === undefined) {
         throw new DotUnitError({
@@ -444,16 +446,16 @@ function bindHttp(
         ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
       });
     },
-    async stop() {
+    async stop({ $state: state }) {
       const handle = state.handle;
       if (handle === undefined) return;
       handle.stopAccepting();
       const timeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
       try {
-        await drained(gauge, timeoutMs);
+        await drained(state.gauge, timeoutMs);
         state.handle = undefined;
       } catch {
-        const remaining = gauge.count;
+        const remaining = state.gauge.count;
         handle.forceClose();
         state.handle = undefined;
         throw new DotUnitError({
@@ -465,7 +467,7 @@ function bindHttp(
         });
       }
     },
-    dispose() {
+    dispose({ $state: state }) {
       if (state.handle !== undefined) {
         state.handle.forceClose();
         state.handle = undefined;

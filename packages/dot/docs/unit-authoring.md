@@ -14,12 +14,12 @@ in reverse declaration order for cleanup (`stop → dispose`). See
 | `defineFeature(...)` | feature    | Your domain. It compiles to several units.                  | `.features([...])`                     | Second. |
 | `entrypoint(config)` | entrypoint | What calls into the features: an HTTP server, a worker.     | `.entrypoints(...)`                    | Last.   |
 
-A unit that needs the list of mounted features is built in a function form:
-`infra.fromFeatures(features => unit({...}))` or
-`entrypoint.fromFeatures(features => unit({...}))`. The `unit` constructor has
-no role. Use it only inside `fromFeatures`, and import it from
-`@arki/dot/unit` or `@arki/dot/feature`. A bare `unit()` passed to a builder
-step is a compile error.
+A unit that needs the list of mounted features is declared with
+`infra.fromFeatures({...})` or `entrypoint.fromFeatures({...})`. It takes the
+same declaration as `infra()` and `entrypoint()`, and its `provides` handles
+exist before any app does. See [Units built from the features](#units-built-from-the-features).
+The `unit` constructor has no role. A bare `unit()` passed to a builder step
+is a compile error.
 
 The builder refuses a unit on the wrong side. An `entrypoint` in `.infra()`
 does not compile. An `infra` unit in `.entrypoints()` does not compile. In an
@@ -82,6 +82,60 @@ export const mailer = infra({
 Everything is inferred: the `needs` shape types the hook contexts, and the
 `provides` factories become the unit's provides — no generic arguments.
 Returning a value from `boot` is a compile error.
+
+## Units built from the features
+
+An adapter that serves the features (an HTTP server, a job worker, a
+scheduler) or composes their declarations (the journal) needs the app's
+feature list. `fromFeatures` takes the declaration `infra()` takes, with three
+additions:
+
+- Every `provides` factory and every hook gets `$features`: the app's mounted
+  features, in mount order.
+- `state: () => S` makes one app's private state. The builder calls it once
+  for each app that mounts the unit, and every factory and hook gets it as
+  `$state`. Two apps built from one declaration never share it. Without
+  `state`, `$state` is `undefined`.
+- `actions` may be a function of the features.
+
+The binder carries `name` and typed `provides` handles like any unit, so a
+feature needs its service by handle.
+
+```ts run
+import { defineApp, entrypoint, infra } from '@arki/dot';
+import { defineFeature } from '@arki/dot/feature';
+import { isFailure } from '@arki/failure';
+
+// Publishes how many features the app mounts.
+const census = infra.fromFeatures({
+  name: 'census',
+  provides: { census: ({ $features }) => ({ count: $features.length }) },
+});
+
+// Keeps a timer between `start` and `stop`: per-app state, never shared.
+const ticker = entrypoint.fromFeatures({
+  name: 'ticker',
+  state: (): { timer?: ReturnType<typeof setInterval> } => ({}),
+  start({ $state }) {
+    $state.timer = setInterval(() => {}, 1000);
+  },
+  stop({ $state }) {
+    clearInterval($state.timer);
+    delete $state.timer;
+  },
+});
+
+const orders = defineFeature('orders')
+  .needs({ census: census.provides.census })
+  .usecases({ size: ({ census: c }: { readonly census: { readonly count: number } }) => c.count })
+  .provides({ size: ({ usecases }) => usecases.size })
+  .entrypoints();
+
+const app = await defineApp('shop').infra(census).features([orders]).entrypoints(ticker).start();
+if (isFailure(app)) throw new Error(app.code);
+if (app.services.size !== 1) throw new Error('expected one feature');
+await app.dispose();
+```
 
 ## Fields
 

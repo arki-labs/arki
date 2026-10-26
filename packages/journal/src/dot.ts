@@ -25,10 +25,18 @@
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
-import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder, InfraBinder } from '@arki/dot/feature';
-import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Service, WireNeeds } from '@arki/dot/unit';
+import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder } from '@arki/dot/feature';
+import type {
+  ActionSource,
+  CtxOf,
+  DotConfigureContext,
+  EmptyShape,
+  NeedsShape,
+  Service,
+  WireNeeds,
+} from '@arki/dot/unit';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
-import { entrypoint, instanceOf, ownUnits, sliceOf, unit } from '@arki/dot/feature';
+import { entrypoint, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import type { Journal, JournalDefinitions } from './api.js';
@@ -338,26 +346,21 @@ export type JournalFeatureOptions<
   readonly workflowMeta?: SchemaInput<Meta>;
 };
 
-/**
- * `RootDb` again on purpose: a Drizzle transaction fits `AppDb` by shape, and must not fit here.
- * `TransactionSource<Tx>`: the worker's database runs the commands of effects, so it opens `Tx`.
- */
-type JournalNeeds<Tx extends TransactionSource<Tx>, AppDb extends RootDb> = {
-  db: AppDb & RootDb & TransactionSource<Tx>;
-};
-
 export type JournalPlugin<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 > = ReturnType<typeof journalPlugin<Meta, Tx, AppDb>>;
 
-/** Feature mode: bound to the app's features when the app is built. */
+/**
+ * Feature mode: bound to the app's features when the app is built. Its `provides.journal`
+ * is the handle a feature needs (`entrypointOnly(appJournal.provides.journal)`).
+ */
 export type JournalDriven<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
-> = InfraBinder<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
+> = ReturnType<typeof journalFromFeatures<Meta, Tx, AppDb>>;
 
 const isHandler = (value: unknown): boolean =>
   typeof value === 'object' &&
@@ -493,24 +496,58 @@ function readDeclarations(features: readonly AnyDefinedFeature[]): {
   return { declarations: { projections, effects, taps, workflows }, owners };
 }
 
+/**
+ * What the journal unit needs, in both modes. `RootDb` again on purpose: a Drizzle transaction
+ * fits `AppDb` by shape, and must not fit here. `TransactionSource<Tx>`: the worker's database
+ * runs the commands of effects, so it opens `Tx`.
+ */
+function journalNeeds<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() {
+  return { db: service<AppDb & RootDb & TransactionSource<Tx>>() };
+}
+
+/** The journal unit's manifest entries, in both modes. */
+function registerJournal(ctx: DotConfigureContext): void {
+  ctx.registerService('journal', 'custom');
+  ctx.declareProvides('journal');
+  // `dot explain --as journal-flow`: which event starts which effect, from the effects' action meta.
+  ctx.registerProjection({ format: 'journal-flow', binding: 'journal', module: '@arki/journal/projection' });
+}
+
 function journalPlugin<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(build: () => Journal<Meta, Tx, AppDb>) {
-  const needs: { readonly db: Service<AppDb & RootDb & TransactionSource<Tx>> } = {
-    db: service<AppDb & RootDb & TransactionSource<Tx>>(),
-  };
+>(composed: Journal<Meta, Tx, AppDb>) {
   return infra({
     name: 'journal',
-    needs,
+    needs: journalNeeds<Tx, AppDb>(),
     configure(ctx) {
-      ctx.registerService('journal', 'custom');
-      ctx.declareProvides('journal');
-      // `dot explain --as journal-flow`: which event starts which effect, from the effects' action meta.
-      ctx.registerProjection({ format: 'journal-flow', binding: 'journal', module: '@arki/journal/projection' });
+      registerJournal(ctx);
     },
-    provides: { journal: () => build() },
+    provides: { journal: () => composed },
+  });
+}
+
+function journalFromFeatures<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>({ j, workflowMeta }: JournalFeatureOptions<Meta, Tx, AppDb>) {
+  return infra.fromFeatures({
+    name: 'journal',
+    needs: journalNeeds<Tx, AppDb>(),
+    configure(ctx) {
+      registerJournal(ctx);
+    },
+    provides: {
+      journal: ({ $features }) =>
+        // `'worker'`: the effects' services exist only once the features boot, after this journal.
+        j.compose({
+          ...readDeclarations($features).declarations,
+          ...(workflowMeta === undefined ? {} : { workflowMeta }),
+          services: 'worker',
+        }),
+    },
   });
 }
 
@@ -539,21 +576,7 @@ export function journal<
 >(
   options: JournalDirectOptions<Meta, Tx, AppDb> | JournalFeatureOptions<Meta, Tx, AppDb>,
 ): JournalPlugin<Meta, Tx, AppDb> | JournalDriven<Meta, Tx, AppDb> {
-  if ('journal' in options) {
-    const composed = options.journal;
-    return journalPlugin(() => composed);
-  }
-  const { j, workflowMeta } = options;
-  return infra.fromFeatures(features =>
-    journalPlugin(() =>
-      // `'worker'`: the effects' services exist only once the features boot, after this journal.
-      j.compose({
-        ...readDeclarations(features).declarations,
-        ...(workflowMeta === undefined ? {} : { workflowMeta }),
-        services: 'worker',
-      }),
-    ),
-  );
+  return 'journal' in options ? journalPlugin(options.journal) : journalFromFeatures(options);
 }
 
 export type JournalWorkerOptions = {
@@ -581,6 +604,9 @@ type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
 /** The worker's own needs. A `jobs` source adds its own. */
 type WorkerNeeds = { readonly db: Service<RootDb>; readonly journal: Service<WorkerHost> };
+
+/** One app's worker, built at boot and run between start and stop. */
+type WorkerState = { worker: JournalWorker | undefined };
 
 /**
  * A job runner built at boot, from the mounted features and the services it needs, for
@@ -624,36 +650,34 @@ export function journalWorker(
   // The source's needs join the worker's, so the kernel resolves and checks them with the
   // worker's own; the overloads above type them for the app.
   const needs: WorkerNeeds = { ...source?.needs, db: service<RootDb>(), journal: service<WorkerHost>() };
-  return entrypoint.fromFeatures(features => {
-    let worker: JournalWorker | undefined;
-    return unit<WorkerNeeds, EmptyShape>({
-      name: 'journal-worker',
-      needs,
-      actions: source?.actions?.(features),
-      async boot(ctx) {
-        const { owners } = readDeclarations(features);
-        const byFeature = new Map<AnyDefinedFeature, Services>();
-        // An effect or tap came from a `journal` slice, so its owner has a slice record. A
-        // projection may come from an infra unit instead, and needs no services anyway.
-        for (const [handler, feature] of owners) {
-          if (handler.startsWith('projection:') || byFeature.has(feature)) continue;
-          byFeature.set(feature, sliceServices(ctx, feature));
-        }
-        const services: HandlerServices = ({ kind, name, workflow }) => {
-          // `workflow.step` asks once per workflow: that workflow's feature answers, not a shared set.
-          const owner = owners.get(workflow === undefined ? `${kind}:${name}` : `workflow:${workflow}`);
-          return (owner === undefined ? undefined : byFeature.get(owner)) ?? {};
-        };
-        const jobs = await source?.build(features, ctx);
-        // Built at boot, not at start: a missing service fails the boot.
-        worker = ctx.journal.worker(ctx.db, { ...workerOptions, services, jobs });
-      },
-      async start() {
-        await worker?.start();
-      },
-      async stop() {
-        await worker?.stop();
-      },
-    });
+  return entrypoint.fromFeatures({
+    name: 'journal-worker',
+    needs,
+    state: (): WorkerState => ({ worker: undefined }),
+    ...(source?.actions === undefined ? {} : { actions: source.actions }),
+    async boot(ctx) {
+      const { owners } = readDeclarations(ctx.$features);
+      const byFeature = new Map<AnyDefinedFeature, Services>();
+      // An effect or tap came from a `journal` slice, so its owner has a slice record. A
+      // projection may come from an infra unit instead, and needs no services anyway.
+      for (const [handler, feature] of owners) {
+        if (handler.startsWith('projection:') || byFeature.has(feature)) continue;
+        byFeature.set(feature, sliceServices(ctx, feature));
+      }
+      const services: HandlerServices = ({ kind, name, workflow }) => {
+        // `workflow.step` asks once per workflow: that workflow's feature answers, not a shared set.
+        const owner = owners.get(workflow === undefined ? `${kind}:${name}` : `workflow:${workflow}`);
+        return (owner === undefined ? undefined : byFeature.get(owner)) ?? {};
+      };
+      const jobs = await source?.build(ctx.$features, ctx);
+      // Built at boot, not at start: a missing service fails the boot.
+      ctx.$state.worker = ctx.journal.worker(ctx.db, { ...workerOptions, services, jobs });
+    },
+    async start({ $state }) {
+      await $state.worker?.start();
+    },
+    async stop({ $state }) {
+      await $state.worker?.stop();
+    },
   });
 }

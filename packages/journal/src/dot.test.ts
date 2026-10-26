@@ -10,9 +10,10 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { UnitSourceGuard } from '@arki/dot/unit';
+import type { EntrypointServicesOf } from '@arki/dot/feature';
+import type { EmptyShape, Provided, UnitSourceGuard } from '@arki/dot/unit';
 import { defineApp, rename } from '@arki/dot';
-import { defineFeature } from '@arki/dot/feature';
+import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { infra, service, token } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
@@ -213,6 +214,29 @@ describe('journal(...) in direct mode', () => {
     expect(await db.select().from(tables.jobs)).toHaveLength(1);
   });
 
+  it('gives each app its own worker when two apps mount one `journalWorker()` value, so stopping one leaves the other running', async () => {
+    const mail = recorder('dot-shared-worker-mail');
+    const composed = j.compose({ effects: [mail.effect] });
+    const worker = journalWorker({ pollMs: POLL_MS });
+    const build = (name: string) =>
+      defineApp(name)
+        .infra(dbPlugin())
+        .infra(journal({ journal: composed }))
+        .entrypoints(worker)
+        .boot();
+    const first = track(await orThrow(build('first-worker')));
+    const second = track(await orThrow(build('second-worker')));
+    await orThrow(first.start());
+    await orThrow(second.start());
+    await orThrow(first.stop());
+
+    const id = orderId(++next);
+    orThrow(await second.services.journal.run(db, placeOrder, { id }, meta));
+    await mail.seen(id);
+
+    expect(mail.handled).toEqual([id]);
+  });
+
   it('runs no effect in an app that serves no worker, so a web-only process leaves the jobs to the worker process', async () => {
     const mail = recorder('dot-no-worker-mail');
     const composed = j.compose({ effects: [mail.effect] });
@@ -253,6 +277,19 @@ describe('journal(...) in direct mode', () => {
 });
 
 describe('journal({ j }) with features', () => {
+  it('has a typed `provides.journal` handle before any app is built, so a feature needs the journal without restating its type', () => {
+    type ComposedJournal = ReturnType<typeof j.compose>;
+    const appJournal = journal({ j });
+    expectTypeOf(appJournal.name).toEqualTypeOf<'journal'>();
+    expectTypeOf(appJournal.provides.journal.provider).toEqualTypeOf<'journal'>();
+    expectTypeOf<Provided<typeof appJournal.provides.journal>>().toEqualTypeOf<ComposedJournal>();
+    const _gateway = defineFeature('gateway').needs({ journal: entrypointOnly(appJournal.provides.journal) });
+    expectTypeOf<EntrypointServicesOf<typeof _gateway>['journal']>().toEqualTypeOf<ComposedJournal>();
+    // The worker publishes nothing: its worker is per-app state, not a service.
+    expectTypeOf(journalWorker().provides).toEqualTypeOf<EmptyShape>();
+    expect(appJournal.provides.journal).toMatchObject({ key: 'journal', provider: 'journal' });
+  });
+
   it('builds the journal from the mounted features alone: one command fires each inline projection and, through the worker, each effect', async () => {
     const ordersMail = recorder('dot-orders-mail');
     const billingMail = recorder('dot-billing-mail');

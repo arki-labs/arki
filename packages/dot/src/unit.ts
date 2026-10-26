@@ -3,8 +3,8 @@
  * handles, tokens, `rename` and the contract types.
  *
  * Exposes the unit contract and the entry points a unit author needs to
- * author + test units — `infra`, `entrypoint`, `unit` (inside
- * `fromFeatures`), `service`, `token`, `provide`, `rename`, `defineApp`,
+ * author + test units — `infra`, `entrypoint` (and their `fromFeatures`
+ * forms), `unit`, `service`, `token`, `provide`, `rename`, `defineApp`,
  * `testApp` / `bootTestApp`, plus lifecycle / manifest / diagnostics types.
  *
  * Adapter packages (e.g. `@arki/dot/env`, `@arki/kv/dot`, `@arki/db/dot`)
@@ -35,6 +35,8 @@ export { resolveDeferred } from './deferred.js';
 export type { Deferred } from './deferred.js';
 export type {
   EntrypointBinder,
+  FeaturesContext,
+  FromFeaturesDefinition,
   InfraBinder,
   PhasedAuthoredUnit,
   PlainAuthoredUnit,

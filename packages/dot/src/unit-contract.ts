@@ -478,8 +478,8 @@ export type UnitPhaseFailures<P> = P extends { readonly hooks: infer Hooks }
 /** Lifecycle callbacks sharing a context, with concrete results per phase.
  * @example type Hooks = PhaseHooks<EmptyShape, EmptyHookReturns>;
  */
-export type PhaseHooks<Context, Returns extends HookReturns> = {
-  readonly configure?: (ctx: DotConfigureContext) => Returns['configure'];
+export type PhaseHooks<Context, Returns extends HookReturns, ConfigureContext = DotConfigureContext> = {
+  readonly configure?: (ctx: ConfigureContext) => Returns['configure'];
   readonly start?: (ctx: Context) => MaybePromise<Returns['start']>;
   readonly stop?: (ctx: Context) => MaybePromise<Returns['stop']>;
   readonly dispose?: (ctx: Context) => MaybePromise<Returns['dispose']>;
@@ -543,9 +543,9 @@ export type CheckedProvider<Value> = PlainValue | PromiseLike<PlainValue> | Chec
  * TProvides annotations describe those raw returns, not the resolved services.
  * Services and ownership resolve promises through their shared projections.
  */
-export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
+export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord, Extra = unknown> = {
   readonly [K in keyof TProvides]: (
-    services: CtxOf<TNeeds> & KernelCtx,
+    services: CtxOf<TNeeds> & KernelCtx & Extra,
   ) => TProvides[K] & NoInfer<CheckedProvider<TProvides[K]>>;
 };
 
@@ -773,16 +773,82 @@ export type UnitDefinition<
   TBoot,
   Returns extends HookReturns = EmptyHookReturns,
   Logging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
-> = PhaseHooks<CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx, Returns> & {
+> = UnitDeclaration<TShape, TProvides, TName, TBoot, Returns, Logging, unknown> & {
+  readonly actions?: readonly ActionSource[];
+};
+
+/**
+ * The part of a unit declaration that {@link UnitDefinition} and
+ * {@link FromFeaturesDefinition} share. `Extra` is what the constructor adds
+ * to every factory and hook context (`unknown`: nothing).
+ */
+type UnitDeclaration<
+  TShape extends NeedsShape,
+  TProvides extends ServiceRecord,
+  TName extends string,
+  TBoot,
+  Returns extends HookReturns,
+  Logging extends DotLoggingHandle | Failure,
+  Extra,
+> = PhaseHooks<CtxOf<TShape> & ProvidedValues<TProvides> & KernelCtx & Extra, Returns, DotConfigureContext & Extra> & {
   readonly name: TName;
   readonly needs?: TShape;
-  readonly actions?: readonly ActionSource[];
   /** Fill the logging slot (see {@link Unit.logging}). Called by the kernel, never at import. */
   readonly logging?: (ctx: DotLoggingContext) => Logging;
   /** One factory per published key. Each gets the needs + kernel keys. Keys are the publish keys. */
-  readonly provides?: ProvidesFactories<TShape, TProvides>;
+  readonly provides?: ProvidesFactories<TShape, TProvides, Extra>;
   /** Runs after the factories; may return a typed private ownership plan or failure. */
-  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx) => MaybePromise<TBoot>;
+  readonly boot?: (ctx: CtxOf<TShape> & ProvidedValues<NoInfer<TProvides>> & KernelCtx & Extra) => MaybePromise<TBoot>;
+};
+
+/**
+ * What a `fromFeatures` unit gets in every `provides` factory and lifecycle
+ * hook context, on top of its needs and the kernel keys. Both keys are
+ * `$`-prefixed, so no need or published key can shadow them.
+ *
+ * @example
+ * ```ts
+ * const count = infra.fromFeatures({
+ *   name: 'count',
+ *   state: () => ({ boots: 0 }),
+ *   provides: { featureCount: ({ $features }) => $features.length },
+ *   start({ $state }) {
+ *     $state.boots += 1;
+ *   },
+ * });
+ * ```
+ */
+export type FeaturesContext<TState> = {
+  /** The app's final mounted feature list, in mount order. */
+  readonly $features: readonly AnyDefinedFeature[];
+  /**
+   * This app's own state: what the declaration's `state()` returned when the
+   * app bound the unit. `undefined` when the declaration has no `state`.
+   */
+  readonly $state: TState;
+};
+
+/**
+ * The one declaration `infra.fromFeatures` / `entrypoint.fromFeatures` take:
+ * a {@link UnitDefinition} whose factories and hooks also get
+ * {@link FeaturesContext}, plus:
+ *
+ * - `state`: called once per app that binds the unit; its value is that
+ *   app's `$state`. Two apps built from one declaration never share it.
+ * - `actions`: a list, or a function of the mounted features.
+ */
+export type FromFeaturesDefinition<
+  TShape extends NeedsShape,
+  TProvides extends ServiceRecord,
+  TName extends string,
+  TBoot,
+  TState,
+  Returns extends HookReturns = EmptyHookReturns,
+  Logging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+> = UnitDeclaration<TShape, TProvides, TName, TBoot, Returns, Logging, FeaturesContext<TState>> & {
+  /** Make one app's state. Called once per bind, before any factory or hook runs. */
+  readonly state?: () => TState;
+  readonly actions?: readonly ActionSource[] | ((features: readonly AnyDefinedFeature[]) => readonly ActionSource[]);
 };
 
 /** A unit whose hooks return nothing: what the first constructor overload builds. */
@@ -828,17 +894,26 @@ export type PhasedAuthoredUnit<
 export type InfraRole = { readonly role: 'infra' };
 /** What `entrypoint()` stamps on its unit: `.entrypoints()` accepts it, `.infra()` refuses it. */
 export type EntrypointRole = { readonly role: 'entrypoint' };
-/** A bare `unit()` has no role; no builder step mounts it until `fromFeatures` gives it one. */
+/** A bare `unit()` has no role; no builder step mounts it. */
 export type NoRole = { readonly role?: undefined };
 
 /**
- * A unit built from the app's mounted features — `infra.fromFeatures(features => unit({...}))`
- * or `entrypoint.fromFeatures(features => unit({...}))`. The builder calls `bind` with the
- * final feature list when the app is built, so a unit can derive its static
- * `actions` from the features' declarations before anything boots.
+ * A unit built from the app's mounted features — `infra.fromFeatures({...})`
+ * or `entrypoint.fromFeatures({...})`. Its `name` and `provides` handles are
+ * known before any app exists, like any unit's. The builder calls `bind`
+ * with the final feature list when the app is built: each call makes a new
+ * unit with its own `$state`, and its static `actions` can come from the
+ * features' declarations before anything boots.
  */
-export type UnitBinder<TRole extends 'infra' | 'entrypoint', U extends AnyUnit = AnyUnit> = {
+export type UnitBinder<
+  TRole extends 'infra' | 'entrypoint',
+  U extends AnyUnit = AnyUnit,
+  TName extends string = string,
+> = {
   readonly role: TRole;
+  readonly name: TName;
+  /** One typed handle per published key, as on {@link Unit.provides}. */
+  readonly provides: U['provides'];
   readonly bind: (features: readonly AnyDefinedFeature[]) => U;
 };
 
@@ -862,9 +937,8 @@ export type EntrypointBinder<
 
 /**
  * The kernel atom with no role: a typed box of `needs`, `provides` and
- * lifecycle hooks. Use it only inside `fromFeatures` —
- * `entrypoint.fromFeatures(features => unit({...}))` — where the outer
- * constructor gives the role. Everywhere else write {@link infra} or {@link entrypoint}.
+ * lifecycle hooks. No builder step mounts it. Write {@link infra} or
+ * {@link entrypoint}, or their `fromFeatures` forms, to give a unit its role.
  */
 export function unit<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
@@ -963,18 +1037,64 @@ export function infra(def: AnyUnitDefinition): AnyUnit {
 
 /**
  * Infrastructure built from the mounted features' declarations — the journal
- * composes their handlers this way. The builder calls `bind` with the final
- * feature list; the unit boots before the features and sees only what they
- * declare, never their slice records.
+ * composes their handlers this way. It takes the same declaration as
+ * {@link infra}; every factory and hook also gets `$features` (the final
+ * feature list) and `$state` (see {@link FromFeaturesDefinition}). The unit
+ * boots before the features and sees only what they declare, never their
+ * slice records.
  *
- * A separate name, not an overload: an overload that takes a function makes
- * TypeScript type a definition's hooks against it first and keep that type.
+ * A separate name, not an overload of `infra`: the result is a binder the
+ * builder binds per app, not a unit.
  */
-infra.fromFeatures = function infraFromFeatures<const U extends AnyUnit>(
-  bind: (features: readonly AnyDefinedFeature[]) => U,
-): UnitBinder<'infra', U> {
-  return { role: 'infra', bind };
-};
+function infraFromFeatures<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TState = undefined,
+  TBoot extends undefined = undefined,
+>(
+  def: FromFeaturesDefinition<
+    TShape,
+    TProvides,
+    TName,
+    undefined,
+    TState,
+    EmptyHookReturns,
+    DotLoggingHandle<undefined>
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): UnitBinder<'infra', PlainAuthoredUnit<TShape, TProvides, TName, TBoot>, TName>;
+function infraFromFeatures<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TState = undefined,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: FromFeaturesDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    TState,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): UnitBinder<
+  'infra',
+  PhasedAuthoredUnit<TShape, TProvides, TName, TBoot, TConfigure, TStart, TStop, TDispose, TLogging>,
+  TName
+>;
+function infraFromFeatures(def: AnyFromFeaturesDefinition): UnitBinder<'infra'> {
+  return fromFeaturesBinder('infra', def);
+}
+infra.fromFeatures = infraFromFeatures;
 
 /**
  * What calls into the features: an HTTP server, a job worker, a scheduler.
@@ -1019,15 +1139,60 @@ export function entrypoint(def: AnyUnitDefinition): AnyUnit {
 
 /**
  * An entrypoint built from the mounted features: an HTTP server serving
- * their routes, a worker running their jobs. The builder calls `bind` with
- * the final feature list, so the unit can derive its static `actions` from
- * the features' declarations before anything boots.
+ * their routes, a worker running their jobs. It takes the same declaration
+ * as {@link entrypoint}; every factory and hook also gets `$features` and
+ * `$state`, and `actions` may be a function of the features, so the unit
+ * derives its static actions before anything boots.
  */
-entrypoint.fromFeatures = function entrypointFromFeatures<const U extends AnyUnit>(
-  bind: (features: readonly AnyDefinedFeature[]) => U,
-): UnitBinder<'entrypoint', U> {
-  return { role: 'entrypoint', bind };
-};
+function entrypointFromFeatures<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TState = undefined,
+  TBoot extends undefined = undefined,
+>(
+  def: FromFeaturesDefinition<
+    TShape,
+    TProvides,
+    TName,
+    undefined,
+    TState,
+    EmptyHookReturns,
+    DotLoggingHandle<undefined>
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): UnitBinder<'entrypoint', PlainAuthoredUnit<TShape, TProvides, TName, TBoot>, TName>;
+function entrypointFromFeatures<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
+  TState = undefined,
+  TBoot extends undefined | ScopePlan | Failure = undefined,
+  TConfigure extends undefined | Failure = undefined,
+  TStart extends undefined | Failure = undefined,
+  TStop extends undefined | Failure = undefined,
+  TDispose extends undefined | Failure = undefined,
+  TLogging extends DotLoggingHandle | Failure = DotLoggingHandle<undefined>,
+>(
+  def: FromFeaturesDefinition<
+    TShape,
+    TProvides,
+    TName,
+    TBoot,
+    TState,
+    { configure: TConfigure; start: TStart; stop: TStop; dispose: TDispose },
+    TLogging
+  >,
+  ..._guard: BootGuard<NoInfer<TBoot>>
+): UnitBinder<
+  'entrypoint',
+  PhasedAuthoredUnit<TShape, TProvides, TName, TBoot, TConfigure, TStart, TStop, TDispose, TLogging>,
+  TName
+>;
+function entrypointFromFeatures(def: AnyFromFeaturesDefinition): UnitBinder<'entrypoint'> {
+  return fromFeaturesBinder('entrypoint', def);
+}
+entrypoint.fromFeatures = entrypointFromFeatures;
 
 /** The erased definition the role constructors' implementations accept; each overload above checks the real one. */
 type AnyUnitDefinition = UnitDefinition<
@@ -1038,6 +1203,55 @@ type AnyUnitDefinition = UnitDefinition<
   HookReturns,
   DotLoggingHandle | Failure
 >;
+
+/** The erased declaration the `fromFeatures` implementations accept; each overload checks the real one. */
+type AnyFromFeaturesDefinition = FromFeaturesDefinition<
+  NeedsShape & NoReservedKeys,
+  ServiceRecord & NoReservedKeys,
+  string,
+  undefined | ScopePlan | Failure,
+  unknown,
+  HookReturns,
+  DotLoggingHandle | Failure
+>;
+
+/** Mint the binder's static handles from the declaration's keys; `bind` makes one unit per app. */
+function fromFeaturesBinder<TRole extends 'infra' | 'entrypoint'>(
+  role: TRole,
+  def: AnyFromFeaturesDefinition,
+): UnitBinder<TRole> {
+  const provides: Record<string, Handle<unknown, string>> = {};
+  for (const key of Object.keys(def.provides ?? {})) provides[key] = handleOf(key, def.name);
+  return { role, name: def.name, provides, bind: features => bindFromFeatures(def, features) };
+}
+
+/**
+ * One app's unit from a `fromFeatures` declaration: `state()` runs here, once,
+ * and every factory and hook gets this app's `$features` and `$state`.
+ */
+function bindFromFeatures(def: AnyFromFeaturesDefinition, features: readonly AnyDefinedFeature[]): AnyUnit {
+  const added: FeaturesContext<unknown> = { $features: features, $state: def.state?.() };
+  const { actions, provides, configure, boot, start, stop, dispose } = def;
+  // Erasure seam (each `as never` below): the kernel builds every context as a
+  // plain record; adding this app's keys to it is what the overloads typed.
+  const factories: Record<string, (ctx: object) => unknown> = {};
+  for (const [key, factory] of Object.entries(provides ?? {}))
+    factories[key] = ctx => factory({ ...ctx, ...added } as never);
+  return createUnit({
+    name: def.name,
+    ...(def.needs === undefined ? {} : { needs: def.needs }),
+    ...(def.logging === undefined ? {} : { logging: def.logging }),
+    ...(actions === undefined ? {} : { actions: typeof actions === 'function' ? actions(features) : actions }),
+    // Erasure seam: each factory returns what the declaration's own factory
+    // returns, which the `fromFeatures` overloads checked.
+    provides: factories as AnyUnitDefinition['provides'],
+    ...(configure === undefined ? {} : { configure: ctx => configure({ ...ctx, ...added }) }),
+    ...(boot === undefined ? {} : { boot: ctx => boot({ ...ctx, ...added } as never) }),
+    ...(start === undefined ? {} : { start: ctx => start({ ...ctx, ...added } as never) }),
+    ...(stop === undefined ? {} : { stop: ctx => stop({ ...ctx, ...added } as never) }),
+    ...(dispose === undefined ? {} : { dispose: ctx => dispose({ ...ctx, ...added } as never) }),
+  });
+}
 
 
 /** Shared constructor after each authoring surface has checked its provider returns. */

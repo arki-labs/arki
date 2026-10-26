@@ -24,7 +24,6 @@ import {
 } from '../feature.js';
 import { defineApp, infra, service } from '../index.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
-import { unit } from '../unit-contract.js';
 
 type FakeDb = { readonly tag: 'db' };
 const fakeDb: FakeDb = { tag: 'db' };
@@ -261,12 +260,10 @@ describe('the hexagon: .infra → .features → .entrypoints', () => {
 
   // A driving adapter in miniature: it reads each mounted feature's slice
   // record through the feature token, exactly as http/queue workers do.
-  const collector = entrypoint.fromFeatures(features =>
-    unit({
-      name: 'collector',
-      provides: { collected: ctx => features.map(f => [f.name, Object.keys(sliceOf(ctx, f))] as const) },
-    }),
-  );
+  const collector = entrypoint.fromFeatures({
+    name: 'collector',
+    provides: { collected: ctx => ctx.$features.map(f => [f.name, Object.keys(sliceOf(ctx, f))] as const) },
+  });
 
   it('binds a driver to the mounted features — the app never lists them twice', async () => {
     const app = orThrow(
@@ -304,7 +301,7 @@ describe('the hexagon: .infra → .features → .entrypoints', () => {
       .infra(dbUnit)
       .features([billing])
       // @ts-expect-error — a driven adapter cannot sit in .entrypoints(): it would boot after the domain
-      .entrypoints(infra.fromFeatures(() => unit({ name: 'late' })));
+      .entrypoints(infra.fromFeatures({ name: 'late' }));
     // @ts-expect-error — a feature is not a unit; it is mounted only through .features()
     defineApp('not-a-unit').infra(dbUnit).infra(authish);
     // @ts-expect-error — authish needs db, which nothing before it provides
@@ -331,16 +328,14 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
   // The journal's shape in miniature: it must know every feature's handler
   // declarations when it is built, AND features must be able to write
   // through it — so it boots before them and reads only static declarations.
-  const registry = infra.fromFeatures(features =>
-    unit({
-      name: 'registry',
-      provides: {
-        registry: () => ({
-          handlers: features.flatMap(f => f.entrypoints.map(s => `${f.name}:${s.key}`)),
-        }),
-      },
-    }),
-  );
+  const registry = infra.fromFeatures({
+    name: 'registry',
+    provides: {
+      registry: ({ $features }) => ({
+        handlers: $features.flatMap(f => f.entrypoints.map(s => `${f.name}:${s.key}`)),
+      }),
+    },
+  });
 
   it('sees the final feature list, boots before the features, and serves them as a dependency', async () => {
     const writer = defineFeature('writer')
@@ -359,9 +354,10 @@ describe('a driven adapter that reads the features (.infra(driven))', () => {
   });
 
   it('gets no slice records: those exist only once the features boot', async () => {
-    const peeking = infra.fromFeatures(features =>
-      unit({ name: 'peeking', provides: { peek: ctx => features.map(f => sliceOf(ctx, f)) } }),
-    );
+    const peeking = infra.fromFeatures({
+      name: 'peeking',
+      provides: { peek: ctx => ctx.$features.map(f => sliceOf(ctx, f)) },
+    });
     const failure = await defineApp('peek').infra(peeking).features([orders]).boot();
     expect(UnexpectedDefect.is(failure)).toBe(true);
     expect(failure).toMatchObject({

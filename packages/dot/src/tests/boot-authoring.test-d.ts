@@ -7,7 +7,7 @@ import { defineFailure } from '@arki/failure';
 
 import type { EmptyShape, Provided, UnitCloseFailure, UnitOpenFailure, UnitPhaseFailures } from '../unit-contract.js';
 import { defineApp } from '../define-app.js';
-import { defineFeature, entrypoint } from '../feature.js';
+import { defineFeature } from '../feature.js';
 import { initUnits } from '../init-units.js';
 import { testApp, testUnit } from '../test-harness.js';
 import { createUnit, infra, rename, service } from '../unit-contract.js';
@@ -204,10 +204,6 @@ defineApp('bad-infra').infra(_badService);
 defineApp('bad-serve').entrypoints(_badService);
 // @ts-expect-error variadic driving registration validates the same contract
 defineApp('bad-entrypoints').entrypoints(_badService);
-// @ts-expect-error bound driving adapters retain their factory contract
-defineApp('bad-driver').entrypoints(entrypoint.fromFeatures(() => _badService));
-// @ts-expect-error bound driven adapters retain their factory contract
-defineApp('bad-driven').infra(infra.fromFeatures(() => _badService));
 // @ts-expect-error testing helpers retain the production mount checks
 testApp([_badService]);
 const _badServiceList = [_badService];

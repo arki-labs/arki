@@ -25,7 +25,6 @@ import { renderExplainText } from '../cli/render-explain.js';
 import { textUi } from '../cli/tests/text-ui.js';
 import { defineFeature, entrypoint, FEATURE_ERROR_CODES, resolveNeeds, routerFor } from '../feature.js';
 import { defineApp, infra, testApp } from '../index.js';
-import { unit } from '../unit-contract.js';
 
 /* ---- app infra ---- */
 
@@ -567,14 +566,12 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
 
   it('lets a driven adapter in .infra() read entrypoint declarations before the features boot', async () => {
     let declared: readonly string[] = [];
-    const collector = infra.fromFeatures(features =>
-      unit({
-        name: 'collector',
-        boot: () => {
-          declared = features.flatMap(f => f.entrypoints.map(slice => `${f.name}:${slice.key}`));
-        },
-      }),
-    );
+    const collector = infra.fromFeatures({
+      name: 'collector',
+      boot: ({ $features }) => {
+        declared = $features.flatMap(f => f.entrypoints.map(slice => `${f.name}:${slice.key}`));
+      },
+    });
     const app = orThrow(await defineApp('collect').infra(database, billing, collector).features([digest]).start());
     expect(declared).toEqual(['digest:rpc', 'digest:schedules', 'digest:journal']);
     orThrow(await app.dispose());

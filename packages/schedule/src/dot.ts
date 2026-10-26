@@ -34,9 +34,9 @@
  */
 
 import type { AnyDefinedFeature, AnyFeatureCore, AnyFeatureSlice, EntrypointBinder, EntrypointServicesOf } from '@arki/dot/feature';
-import type { CtxOf, EmptyShape, NeedsShape, Unit, WireNeeds } from '@arki/dot/unit';
+import type { CtxOf, EmptyShape, NeedsShape, WireNeeds } from '@arki/dot/unit';
 import type { SuccessOf } from '@arki/failure';
-import { allFeatures, entrypoint, handlerObserverOf, instanceOf, sliceOf, unit } from '@arki/dot/feature';
+import { allFeatures, entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/feature';
 import { token } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
@@ -604,94 +604,95 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
   };
   const actions = scheduleActions(own, clock);
 
-  return entrypoint.fromFeatures(features => {
-    let runtime: ScheduleRuntime | undefined;
-    return unit({
-      name: 'schedule',
-      needs,
-      // App-level schedules only: feature schedules already joined each
-      // feature's manifest through their `schedules(...)` slice.
-      actions,
-      configure(ctx) {
-        ctx.registerProjection({
-          format: 'schedule-table',
-          binding: 'schedule',
-          module: '@arki/schedule/projection',
-        });
-        ctx.declareProvides('schedule-runtime');
-        if (clock === 'host') {
-          // Feature schedules declared before the driver knew its clock: fix the unlocked warning.
-          for (const f of features) {
-            for (const slice of f.entrypoints) {
-              for (const action of slice.key === 'schedules' ? unlockedActionIds(slice) : []) {
-                ctx.describeAction(action, { summary: noLockSummary(clock) });
-              }
+  // Erasure seam: the needs record is runtime-built (own needs + the
+  // optional durable alias); the overloads carry the precise shape.
+  return entrypoint.fromFeatures({
+    name: 'schedule',
+    needs,
+    state: (): ScheduleState => ({ runtime: undefined }),
+    // App-level schedules only: feature schedules already joined each
+    // feature's manifest through their `schedules(...)` slice.
+    actions,
+    configure(ctx) {
+      ctx.registerProjection({
+        format: 'schedule-table',
+        binding: 'schedule',
+        module: '@arki/schedule/projection',
+      });
+      ctx.declareProvides('schedule-runtime');
+      if (clock === 'host') {
+        // Feature schedules declared before the driver knew its clock: fix the unlocked warning.
+        for (const f of ctx.$features) {
+          for (const slice of f.entrypoints) {
+            for (const action of slice.key === 'schedules' ? unlockedActionIds(slice) : []) {
+              ctx.describeAction(action, { summary: noLockSummary(clock) });
             }
           }
         }
+      }
+    },
+    provides: {
+      scheduler: ctx => {
+        const durable = durableBackend(ctx);
+        const all: readonly (ScheduleDef<TContext> & { readonly declaredName?: string })[] = [
+          ...observedSchedules(own, ctx),
+          ...collectFeatureSchedules(ctx, ctx.$features),
+        ];
+        for (const definition of all) {
+          const lock = definition.lock;
+          // A locker that can say its store lets the action show the whole line: `dot doctor` prints it.
+          if (lock?.locks.store === undefined) continue;
+          ctx.$describeAction(`${definition.declaredName ?? definition.name}.fire`, {
+            summary: lockSummary({
+              key: lock.key,
+              holdAtLeastMs: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS,
+              locks: lock.locks,
+            }),
+          });
+        }
+        assertSingleClock(all, durable, clock);
+        assertDurableBackend(all, durable);
+        const shared = {
+          clock,
+          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          ...(durable === undefined ? {} : { durable }),
+        };
+        const context = options.context;
+        const created =
+          context === undefined
+            ? createScheduleRuntime({
+                // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
+                schedules: all as readonly ScheduleDef<undefined>[],
+                ...shared,
+              })
+            : createScheduleRuntime<TContext>({
+                schedules: all,
+                ...shared,
+                createContext: () => context(ctx as CtxOf<TNeeds>),
+              });
+        ctx.$state.runtime = created;
+        return schedulerService(
+          clock,
+          all.map(definition => definition.name),
+          created,
+        );
       },
-      provides: {
-        scheduler: ctx => {
-          const durable = durableBackend(ctx);
-          const all: readonly (ScheduleDef<TContext> & { readonly declaredName?: string })[] = [
-            ...observedSchedules(own, ctx),
-            ...collectFeatureSchedules(ctx, features),
-          ];
-          for (const definition of all) {
-            const lock = definition.lock;
-            // A locker that can say its store lets the action show the whole line: `dot doctor` prints it.
-            if (lock?.locks.store === undefined) continue;
-            ctx.$describeAction(`${definition.declaredName ?? definition.name}.fire`, {
-              summary: lockSummary({
-                key: lock.key,
-                holdAtLeastMs: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS,
-                locks: lock.locks,
-              }),
-            });
-          }
-          assertSingleClock(all, durable, clock);
-          assertDurableBackend(all, durable);
-          const shared = {
-            clock,
-            ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-            ...(durable === undefined ? {} : { durable }),
-          };
-          const context = options.context;
-          const created =
-            context === undefined
-              ? createScheduleRuntime({
-                  // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
-                  schedules: all as readonly ScheduleDef<undefined>[],
-                  ...shared,
-                })
-              : createScheduleRuntime<TContext>({
-                  schedules: all,
-                  ...shared,
-                  createContext: () => context(ctx as CtxOf<TNeeds>),
-                });
-          runtime = created;
-          return schedulerService(
-            clock,
-            all.map(definition => definition.name),
-            created,
-          );
-        },
-      },
-      start() {
-        runtime?.start();
-      },
-      async stop() {
-        await runtime?.stop();
-      },
-      async dispose() {
-        await runtime?.stop();
-        runtime = undefined;
-      },
-      // Erasure seam: the needs record is runtime-built (own needs + the
-      // optional durable alias); the overloads carry the precise shape.
-    }) as unknown as Unit<WireNeeds<TNeeds>, SchedulerProvides>;
-  });
+    },
+    start({ $state }) {
+      $state.runtime?.start();
+    },
+    async stop({ $state }) {
+      await $state.runtime?.stop();
+    },
+    async dispose({ $state }) {
+      await $state.runtime?.stop();
+      $state.runtime = undefined;
+    },
+  }) as unknown as EntrypointBinder<WireNeeds<TNeeds>, SchedulerProvides>;
 }
+
+/** One app's schedule runtime, made by the `scheduler` factory and run between start and stop. */
+type ScheduleState = { runtime: ScheduleRuntime | undefined };
 
 /* ------------------------------------------------------------------ */
 /* Typed client                                                        */

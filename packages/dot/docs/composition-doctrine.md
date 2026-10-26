@@ -137,7 +137,7 @@ separate calls:
 
 ```ts run
 import { defineApp, entrypoint, infra } from '@arki/dot';
-import { defineFeature, sliceOf, unit } from '@arki/dot/feature';
+import { defineFeature, sliceOf } from '@arki/dot/feature';
 import { rpc } from '@arki/dot/orpc';
 import { isFailure } from '@arki/failure';
 
@@ -146,16 +146,14 @@ const logger = infra({ name: 'log', provides: { log: () => ({ info: (_message: s
 const database = infra({ name: 'database', provides: { db: () => ({ query: async (_sql: string) => [] }) } });
 const orders = defineFeature('orders').entrypoints(rpc({}, {}, () => ({})));
 const features = [orders] as const;
-const gateway = entrypoint.fromFeatures(mounted =>
-  unit({
-    name: 'gateway',
-    boot: ctx => {
-      for (const mountedFeature of mounted) {
-        if (sliceOf(ctx, mountedFeature) === undefined) throw new Error('gateway sees no slice');
-      }
-    },
-  }),
-);
+const gateway = entrypoint.fromFeatures({
+  name: 'gateway',
+  boot: ctx => {
+    for (const mountedFeature of ctx.$features) {
+      if (sliceOf(ctx, mountedFeature) === undefined) throw new Error('gateway sees no slice');
+    }
+  },
+});
 
 const shop = await defineApp('shop')
   .infra(logger, database) // what the app runs on; log first
@@ -308,8 +306,8 @@ await app.dispose();
 Infrastructure never depends on the domain: nothing in `.infra()` can need a
 feature service, a domain service or a usecase, and `.infra()` is closed once
 `.features()` is called. A feature's own infra never imports any `feature.ts`.
-Adapter authors pick the side with the constructor: `entrypoint.fromFeatures(features => unit(...))`
-is accepted only by `.entrypoints()`; `infra.fromFeatures(features => unit(...))` — an infra
+Adapter authors pick the side with the constructor: `entrypoint.fromFeatures({...})`
+is accepted only by `.entrypoints()`; `infra.fromFeatures({...})` — an infra
 unit that reads the features' static declarations, like the journal — only
 by `.infra()`.
 

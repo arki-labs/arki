@@ -6,14 +6,13 @@ import { defineApp } from '../define-app.js';
 import { defineFeature } from '../define-feature.js';
 import { entrypoint } from '../feature.js';
 import { initUnits } from '../init-units.js';
-import { infra } from '../unit-contract.js';
+import { infra, service } from '../unit-contract.js';
 
 const Refused = defineFailure('test.phase_authoring.refused');
 
 describe('lifecycle authoring', () => {
   it('runs a feature unit hooks with its provided service before driving adapters', async () => {
     const calls: string[] = [];
-    const factory = initUnits.context<{ value: number }>().create();
     const app = orThrow(
       await defineApp('object-hooks')
         .features([
@@ -41,21 +40,19 @@ describe('lifecycle authoring', () => {
             .entrypoints(),
         ])
         .entrypoints(
-          entrypoint.fromFeatures(() =>
-            factory.infra({
-              name: 'driving',
-              needs: ['value'],
-              start({ value }) {
-                calls.push(`driver.start:${value}`);
-              },
-              stop({ value }) {
-                calls.push(`driver.stop:${value}`);
-              },
-              dispose({ value }) {
-                calls.push(`driver.dispose:${value}`);
-              },
-            }),
-          ),
+          entrypoint.fromFeatures({
+            name: 'driving',
+            needs: { value: service<number>() },
+            start({ value }) {
+              calls.push(`driver.start:${value}`);
+            },
+            stop({ value }) {
+              calls.push(`driver.stop:${value}`);
+            },
+            dispose({ value }) {
+              calls.push(`driver.dispose:${value}`);
+            },
+          }),
         )
         .start(),
     );

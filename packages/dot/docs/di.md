@@ -293,7 +293,7 @@ filled after boot, the types cannot see that loop. Keep such calls out of
 usecases, or break the loop in the design.
 
 Adapter authors: `entrypoint.fromFeatures` and `infra.fromFeatures` units receive the features as mounted
-(`AnyDefinedFeature`). Read a feature's declarations from
+(`AnyDefinedFeature`) as `$features`, in every factory and hook context. Read a feature's declarations from
 `f.entrypoints`, its slice record with `sliceOf(ctx, f)`, and its own
 units with `f.units()`.
 
