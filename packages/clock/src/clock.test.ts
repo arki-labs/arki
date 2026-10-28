@@ -7,6 +7,12 @@ import { MAX_TIMER_MS, MockClock, SystemClock } from './clock.js';
 import { CLOCK_ERROR_CODES, ClockError, SLEEP_FAILURES, SleepCancelled } from './errors.js';
 
 describe('ClockError', () => {
+  it('exposes only live configuration codes after sleep cancellation moved to failure values', () => {
+    expect(Object.values(CLOCK_ERROR_CODES)).toEqual(['ARKI_CLOCK_E001', 'ARKI_CLOCK_E002']);
+    // @ts-expect-error The obsolete abort exception code is deliberately retired.
+    expect(CLOCK_ERROR_CODES.aborted).toBeUndefined();
+  });
+
   it('carries a stable code and a remediation, so callers match on the code and not the message', () => {
     const clock = new MockClock();
     try {

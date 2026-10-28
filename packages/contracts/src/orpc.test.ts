@@ -83,6 +83,47 @@ describe('operationAt', () => {
 });
 
 describe('operationOf', () => {
+  it('preserves the operation and metadata identities while reading native accessors once', () => {
+    const original = operations(contract).posts.create;
+    const reads = { carrier: 0, path: 0, name: 0, meta: 0 };
+    const op = {
+      get path() {
+        reads.path++;
+        return original.path;
+      },
+      get name() {
+        reads.name++;
+        return original.name;
+      },
+      get meta() {
+        reads.meta++;
+        return original.meta;
+      },
+    };
+    const carrier = {
+      get [OPERATION]() {
+        reads.carrier++;
+        return op;
+      },
+    };
+    expect(operationOf(carrier)).toBe(op);
+    expect(reads).toEqual({ carrier: 1, path: 1, name: 1, meta: 1 });
+    expect(op.meta).toBe(original.meta);
+  });
+
+  it('rejects forged paths whose overridden every method would hide invalid segments', () => {
+    const path = Object.assign([42], { every: () => true });
+    const carrier = { [OPERATION]: { path, name: '42', meta: {} } };
+    expect(() => Reflect.apply(operationOf, null, [carrier])).toThrow('ARKI_CONTRACTS_E007');
+  });
+
+  it('rejects forged operation names even when a path overrides join', () => {
+    const name = {};
+    const path = Object.assign(['posts'], { join: () => name });
+    const carrier = { [OPERATION]: { path, name, meta: {} } };
+    expect(() => Reflect.apply(operationOf, null, [carrier])).toThrow('ARKI_CONTRACTS_E007');
+  });
+
   it('reads the operation a carrier holds', () => {
     const op = operations(contract).posts.create;
     expect(operationOf({ [OPERATION]: op })).toBe(op);

@@ -25,6 +25,13 @@ declare const client: ContractRouterClient<typeof contract>;
 describe('createOrpcUtils', () => {
   const orpc = createOrpcUtils(contract, client);
 
+  it('keeps prototype-shaped keys in the mapped contract and operation types', () => {
+    const prototypeContract = { ['__proto__']: { constructor: contract.posts.create } };
+    const { orpc: utils } = createORPCReact(prototypeContract);
+    expectTypeOf(utils).toEqualTypeOf<OrpcUtils<typeof prototypeContract, Record<never, never>>>();
+    expectTypeOf(utils.__proto__.constructor['~op']).toEqualTypeOf<OperationOf<typeof contract.posts.create>>();
+  });
+
   it('a leaf is oRPC ProcedureUtils, with no annotation and branded ids kept', () => {
     // Plain assignments: expect-type cannot compare oRPC's overloaded call signatures.
     const leaf: ProcedureUtils<Record<never, never>, { id: string }, Post, Error> = orpc.posts.get;

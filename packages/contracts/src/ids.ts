@@ -6,6 +6,14 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import { is, recordSchema } from '@arki/schema';
 import { CONTRACTS_ERROR_CODES, ContractsError, RandomSourceUnavailable } from './errors.js';
+import {
+  callableSchema,
+  idKindSchema,
+  idPrefixSchema,
+  objectSchema,
+  uuidFormatSchema,
+  uuidV4Schema,
+} from './inspection.js';
 
 /**
  * The id of a user: `usr_` followed by an id. Every package that refers to a user, whether or
@@ -96,22 +104,23 @@ export function defineId<const P extends string, const Kind extends string>(
   },
 ): ReturnType<typeof brandedId<P, Kind>>;
 export function defineId(prefix: string, options?: unknown) {
-  if (typeof prefix !== 'string') {
+  if (!is(prefix, idPrefixSchema)) {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdPrefix,
       'defineId: prefix must be a string. Use an empty string for unprefixed stored IDs.',
     );
   }
   if (options === undefined) return prefixedId(prefix);
-  const kind: unknown = is(options, recordSchema) ? Reflect.get(options, 'kind') : undefined;
-  if (typeof kind !== 'string' || kind.length === 0) {
+  const optionRecord = is(options, recordSchema) ? options : undefined;
+  const kind: unknown = optionRecord === undefined ? undefined : Reflect.get(optionRecord, 'kind');
+  if (!is(kind, idKindSchema)) {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.invalidIdKind,
       'defineId: kind must be a non-empty domain name. Use one literal name for each identity kind.',
     );
   }
-  const format: unknown = is(options, recordSchema) ? Reflect.get(options, 'format') : undefined;
-  if (format === undefined || format === 'uuid') return brandedId(prefix, kind, format);
+  const format: unknown = optionRecord === undefined ? undefined : Reflect.get(optionRecord, 'format');
+  if (is(format, uuidFormatSchema)) return brandedId(prefix, kind, format);
   return brandedId(prefix, kind, snapshotIdFormat(format));
 }
 
@@ -175,7 +184,7 @@ function idDeclaration<const P extends string, TSchema extends z.ZodType<`${P}${
     },
     /** Validates the canonical schema and narrows to its success-only domain type. */
     is: (value: unknown): value is z.output<typeof schema> =>
-      typeof value === 'string' && fast.safeParse(value).success,
+      fast.safeParse(value).success,
   } as const;
 }
 
@@ -185,6 +194,31 @@ const BODY_LENGTH = 24;
 
 // Each batch samples twice the target length; 32 batches bound broken providers.
 const MAX_RANDOM_BATCHES = 32;
+
+const observedProviderResults = new WeakSet<object>();
+function ignoreProviderOutcome(): void {
+  // The synchronous generator already returned the protocol defect.
+}
+
+/** Observe rejected foreign work without using a native Promise's own then/catch properties. */
+function observeProviderResult(value: unknown): void {
+  if (!is(value, objectSchema) && !is(value, callableSchema)) return;
+  if (observedProviderResults.has(value)) return;
+  // Promise constructor/species hooks may reenter inspection before a handler is attached.
+  observedProviderResults.add(value);
+  try {
+    void Promise.prototype.then.call(value, ignoreProviderOutcome, ignoreProviderOutcome);
+    return;
+  } catch {
+    // Non-native thenables still need assimilation; their rejection cannot escape below.
+  }
+  try {
+    void Promise.resolve(value).then(ignoreProviderOutcome, ignoreProviderOutcome);
+  } catch {
+    // A native Promise that blocks constructor/species hooks cannot be observed without mutation.
+  }
+}
+
 
 /**
  * Draws 32 random bits from the provider `createIdBody` resolved for the
@@ -202,9 +236,7 @@ function secureRandom(): number {
   if (result !== bytes) {
     // A broken synchronous provider may still return rejected asynchronous work.
     // Observe it without delaying this protocol failure or exposing its private cause.
-    void Promise.resolve(result).catch(() => {
-      // The synchronous protocol failure below already owns this outcome.
-    });
+    observeProviderResult(result);
     throw new TypeError('Random provider returned a different buffer.');
   }
   const value = bytes[0];
@@ -234,9 +266,9 @@ let cuid: (() => string) | undefined;
 export function createIdBody(): string | IdGenerationFailure {
   try {
     const source: unknown = Reflect.get(globalThis, 'crypto');
-    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    if (!is(source, objectSchema)) return RandomSourceUnavailable();
     const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
-    if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+    if (!is(getRandomValues, callableSchema)) return RandomSourceUnavailable();
     // Web Crypto requires its receiver.
     activeDraw = bytes => Reflect.apply(getRandomValues, source, [bytes]);
     try {
@@ -246,6 +278,7 @@ export function createIdBody(): string | IdGenerationFailure {
       activeDraw = undefined;
     }
   } catch (error) {
+    observeProviderResult(error);
     return UnexpectedDefect({ cause: error });
   }
 }
@@ -253,9 +286,9 @@ export function createIdBody(): string | IdGenerationFailure {
 function createRandomBody(length: number, firstAlphabet: string, alphabet: string): string | IdGenerationFailure {
   try {
     const source: unknown = Reflect.get(globalThis, 'crypto');
-    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    if (!is(source, objectSchema)) return RandomSourceUnavailable();
     const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
-    if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+    if (!is(getRandomValues, callableSchema)) return RandomSourceUnavailable();
     let out = '';
     const batchSize = length * 2;
     for (let batch = 0; batch < MAX_RANDOM_BATCHES; batch++) {
@@ -265,9 +298,7 @@ function createRandomBody(length: number, firstAlphabet: string, alphabet: strin
       if (result !== bytes) {
         // A broken synchronous provider may still return rejected asynchronous work.
         // Observe it without delaying this protocol failure or exposing its private cause.
-        void Promise.resolve(result).catch(() => {
-          // The synchronous protocol failure below already owns this outcome.
-        });
+        observeProviderResult(result);
         return UnexpectedDefect({ cause: new TypeError('Random provider returned a different buffer.') });
       }
       for (let index = 0; index < batchSize; index++) {
@@ -283,6 +314,7 @@ function createRandomBody(length: number, firstAlphabet: string, alphabet: strin
     }
     return UnexpectedDefect({ cause: new Error('Random provider exhausted the rejection sampling budget.') });
   } catch (error) {
+    observeProviderResult(error);
     return UnexpectedDefect({ cause: error });
   }
 }
@@ -291,17 +323,15 @@ function createRandomBody(length: number, firstAlphabet: string, alphabet: strin
 function createUuidBody(): string | IdGenerationFailure {
   try {
     const source: unknown = Reflect.get(globalThis, 'crypto');
-    if (typeof source !== 'object' || source === null) return RandomSourceUnavailable();
+    if (!is(source, objectSchema)) return RandomSourceUnavailable();
     const randomUUID: unknown = Reflect.get(source, 'randomUUID');
-    if (typeof randomUUID !== 'function') {
+    if (!is(randomUUID, callableSchema)) {
       const getRandomValues: unknown = Reflect.get(source, 'getRandomValues');
-      if (typeof getRandomValues !== 'function') return RandomSourceUnavailable();
+      if (!is(getRandomValues, callableSchema)) return RandomSourceUnavailable();
       const bytes = new Uint8Array(16);
       const result: unknown = Reflect.apply(getRandomValues, source, [bytes]);
       if (result !== bytes) {
-        void Promise.resolve(result).catch(() => {
-          // The synchronous protocol failure below already owns this outcome.
-        });
+        observeProviderResult(result);
         return UnexpectedDefect({ cause: new TypeError('Random provider returned a different buffer.') });
       }
       let hex = '';
@@ -317,18 +347,14 @@ function createUuidBody(): string | IdGenerationFailure {
       return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     }
     const result: unknown = Reflect.apply(randomUUID, source, []);
-    if (
-      typeof result === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result)
-    ) {
+    if (is(result, uuidV4Schema)) {
       return result;
     }
     // Observe asynchronous protocol violations while returning the synchronous failure.
-    void Promise.resolve(result).catch(() => {
-      // The synchronous protocol failure below already owns this outcome.
-    });
+    observeProviderResult(result);
     return UnexpectedDefect({ cause: new TypeError('Random UUID provider returned an invalid UUID v4.') });
   } catch (error) {
+    observeProviderResult(error);
     return UnexpectedDefect({ cause: error });
   }
 }

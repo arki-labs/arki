@@ -149,6 +149,10 @@ if (parsed.length !== 'sty_'.length + 24) throw new Error('create() makes the pr
   Missing or malformed providers return `RandomSourceUnavailable`; thrown provider
   faults, invalid output and exhausted rejection sampling return `UnexpectedDefect`
   with a private cause. `ID_GENERATION_FAILURES` declares these for adapters.
+  Malformed asynchronous work is observed without waiting, including native Promises
+  with overridden `then` properties. Native constructor/species hooks must permit
+  handler registration; a provider that blocks those hooks owns its rejection.
+  Contracts does not mutate foreign promises or install global rejection handlers.
   This small synchronous entropy operation needs no separate OTel span; its
   calling operation observes and reports the returned failure.
 - **Stored generator formats are explicit.** Use `format: { alphabet, length }`

@@ -10,7 +10,10 @@ import {
 } from 'drizzle-orm/zod';
 import { z } from 'zod';
 
+import { is } from '@arki/schema';
+
 import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+import { dimensionsSchema, nativeSchema, objectSchema } from './inspection.js';
 
 export { bufferSchema, createSchemaFactory, jsonSchema, literalSchema } from 'drizzle-orm/zod';
 
@@ -31,7 +34,7 @@ const jsonValueSchema = z.json();
 export function jsonColumn<TSchema extends z.ZodType>(name: string, schema: JsonStorableSchema<TSchema>) {
   const builder = jsonb(name).$type<z.output<TSchema>>();
   const config: unknown = Reflect.get(builder, 'config');
-  if (typeof config !== 'object' || config === null) {
+  if (!is(config, objectSchema)) {
     throw new ContractsError(CONTRACTS_ERROR_CODES.invalidColumnMetadata, 'The Drizzle builder has no column config.');
   }
   Object.assign(config, { [COLUMN_ZOD_SCHEMA]: jsonStorageSchema(schema) });
@@ -57,9 +60,9 @@ export function jsonStorageSchema(schema: z.ZodType): z.ZodType {
 
 function readColumnSchema(column: Column): z.ZodType | undefined {
   const config: unknown = Reflect.get(column, 'config');
-  if (typeof config !== 'object' || config === null) return;
+  if (!is(config, objectSchema)) return;
   const schema: unknown = Reflect.get(config, COLUMN_ZOD_SCHEMA);
-  return schema instanceof z.ZodType ? schema : undefined;
+  return is(schema, nativeSchema) ? schema : undefined;
 }
 
 // A JSON $type annotation can itself be an array; it says nothing about SQL
@@ -119,7 +122,7 @@ function autoRefine(table: Table, userRefine: Refine<Table> | undefined): Refine
     if (schema) {
       const dimensions: unknown = Reflect.get(column, 'dimensions');
       let storedSchema = schema;
-      if (typeof dimensions === 'number') {
+      if (is(dimensions, dimensionsSchema)) {
         for (let dimension = 0; dimension < dimensions; dimension += 1) storedSchema = z.array(storedSchema);
       }
       refine[key] = () => storedSchema;

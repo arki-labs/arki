@@ -53,7 +53,12 @@ function build(node: AnyContractRouter, ops: unknown, client: unknown, path: rea
   }
   const group: Record<string, unknown> = { ...createGeneralUtils(path) };
   for (const [key, next] of Object.entries(node)) {
-    group[key] = build(next, child(ops, key), child(client, key), [...path, key]);
+    Object.defineProperty(group, key, {
+      value: build(next, child(ops, key), child(client, key), [...path, key]),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
   return group;
 }

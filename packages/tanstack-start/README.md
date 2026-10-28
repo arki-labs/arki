@@ -23,6 +23,8 @@ export const orpc = createOrpcUtils(rpcContract, client);
 orpc.posts.create['~op'].name; // 'posts.create'
 ```
 
+Contract children remain own enumerable properties, including `__proto__` and `constructor`. Group prototypes and query key methods retain their normal behavior.
+
 Or, with no custom link, in one call: `const { client, orpc } = createORPCReact(rpcContract, { url })`.
 
 - **Same keys as oRPC.** Every key comes from oRPC's own `queryKey` / `infiniteKey` / `mutationKey` /

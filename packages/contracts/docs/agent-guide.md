@@ -140,3 +140,5 @@ bun run build && bun run typecheck && bun run lint && bun run test
 bun run test:docs
 bun run test:runtimes
 ```
+
+Native contract, option, provider and Drizzle metadata inspection uses internal source schemas. Inspection preserves the original operation/schema/provider objects and receiver; it never calls a replacement entropy source. Operation path checks use native array iteration and joining, so forged array methods cannot manufacture a valid identity.

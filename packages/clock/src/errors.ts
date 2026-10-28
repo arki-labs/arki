@@ -21,14 +21,6 @@ export const CLOCK_ERROR_CODES = {
    * @verify bun run test
    */
   invalidDelay: 'ARKI_CLOCK_E002',
-  /**
-   * Legacy abort exception code; sleep now returns SleepCancelled.
-   * @deprecated Match SleepCancelled instead.
-   *
-   * @fix Handle SleepCancelled returned from sleep.
-   * @verify bun run test
-   */
-  aborted: 'ARKI_CLOCK_E003',
 } as const;
 
 /** The code of a {@link ClockError}. */

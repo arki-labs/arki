@@ -21,7 +21,10 @@ import type {
 } from '@orpc/contract';
 import { getContractRouter, isContractProcedure } from '@orpc/contract';
 
+import { is } from '@arki/schema';
+
 import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+import { objectSchema, operationSchema } from './inspection.js';
 
 /** One procedure's identity. The types ride along in a phantom field. */
 export type Operation<TInput, TOutput, TError, TMeta extends Meta> = {
@@ -131,19 +134,6 @@ export function operationAt(contract: AnyContractRouter, path: readonly string[]
   return isContractProcedure(node) ? operationFor(node, path) : undefined;
 }
 
-function isOperation(value: unknown): value is AnyOperation {
-  if (typeof value !== 'object' || value === null) return false;
-  const path: unknown = Reflect.get(value, 'path');
-  const meta: unknown = Reflect.get(value, 'meta');
-  return (
-    Array.isArray(path) &&
-    path.every(segment => typeof segment === 'string') &&
-    Reflect.get(value, 'name') === path.join('.') &&
-    typeof meta === 'object' &&
-    meta !== null
-  );
-}
-
 /**
  * Read the operation a value carries. Throws `TypeError` for a value that
  * has none — a raw oRPC client or utils leaf, or a forged object — so plain
@@ -151,8 +141,8 @@ function isOperation(value: unknown): value is AnyOperation {
  */
 export function operationOf<Op extends AnyOperation>(carrier: Identified<Op>): Op;
 export function operationOf(carrier: unknown): AnyOperation {
-  const op: unknown = typeof carrier === 'object' && carrier !== null ? Reflect.get(carrier, OPERATION) : undefined;
-  if (!isOperation(op)) {
+  const op: unknown = is(carrier, objectSchema) ? Reflect.get(carrier, OPERATION) : undefined;
+  if (!is(op, operationSchema)) {
     throw new ContractsError(
       CONTRACTS_ERROR_CODES.notAnOperation,
       `Expected a value that carries an operation under "${OPERATION}" (a leaf of createOrpcUtils); got one without it.`,

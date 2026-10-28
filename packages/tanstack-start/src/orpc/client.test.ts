@@ -1,6 +1,7 @@
 import { createORPCClient } from '@orpc/client';
 import type { ContractRouterClient } from '@orpc/contract';
-import { createTanstackQueryUtils } from '@orpc/tanstack-query';
+import { oc } from '@orpc/contract';
+import { createGeneralUtils, createTanstackQueryUtils } from '@orpc/tanstack-query';
 import { describe, expect, it } from 'vitest';
 
 import { createBackend, postsContract, servePosts } from './__fixtures__/posts';
@@ -10,6 +11,28 @@ const { client, orpc } = servePosts(createBackend());
 const plain = createTanstackQueryUtils(client);
 
 describe('createOrpcUtils', () => {
+  it('retains own prototype-shaped children without changing group prototypes or query methods', async () => {
+    const contract = { ['__proto__']: { ['__proto__']: oc }, constructor: oc };
+    const client: ContractRouterClient<typeof contract> = createORPCClient({ call: () => Promise.resolve('result') });
+    const utils = createOrpcUtils(contract, client);
+    expect(Object.getPrototypeOf(utils)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(utils.__proto__)).toBe(Object.prototype);
+    expect(Object.hasOwn(utils, '__proto__')).toBe(true);
+    expect(Object.hasOwn(utils.__proto__, '__proto__')).toBe(true);
+    expect(Object.keys(utils)).toEqual(['key', '__proto__', 'constructor']);
+    expect(utils.__proto__.__proto__['~op']).toMatchObject({
+      path: ['__proto__', '__proto__'],
+      name: '__proto__.__proto__',
+    });
+    expect(utils.constructor['~op'].name).toBe('constructor');
+    expect(utils.key()).toEqual(createGeneralUtils([]).key());
+    expect(utils.__proto__.key()).toEqual(createGeneralUtils(['__proto__']).key());
+    await expect(utils.__proto__.__proto__.call()).resolves.toBe('result');
+    const serialized = JSON.stringify(utils);
+    expect(serialized).toContain('"__proto__":{"__proto__":');
+    expect(serialized).toContain('"name":"__proto__.__proto__"');
+  });
+
   it('builds the same keys as oRPC, so both trees share one cache (no double fetch in a mixed app)', () => {
     const input = { status: 'published', limit: 5 };
     expect(orpc.posts.list.queryKey({ input })).toEqual(plain.posts.list.queryKey({ input }));

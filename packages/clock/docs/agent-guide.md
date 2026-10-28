@@ -88,3 +88,5 @@ bun ../../tooling/library/src/llms.ts --check
 ```
 
 Sleep waits for asynchronous cleanup returned by a provider before settling. Asynchronous listener registration rejection becomes a defect while sleep is pending; a rejection after completion is observed without changing the completed outcome. Owned sleep provider registration and cleanup defects return canonical `UnexpectedDefect` from `@arki/failure`. `SLEEP_FAILURES` contains exactly `SleepCancelled` and `UnexpectedDefect`; private causes are excluded from serialization.
+
+The retired abort exception code `ARKI_CLOCK_E003` is removed. Match returned `SleepCancelled`; `CLOCK_ERROR_CODES` contains only the live configuration errors E001 and E002.
