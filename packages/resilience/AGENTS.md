@@ -18,7 +18,8 @@ Retry, circuit breaker, timeout, bulkhead and presets. Read these before you cha
 10. Engine refusals are canonical CircuitOpen, Timeout and BulkheadRejected values, final unless explicitly selected for retry. ResilienceError remains the static backoff diagnostic base.
 11. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time. No `node:*` imports, no `process`, no `Buffer`. It runs on Node, Bun, Deno, browsers and Hermes.
 12. Event listeners are observation only. Their throws and rejected promises cannot change results, retries, breaker accounting or deadline settlement. They are never awaited; synchronous cancellation requests still take effect. Default diagnostics contain canonical codes, never callback messages or values.
-13. Types are written once and inferred everywhere. No `any`, no `@ts-ignore`, no unsafe casts.
+13. Owned policy execution is traced by default. Keep one logical span in composition; record only canonical codes, attempts and delays. Telemetry never repeats work or changes outcomes; no library SDK configuration.
+14. Types are written once and inferred everywhere. No `any`, no `@ts-ignore`, no unsafe casts.
 
 ## Changing this package
 

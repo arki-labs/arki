@@ -337,9 +337,29 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 Event listeners are observation only. They run synchronously, so a listener can still request cancellation through an owned `AbortController`. A listener throw or rejected promise never triggers another operation, opens the breaker, replaces a result, runs a fallback or prevents timeout settlement. Pending observation is never awaited. Put required persistence and other authoritative work in the operation callback.
 
-`attachPolicyLogger` and the Dot adapter log canonical failure codes instead of callback error messages or returned payloads. An unknown throw is labelled `failure.unexpected_defect`. Observer defects emit the same safe code through `arki:resilience`; a broken diagnostic reporter cannot affect execution. Explicit user listeners still receive the original event and own their logging policy. This does not add OpenTelemetry spans.
+`attachPolicyLogger` and the Dot adapter log canonical failure codes instead of callback error messages or returned payloads. An unknown throw is labelled `failure.unexpected_defect`. Observer defects emit the same safe code through `arki:resilience`; a broken diagnostic reporter cannot affect execution. Explicit user listeners still receive the original event and own their logging policy. Owned execution emits OpenTelemetry spans by default; see the coverage below.
 
 Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
+
+#### Default tracing
+
+The `@arki/resilience` tracer inherits the active caller context. Configure the SDK and exporters in the application; standalone use and Dot use the same instrumentation. No SDK is installed by this library.
+
+| Span | Boundary |
+| --- | --- |
+| `resilience.execute` | One public owned policy call, including fallback and pre-aborted refusal |
+| `resilience.attempt` | Each retry attempt, including its inner policies |
+| `resilience.wait` | The selected retry delay, including cancellation or clock refusal |
+| `resilience.circuit_breaker` | Breaker admission and execution, including open-circuit refusal |
+| `resilience.timeout` | Deadline ownership until the policy settles |
+| `resilience.bulkhead` | Capacity admission, queue wait and execution until settlement |
+
+Composition bypasses nested public wrappers: one logical call has one `resilience.execute` span, while distinct inner policies retain their spans. `noop` needs only the logical span; static builders and backoff calculations need no separate spans. Explicit foreign policies passed to `withResilience` retain their own instrumentation; this coverage is for Arki-owned policies.
+
+Only canonical `failure.code`, zero-based attempt numbers and selected delay milliseconds are collected. Raw callback throws use `failure.unexpected_defect` on the failed inner span; a successful fallback leaves the outer call successful. No exception messages, causes, payloads, IDs or preset names are recorded. Custom child spans inherit the current policy context, including across awaits with an application context manager.
+
+Rejected, pending, repeated and throwing telemetry callbacks cannot replace outcomes or repeat execution. Synchronous cancellation by instrumentation is still respected. A timeout span ends when the policy settles, not when uncooperative foreign work eventually stops. Dedicated metrics and breaker state-transition events remain outside this coverage; existing policy events and safe logger/Dot diagnostics remain available.
+
 
 ### Dot unit
 

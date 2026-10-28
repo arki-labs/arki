@@ -9,6 +9,7 @@ import type { ExecutionFailure } from './errors.js';
 import type { Policy, PolicyCallback, PolicyContext, FailureReason, PolicyExecution } from './policy.js';
 import { Cancelled } from './errors.js';
 import { observeEvent } from './observers.js';
+import { withPolicySpan } from './telemetry.js';
 
 /** @internal */
 export type Engine<E = never> = IPolicy<IDefaultPolicyContext, E | ExecutionFailure>;
@@ -37,13 +38,16 @@ class OwnedEngine<E> implements Engine<E> {
   declare readonly _altReturn: E | ExecutionFailure;
   readonly onSuccess;
   readonly onFailure: Engine<E>['onFailure'];
-  constructor(readonly engine: IPolicy<IDefaultPolicyContext>, readonly refuse: (error: unknown) => E) {
+  constructor(readonly engine: IPolicy<IDefaultPolicyContext>, readonly refuse: (error: unknown) => E, readonly spanName?: string) {
     this.onSuccess = observeEvent(engine.onSuccess, engine);
     this.onFailure = listener => observeEvent(engine.onFailure, engine)(
       event => listener({ ...event, reason: originalReason(event.reason) }),
     );
   }
   async execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
+    return this.spanName === undefined ? this.run(fn, signal) : withPolicySpan(this.spanName, () => this.run(fn, signal));
+  }
+  private async run<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
     if (signal?.aborted) return Cancelled({ cause: signal.reason });
     try {
       return await this.engine.execute(async context => {
@@ -64,19 +68,21 @@ class OwnedEngine<E> implements Engine<E> {
   }
 }
 /** @internal Protect callback provenance inside one engine, classify only its own refusal. */
-export function ownedEngine<E>(engine: IPolicy<IDefaultPolicyContext>, refuse: (error: unknown) => E): Engine<E> {
-  return new OwnedEngine(engine, refuse);
+export function ownedEngine<E>(engine: IPolicy<IDefaultPolicyContext>, refuse: (error: unknown) => E, spanName?: string): Engine<E> {
+  return new OwnedEngine(engine, refuse, spanName);
 }
 
 /** Public outcome supervision is separate from raw retry/fallback execution. */
 class OwnedExecution<F, E> implements PolicyExecution<F, E> {
   constructor(readonly raw: PolicyExecution<F, E>) {}
   readonly execute = async <T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E | ExecutionFailure> => {
-    try {
-      return await executeRaw(this, fn, signal);
-    } catch (error) {
-      return UnexpectedDefect({ cause: error });
-    }
+    return withPolicySpan('resilience.execute', async () => {
+      try {
+        return await executeRaw(this, fn, signal);
+      } catch (error) {
+        return UnexpectedDefect({ cause: error });
+      }
+    });
   };
 }
 function isOwnedExecution<F, E>(policy: PolicyExecution<F, E>): policy is OwnedExecution<F, E> {

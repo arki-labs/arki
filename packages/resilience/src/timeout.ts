@@ -8,6 +8,7 @@ import type { Engine } from './engine.js';
 import { Timeout, Cancelled } from './errors.js';
 import { fromEngine, ownedEngine } from './engine.js';
 import { createEvent } from './event.js';
+import { withPolicySpan } from './telemetry.js';
 
 const cancelledErrorSchema = z.object({ isTaskCancelledError: z.literal(true) });
 
@@ -21,6 +22,9 @@ class TimeoutEngine implements Engine<TimeoutFailure> {
   readonly onTimeout = this.deadline.on;
   constructor(readonly timeoutMs: number) {}
   async execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
+    return withPolicySpan('resilience.timeout', () => this.run(fn, signal));
+  }
+  private async run<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
     // A per-call engine has no persistent state. Its first observer captures origin
     // before subscribers can synchronously abort the caller.
     const engine = timeout(this.timeoutMs, TimeoutStrategy.Aggressive);

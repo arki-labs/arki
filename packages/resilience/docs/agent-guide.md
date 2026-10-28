@@ -59,9 +59,15 @@ const answer = await withResilience(() => callBilling(), externalApiPolicy);
 
 Subscribe to policy events for diagnostics. Listeners run synchronously; their thrown errors and rejected promises are supervised, and pending promises are never awaited. Observer failure cannot retry completed work or prevent timeout settlement. Synchronous signal cancellation keeps its existing semantics. Put required effects in the operation callback.
 
-Default logger and Dot records contain canonical failure codes, not callback messages or returned payloads. Unknown throws and observer defects use `failure.unexpected_defect`. User listeners still receive original events. Reporter failure is nonauthoritative. OpenTelemetry spans remain separate work.
+Default logger and Dot records contain canonical failure codes, not callback messages or returned payloads. Unknown throws and observer defects use `failure.unexpected_defect`. User listeners still receive original events. Reporter failure is nonauthoritative. Owned execution emits OpenTelemetry spans by default.
 
 Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
+
+### Trace policy execution
+
+Configure OpenTelemetry once at the application boundary. The `@arki/resilience` tracer emits `resilience.execute` around each owned public call. Retry emits `resilience.attempt` and `resilience.wait`; engine execution emits `resilience.circuit_breaker`, `resilience.timeout` and `resilience.bulkhead`. Composition keeps one logical execution span. Attach custom spans in the callback with the application's OTel API; active context follows the current engine/attempt.
+
+Only canonical failure codes, attempt numbers and selected delay milliseconds are recorded. Telemetry cannot replace results, repeat work or wait for a pending reporter. Timeout spans describe policy settlement, not termination of abandoned foreign effects. Foreign policies retain their own instrumentation. Dedicated metrics and breaker transition events remain open; static builders need no spans.
 
 ## Errors
 

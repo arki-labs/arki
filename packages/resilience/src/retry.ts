@@ -15,6 +15,7 @@ import type { RetryFailure } from './errors.js';
 import { Cancelled } from './errors.js';
 import { createEvent } from './event.js';
 import { ownPolicy } from './engine.js';
+import { withPolicySpan } from './telemetry.js';
 
 import type { Backoff } from './backoff.js';
 import type {
@@ -54,9 +55,11 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       const beforeAttempt = retryCancellation(signal);
       if (beforeAttempt !== undefined) return beforeAttempt;
       const started = success.listening() || failure.listening() ? nowMs() : 0;
-      let failed: { readonly error: unknown } | { readonly value: Awaited<T> };
+      // Instrumentation may synchronously cancel after the loop preflight.
+      const call = () => retryCancellation(signal) ?? fn({ signal, attempt });
+      let failed: { readonly error: unknown } | { readonly value: Awaited<ReturnType<typeof call>> };
       try {
-        const value = await fn({ signal, attempt });
+        const value = await withPolicySpan('resilience.attempt', call, { 'resilience.attempt': attempt });
         if (!isFailure<unknown>(value)) {
           if (success.listening()) success.emit({ duration: nowMs() - started });
           return value;
@@ -91,7 +94,14 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       const afterRetry = retryCancellation(signal);
       if (afterRetry !== undefined) return 'value' in failed ? failed.value : afterRetry;
       try {
-        const sleepResult = await clock.sleep(delay, signal);
+        const sleepResult = await withPolicySpan('resilience.wait', async () => {
+          const beforeWait = retryCancellation(signal);
+          if (beforeWait !== undefined) return 'value' in failed ? failed.value : beforeWait;
+          return await clock.sleep(delay, signal);
+        }, {
+          'resilience.attempt': attempt + 1,
+          'resilience.delay_ms': delay,
+        });
         if (sleepResult !== undefined) return sleepResult;
       } catch (error) {
         return UnexpectedDefect({ cause: error });

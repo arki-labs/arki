@@ -69,6 +69,7 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "cockatiel": "catalog:",
     "zod": "catalog:"
   },
@@ -79,6 +80,7 @@
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "opossum": "^10.0.0",
     "p-retry": "^8.0.1",

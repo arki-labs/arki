@@ -109,7 +109,7 @@ const defaultRetry = backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 
 export function createRetryPolicy<Mapped = never>(options: RetryPolicyOptions<Mapped> = {}): RetryPolicy<Mapped> {
   const retry = buildRetryPolicy(options.backoff ?? defaultRetry, options.clock ?? systemClock);
   if (options.onThrow === undefined) return retry;
-  return { ...withFallback(retry, options.onThrow), onRetry: retry.onRetry, onGiveUp: retry.onGiveUp };
+  return Object.assign(withFallback(retry, options.onThrow), { onRetry: retry.onRetry, onGiveUp: retry.onGiveUp });
 }
 
 /**
@@ -127,7 +127,7 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
   const policy = fromEngine(ownedEngine(engine, error => {
     if (is(error, circuitErrorSchema)) return CircuitOpen({ cause: error });
     throw error;
-  }), {
+  }, 'resilience.circuit_breaker'), {
     onBreak: (listener: Parameters<CircuitBreakerPolicy['onBreak']>[0]) => observeEvent(engine.onBreak, engine)(event => listener(
       'isolated' in event ? event : originalReason(event),
     )),
@@ -160,7 +160,7 @@ export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): Bulkh
     if (is(error, bulkheadErrorSchema)) return BulkheadRejected({ cause: error });
     if (is(error, cancelledErrorSchema)) return Cancelled({ cause: error });
     throw error;
-  }), { onReject: observeEvent(engine.onReject, engine) });
+  }, 'resilience.bulkhead'), { onReject: observeEvent(engine.onReject, engine) });
   return policy;
 }
 
@@ -208,7 +208,7 @@ export function createResiliencePolicy<Mapped = never>(
   const policy = composeResiliencePolicy(options);
   if (options.onThrow === undefined) return policy;
   // Outermost, before the public defect boundary; returned refusals bypass it.
-  return { ...withFallback(policy, options.onThrow), components: policy.components };
+  return Object.assign(withFallback(policy, options.onThrow), { components: policy.components });
 }
 
 /** [bulkhead ->] retry -> circuit breaker -> timeout, without `onThrow`. */
