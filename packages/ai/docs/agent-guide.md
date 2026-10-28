@@ -10,7 +10,7 @@ Read this before changing code that calls a model. The [README](../README.md) is
 - **Embeddings** are not made here. Use `@arki/embeddings`; the vector index is sized from `embedder.space`.
 - The **vector index** (`createVectorIndex`) is Qdrant when `QDRANT_URL` is set (`durable: true`) and in memory otherwise. `runVectorReconciliation` drains erasure tombstones and repairs drift. It runs from cron.
 - The **tool loop** (`createAiSdkRuntime(...).runToolLoop`) streams `RuntimeEvent`s. Tools come from `defineAgentTool`, with an `inputSchema` and an `output` schema.
-- **`createFlow`** runs named nodes in memory. It is not durable.
+- **`createFlow`** runs named nodes in memory. It is not durable. `Flow.run` returns retry-wait `UnexpectedDefect` outcomes unchanged, alongside inferred node refusals; these stop retries and success persistence.
 - Expected refusals are **returned**: `RateLimited` and `BudgetExceeded` from `@arki/ai`, and any failure a tool returns.
 
 ## Task map

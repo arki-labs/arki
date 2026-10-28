@@ -1,48 +1,37 @@
 import type { Clock } from '@arki/clock';
+import type { FailureOf } from '@arki/failure';
+import { SleepCancelled } from '@arki/clock';
+import { UnexpectedDefect } from '@arki/failure';
 
-import { abortedError, invalidWait, isValidWait } from './errors.js';
+import { assertWait, Cancelled } from './errors.js';
 import { systemClock } from './system-clock.js';
 
 /** Options of {@link sleep}. */
 export type SleepOptions = {
-  /** Cuts the wait short. The promise rejects with `ARKI_ASYNC_E002`, and `cause` is `signal.reason`. */
+  /** Cuts the wait short, returning Cancelled with the private signal reason. */
   readonly signal?: AbortSignal;
-  /** Whose timer to wait on. Default: the system clock. Pass a `MockClock` to make tests instant. */
+  /** Whose timer to wait on. Default: the system clock. */
   readonly clock?: Clock;
 };
 
-/**
- * Resolves after `ms` milliseconds. `0` still waits for the next macrotask.
- *
- * Never throws synchronously: an invalid `ms` (`ARKI_ASYNC_E001`) or an abort
- * (`ARKI_ASYNC_E002`) rejects the returned promise. An already-aborted signal
- * rejects without creating a timer. Settling clears the timer and the abort
- * listener, so nothing stays alive.
- */
-export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (!isValidWait(ms)) {
-      const failure = invalidWait('sleep', 'ms', ms);
-      reject(failure);
-      return;
-    }
-    const { signal, clock = systemClock } = options;
-    if (signal?.aborted) {
-      reject(abortedError('sleep()', signal.reason));
-      return;
-    }
-    if (signal === undefined) {
-      clock.setTimer(resolve, ms);
-      return;
-    }
-    const onAbort = (): void => {
-      cancel();
-      reject(abortedError('sleep()', signal.reason));
-    };
-    const cancel = clock.setTimer(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
+/** Waits for a timer, returning cancellation or a supervised provider defect. Invalid delays are static misuse. */
+export function sleep(
+  ms: number,
+  options?: { readonly clock?: never; readonly signal?: never },
+): Promise<void | Exclude<FailureOf<typeof sleepRuntime>, ReturnType<typeof Cancelled>>>;
+export function sleep(ms: number, options: SleepOptions): Promise<void | FailureOf<typeof sleepRuntime>>;
+export function sleep(ms: number, options: SleepOptions = {}): Promise<void | FailureOf<typeof sleepRuntime>> {
+  return sleepRuntime(ms, options);
+}
+async function sleepRuntime(ms: number, options: SleepOptions) {
+  assertWait('sleep', 'ms', ms);
+  try {
+    const result = await (options.clock ?? systemClock).sleep(ms, options.signal);
+    if (SleepCancelled.is(result)) return Cancelled({ cause: result.cause });
+    if (UnexpectedDefect.is(result)) return result;
+    if (result !== undefined) return UnexpectedDefect({ cause: result });
+    return;
+  } catch (error) {
+    return UnexpectedDefect.is(error) ? error : UnexpectedDefect({ cause: error });
+  }
 }

@@ -9,16 +9,15 @@
  * Nobody signed in: the pass stops and emits `auth-required`, entries stay.
  * Another actor signed in: the entry is dead-lettered unsent (`ACTOR_MISMATCH`).
  */
-import { isFailure, UnexpectedDefect } from '@arki/failure';
-import { QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.ts';
-import type { DrainFailure, QueueStorageFailure } from './failures.ts';
-import { observeQueue } from './telemetry.ts';
-
 import { sleep } from '@arki/async';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-import type { QueueStorage } from './storage.ts';
 import type { DeadLetterStore } from './dead-letter.ts';
+import type { DrainFailure, QueueStorageFailure } from './failures.ts';
 import type { AnyRpcClient, QueuedMutation, QueueEvent } from './queue.ts';
+import type { QueueStorage } from './storage.ts';
+import { QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.ts';
+import { observeQueue } from './telemetry.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,31 +66,29 @@ function getHttpStatus(error: unknown): number | null {
 }
 
 function classifyResponse(error: unknown): 'dead-letter' | 'retry' | 'halt' | ReturnType<typeof UnexpectedDefect> {
-    if (UnexpectedDefect.is(error)) return error;
-    if (QueueTransportUnavailable.is(error)) return 'retry';
-    const status = getHttpStatus(error);
+  if (UnexpectedDefect.is(error)) return error;
+  if (QueueTransportUnavailable.is(error)) return 'retry';
+  const status = getHttpStatus(error);
 
-    if (status === 401) {
-      return 'halt';
-    }
+  if (status === 401) {
+    return 'halt';
+  }
 
-    if (status !== null && status >= 400 && status < 500) {
-      // 4xx non-auth — dead-letter immediately
-      return 'dead-letter';
-    }
+  if (status !== null && status >= 400 && status < 500) {
+    // 4xx non-auth — dead-letter immediately
+    return 'dead-letter';
+  }
 
-    if (status !== null && status >= 500 && status <= 599) return 'retry';
-    return UnexpectedDefect({ cause: error });
+  if (status !== null && status >= 500 && status <= 599) return 'retry';
+  return UnexpectedDefect({ cause: error });
 }
-
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
-  const { storage, dlStore, rpc, actorId, maxRetries, backoff, onDeadLetter, onStateChange, emit } =
-    options;
+  const { storage, dlStore, rpc, actorId, maxRetries, backoff, onDeadLetter, onStateChange, emit } = options;
 
   // A successful server call is never repeated in this runtime if queue cleanup fails.
   const accepted = new Map<QueuedMutation['id'], QueuedMutation>();
@@ -123,14 +120,13 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
     }
   }
 
-
   /** Remove an entry from the queue and park it in the dead-letter store. */
   async function deadLetter(entry: QueuedMutation, error: Error): Promise<void | QueueStorageFailure> {
     const after = await storage.read();
     if (isFailure(after)) return after;
     const parked = await dlStore.add(entry, error);
     if (isFailure(parked)) return parked;
-    const removed = await storage.write(after.filter((m) => m.id !== entry.id));
+    const removed = await storage.write(after.filter(m => m.id !== entry.id));
     if (isFailure(removed)) return removed;
     notify(() => emit({ type: 'dead-letter', entry, error }));
     notify(() => onDeadLetter?.(entry, error));
@@ -156,7 +152,10 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
           return false;
         }
         const message = 'Queued under another account; not sent under the account signed in now';
-        const result = await deadLetter({ ...current, lastError: { code: 'ACTOR_MISMATCH', message } }, new Error(message));
+        const result = await deadLetter(
+          { ...current, lastError: { code: 'ACTOR_MISMATCH', message } },
+          new Error(message),
+        );
         return isFailure(result) ? result : true;
       }
 
@@ -166,9 +165,11 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       if (result === 'sent') {
         accepted.set(current.id, current);
         const after = await storage.read();
-        if (isFailure(after)) return QueueEffectUnconfirmed({ id: current.id, idempotencyKey: current.idempotencyKey }, { cause: after });
-        const removed = await storage.write(after.filter((m) => m.id !== entry.id));
-        if (isFailure(removed)) return QueueEffectUnconfirmed({ id: current.id, idempotencyKey: current.idempotencyKey }, { cause: removed });
+        if (isFailure(after))
+          return QueueEffectUnconfirmed({ id: current.id, idempotencyKey: current.idempotencyKey }, { cause: after });
+        const removed = await storage.write(after.filter(m => m.id !== entry.id));
+        if (isFailure(removed))
+          return QueueEffectUnconfirmed({ id: current.id, idempotencyKey: current.idempotencyKey }, { cause: removed });
         accepted.delete(current.id);
         notify(() => emit({ type: 'sent', entry: current }));
         return true;
@@ -210,13 +211,16 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       if (isFailure(persisted)) return persisted;
 
       const delay = backoff(nextAttempts);
-      await sleep(delay);
+      const waited = await sleep(delay);
+      if (isFailure(waited)) return waited;
     }
   }
 
   function reconcileAccepted(failure: QueueStorageFailure): DrainFailure {
     const entry = accepted.values().next().value;
-    return entry === undefined ? failure : QueueEffectUnconfirmed({ id: entry.id, idempotencyKey: entry.idempotencyKey }, { cause: failure });
+    return entry === undefined
+      ? failure
+      : QueueEffectUnconfirmed({ id: entry.id, idempotencyKey: entry.idempotencyKey }, { cause: failure });
   }
 
   async function drain(): Promise<void | DrainFailure> {
@@ -242,7 +246,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
         // Verify the entry is still present (could be removed by a parallel caller)
         const current = await storage.read();
         if (isFailure(current)) return reconcileAccepted(current);
-        const live = current.find((m) => m.id === snapshot.id);
+        const live = current.find(m => m.id === snapshot.id);
         if (!live) continue;
 
         const shouldContinue = await processEntry(live);
@@ -258,7 +262,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
   async function updateEntry(updated: QueuedMutation): Promise<void | QueueStorageFailure> {
     const current = await storage.read();
     if (isFailure(current)) return current;
-    return storage.write(current.map((m) => (m.id === updated.id ? updated : m)));
+    return storage.write(current.map(m => (m.id === updated.id ? updated : m)));
   }
 
   // Serialise concurrent drain calls — only one drain runs at a time.

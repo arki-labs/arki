@@ -1,12 +1,13 @@
 /** Owned resources and child work with callback-inferred failure contracts. */
 import type { Failure, FailureDefinition, FailureIn, FailureOf } from '@arki/failure';
-import { CLOCK_ERROR_CODES, ClockError, SleepCancelled } from '@arki/clock';
+import { SleepCancelled } from '@arki/clock';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { ScopeAggregate, SupervisorFailure } from './errors.js';
-import { ASYNC_ERROR_CODES, AsyncError, Cancelled, Deadline, scopeAggregate } from './errors.js';
+import { Cancelled, Deadline, scopeAggregate } from './errors.js';
 import { scopeTelemetry } from './scope-telemetry.js';
 import { linkedController } from './signal.js';
+import { watchSignal } from './watch-signal.js';
 
 const EntryTag: unique symbol = Symbol('scope.entry');
 function acquired<Value>(value: Value): value is Exclude<Value, Failure> {
@@ -247,21 +248,10 @@ function lifetimeRuntime(options: ScopeOptions) {
     if (!primary.includes(failure)) primary.push(failure);
     controller.abort(ownedReason);
   };
-  const onAbort = () => abort(Cancelled({ cause: options.signal?.reason }));
-  const onDeadline = () => abort(Deadline({ cause: options.deadline?.reason }));
-  if (options.signal?.aborted) onAbort();
-  else options.signal?.addEventListener('abort', onAbort, { once: true });
-  if (options.deadline?.aborted) onDeadline();
-  else options.deadline?.addEventListener('abort', onDeadline, { once: true });
+  const unwatchSignal = watchSignal(options.signal, reason => abort(Cancelled({ cause: reason })), abort);
+  const unwatchDeadline = watchSignal(options.deadline, reason => abort(Deadline({ cause: reason })), abort);
   const normalize = (error: unknown) => {
-    if (
-      controller.signal.reason === ownedReason &&
-      (error === ownedReason ||
-        (((error instanceof AsyncError && error.code === ASYNC_ERROR_CODES.aborted) ||
-          (error instanceof ClockError && error.code === CLOCK_ERROR_CODES.aborted)) &&
-          error.cause === ownedReason))
-    )
-      return;
+    if (controller.signal.reason === ownedReason && error === ownedReason) return;
     return UnexpectedDefect({ cause: error });
   };
   const finalize = async (run: () => unknown) => {
@@ -309,7 +299,11 @@ function lifetimeRuntime(options: ScopeOptions) {
         .then(
           value => {
             if (refused(value)) {
-              if ((Cancelled.is(value) || SleepCancelled.is(value)) && controller.signal.reason === ownedReason && value.cause === ownedReason)
+              if (
+                (Cancelled.is(value) || SleepCancelled.is(value)) &&
+                controller.signal.reason === ownedReason &&
+                value.cause === ownedReason
+              )
                 return;
               abort(value);
             }
@@ -338,8 +332,10 @@ function lifetimeRuntime(options: ScopeOptions) {
       // eslint-disable-next-line failure/must-use -- Close reduces the retained primary failures after every finalizer.
       await quiesce();
       for (const finalizer of finalizers.reverse()) await finalize(finalizer);
-      options.signal?.removeEventListener('abort', onAbort);
-      options.deadline?.removeEventListener('abort', onDeadline);
+      for (const unwatch of [unwatchSignal, unwatchDeadline]) {
+        const failure = await unwatch();
+        if (failure !== undefined) cleanupFailures.push(failure);
+      }
       unlink();
       const outcome = finish(undefined, primary, cleanupFailures);
       telemetry.end(outcome, primary, cleanupFailures, finalizers.length);

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Failure } from '@arki/failure';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { FlowConfig, FlowNode } from './flow';
 import { createFlow, Flow } from './flow';
@@ -51,7 +51,9 @@ describe('returned node failures', () => {
     });
 
     const result = await flow.run(state, {});
-    expectTypeOf(result).toEqualTypeOf<typeof state | ReturnType<typeof PersistenceRefused>>();
+    expectTypeOf(result).toEqualTypeOf<
+      typeof state | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect>
+    >();
     expect(result).toBe(refusal);
     expect(state).toEqual({ saved: false });
     expect(attempts).toBe(1);
@@ -77,7 +79,10 @@ it('infers distinct node failures from their definitions without widening them',
   const flow = createFlow<State, Context>()({ start: 'save', nodes: { save, approve } });
   const result = await flow.run({ saved: false }, { approval: true });
   expectTypeOf(result).toEqualTypeOf<
-    State | ReturnType<typeof PersistenceRefused> | ReturnType<typeof ApprovalRefused>
+    | State
+    | ReturnType<typeof PersistenceRefused>
+    | ReturnType<typeof ApprovalRefused>
+    | ReturnType<typeof UnexpectedDefect>
   >();
   expect(ApprovalRefused.is(result)).toBe(true);
 });
@@ -92,7 +97,7 @@ it('returns successful state unwrapped and keeps failure-free authoring compatib
     },
   });
   const result = await flow.run({ saved: false }, {});
-  expectTypeOf(result).toEqualTypeOf<State>();
+  expectTypeOf(result).toEqualTypeOf<State | ReturnType<typeof UnexpectedDefect>>();
   expect(result).toEqual({ saved: true });
 });
 
@@ -109,7 +114,7 @@ it('recognizes a failure even when its type is also admitted as state', async ()
   };
   const flow = new Flow(config);
   const result = await flow.run(refusal, {});
-  expectTypeOf(result).toEqualTypeOf<typeof refusal>();
+  expectTypeOf(result).toEqualTypeOf<typeof refusal | ReturnType<typeof UnexpectedDefect>>();
   expect(result).toBe(refusal);
   expect(merged).toBe(false);
 });
@@ -127,7 +132,9 @@ it('contextually types inline nodes while inferring their concrete failure', asy
     },
   });
   const result = await flow.run({ saved: false }, { allowed: true });
-  expectTypeOf(result).toEqualTypeOf<State | ReturnType<typeof PersistenceRefused>>();
+  expectTypeOf(result).toEqualTypeOf<
+    State | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect>
+  >();
   expect(result).toEqual({ saved: true });
 });
 
@@ -167,6 +174,39 @@ it('infers overlapping refusals precisely alongside state patches and void nodes
   });
 
   const result = await flow.run({ code: 'ready', saved: false }, {});
-  expectTypeOf(result).toEqualTypeOf<State | typeof refusal>();
+  expectTypeOf(result).toEqualTypeOf<State | typeof refusal | ReturnType<typeof UnexpectedDefect>>();
   expect(result).toBe(refusal);
+});
+
+it('returns a retry-wait defect unchanged without another attempt or a success event', async () => {
+  const { SystemClock } = await import('@arki/clock');
+  const { vi } = await import('vitest');
+  const cause = new Error('timer provider failed');
+  const defect = UnexpectedDefect({ cause });
+  const wait = vi.spyOn(SystemClock.prototype, 'sleep').mockResolvedValue(defect);
+  let attempts = 0;
+  const events: string[] = [];
+  try {
+    const flow = createFlow<{ saved: boolean }, Record<string, never>>({
+      start: 'save',
+      onEvent: event => {
+        events.push(event.type);
+      },
+      nodes: {
+        save: {
+          id: 'save',
+          retries: 1,
+          run: () => {
+            attempts++;
+            return Promise.reject(new Error('retryable callback'));
+          },
+        },
+      },
+    });
+    expect(await flow.run({ saved: false }, {})).toBe(defect);
+    expect(attempts).toBe(1);
+    expect(events).not.toContain('flow:complete');
+  } finally {
+    wait.mockRestore();
+  }
 });

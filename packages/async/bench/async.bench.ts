@@ -53,7 +53,7 @@ export default defineSuite({
     'Run on a real clock with a 60 second wait that is never reached; nothing here uses fake timers.',
     '`lodash.debounce` and `lodash.throttle` are the standalone packages (4.0.8 and 4.1.1) most projects install; the monolithic `lodash` 4.18 behaves like `@arki/async`.',
     '`@arki/async` also validates the wait and returns typed controls (`cancel`, `flush`, `pending`).',
-    '`mapConcurrent` also hands every call a shared `AbortSignal` that aborts on the first failure, and waits for in-flight calls before it rejects; `p-map` and `p-limit` do neither, so on the success path measured here `@arki/async` does strictly more work.',
+    '`mapConcurrent` also hands every call a shared `AbortSignal` that aborts on the first failure, and waits for in-flight calls before returning the canonical outcome; `p-map` and `p-limit` do neither, so on the success path measured here `@arki/async` does strictly more work.',
   ],
   groups: [
     compare<number>({
@@ -207,7 +207,8 @@ export default defineSuite({
       title: 'Sleep with a signal that is already aborted',
       contract: {
         id: 'async-sleep-abort/v1',
-        description: 'the promise rejects at once, without waiting for the delay',
+        description:
+          'cancellation is reported at once, without waiting for the delay; returned Failure versus foreign rejection is normalized for this measurement',
       },
       mode: 'async',
       inputs: ['abort'],
@@ -218,11 +219,7 @@ export default defineSuite({
           label: '@arki/async',
           package: '@arki/async',
           setup: () => AbortSignal.abort(),
-          run: signal =>
-            sleep(WAIT, { signal }).then(
-              () => 'resolved',
-              () => 'rejected',
-            ),
+          run: signal => sleep(WAIT, { signal }).then(outcome => (outcome === undefined ? 'resolved' : 'rejected')),
         },
         delay: {
           label: 'delay',

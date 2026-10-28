@@ -4,7 +4,7 @@ Timing and concurrency helpers on plain Promises and `AbortSignal`: an abortable
 
 - **Same as lodash.** `debounce` and `throttle` call the function at the same moments as lodash, with the latest arguments. The test suite replays random call schedules against lodash and requires identical results.
 - **No leaks.** `sleep` clears its timer and its abort listener when it settles. `scoped` releases what its body acquired. `all`, `mapConcurrent` and `race` never settle while a task they started is still running.
-- **Typed scope failures.** Owned scopes infer refusals from their callbacks and return canonical cancellation, deadline and defect values. Timing helpers retain coded `AsyncError` exceptions.
+- **Typed owned outcomes.** Scopes infer callback refusals. Concurrency and waits return canonical cancellation, deadline and defect values. Static setup misuse still throws `AsyncError`.
 
 ## Install
 
@@ -21,7 +21,7 @@ Load pages four at a time. Request cancellation after five seconds, wait for sta
 ```ts from="examples/load-pages.ts#load-pages"
 /** A connection that loads one page at a time and must be closed when the work ends. */
 export type PageClient = {
-  load(url: string, signal: AbortSignal): Promise<string>;
+  load(url: string, signal: AbortSignal): Promise<string | FailureOf<typeof sleep>>;
   close(): Promise<void>;
 };
 
@@ -37,11 +37,14 @@ export function loadPages(
   const clock = options.clock ?? new SystemClock();
   return scoped(
     {
-      deadline: resource(() => {
-        const controller = new AbortController();
-        const cancel = clock.setTimer(() => controller.abort(), 5000);
-        return { signal: controller.signal, cancel };
-      }, deadline => deadline.cancel()),
+      deadline: resource(
+        () => {
+          const controller = new AbortController();
+          const cancel = clock.setTimer(() => controller.abort(), 5000);
+          return { signal: controller.signal, cancel };
+        },
+        deadline => deadline.cancel(),
+      ),
     },
     ({ deadline }, signal) =>
       scoped(
@@ -63,6 +66,7 @@ Debounce and throttle work like lodash:
 
 ```ts run
 import { debounce, sleep, throttle } from '@arki/async';
+import { orThrow } from '@arki/failure';
 
 const saved: string[] = [];
 const save = debounce((text: string) => {
@@ -75,7 +79,7 @@ save('ab');
 save.flush(); // run the pending call now, with the latest arguments
 save.cancel(); // drop whatever is still pending
 onScroll(10);
-await sleep(5);
+orThrow(await sleep(5));
 if (saved.join() !== 'ab' || save.pending) throw new Error(`unexpected: ${saved.join()}`);
 ```
 
@@ -88,16 +92,16 @@ if (saved.join() !== 'ab' || save.pending) throw new Error(`unexpected: ${saved.
 
 ## Runtime support
 
-Pure ESM. Runtime dependencies are `@arki/clock` and `@arki/failure`; Standard Schema is type-only. It uses `setTimeout`, `clearTimeout`, `AbortController`, `AbortSignal`, `AggregateError` and `Date.now`, at call time. Importing it does nothing. Vitest and Jest fake timers work without setup.
+Pure ESM. Runtime dependencies are `@arki/clock`, `@arki/failure`, `@arki/schema` and the OpenTelemetry API; Standard Schema is type-only. It uses `setTimeout`, `clearTimeout`, `AbortController`, `AbortSignal`, `AggregateError` and `Date.now`, at call time. Importing it does nothing. Vitest and Jest fake timers work without setup.
 
 Tested on Node, Bun, Deno and Chromium with `bun run test:runtimes`. Built for React Native (Hermes), which has no `Promise.withResolvers` or `AbortSignal.any`, so this package uses neither. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
 
 ## Public imports
 
-| Import               | Exports                                                                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Import               | Exports                                                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@arki/async`        | `sleep`, `debounce`, `throttle`, `all`, `mapConcurrent`, `race`, `timeout`; `resource`, `cleanup`, `child`, `scoped`, `openScope`, `dynamicScope`, `createLifetime`; descriptor guards/types, scope failures and timing errors |
-| `@arki/async/errors` | `AsyncError`, `ASYNC_ERROR_CODES`, `MAX_WAIT_MS`, `AsyncErrorCode`; `Cancelled`, `Deadline`, `ScopeFailed`, `scopeAggregate`, `SUPERVISOR_FAILURES` and their types                                                                                           |
+| `@arki/async/errors` | `AsyncError`, `ASYNC_ERROR_CODES`, `MAX_WAIT_MS`, `AsyncErrorCode`; `Cancelled`, `Deadline`, `ScopeFailed`, `scopeAggregate`, `SUPERVISOR_FAILURES` and their types                                                            |
 
 ## Timing API
 
@@ -107,17 +111,19 @@ Returns a promise that resolves after `ms` milliseconds. `ms` is a number from `
 
 - `sleep(0)` still waits for the next macrotask. It never resolves in the same tick.
 - An invalid `ms` rejects the promise with `ARKI_ASYNC_E001`. `sleep` never throws synchronously.
-- An already-aborted signal rejects at once and creates no timer. Aborting during the wait clears the timer and rejects with `ARKI_ASYNC_E002`. In both cases `error.cause` is `signal.reason`.
+- An already-aborted signal returns `Cancelled` and creates no timer. Aborting during the wait clears the timer before returning cancellation; its private cause is `signal.reason`. Clock provider faults return `UnexpectedDefect`. A default-clock wait with no signal has no cancellation outcome; an injected clock retains its cancellation contract.
 - `clock` is the `@arki/clock` `Clock` whose timer it waits on. The default is the system clock. Pass a `MockClock` and its `advance(ms)` ends the wait, so tests run instantly without fake timers.
 
 ```ts run
 import { sleep } from '@arki/async';
 import { MockClock } from '@arki/clock';
+import { isFailure } from '@arki/failure';
 
 const clock = new MockClock();
 const done = sleep(60_000, { clock });
 clock.advance(60_000);
-await done; // no real minute passed
+const outcome = await done; // no real minute passed
+if (isFailure(outcome)) throw new Error(outcome.code);
 ```
 
 ### `debounce(fn, wait, { leading, trailing, maxWait, clock }?)`
@@ -162,13 +168,20 @@ import { cleanup, resource, scoped } from '@arki/async';
 import { isFailure } from '@arki/failure';
 
 const events: string[] = [];
-const rows = await scoped({
-  db: resource(
-    () => ({ query: () => ['select 1'] }),
-    () => { events.push('db closed'); },
-  ),
-  metrics: cleanup(() => { events.push('metrics flushed'); }),
-}, ({ db }) => db.query());
+const rows = await scoped(
+  {
+    db: resource(
+      () => ({ query: () => ['select 1'] }),
+      () => {
+        events.push('db closed');
+      },
+    ),
+    metrics: cleanup(() => {
+      events.push('metrics flushed');
+    }),
+  },
+  ({ db }) => db.query(),
+);
 if (isFailure(rows)) throw new Error(rows.code);
 if (rows[0] !== 'select 1' || events.join() !== 'metrics flushed,db closed') throw new Error(events.join());
 ```
@@ -181,7 +194,7 @@ Use lexical nesting when one resource or child needs an earlier resource. Use `o
 
 For dynamic work, `dynamicScope([CanonicalFailure, ...])` fixes the allowed failure definitions before its body runs. Its `acquire`, `defer`, and `fork` registrations cannot enlarge that contract. An admitted acquisition failure remains owned even when its returned promise is ignored; recover before admission or in a separately supervised attempt.
 
-Owned lifetimes (`scoped`, `openScope`, `dynamicScope`, and `createLifetime`) emit one OpenTelemetry `async.scope` span and an `async.scope.duration` histogram under `@arki/async`. The span stays open through cancellation, child joining and cleanup. It records failure codes, status and counts; resource values, abort reasons and private causes are never exported. Owner-requested shutdown is successful control flow. Descriptor construction and guards do not emit spans.
+Owned lifetimes (`scoped`, `openScope`, `dynamicScope`, and `createLifetime`) emit one OpenTelemetry `async.scope` span and an `async.scope.duration` histogram under `@arki/async`. The span stays open through cancellation, child joining and cleanup. It records failure codes, status and counts; resource values, abort reasons and private causes are never exported. Owner-requested shutdown is successful control flow. Descriptor construction and guards do not emit spans. Concurrent calls emit one `async.all`, `async.mapConcurrent`, `async.race` or `async.timeout` span and an `async.operation.duration` histogram. Task callbacks activate the owner context; no per-item span duplicates it. A timeout span ends at the deadline; late task settlement cannot end it again. Raw Clock methods, sleep and debounce/throttle are timing substrates observed by enclosing work and do not emit a span per timer.
 
 Install your SDK and context manager at the app entry; providers may be registered after importing this package. With no SDK the API is a no-op. Scope callbacks activate the owned span, so nested scopes, custom OTel operations and app-configured log correlation share its trace. Use the typed `@opentelemetry/api` context, trace and metrics APIs for custom instrumentation. The library installs no SDK, logger or runtime-specific context manager. Telemetry failures cannot change callback execution or scope outcomes. Context across awaits requires an app-provided context manager for the runtime (including Hermes).
 
@@ -191,15 +204,18 @@ Install your SDK and context manager at the app entry; providers may be register
 
 ```ts run
 import { all } from '@arki/async';
+import { isFailure } from '@arki/failure';
 
 const getUser = (_signal: AbortSignal) => Promise.resolve({ name: 'Ana' });
 const getOrders = (_signal: AbortSignal) => Promise.resolve([1, 2, 3]);
 
-const [user, orders] = await all([signal => getUser(signal), signal => getOrders(signal)]);
+const result = await all([signal => getUser(signal), signal => getOrders(signal)]);
+if (isFailure(result)) throw new Error(result.code);
+const [user, orders] = result;
 if (user.name !== 'Ana' || orders.length !== 3) throw new Error('unexpected results');
 ```
 
-At most `concurrency` tasks run at once (default: all). On the first rejection the shared signal aborts so the siblings see it, no pending task starts, and the promise waits for the tasks in flight to settle before it rejects with that first error. No task outlives the call. Aborting `signal` does the same and rejects with `ARKI_ASYNC_E002`. On success the signal is left alone, so a result tied to it (a `fetch` response body) stays readable.
+At most `concurrency` tasks run at once (default: all). On the first rejection the shared signal aborts so the siblings see it, no pending task starts, and the promise waits for the tasks in flight to settle before returning `UnexpectedDefect` with that first exception as its private cause. No task outlives the call. Aborting `signal` does the same and returns `Cancelled`. On success the signal is left alone, so a result tied to it (a `fetch` response body) stays readable.
 
 ### `mapConcurrent(items, fn, { concurrency, signal }?)`
 
@@ -227,7 +243,7 @@ declare const mirrors: string[];
 const body = await race(mirrors.map(url => signal => fetch(url, { signal }).then(r => r.text())));
 ```
 
-When one task fulfills, every other task's signal aborts, and the promise waits for those losers to settle before it resolves. The winner's signal is never aborted. When every task rejects (or the list is empty), it rejects with an `AggregateError` of their errors in input order. Aborting `signal` aborts every task, waits for them, and rejects with `ARKI_ASYNC_E002`.
+When one task fulfills, every other task's signal aborts, and the promise waits for those losers to settle before it resolves. The winner's signal is never aborted. When every task rejects, it returns `UnexpectedDefect` with a private `AggregateError` of their exceptions in input order. An empty task list is static misuse and rejects with `AggregateError`. Aborting `signal` aborts every task, waits for them, and returns `Cancelled`.
 
 ### `timeout(task, ms, { signal, clock }?)`
 
@@ -238,10 +254,10 @@ import { timeout } from '@arki/async';
 
 declare const url: string;
 
-const res = await timeout(signal => fetch(url, { signal }), 5000); // rejects with ARKI_ASYNC_E004 after 5 s
+const res = await timeout(signal => fetch(url, { signal }), 5000); // returns Deadline after 5 s
 ```
 
-At `ms` the task's signal aborts (reason: the `ARKI_ASYNC_E004` error) and the promise rejects at once. Cancellation is cooperative: `timeout` does not wait for a task that ignores its signal, so such a task can keep running. Passing a scope signal to `timeout` does not make its detached settlement owned. Await the original work or register it with `child`; prefer a scope deadline signal when resources must stay alive until work settles. `ms` follows the `sleep` rules (`ARKI_ASYNC_E001`). `clock` sets whose timer measures the deadline, as in `sleep`.
+At `ms` the task's signal aborts with the canonical `Deadline` value and the operation returns that value. Task exceptions return `UnexpectedDefect`; external cancellation returns `Cancelled`. Late settlements remain observed. Cancellation is cooperative: `timeout` does not wait for a task that ignores its signal, so such a task can keep running. Passing a scope signal to `timeout` does not make its detached settlement owned. Await the original work or register it with `child`; prefer a scope deadline signal when resources must stay alive until work settles. `ms` follows the `sleep` rules (`ARKI_ASYNC_E001`). `clock` sets whose timer measures the deadline, as in `sleep`.
 
 ### Invalid `concurrency`
 
@@ -253,34 +269,26 @@ Use `@arki/lock` with its memory store for a mutex or a semaphore, and `Promise.
 
 ## Failure behaviour
 
-Scopes return typed `@arki/failure` values with inferred callback failures and canonical `Cancelled`, `Deadline`, `ScopeFailed`, and `UnexpectedDefect` outcomes. Other helpers retain `AsyncError` with stable codes and remediation. Match definitions or codes, never messages.
+Owned work returns ordinary values or canonical failures from `@arki/failure`. A returned failure keeps its original identity. Callback exceptions and provider registration/cleanup defects become `UnexpectedDefect` with private causes. `race` preserves first-fulfillment semantics: a losing rejection does not replace a later fulfilled value; when all tasks reject their exceptions remain in its private aggregate cause.
 
-`debounce` and `throttle` throw `ARKI_ASYNC_E001` when you call them with a bad wait. The other timing/concurrency helpers reject their promises and never throw synchronously. A task that throws its own error makes `all`, `mapConcurrent` and `timeout` reject with that error unchanged. `race` rejects with an `AggregateError` when every task fails.
+`all` and `mapConcurrent` preserve fulfilled `Failure` values as explicit tuple/array elements. They do not hoist them or stop admission because of them. `race` and `timeout` preserve a directly fulfilled failure unchanged. The failure union is inferred from actual operation and callback results.
 
-| Code              | Raised by                                                    | Meaning                                                                                    |
-| ----------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `async.cancelled` | Owned scopes | Cancellation requested by the owner or external signal. |
-| `async.deadline` | Owned scopes | Deadline requested cancellation; settlement is still joined. |
-| `async.scope_failed` | Owned scopes | Multiple primary/cleanup failures; counts are public, exact members remain local. |
-| `failure.unexpected_defect` | Owned scopes | An unknown exception was caught at an owned boundary. |
-| `ARKI_ASYNC_E001` | `sleep`, `debounce`, `throttle`, `timeout`                   | A wait is negative, `NaN`, not finite, or above `2_147_483_647`.                           |
-| `ARKI_ASYNC_E002` | `sleep`, `all`, `mapConcurrent`, `race`, `timeout` | The work was aborted by its signal. `cause` is `signal.reason`.                            |
-| `ARKI_ASYNC_E003` | Reserved legacy scope exception | Managed scopes now return inferred failures and `ScopeFailed`. |
-| `ARKI_ASYNC_E004` | `timeout`                                                    | The deadline passed before the task finished.                                              |
-| `ARKI_ASYNC_E005` | `all`, `mapConcurrent`                                       | `concurrency` is not a positive integer or `Infinity`.                                     |
+| Code                        | Owner                          | Meaning                                                                     |
+| --------------------------- | ------------------------------ | --------------------------------------------------------------------------- |
+| `async.cancelled`           | Waits and concurrency          | An external signal or clock provider cancelled the operation.               |
+| `async.deadline`            | Scopes and timeout             | The owned deadline elapsed.                                                 |
+| `async.scope_failed`        | Scopes                         | Multiple primary/cleanup failures; public counts and exact private members. |
+| `failure.unexpected_defect` | Owned execution                | A callback or foreign provider failed unexpectedly.                         |
+| `ARKI_ASYNC_E001`           | Static delay definitions       | Delay is outside the supported timer range.                                 |
+| `ARKI_ASYNC_E005`           | Static concurrency definitions | Limit is not a positive integer or Infinity.                                |
 
-Handle a timeout and an abort apart:
+Static misuse may throw; async helpers reject their returned promise for it. `debounce` and `throttle` invoke their void callbacks directly and retain the foreign callback exception contract. They do not supervise detached promises returned from a callback.
 
 ```ts run
-import { ASYNC_ERROR_CODES, AsyncError, sleep, timeout } from '@arki/async';
+import { Deadline, sleep, timeout } from '@arki/async';
 
-try {
-  await timeout(signal => sleep(1000, { signal }), 10);
-  throw new Error('timeout should have rejected');
-} catch (error) {
-  if (!(error instanceof AsyncError) || error.code !== ASYNC_ERROR_CODES.timedOut) throw error;
-  // ARKI_ASYNC_E004: show "try again later". An E002 means someone aborted on purpose.
-}
+const outcome = await timeout(signal => sleep(1000, { signal }), 10);
+if (!Deadline.is(outcome)) throw new Error('expected a deadline');
 ```
 
 ## Limits

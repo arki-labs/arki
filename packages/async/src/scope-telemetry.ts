@@ -5,11 +5,16 @@ import type { Failure } from '@arki/failure';
 import packageMetadata from '@arki/async/package.json' with { type: 'json' };
 
 import { Cancelled, Deadline } from './errors.js';
+import { runObservedContext } from './operation-telemetry.js';
 import { systemClock } from './system-clock.js';
 
 function observe<Value>(report: () => Value): Value | undefined {
   try {
-    return report();
+    const value = report();
+    void Promise.resolve(value).catch(() => {
+      /* Reporting never owns execution. */
+    });
+    return value;
   } catch {
     return undefined;
   }
@@ -23,21 +28,7 @@ export function scopeTelemetry() {
   return {
     /** A defective context manager must never skip, replay or replace user work. */
     run<Value>(this: void, run: () => Value): Value {
-      if (ownedContext === undefined) return run();
-      const invocation: { outcome?: { value: Value } | { cause: unknown } } = {};
-      const invoke = (): Value => {
-        if (invocation.outcome === undefined) {
-          try {
-            invocation.outcome = { value: run() };
-          } catch (error) {
-            invocation.outcome = { cause: error };
-          }
-        }
-        if ('cause' in invocation.outcome) throw invocation.outcome.cause;
-        return invocation.outcome.value;
-      };
-      observe(() => context.with(ownedContext, invoke));
-      return invoke();
+      return runObservedContext(ownedContext, run);
     },
     end(outcome: void | Failure, primary: readonly Failure[], cleanup: readonly Failure[], finalizers: number) {
       observe(() => {

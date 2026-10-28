@@ -4,14 +4,26 @@
 
 import { MockClock } from '@arki/clock';
 
-import { all, AsyncError, debounce, mapConcurrent, race, resource, cleanup, scoped, sleep, throttle, timeout } from '../dist/index.js';
+import {
+  all,
+  AsyncError,
+  cleanup,
+  debounce,
+  mapConcurrent,
+  race,
+  resource,
+  scoped,
+  sleep,
+  throttle,
+  timeout,
+} from '../dist/index.js';
 
 async function main() {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const rejection = async promise => {
     try {
-      await promise;
-      return 'resolved';
+      const outcome = await promise;
+      return outcome && typeof outcome === 'object' && 'code' in outcome ? outcome.code : 'resolved';
     } catch (error) {
       return error instanceof AsyncError ? error.code : error.name;
     }
@@ -62,12 +74,12 @@ async function main() {
     all([
       async () => {
         await wait(5);
-        throw new AsyncError('ARKI_ASYNC_E004', 'x', 'y');
+        throw new Error('private task defect');
       },
       async signal => {
-        await sleep(1000, { signal }).catch(() => {
-          siblingAborted = signal.aborted;
-        });
+        const outcome = await sleep(1000, { signal });
+        siblingAborted = signal.aborted;
+        return outcome;
       },
     ]),
   );
@@ -79,9 +91,8 @@ async function main() {
       return 'fast';
     },
     async signal => {
-      await sleep(1000, { signal }).catch(() => {
-        loserAborted = true;
-      });
+      await sleep(1000, { signal });
+      loserAborted = signal.aborted;
       return 'slow';
     },
   ]);
@@ -89,9 +100,9 @@ async function main() {
   let timeoutSignalAborted = false;
   const timedOut = await rejection(
     timeout(async signal => {
-      await sleep(1000, { signal }).catch(() => {
-        timeoutSignalAborted = signal.aborted;
-      });
+      const outcome = await sleep(1000, { signal });
+      timeoutSignalAborted = signal.aborted;
+      return outcome;
     }, 5),
   );
 
@@ -127,22 +138,22 @@ async function main() {
     ['sleep resolves', await sleep(5).then(() => 'ok'), 'ok'],
     ['sleep(0) waits past microtasks', await zero, true],
     ['invalid wait', await rejection(sleep(-1)), 'ARKI_ASYNC_E001'],
-    ['abort', await aborting, 'ARKI_ASYNC_E002'],
+    ['abort', await aborting, 'async.cancelled'],
     ['debounce latest wins', calls.join(','), '2'],
     ['debounce pending', pendingBefore, true],
     ['throttle leading and trailing', leading.join(','), 'a,c'],
-    ['mapConcurrent keeps input order', mapped.join(','), '15,5,10,1'],
+    ['mapConcurrent keeps input order', Array.isArray(mapped) ? mapped.join(',') : mapped.code, '15,5,10,1'],
     ['mapConcurrent respects the limit', peak, 2],
     [
       'mapConcurrent invalid concurrency',
       await rejection(mapConcurrent([1], async n => n, { concurrency: 0 })),
       'ARKI_ASYNC_E005',
     ],
-    ['all rejects with the first error', allFailure, 'ARKI_ASYNC_E004'],
+    ['all returns a canonical task defect', allFailure, 'failure.unexpected_defect'],
     ['all aborts the sibling', siblingAborted, true],
     ['race first fulfilled wins', winner, 'fast'],
     ['race aborts and awaits the loser', loserAborted, true],
-    ['timeout rejects at the deadline', timedOut, 'ARKI_ASYNC_E004'],
+    ['timeout returns its canonical deadline', timedOut, 'async.deadline'],
     ['timeout aborts the task signal', timeoutSignalAborted, true],
     ['scoped cleanup failure', cleanupResult?.code, 'failure.unexpected_defect'],
     ['scoped finalizers run newest first', order.join(','), 'b,a'],

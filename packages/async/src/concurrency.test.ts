@@ -1,389 +1,389 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { FailureOf } from '@arki/failure';
 import { MockClock } from '@arki/clock';
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
-import type { AsyncError } from './errors.js';
 import { all, mapConcurrent, race, timeout } from './concurrency.js';
+import { Cancelled, Deadline } from './errors.js';
 import { sleep } from './sleep.js';
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-afterEach(() => {
-  vi.useRealTimers();
-});
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
 
-/** Settles `promise` into a value or the error it rejected with, so a test can inspect either. */
-async function settled<T>(promise: Promise<T>): Promise<{ value: T } | { error: unknown }> {
-  return promise.then(
-    value => ({ value }),
-    (error: unknown) => ({ error }),
-  );
-}
+const Refused = defineFailure('concurrency_test.refused');
 
-/** A task that ignores its signal: it always runs `ms` to the end, then sets `done`. Models uncooperative work. */
-function stubborn(ms: number, done: { value: boolean }): () => Promise<void> {
-  return async () => {
-    await sleep(ms);
-    done.value = true;
-  };
-}
-
-describe('mapConcurrent', () => {
-  it('resolves in input order, not completion order', async () => {
-    const promise = mapConcurrent([30, 10, 20], async (ms, signal) => {
-      await sleep(ms, { signal });
-      return ms;
-    });
-    await vi.advanceTimersByTimeAsync(30);
-    await expect(promise).resolves.toEqual([30, 10, 20]);
-  });
-
-  it('never has more than `concurrency` calls in flight, and still uses every slot', async () => {
+describe('ordered admission and joining', () => {
+  it('preserves input order and fills every available slot', async () => {
     let active = 0;
     let peak = 0;
-    const promise = mapConcurrent(
-      Array.from({ length: 10 }, (_, index) => index),
-      async (index, signal) => {
+    const pending = mapConcurrent(
+      [30, 10, 20, 1],
+      async ms => {
         active++;
         peak = Math.max(peak, active);
-        await sleep(10 + (index % 3) * 5, { signal });
+        const waited = await sleep(ms);
         active--;
-        return index;
+        return waited ?? ms;
       },
-      { concurrency: 3 },
+      { concurrency: 2 },
     );
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(promise).resolves.toHaveLength(10);
-    expect(peak).toBe(3);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await pending).toEqual([30, 10, 20, 1]);
+    expect(peak).toBe(2);
   });
 
-  it('on the first failure: aborts siblings, starts nothing new, and waits for in-flight work before rejecting', async () => {
-    const boom = new Error('boom');
+  it('normalizes the first throw, aborts siblings, closes admission and joins uncooperative work', async () => {
+    const cause = new Error('private provider error');
     const started: number[] = [];
-    const seenReasons: unknown[] = [];
-    const slowFinished = { value: false };
-    const promise = settled(
-      mapConcurrent(
-        [0, 1, 2, 3, 4],
-        async (index, signal) => {
-          started.push(index);
-          signal.addEventListener('abort', () => seenReasons.push(signal.reason));
-          if (index === 0) {
-            await sleep(10);
-            throw boom;
-          }
-          // The sibling ignores the abort for 50 ms: the call must not settle before it does.
-          await stubborn(50, slowFinished)();
-          return index;
-        },
-        { concurrency: 2 },
-      ),
+    const signals: AbortSignal[] = [];
+    let finished = false;
+    const pending = mapConcurrent(
+      [0, 1, 2],
+      async (index, signal) => {
+        started.push(index);
+        signals.push(signal);
+        const waited = await sleep(index === 0 ? 10 : 50);
+        if (waited !== undefined) return waited;
+        if (index === 0) throw cause;
+        finished = true;
+        return index;
+      },
+      { concurrency: 2 },
     );
-
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
     await vi.advanceTimersByTimeAsync(10);
-    expect(seenReasons).toEqual([boom, boom]);
-    let done = false;
-    void promise.then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(39);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-
-    expect(await promise).toEqual({ error: boom });
-    expect(slowFinished.value).toBe(true);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(40);
+    const result = await pending;
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    if (!UnexpectedDefect.is(result)) throw new Error('expected owned defect');
+    expect(result.cause).toBe(cause);
+    expect(JSON.stringify(result)).not.toContain(cause.message);
+    expect(finished).toBe(true);
     expect(started).toEqual([0, 1]);
   });
 
-  it('keeps only the first error when several tasks fail', async () => {
-    const first = new Error('first');
-    const promise = settled(
-      mapConcurrent([10, 20], async (ms, signal) => {
-        await sleep(ms);
-        throw ms === 10 ? first : new Error(signal.aborted ? 'after abort' : 'second');
-      }),
-    );
-    await vi.advanceTimersByTimeAsync(20);
-    expect(await promise).toEqual({ error: first });
-  });
-
-  it('treats a synchronous throw in `fn` as a failure, not a crash', async () => {
-    const boom = new Error('sync');
-    const result = await settled(
-      mapConcurrent([1], () => {
-        throw boom;
-      }),
-    );
-    expect(result).toEqual({ error: boom });
-  });
-
-  it('an outer abort stops new work, waits for in-flight tasks, and rejects with E002 (cause = reason)', async () => {
+  it('returns cancellation only after every admitted task settles', async () => {
     const controller = new AbortController();
     const started: number[] = [];
-    const finished = { value: false };
-    const promise = settled(
-      mapConcurrent(
-        [0, 1, 2],
-        async index => {
-          started.push(index);
-          await stubborn(40, finished)();
+    const pending = all(
+      [
+        async () => {
+          started.push(1);
+          return sleep(40);
         },
-        { concurrency: 1, signal: controller.signal },
-      ),
+        async () => {
+          started.push(2);
+        },
+      ],
+      { concurrency: 1, signal: controller.signal },
     );
-    await vi.advanceTimersByTimeAsync(10);
-    controller.abort('stop');
     let done = false;
-    void promise.then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(29);
+    void pending.then(() => {
+      done = true;
+    });
+    controller.abort('private reason');
+    await vi.advanceTimersByTimeAsync(39);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    const result = await promise;
-    expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'stop' } });
-    expect(finished.value).toBe(true);
-    expect(started).toEqual([0]);
+    await expect(pending).resolves.toMatchObject({ code: Cancelled.code, cause: 'private reason' });
+    expect(started).toEqual([1]);
   });
 
-  it('an already-aborted signal rejects with E002 and calls nothing', async () => {
-    const fn = vi.fn(() => Promise.resolve(1));
-    const result = await settled(mapConcurrent([1, 2], fn, { signal: AbortSignal.abort('gone') }));
-    expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'gone' } });
-    expect(fn).not.toHaveBeenCalled();
-  });
-
-  it('leaves the signal alone on success, so results tied to it (a fetch body) stay usable', async () => {
-    let shared: AbortSignal | undefined;
-    await mapConcurrent([1], (_, signal) => {
-      shared = signal;
-      return Promise.resolve(1);
+  it('starts no tasks for a preaborted signal and leaves a successful signal usable', async () => {
+    const task = vi.fn(async () => 42);
+    await expect(mapConcurrent([1], task, { signal: AbortSignal.abort('stop') })).resolves.toMatchObject({
+      code: Cancelled.code,
     });
-    expect(shared?.aborted).toBe(false);
+    expect(task).not.toHaveBeenCalled();
+    let seen: AbortSignal | undefined;
+    expect(
+      await all([
+        async signal => {
+          seen = signal;
+          return 42;
+        },
+      ]),
+    ).toEqual([42]);
+    expect(seen?.aborted).toBe(false);
+    expect(await mapConcurrent([], async () => 42)).toEqual([]);
   });
 
-  it('resolves an empty input with an empty list', async () => {
-    await expect(mapConcurrent([], () => Promise.resolve(1))).resolves.toEqual([]);
-  });
-
-  it.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY])(
-    'rejects concurrency %s with E005 and calls nothing',
+  it.each([0, -1, 1.5, Number.NaN, -Infinity])(
+    'rejects static concurrency misuse %s before admission',
     async concurrency => {
-      const fn = vi.fn(() => Promise.resolve(1));
-      const result = await settled(mapConcurrent([1], fn, { concurrency }));
-      expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E005' } });
-      expect((result as { error: AsyncError }).error.remediation).not.toBe('');
-      expect(fn).not.toHaveBeenCalled();
+      const task = vi.fn(async () => 42);
+      await expect(mapConcurrent([1], task, { concurrency })).rejects.toMatchObject({ code: 'ARKI_ASYNC_E005' });
+      expect(task).not.toHaveBeenCalled();
     },
   );
 
-  it('accepts Infinity as "no limit"', async () => {
-    await expect(
-      mapConcurrent([1, 2], n => Promise.resolve(n), { concurrency: Number.POSITIVE_INFINITY }),
-    ).resolves.toEqual([1, 2]);
-  });
-});
-
-describe('all', () => {
-  it('is typed per position like Promise.all', async () => {
-    const promise = all([() => Promise.resolve(1), () => Promise.resolve('two'), () => Promise.resolve(true)] as const);
-    expectTypeOf(promise).toEqualTypeOf<Promise<[number, string, boolean]>>();
-    await expect(promise).resolves.toEqual([1, 'two', true]);
-  });
-
-  it('aborts the siblings on the first rejection and rejects with that error once they settle', async () => {
-    const boom = new Error('boom');
-    const sibling = { value: false };
-    let siblingSignal: AbortSignal | undefined;
-    const promise = settled(
-      all([
-        async () => {
-          await sleep(5);
-          throw boom;
-        },
-        async signal => {
-          siblingSignal = signal;
-          await stubborn(20, sibling)();
-        },
-      ]),
-    );
-    await vi.advanceTimersByTimeAsync(5);
-    expect(siblingSignal?.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(15);
-    expect(await promise).toEqual({ error: boom });
-    expect(sibling.value).toBe(true);
+  it('keeps Failure values as explicit array and heterogeneous tuple elements', async () => {
+    const refused = Refused();
+    expect(await mapConcurrent([1], async () => refused)).toEqual([refused]);
+    const operation = () => all([async () => 42, async () => 'two', async () => refused] as const);
+    expectTypeOf<Awaited<ReturnType<typeof operation>>>().toEqualTypeOf<
+      [number, string, typeof refused] | ReturnType<typeof Cancelled> | ReturnType<typeof UnexpectedDefect>
+    >();
+    expect(await operation()).toEqual([42, 'two', refused]);
   });
 });
 
 describe('race', () => {
-  it('the first task to FULFILL wins, even when another rejects first (unlike Promise.race)', async () => {
-    const promise = race([
+  it('keeps first-fulfillment semantics, joins losers, and preserves the winner signal', async () => {
+    const signals: AbortSignal[] = [];
+    const pending = race([
       async () => {
-        await sleep(5);
-        throw new Error('fast failure');
+        throw new Error('early rejection');
       },
       async signal => {
-        await sleep(10, { signal });
-        return 'winner';
+        signals.push(signal);
+        const waited = await sleep(10);
+        return waited ?? 'winner';
+      },
+      async signal => {
+        signals.push(signal);
+        const waited = await sleep(30);
+        return waited ?? 'loser';
       },
     ]);
-    await vi.advanceTimersByTimeAsync(10);
-    await expect(promise).resolves.toBe('winner');
-  });
-
-  it('aborts the losers, leaves the winner alone, and waits for losers to settle before resolving', async () => {
-    const loserDone = { value: false };
-    const signals: AbortSignal[] = [];
-    const promise = settled(
-      race([
-        async signal => {
-          signals.push(signal);
-          await sleep(10);
-          return 'fast';
-        },
-        async signal => {
-          signals.push(signal);
-          await stubborn(30, loserDone)();
-          return 'slow';
-        },
-      ]),
-    );
+    let done = false;
+    void pending.then(() => {
+      done = true;
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(signals.map(signal => signal.aborted)).toEqual([false, true]);
-    let done = false;
-    void promise.then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(19);
     expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(await promise).toEqual({ value: 'fast' });
-    expect(loserDone.value).toBe(true);
-  });
-
-  it('when every task rejects, rejects with an AggregateError in input order, not completion order', async () => {
-    const late = new Error('late');
-    const early = new Error('early');
-    const promise = settled(
-      race([
-        async () => {
-          await sleep(20);
-          throw late;
-        },
-        async () => {
-          await sleep(5);
-          throw early;
-        },
-      ]),
-    );
     await vi.advanceTimersByTimeAsync(20);
-    const result = await promise;
-    expect(result).toMatchObject({ error: expect.any(AggregateError) });
-    expect((result as { error: AggregateError }).error.errors).toEqual([late, early]);
+    expect(await pending).toBe('winner');
   });
 
-  it('rejects an empty list with an AggregateError, like Promise.any', async () => {
-    const result = await settled(race([]));
-    expect(result).toMatchObject({ error: expect.any(AggregateError) });
+  it('keeps heterogeneous value/failure inference exact without hoisting or narrowing', async () => {
+    const refused = Refused();
+    const _operation = () => race([async () => 42, async () => 'two', async () => refused] as const);
+    expectTypeOf<Awaited<ReturnType<typeof _operation>>>().toEqualTypeOf<
+      number | string | typeof refused | ReturnType<typeof Cancelled> | ReturnType<typeof UnexpectedDefect>
+    >();
+    expectTypeOf<string extends FailureOf<typeof _operation>['code'] ? true : false>().toEqualTypeOf<false>();
+    expect(await race([async () => refused])).toBe(refused);
   });
 
-  it('an outer abort aborts every task, waits for them, and rejects with E002', async () => {
-    const controller = new AbortController();
-    const signals: AbortSignal[] = [];
-    const promise = settled(
-      race(
-        [1, 2].map(n => async (signal: AbortSignal) => {
-          signals.push(signal);
-          await sleep(100, { signal });
-          return n;
-        }),
-        { signal: controller.signal },
-      ),
+  it('owns aggregate rejection causes privately in input order', async () => {
+    const causes = [new Error('first'), new Error('second')];
+    const result = await race(
+      causes.map(cause => async () => {
+        throw cause;
+      }),
     );
-    controller.abort('cancel');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(signals.every(signal => signal.aborted)).toBe(true);
-    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'cancel' } });
+    if (!UnexpectedDefect.is(result)) throw new Error('expected owned aggregate defect');
+    expect(result.cause).toBeInstanceOf(AggregateError);
+    expect(result.cause).toMatchObject({ errors: causes });
+    expect(JSON.stringify(result)).not.toContain('first');
+    await expect(race([])).rejects.toBeInstanceOf(AggregateError);
   });
 });
 
 describe('timeout', () => {
-  it('resolves with the value when the task beats the deadline, leaves its signal alone and clears the timer', async () => {
+  it('keeps success usable and cleans the deadline before returning', async () => {
+    const clock = new MockClock();
     let seen: AbortSignal | undefined;
-    const promise = timeout(async signal => {
-      seen = signal;
-      await sleep(10, { signal });
-      return 'ok';
-    }, 50);
-    await vi.advanceTimersByTimeAsync(10);
-    await expect(promise).resolves.toBe('ok');
-    expect(seen?.aborted).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('at the deadline aborts the task signal with E004 and rejects at once, without waiting for an uncooperative task', async () => {
-    let seen: AbortSignal | undefined;
-    const finished = { value: false };
-    const promise = settled(
-      timeout(async signal => {
-        seen = signal;
-        await stubborn(1000, finished)();
-      }, 50),
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    const result = await promise;
-    expect(result).toMatchObject({ error: { code: 'ARKI_ASYNC_E004' } });
-    expect(seen?.aborted).toBe(true);
-    expect(seen?.reason).toBe((result as { error: unknown }).error);
-    expect(finished.value).toBe(false);
-  });
-
-  it('rejects with the task error when the task fails before the deadline', async () => {
-    const boom = new Error('boom');
-    const result = await settled(timeout(() => Promise.reject(boom), 50));
-    expect(result).toEqual({ error: boom });
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('rejects an invalid deadline (%s) with E001', async ms => {
-    const task = vi.fn(() => Promise.resolve(1));
-    expect(await settled(timeout(task, ms))).toMatchObject({ error: { code: 'ARKI_ASYNC_E001' } });
-    expect(task).not.toHaveBeenCalled();
-  });
-
-  it('an outer abort aborts the task and rejects with E002', async () => {
-    const controller = new AbortController();
-    let seen: AbortSignal | undefined;
-    const promise = settled(
-      timeout(
+    expect(
+      await timeout(
         async signal => {
           seen = signal;
-          await sleep(100, { signal });
+          return 'ok';
         },
-        50,
-        { signal: controller.signal },
+        100,
+        { clock },
       ),
+    ).toBe('ok');
+    expect(seen?.aborted).toBe(false);
+    const callback = vi.fn();
+    clock.setTimer(callback, 200);
+    clock.advance(200);
+    expect(callback).toHaveBeenCalledOnce();
+  });
+
+  it('returns deadline before an uncooperative task and observes its late rejection', async () => {
+    const clock = new MockClock();
+    let rejectLate: ((cause: unknown) => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const pending = timeout(
+      owned => {
+        signal = owned;
+        return new Promise<never>((_resolve, reject) => {
+          rejectLate = reject;
+        });
+      },
+      10,
+      { clock },
     );
-    controller.abort('user');
-    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E002', cause: 'user' } });
-    expect(seen?.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+    clock.advance(10);
+    const result = await pending;
+    expect(Deadline.is(result)).toBe(true);
+    expect(signal?.reason).toBe(result);
+    if (rejectLate === undefined) throw new Error('missing late task');
+    rejectLate(new Error('late private cause'));
+    await Promise.resolve();
+    expect(await pending).toBe(result);
+  });
+
+  it('owns callback throws and invalid definition misuse separately', async () => {
+    const cause = new Error('task defect');
+    await expect(
+      timeout(async () => {
+        throw cause;
+      }, 50),
+    ).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+    await expect(timeout(async () => 42, -1)).rejects.toMatchObject({ code: 'ARKI_ASYNC_E001' });
+  });
+
+  it('retains exactly value, cancellation, deadline and defect outcomes', () => {
+    const _operation = () => timeout(async () => 42, 10);
+    expectTypeOf<Awaited<ReturnType<typeof _operation>>>().toEqualTypeOf<
+      number | ReturnType<typeof Cancelled> | ReturnType<typeof Deadline> | ReturnType<typeof UnexpectedDefect>
+    >();
   });
 });
 
-// A deadline of minutes must be testable without waiting minutes or faking globals.
-describe('timeout with a clock', () => {
-  it('measures the deadline on the given clock', async () => {
-    const clock = new MockClock();
-    const promise = settled(timeout(signal => sleep(10 * 60_000, { signal, clock }), 5 * 60_000, { clock }));
-    clock.advance(5 * 60_000 - 1);
-    await Promise.resolve();
-    clock.advance(1);
-    expect(await promise).toMatchObject({ error: { code: 'ARKI_ASYNC_E004' } });
-  });
+it.each(['addEventListener', 'removeEventListener'] as const)(
+  'supervises foreign signal %s faults at each managed operation',
+  async method => {
+    for (const run of [
+      (signal: AbortSignal) => all([async () => 42], { signal }),
+      (signal: AbortSignal) => race([async () => 42], { signal }),
+      (signal: AbortSignal) => timeout(async () => 42, 10, { signal }),
+    ]) {
+      const controller = new AbortController();
+      const cause = new Error(`${method} defect`);
+      Object.defineProperty(controller.signal, method, {
+        value: () => {
+          throw cause;
+        },
+      });
+      await expect(run(controller.signal)).resolves.toMatchObject({ code: UnexpectedDefect.code, cause });
+    }
+  },
+);
 
-  it('cancels its clock timer once the task wins, so a later advance fires nothing', async () => {
-    const clock = new MockClock();
-    const promise = timeout(() => Promise.resolve('ok'), 1000, { clock });
-    await expect(promise).resolves.toBe('ok');
-    const fired = vi.fn();
-    clock.setTimer(fired, 2000);
-    clock.advance(2000);
-    expect(fired).toHaveBeenCalledOnce();
+it('handles synchronous timer callbacks and cancellation during timer registration without leaking the handle', async () => {
+  const clock = new MockClock();
+  const cancel = vi.fn();
+  vi.spyOn(clock, 'setTimer').mockImplementation(callback => {
+    callback();
+    return cancel;
   });
+  const result = await timeout(
+    () =>
+      new Promise<never>(() => {
+        /* Intentionally uncooperative foreign work. */
+      }),
+    10,
+    { clock },
+  );
+  expect(Deadline.is(result)).toBe(true);
+  expect(cancel).toHaveBeenCalledOnce();
+  const controller = new AbortController();
+  vi.spyOn(clock, 'setTimer').mockImplementation(() => {
+    controller.abort('during registration');
+    return cancel;
+  });
+  await expect(sleep(10, { clock, signal: controller.signal })).resolves.toMatchObject({
+    code: Cancelled.code,
+    cause: 'during registration',
+  });
+  expect(cancel).toHaveBeenCalledTimes(2);
+});
+
+it('preserves an injected clock cancellation instead of narrowing it to success', async () => {
+  const clock = new MockClock();
+  const { SleepCancelled } = await import('@arki/clock');
+  const cause = new Error('provider cancelled its wait');
+  vi.spyOn(clock, 'sleep').mockResolvedValue(SleepCancelled({ cause }));
+  await expect(sleep(10, { clock })).resolves.toMatchObject({ code: Cancelled.code, cause });
+});
+
+it('owns rejected signal registration, observes late registration rejection, and cleans asynchronous removal', async () => {
+  const controller = new AbortController();
+  const cause = new Error('registration rejected');
+  const register = () => Promise.reject(cause);
+  Object.defineProperty(controller.signal, 'addEventListener', { value: register });
+  await expect(all([async () => 42], { signal: controller.signal })).resolves.toMatchObject({
+    code: UnexpectedDefect.code,
+    cause,
+  });
+  const late = new AbortController();
+  let rejectLate: ((cause: unknown) => void) | undefined;
+  const registerLate = () =>
+    new Promise<void>((_resolve, reject) => {
+      rejectLate = reject;
+    });
+  Object.defineProperty(late.signal, 'addEventListener', { value: registerLate });
+  expect(await all([async () => 42], { signal: late.signal })).toEqual([42]);
+  if (rejectLate === undefined) throw new Error('missing registration');
+  rejectLate(cause);
+  await Promise.resolve();
+  const removal = new AbortController();
+  const remove = () => Promise.reject(cause);
+  Object.defineProperty(removal.signal, 'removeEventListener', { value: remove });
+  await expect(race([async () => 42], { signal: removal.signal })).resolves.toMatchObject({
+    code: UnexpectedDefect.code,
+    cause,
+  });
+});
+
+it('infers heterogeneous mapping and exact default/injected wait outcomes from their callbacks', () => {
+  const _mapped = () => mapConcurrent([true], input => (input ? Promise.resolve(42) : Promise.resolve('value')));
+  expectTypeOf<Awaited<ReturnType<typeof _mapped>>>().toEqualTypeOf<
+    (number | string)[] | ReturnType<typeof Cancelled> | ReturnType<typeof UnexpectedDefect>
+  >();
+  const _timeout = (flag: boolean) => timeout(() => (flag ? Promise.resolve(42) : Promise.resolve('value')), 10);
+  expectTypeOf<Awaited<ReturnType<typeof _timeout>>>().toEqualTypeOf<
+    number | string | ReturnType<typeof Cancelled> | ReturnType<typeof Deadline> | ReturnType<typeof UnexpectedDefect>
+  >();
+  const _defaultWait = () => sleep(1);
+  const _providedWait = () => sleep(1, { clock: new MockClock() });
+  expectTypeOf<Awaited<ReturnType<typeof _defaultWait>>>().toEqualTypeOf<void | ReturnType<typeof UnexpectedDefect>>();
+  expectTypeOf<Awaited<ReturnType<typeof _providedWait>>>().toEqualTypeOf<
+    void | ReturnType<typeof Cancelled> | ReturnType<typeof UnexpectedDefect>
+  >();
+});
+
+it('does not admit a task after cancellation during deadline registration', async () => {
+  const controller = new AbortController();
+  const clock = new MockClock();
+  const cancel = vi.fn();
+  vi.spyOn(clock, 'setTimer').mockImplementation(() => {
+    controller.abort('during registration');
+    return cancel;
+  });
+  const task = vi.fn(() => Promise.resolve(42));
+  await expect(timeout(task, 10, { clock, signal: controller.signal })).resolves.toMatchObject({
+    code: Cancelled.code,
+    cause: 'during registration',
+  });
+  expect(task).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledOnce();
+});
+
+it('retains an injected timer provider cancellation at the timeout boundary', async () => {
+  const clock = new MockClock();
+  const { SleepCancelled } = await import('@arki/clock');
+  const cause = new Error('clock provider cancelled');
+  vi.spyOn(clock, 'sleep').mockResolvedValue(SleepCancelled({ cause }));
+  const result = await timeout(
+    () =>
+      new Promise<never>(() => {
+        /* Noncooperative task must not hold cancellation. */
+      }),
+    10,
+    { clock },
+  );
+  expect(Cancelled.is(result)).toBe(true);
+  expect(result).toMatchObject({ code: Cancelled.code, cause });
 });

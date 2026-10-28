@@ -109,8 +109,8 @@ Controllable clock for tests.
 - `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios. Fires no timers.
 
 ```ts run
-import { isFailure } from '@arki/failure';
 import { MockClock } from '@arki/clock';
+import { isFailure } from '@arki/failure';
 
 const clock = new MockClock();
 async function callWithRetry(): Promise<number> {
@@ -130,18 +130,18 @@ if ((await result) !== 3) throw new Error('expected three tries');
 
 ## Failure behaviour
 
-Operational cancellation returns `SleepCancelled`, defined once in `SLEEP_FAILURES`; `SleepFailure` is inferred from that tuple. Static timer/advance misuse still throws `ClockError` under A33. Unknown callback/runtime defects remain exceptions. `now()` and `setNow()` add no failure outcome.
+Operational cancellation returns `SleepCancelled`, defined once in `SLEEP_FAILURES`; `SleepFailure` is inferred from that tuple. Static timer/advance misuse still throws `ClockError` under A33. Sleep timer/listener registration and cleanup defects return the canonical `UnexpectedDefect` included in `SLEEP_FAILURES`. Raw timer callbacks and mock advancement retain their foreign callback exception contract. Raw Clock methods are timing substrates observed through enclosing work; they emit no per-timer span. `now()` and `setNow()` add no failure outcome.
 
-| Code              | Raised by                           | Meaning                                                             |
-| ----------------- | ----------------------------------- | ------------------------------------------------------------------- |
-| `ARKI_CLOCK_E001` | `MockClock.advance`, `advanceAsync` | The step is negative, `NaN` or not finite. Use `setNow` to go back. |
-| `ARKI_CLOCK_E002` | `setTimer`, `sleep`                 | The delay is negative, not finite, or above `MAX_TIMER_MS`.         |
-| `clock.sleep_cancelled` | `sleep` | The signal aborted the sleep; private `cause` is `signal.reason`. |
+| Code                    | Raised by                           | Meaning                                                             |
+| ----------------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| `ARKI_CLOCK_E001`       | `MockClock.advance`, `advanceAsync` | The step is negative, `NaN` or not finite. Use `setNow` to go back. |
+| `ARKI_CLOCK_E002`       | `setTimer`, `sleep`                 | The delay is negative, not finite, or above `MAX_TIMER_MS`.         |
+| `clock.sleep_cancelled` | `sleep`                             | The signal aborted the sleep; private `cause` is `signal.reason`.   |
 
 Handle an aborted sleep like this:
 
 ```ts run
-import { SleepCancelled, MockClock } from '@arki/clock';
+import { MockClock, SleepCancelled } from '@arki/clock';
 
 const clock = new MockClock();
 const controller = new AbortController();

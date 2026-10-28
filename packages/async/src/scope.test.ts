@@ -119,7 +119,7 @@ it('real sleep owner abort joins child before cleanup', async () => {
       watch: child(async signal => {
         started.resolve();
         try {
-          await sleep(1000, { signal, clock });
+          return await sleep(1000, { signal, clock });
         } finally {
           order.push('child');
         }
@@ -143,9 +143,11 @@ it('foreign exception after owner abort is never suppressed', async () => {
       child: child(async signal => {
         started.resolve();
         try {
-          await sleep(1000, { signal, clock });
-        } catch {
+          const waited = await sleep(1000, { signal, clock });
+          assert(Cancelled.is(waited));
           throw secret;
+        } finally {
+          // The owner still joins this deliberately defective child.
         }
       }),
     },
@@ -170,8 +172,8 @@ it('child refusal cancels owned body without adding false defect', async () => {
     },
     async (_values, signal) => {
       fail.resolve();
-      await sleep(1000, { signal, clock });
-      return 42;
+      const waited = await sleep(1000, { signal, clock });
+      return waited ?? 42;
     },
   );
   assert.equal(result, refusal);
@@ -197,7 +199,7 @@ it('deadline remains distinct and Clock owns trigger', async () => {
     {},
     async (_values, signal) => {
       started.resolve();
-      await sleep(1000, { signal, clock });
+      return await sleep(1000, { signal, clock });
     },
     { deadline: deadline.signal },
   );
@@ -304,7 +306,7 @@ it('dependent child reads db during shutdown before outer close', async () => {
           watch: child(async childSignal => {
             started.resolve();
             try {
-              await sleep(1000, { signal: childSignal, clock });
+              return await sleep(1000, { signal: childSignal, clock });
             } finally {
               db.query();
             }
@@ -404,7 +406,7 @@ it('an early-returning foreign wrapper does not confer ownership', async () => {
   await started.promise;
   await clock.advanceAsync(10);
   const result = await pending;
-  assert(UnexpectedDefect.is(result)); // Legacy timeout rejection, not scope's deadline signal.
+  assert(Deadline.is(result)); // The wrapper owns its deadline, but not the original settlement.
   assert.equal(closed, true);
   // The original promise was never registered with this scope. Complete it and
   // observe it explicitly; no API can discover hidden foreign work automatically.
@@ -445,7 +447,7 @@ it('registering the original child settlement survives early wrapper return', as
   assert.equal(closed, false);
   assert.equal(settled, false);
   childWork.resolve(42);
-  assert(UnexpectedDefect.is(await pending));
+  assert(Deadline.is(await pending));
   assert.equal(closed, true);
 });
 
@@ -632,4 +634,17 @@ it('preserves foreign Clock cancellation instead of treating it as owned shutdow
   const refused = SleepCancelled({ cause: new Error('external cancellation') });
   const result = await scoped({ worker: child(() => refused) }, () => 42);
   assert.equal(result, refused);
+});
+
+it('records external cancellation once when foreign registration invokes its callback and reports aborted', async () => {
+  const controller = new AbortController();
+  const register = (_type: string, callback: () => void) => {
+    controller.abort('registration cancelled');
+    callback();
+    callback();
+  };
+  Object.defineProperty(controller.signal, 'addEventListener', { value: register });
+  const result = await scoped({}, () => 42, { signal: controller.signal });
+  assert(Cancelled.is(result));
+  assert.equal(result.cause, 'registration cancelled');
 });

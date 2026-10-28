@@ -162,7 +162,7 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
     this.onEvent?.(event);
   }
 
-  async run(initialState: State, ctx: Context): Promise<State | Extract<Output, Failure>> {
+  async run(initialState: State, ctx: Context) {
     let state = initialState;
     let current = this.start;
     let steps = 0;
@@ -265,7 +265,8 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
           const delay =
             (node.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS) *
             Math.pow(node.retryBackoffFactor ?? DEFAULT_RETRY_BACKOFF, attempt - 1);
-          await sleep(delay);
+          const waited = await sleep(delay);
+          if (isFailure(waited)) return waited;
         }
       }
 

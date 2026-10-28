@@ -6,7 +6,7 @@ import { defineFailure, UnexpectedDefect } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 /**
- * Owned scopes return typed failures. Legacy timing helpers throw an
+ * Owned execution returns typed failures. Static setup misuse throws an
  * {@link AsyncError}. Both expose stable codes for classification.
  */
 
@@ -19,29 +19,6 @@ export const ASYNC_ERROR_CODES = {
    * @verify bun run test
    */
   invalidWait: 'ARKI_ASYNC_E001',
-  /**
-   * Work was cut short by its `AbortSignal` before it finished: a `sleep`, a
-   * `scoped` body, or an `all` / `mapConcurrent` / `race` / `timeout` call.
-   * `cause` is `signal.reason`.
-   *
-   * @fix Catch `AsyncError` with this code where you abort, or check `signal.aborted` before you start the work.
-   * @verify bun run test
-   */
-  aborted: 'ARKI_ASYNC_E002',
-  /**
-   * One or more `scoped` finalizers threw. `errors` holds them; `cause` is the body error, if any.
-   *
-   * @fix Read `error.errors` for each finalizer failure and `error.cause` for the body failure. Make the failing finalizer safe to run twice.
-   * @verify bun run test
-   */
-  cleanupFailed: 'ARKI_ASYNC_E003',
-  /**
-   * A `timeout` deadline passed before the task finished.
-   *
-   * @fix Raise the deadline or speed up the task. Make the task honor its signal so it stops at the deadline.
-   * @verify bun run test
-   */
-  timedOut: 'ARKI_ASYNC_E004',
   /**
    * A `concurrency` limit is not a positive integer or `Infinity`.
    *
@@ -62,20 +39,12 @@ export class AsyncError extends Error {
   readonly code: AsyncErrorCode;
   /** What to do about it, in one sentence. */
   readonly remediation: string;
-  /** The finalizer errors of an `ARKI_ASYNC_E003`, in the order the finalizers ran. Empty for every other code. */
-  readonly errors: readonly unknown[];
 
-  constructor(
-    code: AsyncErrorCode,
-    message: string,
-    remediation: string,
-    options?: { readonly cause?: unknown; readonly errors?: readonly unknown[] },
-  ) {
+  constructor(code: AsyncErrorCode, message: string, remediation: string, options?: ErrorOptions) {
     super(`${code}: ${message}`, options);
     this.name = 'AsyncError';
     this.code = code;
     this.remediation = remediation;
-    this.errors = Object.freeze([...(options?.errors ?? [])]);
   }
 }
 
@@ -95,35 +64,6 @@ export function invalidWait(fn: string, name: string, value: unknown): AsyncErro
     ASYNC_ERROR_CODES.invalidWait,
     `${fn}() needs ${name} to be a number from 0 to ${MAX_WAIT_MS} milliseconds, got ${String(value)}`,
     `Pass a finite ${name} between 0 and ${MAX_WAIT_MS}. For longer waits, schedule again when the timer fires.`,
-  );
-}
-
-/** @internal E002: `what` was cut short by its signal; `cause` is the signal's reason. */
-export function abortedError(what: string, reason: unknown): AsyncError {
-  return new AsyncError(
-    ASYNC_ERROR_CODES.aborted,
-    `${what} was aborted before it finished`,
-    'Catch AsyncError with code ARKI_ASYNC_E002 where you abort, or check signal.aborted before you start the work.',
-    { cause: reason },
-  );
-}
-
-/** @internal E003: finalizers threw; `cause` is the body error (undefined when the body succeeded). */
-export function cleanupFailed(bodyError: unknown, errors: readonly unknown[]): AsyncError {
-  return new AsyncError(
-    ASYNC_ERROR_CODES.cleanupFailed,
-    `scoped() cleanup failed: ${errors.length} finalizer${errors.length === 1 ? '' : 's'} threw`,
-    'Read error.errors for each finalizer failure and error.cause for the body failure, then make the failing finalizer safe to run.',
-    { cause: bodyError, errors },
-  );
-}
-
-/** @internal E004: the `timeout` deadline of `ms` passed. */
-export function timedOut(ms: number): AsyncError {
-  return new AsyncError(
-    ASYNC_ERROR_CODES.timedOut,
-    `timeout() deadline of ${ms} ms passed before the task finished`,
-    'Raise the deadline or speed up the task, and make the task honor its signal so it stops at the deadline.',
   );
 }
 

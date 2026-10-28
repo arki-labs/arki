@@ -184,6 +184,7 @@ Check a returned value with `isFailure` from `@arki/failure`, or a definition's 
 
 - **The package will be split.** It will become the seven packages named in `docs/arki/research/12-ai-split/naming.md` in later minor releases. Import paths may move; each release notes the move in `CHANGELOG.md`.
 - **Not cross-runtime.** Qdrant imports `node:crypto`. Do not import `@arki/ai`'s server entries in a browser bundle.
+- **Flow retry waits return failures.** A failed retry wait returns the original `UnexpectedDefect` alongside inferred node refusals. Check the result before using its state; persist required business failure state before propagating it. Existing FlowError exception paths retain their documented behaviour.
 - **Flow is not durable.** `createFlow` loses a run on restart. A run that waits for hours belongs in an `@arki/journal` workflow.
 - **Rate-limit check comes first.** `streamText` takes a limiter slot before it returns the stream. Check for `RateLimited` before you iterate: a `RateLimited` value is not a stream.
 - **Reconciliation is capped per run.** `runVectorReconciliation` handles at most `ROW_CAP_PER_RUN` (50) rows and `TOMBSTONE_CAP_PER_RUN` (200) tombstones per call. With 10 000 pending tombstones you need 50 calls (cron runs) to clear them.

@@ -12,9 +12,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const settled = async (promise: Promise<void>): Promise<'resolved' | AsyncError> =>
+const settled = async (promise: ReturnType<typeof sleep>) =>
   promise.then(
-    () => 'resolved' as const,
+    value => value ?? ('resolved' as const),
     (error: unknown) => {
       if (error instanceof AsyncError) return error;
       throw error;
@@ -47,7 +47,8 @@ describe('sleep', () => {
       const error = await settled(sleep(ms));
       expect(error).toBeInstanceOf(AsyncError);
       expect(error).toMatchObject({ code: 'ARKI_ASYNC_E001' });
-      expect((error as AsyncError).remediation).not.toBe('');
+      if (!(error instanceof AsyncError)) throw new Error('expected static delay misuse');
+      expect(error.remediation).not.toBe('');
       expect(vi.getTimerCount()).toBe(0);
     },
   );
@@ -59,24 +60,24 @@ describe('sleep', () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
-  it('an already-aborted signal rejects with E002, cause = reason, and creates no timer', async () => {
+  it('an already-aborted signal returns cancellation, cause = reason, and creates no timer', async () => {
     const reason = new Error('stop');
     const controller = new AbortController();
     controller.abort(reason);
     const promise = sleep(1000, { signal: controller.signal });
     expect(vi.getTimerCount()).toBe(0);
     const error = await settled(promise);
-    expect(error).toMatchObject({ code: 'ARKI_ASYNC_E002', cause: reason });
+    expect(error).toMatchObject({ code: 'async.cancelled', cause: reason });
   });
 
-  it('aborting during the wait rejects with E002 and clears the timer', async () => {
+  it('aborting during the wait returns cancellation and clears the timer', async () => {
     const controller = new AbortController();
     const promise = settled(sleep(1000, { signal: controller.signal }));
     await vi.advanceTimersByTimeAsync(10);
     expect(vi.getTimerCount()).toBe(1);
     controller.abort('because');
     expect(vi.getTimerCount()).toBe(0);
-    expect(await promise).toMatchObject({ code: 'ARKI_ASYNC_E002', cause: 'because' });
+    expect(await promise).toMatchObject({ code: 'async.cancelled', cause: 'because' });
   });
 
   it('removes its abort listener when the wait ends normally', async () => {
@@ -87,7 +88,7 @@ describe('sleep', () => {
     expect(add).toHaveBeenCalledTimes(1);
     expect(remove).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(50);
-    await promise;
+    await expect(promise).resolves.toBeUndefined();
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove.mock.calls[0]?.[1]).toBe(add.mock.calls[0]?.[1]);
     expect(remove.mock.calls[0]?.[0]).toBe('abort');
@@ -105,7 +106,7 @@ describe('sleep', () => {
     const controller = new AbortController();
     const promise = settled(sleep(5, { signal: controller.signal }));
     controller.abort();
-    await promise;
+    expect(await promise).toMatchObject({ code: 'async.cancelled' });
     expect(vi.getTimerCount()).toBe(0);
   });
 });
@@ -115,22 +116,22 @@ describe('sleep with a clock', () => {
   it('waits on the given clock, not on real time', async () => {
     const clock = new MockClock();
     let done = false;
-    void sleep(60_000, { clock }).then(() => (done = true));
+    const waiting = sleep(60_000, { clock }).then(() => (done = true));
     clock.advance(59_999);
     await Promise.resolve();
     expect(done).toBe(false);
     clock.advance(1);
-    await Promise.resolve();
+    await waiting;
     expect(done).toBe(true);
   });
 
-  it('still rejects with its own coded error when the signal aborts', async () => {
+  it('returns its canonical cancellation when the signal aborts', async () => {
     const clock = new MockClock();
     const controller = new AbortController();
     const result = settled(sleep(60_000, { clock, signal: controller.signal }));
     controller.abort('stop');
     const error = await result;
-    expect(error).toMatchObject({ code: 'ARKI_ASYNC_E002', cause: 'stop' });
+    expect(error).toMatchObject({ code: 'async.cancelled', cause: 'stop' });
     clock.advance(60_000);
   });
 });
