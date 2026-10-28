@@ -341,7 +341,7 @@ Event listeners are observation only. They run synchronously, so a listener can 
 
 Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
 
-#### Default tracing
+#### Default telemetry
 
 The `@arki/resilience` tracer inherits the active caller context. Configure the SDK and exporters in the application; standalone use and Dot use the same instrumentation. No SDK is installed by this library.
 
@@ -358,7 +358,19 @@ Composition bypasses nested public wrappers: one logical call has one `resilienc
 
 Only canonical `failure.code`, zero-based attempt numbers and selected delay milliseconds are collected. Raw callback throws use `failure.unexpected_defect` on the failed inner span; a successful fallback leaves the outer call successful. No exception messages, causes, payloads, IDs or preset names are recorded. Custom child spans inherit the current policy context, including across awaits with an application context manager.
 
-Rejected, pending, repeated and throwing telemetry callbacks cannot replace outcomes or repeat execution. Synchronous cancellation by instrumentation is still respected. A timeout span ends when the policy settles, not when uncooperative foreign work eventually stops. Dedicated metrics and breaker state-transition events remain outside this coverage; existing policy events and safe logger/Dot diagnostics remain available.
+Rejected, pending, repeated and throwing telemetry callbacks cannot replace outcomes or repeat execution. Synchronous cancellation by instrumentation is still respected. A timeout span ends when the policy settles, not when uncooperative foreign work eventually stops. The `@arki/resilience` meter emits these instruments at the same owned boundaries:
+
+| Instrument | Unit | Dimensions |
+| --- | --- | --- |
+| `resilience.operations` | `{operation}` | `resilience.boundary`, `resilience.outcome` |
+| `resilience.duration` | `s` | `resilience.boundary`, `resilience.outcome` |
+| `resilience.circuit.transitions` | `{transition}` | `resilience.circuit.state` |
+
+Operations count settlements, including refusals, once per boundary. Outcomes are `success`, `failure`, `throw` or `unclassified` when an opaque result cannot be inspected safely. Durations measure dispatch to settlement using the runtime's monotonic clock; unavailable, nonfinite or backwards samples omit duration only. Nested boundary durations overlap; do not sum them as logical request time. Failure codes and user identifiers are never metric dimensions.
+
+Breaker transitions add `resilience.circuit.state_changed` to the active span and increment the transition counter. Destination states are `open`, `half_open`, `closed` and `isolated` (reserved for the engine's manual isolation state). Opening refusals do not create additional transitions. These are transition counts, not a current-state gauge. There is no policy registry, retained instance or extra transition span.
+
+Metrics remain independent of trace sampling. An application can install its meter provider after constructing policies. Faulty asynchronous metric or breaker-event reporters may coalesce measurements while pending; operations they start do not recursively measure themselves. Execution never waits for telemetry. Existing policy events and safe logger/Dot diagnostics remain available.
 
 
 ### Dot unit

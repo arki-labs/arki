@@ -4,6 +4,7 @@ import {
   noop as cockatielNoop,
   wrap as cockatielWrap,
   ConsecutiveBreaker,
+  CircuitState,
   handleAll,
 } from 'cockatiel';
 
@@ -22,6 +23,7 @@ import type { Engine } from './engine.js';
 import { engineOf, fromEngine, ownedEngine, originalReason } from './engine.js';
 import { withFallback } from './fallback.js';
 import { observeEvent } from './observers.js';
+import { recordCircuitTransition } from './telemetry.js';
 import { buildRetryPolicy } from './retry.js';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,13 @@ const circuitErrorSchema = z.object({ isBrokenCircuitError: z.literal(true) });
 const bulkheadErrorSchema = z.object({ isBulkheadRejectedError: z.literal(true) });
 const cancelledErrorSchema = z.object({ isTaskCancelledError: z.literal(true) });
 
+const circuitStateNames = {
+  [CircuitState.Closed]: 'closed',
+  [CircuitState.Open]: 'open',
+  [CircuitState.HalfOpen]: 'half_open',
+  [CircuitState.Isolated]: 'isolated',
+} as const;
+
 const systemClock = new SystemClock();
 const defaultRetry = backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 }).upTo(3);
 
@@ -124,6 +133,7 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
     halfOpenAfter,
     breaker: new ConsecutiveBreaker(consecutiveFailures),
   });
+  engine.onStateChange(state => recordCircuitTransition(circuitStateNames[state]));
   const policy = fromEngine(ownedEngine(engine, error => {
     if (is(error, circuitErrorSchema)) return CircuitOpen({ cause: error });
     throw error;
