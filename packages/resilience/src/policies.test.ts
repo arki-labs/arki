@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Policy } from './index.js';
 import {
   backoff,
-  CancelledError,
+  Cancelled,
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
   createResiliencePolicy,
@@ -117,7 +117,7 @@ describe('createRetryPolicy', () => {
     const result = call.catch((error: unknown) => error);
     await vi.runAllTimersAsync();
 
-    await expect(result).resolves.toMatchObject({ message: 'fails after aborting' });
+    await expect(result).resolves.toMatchObject({ code: 'resilience.cancelled' });
     expect(calls).toBe(1);
   });
 });
@@ -337,8 +337,7 @@ describe('wrap and cancellation', () => {
     const error = await call.catch((error_: unknown) => error_);
 
     expect(seen?.aborted).toBe(true);
-    expect(isResilienceError(error)).toBe(true);
-    expect(error).toBeInstanceOf(CancelledError);
+    expect(Cancelled.is(error)).toBe(true);
     expect(error).not.toBeInstanceOf(TimeoutError);
     expect(error).toMatchObject({ cause: reason });
     expect(calls).toBe(1);
@@ -399,7 +398,7 @@ describe('wrap and cancellation', () => {
     expect(seen).toEqual(['foreign', 'fn 0']);
   });
 
-  it('lets a function that honours the abort reject with its own error', async () => {
+  it('returns cancellation when a cooperative function rejects after abort', async () => {
     const policy = wrap(
       createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(3) }),
       createTimeoutPolicy({ timeoutMs: 60_000 }),
@@ -415,7 +414,7 @@ describe('wrap and cancellation', () => {
 
     controller.abort();
 
-    await expect(call).rejects.toThrow('fn saw the abort');
+    expect(Cancelled.is(await call)).toBe(true);
     expect(calls).toBe(1);
   });
 

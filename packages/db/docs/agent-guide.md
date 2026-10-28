@@ -162,7 +162,7 @@ failures and `UnexpectedDefect`. See [migration and recovery](upgrades/local-run
 | `db.transaction_rejected`         | `TransactionRejected`        | Explicit SQLSTATE rejection; correct the operation.                                 |
 | `db.transaction_unavailable`      | `TransactionUnavailable`     | Driver connection failed before work completed; inspect private cause.              |
 | `db.transaction_commit_uncertain` | `TransactionCommitUncertain` | Work completed; missing acknowledgement or connection/shutdown SQLSTATE; reconcile. |
-| `db.transaction_cancelled`        | `TransactionCancelled`       | Cancelled before COMMIT or during retry delay.                                      |
+| `db.transaction_cancelled`        | `TransactionCancelled`       | Cancelled before an attempt, before COMMIT or during retry delay.                                      |
 | `db.transaction_defect`           | `TransactionDefect`          | Callback defect or failed rollback; fix the implementation.                         |
 
 A returned failure never retries, even if rollback replaces its carrier with 40001.

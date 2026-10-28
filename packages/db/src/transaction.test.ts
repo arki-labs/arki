@@ -18,6 +18,7 @@ import { MockClock, SleepCancelled } from '@arki/clock';
 import { defineFailure, isFailure, orThrow, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 import { configure, memorySink } from '@arki/log';
 import { fakeLog } from '@arki/log/testing';
+import { Cancelled as RetryCancelled } from '@arki/resilience';
 
 import type { TransactionalDb } from './transaction.js';
 import {
@@ -224,7 +225,7 @@ describe('runTransaction: abort', () => {
     controller.abort(new Error('client left'));
     await expect(runTransaction(db, () => Promise.resolve('x'), { signal: controller.signal })).resolves.toMatchObject({
       code: TransactionCancelled.code,
-      cause: controller.signal.reason,
+      cause: { code: RetryCancelled.code, cause: controller.signal.reason },
     });
     expect(configs).toHaveLength(0);
   });

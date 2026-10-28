@@ -8,8 +8,11 @@
 // failure is an expected outcome, so it is retried only when the backoff's `while` says
 // so, and when retrying stops the caller gets the last failure back as a value.
 
-import type { Clock, SleepFailure } from '@arki/clock';
+import type { Clock } from '@arki/clock';
 import { isFailure } from '@arki/failure';
+
+import type { RetryFailure } from './errors.js';
+import { Cancelled } from './errors.js';
 
 import type { Backoff } from './backoff.js';
 import type {
@@ -50,6 +53,11 @@ function nowMs(): number {
 /** A signal that never aborts, for calls made without one. */
 const neverAborted = new AbortController().signal;
 
+/** Read a new cancellation snapshot: AbortSignal's readonly getter can change after work or observers. */
+function retryCancellation(signal: AbortSignal) {
+  return signal.aborted ? Cancelled({ cause: signal.reason }) : undefined;
+}
+
 /**
  * @internal A retry policy: tries `fn`, then waits on `clock` as long as `backoff` says,
  * until it says stop. Then it rethrows the last error, or returns the last failure.
@@ -60,8 +68,10 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
   const retry = createEvent<RetryEvent>();
   const giveUp = createEvent<FailureReason>();
 
-  async function execute<T>(fn: PolicyCallback<T>, signal: AbortSignal = neverAborted): Promise<T | SleepFailure> {
+  async function execute<T>(fn: PolicyCallback<T>, signal: AbortSignal = neverAborted): Promise<T | RetryFailure> {
     for (let attempt = 0; ; attempt++) {
+      const beforeAttempt = retryCancellation(signal);
+      if (beforeAttempt !== undefined) return beforeAttempt;
       const started = success.listening() || failure.listening() ? nowMs() : 0;
       let failed: { readonly error: unknown } | { readonly value: Awaited<T> };
       try {
@@ -80,9 +90,13 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       if (failure.listening()) {
         failure.emit({ duration: nowMs() - started, handled: delay !== undefined, reason: failed });
       }
+      const afterFailure = retryCancellation(signal);
+      if (afterFailure !== undefined) return 'value' in failed ? failed.value : afterFailure;
       if (delay === undefined) {
         if ('error' in failed) {
           giveUp.emit(failed);
+          const afterGiveUp = retryCancellation(signal);
+          if (afterGiveUp !== undefined) return afterGiveUp;
           throw failed.error;
         }
         // A failure that was never retried is simply the answer; only a retried one ran out of retries.
@@ -90,6 +104,8 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
         return failed.value;
       }
       retry.emit({ ...failed, attempt: attempt + 1, delay });
+      const afterRetry = retryCancellation(signal);
+      if (afterRetry !== undefined) return 'value' in failed ? failed.value : afterRetry;
       const sleepResult = await clock.sleep(delay, signal);
       if (sleepResult !== undefined) return sleepResult;
 

@@ -5,6 +5,9 @@
 
 // Errors
 export {
+  Cancelled,
+  RETRY_FAILURES,
+  type RetryFailure,
   ResilienceError,
   RESILIENCE_ERROR_CODES,
   type ResilienceErrorCode,

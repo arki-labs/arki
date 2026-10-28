@@ -8,6 +8,7 @@ import type { NativeEmbeddings, NativeRequest } from './types.js';
 import { embedMany } from './embed.js';
 import { createEmbedder } from './embedder.js';
 import {
+  Cancelled,
   ConfigurationFailure,
   InputTooLong,
   InvalidOutput,
@@ -122,4 +123,18 @@ describe('withMiddleware', () => {
     expect(order).toEqual(['outer in', 'inner in', 'inner out', 'outer out']);
     expect(wrapped.space).toEqual(embedder.space);
   });
+});
+
+it('maps retry cancellation after provider rejection to the embedding cancellation contract', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const embedder = createEmbedder(stubModel(() => {
+    calls++;
+    controller.abort(new Error('private reason'));
+    return Promise.reject(new Error('provider rejected after cancellation'));
+  }));
+  if (isFailure(embedder)) throw new Error(embedder.message);
+  const result = await embedMany(withResilience(embedder, instantPolicy()), ['a'], { signal: controller.signal });
+  expect(Cancelled.is(result)).toBe(true);
+  expect(calls).toBe(1);
 });

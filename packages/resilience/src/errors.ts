@@ -1,3 +1,6 @@
+import { SLEEP_FAILURES } from '@arki/clock';
+import { defineFailure } from '@arki/failure';
+
 /** Stable error codes of `@arki/resilience`. Match on the code, never on the message. */
 export const RESILIENCE_ERROR_CODES = {
   /**
@@ -148,3 +151,18 @@ export function isBrokenCircuitError(error: unknown): error is CircuitOpenError 
 export function isBulkheadRejectedError(error: unknown): error is BulkheadRejectedError {
   return error instanceof BulkheadRejectedError;
 }
+
+/** Retry execution was cancelled before another attempt could begin.
+ * @fix Stop retrying; begin new work only under a new owning signal.
+ * @verify bun run test
+ */
+export const Cancelled = defineFailure('resilience.cancelled', {
+  status: 499,
+  message: 'Retry execution was cancelled.',
+  remediation: 'Stop retrying; begin new work only under a new owning signal.',
+});
+
+/** Original definitions for retry execution and its clock waits. */
+export const RETRY_FAILURES = [...SLEEP_FAILURES, Cancelled] as const;
+/** Exact owned retry outcomes, inferred from their definitions. */
+export type RetryFailure = ReturnType<(typeof RETRY_FAILURES)[number]>;

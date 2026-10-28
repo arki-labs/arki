@@ -3,7 +3,7 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { SleepFailure } from '@arki/clock';
+import type { RetryFailure } from './errors.js';
 import { UnexpectedDefect } from '@arki/failure';
 import { MockClock, SleepCancelled } from '@arki/clock';
 
@@ -133,7 +133,7 @@ it('preserves a clock refusal through composition and never repeats the operatio
   const policy = wrap(retry, createTimeoutPolicy());
   let attempts = 0;
   const result = withResilience(() => { attempts++; throw new Error('try once'); }, policy);
-  expectTypeOf(result).toEqualTypeOf<Promise<SleepFailure>>();
+  expectTypeOf(result).toEqualTypeOf<Promise<RetryFailure>>();
   expect(await result).toBe(refused);
   expect(attempts).toBe(1);
   expectTypeOf(noop.execute(() => 1)).toEqualTypeOf<Promise<number>>();

@@ -79,6 +79,8 @@ if ('vectors' in batch) console.log(batch.usage.requests);
 
 Only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt. The default policy waits at least `retryAfterMs`; over 5 s it does not retry and returns the `RateLimited`. A policy you pass gets no such minimum: its backoff's `delay(attempt, reason)` must read `reason.data.retryAfterMs` itself.
 
+Custom retry-capable policies use `Policy<never, RetryFailure>` from `@arki/resilience`. Retry cancellation maps to the existing embedding `Cancelled` outcome; it does not become an unavailable model or trigger another provider call.
+
 ### Cache repeated texts
 
 ```ts run

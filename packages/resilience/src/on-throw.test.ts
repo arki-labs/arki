@@ -7,7 +7,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Failure } from '@arki/failure';
-import type { SleepFailure } from '@arki/clock';
+import type { RetryFailure } from './errors.js';
 import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure } from '@arki/failure';
 
@@ -15,7 +15,7 @@ import type { Policy, ResiliencePolicy, RetryPolicy } from './index.js';
 import {
   backoff,
   BulkheadRejectedError,
-  CancelledError,
+  Cancelled,
   CircuitOpenError,
   createResiliencePolicy,
   createRetryPolicy,
@@ -122,7 +122,7 @@ describe('onThrow on createResiliencePolicy', () => {
     const result = policy.execute(pending, controller.signal);
     controller.abort();
 
-    await expect(result).rejects.toBeInstanceOf(CancelledError);
+    expect(Cancelled.is(await result)).toBe(true);
     expect(mapped).toBe(0);
   });
 
@@ -180,7 +180,7 @@ describe('onThrow types', () => {
     const policy = createResiliencePolicy({ onThrow: cause => Unavailable({ cause }) });
 
     expectTypeOf(policy).toEqualTypeOf<ResiliencePolicy<Failure<'push.unavailable', undefined>>>();
-    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined> | SleepFailure>>();
+    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined> | RetryFailure>>();
   });
 
   it('an async mapper unwraps, and a rethrowing branch adds nothing', () => {
@@ -197,8 +197,8 @@ describe('onThrow types', () => {
   it('without onThrow nothing is added, and the policy is a plain Policy that wrap accepts', () => {
     const plain = createResiliencePolicy();
 
-    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number | SleepFailure>>();
-    expectTypeOf(plain).toExtend<Policy<never, SleepFailure>>();
+    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number | RetryFailure>>();
+    expectTypeOf(plain).toExtend<Policy<never, RetryFailure>>();
     expectTypeOf(createRetryPolicy()).toEqualTypeOf<RetryPolicy>();
   });
 

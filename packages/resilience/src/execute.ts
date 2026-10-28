@@ -1,4 +1,4 @@
-import type { SleepFailure } from '@arki/clock';
+import type { RetryFailure } from './errors.js';
 
 import type { RetryPolicyOptions, TimeoutPolicyOptions } from './policies.js';
 import type { Policy, PolicyCallback } from './policy.js';
@@ -42,7 +42,7 @@ export function withResilience<T, F = never, E = never>(fn: PolicyCallback<T>, p
 export function withRetry<T, Mapped = never>(
   fn: PolicyCallback<T>,
   options?: RetryPolicyOptions<Mapped>,
-): Promise<T | Mapped | SleepFailure> {
+): Promise<T | Mapped | RetryFailure> {
   return run(createRetryPolicy(options), fn);
 }
 

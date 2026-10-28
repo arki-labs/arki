@@ -1,4 +1,4 @@
-import type { SleepFailure } from '@arki/clock';
+import type { RetryFailure } from './errors.js';
 
 // The public shape of a policy. Nothing here names the underlying engine, so the
 // engine can change without changing this file or anything built on it.
@@ -75,7 +75,7 @@ export type Policy<F = never, E = never> = PolicyExecution<F, E> & {
 };
 
 /** A retry policy. `F` is what its `onThrow` may answer instead of the function's own `T`; `never` without one. */
-export type RetryPolicy<F = never> = Policy<F, SleepFailure> & {
+export type RetryPolicy<F = never> = Policy<F, RetryFailure> & {
   readonly onRetry: PolicyEvent<RetryEvent>;
   /**
    * Fires when the last attempt has failed and its error, or its failure after at least one

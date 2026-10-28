@@ -18,7 +18,7 @@ import type { Clock } from '@arki/clock';
 import { SleepCancelled } from '@arki/clock';
 import { UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import { backoff, createRetryPolicy } from '@arki/resilience';
+import { backoff, Cancelled as RetryCancelled, createRetryPolicy } from '@arki/resilience';
 
 import type { TransactionConfig, TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
@@ -157,7 +157,7 @@ export async function runTransaction<Tx, T>(
       if (TransactionConflict.is(result.failure)) throw result.failure.cause;
       return { value: result.failure };
     }, signal);
-    if (SleepCancelled.is(outcome)) return TransactionCancelled({ cause: outcome });
+    if (SleepCancelled.is(outcome) || RetryCancelled.is(outcome)) return TransactionCancelled({ cause: outcome });
     if (UnexpectedDefect.is(outcome)) return TransactionDefect({ cause: outcome });
     return outcome.value;
   } catch (error) {

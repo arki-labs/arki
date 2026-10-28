@@ -9,9 +9,10 @@ import {
   TimeoutStrategy,
 } from 'cockatiel';
 
-import type { Clock, SleepFailure } from '@arki/clock';
+import type { Clock } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
 
+import type { RetryFailure } from './errors.js';
 import type { Backoff } from './backoff.js';
 import type { BulkheadPolicy, CircuitBreakerPolicy, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
 import { backoff } from './backoff.js';
@@ -168,7 +169,7 @@ export type ResilienceComponents = {
  * What `createResiliencePolicy` returns: the composed policy plus the parts it runs. `F` is what
  * its `onThrow` may answer instead of the function's own `T`; `never` without one.
  */
-export type ResiliencePolicy<F = never> = Policy<F, SleepFailure> & { readonly components: ResilienceComponents };
+export type ResiliencePolicy<F = never> = Policy<F, RetryFailure> & { readonly components: ResilienceComponents };
 
 /**
  * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.

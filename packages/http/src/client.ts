@@ -29,7 +29,7 @@
  */
 
 import { z } from 'zod';
-import type { PolicyExecution, RetryWaitFailure } from '@arki/resilience';
+import type { PolicyExecution, RetryFailure } from '@arki/resilience';
 
 import {
   InvalidEnvelope,
@@ -130,7 +130,7 @@ export type ClientCall<TRoute> =
  * What the client needs from a retry policy: an `@arki/resilience` policy fits. A policy with a
  * fallback does not, because its result could be the fallback instead of a response.
  */
-export type ClientPolicy = PolicyExecution<never, RetryWaitFailure>;
+export type ClientPolicy = PolicyExecution<never, RetryFailure>;
 
 /** One attempt's outcome, as `retryOn` sees it: the response, or the error `fetch` threw. */
 export type RetryOutcome = {

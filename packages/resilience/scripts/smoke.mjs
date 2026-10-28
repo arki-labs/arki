@@ -7,7 +7,7 @@ import { defineFailure } from '@arki/failure';
 
 import {
   backoff,
-  CancelledError,
+  Cancelled,
   CircuitOpenError,
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
@@ -24,6 +24,11 @@ import {
   withResilience,
   wrap,
 } from '../dist/index.js';
+
+const preAborted = new AbortController();
+preAborted.abort('private');
+let cancelledCalls = 0;
+const cancelledResult = await createRetryPolicy().execute(() => { cancelledCalls++; return 'unexpected'; }, preAborted.signal);
 
 const pending = () => new Promise(() => undefined);
 const errorName = async promise => {
@@ -106,6 +111,8 @@ const mappedFirst = await mappedPolicy.execute(() => Promise.reject(new Error('d
 const mappedOpen = await mappedPolicy.execute(() => 'x');
 
 const checks = [
+  ['retry pre-abort outcome', Cancelled.is(cancelledResult), true],
+  ['retry pre-abort no callback', cancelledCalls, 0],
   ['while(definition) retries its failure', namedRetry.delay(1, ExportUnavailable()), 1],
   ['while(definition) skips other failures', namedRetry.delay(1, ExportUnauthorized()), undefined],
   ['while(definition) retries thrown errors', namedRetry.delay(1, new Error('down')), 1],
@@ -130,7 +137,7 @@ const checks = [
   ['breaker open', await errorName(breaker.execute(() => 'x')), 'CircuitOpenError'],
   ['breaker is ours', (await breaker.execute(() => 'x').catch(e => e)) instanceof CircuitOpenError, true],
   ['bulkhead full', isBulkheadRejectedError(await bulkhead.execute(() => 'x').catch(e => e)), true],
-  ['cancelled', (await cancelled) instanceof CancelledError, true],
+  ['cancelled', Cancelled.is(await cancelled), true],
   ['composed preset', composed, 'composed'],
   ['composed context', JSON.stringify(attempts), '[[0,true]]'],
   ['withResilience', await withResilience(() => 'through', noop), 'through'],

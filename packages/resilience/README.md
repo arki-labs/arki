@@ -58,7 +58,7 @@ How to handle them:
 
 - Check `isFailure(result)` after every call whose function can return a failure.
 - Catch `ResilienceError` by `error.code`, never by message. A `CancelledError` means your own signal aborted: do not count it as an outage.
-- Use `onThrow` when you want one error path with no `try/catch`. It maps what is still thrown to a value, except a cancel, which is always thrown.
+- Use `onThrow` when you want one error path with no `try/catch`. It maps what is still thrown to a value, except cancellation; retry returns its canonical outcome.
 - Use `withFallback` for a last answer when the policy gives up. It does not run on a cancel.
 - A bad `backoff` option throws `InvalidBackoffError` where the backoff is built, not later.
 
@@ -141,7 +141,7 @@ const quote = await quotes.execute(() => fetchQuote()); // Quote | null
 
 `withFallback(policy, fallback)` returns a policy whose call resolves to `T | F`: the function's own result, or what `fallback(error)` returns when the policy gives up (retries used up, circuit open, timeout, ...). The type comes from the fallback, so `null` and `{ stale: true }` show up in the result type.
 
-- A fallback never hides a cancel. If the caller's signal is aborted, the error is rethrown and `fallback` does not run.
+- A fallback never hides a cancel. Retry cancellation returns its canonical outcome. Engine-only cancellation keeps its thrown bridge; `fallback` does not run in either case.
 - To fall back on some errors only, rethrow the others: `(error) => { if (!isBrokenCircuitError(error)) throw error; return cached; }`.
 - Put it outermost. `wrap` does not accept a policy with a fallback (a compile error), because inside a retry it would hide the errors the retry needs.
 
@@ -175,7 +175,7 @@ export async function pushAll() {
 
 - It sees only what the retries gave up on, or what they never retry. A returned failure is the answer as before.
 - It is outermost, so an open circuit (`CircuitOpenError`), a deadline (`TimeoutError`) and a full bulkhead (`BulkheadRejectedError`) are throws that reach it too.
-- A cancel by the caller's signal is never mapped; the `CancelledError` is thrown.
+- A cancel by the caller's signal is never mapped; the retry loop returns `Cancelled`.
 - Rethrow what you do not recognise, so unknown errors stay bugs: `cause => { if (!isNetworkError(cause)) throw cause; return Unavailable({ cause }); }`.
 - `createRetryPolicy` and `withRetry` take it too. A policy with `onThrow` is a `Policy<Mapped>`, so like a fallback it cannot go inside `wrap`.
 
@@ -482,4 +482,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Typed retry waits
 
-Retry delay cancellation now returns `SleepCancelled` from `@arki/clock`; a clock provider fault returns `UnexpectedDefect`. These exact `SleepFailure` outcomes propagate through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without retrying or invoking a throw fallback. Check returned failures before using successful values. Other policy engine rejections retain their existing bridge during the A-33 migration; cancellation during an in-flight timeout is still `CancelledError`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no sleep failures.
+Retry execution returns `Cancelled` (`resilience.cancelled`) before an aborted attempt or when failed work/observers observe caller cancellation. Completed successes and returned failures retain identity. Cancellation during an actual clock wait still returns the original `SleepCancelled`; a returned clock defect remains `UnexpectedDefect`. The original definitions in `RETRY_FAILURES` infer `RetryFailure`, propagated through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without a throw fallback. Admit the full tuple on RPC routes that execute retry policies. `RETRY_WAIT_FAILURES`/`RetryWaitFailure` describe clock waits only. Other engine-only policies retain their existing thrown bridge during A-33 migration; cancellation reaching a retry loop becomes `Cancelled`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no retry failures. Pending callbacks remain cooperative: retry does not race or forcibly stop a callback that ignores its signal. Event callback throws and rejecting custom clocks remain part of the outstanding defect-boundary migration.

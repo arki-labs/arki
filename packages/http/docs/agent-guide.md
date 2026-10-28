@@ -33,6 +33,8 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 3. Use `failureHeaders` for challenges and retry headers. Handler-owned failures can supply the same callback as the third `bind` argument.
 4. Each binding runs only the steps present when it was bound. Do not return `{}` on success next to a failure: TypeScript reduces `{} | Failure` to `{}` and the failure leaves the type.
 
+The client accepts retry-capable policies with the exact `RetryFailure` outcome from `@arki/resilience`. Retry cancellation maps to the HTTP client's existing `RequestCancelled` or owned `RequestTimeout`; clock defects preserve `UnexpectedDefect`.
+
 ### Make a write safe to repeat
 
 1. Pass the same canonical route descriptors to `idempotent({ routes: [writeRoute], ... })`. Each must list all `IDEMPOTENCY_FAILURES`; omitted or partial declarations fail typechecking and configure-time validation.

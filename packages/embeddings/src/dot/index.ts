@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 
-import type { Policy, RetryWaitFailure } from '@arki/resilience';
+import type { Policy, RetryFailure } from '@arki/resilience';
 import { infra } from '@arki/dot/unit';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
@@ -28,7 +28,7 @@ export type EmbeddingsPluginOptions = {
   /** `true`: `withCache` over a `memoryCacheStore()`; a store: `withCache` over it. Default `false`. */
   readonly cache?: boolean | CacheStore;
   /** `true`: `withResilience` with its default policy; a policy: that one. Default `false`. */
-  readonly resilience?: boolean | Policy<never, RetryWaitFailure>;
+  readonly resilience?: boolean | Policy<never, RetryFailure>;
 };
 
 /** `EmbeddingsPluginOptions`, checked when `embeddings()` boots; a type test locks it to the type. */
@@ -40,7 +40,7 @@ export const embeddingsPluginOptionsSchema = withOptionsJson(
         functionSchema<() => EmbeddingModel | Embedder | EmbedFailure>(),
       ]),
       cache: z.union([z.boolean(), objectSchema<CacheStore>()]).optional(),
-      resilience: z.union([z.boolean(), objectSchema<Policy<never, RetryWaitFailure>>()]).optional(),
+      resilience: z.union([z.boolean(), objectSchema<Policy<never, RetryFailure>>()]).optional(),
     })
     .readonly(),
 );

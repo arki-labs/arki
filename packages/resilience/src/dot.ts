@@ -1,4 +1,4 @@
-import type { SleepFailure } from '@arki/clock';
+import type { RetryFailure } from './errors.js';
 
 /**
  * DOT adapter for `@arki/resilience`.
@@ -53,7 +53,7 @@ export type ResilienceService<N extends string> = {
   /** The preset called `name`. The same object as `presets[name]`, so breaker state is shared. */
   for(name: N): ResiliencePolicy;
   /** Run `fn` through the preset called `name`. */
-  run<T>(name: N, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | SleepFailure>;
+  run<T>(name: N, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | RetryFailure>;
 };
 
 const log: Logger = getLogger('arki:resilience');

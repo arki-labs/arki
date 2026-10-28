@@ -1,4 +1,4 @@
-import type { Backoff, Policy, RetryWaitFailure } from '@arki/resilience';
+import type { Backoff, Policy, RetryFailure } from '@arki/resilience';
 import { invariant } from '@arki/failure';
 import { backoff, createResiliencePolicy, isResilienceError, RESILIENCE_ERROR_CODES } from '@arki/resilience';
 
@@ -57,7 +57,7 @@ function embeddingPolicy() {
 /** What one attempt settled on. A retryable failure is returned bare instead, so the policy can retry it. */
 type Settled = { readonly settled: EmbeddingBatch | EmbedFailure };
 
-function resilience(policy: Policy<never, RetryWaitFailure>): EmbedMiddleware {
+function resilience(policy: Policy<never, RetryFailure>): EmbedMiddleware {
   return (next, embedder) => async (inputs, options) => {
     try {
       const outcome = await policy.execute(async ({ signal, attempt }): Promise<Settled | EmbedFailure> => {
@@ -68,8 +68,8 @@ function resilience(policy: Policy<never, RetryWaitFailure>): EmbedMiddleware {
       }, options.signal);
       if ('settled' in outcome) return outcome.settled;
       if (isEmbedFailure(outcome)) return outcome;
-      // What is left is the retry wait's own failure, which only the caller's signal causes.
-      invariant(options.signal?.aborted === true, () => `the retry wait failed: ${outcome.code}`);
+      // Cancellation is owned by retry or its clock wait; the embedding boundary keeps its own cancellation.
+      invariant(options.signal?.aborted === true, () => `retry execution failed: ${outcome.code}`);
       return Cancelled();
     } catch (error) {
       // A throw from `embed` itself is a bug and stays a throw; so is a policy built wrong.
@@ -102,7 +102,7 @@ function resilience(policy: Policy<never, RetryWaitFailure>): EmbedMiddleware {
  */
 export function withResilience(
   embedder: Embedder,
-  policy: Policy<never, RetryWaitFailure> = embeddingPolicy(),
+  policy: Policy<never, RetryFailure> = embeddingPolicy(),
 ): Embedder {
   return withMiddleware(embedder, resilience(policy));
 }

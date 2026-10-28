@@ -7,7 +7,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { Policy, RetryWaitFailure } from '@arki/resilience';
+import type { Policy, RetryFailure } from '@arki/resilience';
 import { MockClock, SleepCancelled } from '@arki/clock';
 import { InvalidEnvelope, isFailure, UnexpectedDefect } from '@arki/failure';
 import { backoff, createRetryPolicy, withFallback } from '@arki/resilience';
@@ -179,7 +179,7 @@ describe('ClientPolicy', () => {
   it('accepts an @arki/resilience policy, but not one with a fallback: its result might not be a response', () => {
     expectTypeOf(policy).toExtend<ClientPolicy>();
     const cached = withFallback(policy, () => 'cached');
-    expectTypeOf(cached).toEqualTypeOf<Policy<string, RetryWaitFailure>>();
+    expectTypeOf(cached).toEqualTypeOf<Policy<string, RetryFailure>>();
     expectTypeOf(cached).not.toExtend<ClientPolicy>();
   });
 });
