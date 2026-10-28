@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { ScoreRow } from '../tests/rerank-contract.js';
@@ -23,8 +23,8 @@ describe('./tei reranker', () => {
   // A server started with --auto-truncate would cut silently if `truncate` were left out.
   it('always sends truncate, false by default and true when rerank() truncates', async () => {
     const { fetch, calls } = stubRerankFetch(() => Response.json(teiBody([{ index: 0, score: 1 }])));
-    await rerank(tei(fetch), 'q', ['d'], { text: item => item });
-    await rerank(tei(fetch), 'q', ['d'], { text: item => item, onTooLong: 'truncate' });
+    orThrow(await rerank(tei(fetch), 'q', ['d'], { text: item => item }));
+    orThrow(await rerank(tei(fetch), 'q', ['d'], { text: item => item, onTooLong: 'truncate' }));
     expect(calls[0]?.url).toBe('http://127.0.0.1:8080/rerank');
     expect(calls.map(call => call.body)).toEqual([
       { query: 'q', texts: ['d'], truncate: false, raw_scores: false, return_text: false },

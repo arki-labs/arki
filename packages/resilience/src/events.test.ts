@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { UnexpectedDefect } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { PolicyLogger } from './index.js';
 import {
@@ -67,7 +67,7 @@ describe('attachPolicyLogger', () => {
     const { entries, logger } = recorder();
     attachPolicyLogger(policy, logger);
 
-    await policy.execute(() => 'ok');
+    orThrow(await policy.execute(() => 'ok'));
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.message).toBe('[resilience] Operation succeeded');
@@ -80,13 +80,15 @@ describe('attachPolicyLogger', () => {
     const { entries, logger } = recorder();
     attachPolicyLogger(breaker, logger, 'db');
 
-    await breaker
-      .execute(() => {
-        throw new Error('down');
-      })
-      .catch(ignore);
+    expect(
+      UnexpectedDefect.is(
+        await breaker.execute(() => {
+          throw new Error('down');
+        }),
+      ),
+    ).toBe(true);
     vi.advanceTimersByTime(100);
-    await breaker.execute(() => 'up');
+    orThrow(await breaker.execute(() => 'up'));
 
     expect(entries.map(e => [e.level, e.message])).toEqual([
       ['error', '[db] Operation failed'],
@@ -118,7 +120,7 @@ describe('attachPolicyLogger', () => {
     const { entries, logger } = recorder();
     attachPolicyLogger(policy, logger);
 
-    await policy.execute(() => 'ok');
+    orThrow(await policy.execute(() => 'ok'));
     const call = policy.execute(() => {
       throw new Error('bad');
     });
@@ -138,9 +140,9 @@ describe('attachPolicyLogger', () => {
     const { entries, logger } = recorder();
     const detach = attachPolicyLogger(policy, logger);
 
-    await policy.execute(() => 'one');
+    orThrow(await policy.execute(() => 'one'));
     detach();
-    await policy.execute(() => 'two');
+    orThrow(await policy.execute(() => 'two'));
 
     expect(entries).toHaveLength(1);
   });

@@ -3,8 +3,17 @@ import { AggregationTemporality, DataPointType, InMemoryMetricExporter, MeterPro
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MockClock } from '@arki/clock';
-import { defineFailure, UnexpectedDefect } from '@arki/failure';
-import { backoff, CircuitOpen, createCircuitBreakerPolicy, createRetryPolicy, noop, withFallback, wrap } from './index.js';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+
+import {
+  backoff,
+  CircuitOpen,
+  createCircuitBreakerPolicy,
+  createRetryPolicy,
+  noop,
+  withFallback,
+  wrap,
+} from './index.js';
 
 let releasePending = () => { /* No pending reporter until a test installs one. */ };
 let provider: MeterProvider | undefined;
@@ -58,9 +67,9 @@ it('records durations in seconds and refuses negative or nonfinite clock samples
   const now = vi.spyOn(performance, 'now').mockReturnValueOnce(100).mockReturnValueOnce(350);
   expect(await noop.execute(() => 1)).toBe(1);
   now.mockReturnValueOnce(100).mockReturnValueOnce(50);
-  await noop.execute(() => 2);
+  orThrow(await noop.execute(() => 2));
   now.mockReturnValue(Number.NaN);
-  await noop.execute(() => 3);
+  orThrow(await noop.execute(() => 3));
   now.mockRestore();
   const collected = await telemetry.collect();
   const duration = collected.find(metric => metric.descriptor.name === 'resilience.duration');

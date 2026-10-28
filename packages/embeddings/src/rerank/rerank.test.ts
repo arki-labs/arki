@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { Reranker } from './index.js';
 import { memoryCacheStore } from '../cache.js';
@@ -202,7 +202,7 @@ describe('withRerankCache', () => {
   it('only the documents not in the store are sent, and indices map back', async () => {
     const base = fakeReranker({ scores: { a: 0.2, b: 0.9, c: 0.5 } });
     const cached = withRerankCache(base, memoryCacheStore());
-    await rerank(cached, 'q', [hit('b')], { text });
+    orThrow(await rerank(cached, 'q', [hit('b')], { text }));
     const spy = vi.spyOn(base, 'rerank');
     const ranked = await rerank(cached, 'q', [hit('a'), hit('b'), hit('c')], { text });
     if (isFailure(ranked)) throw new Error(ranked.message);
@@ -215,11 +215,11 @@ describe('withRerankCache', () => {
   it('another model or query misses', async () => {
     const store = memoryCacheStore();
     const first = fakeReranker({ scores: { a: 0.2 } });
-    await rerank(withRerankCache(first, store), 'q', [hit('a')], { text });
+    orThrow(await rerank(withRerankCache(first, store), 'q', [hit('a')], { text }));
     const other = { ...fakeReranker({ scores: { a: 0.7 } }), id: 'other-model' };
     const spy = vi.spyOn(other, 'rerank');
     const ranked = await rerank(withRerankCache(other, store), 'q', [hit('a')], { text });
-    await rerank(withRerankCache(first, store), 'another query', [hit('a')], { text });
+    orThrow(await rerank(withRerankCache(first, store), 'another query', [hit('a')], { text }));
     if (isFailure(ranked)) throw new Error(ranked.message);
     expect(spy).toHaveBeenCalledOnce();
     expect(ranked.hits[0]?.score).toBe(0.7);

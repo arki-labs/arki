@@ -116,7 +116,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q1', deadLetterStorageKey: 'dl1' });
 
-    await queue.enqueue(createPost, { title: 'Hello' });
+    orThrow(await queue.enqueue(createPost, { title: 'Hello' }));
 
     // The mutation must be persisted: we verify by checking the raw storage key
     const raw = store['q1'];
@@ -129,7 +129,7 @@ describe('OfflineMutationQueue', () => {
   it('enqueue() persists the path the contract gives the operation', async () => {
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('success'), storageKey: 'qp', deadLetterStorageKey: 'dlp' });
 
-    await queue.enqueue(createPost, { title: 'Path' });
+    orThrow(await queue.enqueue(createPost, { title: 'Path' }));
 
     expect(store['qp']).toContain(JSON.stringify(TEST_PATH));
     queue.dispose();
@@ -163,9 +163,9 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q3', deadLetterStorageKey: 'dl3' });
 
-    await queue.enqueue(createPost, { title: 'First' });
-    await queue.enqueue(createPost, { title: 'Second' });
-    await queue.enqueue(createPost, { title: 'Third' });
+    orThrow(await queue.enqueue(createPost, { title: 'First' }));
+    orThrow(await queue.enqueue(createPost, { title: 'Second' }));
+    orThrow(await queue.enqueue(createPost, { title: 'Third' }));
 
     // Read the stored state to verify order
     const { createQueueStorage } = await import('../../src/mutations/storage.ts');
@@ -187,7 +187,7 @@ describe('OfflineMutationQueue', () => {
     const events: Array<{ type: string }> = [];
     queue.subscribe((event) => events.push(event));
 
-    await queue.enqueue(createPost, { title: 'Event test' });
+    orThrow(await queue.enqueue(createPost, { title: 'Event test' }));
 
     const enqueued = events.find((e) => e.type === 'enqueued');
     expect(enqueued).toBeDefined();
@@ -212,7 +212,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(createPost, { title: 'Will fail' });
+    orThrow(await queue.enqueue(createPost, { title: 'Will fail' }));
     orThrow(await queue.drain());
 
     // Wait for dead-letter count update (it's async via subscribe)
@@ -234,7 +234,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(createPost, { title: 'Permanent fail' });
+    orThrow(await queue.enqueue(createPost, { title: 'Permanent fail' }));
     orThrow(await queue.drain());
 
     const items = orThrow(await queue.deadLetter.list());
@@ -254,7 +254,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(createPost, { title: 'Discard me' });
+    orThrow(await queue.enqueue(createPost, { title: 'Discard me' }));
     orThrow(await queue.drain());
 
     const before = orThrow(await queue.deadLetter.list());
@@ -286,7 +286,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(createPost, { title: 'Retry me' });
+    orThrow(await queue.enqueue(createPost, { title: 'Retry me' }));
     orThrow(await queue.drain());
 
     const dlBefore = orThrow(await queue.deadLetter.list());
@@ -319,7 +319,7 @@ describe('OfflineMutationQueue', () => {
       deadLetterStorageKey: 'dl-actor',
     });
 
-    await queue.enqueue(createPost, { title: 'Alice wrote this' });
+    orThrow(await queue.enqueue(createPost, { title: 'Alice wrote this' }));
     expect(store['q-actor']).toContain(ALICE);
 
     signedIn = 'usr_bob';
@@ -345,15 +345,25 @@ describe('OfflineMutationQueue', () => {
   describe('offline reload: the session is unknown at enqueue', () => {
     async function writeAfterReload(rpc: AnyRpcClient, key: string) {
       // Before the reload: Alice was signed in on this device.
-      const before = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: key, deadLetterStorageKey: `dl-${key}` });
-      await before.enqueue(createPost, { title: 'Before reload' });
+      const before = createOfflineMutationQueue({
+        actorId: () => ALICE,
+        rpc,
+        storageKey: key,
+        deadLetterStorageKey: `dl-${key}`,
+      });
+      orThrow(await before.enqueue(createPost, { title: 'Before reload' }));
       before.dispose();
       for (const k of Object.keys(store)) if (k === key) delete store[k];
 
       // After the reload: a fresh queue, the session not known yet.
       let signedIn: string | undefined;
-      const after = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: key, deadLetterStorageKey: `dl-${key}` });
-      await after.enqueue(createPost, { title: 'Offline after reload' });
+      const after = createOfflineMutationQueue({
+        actorId: () => signedIn,
+        rpc,
+        storageKey: key,
+        deadLetterStorageKey: `dl-${key}`,
+      });
+      orThrow(await after.enqueue(createPost, { title: 'Offline after reload' }));
       return { queue: after, signIn: (id: string) => (signedIn = id) };
     }
 
@@ -388,13 +398,18 @@ describe('OfflineMutationQueue', () => {
     it('a confirmed sign-out forgets the last user: a signed-out write replays for nobody', async () => {
       const rpc = makeRpc('success');
       let signedIn: string | null = ALICE;
-      const queue = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: 'q-signout', deadLetterStorageKey: 'dl-signout' });
-      await queue.enqueue(createPost, { title: 'As Alice' });
+      const queue = createOfflineMutationQueue({
+        actorId: () => signedIn,
+        rpc,
+        storageKey: 'q-signout',
+        deadLetterStorageKey: 'dl-signout',
+      });
+      orThrow(await queue.enqueue(createPost, { title: 'As Alice' }));
       orThrow(await queue.drain());
       expect(rpc.call).toHaveBeenCalledOnce();
 
       signedIn = null;
-      await queue.enqueue(createPost, { title: 'Signed out' });
+      orThrow(await queue.enqueue(createPost, { title: 'Signed out' }));
       expect(store['q-signout']).toContain('"actorId":null');
 
       signedIn = ALICE;
@@ -407,23 +422,43 @@ describe('OfflineMutationQueue', () => {
 
     it('a sign-out also forgets it across a reload', async () => {
       const key = 'q-signout-reload';
-      const before = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
-      await before.enqueue(createPost, { title: 'As Alice' });
-      const signedOut = createOfflineMutationQueue({ actorId: () => null, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
-      await signedOut.enqueue(createPost, { title: 'Signed out' });
+      const before = createOfflineMutationQueue({
+        actorId: () => ALICE,
+        rpc: makeRpc('success'),
+        storageKey: key,
+        deadLetterStorageKey: `dl-${key}`,
+      });
+      orThrow(await before.enqueue(createPost, { title: 'As Alice' }));
+      const signedOut = createOfflineMutationQueue({
+        actorId: () => null,
+        rpc: makeRpc('success'),
+        storageKey: key,
+        deadLetterStorageKey: `dl-${key}`,
+      });
+      orThrow(await signedOut.enqueue(createPost, { title: 'Signed out' }));
       before.dispose();
       signedOut.dispose();
       delete store[key];
 
-      const after = createOfflineMutationQueue({ actorId: () => undefined, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
-      await after.enqueue(createPost, { title: 'After reload' });
+      const after = createOfflineMutationQueue({
+        actorId: () => undefined,
+        rpc: makeRpc('success'),
+        storageKey: key,
+        deadLetterStorageKey: `dl-${key}`,
+      });
+      orThrow(await after.enqueue(createPost, { title: 'After reload' }));
       expect(store[key]).toContain('"actorId":null');
       after.dispose();
     });
 
     it('keeps null when no user was ever signed in on this device', async () => {
-      const queue = createOfflineMutationQueue({ actorId: () => null, rpc: makeRpc('success'), storageKey: 'q-nobody', deadLetterStorageKey: 'dl-nobody' });
-      await queue.enqueue(createPost, { title: 'Anonymous' });
+      const queue = createOfflineMutationQueue({
+        actorId: () => null,
+        rpc: makeRpc('success'),
+        storageKey: 'q-nobody',
+        deadLetterStorageKey: 'dl-nobody',
+      });
+      orThrow(await queue.enqueue(createPost, { title: 'Anonymous' }));
       expect(store['q-nobody']).toContain('"actorId":null');
       queue.dispose();
     });

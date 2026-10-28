@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
-
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { EmbedderOptions } from '../embedder.js';
@@ -54,10 +53,10 @@ describe('./voyage', () => {
   it('maps purpose to the provider field', async () => {
     const { fetch, bodies } = stub(() => withVectors(TWO, floats));
     const embedder = voyage(fetch);
-    await embedMany(embedder, ['a', 'b'], { purpose: 'query' });
-    await embedMany(embedder, ['a', 'b'], { purpose: 'document' });
-    await embedMany(embedder, ['a', 'b'], { purpose: 'clustering' });
-    await embedMany(embedder, ['a', 'b']);
+    orThrow(await embedMany(embedder, ['a', 'b'], { purpose: 'query' }));
+    orThrow(await embedMany(embedder, ['a', 'b'], { purpose: 'document' }));
+    orThrow(await embedMany(embedder, ['a', 'b'], { purpose: 'clustering' }));
+    orThrow(await embedMany(embedder, ['a', 'b']));
     expect(bodies.map(body => (is(body, recordSchema) ? body['input_type'] : 'missing'))).toEqual([
       'query',
       'document',
@@ -89,8 +88,8 @@ describe('./voyage', () => {
   it('truncation is false unless asked', async () => {
     const { fetch, bodies } = stub(() => withVectors(TWO, floats));
     const embedder = voyage(fetch);
-    await embedMany(embedder, ['a', 'b']);
-    await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' });
+    orThrow(await embedMany(embedder, ['a', 'b']));
+    orThrow(await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' }));
     expect(bodies.map(body => (is(body, recordSchema) ? body['truncation'] : 'missing'))).toEqual([false, true]);
   });
 
@@ -103,14 +102,22 @@ describe('./voyage', () => {
     expect(sorted.vectors[1]?.[1]).toBe(1);
 
     const missing = stub(() =>
-      Response.json({ data: [{ embedding: floats(0), index: 0 }, { embedding: floats(1), index: 5 }], usage: { total_tokens: 1 } }),
+      Response.json({
+        data: [
+          { embedding: floats(0), index: 0 },
+          { embedding: floats(1), index: 5 },
+        ],
+        usage: { total_tokens: 1 },
+      }),
     );
     const result = await embedMany(voyage(missing.fetch), ['a', 'b']);
     expect(isFailure(result) && result.code).toBe('embeddings.invalid_output');
   });
 
   it('429 is RateLimited', async () => {
-    const { fetch } = stub(() => new Response('{"detail":"slow down"}', { status: 429, headers: { 'retry-after': '3' } }));
+    const { fetch } = stub(
+      () => new Response('{"detail":"slow down"}', { status: 429, headers: { 'retry-after': '3' } }),
+    );
     const result = await embedMany(voyage(fetch), ['a']);
     expect(isFailure(result) && result.code).toBe('embeddings.rate_limited');
     expect(isFailure(result) && result.data).toEqual({ retryAfterMs: 3000 });
@@ -129,7 +136,9 @@ describe('./voyage', () => {
 
   // With truncation off, Voyage answers 400 for a long text; the caller needs InputTooLong, not a raw error.
   it('a 400 about length is InputTooLong', async () => {
-    const { fetch } = stub(() => new Response('{"detail":"Input text is longer than the context length"}', { status: 400 }));
+    const { fetch } = stub(
+      () => new Response('{"detail":"Input text is longer than the context length"}', { status: 400 }),
+    );
     const result = await embedMany(voyage(fetch), ['a']);
     expect(isFailure(result) && result.code).toBe('embeddings.input_too_long');
   });

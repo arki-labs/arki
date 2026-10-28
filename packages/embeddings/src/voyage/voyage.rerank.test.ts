@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { ScoreRow } from '../tests/rerank-contract.js';
@@ -28,8 +28,8 @@ describe('./voyage reranker', () => {
   // Voyage truncates by default; the default here must refuse instead, so text is never lost silently.
   it('sends truncation: false unless rerank() was told to truncate', async () => {
     const { fetch, calls } = stubRerankFetch(() => Response.json(voyageBody([{ index: 0, score: 1 }])));
-    await rerank(voyage(fetch), 'q', ['d'], { text: item => item });
-    await rerank(voyage(fetch), 'q', ['d'], { text: item => item, onTooLong: 'truncate' });
+    orThrow(await rerank(voyage(fetch), 'q', ['d'], { text: item => item }));
+    orThrow(await rerank(voyage(fetch), 'q', ['d'], { text: item => item, onTooLong: 'truncate' }));
     expect(calls[0]?.url).toBe('https://api.voyageai.com/v1/rerank');
     expect(calls.map(call => call.body)).toEqual([
       { model: 'rerank-2.5', query: 'q', documents: ['d'], truncation: false },

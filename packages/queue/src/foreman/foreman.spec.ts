@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Permit } from '@arki/admin/module';
 import { redactSecrets as adminRedactSecrets, isModuleError } from '@arki/admin/module';
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { QueueInstance } from '../types/builder.ts';
@@ -58,7 +59,7 @@ async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number
   queue = instance;
   await instance.register(q.registry({ flaky }));
   await instance.start();
-  await flaky.trigger({ to: 'a@b.c' });
+  orThrow(await flaky.trigger({ to: 'a@b.c' }));
   const failed = async () =>
     (await pglite.query(`select 1 from infra_pg_boss.job where state = 'failed'`)).rows.length === 1;
   await waitFor(failed);

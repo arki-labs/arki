@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import { createEmbedder } from '../embedder.js';
 import { RateLimited } from '../failures.js';
 import { createGoogleModel } from './index.js';
 
-const PNG = Uint8Array.of(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
+const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 const PNG_BASE64 = 'iVBORw0KGgo=';
 const SIZE = 768;
 
@@ -59,7 +59,7 @@ describe('./google images', () => {
   // The documented REST shape: one request per input, text part then inline image part, both in one content.
   it('sends one request per input with text and inline image parts', async () => {
     const stub = stubFetch();
-    await google(stub.fetch).embed(['a', { text: 'b', image: PNG }], { purpose: 'query' });
+    orThrow(await google(stub.fetch).embed(['a', { text: 'b', image: PNG }], { purpose: 'query' }));
     expect(stub.calls).toHaveLength(1);
     expect(stub.calls[0]?.url).toBe(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents',

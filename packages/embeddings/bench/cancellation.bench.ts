@@ -7,9 +7,10 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { defineSuite, metric } from '@arki/bench';
-import { createEmbedder, embedMany, embedStream, isEmbedFailure, withResilience } from '@arki/embeddings';
+import { Cancelled, createEmbedder, embedMany, embedStream, isEmbedFailure, withResilience } from '@arki/embeddings';
 import { createOllamaModel } from '@arki/embeddings/ollama';
 import { createTransformersModel } from '@arki/embeddings/transformers';
+import { invariant } from '@arki/failure';
 
 const TRIALS = 30;
 const DIMENSIONS = 4;
@@ -98,9 +99,11 @@ async function duringRetry(): Promise<number> {
   await sleep(20);
   const started = performance.now();
   controller.abort();
-  await result;
+  const outcome = await result;
   await quiet();
-  return performance.now() - started;
+  const elapsed = performance.now() - started;
+  invariant(Cancelled.is(outcome), 'Aborted embedding work must report its cancellation.');
+  return elapsed;
 }
 
 /** Abort while one request is on the wire. */
@@ -110,9 +113,11 @@ async function duringFetch(): Promise<number> {
   await sleep(5);
   const started = performance.now();
   controller.abort();
-  await result;
+  const outcome = await result;
   await quiet();
-  return performance.now() - started;
+  const elapsed = performance.now() - started;
+  invariant(Cancelled.is(outcome), 'Aborted embedding work must report its cancellation.');
+  return elapsed;
 }
 
 /** Abort while the reader is busy in its own sink, with requests in flight behind it. */
@@ -145,8 +150,10 @@ async function duringInference(): Promise<number> {
   const result = embedMany(gemmaEmbedder, docs(32), { signal: controller.signal });
   const started = performance.now();
   controller.abort();
-  await result;
-  return performance.now() - started;
+  const outcome = await result;
+  const elapsed = performance.now() - started;
+  invariant(Cancelled.is(outcome), 'Aborted embedding work must report its cancellation.');
+  return elapsed;
 }
 
 const stage = (id: string, title: string, collect: () => Promise<number>) =>

@@ -228,6 +228,7 @@
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@types/react": "catalog:react19",
     "eslint": "catalog:",

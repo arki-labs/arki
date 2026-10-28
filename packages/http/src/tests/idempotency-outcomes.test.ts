@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { ResponseCache, StoredResponse } from '../idempotency.js';
@@ -130,7 +130,7 @@ describe('idempotency owned outcomes', () => {
     const persist = cache.finish.getMockImplementation();
     if (persist === undefined) throw new Error('Expected the default persistence implementation');
     cache.finish.mockImplementation(async (...args) => {
-      await persist(...args);
+      orThrow(await persist(...args));
       throw cause;
     });
     const error = await bridgeError(run);

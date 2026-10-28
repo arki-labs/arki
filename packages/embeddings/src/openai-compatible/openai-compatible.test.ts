@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import { embedMany } from '../embed.js';
@@ -40,7 +40,7 @@ describe('./openai-compatible', () => {
   it('posts model and input[] to baseURL/embeddings with a bearer key', async () => {
     const fetch = vi.fn<FetchLike>(() => Promise.resolve(new Response(REORDERED)));
     const { embedder } = nebius(fetch);
-    await embedMany(embedder, ['a', 'b', 'c']);
+    orThrow(await embedMany(embedder, ['a', 'b', 'c']));
     const [url, init] = fetch.mock.calls[0] ?? [];
     expect(url).toBe('https://api.tokenfactory.nebius.com/v1/embeddings');
     expect(JSON.parse(typeof init?.body === 'string' ? init.body : '{}')).toEqual({
@@ -83,7 +83,8 @@ describe('./openai-compatible', () => {
     );
     const batch = await embedMany(embedder, ['b', 'a'.repeat(40)]);
     expect(InputTooLong.is(batch)).toBe(true);
-    if (InputTooLong.is(batch)) expect(batch.data).toMatchObject({ index: 1, tokens: { basis: 'estimated', count: 10 } });
+    if (InputTooLong.is(batch))
+      expect(batch.data).toMatchObject({ index: 1, tokens: { basis: 'estimated', count: 10 } });
   });
 
   it('maps 429 with retry-after', async () => {

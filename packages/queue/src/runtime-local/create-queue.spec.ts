@@ -13,6 +13,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { QueueInstance } from '../types/builder.ts';
@@ -95,7 +96,7 @@ describe('runtime-local schedules trigger their job', () => {
     ]);
 
     // A tick sends the schedule data to the job's queue, exactly like trigger().
-    await job.trigger({ slot: 'am' });
+    orThrow(await job.trigger({ slot: 'am' }));
     await waitFor(() => order.length === 3);
 
     expect(order).toEqual(['job-mw-before', 'handler-am', 'job-mw-after']);
@@ -132,7 +133,7 @@ describe('runtime-local schedules trigger their job', () => {
     ]);
 
     const internal = schedule._internal as InternalScheduleDefinition;
-    await internal.job.trigger({});
+    orThrow(await internal.job.trigger({}));
     await waitFor(() => order.length === 3);
 
     expect(order).toEqual(['schedule-mw-before', 'handler-local-user', 'schedule-mw-after']);

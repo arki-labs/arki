@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { NativeRequest } from './types.js';
 import { embed } from './embed.js';
@@ -32,7 +32,7 @@ describe('normalizeText', () => {
     );
     if (isFailure(embedder)) throw new Error(embedder.message);
     const text = '  Ştefan  şi\tcafé ';
-    await embed(embedder, text);
+    orThrow(await embed(embedder, text));
     expect(sent).toEqual([text]);
   });
 });

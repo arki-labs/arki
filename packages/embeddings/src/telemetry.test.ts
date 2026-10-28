@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
 import { withCache } from './cache.js';
@@ -12,7 +13,7 @@ describe('withTelemetry', () => {
     using log = fakeLog();
     const embedder = withTelemetry(fakeEmbedder({ dimensions: 8 }));
 
-    await embedder.embed(['ana@example.com', 'sk-secret-token'], { purpose: 'document' });
+    orThrow(await embedder.embed(['ana@example.com', 'sk-secret-token'], { purpose: 'document' }));
 
     const event = log.records.find(record => record.eventName === 'arki.embed');
     expect(event?.fields).toMatchObject({ provider: 'fake', model: 'fake-8', dimensions: 8, inputs: 2, outcome: 'ok' });
@@ -22,7 +23,7 @@ describe('withTelemetry', () => {
 
   it('records inputs only when asked', async () => {
     using log = fakeLog();
-    await withTelemetry(fakeEmbedder({ dimensions: 8 }), { recordInputs: true }).embed(['hello'], {});
+    orThrow(await withTelemetry(fakeEmbedder({ dimensions: 8 }), { recordInputs: true }).embed(['hello'], {}));
 
     log.assertLogged({ eventName: 'arki.embed', fields: { texts: ['hello'] } });
   });
@@ -31,7 +32,7 @@ describe('withTelemetry', () => {
     using log = fakeLog();
     const embedder = withTelemetry(fakeEmbedder({ dimensions: 8, failures: { busy: RateLimited({}) } }));
 
-    await embedder.embed(['busy'], {});
+    expect(await embedder.embed(['busy'], {})).toMatchObject({ code: RateLimited.code });
 
     const events = log.records.filter(record => record.eventName === 'arki.embed');
     expect(events).toHaveLength(1);
@@ -42,8 +43,8 @@ describe('withTelemetry', () => {
     using log = fakeLog();
     const embedder = withTelemetry(withCache(fakeEmbedder({ dimensions: 8 })));
 
-    await embedder.embed(['a'], {});
-    await embedder.embed(['a'], {});
+    orThrow(await embedder.embed(['a'], {}));
+    orThrow(await embedder.embed(['a'], {}));
 
     const events = log.records.filter(record => record.eventName === 'arki.embed');
     expect(events.map(event => event.fields['cacheHits'])).toEqual([0, 1]);

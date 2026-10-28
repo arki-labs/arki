@@ -1,18 +1,13 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import type { UnitSourceGuard, Provided } from '@arki/dot/unit';
+import type { Provided, UnitSourceGuard } from '@arki/dot/unit';
 import { defineApp, DotUnitError } from '@arki/dot/unit';
-import { orThrow } from '@arki/failure';
-import { fakeLog } from '@arki/log/testing';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import { fakeLog } from '@arki/log/testing';
 
 import { resilience, RESILIENCE_PLUGIN_ERROR_CODES } from './dot.js';
-import { backoff, definePresets } from './index.js';
-
-/** Passed to `.catch` where the test only needs the call to settle. */
-function swallow(): void {
-  // the failure is expected
-}
+import { backoff, CircuitOpen, definePresets } from './index.js';
 
 const boom = (): never => {
   throw new Error('down');
@@ -42,10 +37,16 @@ describe('@arki/resilience/dot', () => {
     const presets = definePresets({ carrier: { retry: backoff.constant(0).upTo(0) } });
     const app = orThrow(await defineApp('resilience-reporter').infra(resilience(presets)).boot());
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- A foreign logger can return a rejected promise through its void signature.
-    vi.spyOn(getLogger('arki:resilience'), 'debug').mockImplementation(() => Promise.reject(new Error('private reporter')));
+    vi.spyOn(getLogger('arki:resilience'), 'debug').mockImplementation(() =>
+      Promise.reject(new Error('private reporter')),
+    );
     const original = new Error('application');
     try {
-      await expect(app.services.resilience.run('carrier', () => { throw original; })).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: original });
+      await expect(
+        app.services.resilience.run('carrier', () => {
+          throw original;
+        }),
+      ).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: original });
       await Promise.resolve();
     } finally {
       orThrow(await app.dispose());
@@ -69,7 +70,7 @@ describe('@arki/resilience/dot', () => {
     fake = fakeLog();
     const presets = makePresets();
     const app = await orThrow(defineApp('resilience-logs').infra(resilience(presets)).boot());
-    await app.services.resilience.run('carrier', boom).catch(swallow);
+    expect(CircuitOpen.is(await app.services.resilience.run('carrier', boom))).toBe(true);
 
     fake.assertLogged({
       level: 'debug',
@@ -85,7 +86,7 @@ describe('@arki/resilience/dot', () => {
     const before = resilienceRecords(fake);
 
     await orThrow(app.dispose());
-    await presets.carrier.components.retry.execute(boom).catch(swallow);
+    expect(UnexpectedDefect.is(await presets.carrier.components.retry.execute(boom))).toBe(true);
     expect(resilienceRecords(fake)).toBe(before);
   });
 
@@ -96,7 +97,7 @@ describe('@arki/resilience/dot', () => {
     const b = await orThrow(defineApp('resilience-b').infra(resilience(presets)).boot());
     await orThrow(a.dispose());
     const before = resilienceRecords(fake);
-    await presets.solo.components.retry.execute(boom).catch(swallow);
+    expect(UnexpectedDefect.is(await presets.solo.components.retry.execute(boom))).toBe(true);
 
     // One retry record from app b only; app a's subscriptions are gone.
     expect(resilienceRecords(fake) - before).toBe(1 + 1); // retry + give up

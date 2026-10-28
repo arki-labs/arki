@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
-
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { EmbedderOptions } from '../embedder.js';
@@ -50,7 +49,7 @@ describe('./cohere', () => {
     const { fetch, bodies } = stub(() => answerWith('float', floats));
     const embedder = cohere(fetch);
     for (const purpose of ['query', 'document', 'classification', 'clustering', 'similarity'] as const) {
-      await embedMany(embedder, ['a', 'b'], { purpose });
+      orThrow(await embedMany(embedder, ['a', 'b'], { purpose }));
     }
     expect(bodies.map(body => field(body, 'input_type'))).toEqual([
       'search_query',
@@ -64,7 +63,7 @@ describe('./cohere', () => {
   // Leaving input_type to a default would let a corpus and its queries drift apart without any error.
   it('document intent is sent explicitly', async () => {
     const { fetch, bodies } = stub(() => answerWith('float', floats));
-    await embedMany(cohere(fetch), ['a', 'b']);
+    orThrow(await embedMany(cohere(fetch), ['a', 'b']));
     expect(field(bodies[0], 'input_type')).toBe('search_document');
   });
 
@@ -90,13 +89,15 @@ describe('./cohere', () => {
   it('truncate is NONE unless asked', async () => {
     const { fetch, bodies } = stub(() => answerWith('float', floats));
     const embedder = cohere(fetch);
-    await embedMany(embedder, ['a', 'b']);
-    await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' });
+    orThrow(await embedMany(embedder, ['a', 'b']));
+    orThrow(await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' }));
     expect(bodies.map(body => field(body, 'truncate'))).toEqual(['NONE', 'END']);
   });
 
   it('429 is RateLimited', async () => {
-    const { fetch } = stub(() => new Response('{"message":"slow down"}', { status: 429, headers: { 'retry-after': '3' } }));
+    const { fetch } = stub(
+      () => new Response('{"message":"slow down"}', { status: 429, headers: { 'retry-after': '3' } }),
+    );
     const result = await embedMany(cohere(fetch), ['a']);
     expect(isFailure(result) && result.code).toBe('embeddings.rate_limited');
     expect(isFailure(result) && result.data).toEqual({ retryAfterMs: 3000 });
@@ -116,7 +117,8 @@ describe('./cohere', () => {
   // With truncate NONE Cohere answers 400 for a long text; the caller needs InputTooLong, not a raw error.
   it('a 400 about length is InputTooLong', async () => {
     const { fetch } = stub(
-      () => new Response('{"message":"too many tokens: total number of tokens exceeds the limit of 512"}', { status: 400 }),
+      () =>
+        new Response('{"message":"too many tokens: total number of tokens exceeds the limit of 512"}', { status: 400 }),
     );
     const result = await embedMany(cohere(fetch), ['a']);
     expect(isFailure(result) && result.code).toBe('embeddings.input_too_long');

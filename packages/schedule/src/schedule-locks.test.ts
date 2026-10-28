@@ -131,7 +131,7 @@ describe('schedules(core, [{ lock }])', () => {
     });
     expect(calls()).toBe(0);
     blocker.resolve();
-    await holding;
+    orThrow(await holding);
     await orThrow(started.dispose());
   });
 
@@ -270,7 +270,9 @@ describe('schedules(core, [{ lock }])', () => {
     // @ts-expect-error no locks service
     schedules(bare, [{ name: 'c', every: '1m', lock: { key: 'k' }, handler: ({ usecases }) => usecases.run() }]);
     // A plain need is not enough: a `locks` the usecases could also read is not what the scheduler takes.
-    const plain = defineFeature('plain').needs({ locks: service<Locker>() }).usecases({ run: () => () => 1 });
+    const plain = defineFeature('plain')
+      .needs({ locks: service<Locker>() })
+      .usecases({ run: () => () => 1 });
     // @ts-expect-error a plain `locks` need is below the entrypoint; it must be `entrypointOnly`
     schedules(plain, [{ name: 'job', every: '1m', lock: true, handler: ({ usecases }) => usecases.run() }]);
     // Without `lock`, the same feature is fine.
@@ -369,7 +371,7 @@ describe('lock counters', () => {
     await settle();
     await expect(runtime.trigger('job')).resolves.toEqual({ name: 'job', status: 'skipped-lock' });
     blocker.resolve();
-    await holding;
+    orThrow(await holding);
     expect(runtime).toMatchObject({ lockContention: 1, lockFailures: 0, lockLost: 0 });
   });
 

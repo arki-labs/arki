@@ -310,7 +310,7 @@ describe('ReplayLoop', () => {
 
     // Advance timers past all retry backoff periods
     await vi.runAllTimersAsync();
-    await drainPromise;
+    orThrow(await drainPromise);
 
     // After maxRetries exhausted, entry moves to dead-letter
     expect(dlStore._entries).toHaveLength(1);
@@ -349,7 +349,7 @@ describe('ReplayLoop', () => {
 
     const drainPromise = loop.drainNow();
     await vi.runAllTimersAsync();
-    await drainPromise;
+    orThrow(await drainPromise);
 
     // Entry dead-lettered after exhausting retries
     expect(dlStore._entries).toHaveLength(1);

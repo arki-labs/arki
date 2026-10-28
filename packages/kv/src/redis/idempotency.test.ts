@@ -48,7 +48,7 @@ describe('redisResponseCache', () => {
     const key = freshKey();
     expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
     expect(await cache.begin(key, 'fp', ownerTwo)).toBe('in-progress');
-    await cache.finish(key, ownerOne, response, 5000);
+    expect(await cache.finish(key, ownerOne, response, 5000)).toBeUndefined();
     expect(await cache.begin(key, 'fp', ownerTwo)).toEqual({ replay: response });
     expect(await cache.begin(key, 'other', ownerTwo)).toBe('conflict');
   });
@@ -66,28 +66,28 @@ describe('redisResponseCache', () => {
   it('pending reservations survive retention and only their owner can finish', async () => {
     const cache = redisResponseCache(redis);
     const key = freshKey();
-    await cache.begin(key, 'fp', ownerOne);
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
     expect(await redis.pttl(`idem:${key}`)).toBe(-1);
     await sleep(250);
     expect(await cache.begin(key, 'fp', ownerTwo)).toBe('in-progress');
     expect(await cache.finish(key, ownerTwo, response, 100)).toMatchObject({ code: IdempotencyOwnershipLost.code });
-    await cache.abandon(key, ownerTwo);
+    expect(await cache.abandon(key, ownerTwo)).toBeUndefined();
     expect(await cache.finish(key, ownerOne, response, 5000)).toBeUndefined();
-    await cache.abandon(key, ownerOne);
+    expect(await cache.abandon(key, ownerOne)).toBeUndefined();
     expect(await cache.begin(key, 'fp', ownerThree)).toEqual({ replay: response });
   });
 
   it('the TTL ends the entry, even after finish, and an abandoned key starts at once', async () => {
     const cache = redisResponseCache(redis);
     const key = freshKey();
-    await cache.begin(key, 'fp', ownerOne);
-    await cache.finish(key, ownerOne, response, 300);
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
+    expect(await cache.finish(key, ownerOne, response, 300)).toBeUndefined();
     await sleep(600);
     expect(await cache.begin(key, 'fp-2', ownerTwo)).toBe('started');
     expect(await cache.finish(key, ownerOne, response, 5000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
     expect(await cache.abandon(key, ownerOne)).toBeUndefined();
     expect(await cache.begin(key, 'fp-2', ownerThree)).toBe('in-progress');
-    await cache.abandon(key, ownerTwo);
+    expect(await cache.abandon(key, ownerTwo)).toBeUndefined();
     expect(await cache.begin(key, 'fp-2', ownerThree)).toBe('started');
   });
 
@@ -124,7 +124,7 @@ describe('redisResponseCache', () => {
     const cache = redisResponseCache(redis);
     const key = freshKey();
     expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({ code: IdempotencyOwnershipLost.code });
-    await cache.begin(key, 'fp', ownerOne);
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
     for (const ttl of [0, -1, Number.NaN, Infinity, 0.5]) {
       expect(await cache.finish(key, ownerOne, response, ttl)).toMatchObject({
         code: IdempotencyWriteUnconfirmed.code,
@@ -166,7 +166,7 @@ describe('redisResponseCache', () => {
     const cause = new Error('private Redis rejection');
     vi.spyOn(redis, 'set').mockRejectedValueOnce(cause);
     expect(await cache.begin(key, 'fp', ownerOne)).toMatchObject({ code: IdempotencyClaimUnconfirmed.code, cause });
-    await cache.begin(key, 'fp', ownerOne);
+    expect(await cache.begin(key, 'fp', ownerOne)).toBe('started');
     vi.spyOn(redis, 'eval').mockRejectedValueOnce(cause);
     expect(await cache.finish(key, ownerOne, response, 1000)).toMatchObject({
       code: IdempotencyWriteUnconfirmed.code,

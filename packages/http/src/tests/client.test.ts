@@ -7,12 +7,12 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { InvalidEnvelope, InvalidInput, isFailure } from '@arki/failure';
+import { InvalidEnvelope, InvalidInput, isFailure, orThrow } from '@arki/failure';
 
 import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
-import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
+import { route } from '../contract.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 import { raw } from '../raw.js';
 import { codec, optional } from '../wire.js';
@@ -111,7 +111,7 @@ describe('createClient', () => {
     }
     expect(wire.sent).toHaveLength(0);
     // Dots inside a value are an ordinary id: only a whole "." or ".." segment moves the URL.
-    await move({ params: { id: '..e1' }, body: { at: new Date(0) } });
+    orThrow(await move({ params: { id: '..e1' }, body: { at: new Date(0) } }));
     expect(wire.sent[0]?.url).toBe(`${BASE}/events/..e1/move`);
   });
 

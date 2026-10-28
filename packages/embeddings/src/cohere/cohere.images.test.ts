@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import { createEmbedder } from '../embedder.js';
 import { RateLimited } from '../failures.js';
 import { createCohereModel } from './index.js';
 
-const PNG = Uint8Array.of(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
+const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 const PNG_URI = 'data:image/png;base64,iVBORw0KGgo=';
 const SIZE = 256;
 
@@ -65,9 +65,9 @@ describe('./cohere images', () => {
 
   it('a text-only call on embed-v4.0 still sends `texts`', async () => {
     const { fetch, calls } = stub(() =>
-      Response.json({ embeddings: { float: [Array.from({ length: SIZE }, () => 0)] } }),
+      Response.json({ embeddings: { float: [Array.from({ length: SIZE }, (_, index) => (index === 0 ? 1 : 0))] } }),
     );
-    await cohere(fetch).embed(['a'], {});
+    orThrow(await cohere(fetch).embed(['a'], {}));
     expect(calls[0]?.body).toMatchObject({ texts: ['a'] });
     expect(calls[0]?.body).not.toHaveProperty('inputs');
   });

@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
 import { DotUnitError } from '@arki/dot/unit';
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
 import { TANSTACK_START_PLUGIN_ERROR_CODES, tanstackStart } from './dot';
@@ -33,7 +33,12 @@ function makeApp(options: AppOptions = {}) {
     mounts: {
       rpc: { at: options.rpcAt ?? '/api/orpc', serve: ({ api }, request, prefix) => api.handle(request, prefix) },
       auth: { at: options.authAt ?? '/api/auth', serve: ({ auth }, request) => auth.handler(request) },
-      cron: { at: '/api/cron', router: {}, secret: options.secret ?? (() => 'cron-secret'), schedules: () => schedules },
+      cron: {
+        at: '/api/cron',
+        router: {},
+        secret: options.secret ?? (() => 'cron-secret'),
+        schedules: () => schedules,
+      },
       health: { at: '/api/health' },
     },
     ...(options.cors === undefined ? {} : { cors: () => options.cors ?? { origins: [] } }),
@@ -60,7 +65,7 @@ describe('tanstackStart() context', () => {
     expect(bob.rpc).toEqual({ caller: 'bob' });
     expect(ada.requestId).not.toBe(bob.requestId);
     expect(ada.signal).toBe(signal);
-    await running.dispose();
+    orThrow(await running.dispose());
   });
 
   it('reads the session only when asked, once per request, never shared across requests', async () => {
@@ -78,7 +83,7 @@ describe('tanstackStart() context', () => {
     const bob = await running.services.tanstackStart.context(request('bob'), signal);
     expect(await bob.session()).toEqual({ user: { id: 'bob' } });
     expect(calls.principal).toBe(2);
-    await running.dispose();
+    orThrow(await running.dispose());
   });
 });
 
@@ -133,7 +138,6 @@ describe('tanstackStart() configure', () => {
   it('rejects a mount path with a trailing slash, which would mount at a double slash', () => {
     expect(isFailure(makeApp({ rpcAt: '/api/rpc/' }).app.configure())).toBe(true);
   });
-
 });
 
 describe('tanstackStart() boot', () => {
@@ -155,6 +159,6 @@ describe('tanstackStart() boot', () => {
     expect(cors.allows('https://evil.example')).toBe(false);
     expect(cors.allows('chrome-extension://abcdef')).toBe(true);
     expect(cors.allows(null)).toBe(false);
-    await running.dispose();
+    orThrow(await running.dispose());
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MockClock } from '@arki/clock';
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff, createResiliencePolicy, createRetryPolicy, createTimeoutPolicy } from '@arki/resilience';
 
 import type { EmbedFailure } from './failures.js';
@@ -120,7 +120,7 @@ describe('withMiddleware', () => {
         return result;
       },
     );
-    await wrapped.embed(['a'], {});
+    orThrow(await wrapped.embed(['a'], {}));
     expect(order).toEqual(['outer in', 'inner in', 'inner out', 'outer out']);
     expect(wrapped.space).toEqual(embedder.space);
   });
@@ -129,11 +129,13 @@ describe('withMiddleware', () => {
 it('maps retry cancellation after provider rejection to the embedding cancellation contract', async () => {
   const controller = new AbortController();
   let calls = 0;
-  const embedder = createEmbedder(stubModel(() => {
-    calls++;
-    controller.abort(new Error('private reason'));
-    return Promise.reject(new Error('provider rejected after cancellation'));
-  }));
+  const embedder = createEmbedder(
+    stubModel(() => {
+      calls++;
+      controller.abort(new Error('private reason'));
+      return Promise.reject(new Error('provider rejected after cancellation'));
+    }),
+  );
   if (isFailure(embedder)) throw new Error(embedder.message);
   const result = await embedMany(withResilience(embedder, instantPolicy()), ['a'], { signal: controller.signal });
   expect(Cancelled.is(result)).toBe(true);
@@ -143,17 +145,29 @@ it('maps retry cancellation after provider rejection to the embedding cancellati
 it('preserves a returned clock defect instead of asserting cancellation or retrying a provider', async () => {
   const refusal = UnexpectedDefect({ cause: new Error('private clock') });
   class RefusingClock extends MockClock {
-    override sleep() { return Promise.resolve(refusal); }
+    override sleep() {
+      return Promise.resolve(refusal);
+    }
   }
   const { embedder, state } = failingThen(RateLimited({}));
-  const policy = createRetryPolicy({ clock: new RefusingClock(), backoff: backoff.constant(1).upTo(2).while(RateLimited) });
+  const policy = createRetryPolicy({
+    clock: new RefusingClock(),
+    backoff: backoff.constant(1).upTo(2).while(RateLimited),
+  });
   const outcome = await withResilience(embedder, policy).embed(['a'], {});
   expect(outcome).toBe(refusal);
   expect(state.calls).toBe(1);
 });
 
 it('maps an owned timeout to provider unavailability without retrying it', async () => {
-  const embedder = createEmbedder(stubModel(() => new Promise<never>(() => { /* The provider ignores cancellation. */ })));
+  const embedder = createEmbedder(
+    stubModel(
+      () =>
+        new Promise<never>(() => {
+          /* The provider ignores cancellation. */
+        }),
+    ),
+  );
   if (isFailure(embedder)) throw new Error(embedder.message);
   const outcome = await withResilience(embedder, createTimeoutPolicy({ timeoutMs: 1 })).embed(['a'], {});
   expect(ModelUnavailable.is(outcome)).toBe(true);

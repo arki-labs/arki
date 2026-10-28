@@ -4,8 +4,23 @@ import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api
 import { AlwaysOffSampler, BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MockClock } from '@arki/clock';
-import { defineFailure, UnexpectedDefect } from '@arki/failure';
-import { backoff, BulkheadRejected, Cancelled, CircuitOpen, createBulkheadPolicy, createCircuitBreakerPolicy, createResiliencePolicy, createRetryPolicy, createTimeoutPolicy, noop, Timeout, withFallback, wrap } from './index.js';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+
+import {
+  backoff,
+  BulkheadRejected,
+  Cancelled,
+  CircuitOpen,
+  createBulkheadPolicy,
+  createCircuitBreakerPolicy,
+  createResiliencePolicy,
+  createRetryPolicy,
+  createTimeoutPolicy,
+  noop,
+  Timeout,
+  withFallback,
+  wrap,
+} from './index.js';
 import { withPolicySpan } from './telemetry.js';
 
 class TestContextManager implements ContextManager {
@@ -110,7 +125,13 @@ it('preserves raw throws for fallback and reports its final answer only once', a
 it('records actual refusal codes and never invokes pre-cancelled work', async () => {
   const exporter = installTelemetry();
   const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
-  await breaker.execute(() => { throw new Error('private cause'); });
+  expect(
+    UnexpectedDefect.is(
+      await breaker.execute(() => {
+        throw new Error('private cause');
+      }),
+    ),
+  ).toBe(true);
   expect(CircuitOpen.is(await breaker.execute(() => 'unused'))).toBe(true);
   const controller = new AbortController(); controller.abort('private reason');
   const work = vi.fn(() => 'unused');
@@ -231,10 +252,14 @@ it('propagates nonrecording contexts without exporting discarded spans', async (
   const exporter = installTelemetry(false);
   const caller = trace.getTracer('test').startSpan('caller');
   let childTraceId: string | undefined;
-  await context.with(trace.setSpan(context.active(), caller), () => noop.execute(async () => {
-    await Promise.resolve();
-    childTraceId = trace.getSpan(context.active())?.spanContext().traceId;
-  }));
+  orThrow(
+    await context.with(trace.setSpan(context.active(), caller), () =>
+      noop.execute(async () => {
+        await Promise.resolve();
+        childTraceId = trace.getSpan(context.active())?.spanContext().traceId;
+      }),
+    ),
+  );
   expect(childTraceId).toBe(caller.spanContext().traceId);
   expect(childTraceId).not.toBe('00000000000000000000000000000000');
   expect(exporter.getFinishedSpans()).toEqual([]);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import { embedMany } from '../embed.js';
@@ -73,7 +73,7 @@ describe('./bedrock', () => {
     expect(isFailure(refused) && refused.code).toBe('embeddings.input_too_long');
     expect(kept.calls).toHaveLength(0);
     const cut = stubFetch();
-    await embedMany(bedrock(cut.fetch), [long], { onTooLong: 'truncate' });
+    orThrow(await embedMany(bedrock(cut.fetch), [long], { onTooLong: 'truncate' }));
     expect(String(bodyOf(cut.calls, 0)['inputText'])).toHaveLength(8192 * 4);
   });
 

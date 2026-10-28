@@ -13,8 +13,8 @@ import type { HttpClientFailure } from '../client.js';
 import type { ParamsOf } from '../contract.js';
 import { reply, routes } from '../bundle.js';
 import { createClient } from '../client.js';
-import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
+import { route } from '../contract.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 import { step } from '../middleware.js';
 import { contractMeta, toOpenApi, toOpenApiFromManifest } from '../openapi.js';
@@ -431,7 +431,10 @@ describe('client', () => {
     expectTypeOf(api.getOrder).returns.resolves.toEqualTypeOf<
       z.output<typeof Order> | z.output<typeof Gone> | HttpClientFailure
     >();
-    // @ts-expect-error -- the order id is branded; a plain string is rejected
-    void api.getOrder({ params: { id: 'o1' }, headers: { 'x-tenant': 't' } });
+    const getOrderWithoutBrandedId = () => {
+      // @ts-expect-error -- the order id is branded; a plain string is rejected
+      return api.getOrder({ params: { id: 'o1' }, headers: { 'x-tenant': 't' } });
+    };
+    expectTypeOf(getOrderWithoutBrandedId).toBeFunction();
   });
 });

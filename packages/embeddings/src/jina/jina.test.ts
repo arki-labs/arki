@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { EmbedderOptions } from '../embedder.js';
@@ -60,22 +60,24 @@ describe('./jina', () => {
     ] as const;
     for (const [purpose, task] of pairs) {
       const { fetch, bodies } = stub(() => withVectors(TWO, floats));
-      await embedMany(jina(fetch), ['a', 'b'], { purpose });
+      orThrow(await embedMany(jina(fetch), ['a', 'b'], { purpose }));
       expect(field(bodies[0], 'task')).toBe(task);
     }
     const none = stub(() => withVectors(TWO, floats));
-    await embedMany(jina(none.fetch), ['a', 'b']);
+    orThrow(await embedMany(jina(none.fetch), ['a', 'b']));
     expect(is(none.bodies[0], recordSchema) && 'task' in none.bodies[0]).toBe(false);
   });
 
   // Asking for a smaller size must reach Jina, or the vectors would not fit the space the caller keyed on.
   it('sends the Matryoshka size only when it differs from native', async () => {
     const small = stub(() => withVectors(TWO, floats));
-    await embedMany(jina(small.fetch), ['a', 'b']);
+    orThrow(await embedMany(jina(small.fetch), ['a', 'b']));
     expect(small.bodies[0]).toMatchObject({ model: 'jina-embeddings-v3', dimensions: SIZE, normalized: true });
-    const native = stub(() => withVectors(TWO, floats));
+    const native = stub(() =>
+      withVectors(TWO, index => Array.from({ length: full.space.dimensions }, (_, at) => (at === index ? 1 : 0))),
+    );
     const full = jina(native.fetch, {});
-    await full.embed(['a', 'b'], {});
+    orThrow(await full.embed(['a', 'b'], {}));
     expect(is(native.bodies[0], recordSchema) && 'dimensions' in native.bodies[0]).toBe(false);
   });
 
@@ -83,8 +85,8 @@ describe('./jina', () => {
   it('truncate is false unless asked', async () => {
     const { fetch, bodies } = stub(() => withVectors(TWO, floats));
     const embedder = jina(fetch);
-    await embedMany(embedder, ['a', 'b']);
-    await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' });
+    orThrow(await embedMany(embedder, ['a', 'b']));
+    orThrow(await embedMany(embedder, ['a', 'b'], { onTooLong: 'truncate' }));
     expect(bodies.map(body => field(body, 'truncate'))).toEqual([false, true]);
   });
 

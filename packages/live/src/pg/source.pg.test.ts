@@ -21,6 +21,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
@@ -174,7 +175,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
 
     try {
       const first = nextId();
-      await journal.run(writer, createPost, { id: first, title: 'From a command' }, { actorId: 'usr_1' });
+      orThrow(await journal.run(writer, createPost, { id: first, title: 'From a command' }, { actorId: 'usr_1' }));
       await settled([POSTS]);
 
       await postRepository(writer).rename(first, 'Renamed by a repository');

@@ -1,5 +1,6 @@
-import { isFailure } from '@arki/failure';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { Policy } from './index.js';
 import {
@@ -350,11 +351,11 @@ describe('wrap and cancellation', () => {
       return attempt;
     };
 
-    await noop.execute(record);
-    await createTimeoutPolicy().execute(record);
-    await createCircuitBreakerPolicy().execute(record);
-    await createBulkheadPolicy().execute(record);
-    await wrap(createCircuitBreakerPolicy(), createTimeoutPolicy()).execute(record);
+    orThrow(await noop.execute(record));
+    orThrow(await createTimeoutPolicy().execute(record));
+    orThrow(await createCircuitBreakerPolicy().execute(record));
+    orThrow(await createBulkheadPolicy().execute(record));
+    orThrow(await wrap(createCircuitBreakerPolicy(), createTimeoutPolicy()).execute(record));
 
     expect(attempts).toEqual([0, 0, 0, 0, 0]);
   });

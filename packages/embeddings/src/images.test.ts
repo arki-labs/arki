@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { EmbedFailure } from './failures.js';
 import type { NativeEmbeddings, NativeInputsRequest } from './types.js';
@@ -8,7 +8,7 @@ import { createEmbedder } from './embedder.js';
 import { InputTooLong, UnsupportedInput } from './failures.js';
 import { echoTexts, stubModel, tracer } from './tests/stub-model.js';
 
-const PNG = Uint8Array.of(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
+const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 const instruction = { query: 'Q: ', version: 1 };
 
 const answerInputs = ({ inputs }: NativeInputsRequest): Promise<NativeEmbeddings> =>
@@ -52,7 +52,7 @@ describe('image inputs', () => {
   it('a text-only call on an image model still goes to embedTexts', async () => {
     const embedTexts = vi.fn(echoTexts);
     const embedInputs = vi.fn<(request: NativeInputsRequest) => Promise<NativeEmbeddings | EmbedFailure>>(answerInputs);
-    await build({ inputs: ['text', 'image'], embedInputs }, embedTexts).embed(['a', 'b'], {});
+    orThrow(await build({ inputs: ['text', 'image'], embedInputs }, embedTexts).embed(['a', 'b'], {}));
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(embedInputs).not.toHaveBeenCalled();
   });

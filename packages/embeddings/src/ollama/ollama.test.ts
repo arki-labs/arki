@@ -1,14 +1,13 @@
 import { readFileSync } from 'node:fs';
-
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
-import { resolveSpace } from '../space.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
+import { resolveSpace } from '../space.js';
 import { createOllamaModel } from './index.js';
 
 /** Real answers recorded from Ollama 2026-10-17 (`qwen3-embedding:0.6b`, inputs "hello" and "world"). */
@@ -121,7 +120,7 @@ describe('./ollama', () => {
     const digest = (JSON.parse(TAGS) as { models: { digest: string }[] }).models[0]?.digest;
     expect(model.revision).toBe(digest);
     expect(batch.space.revision).toBe(digest);
-    await embedMany(embedder, ['world']);
+    orThrow(await embedMany(embedder, ['world']));
     expect(stub.calls.filter(call => call.url.endsWith('/api/tags'))).toHaveLength(1);
   });
 
@@ -155,7 +154,7 @@ describe('./ollama', () => {
     if (isFailure(model)) throw new Error(model.message);
     const embedder = createEmbedder(model);
     if (isFailure(embedder)) throw new Error(embedder.message);
-    await embedMany(embedder, ['who is the shepherd'], { purpose: 'query' });
+    orThrow(await embedMany(embedder, ['who is the shepherd'], { purpose: 'query' }));
     expect(stub.embedCalls()[0]?.body).toMatchObject({ input: ['who is the shepherd'] });
   });
 });

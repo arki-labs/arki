@@ -132,8 +132,8 @@ describe('queue() client + queueWorker() in separate apps', () => {
         await inspect.close();
       }
     } finally {
-      await worker.dispose();
-      await api.dispose();
+      orThrow(await worker.dispose());
+      orThrow(await api.dispose());
     }
   }, 30_000);
   // Why: a flow is a BullMQ tree, so a parent step must run only after its
@@ -189,8 +189,8 @@ describe('queue() client + queueWorker() in separate apps', () => {
       await waitFor(() => finished.length === 2);
       expect(finished).toEqual(['reserve:o-1', 'notify:o-1:w1']);
     } finally {
-      await worker.dispose();
-      await api.dispose();
+      orThrow(await worker.dispose());
+      orThrow(await api.dispose());
     }
   }, 30_000);
 });

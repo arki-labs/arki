@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { NativeRequest } from './types.js';
@@ -118,7 +118,7 @@ describe('onTooLong', () => {
     if (isFailure(model)) throw new Error(model.message);
     const embedder = createEmbedder(model);
     if (isFailure(embedder)) throw new Error(embedder.message);
-    await embedder.embed(['x'.repeat(10_000)], { onTooLong: 'truncate' });
+    orThrow(await embedder.embed(['x'.repeat(10_000)], { onTooLong: 'truncate' }));
     expect(bodies[0]).toMatchObject({ truncate: true });
   });
 
@@ -141,7 +141,7 @@ describe('onTooLong', () => {
     if (isFailure(model)) throw new Error(model.message);
     const embedder = createEmbedder(model);
     if (isFailure(embedder)) throw new Error(embedder.message);
-    await embedder.embed(['y'.repeat(100)], { onTooLong: 'truncate' });
+    orThrow(await embedder.embed(['y'.repeat(100)], { onTooLong: 'truncate' }));
     expect(sent[0]).toMatchObject({ input: ['y'.repeat(20)] });
   });
 
@@ -162,7 +162,7 @@ describe('onTooLong', () => {
     if (isFailure(model)) throw new Error(model.message);
     const embedder = createEmbedder(model);
     if (isFailure(embedder)) throw new Error(embedder.message);
-    await embedder.embed(['a'.repeat(7) + '😀'], { onTooLong: 'truncate' });
+    orThrow(await embedder.embed(['a'.repeat(7) + '😀'], { onTooLong: 'truncate' }));
     expect(sent[0]).toMatchObject({ input: ['aaaaaaa'] });
     expect(truncateByEstimate('a'.repeat(7) + '😀', 2).isWellFormed()).toBe(true);
     expect(truncateByEstimate('a'.repeat(6) + '😀', 2)).toBe('aaaaaa😀');

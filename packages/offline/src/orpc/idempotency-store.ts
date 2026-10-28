@@ -65,9 +65,12 @@ export function storeIdempotentResponse(
   // A faulty context manager may omit/repeat the callback or throw after invoking it.
   // Always return the one owned execution, even when telemetry fails.
   observe(() => {
-    if (span !== undefined) void Promise.resolve(context.with(trace.setSpan(context.active(), span), execute)).catch(() => {
-      // Observe rejected work from a defective context manager; execute() owns the outcome.
-    });
+    if (span !== undefined) {
+      // eslint-disable-next-line failure/must-use -- This secondary telemetry observer shares execute()'s cached outcome; the primary outcome is returned below.
+      void Promise.resolve(context.with(trace.setSpan(context.active(), span), execute)).catch(() => {
+        // Observe rejected work from a defective context manager; execute() owns the outcome.
+      });
+    }
   });
   return execute();
 }

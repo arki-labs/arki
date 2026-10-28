@@ -69,6 +69,7 @@
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@types/react": "catalog:react",
@@ -76,8 +77,8 @@
     "react": "catalog:react",
     "typescript": "catalog:"
   },
-  "module:jsx": "src",
   "peerDependencies": {
     "react": "^18 || ^19"
-  }
+  },
+  "module:jsx": "src"
 }

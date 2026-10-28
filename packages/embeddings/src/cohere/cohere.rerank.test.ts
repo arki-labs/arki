@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { ScoreRow } from '../tests/rerank-contract.js';
@@ -48,7 +48,7 @@ describe('./cohere rerankers', () => {
   // Cohere reads 4096 tokens of a document unless told more; a v4 model would lose the rest silently.
   it('Cohere is sent model, query, documents and the model’s whole context as max_tokens_per_doc', async () => {
     const { fetch, calls } = stubRerankFetch(() => Response.json(cohereBody([{ index: 0, score: 1 }])));
-    await cohere(fetch, 'rerank-v4.0-fast').rerank('q', ['d'], {});
+    orThrow(await cohere(fetch, 'rerank-v4.0-fast').rerank('q', ['d'], {}));
     expect(calls[0]?.url).toBe('https://api.cohere.com/v2/rerank');
     expect(calls[0]?.body).toEqual({
       model: 'rerank-v4.0-fast',

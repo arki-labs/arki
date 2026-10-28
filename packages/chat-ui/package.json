@@ -199,6 +199,7 @@
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",

@@ -111,7 +111,12 @@ describe('http() plugin', () => {
   it('serves the routes of every mounted feature without the app listing them again', async () => {
     const ordersCore = defineFeature('orders')
       .needs({ ordersDb: service<OrdersDb>() })
-      .usecases({ list: ({ ordersDb }) => () => ordersDb.list() });
+      .usecases({
+        list:
+          ({ ordersDb }) =>
+          () =>
+            ordersDb.list(),
+      });
     const orders = ordersCore.entrypoints(
       coreEndpoints(ordersCore, ({ usecases }) => routes().bind(listOrders, () => orThrow(usecases.list())), {
         contracts: [listOrders],
@@ -139,7 +144,7 @@ describe('http() plugin', () => {
   // Why: an `entrypointOnly` need exists for what only a driving adapter holds (a health
   // probe's db handle, a transaction middleware's db). `endpoints()` is a driving adapter,
   // so its build must receive that need, typed, even on a feature with no usecases at all.
-  it('hands endpoints(core, build) the feature\'s entrypointOnly needs, before .usecases() too', async () => {
+  it("hands endpoints(core, build) the feature's entrypointOnly needs, before .usecases() too", async () => {
     const probeCore = defineFeature('probe').needs({ ordersDb: entrypointOnly(ordersDbPlugin.provides.ordersDb) });
     const probe = probeCore.entrypoints(
       coreEndpoints(probeCore, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()), {
@@ -455,7 +460,7 @@ describe('http() with feature instances', () => {
         .boot(),
     );
     expect(await (await get(plain, '/reports')).json()).toEqual({ region: 'us' });
-    await plain.dispose();
+    orThrow(await plain.dispose());
 
     const other = defineFeature('reports-two').entrypoints(
       coreEndpoints(defineFeature('reports-two'), () => routes().bind(listReports, () => ({ region: 'x' })), {

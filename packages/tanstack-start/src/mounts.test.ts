@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CronContext } from '@arki/schedule/orpc';
 import { defineApp, infra } from '@arki/dot';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
 import { tanstackStart } from './dot';
@@ -83,7 +83,7 @@ describe('rpcHandlers()', () => {
     const response = await handlers.POST({ request: rpcRequest('/ping', { method: 'POST' }), context });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ pong: true });
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('reflects a listed origin with credentials', async () => {
@@ -93,7 +93,7 @@ describe('rpcHandlers()', () => {
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://shop.example');
     expect(response.headers.get('Access-Control-Allow-Credentials')).toBe('true');
     expect(response.headers.get('Vary')).toContain('Origin');
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('never reflects an unlisted origin', async () => {
@@ -102,19 +102,25 @@ describe('rpcHandlers()', () => {
     const response = await handlers.POST({ request, context });
     expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
     expect(response.headers.get('Access-Control-Allow-Credentials')).toBeNull();
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('reflects extension origins only when extensions are on', async () => {
     const headers = { origin: 'chrome-extension://abcdef' };
     const on = await startedApp({ extensions: true });
     const off = await startedApp({ extensions: false });
-    const allowed = await handlers.POST({ request: rpcRequest('/ping', { method: 'POST', headers }), context: on.context });
-    const refused = await handlers.POST({ request: rpcRequest('/ping', { method: 'POST', headers }), context: off.context });
+    const allowed = await handlers.POST({
+      request: rpcRequest('/ping', { method: 'POST', headers }),
+      context: on.context,
+    });
+    const refused = await handlers.POST({
+      request: rpcRequest('/ping', { method: 'POST', headers }),
+      context: off.context,
+    });
     expect(allowed.headers.get('Access-Control-Allow-Origin')).toBe('chrome-extension://abcdef');
     expect(refused.headers.get('Access-Control-Allow-Origin')).toBeNull();
-    await on.dispose();
-    await off.dispose();
+    orThrow(await on.dispose());
+    orThrow(await off.dispose());
   });
 
   it('answers a preflight with 204 and the CORS headers', async () => {
@@ -124,14 +130,14 @@ describe('rpcHandlers()', () => {
     expect(response.status).toBe(204);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://shop.example');
     expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('answers 404 when no procedure matched', async () => {
     const { context, dispose } = await startedApp();
     const response = await handlers.POST({ request: rpcRequest('/nope', { method: 'POST' }), context });
     expect(response.status).toBe(404);
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('answers 500 on a crash without leaking its message', async () => {
@@ -139,7 +145,7 @@ describe('rpcHandlers()', () => {
     const response = await handlers.POST({ request: rpcRequest('/boom', { method: 'POST' }), context });
     expect(response.status).toBe(500);
     expect(await response.text()).not.toContain('password');
-    await dispose();
+    orThrow(await dispose());
   });
 });
 
@@ -155,7 +161,7 @@ describe('cronHandlers()', () => {
     expect([missing.status, wrongScheme.status, wrong.status]).toEqual([401, 401, 401]);
     expect(await wrong.json()).toEqual({ error: 'Invalid cron secret' });
     expect(triggered).toEqual([]);
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('triggers the named schedule through the scheduler the plugin needs', async () => {
@@ -165,24 +171,27 @@ describe('cronHandlers()', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ sent: true });
     expect(triggered).toEqual(['send-digest']);
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('answers 404 for an unknown cron', async () => {
     const { context, dispose } = await startedApp();
     const response = await handlers.POST({ request: cronRequest('nope', 'Bearer cron-secret'), context });
     expect(response.status).toBe(404);
-    await dispose();
+    orThrow(await dispose());
   });
 });
 
 describe('authHandlers() and healthHandlers()', () => {
   it('forwards auth requests through the declared auth mount', async () => {
     const { context, calls, dispose } = await startedApp();
-    const response = await authHandlers().GET({ request: new Request('https://api.example/api/auth/session'), context });
+    const response = await authHandlers().GET({
+      request: new Request('https://api.example/api/auth/session'),
+      context,
+    });
     expect(await response.json()).toEqual({ auth: '/api/auth/session' });
     expect(calls.handler).toBe(1);
-    await dispose();
+    orThrow(await dispose());
   });
 
   it('reports ok', async () => {
@@ -190,7 +199,7 @@ describe('authHandlers() and healthHandlers()', () => {
     const response = healthHandlers().GET({ context });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: 'ok' });
-    await dispose();
+    orThrow(await dispose());
   });
 });
 
@@ -210,6 +219,6 @@ describe('a handler for an undeclared mount', () => {
       healthHandlers().GET({ context }),
     ];
     expect(responses.map(response => response.status)).toEqual([404, 404, 404, 404]);
-    await dispose();
+    orThrow(await dispose());
   });
 });

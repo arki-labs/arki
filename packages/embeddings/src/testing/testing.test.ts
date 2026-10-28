@@ -1,18 +1,17 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
 import { afterAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
 import type { Embedder as JudgeEmbedder } from '@arki/testing/ai';
+import { isFailure, orThrow } from '@arki/failure';
 import { cosine as judgeCosine } from '@arki/testing/ai';
 
 import { embed, embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
 import { Cancelled, InvalidOutput, RateLimited } from '../failures.js';
-import { cosine, norm } from '../vector.js';
 import { echoTexts, stubModel } from '../tests/stub-model.js';
+import { cosine, norm } from '../vector.js';
 import { fakeEmbedder, fixtureEmbedder, fromArkiEmbedder, recordEmbedder } from './index.js';
 
 describe('./testing fakeEmbedder', () => {
@@ -76,7 +75,7 @@ describe('recordEmbedder and fixtureEmbedder', () => {
   // A miss must fail loudly: a made-up vector would let a test pass against data nobody recorded.
   it('a request that was not recorded is InvalidOutput', async () => {
     const file = path.join(directory, 'miss.json');
-    await embed(recordEmbedder(fakeEmbedder({ dimensions: 8 }), file), 'recorded', { purpose: 'query' });
+    orThrow(await embed(recordEmbedder(fakeEmbedder({ dimensions: 8 }), file), 'recorded', { purpose: 'query' }));
     const replay = fixtureEmbedder(load(file));
     if (isFailure(replay)) throw new Error(replay.message);
     const otherText = await embed(replay, 'never recorded', { purpose: 'query' });
@@ -108,8 +107,8 @@ describe('recordEmbedder and fixtureEmbedder', () => {
     const live = createEmbedder(stubModel(echoTexts, { dimensions: 4, matryoshka: [4, 2] }));
     if (isFailure(live)) throw new Error(live.message);
     const recorder = recordEmbedder(live, file);
-    await embed(recorder, 't1', { dimensions: 2 });
-    await embed(recorder, 't2');
+    orThrow(await embed(recorder, 't1', { dimensions: 2 }));
+    orThrow(await embed(recorder, 't2'));
     const replay = fixtureEmbedder(load(file));
     if (isFailure(replay)) throw new Error(replay.message);
     expect(replay.space.dimensions).toBe(4);
@@ -130,7 +129,7 @@ describe('recordEmbedder and fixtureEmbedder', () => {
   // Replay must cancel like a live embedder, or a cancellation test passes only offline.
   it('replay honours an aborted signal', async () => {
     const file = path.join(directory, 'abort.json');
-    await embed(recordEmbedder(fakeEmbedder({ dimensions: 8 }), file), 'text');
+    orThrow(await embed(recordEmbedder(fakeEmbedder({ dimensions: 8 }), file), 'text'));
     const replay = fixtureEmbedder(load(file));
     if (isFailure(replay)) throw new Error(replay.message);
     const controller = new AbortController();

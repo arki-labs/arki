@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import { createEmbedder } from '../embedder.js';
@@ -37,7 +37,9 @@ function stubFetch(answer?: () => Response) {
 function sizeOf(body: unknown): number {
   if (!is(body, recordSchema)) return 3072;
   const first = Array.isArray(body['requests']) ? body['requests'][0] : body;
-  return is(first, recordSchema) && typeof first['outputDimensionality'] === 'number' ? first['outputDimensionality'] : 3072;
+  return is(first, recordSchema) && typeof first['outputDimensionality'] === 'number'
+    ? first['outputDimensionality']
+    : 3072;
 }
 
 function google(fetch: ReturnType<typeof stubFetch>['fetch'], id?: string, dimensions?: number) {
@@ -74,14 +76,14 @@ describe('./google', () => {
       expect(firstRequest(stub.calls)['taskType']).toBe(taskType);
     }
     const stub = stubFetch();
-    await google(stub.fetch).embed(['a', 'b'], {});
+    orThrow(await google(stub.fetch).embed(['a', 'b'], {}));
     expect(firstRequest(stub.calls)).not.toHaveProperty('taskType');
   });
 
   // gemini-embedding-2 rejects task types; its purpose lives in the text prefix instead.
   it('gemini-embedding-2 sends no taskType and prefixes the text', async () => {
     const stub = stubFetch();
-    await google(stub.fetch, 'gemini-embedding-2').embed(['a', 'b'], { purpose: 'query' });
+    orThrow(await google(stub.fetch, 'gemini-embedding-2').embed(['a', 'b'], { purpose: 'query' }));
     const request = firstRequest(stub.calls);
     expect(request).not.toHaveProperty('taskType');
     expect(JSON.stringify(request)).toContain('task: search result | query: a');
@@ -102,7 +104,7 @@ describe('./google', () => {
   // Sending outputDimensionality for the native size would make every call look like a new space.
   it('omits outputDimensionality at the native size', async () => {
     const stub = stubFetch();
-    await google(stub.fetch).embed(['a', 'b'], {});
+    orThrow(await google(stub.fetch).embed(['a', 'b'], {}));
     expect(firstRequest(stub.calls)).not.toHaveProperty('outputDimensionality');
   });
 
@@ -116,7 +118,10 @@ describe('./google', () => {
   // Retries belong to withResilience, so the 429 must reach the caller with its wait time.
   it('429 is RateLimited', async () => {
     const stub = stubFetch(() =>
-      Response.json({ error: { code: 429, message: 'quota', status: 'RESOURCE_EXHAUSTED' } }, { status: 429, headers: { 'retry-after': '2' } }),
+      Response.json(
+        { error: { code: 429, message: 'quota', status: 'RESOURCE_EXHAUSTED' } },
+        { status: 429, headers: { 'retry-after': '2' } },
+      ),
     );
     const result = await google(stub.fetch).embed(['a', 'b'], {});
     expect(isFailure(result) && result.code).toBe('embeddings.rate_limited');
@@ -126,7 +131,9 @@ describe('./google', () => {
 
   // A bad key is the operator's fault to fix, not a transient error.
   it('403 is ConfigurationFailure', async () => {
-    const stub = stubFetch(() => Response.json({ error: { code: 403, message: 'bad key', status: 'PERMISSION_DENIED' } }, { status: 403 }));
+    const stub = stubFetch(() =>
+      Response.json({ error: { code: 403, message: 'bad key', status: 'PERMISSION_DENIED' } }, { status: 403 }),
+    );
     const result = await google(stub.fetch).embed(['a', 'b'], {});
     expect(isFailure(result) && result.code).toBe('embeddings.configuration');
   });

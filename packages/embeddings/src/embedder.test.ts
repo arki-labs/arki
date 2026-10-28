@@ -1,18 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { NativeRequest } from './types.js';
 import { createEmbedder } from './embedder.js';
 import { InvalidOutput, UnsupportedInput } from './failures.js';
+import { QWEN3_INSTRUCTION } from './instructions.js';
 import { calibrateInt8, calibrationId } from './quantize.js';
 import { isSameSpace, spaceId } from './space.js';
-import { QWEN3_INSTRUCTION } from './instructions.js';
 import { echoTexts, stubModel } from './tests/stub-model.js';
 
 /** An embedder over a model whose native call answers exactly `vectors`. */
 function answering(vectors: readonly (readonly number[])[], facts: Parameters<typeof stubModel>[1] = {}) {
-  const embedder = createEmbedder(stubModel(() => Promise.resolve({ vectors, tokens: { basis: 'unknown' as const } }), facts));
+  const embedder = createEmbedder(
+    stubModel(() => Promise.resolve({ vectors, tokens: { basis: 'unknown' as const } }), facts),
+  );
   if (isFailure(embedder)) throw new Error('stub embedder refused its own defaults');
   return embedder;
 }
@@ -25,10 +27,10 @@ describe('createEmbedder validates every response', () => {
 
   // A model record with the wrong size must fail loudly, never be silently adopted into an index.
   it('wrong dims is InvalidOutput and names both numbers', async () => {
-    const result = await answering([Array.from({ length: 768 }, () => 0.1)], { dimensions: 1024, matryoshka: [] }).embed(
-      ['a'],
-      {},
-    );
+    const result = await answering([Array.from({ length: 768 }, () => 0.1)], {
+      dimensions: 1024,
+      matryoshka: [],
+    }).embed(['a'], {});
     expect(isFailure(result) && result.code).toBe('embeddings.invalid_output');
     expect(InvalidOutput.is(result) && result.data.reason).toContain('expected 1024, got 768');
   });
@@ -82,9 +84,9 @@ describe('createEmbedder validates every response', () => {
     });
     const embedder = createEmbedder(stubModel(spy, { instruction: QWEN3_INSTRUCTION }));
     if (isFailure(embedder)) throw new Error('refused defaults');
-    await embedder.embed(['what is rain'], { purpose: 'query' });
-    await embedder.embed(['rain is water'], { purpose: 'document' });
-    await embedder.embed(['plain'], {});
+    orThrow(await embedder.embed(['what is rain'], { purpose: 'query' }));
+    orThrow(await embedder.embed(['rain is water'], { purpose: 'document' }));
+    orThrow(await embedder.embed(['plain'], {}));
     expect(seen).toEqual([[`${QWEN3_INSTRUCTION.query ?? ''}what is rain`], ['rain is water'], ['plain']]);
   });
 
@@ -106,7 +108,6 @@ const eight = (request: NativeRequest) =>
   });
 
 describe('createEmbedder makes the dtype the provider cannot', () => {
-
   // A provider without native binary still gets cheap first-pass vectors, and is asked for floats.
   it('binary is packed here from validated floats', async () => {
     const native = vi.fn(eight);
@@ -115,7 +116,7 @@ describe('createEmbedder makes the dtype the provider cannot', () => {
     const batch = await embedder.embed(['a'], {});
     if (isFailure(batch)) throw new Error(batch.message);
     expect(native.mock.calls[0]?.[0].quantization).toBeUndefined();
-    expect([...batch.vectors[0] ?? []]).toEqual([0b1010_1100]);
+    expect([...(batch.vectors[0] ?? [])]).toEqual([0b1010_1100]);
     expect(batch.space).toMatchObject({ dimensions: 8, quantization: 'binary' });
     expect(batch.space.calibration).toBeUndefined();
   });
@@ -130,7 +131,7 @@ describe('createEmbedder makes the dtype the provider cannot', () => {
     if (isFailure(embedder)) throw new Error(embedder.message);
     const batch = await embedder.embed(['a'], {});
     if (isFailure(batch)) throw new Error(batch.message);
-    expect([...batch.vectors[0] ?? []]).toEqual([127, -128, 127, -128, 127, 127, -128, -128]);
+    expect([...(batch.vectors[0] ?? [])]).toEqual([127, -128, 127, -128, 127, 127, -128, -128]);
     expect(batch.space).toEqual(embedder.space);
     expect(spaceId(batch.space)).toContain(`/i8@${calibrationId(calibration)}/`);
     const other = calibrateInt8([new Float32Array(8).fill(-1), new Float32Array(8).fill(1)]);

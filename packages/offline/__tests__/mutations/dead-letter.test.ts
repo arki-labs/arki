@@ -1,7 +1,9 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { orThrow } from '@arki/failure';
-import { queuedMutationId, mutationIdempotencyKey } from '../../src/mutations/identity.ts';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import type { QueuedMutation } from '../../src/mutations/queue.ts';
+import { mutationIdempotencyKey, queuedMutationId } from '../../src/mutations/identity.ts';
 
 // ---------------------------------------------------------------------------
 // In-memory IDB mock
@@ -76,7 +78,7 @@ describe('DeadLetterStore', () => {
     orThrow(await dlStore.add(makeMutation('third'), new Error('err3')));
 
     const items = orThrow(await dlStore.list());
-    expect(items.map((m) => m.id)).toEqual(['first', 'second', 'third']);
+    expect(items.map(m => m.id)).toEqual(['first', 'second', 'third']);
   });
 
   it('remove() deletes an entry by id; remaining entries are preserved', async () => {
@@ -89,7 +91,7 @@ describe('DeadLetterStore', () => {
     orThrow(await dlStore.remove(queuedMutationId.schema.parse('remove-me')));
 
     const items = orThrow(await dlStore.list());
-    expect(items.map((m) => m.id)).toEqual(['keep-1', 'keep-2']);
+    expect(items.map(m => m.id)).toEqual(['keep-1', 'keep-2']);
   });
 
   it('remove() on a non-existent id is a no-op', async () => {
@@ -150,9 +152,13 @@ describe('DeadLetterStore', () => {
   it('preserves committed writes and later observers when a reporter throws or rejects', async () => {
     const dlStore = createDeadLetterStore('reporter-refusal');
     const later = vi.fn();
-    dlStore.subscribe(() => { throw new Error('reporter refused'); });
+    dlStore.subscribe(() => {
+      throw new Error('reporter refused');
+    });
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Exercise a malformed JS observer returning a rejected promise from a void API.
-    dlStore.subscribe(() => { return Promise.reject(new Error('async reporter refused')); });
+    dlStore.subscribe(() => {
+      return Promise.reject(new Error('async reporter refused'));
+    });
     dlStore.subscribe(later);
 
     expect(await dlStore.add(makeMutation('reported'), new Error('e'))).toBeUndefined();
@@ -165,7 +171,9 @@ describe('DeadLetterStore', () => {
     let nested: ReturnType<typeof dlStore.remove> | undefined;
     const reporter = vi.fn(() => {
       nested = dlStore.remove(queuedMutationId.schema.parse('reentrant'));
-      return nested;
+      return nested.then(result => {
+        expect(result).toBeUndefined();
+      });
     });
     const later = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Exercise reentrant async JS reporting through the public void observer API.
@@ -183,7 +191,12 @@ describe('DeadLetterStore', () => {
 
   it('notifies other observers of future commits while one observer stays pending', async () => {
     const dlStore = createDeadLetterStore('pending-reporter');
-    const pending = vi.fn(() => new Promise<void>(() => { /* Intentionally never settles. */ }));
+    const pending = vi.fn(
+      () =>
+        new Promise<void>(() => {
+          /* Intentionally never settles. */
+        }),
+    );
     const later = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- Exercise a malformed JS observer that never settles through the public void API.
     dlStore.subscribe(pending);

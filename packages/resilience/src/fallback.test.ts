@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { orThrow, UnexpectedDefect } from '@arki/failure';
+
 import {
   backoff,
   Cancelled,
+  CircuitOpen,
   createCircuitBreakerPolicy,
   createResiliencePolicy,
   createTimeoutPolicy,
-  CircuitOpen,
   noop,
   withFallback,
   wrap,
@@ -17,11 +19,6 @@ const ignore = (): void => {
   // intentionally pending forever
 };
 
-/** Passed to `.catch` where the test only needs the call to settle. */
-function swallow(): void {
-  // the failure is expected
-}
-
 const boom = (): never => {
   throw new Error('down');
 };
@@ -29,7 +26,7 @@ const boom = (): never => {
 describe('withFallback', () => {
   it('an open breaker returns its refusal without calling work or fallback', async () => {
     const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
-    await breaker.execute(boom).catch(swallow);
+    expect(UnexpectedDefect.is(await breaker.execute(boom))).toBe(true);
     const guarded = withFallback(breaker, () => 'cached');
     const fn = vi.fn(() => 'live');
 
@@ -39,9 +36,9 @@ describe('withFallback', () => {
 
   it('engine refusals never enter a throw fallback', async () => {
     const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
-    await breaker.execute(boom).catch(swallow);
+    expect(UnexpectedDefect.is(await breaker.execute(boom))).toBe(true);
     const seen: unknown[] = [];
-    await withFallback(breaker, error => seen.push(error)).execute(() => 1);
+    expect(CircuitOpen.is(await withFallback(breaker, error => seen.push(error)).execute(() => 1))).toBe(true);
 
     expect(seen).toEqual([]);
   });
@@ -72,7 +69,10 @@ describe('withFallback', () => {
       if (!(error instanceof TypeError)) throw error;
       return 'cached';
     });
-    await expect(selective.execute(() => Promise.reject(new RangeError('mine')))).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: expect.any(RangeError) });
+    await expect(selective.execute(() => Promise.reject(new RangeError('mine')))).resolves.toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: expect.any(RangeError),
+    });
   });
 
   it('a caller abort is not hidden by the fallback', async () => {
@@ -90,7 +90,7 @@ describe('withFallback', () => {
     const onSuccess = vi.fn();
     const policy = withFallback(noop, () => 1);
     policy.onSuccess(onSuccess);
-    await policy.execute(() => 2);
+    orThrow(await policy.execute(() => 2));
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 });

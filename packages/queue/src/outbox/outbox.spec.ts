@@ -264,7 +264,7 @@ describe('runAfter in a transaction', () => {
       stored[label] = row?.priority ?? Number.NaN;
     }
     expect(stored).toEqual({ CRITICAL: 4, HIGH: 2, NORMAL: 0, LOW: -2, BACKGROUND: -5 });
-    await journal.drain(db, { jobs: runner });
+    orThrow(await journal.drain(db, { jobs: runner }));
     expect(handled.map(job => job.data)).toEqual(
       ['CRITICAL', 'HIGH', 'NORMAL', 'LOW', 'BACKGROUND'].map(userId => ({ userId })),
     );
@@ -320,13 +320,13 @@ describe('outboxRunner on the journal worker', () => {
   it('a job that keeps failing goes dead after its backoff; journal.retry runs it again under the same id', async () => {
     failures = 5;
     const { id } = orThrow(await db.transaction(tx => schedule.runAfter(tx, wrapped, { n: 1 })));
-    await journal.drain(db, { jobs: runner });
+    orThrow(await journal.drain(db, { jobs: runner }));
     const [dead] = await rows();
     expect(dead).toMatchObject({ id, attempts: 2 });
     expect(dead?.deadAt).toBeInstanceOf(Date);
     failures = 0;
-    await journal.retry(db, id, { actor: 'outbox-spec' });
-    await journal.drain(db, { jobs: runner });
+    orThrow(await journal.retry(db, id, { actor: 'outbox-spec' }));
+    orThrow(await journal.drain(db, { jobs: runner }));
     expect(handled.map(job => job.jobId)).toEqual([id, id, id]);
     expect(await rows()).toEqual([]);
   });
@@ -334,7 +334,7 @@ describe('outboxRunner on the journal worker', () => {
   it('runs a transform once, at the worker: the row keeps the raw input', async () => {
     orThrow(await db.transaction(tx => schedule.runAfter(tx, shout, 'hi')));
     expect(await rows()).toMatchObject([{ args: 'hi' }]);
-    await journal.drain(db, { jobs: runner });
+    orThrow(await journal.drain(db, { jobs: runner }));
     expect(handled).toMatchObject([{ name: 'shout', data: 'hi!' }]);
   });
 

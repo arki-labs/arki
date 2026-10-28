@@ -2,12 +2,12 @@
   "name": "@arki/seo",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/arki-labs/arki.git",
     "directory": "packages/seo"
   },
+  "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
@@ -41,6 +41,21 @@
   "dependencies": {
     "schema-dts": "catalog:"
   },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
   "peerDependencies": {
     "@arki/icons": "workspace:*",
     "@arki/ui": "workspace:*",
@@ -64,19 +79,5 @@
     "react-dom": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "@arki/eslint-config": "workspace:*",
-    "@arki/prettier-config": "workspace:*",
-    "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
-    "@tanstack/react-router": "catalog:tanstack/start",
-    "@types/react": "catalog:react",
-    "@types/react-dom": "catalog:react",
-    "@vitejs/plugin-react": "catalog:",
-    "react": "catalog:react",
-    "react-dom": "catalog:react",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { SparseModelOptions } from './index.js';
@@ -45,8 +45,8 @@ describe('./sparse', () => {
   it('posts inputs[] and an explicit truncate flag to baseURL/embed_sparse', async () => {
     const fetch = vi.fn<FetchLike>(answer(TEI_REPLY));
     const model = splade(fetch, { apiKey: 'key' });
-    await model.embed(['a', 'b'], {});
-    await model.embed(['a', 'b'], { onTooLong: 'truncate' });
+    orThrow(await model.embed(['a', 'b'], {}));
+    orThrow(await model.embed(['a', 'b'], { onTooLong: 'truncate' }));
     const [url, init] = fetch.mock.calls[0] ?? [];
     expect(url).toBe('http://tei.test/embed_sparse');
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer key');

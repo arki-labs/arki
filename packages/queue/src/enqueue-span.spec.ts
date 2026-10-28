@@ -9,17 +9,17 @@ import { PgBoss } from 'pg-boss';
 import { afterEach, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable, z } from '@arki/contracts';
-import { InvalidInput, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
+import { InvalidInput, orThrow, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 
+import type { FlowEnqueueFailure } from './flow-jobs.ts';
 import type { QueueJobId } from './job-id.ts';
 import type { JobTriggerResult } from './trigger.ts';
-import type { FlowEnqueueFailure } from './flow-jobs.ts';
 import type { FlowEnqueueResult } from './types/builder.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
+import { QueueAcceptanceUnknown, QueueUnavailable } from './errors.ts';
 import { initQueue } from './init.ts';
 import { createQueueClient } from './queue-client.ts';
 import { createRuntimeLocalQueueInstance } from './runtime-local/create-queue.ts';
-import { QueueAcceptanceUnknown, QueueUnavailable } from './errors.ts';
 import { triggerValidated } from './trigger.ts';
 
 const transport = vi.hoisted(() => ({
@@ -131,7 +131,11 @@ function job() {
 
 it('traces flow validation refusals before transport with the exact public result type', async () => {
   const exporter = installTelemetry();
-  const flow = q.flow.name('declared-flow').input(schema).step('one', { job: job(), data: value => value }).build();
+  const flow = q.flow
+    .name('declared-flow')
+    .input(schema)
+    .step('one', { job: job(), data: value => value })
+    .build();
   const handle = createQueueClient({ connection: 'redis://localhost:6379' });
   try {
     const _enqueue = () => handle.client.enqueue(flow, { n: 1 });
@@ -180,7 +184,10 @@ it('propagates one flow producer context through the tree while preserving expli
     const span = spans[0];
     expect(span?.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
     const roots = transport.addBulk.mock.calls[0]?.[0];
-    const metadata = JSON.stringify({ 'span-id': span?.spanContext().spanId, 'trace-id': parent.spanContext().traceId });
+    const metadata = JSON.stringify({
+      'span-id': span?.spanContext().spanId,
+      'trace-id': parent.spanContext().traceId,
+    });
     expect(roots?.[0]?.opts?.telemetry?.metadata).toBe(metadata);
     expect(roots?.[0]?.children?.[0]?.opts?.telemetry?.metadata).toBe(metadata);
     expect(roots?.[1]?.opts?.telemetry?.metadata).toBe('explicit');
@@ -411,10 +418,12 @@ it('preserves explicitly supplied BullMQ telemetry precedence', async () => {
   const handle = createQueueClient({ connection: 'redis://localhost:6379' });
   transport.add.mockImplementation((_name, _data, options) => Promise.resolve({ id: options.jobId }));
   try {
-    await handle.client.enqueue(
-      job(),
-      { n: 1 },
-      { jobId: 'key', bullmqOptions: { telemetry: { metadata: 'caller-owned' } } },
+    orThrow(
+      await handle.client.enqueue(
+        job(),
+        { n: 1 },
+        { jobId: 'key', bullmqOptions: { telemetry: { metadata: 'caller-owned' } } },
+      ),
     );
     expect(transport.add.mock.calls[0]?.[2].telemetry?.metadata).toBe('caller-owned');
   } finally {
