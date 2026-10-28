@@ -5,42 +5,72 @@ import { SCHEMA_ERROR_CODES, SchemaRunError } from './errors.js';
 /** The one JSON Schema target `withJsonSchema` answers: the one OpenAPI 3.1 uses. */
 const TARGET = 'draft-2020-12';
 
+const ignore = (): void => {
+  // Capability probes have no asynchronous output channel.
+};
+const observed = new WeakSet<object>();
+
+/** Best-effort native rejection observation, reserved before constructor/species code can reenter. */
+function observe<Value>(value: Value): Value {
+  if (typeof value === 'object' && value !== null && !observed.has(value)) {
+    observed.add(value);
+    try {
+      void Promise.prototype.then.call(value, ignore, ignore);
+    } catch {
+      // Non-promises and promises that prohibit handler registration cannot be observed this way.
+    }
+  }
+  return value;
+}
+
 /**
  * True when `value` is a Standard Schema v1: it has `~standard` with
  * `version` 1, a string `vendor` and a `validate` function. Functions count,
- * because ArkType types are callable.
+ * because ArkType types are callable. Uninspectable protocols return false.
  */
 export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
-  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return false;
-  if (!('~standard' in value)) return false;
-  const standard = value['~standard'];
-  return (
-    typeof standard === 'object' &&
-    standard !== null &&
-    'version' in standard &&
-    standard.version === 1 &&
-    'vendor' in standard &&
-    typeof standard.vendor === 'string' &&
-    'validate' in standard &&
-    typeof standard.validate === 'function'
-  );
+  try {
+    observe(value);
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return false;
+    if (!('~standard' in value)) return false;
+    const standard = observe(value['~standard']);
+    return (
+      typeof standard === 'object' &&
+      standard !== null &&
+      'version' in standard &&
+      observe(standard.version) === 1 &&
+      'vendor' in standard &&
+      typeof observe(standard.vendor) === 'string' &&
+      'validate' in standard &&
+      typeof observe(standard.validate) === 'function'
+    );
+  } catch (error) {
+    observe(error);
+    return false;
+  }
 }
 
 /** True when the schema can also describe itself as JSON Schema (`~standard.jsonSchema`). */
 export function hasJsonSchema<Input, Output>(
   schema: StandardSchemaV1<Input, Output>,
 ): schema is SchemaWithJson<Input, Output> {
-  const standard = schema['~standard'];
-  if (!('jsonSchema' in standard)) return false;
-  const converter = standard.jsonSchema;
-  return (
-    typeof converter === 'object' &&
-    converter !== null &&
-    'input' in converter &&
-    typeof converter.input === 'function' &&
-    'output' in converter &&
-    typeof converter.output === 'function'
-  );
+  try {
+    observe(schema);
+    const standard: unknown = observe(schema['~standard']);
+    if (typeof standard !== 'object' || standard === null || !('jsonSchema' in standard)) return false;
+    const converter = observe(standard.jsonSchema);
+    return (
+      typeof converter === 'object' &&
+      converter !== null &&
+      'input' in converter &&
+      typeof observe(converter.input) === 'function' &&
+      'output' in converter &&
+      typeof observe(converter.output) === 'function'
+    );
+  } catch (error) {
+    observe(error);
+    return false;
+  }
 }
 
 /**

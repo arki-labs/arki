@@ -101,6 +101,7 @@ Use `@arki/contracts/orpc` when client code needs to know which procedure it hol
 - **`.meta({ offlineSafe: true })` cannot prove the policy.** oRPC keeps the meta type the builder declared. Use the marker function, which puts the literal `true` into the type.
 - **A raw `createTanstackQueryUtils` leaf has no operation.** Consumers that need identity reject it at compile time. Plain JavaScript callers get a `ContractsError` from `operationOf`.
 - **The contract value goes to the browser** with its Zod schemas. `minifyContractRouter` keeps path and meta, so `operations()` still works on it when bundle size matters.
+- **Operation keys are own data properties.** Valid prototype-shaped keys such as `__proto__` remain visible in enumeration and JSON serialization, including nested groups. Reserved query-utils names still fail at definition time.
 - **End a keyset on a unique key.** Rows with the same `createdAt` have no order of their own.
 - **A cursor is not secret.** It is base64url JSON of the last row's key values.
 - **Prefixes are stored as given.** `defineId('hlgt_')` matches rows already stored.

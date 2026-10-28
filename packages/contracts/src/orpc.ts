@@ -101,12 +101,14 @@ function checkKey(key: string, path: readonly string[]): void {
 
 function walk(node: AnyContractRouter, path: readonly string[]): unknown {
   if (isContractProcedure(node)) return operationFor(node, path);
-  const tree: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(node)) {
-    checkKey(key, path);
-    tree[key] = walk(child, [...path, key]);
-  }
-  return Object.freeze(tree);
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(node).map(([key, child]) => {
+        checkKey(key, path);
+        return [key, walk(child, [...path, key])] as const;
+      }),
+    ),
+  );
 }
 
 /**

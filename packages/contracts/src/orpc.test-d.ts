@@ -3,10 +3,10 @@ import { oc } from '@orpc/contract';
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { ErrorOf, Identified, InputOf, MetaOf, Operation, OperationOf, Operations, OutputOf } from './orpc.js';
-import { operationOf, operations } from './orpc.js';
 import type { IdOf } from './ids.js';
+import type { ErrorOf, Identified, InputOf, MetaOf, Operation, OperationOf, Operations, OutputOf } from './orpc.js';
 import { defineId } from './ids.js';
+import { operationOf, operations } from './orpc.js';
 
 const postId = z.string().brand<'PostId'>();
 const getPost = oc
@@ -41,6 +41,11 @@ describe('OperationOf', () => {
 });
 
 describe('operations', () => {
+  it('infers prototype-shaped keys from the original contract', () => {
+    const ops = operations({ ['__proto__']: { constructor: getPost } });
+    expectTypeOf(ops.__proto__.constructor).toEqualTypeOf<OperationOf<typeof getPost>>();
+  });
+
   it('keeps the contract keys and puts an Operation at every leaf, with no annotation', () => {
     const ops = operations(contract);
     expectTypeOf(ops.posts.get).toEqualTypeOf<OperationOf<typeof getPost>>();
@@ -66,6 +71,8 @@ describe('operationOf', () => {
   });
 
   it('an Operation is assignable to the loose shape, so generic code can take any of them', () => {
-    expectTypeOf<OperationOf<typeof getPost>>().toExtend<Operation<unknown, unknown, unknown, Record<string, unknown>>>();
+    expectTypeOf<OperationOf<typeof getPost>>().toExtend<
+      Operation<unknown, unknown, unknown, Record<string, unknown>>
+    >();
   });
 });

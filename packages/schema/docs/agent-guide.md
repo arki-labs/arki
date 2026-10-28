@@ -16,7 +16,7 @@ A foreign API requiring exceptions can use `orThrow(result)` from `@arki/failure
 
 ## Accept any schema at runtime
 
-Use `isStandardSchema(value)` to recognize callable and object schemas. Source types are `StandardSchemaV1` and `StandardJSONSchemaV1`. The failure foundation imports the external spec directly to keep dependencies acyclic.
+Use `isStandardSchema(value)` to recognize callable and object schemas. Capability predicates return `false` for inaccessible or malformed protocols, including revoked proxies and throwing accessors. Native promises with usable constructor/species hooks are observed once without awaiting them; probes do not invoke arbitrary `then` accessors. Observation is reserved before those hooks run, so reentry cannot repeat it. A provider that blocks handler registration retains responsibility for its own rejection. Source types are `StandardSchemaV1` and `StandardJSONSchemaV1`. The failure foundation imports the external spec directly to keep dependencies acyclic.
 
 ## Give a schema a JSON Schema
 

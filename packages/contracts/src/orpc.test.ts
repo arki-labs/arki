@@ -19,6 +19,19 @@ const contract = {
 };
 
 describe('operations', () => {
+  it('preserves prototype-shaped keys as own data through enumeration and serialization', () => {
+    // Persisted operation identities must not disappear through Object.prototype setters.
+    const unusual = { ['__proto__']: { ['__proto__']: oc }, constructor: oc, toString: oc };
+    const ops = operations(unusual);
+    expect(Object.keys(ops)).toEqual(['__proto__', 'constructor', 'toString']);
+    expect(Object.keys(ops.__proto__)).toEqual(['__proto__']);
+    expect(ops.__proto__.__proto__.path).toEqual(['__proto__', '__proto__']);
+    expect(Object.getPrototypeOf(ops)).toBe(Object.prototype);
+    expect(Object.isFrozen(ops.__proto__)).toBe(true);
+    expect(JSON.stringify(ops)).toContain('"name":"__proto__.__proto__"');
+    expect(operationAt(unusual, ['__proto__', '__proto__'])).toEqual(ops.__proto__.__proto__);
+  });
+
   it('gives every procedure its path, its dotted name (the server stores the same string) and its meta', () => {
     const ops = operations(contract);
     expect(ops.posts.create).toEqual({ path: ['posts', 'create'], name: 'posts.create', meta: { offlineSafe: true } });

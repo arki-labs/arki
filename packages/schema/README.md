@@ -156,6 +156,7 @@ No Node or Bun built-ins are used. The table records the previous smoke run; rer
 - Sync `parse` cannot await async checks.
 - JSON Schema converters only support draft-2020-12.
 - The wrapper keeps Standard Schema behavior, not the original validator's extra methods.
+- Capability predicates return `false` for inaccessible or malformed protocols. They observe native promises with usable constructor/species hooks once, without awaiting them or invoking arbitrary `then` accessors. A provider that blocks handler registration retains responsibility for its own rejection.
 - `pathOf` returns keys, so a field name containing a dot remains one segment.
 
 ## Documentation

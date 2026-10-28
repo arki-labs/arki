@@ -56,6 +56,17 @@ async function main() {
   const rejected = await parseAsync(throwing, 1);
   const wrapped = withJsonSchema(lengthOf, { type: 'string' });
   const target = thrownBy(() => wrapped['~standard'].jsonSchema.input({ target: 'draft-07' }));
+  const unreadable = new Proxy(lengthOf, {
+    get() {
+      throw bug;
+    },
+    has() {
+      throw bug;
+    },
+  });
+  const revoked = Proxy.revocable(lengthOf, {});
+  revoked.revoke();
+  const asyncProtocol = { '~standard': Promise.reject(bug) };
 
   const checks = [
     ['parse returns the output', parse(lengthOf, 'abc'), 3],
@@ -69,6 +80,11 @@ async function main() {
     ['formatIssues joins issues', formatIssues([{ message: 'm' }, { message: 'n', path: ['p'] }]), 'm; p: n'],
     ['isStandardSchema accepts a schema', isStandardSchema(lengthOf), true],
     ['isStandardSchema rejects an object', isStandardSchema({}), false],
+    ['isStandardSchema refuses inaccessible protocols', isStandardSchema(unreadable), false],
+    ['isStandardSchema refuses revoked proxies', isStandardSchema(revoked.proxy), false],
+    ['isStandardSchema observes invalid async protocols', isStandardSchema(asyncProtocol), false],
+    ['hasJsonSchema refuses inaccessible protocols', hasJsonSchema(unreadable), false],
+    ['hasJsonSchema refuses revoked proxies', hasJsonSchema(revoked.proxy), false],
     ['hasJsonSchema is false before wrapping', hasJsonSchema(lengthOf), false],
     ['hasJsonSchema is true after wrapping', hasJsonSchema(wrapped), true],
     ['withJsonSchema still validates', parse(wrapped, 'ab'), 2],
