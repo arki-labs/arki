@@ -11,6 +11,7 @@ import type { ContextStore, EnvSettings, Fields, Formatter, Sink } from '../core
 import { invalidLevelError } from '../core/errors.js';
 import { json } from '../core/formatters.js';
 import { Level } from '../core/levels.js';
+import { reportFailure } from '../core/report.js';
 
 /** Lines are written when this many characters are waiting, or on the next `setImmediate`. */
 const FLUSH_AT = 16 * 1024;
@@ -34,7 +35,11 @@ function fdSink(fd: number, format: Formatter, onClose?: () => void): Sink {
     if (pending === '') return;
     const data = Buffer.from(pending, 'utf8');
     pending = '';
-    writeAll(fd, data);
+    try {
+      writeAll(fd, data);
+    } catch (error) {
+      reportFailure(flushSync, 'a file descriptor sink', error);
+    }
   };
   const onTick = (): void => {
     if (scheduled) flushSync();
@@ -57,7 +62,11 @@ function fdSink(fd: number, format: Formatter, onClose?: () => void): Sink {
       flushSync();
       closed = true;
       process.removeListener('exit', flushSync);
-      onClose?.();
+      try {
+        onClose?.();
+      } catch (error) {
+        reportFailure(flushSync, 'a file descriptor sink close', error);
+      }
     },
   };
 }

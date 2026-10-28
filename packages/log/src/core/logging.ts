@@ -16,9 +16,9 @@ import type {
 } from './types.js';
 import { alreadyConfiguredError, fakeActiveError, staleHandleError, unknownChannelError } from './errors.js';
 import { Level, toLevel } from './levels.js';
-import { deliver, syncContext } from './pipeline.js';
+import { closeSink, deliver, flushSink, syncContext } from './pipeline.js';
 import { EMPTY_FIELDS, LogEntry } from './record.js';
-import { reportFailure } from './report.js';
+import { observeRejection, reportFailure } from './report.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -234,11 +234,89 @@ class LoggingImpl implements InternalLogging {
   }
 
   withContext<R>(fields: Fields, fn: () => R): R {
-    const outer = this.context.get();
-    const scope: Record<string, Value> = {};
-    if (outer !== undefined) for (const key in outer) scope[key] = outer[key];
+    const outer = this.readContext();
+    let scope: Record<string, Value> = {};
+    try {
+      if (outer !== undefined) for (const key in outer) scope[key] = outer[key];
+    } catch (error) {
+      // Omit the entire failed metadata layer rather than leaking a partial copy.
+      scope = {};
+      reportFailure(this.context, 'a context store', error);
+    }
     for (const key in fields) scope[key] = fields[key];
-    return this.context.run(scope, fn);
+    // The application owns the callback outcome. A faulty provider must not
+    // replace it, swallow its error, or cause the callback to run twice.
+    let outcome: { readonly value: R } | { readonly error: unknown } | undefined;
+    let started = false;
+    const invoke = (): R => {
+      started = true;
+      try {
+        const value = fn();
+        outcome = { value };
+        return value;
+      } catch (error) {
+        outcome = { error };
+        throw error;
+      }
+    };
+    const run = (): R | undefined => {
+      if (!started) return invoke();
+      // A reentrant provider call has no completed application result to return.
+      if (outcome === undefined) return;
+      if ('error' in outcome) throw outcome.error;
+      return outcome.value;
+    };
+    try {
+      const result = this.context.run(scope, run);
+      // An async provider may wrap the application's promise in a second one.
+      // Observe that discarded wrapper, while returning the original promise.
+      if (outcome === undefined || !('value' in outcome) || result !== outcome.value) {
+        observeRejection(result, this.context, 'a context store');
+      }
+    } catch (error) {
+      if (outcome === undefined || !('error' in outcome) || error !== outcome.error) {
+        reportFailure(this.context, 'a context store', error);
+      }
+    }
+    if (outcome === undefined) return invoke();
+    if ('error' in outcome) throw outcome.error;
+    return outcome.value;
+  }
+
+  private readContext(): Fields | undefined {
+    try {
+      const fields = this.context.get();
+      // Fields may legitimately contain a `then` key. Only a native Promise
+      // is an invalid asynchronous return; metadata is never assimilated.
+      if (fields instanceof Promise) {
+        observeRejection(fields, this.context, 'a context store');
+        return undefined;
+      }
+      return fields;
+    } catch (error) {
+      reportFailure(this.context, 'a context store', error);
+      return undefined;
+    }
+  }
+
+  private readTrace(): TraceContext | undefined {
+    const source = this.traceSource;
+    if (source === undefined) return undefined;
+    try {
+      const trace = source();
+      if (trace instanceof Promise) {
+        observeRejection(trace, source, 'a trace source');
+        return undefined;
+      }
+      // Accessors belong to the provider boundary too. The record only sees
+      // a snapshot, so a getter cannot escape later during construction.
+      return trace === undefined
+        ? undefined
+        : { traceId: trace.traceId, spanId: trace.spanId, traceFlags: trace.traceFlags };
+    } catch (error) {
+      reportFailure(source, 'a trace source', error);
+      return undefined;
+    }
   }
 
   shareContext(fields: Fields): void {
@@ -302,10 +380,10 @@ class LoggingImpl implements InternalLogging {
       template,
       this.shared,
       logger.bound,
-      this.context.get(),
+      this.readContext(),
       call,
       error,
-      logger.traceContext ?? this.traceSource?.(),
+      logger.traceContext ?? this.readTrace(),
       this.resource,
       eventName,
       body,
@@ -390,7 +468,7 @@ class LoggingImpl implements InternalLogging {
   private async flush(): Promise<void> {
     const state = this.state;
     if (state === undefined) return;
-    await Promise.all(uniqueSinks(state).map(async sink => sink.flush?.()));
+    await Promise.all(uniqueSinks(state).map(sink => flushSink(sink)));
   }
 
   private async close(timeoutMs: number | undefined): Promise<void> {
@@ -421,8 +499,7 @@ function uniqueSinks(state: State): Sink[] {
 }
 
 async function drainAndClose(sinks: readonly Sink[]): Promise<void> {
-  await Promise.all(sinks.map(async sink => sink.flush?.()));
-  await Promise.all(sinks.map(async sink => sink.close?.()));
+  await Promise.all(sinks.map(sink => closeSink(sink)));
 }
 
 function without(fields: Fields, omit: string): Fields {

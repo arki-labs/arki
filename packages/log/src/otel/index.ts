@@ -39,7 +39,7 @@ export function otelSink(loggerProvider: LoggerProvider): Sink {
   const logger = loggerProvider.getLogger(SCOPE_NAME);
   return {
     write: record => {
-      logger.emit({
+      return logger.emit({
         timestamp: record.time,
         severityNumber: record.level,
         severityText: record.levelName,

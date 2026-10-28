@@ -1,6 +1,6 @@
 import type { ContextStore, Fields, LogRecord, Sink } from './types.js';
 import { Level } from './levels.js';
-import { reportFailure } from './report.js';
+import { observeRejection, reportFailure } from './report.js';
 
 /**
  * Hands a record to a sink: the sink's own level floor, then its own
@@ -24,9 +24,27 @@ export function deliver(sink: Sink, record: LogRecord): void {
     }
   }
   try {
-    sink.write(current);
+    observeRejection(sink.write(current), sink, 'a sink');
   } catch (error) {
     reportFailure(sink, 'a sink', error);
+  }
+}
+
+/** Each lifecycle fault loses only this sink's observation; cleanup still proceeds. */
+export async function flushSink(sink: Sink): Promise<void> {
+  try {
+    await sink.flush?.();
+  } catch (error) {
+    reportFailure(sink, 'a sink flush', error);
+  }
+}
+
+export async function closeSink(sink: Sink): Promise<void> {
+  await flushSink(sink);
+  try {
+    await sink.close?.();
+  } catch (error) {
+    reportFailure(sink, 'a sink close', error);
   }
 }
 

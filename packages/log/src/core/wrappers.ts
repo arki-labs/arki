@@ -1,7 +1,7 @@
 import type { LevelName } from './levels.js';
 import type { LogRecord, Sink } from './types.js';
 import { Level } from './levels.js';
-import { deliver } from './pipeline.js';
+import { closeSink, deliver, flushSink } from './pipeline.js';
 import { recordScope, updateRecord } from './record.js';
 
 type Ring = { records: LogRecord[]; triggered: boolean };
@@ -60,8 +60,8 @@ export function fingersCrossed(
       ring.records.push(record);
       if (ring.records.length > maxRecords) ring.records.shift();
     },
-    flush: () => sink.flush?.(),
-    close: () => sink.close?.(),
+    flush: () => flushSink(sink),
+    close: () => closeSink(sink),
   };
 }
 
@@ -102,12 +102,11 @@ export function buffer(
     },
     flush: () => {
       drain();
-      return sink.flush?.();
+      return flushSink(sink);
     },
     close: async () => {
       drain();
-      await sink.flush?.();
-      await sink.close?.();
+      await closeSink(sink);
     },
   };
 }
@@ -181,16 +180,17 @@ export function deduplicate(
     },
     flush: () => {
       const now = Date.now();
-      for (const [key, window] of windows) close(key, window, now);
-      return sink.flush?.();
+      const batch = [...windows];
+      for (const [key, window] of batch) close(key, window, now);
+      return flushSink(sink);
     },
     close: async () => {
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
       const now = Date.now();
-      for (const [key, window] of windows) close(key, window, now);
-      await sink.flush?.();
-      await sink.close?.();
+      const batch = [...windows];
+      for (const [key, window] of batch) close(key, window, now);
+      await closeSink(sink);
     },
   };
 }

@@ -55,6 +55,9 @@ test('logs a warning', () => {
 - Before `configure()`, only `warn` and above are kept, and only the first 64 records.
 - A second `configure()` throws `ARKI_LOG_E001`. Use `reconfigure()` on the handle. App entries pass `{ owner: import.meta.url }`, so a dev server's re-run of the entry replaces the setup instead of throwing.
 - `withContext` fields cross `await` only with `asyncContext()` from `@arki/log/node`.
+- Context and trace-provider faults omit metadata. `withContext` preserves its callback's exact value, promise or error and calls it once even if the provider fails.
+- Sink writes and lifecycle calls are best effort. Rejections are observed; failed flushes still permit close and cannot skip other sinks' cleanup. A close timeout bounds waiting, while cleanup continues.
+- Deferred descriptor writes and failure diagnostics cannot throw into application work. Logging does not acknowledge record delivery.
 - A failure value logged as a field prints its cause chain, at most 64 links.
 - `fatal` never ends the process.
 - Importing `@arki/log/node` reads nothing. `fromEnv()` reads `LOG_LEVEL`, `DEBUG` and `NO_COLOR` when called.

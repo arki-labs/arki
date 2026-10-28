@@ -83,7 +83,7 @@ Runs on Node, Bun, Deno, browsers and React Native (Hermes). The core uses web-s
 
 ## Failure behaviour
 
-Logging never throws into the code that logs. A failing sink loses only its own copy of the record. The failure is reported once on `console.error`.
+Logging never throws into the code that logs. A failing sink loses only its own copy of the record. Context and trace-provider faults omit their metadata. Failures are reported once per provider on `console.error`; diagnostic failures are contained too.
 
 A setup mistake throws `LogError` with a code and a `remediation`:
 
@@ -180,6 +180,8 @@ await logging.close({ timeoutMs: 5000 }); // flush, close every sink, unconfigur
 ```
 
 A second `configure()` throws `ARKI_LOG_E001`; use `reconfigure`. The exception is `configure(config, { owner })` called again with the same `owner`: a dev server (Vite, Nitro) that runs the entry module again after an edit, in the same process, without running its `import.meta.hot` dispose hooks. Pass `{ owner: import.meta.url }` at the entry, and the re-run replaces the setup and makes the old handle stale. `createLogging()` returns a private instance. Declare `interface Register { logging: typeof logging }` in `declare module '@arki/log'` to type-check channel names in `to()`.
+
+Flush, close and retired-sink cleanup are best effort: a failed flush still closes its sink, and each sink cleans up independently. Rejected async writes and deferred descriptor failures are observed without rejecting application work. A close timeout bounds the wait; cleanup continues afterward. Logging does not guarantee record delivery. `withContext` invokes its callback once and preserves its value, promise or thrown error even if the context provider fails.
 
 ## Environment
 
