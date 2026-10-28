@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { UnexpectedDefect } from '@arki/failure';
+
 import type { PolicyLogger } from './index.js';
 import {
   attachPolicyLogger,
@@ -55,9 +57,9 @@ describe('attachPolicyLogger', () => {
     ]);
     expect(entries[1]?.context).toMatchObject({ attempt: 1 });
     expect(typeof entries[1]?.context?.delay).toBe('number');
-    expect(entries[0]?.context).toMatchObject({ error: 'boom' });
+    expect(entries[0]?.context).toMatchObject({ error: UnexpectedDefect.code });
     expect(typeof entries[0]?.context?.durationMs).toBe('number');
-    expect(entries[5]?.context).toEqual({ error: 'boom' });
+    expect(entries[5]?.context).toEqual({ error: UnexpectedDefect.code });
   });
 
   it('logs a success with its duration', async () => {
@@ -93,7 +95,7 @@ describe('attachPolicyLogger', () => {
       ['info', '[db] Operation succeeded'],
       ['info', '[db] Circuit breaker closed'],
     ]);
-    expect(entries[1]?.context).toEqual({ error: 'down' });
+    expect(entries[1]?.context).toEqual({ error: UnexpectedDefect.code });
   });
 
   it('logs a timeout', async () => {

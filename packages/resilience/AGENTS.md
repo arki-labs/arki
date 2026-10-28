@@ -17,7 +17,8 @@ Retry, circuit breaker, timeout, bulkhead and presets. Read these before you cha
 9. The policies own their public types and errors. A new `cockatiel` release must never change this API.
 10. Remaining thrown engine errors extend `ResilienceError` with a stable `code` and a `remediation`. Match on the code, never on the message. Errors thrown by the caller's function pass through untouched.
 11. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time. No `node:*` imports, no `process`, no `Buffer`. It runs on Node, Bun, Deno, browsers and Hermes.
-12. Types are written once and inferred everywhere. No `any`, no `@ts-ignore`, no unsafe casts.
+12. Event listeners are observation only. Their throws and rejected promises cannot change results, retries, breaker accounting or deadline settlement. They are never awaited; synchronous cancellation requests still take effect. Default diagnostics contain canonical codes, never callback messages or values.
+13. Types are written once and inferred everywhere. No `any`, no `@ts-ignore`, no unsafe casts.
 
 ## Changing this package
 

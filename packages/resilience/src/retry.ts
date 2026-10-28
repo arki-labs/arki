@@ -13,6 +13,7 @@ import { isFailure } from '@arki/failure';
 
 import type { RetryFailure } from './errors.js';
 import { Cancelled } from './errors.js';
+import { superviseObserver } from './observers.js';
 
 import type { Backoff } from './backoff.js';
 import type {
@@ -30,16 +31,19 @@ function createEvent<E>(): { readonly on: PolicyEvent<E>; emit(event: E): void; 
   const listeners: ((event: E) => void)[] = [];
   return {
     on(listener) {
-      listeners.push(listener);
+      const supervised = superviseObserver(listener);
+      listeners.push(supervised);
       return {
         dispose() {
-          const index = listeners.indexOf(listener);
+          const index = listeners.indexOf(supervised);
           if (index !== -1) listeners.splice(index, 1);
         },
       };
     },
     emit(event) {
-      for (const listener of listeners) listener(event);
+      // Subscription changes apply to the next emission, not to an in-flight snapshot.
+      const snapshot = [...listeners];
+      for (const listener of snapshot) listener(event);
     },
     listening: () => listeners.length > 0,
   };

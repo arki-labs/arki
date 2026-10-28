@@ -18,6 +18,7 @@ import type { BulkheadPolicy, CircuitBreakerPolicy, Policy, RetryPolicy, Timeout
 import { backoff } from './backoff.js';
 import { engineOf, fromEngine } from './engine.js';
 import { withFallback } from './fallback.js';
+import { observeEvent } from './observers.js';
 import { buildRetryPolicy } from './retry.js';
 
 // ---------------------------------------------------------------------------
@@ -118,7 +119,12 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
     halfOpenAfter,
     breaker: new ConsecutiveBreaker(consecutiveFailures),
   });
-  return fromEngine(engine, { onBreak: engine.onBreak, onHalfOpen: engine.onHalfOpen, onReset: engine.onReset });
+  const policy = fromEngine(engine, {
+    onBreak: observeEvent(engine.onBreak, engine),
+    onHalfOpen: observeEvent(engine.onHalfOpen, engine),
+    onReset: observeEvent(engine.onReset, engine),
+  });
+  return policy;
 }
 
 /**
@@ -130,7 +136,8 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
 export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): TimeoutPolicy {
   const { timeoutMs = 30_000 } = options;
   const engine = timeout(timeoutMs, TimeoutStrategy.Aggressive);
-  return fromEngine(engine, { onTimeout: engine.onTimeout });
+  const policy = fromEngine(engine, { onTimeout: observeEvent(engine.onTimeout, engine) });
+  return policy;
 }
 
 /**
@@ -141,7 +148,8 @@ export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): Timeout
 export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): BulkheadPolicy {
   const { maxConcurrent = 10, maxQueue = 100 } = options;
   const engine = bulkhead(maxConcurrent, maxQueue);
-  return fromEngine(engine, { onReject: engine.onReject });
+  const policy = fromEngine(engine, { onReject: observeEvent(engine.onReject, engine) });
+  return policy;
 }
 
 /**

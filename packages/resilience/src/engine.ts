@@ -10,6 +10,7 @@ import {
 } from 'cockatiel';
 
 import type { Policy, PolicyCallback, PolicyContext } from './policy.js';
+import { observeEvent } from './observers.js';
 import { BulkheadRejectedError, CancelledError, CircuitOpenError, TimeoutError } from './errors.js';
 
 /** A cockatiel policy, whatever its context type. @internal */
@@ -48,8 +49,8 @@ class EnginePolicy<E> implements Policy<never, E> {
   readonly onFailure: Engine<E>['onFailure'];
 
   constructor(readonly engine: Engine<E>) {
-    this.onSuccess = engine.onSuccess;
-    this.onFailure = engine.onFailure;
+    this.onSuccess = observeEvent(engine.onSuccess, engine);
+    this.onFailure = observeEvent(engine.onFailure, engine);
   }
 
   readonly execute = async <T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | E> => {

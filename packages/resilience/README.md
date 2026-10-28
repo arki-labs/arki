@@ -48,6 +48,8 @@ The full list of exports is in [API](#api).
 
 ## Failure behaviour
 
+Observation defects are supervised separately: event listener errors never replace the operation outcome. Required work belongs in the operation callback, not an observer.
+
 A policy call has three kinds of outcome. Know which one you are handling.
 
 1. **A value.** Your function's own result. A policy with `withFallback` or `onThrow` can also resolve to what they return, typed as `T | F`.
@@ -357,6 +359,12 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 ```
 
 `logger` needs `info`, `warn` and `error` methods. The helper subscribes to the events a policy exposes: every policy has `onSuccess` and `onFailure`; a retry policy adds `onRetry` and `onGiveUp`; a circuit breaker adds `onBreak`, `onHalfOpen` and `onReset`; a timeout policy adds `onTimeout`; a bulkhead adds `onReject`. Each event method takes a listener and returns a subscription with `dispose()`. A composed policy (`wrap`, `createResiliencePolicy`, the presets) exposes only `onSuccess` and `onFailure` itself; `createResiliencePolicy` and the presets also give you `components`, whose events are the full set. `attachPolicyLogger` returns a function that ends all its subscriptions.
+
+Event listeners are observation only. They run synchronously, so a listener can still request cancellation through an owned `AbortController`. A listener throw or rejected promise never triggers another operation, opens the breaker, replaces a result, runs a fallback or prevents timeout settlement. Pending observation is never awaited. Put required persistence and other authoritative work in the operation callback.
+
+`attachPolicyLogger` and the Dot adapter log canonical failure codes instead of callback error messages or returned payloads. An unknown throw is labelled `failure.unexpected_defect`. Observer defects emit the same safe code through `arki:resilience`; a broken diagnostic reporter cannot affect execution. Explicit user listeners still receive the original event and own their logging policy. This does not add OpenTelemetry spans or change the remaining engine error bridges.
+
+Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
 
 ### Dot unit
 

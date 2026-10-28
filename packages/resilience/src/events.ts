@@ -1,4 +1,14 @@
-import type { CircuitBreakerPolicy, FailureReason, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type {
+  BulkheadPolicy,
+  CircuitBreakerPolicy,
+  FailureReason,
+  Policy,
+  RetryPolicy,
+  TimeoutPolicy,
+} from './policy.js';
+import { observeEvent } from './observers.js';
 
 // ---------------------------------------------------------------------------
 // Logger interface — intentionally minimal so callers can pass any logger.
@@ -10,28 +20,19 @@ export type PolicyLogger = {
   error(message: string, context?: Record<string, unknown>): void;
 };
 
-// ---------------------------------------------------------------------------
-// Type guards for policy event detection
-// ---------------------------------------------------------------------------
+/** Optional event capabilities come from the original policy declarations. */
+type ObservablePolicy = Policy<unknown, unknown> &
+  Partial<
+    Pick<RetryPolicy, 'onRetry' | 'onGiveUp'> &
+      Pick<CircuitBreakerPolicy, 'onBreak' | 'onHalfOpen' | 'onReset'> &
+      Pick<TimeoutPolicy, 'onTimeout'> &
+      Pick<BulkheadPolicy, 'onReject'>
+  >;
 
-function hasRetryEvents(policy: Policy<unknown, unknown>): policy is RetryPolicy {
-  return 'onRetry' in policy;
-}
-
-function hasCircuitBreakerEvents(policy: Policy<unknown, unknown>): policy is CircuitBreakerPolicy {
-  return 'onBreak' in policy && 'onReset' in policy && 'onHalfOpen' in policy;
-}
-
-function hasTimeoutEvents(policy: Policy<unknown, unknown>): policy is TimeoutPolicy {
-  return 'onTimeout' in policy;
-}
-
-/** One line of text for a failure, whatever was thrown. @internal */
+/** Default diagnostics expose codes, never callback messages or payloads. @internal */
 export function describe(reason: FailureReason): string {
-  if ('error' in reason) {
-    return reason.error instanceof Error ? reason.error.message : String(reason.error);
-  }
-  return String(reason.value);
+  const outcome = 'error' in reason ? reason.error : reason.value;
+  return isFailure(outcome) ? outcome.code : UnexpectedDefect.code;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,20 +46,24 @@ export function describe(reason: FailureReason): string {
  * Returns a cleanup function that disposes all subscriptions.
  */
 export function attachPolicyLogger(
-  policy: Policy<unknown, unknown>,
+  policy: ObservablePolicy,
   logger: PolicyLogger,
   policyName = 'resilience',
 ): () => void {
   const disposables: { dispose(): void }[] = [];
 
   // Retry events
-  if (hasRetryEvents(policy)) {
+  if (policy.onRetry) {
     disposables.push(
-      policy.onRetry(({ attempt, delay }) => {
-        logger.warn(`[${policyName}] Retry attempt`, { attempt, delay });
+      observeEvent(policy.onRetry, policy)(({ attempt, delay }) => {
+        return logger.warn(`[${policyName}] Retry attempt`, { attempt, delay });
       }),
-      policy.onGiveUp(failureReason => {
-        logger.error(`[${policyName}] All retries exhausted`, {
+    );
+  }
+  if (policy.onGiveUp) {
+    disposables.push(
+      observeEvent(policy.onGiveUp, policy)(failureReason => {
+        return logger.error(`[${policyName}] All retries exhausted`, {
           error: describe(failureReason),
         });
       }),
@@ -66,44 +71,60 @@ export function attachPolicyLogger(
   }
 
   // Circuit breaker events
-  if (hasCircuitBreakerEvents(policy)) {
+  if (policy.onBreak) {
     disposables.push(
-      policy.onBreak(failureReason => {
+      observeEvent(policy.onBreak, policy)(failureReason => {
         if ('isolated' in failureReason) {
-          logger.error(`[${policyName}] Circuit breaker opened (isolated)`);
+          return logger.error(`[${policyName}] Circuit breaker opened (isolated)`);
         } else {
-          logger.error(`[${policyName}] Circuit breaker opened`, {
+          return logger.error(`[${policyName}] Circuit breaker opened`, {
             error: describe(failureReason),
           });
         }
       }),
-      policy.onHalfOpen(() => {
-        logger.info(`[${policyName}] Circuit breaker half-open`);
+    );
+  }
+  if (policy.onHalfOpen) {
+    disposables.push(
+      observeEvent(policy.onHalfOpen, policy)(() => {
+        return logger.info(`[${policyName}] Circuit breaker half-open`);
       }),
-      policy.onReset(() => {
-        logger.info(`[${policyName}] Circuit breaker closed`);
+    );
+  }
+  if (policy.onReset) {
+    disposables.push(
+      observeEvent(policy.onReset, policy)(() => {
+        return logger.info(`[${policyName}] Circuit breaker closed`);
       }),
     );
   }
 
   // Timeout events
-  if (hasTimeoutEvents(policy)) {
+  if (policy.onTimeout) {
     disposables.push(
-      policy.onTimeout(() => {
-        logger.warn(`[${policyName}] Operation timed out`);
+      observeEvent(policy.onTimeout, policy)(() => {
+        return logger.warn(`[${policyName}] Operation timed out`);
+      }),
+    );
+  }
+
+  if (policy.onReject) {
+    disposables.push(
+      observeEvent(policy.onReject, policy)(() => {
+        return logger.warn(`[${policyName}] Bulkhead full, call rejected`);
       }),
     );
   }
 
   // Success / failure events (available on every policy)
   disposables.push(
-    policy.onSuccess(({ duration }) => {
-      logger.info(`[${policyName}] Operation succeeded`, {
+    observeEvent(policy.onSuccess, policy)(({ duration }) => {
+      return logger.info(`[${policyName}] Operation succeeded`, {
         durationMs: duration,
       });
     }),
-    policy.onFailure(({ reason, duration }) => {
-      logger.error(`[${policyName}] Operation failed`, {
+    observeEvent(policy.onFailure, policy)(({ reason, duration }) => {
+      return logger.error(`[${policyName}] Operation failed`, {
         error: describe(reason),
         durationMs: duration,
       });

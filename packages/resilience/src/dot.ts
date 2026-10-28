@@ -66,7 +66,7 @@ function listen(preset: string, policy: ResiliencePolicy, into: Subscription[]):
   const { retry, circuitBreaker, timeout, bulkhead } = policy.components;
   into.push(
     retry.onRetry(event => {
-      log.debug('preset {preset}: retry {attempt} in {delay} ms ({error})', {
+      return log.debug('preset {preset}: retry {attempt} in {delay} ms ({error})', {
         preset,
         attempt: event.attempt,
         delay: event.delay,
@@ -74,28 +74,28 @@ function listen(preset: string, policy: ResiliencePolicy, into: Subscription[]):
       });
     }),
     retry.onGiveUp(reason => {
-      log.debug('preset {preset}: gave up ({error})', { preset, error: describe(reason) });
+      return log.debug('preset {preset}: gave up ({error})', { preset, error: describe(reason) });
     }),
     circuitBreaker.onBreak(event => {
-      log.debug('preset {preset}: circuit opened ({error})', {
+      return log.debug('preset {preset}: circuit opened ({error})', {
         preset,
         error: 'isolated' in event ? 'isolated by hand' : describe(event),
       });
     }),
     circuitBreaker.onHalfOpen(() => {
-      log.debug('preset {preset}: circuit half-open', { preset });
+      return log.debug('preset {preset}: circuit half-open', { preset });
     }),
     circuitBreaker.onReset(() => {
-      log.debug('preset {preset}: circuit closed', { preset });
+      return log.debug('preset {preset}: circuit closed', { preset });
     }),
     timeout.onTimeout(() => {
-      log.debug('preset {preset}: timed out', { preset });
+      return log.debug('preset {preset}: timed out', { preset });
     }),
   );
   if (bulkhead !== undefined) {
     into.push(
       bulkhead.onReject(() => {
-        log.debug('preset {preset}: bulkhead full, call rejected', { preset });
+        return log.debug('preset {preset}: bulkhead full, call rejected', { preset });
       }),
     );
   }

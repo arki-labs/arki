@@ -55,6 +55,14 @@ const answer = await withResilience(() => callBilling(), externalApiPolicy);
 - `RetriesExhaustedError` is exported, but the retry policy rethrows the last error as it was.
 - A cancel is never retried and never mapped.
 
+## Observation
+
+Subscribe to policy events for diagnostics. Listeners run synchronously; their thrown errors and rejected promises are supervised, and pending promises are never awaited. Observer failure cannot retry completed work or prevent timeout settlement. Synchronous signal cancellation keeps its existing semantics. Put required effects in the operation callback.
+
+Default logger and Dot records contain canonical failure codes, not callback messages or returned payloads. Unknown throws and observer defects use `failure.unexpected_defect`. User listeners still receive original events. Reporter failure is nonauthoritative. OpenTelemetry spans and broader engine failure migration remain separate work.
+
+Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
+
 ## Errors
 
 | Code                          | Error                   | What to do                                            |

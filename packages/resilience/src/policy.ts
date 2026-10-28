@@ -20,7 +20,10 @@ export type PolicyCallback<T> = (context: PolicyContext) => PromiseLike<T> | T;
 /** Returned by every event method. Call `dispose()` to stop listening. */
 export type Subscription = { dispose(): void };
 
-/** An event method: pass a listener, get a subscription back. */
+/**
+ * Subscribe to observation. Listeners run synchronously; rejected promises are observed but never awaited.
+ * Listener defects cannot replace outcomes or trigger retries. Use the operation for authoritative work.
+ */
 export type PolicyEvent<E> = (listener: (event: E) => void) => Subscription;
 
 /** Why a call counted as a failure: the error it threw, or the value it returned (a failure from `@arki/failure`). */

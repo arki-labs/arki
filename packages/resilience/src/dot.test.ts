@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { UnitSourceGuard, Provided } from '@arki/dot/unit';
 import { defineApp, DotUnitError } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
+import { getLogger } from '@arki/log';
 
 import { resilience, RESILIENCE_PLUGIN_ERROR_CODES } from './dot.js';
 import { backoff, definePresets } from './index.js';
@@ -31,11 +32,26 @@ function resilienceRecords(log: ReturnType<typeof fakeLog>): number {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fake?.restore();
   fake = undefined;
 });
 
 describe('@arki/resilience/dot', () => {
+  it('observes a rejecting debug reporter without changing a completed call', async () => {
+    const presets = definePresets({ carrier: { retry: backoff.constant(0).upTo(0) } });
+    const app = orThrow(await defineApp('resilience-reporter').infra(resilience(presets)).boot());
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- A foreign logger can return a rejected promise through its void signature.
+    vi.spyOn(getLogger('arki:resilience'), 'debug').mockImplementation(() => Promise.reject(new Error('private reporter')));
+    const original = new Error('application');
+    try {
+      await expect(app.services.resilience.run('carrier', () => { throw original; })).rejects.toBe(original);
+      await Promise.resolve();
+    } finally {
+      orThrow(await app.dispose());
+    }
+  });
+
   it('registers one resilience service in the manifest', () => {
     const configured = orThrow(defineApp('resilience-manifest').infra(resilience(makePresets())).configure());
     expect(configured.manifest.services).toEqual([{ name: 'resilience', plugin: 'resilience', kind: 'custom' }]);

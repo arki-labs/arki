@@ -110,7 +110,22 @@ const mappedPolicy = createResiliencePolicy({
 const mappedFirst = await mappedPolicy.execute(() => Promise.reject(new Error('down')));
 const mappedOpen = await mappedPolicy.execute(() => 'x');
 
+// A reporting failure must never repeat a completed operation or block a deadline.
+const observedRetry = createRetryPolicy({ backoff: backoff.constant(0).upTo(1) });
+let saved = 0;
+observedRetry.onSuccess(() => { throw new Error('private observer'); });
+observedRetry.onSuccess(() => Promise.reject(new Error('private async observer')));
+observedRetry.onSuccess(() => new Promise(() => {}));
+const savedResult = await observedRetry.execute(() => { saved++; return 'saved'; });
+const observedTimeout = createTimeoutPolicy({ timeoutMs: 5 });
+observedTimeout.onTimeout(() => { throw new Error('private observer'); });
+observedTimeout.onTimeout(() => Promise.reject(new Error('private async observer')));
+const observedDeadline = await errorName(observedTimeout.execute(pending));
+
 const checks = [
+  ['observer cannot change success', savedResult, 'saved'],
+  ['observer cannot repeat effects', saved, 1],
+  ['observer cannot block timeout', observedDeadline, 'TimeoutError'],
   ['retry pre-abort outcome', Cancelled.is(cancelledResult), true],
   ['retry pre-abort no callback', cancelledCalls, 0],
   ['while(definition) retries its failure', namedRetry.delay(1, ExportUnavailable()), 1],
