@@ -4,26 +4,31 @@ import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 export const SCHEDULE_ERROR_CODES = {
   /**
+   * A schedule definition has an invalid name, timing or configuration.
    * @fix Correct the schedule name, timing and configuration reported by the error; trigger only registered schedules.
    * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
    */
   invalidDefinition: 'ARKI_SCHEDULE_E001',
   /**
+   * Two schedules use the same name in one schedule plugin.
    * @fix Give each schedule a unique name within the schedule plugin.
    * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
    */
   duplicateSchedule: 'ARKI_SCHEDULE_E002',
   /**
+   * Retired code for a schedule handler that threw during execution.
    * @fix Inspect the schedule handler failure and repair its private cause before triggering again; this legacy code is no longer emitted by the runtime.
    * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
    */
   handlerFailure: 'ARKI_SCHEDULE_E003',
   /**
+   * Retired code for a lock provider that failed to acquire a schedule lock.
    * @fix Inspect the lock provider and restore lock acquisition before triggering again; current runtimes return schedule.lock_failed instead.
    * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
    */
   lockAcquireFailure: 'ARKI_SCHEDULE_E004',
   /**
+   * A durable schedule has no durable backend.
    * @fix Mount durableScheduler from @arki/queue/dot and pass its durable backend, or remove durable: true.
    * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
    */
@@ -66,13 +71,13 @@ export class ScheduleError extends Error {
     this.remediation = args.remediation;
   }
 }
+/** The lock provider codes a schedule reports; any other provider code stays a private defect. */
+export const lockCodeSchema = z.enum(['lost', 'store']);
+
 /** The lock provider refused execution; the original provider error remains private.
  * @fix Inspect the lock provider before triggering this schedule again.
  * @verify bun run test -- src/schedule.test.ts src/outcomes.test.ts src/feature-schedules.test.ts src/schedule-locks.test.ts
  */
-/** The lock provider codes a schedule reports; any other provider code stays a private defect. */
-export const lockCodeSchema = z.enum(['lost', 'store']);
-
 export const ScheduleLockFailed = defineFailure('schedule.lock_failed', {
   status: 503,
   data: z.object({ lockCode: lockCodeSchema }),

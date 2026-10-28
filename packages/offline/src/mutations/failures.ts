@@ -5,6 +5,7 @@ import type { FailureOf } from '@arki/failure';
 import { mutationIdempotencyKey, queuedMutationId } from './identity.ts';
 
 /**
+ * The existing offline queue could not be read.
  * @fix Restore access to local storage before attempting another enqueue.
  * @verify bun run test -- __tests__/mutations/queue.test.ts
  */
@@ -15,6 +16,7 @@ export const QueueStorageUnavailable = defineFailure('offline.queue_storage_unav
 });
 
 /**
+ * The queued mutation outcome could not be confirmed.
  * @fix Reconcile this identity before retry; a write or remote effect may already exist.
  * @verify bun run test -- __tests__/mutations/queue.test.ts
  */
@@ -25,7 +27,8 @@ export const QueueAcceptanceUnconfirmed = defineFailure('offline.queue_acceptanc
   remediation: 'Reconcile the queue and server using this idempotency key. Never enqueue the same effect with a new key blindly.',
 });
 
-/** @fix Preserve the original bytes and repair or explicitly discard invalid local data.
+/** Stored offline data does not match its persistence contract.
+ * @fix Preserve the original bytes and repair or explicitly discard invalid local data.
  * @verify bun run test -- __tests__/mutations/queue.test.ts __tests__/mutations/replay.test.ts __tests__/mutations/storage.test.ts
  */
 export const QueueStorageCorrupt = defineFailure('offline.queue_storage_corrupt', {
@@ -34,7 +37,8 @@ export const QueueStorageCorrupt = defineFailure('offline.queue_storage_corrupt'
   remediation: 'Preserve the original bytes; repair or explicitly discard the invalid local data before continuing.',
 });
 
-/** @fix Reconcile local state before retrying a write whose acknowledgement was lost.
+/** A local offline-state write was not confirmed.
+ * @fix Reconcile local state before retrying a write whose acknowledgement was lost.
  * @verify bun run test -- __tests__/mutations/queue.test.ts __tests__/mutations/replay.test.ts __tests__/mutations/storage.test.ts
  */
 export const QueuePersistenceUnconfirmed = defineFailure('offline.queue_persistence_unconfirmed', {
@@ -43,7 +47,8 @@ export const QueuePersistenceUnconfirmed = defineFailure('offline.queue_persiste
   remediation: 'Read and reconcile local state before repeating this persistence operation.',
 });
 
-/** @fix Submit a serializable mutation input before retrying.
+/** Offline state could not be serialized.
+ * @fix Submit a serializable mutation input before retrying.
  * @verify bun run test -- __tests__/mutations/queue.test.ts __tests__/mutations/replay.test.ts __tests__/mutations/storage.test.ts
  */
 export const QueueEncodingFailure = defineFailure('offline.queue_encoding_failure', {
@@ -52,7 +57,8 @@ export const QueueEncodingFailure = defineFailure('offline.queue_encoding_failur
   remediation: 'Use a serializable mutation input before retrying; no persistence was attempted.',
 });
 
-/** @fix Reconcile the accepted server effect using the original idempotency identity.
+/** The server accepted the mutation, but local cleanup was not confirmed.
+ * @fix Reconcile the accepted server effect using the original idempotency identity.
  * @verify bun run test -- __tests__/mutations/queue.test.ts __tests__/mutations/replay.test.ts __tests__/mutations/storage.test.ts
  */
 export const QueueEffectUnconfirmed = defineFailure('offline.queue_effect_unconfirmed', {
@@ -62,7 +68,8 @@ export const QueueEffectUnconfirmed = defineFailure('offline.queue_effect_unconf
   remediation: 'Reconcile the server effect using this idempotency key. Retry local cleanup, never enqueue a replacement effect blindly.',
 });
 
-/** @fix Restore connectivity; the queue owns retries using the original idempotency key.
+/** The RPC transport is temporarily unavailable.
+ * @fix Restore connectivity; the queue owns retries using the original idempotency key.
  * @verify bun run test -- __tests__/mutations/queue.test.ts __tests__/mutations/replay.test.ts __tests__/mutations/storage.test.ts
  */
 export const QueueTransportUnavailable = defineFailure('offline.queue_transport_unavailable', {

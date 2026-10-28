@@ -20,9 +20,12 @@
  * DOC_E014-E016 (CHANGELOG.md, LICENSE, AGENTS.md exist), DOC_E017 (README H2s,
  * `README_SECTIONS`), DOC_E018 (AGENTS.md role line and sections), DOC_E019
  * (banned words in README, docs and llms.txt), SRC_E001 (the package's own
- * version as a string literal in `src/**`), ERR_E001 (an error code of
- * `error-index.ts` without `@fix` or `@verify`).
+ * version as a string literal in `src/**`).
  * Warnings: DOC_W001 forward-looking words, DOC_W002 llms.txt over 60 lines.
+ *
+ * Every library, private or public, gets `error-index.ts`: ERR_E001 (missing
+ * summary, `@fix` or `@verify`) and ERR_E002 (multiple original definitions).
+ * The collector also checks ERR_E002 across packages.
  *
  * Every library, private or public, also gets `public-types.ts`: TYPES_E001 (an
  * export entry other than `./zod` exposes Zod types), TYPES_W001 (the entry's
@@ -48,9 +51,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
+import type { ErrorEntry } from './error-index';
 import { checkContractEntry } from './contract-entry';
 import { checkDocs, checkSource } from './docs';
-import { checkErrorDocs } from './error-index';
+import { buildErrorIndex, checkErrorDocs, duplicateErrorCodes, ERR_RULES } from './error-index';
 import { leaves, readManifest } from './manifest';
 import { checkPublicTypes } from './public-types';
 import { complain, say } from './report';
@@ -140,8 +144,10 @@ export function checkLibrary(dir: string, kind: Kind = 'library'): CheckResult {
     const docs = checkDocs(dir, manifest);
     errors.push(...docs.errors);
     warnings.push(...docs.warnings);
-    errors.push(...checkSource(dir).errors, ...checkErrorDocs(dir));
+    errors.push(...checkSource(dir).errors);
   }
+
+  errors.push(...checkErrorDocs(dir));
 
   // Private packages too: wave-1 Zod targets such as ai, queue and testing are private.
   const types = checkPublicTypes(dir, manifest);
@@ -215,11 +221,25 @@ export function findingKey(error: string): string {
 export function checkAll(root: string, baseline: readonly BaselineEntry[]): AllResult {
   const errors: AllResult['errors'][number][] = [];
   const warnings: AllResult['warnings'][number][] = [];
+  const originals: ErrorEntry[] = [];
   const used = new Set<BaselineEntry>();
   let baselined = 0;
-  for (const { dir, kind } of workspaceDirs(root)) {
+  const results = workspaceDirs(root).map(({ dir, kind }) => {
     const name = readManifest(dir).name;
     const result = checkLibrary(dir, kind);
+    if (kind === 'library') originals.push(...buildErrorIndex(dir));
+    return { name, result };
+  });
+  // Re-exports add no entries: only original definitions compete for a public code URL.
+  for (const code of duplicateErrorCodes(originals)) {
+    const owners = new Set(originals.filter(entry => entry.code === code).map(entry => entry.package));
+    if (owners.size < 2) continue;
+    const error = `ERR_E002 ${ERR_RULES.ERR_E002}: ${code}`;
+    for (const { name, result } of results) {
+      if (owners.has(name) && !result.errors.includes(error)) result.errors.push(error);
+    }
+  }
+  for (const { name, result } of results) {
     for (const warning of result.warnings) warnings.push({ package: name, warning });
     for (const error of result.errors) {
       const known = baseline.find(entry => entry.package === name && findingKey(entry.error) === findingKey(error));

@@ -366,7 +366,7 @@ Rejected, pending, repeated and throwing telemetry callbacks cannot replace outc
 | `resilience.duration` | `s` | `resilience.boundary`, `resilience.outcome` |
 | `resilience.circuit.transitions` | `{transition}` | `resilience.circuit.state` |
 
-Operations count settlements, including refusals, once per boundary. Outcomes are `success`, `failure`, `throw` or `unclassified` when an opaque result cannot be inspected safely. Durations measure dispatch to settlement using the runtime's monotonic clock; unavailable, nonfinite or backwards samples omit duration only. Nested boundary durations overlap; do not sum them as logical request time. Failure codes and user identifiers are never metric dimensions.
+Operations count settlements, including refusals, once per boundary. Outcomes are `success`, `failure`, `throw` or `unclassified` if classification itself is unavailable. Opaque values that cannot prove a canonical failure brand remain successful values. Durations measure dispatch to settlement using the runtime's performance clock (wall-clock fallback when absent); unavailable, nonfinite or backwards samples omit duration only. Nested boundary durations overlap; do not sum them as logical request time. Failure codes and user identifiers are never metric dimensions.
 
 Breaker transitions add `resilience.circuit.state_changed` to the active span and increment the transition counter. Destination states are `open`, `half_open`, `closed` and `isolated` (reserved for the engine's manual isolation state). Opening refusals do not create additional transitions. These are transition counts, not a current-state gauge. There is no policy registry, retained instance or extra transition span.
 
@@ -483,3 +483,7 @@ MIT — see [LICENSE](./LICENSE).
 ## Typed retry waits
 
 Every public execution supervises final defects. Retry cancellation is cooperative; a callback that never settles needs an explicit timeout and must observe its signal to stop effects. The timeout engine captures deadline versus caller cancellation before forwarding observations. A timed-out callback may still run: reconcile uncertain effects before explicitly selecting `Timeout` for retry. `Policy<F, E>` keeps fallback values and owned policy outcomes separate; policies without retry do not acquire clock-wait failures.
+
+Retry observation timing is best effort. If timing is unavailable, invalid or moves backwards, duration-bearing success/failure events are omitted; operation results and retry/give-up events remain authoritative. Timing failures never repeat completed work. Custom Backoff delays must be finite milliseconds from zero through `MAX_TIMER_MS`, or `undefined` to stop. Custom Clock sleeps must resolve to `undefined` or an original `SLEEP_FAILURES` value. Malformed results return the already-admitted `UnexpectedDefect` before another attempt; private protocol details stay off the wire.
+
+Invalid static breaker, deadline and capacity options throw `AssertError` when the policy is built. Concurrency and failure thresholds must be positive safe integers; queue capacity is nonnegative. Timing is finite and nonnegative, and deadlines fit `MAX_TIMER_MS`. These definition errors are separate from returned execution outcomes.

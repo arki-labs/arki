@@ -9,8 +9,8 @@ import {
 } from 'cockatiel';
 
 import type { Clock } from '@arki/clock';
-import { SystemClock } from '@arki/clock';
-import { is } from '@arki/schema';
+import { MAX_TIMER_MS, SystemClock } from '@arki/clock';
+import { ensure, is } from '@arki/schema';
 import { z } from 'zod';
 import { CircuitOpen, BulkheadRejected, Cancelled } from './errors.js';
 import { timeoutPolicy } from './timeout.js';
@@ -95,6 +95,19 @@ export type ResiliencePolicyOptions<Mapped = never> = {
 // Policy factories
 // ---------------------------------------------------------------------------
 
+/** @internal Static options keep their source TS contracts; exact type tests bind these schemas. */
+export const circuitBreakerOptionsSchema = z.object({
+  halfOpenAfter: z.number().finite().nonnegative().optional(),
+  consecutiveFailures: z.number().int().positive().optional(),
+});
+/** @internal Web timers cannot honor delays above MAX_TIMER_MS. */
+export const timeoutOptionsSchema = z.object({ timeoutMs: z.number().min(0).max(MAX_TIMER_MS).optional() });
+/** @internal Zero capacity with queued work can never make progress. */
+export const bulkheadOptionsSchema = z.object({
+  maxConcurrent: z.number().int().positive().optional(),
+  maxQueue: z.number().int().nonnegative().optional(),
+});
+
 const circuitErrorSchema = z.object({ isBrokenCircuitError: z.literal(true) });
 const bulkheadErrorSchema = z.object({ isBulkheadRejectedError: z.literal(true) });
 const cancelledErrorSchema = z.object({ isTaskCancelledError: z.literal(true) });
@@ -127,7 +140,7 @@ export function createRetryPolicy<Mapped = never>(options: RetryPolicyOptions<Ma
  * Defaults: 5 consecutive failures, 30 s half-open window.
  */
 export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions = {}): CircuitBreakerPolicy {
-  const { halfOpenAfter = 30_000, consecutiveFailures = 5 } = options;
+  const { halfOpenAfter = 30_000, consecutiveFailures = 5 } = ensure(options, circuitBreakerOptionsSchema, { at: 'circuit breaker options' });
 
   const engine = circuitBreaker(handleAll, {
     halfOpenAfter,
@@ -154,7 +167,7 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
  * Default: 30 s.
  */
 export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): TimeoutPolicy {
-  const { timeoutMs = 30_000 } = options;
+  const { timeoutMs = 30_000 } = ensure(options, timeoutOptionsSchema, { at: 'timeout options' });
   return timeoutPolicy(timeoutMs);
 }
 
@@ -164,7 +177,7 @@ export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): Timeout
  * Defaults: 10 concurrent, 100 queued.
  */
 export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): BulkheadPolicy {
-  const { maxConcurrent = 10, maxQueue = 100 } = options;
+  const { maxConcurrent = 10, maxQueue = 100 } = ensure(options, bulkheadOptionsSchema, { at: 'bulkhead options' });
   const engine = bulkhead(maxConcurrent, maxQueue);
   const policy = fromEngine(ownedEngine(engine, error => {
     if (is(error, bulkheadErrorSchema)) return BulkheadRejected({ cause: error });

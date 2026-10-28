@@ -155,7 +155,10 @@ export function defineFailure(code: string, options: LooseOptions = {}): unknown
     const text = typeof message === 'function' ? message(data) : fill(message ?? code, data);
     return new FailureValue(code, text, data, status, remediation, causeOf(hasData ? args[1] : args[0]));
   };
-  const is = (value: unknown): boolean => isFailure(value) && value.code === code;
+  const is = (value: unknown): boolean => {
+    try { return isFailure(value) && value.code === code; }
+    catch { return false; }
+  };
 
   return Object.freeze(Object.assign(make, { code, status, remediation, dataSchema, is }));
 }
@@ -243,13 +246,18 @@ export function isFailure(value: unknown): boolean {
   // it as an own property but never on a prototype, so outside data (an API response, a
   // queue message, a tool result) can never pass as a failure. Checked by shape, not
   // instanceof, so two copies of this package still recognise each other's failures.
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return (
-    typeof prototype === 'object' &&
-    prototype !== null &&
-    Object.hasOwn(prototype, BRAND) &&
-    !Object.hasOwn(value, BRAND)
-  );
+  try {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return (
+      typeof prototype === 'object' &&
+      prototype !== null &&
+      Object.hasOwn(prototype, BRAND) &&
+      !Object.hasOwn(value, BRAND)
+    );
+  } catch {
+    // Opaque/revoked objects cannot prove a failure brand. Detection owns no effects.
+    return false;
+  }
 }
 
 /** A value that may be a failure: the success value, or one of the failures it can return. */

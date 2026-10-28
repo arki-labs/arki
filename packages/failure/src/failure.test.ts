@@ -267,3 +267,23 @@ describe('stoppable', () => {
     expect(result).toEqual(value);
   });
 });
+
+it('failure detection refuses opaque or revoked objects without throwing', () => {
+  const opaque = new Proxy({}, { getPrototypeOf() { throw new Error('private inspection'); } });
+  expect(isFailure(opaque)).toBe(false);
+  expect(PostNotFound.is(opaque)).toBe(false);
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  expect(isFailure(revoked.proxy)).toBe(false);
+  expect(PostNotFound.is(revoked.proxy)).toBe(false);
+});
+
+it('definition matching refuses an inaccessible code without throwing', () => {
+  const opaque = new Proxy(PostNotFound({ id: 'p1' }), {
+    get(target, key, receiver) {
+      if (key === 'code') throw new Error('private code');
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  expect(PostNotFound.is(opaque)).toBe(false);
+});

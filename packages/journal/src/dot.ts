@@ -65,6 +65,7 @@ export { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 
 export const JOURNAL_PLUGIN_ERROR_CODES = {
   /**
+   * A feature supplied an invalid Journal contribution.
    * @fix Declare the feature slice with journalHandlers, journalEffects, journalWorkflows or journalProjections from @arki/journal/dot.
    * @verify bun run test -- src/dot-feature.test.ts
    */

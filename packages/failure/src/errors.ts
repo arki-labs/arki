@@ -44,6 +44,7 @@ export const FAILURE_ERROR_CODES = {
    */
   duplicateCode: 'ARKI_FAILURE_E005',
   /**
+   * Retired code for revived failure data that did not satisfy its schema.
    * @deprecated Retired: revival now returns InvalidEnvelope with reason invalid_data.
    *
    * @fix Check the stored data against the schema. A schema that transforms its input cannot read its own output.
@@ -51,6 +52,7 @@ export const FAILURE_ERROR_CODES = {
    */
   invalidData: 'ARKI_FAILURE_E006',
   /**
+   * Retired code for an asynchronous schema used during synchronous revival.
    * @deprecated Retired: revival now returns AsyncSchema.
    *
    * @fix Use a schema that validates synchronously for failure data.

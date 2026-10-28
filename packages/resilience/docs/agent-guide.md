@@ -99,3 +99,6 @@ dot doctor --json | jq '.data'
 ## Typed retry waits
 
 Use `RETRY_FAILURES` for retry-only callers and `RESILIENCE_FAILURES` for composed policies/presets. `wrap` infers heterogeneous unions. `Policy<F, E>` includes common cancellation/defect outcomes and keeps fallback values separate. Returned engine refusals bypass `onThrow`/`withFallback` and never open a breaker; select them explicitly with `.while(...)` only when replay is safe. Actual clock waits preserve their original failures. Timeout captures cancellation origin before observers; retry-only callbacks remain cooperative.
+Custom Clock/Backoff implementations are execution protocols. Invalid delay/outcome values return `UnexpectedDefect` before another attempt; thrown/rejected providers remain supervised. Preserve the original canonical sleep failure object. Timing is observation only: unavailable or invalid samples omit duration-bearing events, never results or retry/give-up events.
+
+Each measurement retains the same clock function and receiver across awaited work. Timing samples are schema-validated before arithmetic; switching global clock objects cannot mix origins.

@@ -51,7 +51,7 @@ function collapse(text: string): string {
 
 /** The last JSDoc block on a node: its summary and the text of its `@fix` and `@verify` tags. */
 function readDoc(node: ts.Node): Pick<ErrorEntry, 'what' | 'fix' | 'verify'> {
-  const block = ts.getJSDocCommentsAndTags(node).findLast(ts.isJSDoc);
+  const block = ts.getJSDocCommentsAndTags(node).findLast(comment => ts.isJSDoc(comment));
   const tagText = (name: string): string | null => {
     const tag = block?.tags?.find(candidate => candidate.tagName.text === name);
     const text = tag === undefined ? '' : collapse(ts.getTextOfJSDocComment(tag.comment) ?? '');
@@ -73,36 +73,108 @@ function unwrap(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-/** Every error entry one source file defines. `file` is the path shown in `source`. */
+/** Static tooling: throws ERR_E003 when a recognized factory cannot be indexed. Every error entry one source file defines. `file` is the path shown in `source`. */
 export function readErrorEntries(sourceText: string, file: string, packageName: string): ErrorEntry[] {
   const sourceFile = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const entries: ErrorEntry[] = [];
-  const failureFactories = new Set(['defineFailure']);
-  const failureNamespaces = new Set<string>();
-  for (const statement of sourceFile.statements) {
+  // A one-file checker binds lexical symbols without loading imports or executing source.
+  const program = ts.createProgram(
+    [file],
+    { noLib: true, noResolve: true },
+    {
+      getSourceFile: name => (name === file ? sourceFile : undefined),
+      getDefaultLibFileName: () => '',
+      writeFile: () => {
+        throw new Error('error index never emits compiler output');
+      },
+      getCurrentDirectory: () => '',
+      getDirectories: () => [],
+      fileExists: name => name === file,
+      readFile: name => (name === file ? sourceText : undefined),
+      getCanonicalFileName: name => name,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => '\n',
+    },
+  );
+  const checker = program.getTypeChecker();
+  const canonicalImport = (node: ts.Node): boolean => {
+    let current = node;
+    while (!ts.isImportDeclaration(current)) {
+      if (ts.isSourceFile(current)) return false;
+      current = current.parent;
+    }
+    // The factory package consumes its own canonical factory through local imports.
+    return (
+      ts.isStringLiteral(current.moduleSpecifier) &&
+      (current.moduleSpecifier.text === '@arki/failure' ||
+        (packageName === '@arki/failure' && current.moduleSpecifier.text.startsWith('.'))) &&
+      !current.importClause?.isTypeOnly
+    );
+  };
+  const resolveFactory = (
+    expression: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+  ): 'factory' | 'namespace' | 'mutable' | undefined => {
+    const value = unwrap(expression);
+    const member = ts.isElementAccessExpression(value) ? unwrap(value.argumentExpression) : undefined;
     if (
-      !ts.isImportDeclaration(statement) ||
-      !ts.isStringLiteral(statement.moduleSpecifier) ||
-      statement.moduleSpecifier.text !== '@arki/failure' ||
-      statement.importClause?.isTypeOnly
-    )
-      continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (bindings !== undefined && ts.isNamespaceImport(bindings)) failureNamespaces.add(bindings.name.text);
-    if (bindings !== undefined && ts.isNamedImports(bindings)) {
-      for (const binding of bindings.elements) {
-        if (!binding.isTypeOnly && (binding.propertyName ?? binding.name).text === 'defineFailure') {
-          failureFactories.add(binding.name.text);
+      (ts.isPropertyAccessExpression(value) && value.name.text === 'defineFailure') ||
+      (ts.isElementAccessExpression(value) &&
+        member !== undefined &&
+        ts.isStringLiteralLike(member) &&
+        member.text === 'defineFailure')
+    ) {
+      const namespace = resolveFactory(value.expression, seen);
+      return namespace === 'namespace' ? 'factory' : namespace === 'mutable' ? 'mutable' : undefined;
+    }
+    if (!ts.isIdentifier(value)) return undefined;
+    const symbol = checker.getSymbolAtLocation(value);
+    // Bare calls occur in factory-owning source and compiler-only fixtures.
+    if (symbol === undefined) return value.text === 'defineFailure' ? 'factory' : undefined;
+    if (seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    for (const declaration of symbol.declarations ?? []) {
+      if (
+        ts.isImportSpecifier(declaration) &&
+        canonicalImport(declaration) &&
+        !declaration.isTypeOnly &&
+        (declaration.propertyName ?? declaration.name).text === 'defineFailure'
+      )
+        return 'factory';
+      if (ts.isNamespaceImport(declaration) && canonicalImport(declaration)) return 'namespace';
+      if (ts.isBindingElement(declaration) && ts.isObjectBindingPattern(declaration.parent)) {
+        const property = declaration.propertyName ?? declaration.name;
+        const key = ts.isComputedPropertyName(property) ? unwrap(property.expression) : property;
+        const owner = declaration.parent.parent;
+        if (
+          !declaration.dotDotDotToken &&
+          (ts.isStringLiteralLike(key) || (!ts.isComputedPropertyName(property) && ts.isIdentifier(key))) &&
+          key.text === 'defineFailure' &&
+          ts.isVariableDeclaration(owner) &&
+          owner.initializer !== undefined
+        ) {
+          const namespace = resolveFactory(owner.initializer, seen);
+          if (namespace === 'namespace' || namespace === 'mutable') {
+            return namespace === 'namespace' &&
+              ts.isVariableDeclarationList(owner.parent) &&
+              (owner.parent.flags & ts.NodeFlags.Const) !== 0
+              ? 'factory'
+              : 'mutable';
+          }
+        }
+      }
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined) {
+        const target = resolveFactory(declaration.initializer, seen);
+        if (target !== undefined) {
+          return ts.isVariableDeclarationList(declaration.parent) &&
+            (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+            ? target
+            : 'mutable';
         }
       }
     }
-  }
-  const isFailureFactory = (expression: ts.Expression): boolean =>
-    (ts.isIdentifier(expression) && failureFactories.has(expression.text)) ||
-    (ts.isPropertyAccessExpression(expression) &&
-      ts.isIdentifier(expression.expression) &&
-      failureNamespaces.has(expression.expression.text) &&
-      expression.name.text === 'defineFailure');
+    return undefined;
+  };
   const at = (node: ts.Node): string =>
     `${file}:${String(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1)}`;
 
@@ -124,9 +196,17 @@ export function readErrorEntries(sourceText: string, file: string, packageName: 
             }
           }
         }
-      } else if (ts.isCallExpression(initializer) && isFailureFactory(initializer.expression)) {
-        const [code] = initializer.arguments;
-        if (code !== undefined && ts.isStringLiteralLike(code)) {
+      } else if (ts.isCallExpression(initializer)) {
+        const factory = resolveFactory(initializer.expression);
+        if (factory === 'factory' || factory === 'mutable') {
+          const [argument] = initializer.arguments;
+          const code = argument === undefined ? undefined : unwrap(argument);
+          if (factory === 'mutable' || code === undefined || !ts.isStringLiteralLike(code)) {
+            // Static tooling throws on incomplete coverage; it never imports or evaluates a module.
+            throw new Error(
+              `ERR_E003 cannot statically index failure definition at ${at(node)}: use a constant factory alias and literal code`,
+            );
+          }
           entries.push({ code: code.text, package: packageName, kind: 'failure', ...readDoc(node), source: at(node) });
         }
       }
@@ -163,13 +243,20 @@ export function buildErrorIndex(packageDir: string): ErrorEntry[] {
   return errorIndexSchema.parse(entries).toSorted((a, b) => a.code.localeCompare(b.code));
 }
 
-/** Entries that lack `@fix` or `@verify`. The rule ERR_E001 of `arki-library-check` reports these. */
+/** Entries that lack a nonempty summary, `@fix` or `@verify`. The rule ERR_E001 of `arki-library-check` reports these. */
 export function missingErrorDocs(entries: readonly ErrorEntry[]): ErrorEntry[] {
-  return entries.filter(entry => entry.fix === null || entry.verify === null);
+  return entries.filter(
+    entry =>
+      collapse(entry.what) === '' ||
+      entry.fix === null ||
+      collapse(entry.fix) === '' ||
+      entry.verify === null ||
+      collapse(entry.verify) === '',
+  );
 }
 
 export const ERR_RULES = {
-  ERR_E001: 'error code lacks @fix or @verify in its JSDoc',
+  ERR_E001: 'error code lacks summary, @fix or @verify in its JSDoc',
   ERR_E002: 'error code has multiple definitions',
 } as const;
 
@@ -191,9 +278,11 @@ export function duplicateErrorCodes(entries: readonly ErrorEntry[]): string[] {
 export function checkErrorDocs(packageDir: string): string[] {
   const entries = buildErrorIndex(packageDir);
   const missing = missingErrorDocs(entries).map(entry => {
-    const lacking = [entry.fix === null ? '@fix' : null, entry.verify === null ? '@verify' : null].filter(
-      tag => tag !== null,
-    );
+    const lacking = [
+      collapse(entry.what) === '' ? 'summary' : null,
+      entry.fix === null || collapse(entry.fix) === '' ? '@fix' : null,
+      entry.verify === null || collapse(entry.verify) === '' ? '@verify' : null,
+    ].filter(tag => tag !== null);
     return `ERR_E001 ${ERR_RULES.ERR_E001}: ${entry.code} (no ${lacking.join(', ')})`;
   });
   return [...missing, ...duplicateErrorCodes(entries).map(code => `ERR_E002 ${ERR_RULES.ERR_E002}: ${code}`)];
@@ -207,7 +296,7 @@ function main(): number {
   mkdirSync(path.dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(entries, null, 2)}\n`);
   const missing = missingErrorDocs(entries).length;
-  say(`arki-error-index: ${String(entries.length)} code(s), ${String(missing)} without @fix/@verify -> ${out}`);
+  say(`arki-error-index: ${String(entries.length)} code(s), ${String(missing)} without summary/@fix/@verify -> ${out}`);
   if (entries.length === 0) complain('arki-error-index: no error codes found under src/');
   const duplicates = duplicateErrorCodes(entries);
   for (const code of duplicates) complain(`ERR_E002 ${ERR_RULES.ERR_E002}: ${code}`);

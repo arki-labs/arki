@@ -208,3 +208,55 @@ describe('updateBaseline', () => {
     expect(entries).toEqual([{ package: '@arki/a', error: 'E2', reason: 'new' }, kept]);
   });
 });
+
+function errorsFile(dir: string, source: string): void {
+  mkdirSync(path.join(dir, 'src'), { recursive: true });
+  writeFileSync(path.join(dir, 'src', 'errors.ts'), source);
+}
+
+describe('error documentation enforcement', () => {
+  const documented = `/** The post is missing.
+    * @fix Create the post.
+    * @verify bun run test
+    */
+    export const Missing = defineFailure('post.missing');`;
+
+  it('requires summary and remediation for private libraries before release', () => {
+    const dir = packageDir('demo', good, { tags: ['foundation'] });
+    errorsFile(
+      dir,
+      `/** @fix Create it. \n * @verify bun run test \n */
+      const Missing = defineFailure('post.missing');
+      /** No remediation yet. */
+      const Locked = defineFailure('post.locked');`,
+    );
+    expect(checkLibrary(dir).errors).toEqual([
+      'ERR_E001 error code lacks summary, @fix or @verify in its JSDoc: post.locked (no @fix, @verify)',
+      'ERR_E001 error code lacks summary, @fix or @verify in its JSDoc: post.missing (no summary)',
+    ]);
+  });
+
+  it('fails the collector for conflicting originals across packages without repeating local duplicates', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'arki-error-collector-'));
+    for (const folder of ['first', 'second']) {
+      const dir = path.join(root, 'packages', folder);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...good, name: `@arki/${folder}` }));
+      writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify({ tags: ['foundation'] }));
+      errorsFile(dir, documented);
+      writeFileSync(path.join(dir, 'src', 'index.ts'), "export { Missing } from './errors';");
+      writeFileSync(path.join(dir, 'src', 'alias.ts'), "export { Missing as Gone } from './errors';");
+    }
+    // A same-package collision already reported locally must not appear twice globally.
+    writeFileSync(path.join(root, 'packages', 'first', 'src', 'other.ts'), documented);
+    expect(checkAll(root, []).errors).toEqual([
+      { package: '@arki/first', error: 'ERR_E002 error code has multiple definitions: post.missing' },
+      { package: '@arki/second', error: 'ERR_E002 error code has multiple definitions: post.missing' },
+    ]);
+    // Re-exports alone retain a single original and cannot create a false collision.
+    errorsFile(path.join(root, 'packages', 'second'), "export { Missing } from '@arki/first';");
+    expect(checkAll(root, []).errors).toEqual([
+      { package: '@arki/first', error: 'ERR_E002 error code has multiple definitions: post.missing' },
+    ]);
+  });
+});

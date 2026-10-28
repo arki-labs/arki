@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -107,7 +107,7 @@ describe('checkErrorDocs', () => {
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@arki/demo' }));
     writeFileSync(path.join(dir, 'src', 'errors.ts'), REGISTRY);
     expect(checkErrorDocs(dir)).toEqual([
-      'ERR_E001 error code lacks @fix or @verify in its JSDoc: ARKI_DEMO_E002 (no @fix, @verify)',
+      'ERR_E001 error code lacks summary, @fix or @verify in its JSDoc: ARKI_DEMO_E002 (no @fix, @verify)',
     ]);
   });
 });
@@ -120,6 +120,42 @@ describe('errorDocsUrl', () => {
 });
 
 describe('canonical definitions', () => {
+  it('indexes literal namespace members and destructured aliases without trusting shadowed objects', () => {
+    // Why: alternate JavaScript access syntax must not bypass docs or duplicate-code checks.
+    const entries = readErrorEntries(
+      `import * as failures from '@arki/failure';
+      const { defineFailure: make } = failures;
+      const One = make('post.one');
+      const Two = failures['defineFailure']('post.two');
+      const namespace = failures;
+      const { ['defineFailure']: another } = namespace;
+      const Three = another('post.three');
+      const defineFailure = 'isFailure';
+      const { [defineFailure]: isFailure } = failures;
+      const NotDefinition = isFailure('not.a.definition');
+      function shadowed(failures: { defineFailure: (code: string) => string }) {
+        const { defineFailure: unrelated } = failures;
+        const NotFailure = unrelated('not.failure');
+        const AlsoNotFailure = failures['defineFailure']('also.not.failure');
+      }`,
+      'src/errors.ts',
+      'p',
+    );
+    expect(entries.map(entry => entry.code)).toEqual(['post.one', 'post.two', 'post.three']);
+  });
+
+  it('refuses mutable destructured factory aliases instead of silently losing coverage', () => {
+    expect(() =>
+      readErrorEntries(
+        `import * as failures from '@arki/failure';
+        let { defineFailure: make } = failures;
+        const Missing = make('post.missing');`,
+        'src/errors.ts',
+        'p',
+      ),
+    ).toThrow('ERR_E003');
+  });
+
   it('reads aliases of canonical factory imports', () => {
     // Why: renaming an import must not silently remove a failure from public docs.
     const entries = readErrorEntries(
@@ -164,5 +200,130 @@ describe('canonical definitions', () => {
     writeFileSync(path.join(dir, 'src', 'other.ts'), `${doc}\nexport const Other = defineFailure('post.missing');`);
     expect(buildErrorIndex(dir)).toHaveLength(3);
     expect(checkErrorDocs(dir)).toEqual(['ERR_E002 error code has multiple definitions: post.missing']);
+  });
+});
+
+describe('documentation completeness and static privacy', () => {
+  it('requires a nonempty summary and both nonempty remediation tags', () => {
+    const entries = readErrorEntries(
+      `
+      /**
+       * @fix Recreate the post.
+       * @verify bun run test
+       */
+      const MissingSummary = defineFailure('post.no_summary');
+      /** A post is missing.
+       * @fix
+       * @verify
+       */
+      const EmptyTags = defineFailure('post.empty_tags');
+    `,
+      'src/errors.ts',
+      'p',
+    );
+    expect(missingErrorDocs(entries).map(entry => entry.code)).toEqual(['post.no_summary', 'post.empty_tags']);
+  });
+
+  it('resolves chained local constant aliases and respects lexical shadowing', () => {
+    const entries = readErrorEntries(
+      `
+      import { defineFailure as failure } from '@arki/failure';
+      import * as failures from '@arki/failure';
+      const make = failure;
+      const chained = (make);
+      const fromNamespace = failures.defineFailure;
+      const One = chained('post.one');
+      const Two = fromNamespace('post.two');
+      function nested() {
+        const local = make;
+        const Three = local('post.three');
+      }
+      function unrelated(make: (code: string) => string) {
+        const NotFailure = make('not.a_failure');
+      }
+      function shadowed(failures: { defineFailure: (code: string) => string }) {
+        const NotFailure = failures.defineFailure('also.not_a_failure');
+      }
+    `,
+      'src/errors.ts',
+      'p',
+    );
+    expect(entries.map(entry => entry.code)).toEqual(['post.one', 'post.two', 'post.three']);
+  });
+
+  it('indexes the factory package own local imports without accepting unrelated imports', () => {
+    const source = `import { defineFailure } from './failure.js';
+      const make = defineFailure;
+      const Invalid = make('schema.invalid_input');`;
+    expect(readErrorEntries(source, 'src/foundations.ts', '@arki/failure').map(entry => entry.code)).toEqual([
+      'schema.invalid_input',
+    ]);
+    expect(readErrorEntries(source, 'src/errors.ts', '@arki/unrelated')).toEqual([]);
+  });
+
+  it('fails explicitly when a known factory code cannot be indexed statically', () => {
+    expect(() =>
+      readErrorEntries(
+        `
+      import { defineFailure } from '@arki/failure';
+      const make = defineFailure;
+      const Missing = make(getCode());
+    `,
+        'src/errors.ts',
+        'p',
+      ),
+    ).toThrow(/ERR_E003.*src\/errors.ts/);
+  });
+
+  it('rejects mutable factory aliases rather than trusting a stale initializer', () => {
+    expect(() =>
+      readErrorEntries(
+        `
+      import { defineFailure } from '@arki/failure';
+      let make = defineFailure;
+      const Missing = make('post.missing');
+    `,
+        'src/errors.ts',
+        'p',
+      ),
+    ).toThrow(/ERR_E003/);
+  });
+
+  it('never evaluates a module or includes private factory payloads in JSON', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'error-index-'));
+    mkdirSync(path.join(dir, 'src'));
+    const marker = path.join(dir, 'executed');
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@arki/demo' }));
+    writeFileSync(
+      path.join(dir, 'src', 'errors.ts'),
+      `
+      import { writeFileSync } from 'node:fs';
+      import { defineFailure } from '@arki/failure';
+      writeFileSync(${JSON.stringify(marker)}, 'ran');
+      /** The post is missing.
+       * @fix Create the post.
+       * @verify bun run test
+       */
+      export const Missing = defineFailure('post.missing', {
+        message: 'PRIVATE_MESSAGE',
+        cause: new Error('PRIVATE_CAUSE'),
+        data: { token: 'PRIVATE_TOKEN', payload: 'PRIVATE_PAYLOAD' },
+        get remediation() { throw new Error('must never evaluate'); }
+      });
+    `,
+    );
+    const index = errorIndexSchema.parse(buildErrorIndex(dir));
+    expect(index).toHaveLength(1);
+    expect(Object.keys(index[0] ?? {}).toSorted()).toEqual([
+      'code',
+      'fix',
+      'kind',
+      'package',
+      'source',
+      'verify',
+      'what',
+    ]);
+    expect(JSON.stringify(index)).not.toMatch(/PRIVATE_|cause|payload|token|message/);
+    expect(existsSync(marker)).toBe(false);
   });
 });

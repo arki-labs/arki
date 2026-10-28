@@ -10,6 +10,7 @@ import { is, recordSchema } from '@arki/schema';
 import type { EmbeddingSpace, TokenCount } from './types.js';
 
 /**
+ * The embedding provider is rate limiting this caller.
  * @fix Wait retryAfterMs (when set) and try again, or wrap the embedder in withResilience.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -21,6 +22,7 @@ export const RateLimited = defineFailure('embeddings.rate_limited', {
 });
 
 /**
+ * An input exceeds the embedding model token limit.
  * @fix Split the text into smaller chunks before embedding it.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -32,6 +34,7 @@ export const InputTooLong = defineFailure('embeddings.input_too_long', {
 });
 
 /**
+ * The embedding model or its provider is unavailable.
  * @fix not-pulled: run `ollama pull <model>`; unreachable: start the server or fix the base URL; peer-missing: install the provider SDK peer.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -47,6 +50,7 @@ export const ModelUnavailable = defineFailure('embeddings.model_unavailable', {
 });
 
 /**
+ * The embedding model does not support this input type.
  * @fix Remove the unsupported input part or option, or select a model that supports it.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -62,6 +66,7 @@ export const UnsupportedInput = defineFailure('embeddings.unsupported_input', {
 });
 
 /**
+ * The provider returned an unusable embedding.
  * @fix Inspect the provider response and adapter validation; use a provider and model returning the required finite embedding vector shape.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -73,6 +78,7 @@ export const InvalidOutput = defineFailure('embeddings.invalid_output', {
 });
 
 /**
+ * The configured model does not match the index embedding space.
  * @fix Re-embed the corpus in the new space, or configure the model the index was built with.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -84,6 +90,7 @@ export const SpaceMismatch = defineFailure('embeddings.space_mismatch', {
 });
 
 /**
+ * The embedding call was cancelled.
  * @fix Start a new request with an active AbortSignal if the embedding is still needed.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */
@@ -94,6 +101,7 @@ export const Cancelled = defineFailure('embeddings.cancelled', {
 });
 
 /**
+ * The embedding provider, model or connection is misconfigured.
  * @fix Correct the configured provider, model and connection settings identified by the configuration failure.
  * @verify bun run test -- src/failures.test.ts src/embed.test.ts
  */

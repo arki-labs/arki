@@ -1,6 +1,7 @@
 import type { Attributes, Context } from '@opentelemetry/api';
 import { context, metrics, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { startTiming, elapsedTime } from './timing.js';
 
 /** Reporting has no authority over execution, including foreign asynchronous reporters. */
 function observe<Report>(report: () => Report): Report | undefined {
@@ -31,19 +32,19 @@ function reportMetric(report: () => void): void {
   }
 }
 
-function recordSettlement(name: string, outcome: string, started: number | undefined, current: Context): void {
-  const ended = observe(() => performance.now());
+function recordSettlement(name: string, outcome: string, started: ReturnType<typeof startTiming>, current: Context): void {
+  const elapsed = elapsedTime(started);
   const attributes = { 'resilience.boundary': name, 'resilience.outcome': outcome };
   reportMetric(() => {
     const meter = observe(() => metrics.getMeter('@arki/resilience'));
     const count = observe(() => meter?.createCounter('resilience.operations', { unit: '{operation}', description: 'Settled owned policy boundaries' }));
     return count?.add(1, attributes, current);
   });
-  if (started === undefined || ended === undefined || !Number.isFinite(ended - started) || ended < started) return;
+  if (elapsed === undefined) return;
   reportMetric(() => {
     const meter = observe(() => metrics.getMeter('@arki/resilience'));
     const duration = observe(() => meter?.createHistogram('resilience.duration', { unit: 's', description: 'Owned policy boundary time until settlement' }));
-    return duration?.record((ended - started) / 1000, attributes, current);
+    return duration?.record(elapsed / 1000, attributes, current);
   });
 }
 
@@ -75,7 +76,7 @@ export async function withPolicySpan<Value>(
   attributes?: Attributes,
 ): Promise<Value> {
   const canReportMetrics = metricReports === 0;
-  let started: number | undefined;
+  let started: ReturnType<typeof startTiming>;
   let outcome = 'unclassified';
   const active = observe(() => context.active());
   const tracer = observe(() => trace.getTracer('@arki/resilience'));
@@ -93,7 +94,7 @@ export async function withPolicySpan<Value>(
       rejectExecution = reject;
     });
     try {
-      started = observe(() => performance.now());
+      started = startTiming();
       resolveExecution(run());
     } catch (error) {
       rejectExecution(error);

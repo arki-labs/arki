@@ -127,6 +127,8 @@ export const NotionUnavailable = defineFailure('export.notion_unavailable', {
 
 ### `isFailure(value)`
 
+Detection refuses opaque or revoked objects without throwing. `Def.is(value)` also refuses an inaccessible code. An object that cannot prove the canonical failure brand stays an ordinary value; decoding wire failures still requires `revive`.
+
 True for any failure value. Narrows `T | Failure` both ways. Passing a promise is a type error, because a forgotten `await` would always answer "not a failure".
 
 ### Early return
@@ -357,7 +359,7 @@ if (OutOfStock.is(r)) accept(r); // ✓ one kind
 if (OutOfStock.is(r) || Busy.is(r)) accept(r); // ✓ each kind checked by name
 ```
 
-"Checked by kind" comes from types and the nearest condition about the value. Every part must be a failure with a literal `code`. Each `||` branch must check one named kind or compare `code` to one literal value. A bare `isFailure` is rejected even when the result currently has only one refusal. A preceding `if (!guard) return` or `throw` is checked the same way. A directly constructed failure remains valid. Const aliases preserve the checked value's identity. Multiple codes checked through a `switch` or more complex control flow still require an enclosing kind check. The checked calls default to `accept`, including member calls, static computed properties, imported aliases and local const aliases; set `names` to check others: `'failure/no-blind-accept': ['error', { names: ['accept', 'handled'] }]`. Mutable helper aliases are not followed. A call whose argument cannot be a failure (such as `dialog.accept('yes')`) is left alone.
+"Checked by kind" comes from types and the nearest condition about the value. Every part must be a failure with a literal `code`. Each `||` branch must check one named kind or compare `code` to one literal value. A bare `isFailure` is rejected even when the result currently has only one refusal. A preceding `if (!guard) return` or `throw` is checked the same way. A directly constructed failure remains valid. Const aliases preserve the checked value's identity. Multiple codes checked through a `switch` or more complex control flow still require an enclosing kind check. The checked calls default to `accept`, including member calls, static computed properties, imported aliases and local const aliases; set `names` to check others: `'failure/no-blind-accept': ['error', { names: ['accept', 'handled'] }]`. Captured `.bind` arguments are checked at binding; `.call` and statically typed tuple `.apply` arguments are checked at invocation. A mutable tuple slot requires its own kind guard and a current narrowed argument. For a wide tuple, pass `[args[0]]` after the guard so compiler flow information reaches the call; a tuple variable retains its declared slot type. Constructing or checking an earlier value is not proof of the current kind. Mutable helper aliases are not followed. A call whose argument cannot be a failure (such as `dialog.accept('yes')`) is left alone.
 
 ```js skip="needs an app's eslint config and typescript-eslint"
 // eslint.config.js
@@ -519,3 +521,5 @@ Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
 `parse(schema, input)` returns the schema output or `InvalidInput`, `AsyncSchema`, or `ValidatorDefect`. `parseAsync` returns output or `InvalidInput`/`ValidatorDefect`. Their exact failure types are `SchemaFailure` and `AsyncSchemaFailure`. `InvalidInput.data.issues` contains normalized issue messages and paths. Defect messages are safe; their caught causes are private.
 
 `@arki/schema` reexports these functions and provides issue formatting and JSON Schema helpers. There is one executor and no dependency cycle. Use `orThrow` only at an explicit foreign API that requires exceptions. See [the migration guide](docs/upgrade-typed-validation.md).
+
+Failure lint also follows `void` and comma-expression discards, erased returned callbacks and class callback fields. Returning a callback through a void signature does not transfer ownership of its failure.

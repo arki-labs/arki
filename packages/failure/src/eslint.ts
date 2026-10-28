@@ -18,12 +18,19 @@ import type { Node, Type, TypeChecker, Symbol as TypeSymbol } from 'typescript';
 import { AST_NODE_TYPES, ESLintUtils } from '@typescript-eslint/utils';
 import {
   forEachChild,
+  isArrayLiteralExpression,
+  isAsExpression,
   isBindingElement,
+  isCallExpression,
   isElementAccessExpression,
   isExpression,
   isIdentifier,
+  isNumericLiteral,
   isObjectBindingPattern,
+  isParenthesizedExpression,
   isPropertyAccessExpression,
+  isSatisfiesExpression,
+  isSpreadElement,
   isVariableDeclaration,
   isVariableDeclarationList,
   NodeFlags,
@@ -55,6 +62,19 @@ export const mustUse = createRule({
     const services = ESLintUtils.getParserServices(context);
     const checker = services.program.getTypeChecker();
     const checkedCallbacks = new Set<TSESTree.Expression>();
+    const checkedValues = new Set<TSESTree.Expression>();
+    const checkDiscarded = (expressions: TSESTree.Expression[], node: TSESTree.Node): void => {
+      const values = expressions
+        .flatMap(expression => discardedValues(expression))
+        .filter(value => !checkedValues.has(value));
+      for (const value of values) checkedValues.add(value);
+      const codes = new Set(
+        values.flatMap(value =>
+          resultTypes(checker, services.getTypeAtLocation(value)).flatMap(part => failureCodes(checker, part)),
+        ),
+      );
+      if (codes.size > 0) context.report({ node, messageId: 'mustUse', data: { codes: [...codes].join(', ') } });
+    };
     const checkCallback = (expression: TSESTree.Expression): void => {
       if (checkedCallbacks.has(expression)) return;
       checkedCallbacks.add(expression);
@@ -98,17 +118,24 @@ export const mustUse = createRule({
       AssignmentPattern(node) {
         checkCallback(node.right);
       },
+      ReturnStatement(node) {
+        if (node.argument !== null) checkCallback(node.argument);
+      },
+      PropertyDefinition(node) {
+        if (node.value !== null) checkCallback(node.value);
+      },
       Property(node) {
         if (node.value.type === AST_NODE_TYPES.Identifier || node.value.type === AST_NODE_TYPES.MemberExpression)
           checkCallback(node.value);
       },
       ExpressionStatement(node) {
-        const codes = new Set(
-          discardedValues(node.expression).flatMap(value =>
-            resultTypes(checker, services.getTypeAtLocation(value)).flatMap(part => failureCodes(checker, part)),
-          ),
-        );
-        if (codes.size > 0) context.report({ node, messageId: 'mustUse', data: { codes: [...codes].join(', ') } });
+        checkDiscarded([node.expression], node);
+      },
+      UnaryExpression(node) {
+        if (node.operator === 'void') checkDiscarded([node.argument], node);
+      },
+      SequenceExpression(node) {
+        checkDiscarded(node.expressions.slice(0, -1), node);
       },
     };
   },
@@ -214,66 +241,105 @@ export const noBlindAccept = createRule({
     const services = ESLintUtils.getParserServices(context);
     const checker = services.program.getTypeChecker();
 
-    /** A guard that narrows `subject` to exactly one failure code, such as `OutOfStock.is(r)`. */
-    const checksKind = (test: TSESTree.Expression, subject: TypeSymbol): boolean => {
-      if (test.type === AST_NODE_TYPES.LogicalExpression && test.operator === '||')
-        return checksKind(test.left, subject) && checksKind(test.right, subject);
-      if (test.type === AST_NODE_TYPES.LogicalExpression && test.operator === '&&')
-        return checksKind(test.left, subject) || checksKind(test.right, subject);
-      if (test.type === AST_NODE_TYPES.BinaryExpression && test.operator === '===') {
+    /** Exact checked codes must also cover the current compiler flow type, not stale guard syntax. */
+    const checkedKinds = (
+      test: TSESTree.Expression,
+      subjects: readonly Reference[],
+      truthy = true,
+    ): ReadonlySet<string> | undefined => {
+      if (test.type === AST_NODE_TYPES.UnaryExpression && test.operator === '!')
+        return checkedKinds(test.argument, subjects, !truthy);
+      if (test.type === AST_NODE_TYPES.LogicalExpression) {
+        const left = checkedKinds(test.left, subjects, truthy);
+        const right = checkedKinds(test.right, subjects, truthy);
+        if ((test.operator === '||' && truthy) || (test.operator === '&&' && !truthy))
+          return left === undefined || right === undefined ? undefined : new Set([...left, ...right]);
+        if ((test.operator === '&&' && truthy) || (test.operator === '||' && !truthy)) {
+          if (left === undefined) return right;
+          if (right === undefined) return left;
+          return new Set([...left].filter(code => right.has(code)));
+        }
+      }
+      if (
+        test.type === AST_NODE_TYPES.BinaryExpression &&
+        ((test.operator === '===' && truthy) || (test.operator === '!==' && !truthy))
+      ) {
         const codeAccess = (expression: TSESTree.Expression): boolean =>
           expression.type === AST_NODE_TYPES.MemberExpression &&
-          expression.object.type === AST_NODE_TYPES.Identifier &&
-          subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(expression.object)) === subject &&
+          referenceMatches(checker, services.esTreeNodeToTSNodeMap.get(expression.object), subjects) &&
           ((!expression.computed &&
             expression.property.type === AST_NODE_TYPES.Identifier &&
             expression.property.name === 'code') ||
             (expression.computed &&
               expression.property.type === AST_NODE_TYPES.Literal &&
               expression.property.value === 'code'));
-        return (
-          (codeAccess(test.left) && services.getTypeAtLocation(test.right).isStringLiteral()) ||
-          (codeAccess(test.right) && services.getTypeAtLocation(test.left).isStringLiteral())
-        );
+        const right = services.getTypeAtLocation(test.right);
+        if (codeAccess(test.left) && right.isStringLiteral()) return new Set([right.value]);
+        const left = services.getTypeAtLocation(test.left);
+        if (codeAccess(test.right) && left.isStringLiteral()) return new Set([left.value]);
       }
-      if (test.type !== AST_NODE_TYPES.CallExpression) return false;
+      if (test.type !== AST_NODE_TYPES.CallExpression || !truthy) return undefined;
       const signature = checker.getResolvedSignature(services.esTreeNodeToTSNodeMap.get(test));
-      // A generic guard such as `isFailure<Value>` narrows to whatever its argument may be, so it names no kind.
-      if (signature === undefined || (signature.getDeclaration().typeParameters?.length ?? 0) > 0) return false;
+      // Generic guards name no kind, even when their current argument has one refusal.
+      if (signature === undefined || (signature.getDeclaration().typeParameters?.length ?? 0) > 0) return undefined;
       const predicate = checker.getTypePredicateOfSignature(signature);
-      if (predicate?.type === undefined || predicate.parameterIndex === undefined) return false;
+      if (predicate?.type === undefined || predicate.parameterIndex === undefined) return undefined;
       const argument = test.arguments[predicate.parameterIndex];
       if (
-        argument?.type !== AST_NODE_TYPES.Identifier ||
-        subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(argument)) !== subject
+        argument === undefined ||
+        argument.type === AST_NODE_TYPES.SpreadElement ||
+        !referenceMatches(checker, services.esTreeNodeToTSNodeMap.get(argument), subjects)
       )
-        return false;
+        return undefined;
       const narrowed = kinds(checker, predicate.type);
-      return narrowed.codes.size === 1 && !narrowed.wide && !narrowed.plain;
+      return narrowed.codes.size === 1 && !narrowed.wide && !narrowed.plain ? narrowed.codes : undefined;
     };
 
     return {
       CallExpression(node) {
-        const name = checkedCallee(checker, services.esTreeNodeToTSNodeMap.get(node.callee), names);
+        const callee = services.esTreeNodeToTSNodeMap.get(node.callee);
+        const applyReceiver = callableReceiver(checker, callee, 'apply');
+        const receiver =
+          applyReceiver ?? callableReceiver(checker, callee, 'call') ?? callableReceiver(checker, callee, 'bind');
+        const name = checkedCallee(checker, receiver ?? callee, names);
         if (name === undefined) return;
-        const argument = node.arguments[0];
+        const argument = node.arguments[receiver === undefined ? 0 : 1];
         if (argument === undefined || argument.type === AST_NODE_TYPES.SpreadElement) return;
-        const found = kinds(checker, services.getTypeAtLocation(argument));
+        let type: Type = services.getTypeAtLocation(argument);
+        const argumentNode = services.esTreeNodeToTSNodeMap.get(argument);
+        let subjects = references(checker, argumentNode);
+        if (applyReceiver !== undefined) {
+          if (argument.type === AST_NODE_TYPES.ArrayExpression) {
+            const first = argument.elements[0];
+            if (first === undefined || first === null || first.type === AST_NODE_TYPES.SpreadElement) return;
+            type = services.getTypeAtLocation(first);
+            subjects = references(checker, services.esTreeNodeToTSNodeMap.get(first));
+          } else {
+            if (!checker.isTupleType(type)) return;
+            const first = type.getProperty('0');
+            if (first === undefined) return;
+            type = checker.getTypeOfSymbol(first);
+            subjects = subjects.map(subject => ({ ...subject, keys: [...subject.keys, '0'] }));
+            const origin = tupleFirstValue(checker, argumentNode);
+            // A mutable union slot may have changed since capture; only a single declared kind keeps that proof.
+            const captured = kinds(checker, type);
+            if (origin !== undefined && captured.codes.size === 1 && !captured.wide && !captured.plain)
+              subjects.push(...references(checker, origin));
+          }
+        }
+        const found = kinds(checker, type);
         // Not a failure at all (such as `dialog.accept('yes')`): another API's `accept`.
         if (found.codes.size === 0 && !found.wide) return;
-        const subject =
-          argument.type === AST_NODE_TYPES.Identifier
-            ? subjectSymbol(checker, services.esTreeNodeToTSNodeMap.get(argument))
-            : undefined;
-        const guard =
-          subject === undefined
-            ? undefined
-            : guardedByKind(
-                node,
-                test => mentionsSubject(checker, services.esTreeNodeToTSNodeMap.get(test), subject),
-                test => checksKind(test, subject),
-              );
-        const blind = found.plain || found.wide || guard === false || (found.codes.size > 1 && guard !== true);
+        const guard = guardedByKind(
+          node,
+          test => mentionsSubject(checker, services.esTreeNodeToTSNodeMap.get(test), subjects),
+          (test, truthy) => {
+            const checked = checkedKinds(test, subjects, truthy);
+            return checked !== undefined && !found.wide && [...found.codes].every(code => checked.has(code));
+          },
+        );
+        const blind =
+          found.plain || (found.wide && guard !== true) || guard === false || (found.codes.size > 1 && guard !== true);
         if (blind) context.report({ node, messageId: 'noBlindAccept', data: { name } });
       },
     };
@@ -287,6 +353,10 @@ function checkedCallee(
   names: readonly string[],
   seen = new Set<TypeSymbol>(),
 ): string | undefined {
+  if (isCallExpression(callee) && callee.arguments.length === 1) {
+    const receiver = callableReceiver(checker, callee.expression, 'bind');
+    if (receiver !== undefined) return checkedCallee(checker, receiver, names, seen);
+  }
   const symbol = isElementAccessExpression(callee)
     ? (() => {
         const key = checker.getTypeAtLocation(callee.argumentExpression);
@@ -327,6 +397,20 @@ function checkedCallee(
   return undefined;
 }
 
+/** Function protocol methods keep the original call target; arbitrary object properties do not. */
+function callableReceiver(checker: TypeChecker, callee: Node, method: string): Node | undefined {
+  if (!isPropertyAccessExpression(callee) && !isElementAccessExpression(callee)) return undefined;
+  const name = isPropertyAccessExpression(callee)
+    ? callee.name.text
+    : (() => {
+        const key = checker.getTypeAtLocation(callee.argumentExpression);
+        return key.isStringLiteral() ? key.value : undefined;
+      })();
+  return name === method && checker.getTypeAtLocation(callee.expression).getCallSignatures().length > 0
+    ? callee.expression
+    : undefined;
+}
+
 /**
  * Whether the nearest condition about the subject checks it by kind. No enclosing
  * condition is distinct from an explicit blind guard: a directly constructed failure is precise.
@@ -334,10 +418,10 @@ function checkedCallee(
 function guardedByKind(
   call: TSESTree.CallExpression,
   mentions: (test: TSESTree.Expression) => boolean,
-  checksKind: (test: TSESTree.Expression) => boolean,
+  checksKind: (test: TSESTree.Expression, truthy: boolean) => boolean,
 ): boolean | undefined {
   let child: TSESTree.Node = call;
-  for (let node: TSESTree.Node | undefined = call.parent; node !== undefined; child = node, node = node.parent) {
+  for (let node = call.parent; node.type !== AST_NODE_TYPES.Program; child = node, node = node.parent) {
     if (
       node.type === AST_NODE_TYPES.FunctionDeclaration ||
       node.type === AST_NODE_TYPES.FunctionExpression ||
@@ -353,22 +437,24 @@ function guardedByKind(
           preceding?.type === AST_NODE_TYPES.IfStatement &&
           preceding.alternate === null &&
           exitsFunction(preceding.consequent) &&
-          preceding.test.type === AST_NODE_TYPES.UnaryExpression &&
-          preceding.test.operator === '!' &&
-          mentions(preceding.test.argument)
+          mentions(preceding.test)
         )
-          return checksKind(preceding.test.argument);
+          return checksKind(preceding.test, false);
       }
     }
-    const test =
+    if (
       (node.type === AST_NODE_TYPES.IfStatement || node.type === AST_NODE_TYPES.ConditionalExpression) &&
-      node.consequent === child
-        ? node.test
-        : node.type === AST_NODE_TYPES.LogicalExpression && node.operator === '&&' && node.right === child
-          ? node.left
-          : undefined;
-    if (test === undefined) continue;
-    if (mentions(test)) return checksKind(test);
+      (node.consequent === child || node.alternate === child) &&
+      mentions(node.test)
+    )
+      return checksKind(node.test, node.consequent === child);
+    if (
+      node.type === AST_NODE_TYPES.LogicalExpression &&
+      (node.operator === '&&' || node.operator === '||') &&
+      node.right === child &&
+      mentions(node.left)
+    )
+      return checksKind(node.left, node.operator === '&&');
   }
   return undefined;
 }
@@ -399,10 +485,74 @@ function subjectSymbol(checker: TypeChecker, node: Node, seen = new Set<TypeSymb
   return symbol;
 }
 
-function mentionsSubject(checker: TypeChecker, node: Node, subject: TypeSymbol): boolean {
+/** A tuple literal or variable initializer supplies provenance, used only for a single declared kind. */
+function tupleFirstValue(checker: TypeChecker, node: Node, seen = new Set<TypeSymbol>()): Node | undefined {
+  if (isAsExpression(node) || isSatisfiesExpression(node) || isParenthesizedExpression(node))
+    return tupleFirstValue(checker, node.expression, seen);
+  if (isArrayLiteralExpression(node)) {
+    const first = node.elements[0];
+    return first !== undefined && !isSpreadElement(first) ? first : undefined;
+  }
+  if (!isIdentifier(node)) return undefined;
+  const symbol = checker.getSymbolAtLocation(node);
+  if (symbol === undefined || seen.has(symbol)) return undefined;
+  seen.add(symbol);
+  const declaration = symbol.valueDeclaration;
+  if (
+    declaration === undefined ||
+    !isVariableDeclaration(declaration) ||
+    declaration.initializer === undefined ||
+    !isVariableDeclarationList(declaration.parent)
+  )
+    return undefined;
+  return tupleFirstValue(checker, declaration.initializer, seen);
+}
+
+/** Reference paths retain symbol identity and literal keys, without evaluating values or synthesizing AST nodes. */
+function referencePath(checker: TypeChecker, node: Node) {
+  let current = node;
+  const keys: string[] = [];
+  while (isPropertyAccessExpression(current) || isElementAccessExpression(current)) {
+    const key = isPropertyAccessExpression(current)
+      ? current.name.text
+      : (() => {
+          if (isNumericLiteral(current.argumentExpression)) return current.argumentExpression.text;
+          const type = checker.getTypeAtLocation(current.argumentExpression);
+          return type.isStringLiteral() || type.isNumberLiteral() ? String(type.value) : undefined;
+        })();
+    if (key === undefined) return;
+    keys.unshift(key);
+    current = current.expression;
+  }
+  if (!isIdentifier(current)) return;
+  const root = subjectSymbol(checker, current);
+  return root === undefined ? undefined : { root, keys };
+}
+
+type Reference = NonNullable<ReturnType<typeof referencePath>>;
+
+function references(checker: TypeChecker, node: Node): Reference[] {
+  const reference = referencePath(checker, node);
+  return reference === undefined ? [] : [reference];
+}
+
+function referenceMatches(checker: TypeChecker, node: Node, subjects: readonly Reference[]): boolean {
+  const found = referencePath(checker, node);
   return (
-    (isIdentifier(node) && subjectSymbol(checker, node) === subject) ||
-    forEachChild(node, child => (mentionsSubject(checker, child, subject) ? true : undefined)) === true
+    found !== undefined &&
+    subjects.some(
+      subject =>
+        found.root === subject.root &&
+        found.keys.length === subject.keys.length &&
+        found.keys.every((key, index) => key === subject.keys[index]),
+    )
+  );
+}
+
+function mentionsSubject(checker: TypeChecker, node: Node, subjects: readonly Reference[]): boolean {
+  return (
+    referenceMatches(checker, node, subjects) ||
+    forEachChild(node, child => (mentionsSubject(checker, child, subjects) ? true : undefined)) === true
   );
 }
 

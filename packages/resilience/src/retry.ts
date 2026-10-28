@@ -8,7 +8,10 @@
 // failure is an expected outcome, so it is retried only when the backoff's `while` says
 // so, and when retrying stops the caller gets the last failure back as a value.
 
-import type { Clock } from '@arki/clock';
+import type { Clock, SleepFailure } from '@arki/clock';
+import { MAX_TIMER_MS, SLEEP_FAILURES } from '@arki/clock';
+import { is } from '@arki/schema';
+import { z } from 'zod';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { RetryFailure } from './errors.js';
@@ -16,6 +19,7 @@ import { Cancelled } from './errors.js';
 import { createEvent } from './event.js';
 import { ownPolicy } from './engine.js';
 import { withPolicySpan } from './telemetry.js';
+import { startTiming, elapsedTime } from './timing.js';
 
 import type { Backoff } from './backoff.js';
 import type {
@@ -27,11 +31,12 @@ import type {
   SuccessEvent,
 } from './policy.js';
 
-/** Milliseconds since some fixed point, for event durations. */
-function nowMs(): number {
-  return typeof performance === 'undefined' ? Date.now() : performance.now();
-}
-
+/** @internal The canonical Clock definitions own the accepted wait outcomes. */
+export const clockSleepOutcomeSchema = z.union([
+  z.void(), z.custom<SleepFailure>(value => SLEEP_FAILURES.some(definition => definition.is(value))),
+]);
+/** @internal A foreign Backoff must return an actual bounded delay or stop. */
+export const retryDelaySchema = z.number().min(0).max(MAX_TIMER_MS).optional();
 /** A signal that never aborts, for calls made without one. */
 const neverAborted = new AbortController().signal;
 
@@ -54,14 +59,17 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
     for (let attempt = 0; ; attempt++) {
       const beforeAttempt = retryCancellation(signal);
       if (beforeAttempt !== undefined) return beforeAttempt;
-      const started = success.listening() || failure.listening() ? nowMs() : 0;
+      const started = success.listening() || failure.listening() ? startTiming() : undefined;
       // Instrumentation may synchronously cancel after the loop preflight.
       const call = () => retryCancellation(signal) ?? fn({ signal, attempt });
       let failed: { readonly error: unknown } | { readonly value: Awaited<ReturnType<typeof call>> };
       try {
         const value = await withPolicySpan('resilience.attempt', call, { 'resilience.attempt': attempt });
         if (!isFailure<unknown>(value)) {
-          if (success.listening()) success.emit({ duration: nowMs() - started });
+          if (success.listening()) {
+            const elapsed = elapsedTime(started);
+            if (elapsed !== undefined) success.emit({ duration: elapsed });
+          }
           return value;
         }
         failed = { value };
@@ -70,12 +78,18 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       }
       let delay: ReturnType<Backoff['delay']>;
       try {
-        delay = signal.aborted ? undefined : backoff.delay(attempt + 1, 'error' in failed ? failed.error : failed.value);
+        const provided: unknown = signal.aborted ? undefined : backoff.delay(attempt + 1, 'error' in failed ? failed.error : failed.value);
+        if (!is(provided, retryDelaySchema)) {
+          void Promise.resolve(provided).catch(() => { /* A synchronous protocol cannot return a rejected promise. */ });
+          return UnexpectedDefect({ cause: provided });
+        }
+        delay = provided;
       } catch (error) {
         return UnexpectedDefect({ cause: error });
       }
       if (failure.listening()) {
-        failure.emit({ duration: nowMs() - started, handled: delay !== undefined, reason: failed });
+        const elapsed = elapsedTime(started);
+        if (elapsed !== undefined) failure.emit({ duration: elapsed, handled: delay !== undefined, reason: failed });
       }
       const afterFailure = retryCancellation(signal);
       if (afterFailure !== undefined) return 'value' in failed ? failed.value : afterFailure;
@@ -97,7 +111,8 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
         const sleepResult = await withPolicySpan('resilience.wait', async () => {
           const beforeWait = retryCancellation(signal);
           if (beforeWait !== undefined) return 'value' in failed ? failed.value : beforeWait;
-          return await clock.sleep(delay, signal);
+          const outcome: unknown = await clock.sleep(delay, signal);
+          return is(outcome, clockSleepOutcomeSchema) ? outcome : UnexpectedDefect({ cause: outcome });
         }, {
           'resilience.attempt': attempt + 1,
           'resilience.delay_ms': delay,

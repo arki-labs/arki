@@ -45,21 +45,25 @@ export type { QueueClient, QueueClientOptions } from './queue-client.ts';
 
 export const QUEUE_PLUGIN_ERROR_CODES = {
   /**
+   * The queue worker did not finish startup within the configured timeout.
    * @fix Check Redis connectivity and worker context creation; raise startupTimeoutMs only when startup legitimately needs longer.
    * @verify bun run test -- src/dot.spec.ts
    */
   startupTimeout: 'ARKI_QUEUE_E001',
   /**
+   * The queue worker was started while already running.
    * @fix Start the app once, or stop the queue worker before starting it again.
    * @verify bun run test -- src/dot.spec.ts
    */
   doubleStart: 'ARKI_QUEUE_E002',
   /**
+   * The queue worker was stopped before successful startup.
    * @fix Stop only after successful startup or let the Dot lifecycle manage shutdown.
    * @verify bun run test -- src/dot.spec.ts
    */
   stopBeforeStart: 'ARKI_QUEUE_E003',
   /**
+   * Queue worker startup has no mounted queue client.
    * @fix Mount queue({ connection }) before feature registration and queueWorker startup.
    * @verify bun run test -- src/dot.spec.ts
    */

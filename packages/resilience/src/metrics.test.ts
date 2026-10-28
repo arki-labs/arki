@@ -159,12 +159,12 @@ it('counts once when a context manager repeats execution callbacks', async () =>
   expect(collected.find(metric => metric.descriptor.name === 'resilience.operations')?.dataPoints[0]?.value).toBe(1);
 });
 
-it('observes an opaque success without rejecting or guessing its failure status', async () => {
+it('observes an opaque success without turning inspection into a failure', async () => {
   const telemetry = installMetrics();
   const opaque = new Proxy({}, { getPrototypeOf: throwReporter });
   expect(await noop.execute(() => opaque)).toBe(opaque);
   const collected = await telemetry.collect();
-  expect(collected.find(metric => metric.descriptor.name === 'resilience.operations')?.dataPoints[0]?.attributes['resilience.outcome']).toBe('unclassified');
+  expect(collected.find(metric => metric.descriptor.name === 'resilience.operations')?.dataPoints[0]?.attributes['resilience.outcome']).toBe('success');
 });
 
 it('preserves dispatch when timing is unavailable', async () => {
