@@ -1,6 +1,7 @@
-import type { Backoff, Policy, RetryFailure } from '@arki/resilience';
-import { invariant } from '@arki/failure';
-import { backoff, createResiliencePolicy, isResilienceError, RESILIENCE_ERROR_CODES } from '@arki/resilience';
+import type { Backoff, Policy, ResilienceFailure } from '@arki/resilience';
+import { UnexpectedDefect } from '@arki/failure';
+import { SleepCancelled } from '@arki/clock';
+import { backoff, createResiliencePolicy, Cancelled as PolicyCancelled } from '@arki/resilience';
 
 import type { EmbedFailure } from './failures.js';
 import type { Embedder, EmbeddingBatch, EmbedMiddleware } from './types.js';
@@ -57,7 +58,7 @@ function embeddingPolicy() {
 /** What one attempt settled on. A retryable failure is returned bare instead, so the policy can retry it. */
 type Settled = { readonly settled: EmbeddingBatch | EmbedFailure };
 
-function resilience(policy: Policy<never, RetryFailure>): EmbedMiddleware {
+function resilience(policy: Policy<never, ResilienceFailure>): EmbedMiddleware {
   return (next, embedder) => async (inputs, options) => {
     try {
       const outcome = await policy.execute(async ({ signal, attempt }): Promise<Settled | EmbedFailure> => {
@@ -68,15 +69,12 @@ function resilience(policy: Policy<never, RetryFailure>): EmbedMiddleware {
       }, options.signal);
       if ('settled' in outcome) return outcome.settled;
       if (isEmbedFailure(outcome)) return outcome;
-      // Cancellation is owned by retry or its clock wait; the embedding boundary keeps its own cancellation.
-      invariant(options.signal?.aborted === true, () => `retry execution failed: ${outcome.code}`);
-      return Cancelled();
+      if (SleepCancelled.is(outcome) || PolicyCancelled.is(outcome)) return Cancelled({ cause: outcome });
+      // An engine refusal cannot be an embedding result; keep the provider-level contract.
+      return ModelUnavailable({ model: embedder.model.id, reason: 'unreachable' }, { cause: outcome });
     } catch (error) {
-      // A throw from `embed` itself is a bug and stays a throw; so is a policy built wrong.
-      if (!isResilienceError(error) || error.code === RESILIENCE_ERROR_CODES.invalidBackoff) throw error;
-      if (options.signal?.aborted) return Cancelled();
-      // A deadline, an open circuit or a full bulkhead: the provider did not answer in time.
-      return ModelUnavailable({ model: embedder.model.id, reason: 'unreachable' });
+      // A foreign policy may still throw. This owned middleware returns the private defect.
+      return UnexpectedDefect({ cause: error });
     }
   };
 }
@@ -102,7 +100,7 @@ function resilience(policy: Policy<never, RetryFailure>): EmbedMiddleware {
  */
 export function withResilience(
   embedder: Embedder,
-  policy: Policy<never, RetryFailure> = embeddingPolicy(),
+  policy: Policy<never, ResilienceFailure> = embeddingPolicy(),
 ): Embedder {
   return withMiddleware(embedder, resilience(policy));
 }

@@ -2,12 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   backoff,
-  CancelledError,
-  CircuitOpenError,
+  Cancelled,
   createCircuitBreakerPolicy,
   createResiliencePolicy,
   createTimeoutPolicy,
-  isBrokenCircuitError,
+  CircuitOpen,
   noop,
   withFallback,
   wrap,
@@ -28,23 +27,23 @@ const boom = (): never => {
 };
 
 describe('withFallback', () => {
-  it('an open breaker serves the fallback without calling the function', async () => {
+  it('an open breaker returns its refusal without calling work or fallback', async () => {
     const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
     await breaker.execute(boom).catch(swallow);
     const guarded = withFallback(breaker, () => 'cached');
     const fn = vi.fn(() => 'live');
 
-    expect(await guarded.execute(fn)).toBe('cached');
+    expect(CircuitOpen.is(await guarded.execute(fn))).toBe(true);
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it('the fallback receives the policy error, so callers can decide by error type', async () => {
+  it('engine refusals never enter a throw fallback', async () => {
     const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
     await breaker.execute(boom).catch(swallow);
     const seen: unknown[] = [];
     await withFallback(breaker, error => seen.push(error)).execute(() => 1);
 
-    expect(seen[0]).toBeInstanceOf(CircuitOpenError);
+    expect(seen).toEqual([]);
   });
 
   it('runs once after the retries are used up, not once per attempt', async () => {
@@ -68,12 +67,12 @@ describe('withFallback', () => {
     expect(await withFallback(noop, () => 0).execute(boom)).toBe(0);
   });
 
-  it('a fallback that throws lets its error through (the selective pattern)', async () => {
+  it('a selective fallback that rethrows returns the original defect', async () => {
     const selective = withFallback(noop, (error: unknown) => {
-      if (!isBrokenCircuitError(error)) throw error;
+      if (!(error instanceof TypeError)) throw error;
       return 'cached';
     });
-    await expect(selective.execute(() => Promise.reject(new RangeError('mine')))).rejects.toBeInstanceOf(RangeError);
+    await expect(selective.execute(() => Promise.reject(new RangeError('mine')))).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: expect.any(RangeError) });
   });
 
   it('a caller abort is not hidden by the fallback', async () => {
@@ -83,7 +82,7 @@ describe('withFallback', () => {
     const call = policy.execute(() => new Promise<never>(ignore), controller.signal);
     controller.abort();
 
-    await expect(call).rejects.toBeInstanceOf(CancelledError);
+    await expect(call).resolves.toMatchObject({ code: Cancelled.code });
     expect(fallback).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,4 @@
+import { isFailure } from '@arki/failure';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Policy } from './index.js';
@@ -9,11 +10,10 @@ import {
   createResiliencePolicy,
   createRetryPolicy,
   createTimeoutPolicy,
-  isBrokenCircuitError,
-  isBulkheadRejectedError,
-  isResilienceError,
+  CircuitOpen,
+  BulkheadRejected,
   noop,
-  TimeoutError,
+  Timeout,
   wrap,
 } from './index.js';
 
@@ -49,7 +49,7 @@ describe('createRetryPolicy', () => {
     vi.useRealTimers();
   });
 
-  it('calls the function once plus maxAttempts retries, then rethrows the last error', async () => {
+  it('calls the function once plus maxAttempts retries, then returns the last error as a private defect cause', async () => {
     vi.useFakeTimers();
     const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(3) });
     const errors: Error[] = [];
@@ -62,7 +62,7 @@ describe('createRetryPolicy', () => {
     await vi.runAllTimersAsync();
 
     expect(errors).toHaveLength(4);
-    await expect(result).resolves.toBe(errors[3]);
+    await expect(result).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: errors[3] });
   });
 
   it('gives the function its attempt number, starting at 0 for the first call', async () => {
@@ -95,7 +95,7 @@ describe('createRetryPolicy', () => {
     const result = call.catch((error: unknown) => error);
     await vi.runAllTimersAsync();
 
-    await expect(result).resolves.toBeInstanceOf(Error);
+    await expect(result).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: expect.any(Error) });
     expect(retries.map(r => r.attempt)).toEqual([1, 2, 3, 4]);
     for (const { delay } of retries) {
       expect(delay).toBeGreaterThanOrEqual(0);
@@ -142,13 +142,13 @@ describe('createCircuitBreakerPolicy', () => {
     };
 
     for (let i = 0; i < 3; i++) {
-      await expect(breaker.execute(failing)).rejects.toThrow('downstream down');
+      await expect(breaker.execute(failing)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('downstream down') });
     }
     const fourth = await breaker.execute(failing).catch((error: unknown) => error);
 
     expect(calls).toBe(3);
-    expect(isBrokenCircuitError(fourth)).toBe(true);
-    expect(isResilienceError(fourth)).toBe(true);
+    expect(CircuitOpen.is(fourth)).toBe(true);
+    expect(isFailure(fourth)).toBe(true);
     expect(broke).toHaveBeenCalledTimes(1);
     expect(broke.mock.calls[0]?.[0]).toMatchObject({ error: { message: 'downstream down' } });
   });
@@ -156,11 +156,11 @@ describe('createCircuitBreakerPolicy', () => {
   it('counts only consecutive failures: a success resets the count', async () => {
     const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 3, halfOpenAfter: 1000 });
 
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
     await expect(breaker.execute(() => 'ok')).resolves.toBe('ok');
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
     // Still closed: the fifth failure overall is only the second in a row.
     await expect(breaker.execute(() => 'still closed')).resolves.toBe('still closed');
   });
@@ -177,11 +177,11 @@ describe('createCircuitBreakerPolicy', () => {
       breaker.execute(() => {
         throw new Error('first');
       }),
-    ).rejects.toThrow('first');
-    expect(isBrokenCircuitError(await breaker.execute(() => 'x').catch((error: unknown) => error))).toBe(true);
+    ).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('first') });
+    expect(CircuitOpen.is(await breaker.execute(() => 'x').catch((error: unknown) => error))).toBe(true);
 
     vi.advanceTimersByTime(999);
-    expect(isBrokenCircuitError(await breaker.execute(() => 'x').catch((error: unknown) => error))).toBe(true);
+    expect(CircuitOpen.is(await breaker.execute(() => 'x').catch((error: unknown) => error))).toBe(true);
     expect(halfOpen).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1);
@@ -213,11 +213,11 @@ describe('createCircuitBreakerPolicy', () => {
     const broke = vi.fn();
     breaker.onBreak(broke);
 
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
     vi.advanceTimersByTime(1000);
-    await expect(breaker.execute(fail)).rejects.toThrow('flaky');
+    await expect(breaker.execute(fail)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('flaky') });
     expect(broke).toHaveBeenCalledTimes(2);
-    expect(isBrokenCircuitError(await breaker.execute(fail).catch((error: unknown) => error))).toBe(true);
+    expect(CircuitOpen.is(await breaker.execute(fail).catch((error: unknown) => error))).toBe(true);
   });
 });
 
@@ -243,8 +243,8 @@ describe('createTimeoutPolicy (aggressive)', () => {
     await vi.advanceTimersByTimeAsync(1);
 
     const error = await result;
-    expect(error).toBeInstanceOf(TimeoutError);
-    expect(isResilienceError(error)).toBe(true);
+    expect(error).toMatchObject({ code: Timeout.code });
+    expect(isFailure(error)).toBe(true);
     expect(seen?.aborted).toBe(true);
     expect(timedOut).toHaveBeenCalledTimes(1);
   });
@@ -285,7 +285,7 @@ describe('wrap and cancellation', () => {
       .catch((error_: unknown) => error_);
 
     expect(calls).toBe(2);
-    expect(isBrokenCircuitError(error)).toBe(true);
+    expect(CircuitOpen.is(error)).toBe(true);
   });
 
   it('with a bulkhead, one logical call holds one slot for all its retries and extra calls are rejected', async () => {
@@ -307,7 +307,7 @@ describe('wrap and cancellation', () => {
     });
 
     const second = await policy.execute(() => 'second').catch((error_: unknown) => error_);
-    expect(isBulkheadRejectedError(second)).toBe(true);
+    expect(BulkheadRejected.is(second)).toBe(true);
 
     held.resolve('first');
     await expect(first).resolves.toBe('first');
@@ -338,7 +338,7 @@ describe('wrap and cancellation', () => {
 
     expect(seen?.aborted).toBe(true);
     expect(Cancelled.is(error)).toBe(true);
-    expect(error).not.toBeInstanceOf(TimeoutError);
+    expect(error).not.toMatchObject({ code: Timeout.code });
     expect(error).toMatchObject({ cause: reason });
     expect(calls).toBe(1);
   });
@@ -424,7 +424,7 @@ describe('wrap and cancellation', () => {
       noop.execute(() => {
         throw new Error('plain failure');
       }),
-    ).rejects.toThrow('plain failure');
+    ).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('plain failure') });
   });
 });
 
@@ -453,8 +453,8 @@ describe('createBulkheadPolicy', () => {
     await settle();
 
     expect(started).toBe(2);
-    expect(isBulkheadRejectedError(fourth)).toBe(true);
-    expect(isResilienceError(fourth)).toBe(true);
+    expect(BulkheadRejected.is(fourth)).toBe(true);
+    expect(isFailure(fourth)).toBe(true);
     expect(rejected).toHaveBeenCalledTimes(1);
 
     gates[0]?.resolve('a');

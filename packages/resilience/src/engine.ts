@@ -1,98 +1,131 @@
-// The only module that talks to cockatiel. It turns a cockatiel policy into one of our
-// `Policy` objects and turns cockatiel's errors into ours. Everything here is `@internal`:
-// the build strips it from the published types, so no cockatiel name reaches them.
-
+// Internal execution keeps callback throws available to retry and explicit fallback.
+// Only the public boundary normalizes a final defect. Each SDK adapter owns its refusals.
 import type { IDefaultPolicyContext, IPolicy } from 'cockatiel';
-import {
-  isBrokenCircuitError as isCockatielBrokenCircuit,
-  isBulkheadRejectedError as isCockatielBulkheadRejected,
-  isTaskCancelledError as isCockatielTaskCancelled,
-} from 'cockatiel';
+import { UnexpectedDefect } from '@arki/failure';
+import { is } from '@arki/schema';
+import { z } from 'zod';
 
-import type { Policy, PolicyCallback, PolicyContext } from './policy.js';
+import type { ExecutionFailure } from './errors.js';
+import type { Policy, PolicyCallback, PolicyContext, FailureReason, PolicyExecution } from './policy.js';
+import { Cancelled } from './errors.js';
 import { observeEvent } from './observers.js';
-import { BulkheadRejectedError, CancelledError, CircuitOpenError, TimeoutError } from './errors.js';
 
-/** A cockatiel policy, whatever its context type. @internal */
-export type Engine<E = never> = IPolicy<IDefaultPolicyContext, E>;
+/** @internal */
+export type Engine<E = never> = IPolicy<IDefaultPolicyContext, E | ExecutionFailure>;
 
-/** Retry supplies `attempt` in the context; the other policies do not. */
-function hasAttempt(context: IDefaultPolicyContext): context is PolicyContext {
-  return 'attempt' in context && typeof context.attempt === 'number';
+const attemptSchema = z.object({ attempt: z.number() });
+function contextOf(context: IDefaultPolicyContext): PolicyContext {
+  return { signal: context.signal, attempt: is(context, attemptSchema) ? context.attempt : 0 };
 }
 
-/**
- * Turn a failure the engine raised into the matching error of this package. Errors thrown by
- * the wrapped function are returned as they are. Runs only when a call has already failed.
- * @internal
- */
-export function toResilienceError(error: unknown, signal: AbortSignal | undefined): unknown {
-  if (isCockatielBrokenCircuit(error)) {
-    return new CircuitOpenError(error.message, { cause: error });
-  }
-  if (isCockatielBulkheadRejected(error)) {
-    return new BulkheadRejectedError(error.message, { cause: error });
-  }
-  if (isCockatielTaskCancelled(error)) {
-    // The engine uses one error for both: a deadline it set itself, and a signal the caller
-    // aborted. Only the caller's signal tells them apart.
-    return signal?.aborted
-      ? new CancelledError('Operation cancelled by the caller', { cause: signal.reason ?? error })
-      : new TimeoutError(error.message, { cause: error });
-  }
-  return error;
+// A private nominal carrier distinguishes a callback throw from an SDK refusal, even
+// when the callback throws an actual SDK error. It never leaves the engine adapter.
+class CallbackThrow extends Error {
+  constructor(readonly original: unknown) { super('Callback threw'); }
+}
+const callbackThrowSchema = z.instanceof(CallbackThrow);
+function originalError(error: unknown): unknown {
+  return is(error, callbackThrowSchema) ? error.original : error;
+}
+/** @internal Keep public observations about the original callback, never the carrier. */
+export function originalReason(reason: FailureReason): FailureReason {
+  return 'error' in reason ? { error: originalError(reason.error) } : reason;
 }
 
-/** Runtime witness retains the engine's inferred alternate outcome without an erased WeakMap. */
-class EnginePolicy<E> implements Policy<never, E> {
-  readonly onSuccess: Engine<E>['onSuccess'];
+/** One adapter owns the source of each SDK refusal. */
+class OwnedEngine<E> implements Engine<E> {
+  declare readonly _altReturn: E | ExecutionFailure;
+  readonly onSuccess;
   readonly onFailure: Engine<E>['onFailure'];
-
-  constructor(readonly engine: Engine<E>) {
+  constructor(readonly engine: IPolicy<IDefaultPolicyContext>, readonly refuse: (error: unknown) => E) {
     this.onSuccess = observeEvent(engine.onSuccess, engine);
-    this.onFailure = observeEvent(engine.onFailure, engine);
+    this.onFailure = listener => observeEvent(engine.onFailure, engine)(
+      event => listener({ ...event, reason: originalReason(event.reason) }),
+    );
   }
-
-  readonly execute = async <T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | E> => {
+  async execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
+    if (signal?.aborted) return Cancelled({ cause: signal.reason });
     try {
-      return await this.engine.execute(
-        context => fn(hasAttempt(context) ? context : { signal: context.signal, attempt: 0 }),
-        signal,
-      );
+      return await this.engine.execute(async context => {
+        try {
+          return await fn(context);
+        } catch (error) {
+          throw new CallbackThrow(error);
+        }
+      }, signal);
     } catch (error) {
-      throw toResilienceError(error, signal);
+      if (is(error, callbackThrowSchema)) throw error.original;
+      try {
+        return this.refuse(error);
+      } catch (error_) {
+        return UnexpectedDefect({ cause: error_ });
+      }
+    }
+  }
+}
+/** @internal Protect callback provenance inside one engine, classify only its own refusal. */
+export function ownedEngine<E>(engine: IPolicy<IDefaultPolicyContext>, refuse: (error: unknown) => E): Engine<E> {
+  return new OwnedEngine(engine, refuse);
+}
+
+/** Public outcome supervision is separate from raw retry/fallback execution. */
+class OwnedExecution<F, E> implements PolicyExecution<F, E> {
+  constructor(readonly raw: PolicyExecution<F, E>) {}
+  readonly execute = async <T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E | ExecutionFailure> => {
+    try {
+      return await executeRaw(this, fn, signal);
+    } catch (error) {
+      return UnexpectedDefect({ cause: error });
     }
   };
 }
-
+function isOwnedExecution<F, E>(policy: PolicyExecution<F, E>): policy is OwnedExecution<F, E> {
+  return policy instanceof OwnedExecution;
+}
+/** @internal */
+export function ownPolicy<F = never, E = never>(policy: Policy<F, E>): Policy<F, E> {
+  return Object.assign(new OwnedExecution(policy), { onSuccess: policy.onSuccess, onFailure: policy.onFailure });
+}
+/** @internal Own an execution-only adapter, preserving raw fallback composition. */
+export function ownExecution<F, E>(execution: PolicyExecution<F, E>): PolicyExecution<F, E> {
+  return new OwnedExecution(execution);
+}
+/** @internal Raw fallback/retry composition; preflight never invokes cancelled work. */
+export function executeRaw<T, F, E>(policy: PolicyExecution<F, E>, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E | ExecutionFailure> {
+  if (signal?.aborted) return Promise.resolve(Cancelled({ cause: signal.reason }));
+  return (isOwnedExecution(policy) ? policy.raw : policy).execute(fn, signal);
+}
+class EnginePolicy<E> extends OwnedExecution<never, E> implements Policy<never, E> {
+  readonly onSuccess;
+  readonly onFailure;
+  constructor(readonly engine: Engine<E>) {
+    super({
+      execute: (fn, signal) => engine.execute(context => fn(contextOf(context)), signal),
+    });
+    this.onSuccess = engine.onSuccess;
+    this.onFailure = engine.onFailure;
+  }
+}
 function isEnginePolicy<E>(policy: Policy<never, E>): policy is EnginePolicy<E> {
   return policy instanceof EnginePolicy;
 }
-
-/** Build one of our policies on top of an engine, adding the engine's extra event methods. @internal */
+/** @internal */
 export function fromEngine<E, Extra extends object>(engine: Engine<E>, extra: Extra): Policy<never, E> & Extra {
   return Object.assign(new EnginePolicy(engine), extra);
 }
-
-/** Lets a policy that was not created by this package take part in `wrap()`. */
 class ForeignEngine<E> implements Engine<E> {
-  declare readonly _altReturn: E;
-  readonly onSuccess: Engine['onSuccess'];
-  readonly onFailure: Engine['onFailure'];
-  readonly #policy: Policy<never, E>;
-
-  constructor(policy: Policy<never, E>) {
-    this.#policy = policy;
-    this.onSuccess = policy.onSuccess;
-    this.onFailure = policy.onFailure;
+  declare readonly _altReturn: E | ExecutionFailure;
+  readonly onSuccess;
+  readonly onFailure;
+  constructor(readonly policy: Policy<never, E>) {
+    this.onSuccess = observeEvent(policy.onSuccess, policy);
+    this.onFailure = observeEvent(policy.onFailure, policy);
   }
-
-  execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal): Promise<T | E> {
-    return this.#policy.execute(fn, signal);
+  execute<T>(fn: (context: IDefaultPolicyContext) => PromiseLike<T> | T, signal?: AbortSignal) {
+    return executeRaw(this.policy, fn, signal);
   }
 }
-
-/** The engine behind a policy, or an adapter when the policy came from elsewhere. @internal */
+/** @internal Composition retains raw callback throws without bypassing owned refusal classification. */
 export function engineOf<E>(policy: Policy<never, E>): Engine<E> {
   return isEnginePolicy(policy) ? policy.engine : new ForeignEngine(policy);
 }

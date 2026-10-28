@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { UnexpectedDefect, isFailure } from '@arki/failure';
+import { UnexpectedDefect, isFailure, defineFailure } from '@arki/failure';
 
 import type { EmbedFailure } from './index.js';
 import {
@@ -35,6 +35,7 @@ describe('failures', () => {
       SpaceMismatch({ expected: space, actual: { ...space, dimensions: 4 } }),
       Cancelled(),
       ConfigurationFailure({ message: 'nothing set' }),
+      UnexpectedDefect(),
     ];
     // The public union must cover exactly the supported refusal values, without widening.
     expectTypeOf<(typeof failures)[number]>().toEqualTypeOf<EmbedFailure>();
@@ -45,7 +46,7 @@ describe('failures', () => {
     expect(new Set(failures.map(failure => failure.code)).size).toBe(failures.length);
     expect(isEmbedFailure({ code: 'embeddings.cancelled' })).toBe(false);
     expect(isEmbedFailure(new Float32Array(2))).toBe(false);
-    expect(isEmbedFailure(UnexpectedDefect())).toBe(false);
+    expect(isEmbedFailure(defineFailure('test.unrelated')())).toBe(false);
   });
 
   it('narrows an untyped boundary to the public failure union', () => {

@@ -1,4 +1,4 @@
-import type { RetryFailure } from './errors.js';
+import type { RetryFailure, ExecutionFailure, CircuitFailure, TimeoutFailure, BulkheadFailure } from './errors.js';
 
 // The public shape of a policy. Nothing here names the underlying engine, so the
 // engine can change without changing this file or anything built on it.
@@ -66,7 +66,7 @@ export type PolicyExecution<F = never, E = never> = {
   /** Phantom: makes a policy with a fallback unassignable to a plain `Policy`, so `wrap` rejects it. */
   readonly [fallbackType]?: () => F;
   readonly [outcomeType]?: () => E;
-  execute<T>(this: void, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E>;
+  execute<T>(this: void, fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | F | E | ExecutionFailure>;
 };
 
 /** Execution plus observable policy events. */
@@ -87,7 +87,7 @@ export type RetryPolicy<F = never> = Policy<F, RetryFailure> & {
   readonly onGiveUp: PolicyEvent<FailureReason>;
 };
 
-export type CircuitBreakerPolicy = Policy & {
+export type CircuitBreakerPolicy = Policy<never, CircuitFailure> & {
   readonly onBreak: PolicyEvent<BreakEvent>;
   /** Fires when the breaker lets a trial call through after `halfOpenAfter`. */
   readonly onHalfOpen: PolicyEvent<void>;
@@ -95,11 +95,11 @@ export type CircuitBreakerPolicy = Policy & {
   readonly onReset: PolicyEvent<void>;
 };
 
-export type TimeoutPolicy = Policy & {
+export type TimeoutPolicy = Policy<never, TimeoutFailure> & {
   readonly onTimeout: PolicyEvent<void>;
 };
 
-export type BulkheadPolicy = Policy & {
+export type BulkheadPolicy = Policy<never, BulkheadFailure> & {
   /** Fires when a call is turned away because both the slots and the queue are full. */
   readonly onReject: PolicyEvent<void>;
 };

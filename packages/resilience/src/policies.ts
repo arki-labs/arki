@@ -5,18 +5,21 @@ import {
   wrap as cockatielWrap,
   ConsecutiveBreaker,
   handleAll,
-  timeout,
-  TimeoutStrategy,
 } from 'cockatiel';
 
 import type { Clock } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
+import { is } from '@arki/schema';
+import { z } from 'zod';
+import { CircuitOpen, BulkheadRejected, Cancelled } from './errors.js';
+import { timeoutPolicy } from './timeout.js';
 
-import type { RetryFailure } from './errors.js';
+import type { ResilienceFailure } from './errors.js';
 import type { Backoff } from './backoff.js';
 import type { BulkheadPolicy, CircuitBreakerPolicy, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
 import { backoff } from './backoff.js';
-import { engineOf, fromEngine } from './engine.js';
+import type { Engine } from './engine.js';
+import { engineOf, fromEngine, ownedEngine, originalReason } from './engine.js';
 import { withFallback } from './fallback.js';
 import { observeEvent } from './observers.js';
 import { buildRetryPolicy } from './retry.js';
@@ -27,7 +30,7 @@ import { buildRetryPolicy } from './retry.js';
 
 /**
  * Turns a thrown error that reaches the caller into a value, usually a failure from
- * `@arki/failure`. Rethrow the errors it does not recognise, so they stay bugs.
+ * `@arki/failure`. Rethrow unrecognized errors so the public boundary returns UnexpectedDefect.
  */
 export type OnThrow<Mapped> = (error: unknown) => Mapped | PromiseLike<Mapped>;
 
@@ -80,10 +83,8 @@ export type ResiliencePolicyOptions<Mapped = never> = {
   bulkhead?: BulkheadPolicyOptions;
   /**
    * Map a thrown error that reaches the caller to a value, usually a failure from `@arki/failure`.
-   * The call then resolves to `T | Mapped` instead of throwing. It wraps everything, so it also
-   * sees an open circuit (`CircuitOpenError`), a deadline (`TimeoutError`) and a full bulkhead
-   * (`BulkheadRejectedError`). A cancel by the caller's signal is never mapped. Rethrow the
-   * errors it does not recognise, so they stay bugs.
+   * Explicit fallback sees exhausted callback throws before public defect normalization.
+   * Returned engine refusals and cancellation bypass it. Unmapped throws become UnexpectedDefect.
    */
   onThrow?: OnThrow<Mapped>;
 };
@@ -91,6 +92,10 @@ export type ResiliencePolicyOptions<Mapped = never> = {
 // ---------------------------------------------------------------------------
 // Policy factories
 // ---------------------------------------------------------------------------
+
+const circuitErrorSchema = z.object({ isBrokenCircuitError: z.literal(true) });
+const bulkheadErrorSchema = z.object({ isBulkheadRejectedError: z.literal(true) });
+const cancelledErrorSchema = z.object({ isTaskCancelledError: z.literal(true) });
 
 const systemClock = new SystemClock();
 const defaultRetry = backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 }).upTo(3);
@@ -119,8 +124,13 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
     halfOpenAfter,
     breaker: new ConsecutiveBreaker(consecutiveFailures),
   });
-  const policy = fromEngine(engine, {
-    onBreak: observeEvent(engine.onBreak, engine),
+  const policy = fromEngine(ownedEngine(engine, error => {
+    if (is(error, circuitErrorSchema)) return CircuitOpen({ cause: error });
+    throw error;
+  }), {
+    onBreak: (listener: Parameters<CircuitBreakerPolicy['onBreak']>[0]) => observeEvent(engine.onBreak, engine)(event => listener(
+      'isolated' in event ? event : originalReason(event),
+    )),
     onHalfOpen: observeEvent(engine.onHalfOpen, engine),
     onReset: observeEvent(engine.onReset, engine),
   });
@@ -135,9 +145,7 @@ export function createCircuitBreakerPolicy(options: CircuitBreakerPolicyOptions 
  */
 export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): TimeoutPolicy {
   const { timeoutMs = 30_000 } = options;
-  const engine = timeout(timeoutMs, TimeoutStrategy.Aggressive);
-  const policy = fromEngine(engine, { onTimeout: observeEvent(engine.onTimeout, engine) });
-  return policy;
+  return timeoutPolicy(timeoutMs);
 }
 
 /**
@@ -148,7 +156,11 @@ export function createTimeoutPolicy(options: TimeoutPolicyOptions = {}): Timeout
 export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): BulkheadPolicy {
   const { maxConcurrent = 10, maxQueue = 100 } = options;
   const engine = bulkhead(maxConcurrent, maxQueue);
-  const policy = fromEngine(engine, { onReject: observeEvent(engine.onReject, engine) });
+  const policy = fromEngine(ownedEngine(engine, error => {
+    if (is(error, bulkheadErrorSchema)) return BulkheadRejected({ cause: error });
+    if (is(error, cancelledErrorSchema)) return Cancelled({ cause: error });
+    throw error;
+  }), { onReject: observeEvent(engine.onReject, engine) });
   return policy;
 }
 
@@ -157,8 +169,9 @@ export function createBulkheadPolicy(options: BulkheadPolicyOptions = {}): Bulkh
  * every attempt goes through the breaker and then the timeout. Events on the result are
  * those of the outermost policy.
  */
-export function wrap<E = never>(first: Policy<never, E>, ...rest: Policy<never, E>[]): Policy<never, E> {
-  return fromEngine(cockatielWrap(engineOf(first), ...rest.map(policy => engineOf(policy))), {});
+export function wrap<E, R extends readonly unknown[]>(first: Policy<never, E>, ...rest: { [K in keyof R]: Policy<never, R[K]> }): Policy<never, E | R[number]> {
+  const engines: Engine<E | R[number]>[] = [engineOf(first), ...rest.map(policy => engineOf(policy))];
+  return fromEngine(cockatielWrap(...engines), {});
 }
 
 /** A policy that only runs the function. Useful as a default or in tests. */
@@ -177,7 +190,7 @@ export type ResilienceComponents = {
  * What `createResiliencePolicy` returns: the composed policy plus the parts it runs. `F` is what
  * its `onThrow` may answer instead of the function's own `T`; `never` without one.
  */
-export type ResiliencePolicy<F = never> = Policy<F, RetryFailure> & { readonly components: ResilienceComponents };
+export type ResiliencePolicy<F = never> = Policy<F, ResilienceFailure> & { readonly components: ResilienceComponents };
 
 /**
  * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.
@@ -194,7 +207,7 @@ export function createResiliencePolicy<Mapped = never>(
 ): ResiliencePolicy<Mapped> {
   const policy = composeResiliencePolicy(options);
   if (options.onThrow === undefined) return policy;
-  // Outermost, so an open circuit, a deadline and a full bulkhead reach it too.
+  // Outermost, before the public defect boundary; returned refusals bypass it.
   return { ...withFallback(policy, options.onThrow), components: policy.components };
 }
 

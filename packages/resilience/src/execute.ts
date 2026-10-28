@@ -1,20 +1,16 @@
-import type { RetryFailure } from './errors.js';
+import type { RetryFailure, ExecutionFailure } from './errors.js';
 
 import type { RetryPolicyOptions, TimeoutPolicyOptions } from './policies.js';
 import type { Policy, PolicyCallback } from './policy.js';
+import { UnexpectedDefect } from '@arki/failure';
 import { createRetryPolicy, createTimeoutPolicy } from './policies.js';
 
-/**
- * Return the policy's own promise instead of awaiting it inside an `async` function, which would
- * wrap it in a second promise and add microtask hops to every call. A policy that throws instead of
- * rejecting still yields a rejected promise, as an `async` function would.
- */
-function run<T, F, E>(policy: Policy<F, E>, fn: PolicyCallback<T>): Promise<T | F | E> {
+/** Own synchronous and asynchronous defects from foreign execution-only policies too. */
+function run<T, F, E>(policy: Policy<F, E>, fn: PolicyCallback<T>): Promise<T | F | E | ExecutionFailure> {
   try {
-    return policy.execute(fn);
+    return policy.execute(fn).catch(error => UnexpectedDefect({ cause: error }));
   } catch (error) {
-    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- passes the thrown value through unchanged, as an `async` function would
-    return Promise.reject(error);
+    return Promise.resolve(UnexpectedDefect({ cause: error }));
   }
 }
 
@@ -29,7 +25,7 @@ function run<T, F, E>(policy: Policy<F, E>, fn: PolicyCallback<T>): Promise<T | 
  * );
  * ```
  */
-export function withResilience<T, F = never, E = never>(fn: PolicyCallback<T>, policy: Policy<F, E>): Promise<T | F | E> {
+export function withResilience<T, F = never, E = never>(fn: PolicyCallback<T>, policy: Policy<F, E>): Promise<T | F | E | ExecutionFailure> {
   return run(policy, fn);
 }
 
@@ -49,6 +45,6 @@ export function withRetry<T, Mapped = never>(
 /**
  * Execute a function with a timeout policy.
  */
-export function withTimeout<T>(fn: PolicyCallback<T>, options?: TimeoutPolicyOptions): Promise<T> {
+export function withTimeout<T>(fn: PolicyCallback<T>, options?: TimeoutPolicyOptions) {
   return run(createTimeoutPolicy(options), fn);
 }

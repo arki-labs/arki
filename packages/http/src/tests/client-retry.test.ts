@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { Policy, RetryFailure } from '@arki/resilience';
 import { MockClock, SleepCancelled } from '@arki/clock';
 import { InvalidEnvelope, isFailure, UnexpectedDefect } from '@arki/failure';
-import { backoff, createRetryPolicy, withFallback } from '@arki/resilience';
+import { backoff, createRetryPolicy, withFallback, createCircuitBreakerPolicy, createTimeoutPolicy, CircuitOpen } from '@arki/resilience';
 
 import type { ClientPolicy } from '../client.js';
 import { createClient, retryTransient } from '../client.js';
@@ -204,3 +204,21 @@ it.each([SleepCancelled({ cause: 'foreign cancellation' }), UnexpectedDefect({ c
     expect(sleep).toHaveBeenCalledOnce();
   },
 );
+
+it('forwards an owned circuit refusal without sending or mislabelling cancellation', async () => {
+  const circuit = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
+  const defect = await circuit.execute(() => { throw new Error('dependency failed'); });
+  expect(UnexpectedDefect.is(defect)).toBe(true);
+  const { calls, fetch } = scripted(() => json(200, { id: 'o1' }));
+  const orders = createClient({ getOrder }, { baseUrl: 'https://api.test', fetch, policy: circuit });
+  expect(CircuitOpen.is(await orders.getOrder({ params: { id: 'o1' } }))).toBe(true);
+  expect(calls).toHaveLength(0);
+});
+
+it('maps the policy deadline even when the HTTP client has no deadline', async () => {
+  const orders = createClient({ getOrder }, {
+    baseUrl: 'https://api.test', fetch: () => new Promise<never>(() => { /* The provider ignores cancellation. */ }),
+    policy: createTimeoutPolicy({ timeoutMs: 1 }),
+  });
+  expect(RequestTimeout.is(await orders.getOrder({ params: { id: 'o1' } }))).toBe(true);
+});

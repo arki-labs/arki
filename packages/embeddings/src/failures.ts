@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 
-import { defineFailure, isFailure } from '@arki/failure';
+import { UnexpectedDefect, defineFailure, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { EmbeddingSpace, TokenCount } from './types.js';
@@ -122,6 +122,7 @@ const EMBED_FAILURES = [
   SpaceMismatch,
   Cancelled,
   ConfigurationFailure,
+  UnexpectedDefect,
 ] as const;
 
 export type EmbedFailure = ReturnType<(typeof EMBED_FAILURES)[number]>;

@@ -1,3 +1,4 @@
+import type { ExecutionFailure, TimeoutFailure } from './errors.js';
 // The reason retry takes a clock: a retry with real-size delays (seconds) must be testable
 // without waiting those seconds and without faking the global timers.
 
@@ -56,7 +57,7 @@ describe('retry delays on a MockClock', () => {
 
     await clock.advanceAsync(60_000);
 
-    await expect(settled).resolves.toMatchObject({ message: 'failure 3' });
+    await expect(settled).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('failure 3') });
     expect(calledAt).toEqual([0, 5000, 10_000]);
   });
 
@@ -75,7 +76,7 @@ describe('retry delays on a MockClock', () => {
       throw new RangeError('bad input, retrying will not help');
     });
 
-    await expect(result).rejects.toBeInstanceOf(RangeError);
+    await expect(result).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: expect.any(RangeError) });
     expect(calls).toBe(1);
   });
 
@@ -133,10 +134,10 @@ it('preserves a clock refusal through composition and never repeats the operatio
   const policy = wrap(retry, createTimeoutPolicy());
   let attempts = 0;
   const result = withResilience(() => { attempts++; throw new Error('try once'); }, policy);
-  expectTypeOf(result).toEqualTypeOf<Promise<RetryFailure>>();
+  expectTypeOf(result).toEqualTypeOf<Promise<RetryFailure | TimeoutFailure>>();
   expect(await result).toBe(refused);
   expect(attempts).toBe(1);
-  expectTypeOf(noop.execute(() => 1)).toEqualTypeOf<Promise<number>>();
+  expectTypeOf(noop.execute(() => 1)).toEqualTypeOf<Promise<number | ExecutionFailure>>();
 });
 
 it('keeps engine execution usable when detached or copied into a plain policy', async () => {

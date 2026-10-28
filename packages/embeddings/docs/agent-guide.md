@@ -79,7 +79,7 @@ if ('vectors' in batch) console.log(batch.usage.requests);
 
 Only `RateLimited` and `ModelUnavailable { reason: 'unreachable' }` are retried. `usage.requests` counts every attempt. The default policy waits at least `retryAfterMs`; over 5 s it does not retry and returns the `RateLimited`. A policy you pass gets no such minimum: its backoff's `delay(attempt, reason)` must read `reason.data.retryAfterMs` itself.
 
-Custom retry-capable policies use `Policy<never, RetryFailure>` from `@arki/resilience`. Retry cancellation maps to the existing embedding `Cancelled` outcome; it does not become an unavailable model or trigger another provider call.
+Custom retry-capable policies use `Policy<never, ResilienceFailure>` from `@arki/resilience`. Retry cancellation maps to the existing embedding `Cancelled` outcome; it does not become an unavailable model or trigger another provider call.
 
 ### Cache repeated texts
 
@@ -197,3 +197,5 @@ dot doctor --json | jq '.data'
 
 - `dot explain --json` shows the `embeddings` unit and the `embedder` it provides.
 - `dot doctor --json` shows whether the app boots with the `embeddings` unit, and lists any issue. A model that did not build does not stop the boot: `embedder` is `null`, and the log has the warning `embeddings are off, embedder is null`.
+
+The resilience middleware preserves returned `UnexpectedDefect` identity, including a defective retry clock. Final callback/policy throws become private defects; they are not relabelled as model outages. Timeout/circuit/capacity refusals map to ModelUnavailable; policy/clock cancellation maps to Cancelled.

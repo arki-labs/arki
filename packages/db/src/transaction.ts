@@ -24,7 +24,7 @@ import type { TransactionConfig, TransactionalDb } from './composition.js';
 import type { TransactionFailure } from './errors.js';
 import { isTransaction } from './dialect.js';
 import { TransactionCancelled, TransactionConflict, TransactionDefect } from './errors.js';
-import { classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
+import { assertSafeDriver, classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
 import { findDatabaseError } from './sql-state.js';
 import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
 
@@ -127,10 +127,17 @@ export async function runTransaction<Tx, T>(
   const { clock, signal, ...settings } = options;
   const { isolation, retries } = parseTransactionSettings(settings);
   assertTransactionRoot(db);
+  assertSafeDriver(db);
 
+  let attempts = 0;
   const policy = createRetryPolicy({
     backoff: RETRY_BACKOFF.upTo(retries).while(error => retryableSqlState(error) !== undefined),
     clock,
+    onThrow(error) {
+      const sqlState = retryableSqlState(error);
+      if (sqlState !== undefined) return { value: TransactionConflict({ attempts, sqlState }, { cause: error }) };
+      throw error;
+    },
   });
   const retried = policy.onRetry(event => {
     try {
@@ -147,7 +154,6 @@ export async function runTransaction<Tx, T>(
   // Postgres reads the isolation level. SQLite has one writer, so it is serializable anyway;
   // it reads `behavior`, and `immediate` takes the write lock up front.
   const config: TransactionConfig = { isolationLevel: isolation, behavior: 'immediate' };
-  let attempts = 0;
   try {
     const outcome = await policy.execute(async () => {
       signal?.throwIfAborted();

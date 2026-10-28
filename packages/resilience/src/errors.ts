@@ -1,43 +1,8 @@
 import { SLEEP_FAILURES } from '@arki/clock';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
 /** Stable error codes of `@arki/resilience`. Match on the code, never on the message. */
 export const RESILIENCE_ERROR_CODES = {
-  /**
-   * The circuit breaker is open and rejected the call.
-   *
-   * @fix Wait for the breaker to half-open and call again, or serve a fallback with `withFallback` while it is open.
-   * @verify cd packages/resilience && bun run test
-   */
-  circuitOpen: 'ARKI_RESILIENCE_E001',
-  /**
-   * A timeout policy reached its deadline.
-   *
-   * @fix Raise `timeoutMs`, or make the operation faster. Pass the policy's `signal` to the work so it stops.
-   * @verify cd packages/resilience && bun run test
-   */
-  timeout: 'ARKI_RESILIENCE_E002',
-  /**
-   * The caller's own signal aborted the call.
-   *
-   * @fix Check `signal.aborted` before you start, or catch `CancelledError` where you abort. It is not an outage.
-   * @verify cd packages/resilience && bun run test
-   */
-  cancelled: 'ARKI_RESILIENCE_E003',
-  /**
-   * A bulkhead had no free execution or queue slot.
-   *
-   * @fix Retry later, raise `maxConcurrent` or the queue size, or shed load before the call.
-   * @verify cd packages/resilience && bun run test
-   */
-  bulkheadRejected: 'ARKI_RESILIENCE_E004',
-  /**
-   * Every retry attempt failed.
-   *
-   * @fix Read `lastError` for the real cause, or raise the `upTo` limit.
-   * @verify cd packages/resilience && bun run test
-   */
-  retriesExhausted: 'ARKI_RESILIENCE_E005',
   /**
    * A `backoff` builder got an option or an attempt number it cannot use.
    *
@@ -50,7 +15,7 @@ export const RESILIENCE_ERROR_CODES = {
 /** The code of a {@link ResilienceError}. */
 export type ResilienceErrorCode = (typeof RESILIENCE_ERROR_CODES)[keyof typeof RESILIENCE_ERROR_CODES];
 
-/** Base class of every error the policies raise themselves. Errors thrown by your function pass through untouched. */
+/** Base class for static policy configuration misuse. Operational failures are returned. */
 export abstract class ResilienceError extends Error {
   /** Stable machine-readable code, `ARKI_RESILIENCE_E<nnn>`. */
   abstract readonly code: ResilienceErrorCode;
@@ -60,70 +25,6 @@ export abstract class ResilienceError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = new.target.name;
-  }
-}
-
-/** The circuit breaker is open: the call was rejected without running the function. */
-export class CircuitOpenError extends ResilienceError {
-  readonly code = RESILIENCE_ERROR_CODES.circuitOpen;
-  readonly remediation = 'Wait for the breaker to half-open and try again, or serve a fallback while it is open.';
-
-  constructor(message = 'Circuit breaker is open', options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'CircuitOpenError';
-  }
-}
-
-/** A timeout policy reached its deadline before the function returned. */
-export class TimeoutError extends ResilienceError {
-  readonly code = RESILIENCE_ERROR_CODES.timeout;
-  readonly remediation = 'Raise the timeout, or make the operation faster.';
-
-  constructor(message = 'Operation timed out', options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'TimeoutError';
-  }
-}
-
-/** The caller's own signal aborted while the call was in flight. `cause` is the signal's reason. */
-export class CancelledError extends ResilienceError {
-  readonly code = RESILIENCE_ERROR_CODES.cancelled;
-  readonly remediation = 'Check signal.aborted before you start, or catch CancelledError where you abort.';
-
-  constructor(message = 'Operation cancelled', options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'CancelledError';
-  }
-}
-
-/** A bulkhead turned the call away: every execution slot and queue slot was taken. */
-export class BulkheadRejectedError extends ResilienceError {
-  readonly code = RESILIENCE_ERROR_CODES.bulkheadRejected;
-  readonly remediation = 'Retry later, raise the bulkhead limits, or shed load before the call.';
-
-  constructor(message = 'Bulkhead capacity exceeded', options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'BulkheadRejectedError';
-  }
-}
-
-/**
- * Thrown when all retry attempts have been exhausted without a successful result.
- */
-export class RetriesExhaustedError extends ResilienceError {
-  readonly code = RESILIENCE_ERROR_CODES.retriesExhausted;
-  readonly remediation = 'Read lastError for the real cause, or raise the attempt limit.';
-
-  public readonly attempts: number;
-  public readonly lastError: Error | undefined;
-
-  constructor(attempts: number, lastError?: Error) {
-    super(`All ${attempts} retry attempts exhausted${lastError ? `: ${lastError.message}` : ''}`, {
-      cause: lastError,
-    });
-    this.name = 'RetriesExhaustedError';
-    this.attempts = attempts;
-    this.lastError = lastError;
   }
 }
 
@@ -139,26 +40,13 @@ export class InvalidBackoffError extends ResilienceError {
   }
 }
 
-/** True for every error raised by the resilience layer itself. */
-export function isResilienceError(error: unknown): error is ResilienceError {
-  return error instanceof ResilienceError;
-}
-
-export function isBrokenCircuitError(error: unknown): error is CircuitOpenError {
-  return error instanceof CircuitOpenError;
-}
-
-export function isBulkheadRejectedError(error: unknown): error is BulkheadRejectedError {
-  return error instanceof BulkheadRejectedError;
-}
-
-/** Retry execution was cancelled before another attempt could begin.
+/** Execution was cancelled before work could continue.
  * @fix Stop retrying; begin new work only under a new owning signal.
  * @verify bun run test
  */
 export const Cancelled = defineFailure('resilience.cancelled', {
   status: 499,
-  message: 'Retry execution was cancelled.',
+  message: 'Execution was cancelled.',
   remediation: 'Stop retrying; begin new work only under a new owning signal.',
 });
 
@@ -166,3 +54,43 @@ export const Cancelled = defineFailure('resilience.cancelled', {
 export const RETRY_FAILURES = [...SLEEP_FAILURES, Cancelled] as const;
 /** Exact owned retry outcomes, inferred from their definitions. */
 export type RetryFailure = ReturnType<(typeof RETRY_FAILURES)[number]>;
+
+/** The circuit is open; no callback ran.
+ * @fix Wait for a half-open attempt or explicitly handle the refusal.
+ * @verify bun run test
+ */
+export const CircuitOpen = defineFailure('resilience.circuit_open', {
+  status: 503,
+  message: 'Circuit breaker is open.',
+  remediation: 'Wait for a half-open attempt or explicitly handle the refusal.',
+});
+/** The owned deadline expired; the callback may still need to finish cancellation.
+ * @fix Pass the attempt signal to work and reconcile effects before retrying.
+ * @verify bun run test
+ */
+export const Timeout = defineFailure('resilience.timeout', {
+  status: 504,
+  message: 'Operation timed out.',
+  remediation: 'Pass the attempt signal to work and reconcile effects before retrying.',
+});
+/** No execution or queue slot was available; no callback ran.
+ * @fix Shed load or explicitly retry after capacity becomes available.
+ * @verify bun run test
+ */
+export const BulkheadRejected = defineFailure('resilience.bulkhead_rejected', {
+  status: 429,
+  message: 'Bulkhead capacity exceeded.',
+  remediation: 'Shed load or explicitly retry after capacity becomes available.',
+});
+/** Outcomes shared by every owned public execution boundary. */
+export const EXECUTION_FAILURES = [Cancelled, UnexpectedDefect] as const;
+export type ExecutionFailure = ReturnType<(typeof EXECUTION_FAILURES)[number]>;
+export const CIRCUIT_FAILURES = [...EXECUTION_FAILURES, CircuitOpen] as const;
+export type CircuitFailure = ReturnType<(typeof CIRCUIT_FAILURES)[number]>;
+export const TIMEOUT_FAILURES = [...EXECUTION_FAILURES, Timeout] as const;
+export type TimeoutFailure = ReturnType<(typeof TIMEOUT_FAILURES)[number]>;
+export const BULKHEAD_FAILURES = [...EXECUTION_FAILURES, BulkheadRejected] as const;
+export type BulkheadFailure = ReturnType<(typeof BULKHEAD_FAILURES)[number]>;
+/** Complete admission for composed policies, from the original definitions. */
+export const RESILIENCE_FAILURES = [...RETRY_FAILURES, CircuitOpen, Timeout, BulkheadRejected] as const;
+export type ResilienceFailure = ReturnType<(typeof RESILIENCE_FAILURES)[number]>;

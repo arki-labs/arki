@@ -45,7 +45,7 @@ describe('@arki/resilience/dot', () => {
     vi.spyOn(getLogger('arki:resilience'), 'debug').mockImplementation(() => Promise.reject(new Error('private reporter')));
     const original = new Error('application');
     try {
-      await expect(app.services.resilience.run('carrier', () => { throw original; })).rejects.toBe(original);
+      await expect(app.services.resilience.run('carrier', () => { throw original; })).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: original });
       await Promise.resolve();
     } finally {
       orThrow(await app.dispose());

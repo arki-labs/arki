@@ -68,7 +68,9 @@
     "@arki/clock": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
-    "cockatiel": "catalog:"
+    "@arki/schema": "workspace:*",
+    "cockatiel": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",

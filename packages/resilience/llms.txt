@@ -7,7 +7,7 @@ An expected outcome is a returned failure, not a throw. Bound every retry with `
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/resilience`: retry, circuit breaker, timeout, bulkhead and curated presets, with typed errors and a `backoff` schedule shared with `@arki/queue` and `@arki/journal`. `BulkheadRejectedError`, `Cancelled`, `CancelledError`, `CircuitOpenError`, `InvalidBackoffError`, `RESILIENCE_ERROR_CODES`, `RETRY_FAILURES`, `RETRY_WAIT_FAILURES`, `ResilienceError`, `RetriesExhaustedError`, `TimeoutError`, `attachPolicyLogger`; and 49 more.
+- `@arki/resilience`: retry, circuit breaker, timeout, bulkhead and curated presets, with typed errors and a `backoff` schedule shared with `@arki/queue` and `@arki/journal`. `BULKHEAD_FAILURES`, `BulkheadRejected`, `CIRCUIT_FAILURES`, `Cancelled`, `CircuitOpen`, `EXECUTION_FAILURES`, `InvalidBackoffError`, `RESILIENCE_ERROR_CODES`, `RESILIENCE_FAILURES`, `RETRY_FAILURES`, `RETRY_WAIT_FAILURES`, `ResilienceError`; and 54 more.
 - `@arki/resilience/dot`: `RESILIENCE_PLUGIN_ERROR_CODES`, `resilience`; types `ResilienceService`.
 <!-- llms:end -->
 
@@ -28,7 +28,7 @@ An expected outcome is a returned failure, not a throw. Bound every retry with `
 ## Rules that bite
 
 - A returned failure is not retried unless `.while(Definition)` names it.
-- A thrown error is retried, then thrown again unchanged.
+- Callback throws retry; explicit fallback sees the original; final unmapped throws return UnexpectedDefect.
 - No `.upTo(n)` means retry forever.
 - A cancel is never retried and never mapped.
 - A policy with a fallback or `onThrow` cannot go inside `wrap`.

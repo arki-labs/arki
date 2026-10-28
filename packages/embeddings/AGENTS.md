@@ -4,7 +4,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 ## Laws
 
-1. An expected refusal is a returned failure, never a throw. Throw only for a bug in the caller's own code (a custom `embed` or `onProgress` that throws is rethrown).
+1. An expected refusal is a returned failure, never a throw. The owned resilience middleware returns UnexpectedDefect for final callback or policy defects. Other custom callback boundaries still retain their existing throwing API pending migration.
 2. Every provider answer goes through the output check in `src/embedder.ts` (count, dimensions, finite numbers, non-zero norm). A model record's `embedTexts` returns raw vectors and never validates them itself.
 3. `embedMany` is all or nothing. Never return partial vectors from a failed batch.
 4. The root imports no provider SDK, no `process.env` and no `node:*`. A provider SDK is an optional peer, loaded on the first call, and a missing one is `ModelUnavailable { reason: 'peer-missing' }`.

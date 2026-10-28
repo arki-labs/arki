@@ -7,19 +7,19 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Failure } from '@arki/failure';
-import type { RetryFailure } from './errors.js';
+import type { ResilienceFailure } from './errors.js';
 import { MockClock } from '@arki/clock';
 import { defineFailure, isFailure } from '@arki/failure';
 
 import type { Policy, ResiliencePolicy, RetryPolicy } from './index.js';
 import {
   backoff,
-  BulkheadRejectedError,
+  BulkheadRejected,
   Cancelled,
-  CircuitOpenError,
+  CircuitOpen,
   createResiliencePolicy,
   createRetryPolicy,
-  TimeoutError,
+  Timeout,
   withRetry,
   wrap,
 } from './index.js';
@@ -59,7 +59,7 @@ describe('onThrow on createResiliencePolicy', () => {
     expect(isFailure(settled) && settled.cause).toBeInstanceOf(TypeError);
   });
 
-  it('a mapper that rethrows what it does not recognise keeps that error a bug', async () => {
+  it('a mapper that rethrows what it does not recognise returns that bug as a defect', async () => {
     const policy = createResiliencePolicy({
       retry: backoff.constant(1).upTo(0),
       onThrow: cause => {
@@ -72,41 +72,41 @@ describe('onThrow on createResiliencePolicy', () => {
       policy.execute(() => {
         throw new RangeError('index out of range');
       }),
-    ).rejects.toThrow(RangeError);
+    ).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: expect.any(RangeError) });
   });
 
-  it('an open circuit is a throw too, so it reaches onThrow', async () => {
+  it('an open circuit is returned without reaching onThrow', async () => {
     const policy = createResiliencePolicy({
       retry: backoff.constant(1).upTo(0),
       circuitBreaker: { consecutiveFailures: 1 },
-      onThrow: cause => (cause instanceof CircuitOpenError ? 'circuit open' : 'network'),
+      onThrow: () => 'network',
     });
 
     expect(await policy.execute(networkDown)).toBe('network');
-    expect(await policy.execute(() => 'never runs')).toBe('circuit open');
+    expect(CircuitOpen.is(await policy.execute(() => 'never runs'))).toBe(true);
   });
 
-  it('a deadline is a throw too, so it reaches onThrow', async () => {
+  it('a deadline is returned without reaching onThrow', async () => {
     const policy = createResiliencePolicy({
       retry: backoff.constant(1).upTo(0),
       timeout: { timeoutMs: 5 },
-      onThrow: cause => (cause instanceof TimeoutError ? 'timed out' : 'other'),
+      onThrow: () => 'other',
     });
 
-    expect(await policy.execute(pending)).toBe('timed out');
+    expect(Timeout.is(await policy.execute(pending))).toBe(true);
   });
 
-  it('a full bulkhead is a throw too, so it reaches onThrow', async () => {
+  it('a full bulkhead is returned without reaching onThrow', async () => {
     const policy = createResiliencePolicy({
       retry: backoff.constant(1).upTo(0),
       timeout: { timeoutMs: 50 },
       bulkhead: { maxConcurrent: 1, maxQueue: 0 },
-      onThrow: cause => (cause instanceof BulkheadRejectedError ? 'full' : 'other'),
+      onThrow: () => 'other',
     });
 
     const holding = policy.execute(pending);
-    expect(await policy.execute(() => 'never runs')).toBe('full');
-    expect(await holding).toBe('other'); // its own deadline, mapped as well
+    expect(BulkheadRejected.is(await policy.execute(() => 'never runs'))).toBe(true);
+    expect(Timeout.is(await holding)).toBe(true);
   });
 
   it('a cancel is never mapped: the caller asked to stop, so nothing was unavailable', async () => {
@@ -140,10 +140,10 @@ describe('onThrow on createResiliencePolicy', () => {
     expect(typeof policy.components.circuitBreaker.onBreak).toBe('function');
   });
 
-  it('without onThrow it still throws', async () => {
+  it('without onThrow it returns a defect', async () => {
     const policy = createResiliencePolicy({ retry: backoff.constant(1).upTo(0) });
 
-    await expect(policy.execute(networkDown)).rejects.toThrow('fetch failed');
+    await expect(policy.execute(networkDown)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new TypeError('fetch failed') });
   });
 });
 
@@ -180,7 +180,7 @@ describe('onThrow types', () => {
     const policy = createResiliencePolicy({ onThrow: cause => Unavailable({ cause }) });
 
     expectTypeOf(policy).toEqualTypeOf<ResiliencePolicy<Failure<'push.unavailable', undefined>>>();
-    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined> | RetryFailure>>();
+    expectTypeOf(policy.execute(() => 42)).toEqualTypeOf<Promise<number | Failure<'push.unavailable', undefined> | ResilienceFailure>>();
   });
 
   it('an async mapper unwraps, and a rethrowing branch adds nothing', () => {
@@ -197,8 +197,8 @@ describe('onThrow types', () => {
   it('without onThrow nothing is added, and the policy is a plain Policy that wrap accepts', () => {
     const plain = createResiliencePolicy();
 
-    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number | RetryFailure>>();
-    expectTypeOf(plain).toExtend<Policy<never, RetryFailure>>();
+    expectTypeOf(plain.execute(() => 42)).toEqualTypeOf<Promise<number | ResilienceFailure>>();
+    expectTypeOf(plain).toExtend<Policy<never, ResilienceFailure>>();
     expectTypeOf(createRetryPolicy()).toEqualTypeOf<RetryPolicy>();
   });
 

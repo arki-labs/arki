@@ -1,3 +1,4 @@
+import type { ExecutionFailure } from './errors.js';
 import { expect, expectTypeOf, it, vi } from 'vitest';
 
 import { MockClock, SleepCancelled } from '@arki/clock';
@@ -153,7 +154,7 @@ it('infers retry outcomes through composition without widening ordinary policies
   const work = vi.fn(() => 'done' as const);
   const result = wrap(noop, retry).execute(work, controller.signal);
   expectTypeOf(result).toEqualTypeOf<Promise<'done' | RetryFailure>>();
-  expectTypeOf(noop.execute(() => 42)).toEqualTypeOf<Promise<number>>();
+  expectTypeOf(noop.execute(() => 42)).toEqualTypeOf<Promise<number | ExecutionFailure>>();
   expectTypeOf<RetryFailure>().toEqualTypeOf<ReturnType<(typeof RETRY_FAILURES)[number]>>();
   expect(RETRY_FAILURES).toContain(Cancelled);
   expect(RETRY_FAILURES).toContain(SleepCancelled);

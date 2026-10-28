@@ -29,7 +29,8 @@
  */
 
 import { z } from 'zod';
-import type { PolicyExecution, RetryFailure } from '@arki/resilience';
+import type { PolicyExecution, ResilienceFailure } from '@arki/resilience';
+import { withFallback, CircuitOpen, BulkheadRejected, Timeout } from '@arki/resilience';
 
 import {
   InvalidEnvelope,
@@ -41,7 +42,7 @@ import {
   UnexpectedFailure,
   ValidatorDefect,
 } from '@arki/failure';
-import { formatIssues, parseAsync } from '@arki/schema';
+import { formatIssues, is, parseAsync } from '@arki/schema';
 
 import type { PathParams, ResponseSchemas, RouteContract, RouteDef, RouteFailure, RouteInput } from './contract.js';
 import type { HttpClientFailure } from './failures.js';
@@ -130,7 +131,7 @@ export type ClientCall<TRoute> =
  * What the client needs from a retry policy: an `@arki/resilience` policy fits. A policy with a
  * fallback does not, because its result could be the fallback instead of a response.
  */
-export type ClientPolicy = PolicyExecution<never, RetryFailure>;
+export type ClientPolicy = PolicyExecution<never, ResilienceFailure>;
 
 /** One attempt's outcome, as `retryOn` sees it: the response, or the error `fetch` threw. */
 export type RetryOutcome = {
@@ -351,6 +352,8 @@ class RetryableResponse extends Error {
   }
 }
 
+const retryableResponseSchema = z.instanceof(RetryableResponse);
+
 type Attempt = { readonly response: Response } | { readonly error: unknown };
 
 /** Own fetch exceptions without widening the public result to an arbitrary failure. */
@@ -397,13 +400,14 @@ async function sendOnceOrRetry(
       previous = response;
       throw new RetryableResponse(response);
     };
-    const outcome = await policy.execute(attempt, deadline.signal).catch((error: unknown) => {
-      if (error instanceof RetryableResponse) return { response: error.response };
-      throw error;
-    });
+    // Explicit fallback sees only callback throws, before the public defect boundary.
+    // Returned clock/engine failures retain their own identity and classification.
+    const outcome = await withFallback(policy, (error: unknown): Attempt =>
+      is(error, retryableResponseSchema) ? { response: error.response } : { error },
+    ).execute(attempt, deadline.signal);
     if (isFailure(outcome)) {
-      if (UnexpectedDefect.is(outcome)) return outcome;
-      if (deadline.signal?.reason instanceof HttpError && deadline.signal.reason.code === HTTP_ERROR_CODES.requestTimeout) {
+      if (UnexpectedDefect.is(outcome) || CircuitOpen.is(outcome) || BulkheadRejected.is(outcome)) return outcome;
+      if (Timeout.is(outcome) || (deadline.signal?.reason instanceof HttpError && deadline.signal.reason.code === HTTP_ERROR_CODES.requestTimeout)) {
         return RequestTimeout({ cause: outcome });
       }
       return RequestCancelled({ cause: outcome });

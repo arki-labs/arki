@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { backoff, CircuitOpenError, definePresets } from './index.js';
+import { backoff, CircuitOpen, definePresets } from './index.js';
 
 /** Passed to `.catch` where the test only needs the call to settle. */
 function swallow(): void {
@@ -19,7 +19,7 @@ describe('definePresets', () => {
     });
     await presets.carrier.execute(boom).catch(swallow);
 
-    await expect(presets.carrier.execute(() => 1)).rejects.toBeInstanceOf(CircuitOpenError);
+    await expect(presets.carrier.execute(() => 1)).resolves.toMatchObject({ code: CircuitOpen.code });
     expect(await presets.db.execute(() => 'fine')).toBe('fine');
   });
 

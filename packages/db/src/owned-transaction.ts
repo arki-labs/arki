@@ -26,7 +26,8 @@ const log = getLogger('arki:db:outcome');
  * queries run inside the open transaction and a later throw cannot roll back
  * (docs/arki/research/17-multi-database/spike/results.md).
  */
-function assertSafeDriver(db: object): void {
+/** @internal Reject static driver misuse before public policy supervision. */
+export function assertSafeDriver(db: object): void {
   if (dialectOf(db) !== 'sqlite' || isLibsql(db)) return;
   throw new DbTransactionError({
     code: DB_TRANSACTION_ERROR_CODES.unsafeSqliteDriver,

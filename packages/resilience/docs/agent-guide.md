@@ -7,7 +7,7 @@ Read `llms.txt` first for the map. When this guide and `AGENTS.md` disagree, `AG
 1. A `Policy` runs your function and applies retry, timeout, circuit breaker or bulkhead around it.
 2. Your function can return a value, return a failure from `@arki/failure`, or throw.
 3. A returned failure is an answer. It is retried only when `.while(Definition)` names it.
-4. A thrown error is retried by the backoff, then thrown again unchanged.
+4. A callback throw is retried by default; explicit fallback receives it unchanged before final UnexpectedDefect normalization.
 5. `withFallback` and `onThrow` turn what is left into a value. They make a `Policy<F>` and go outermost.
 
 ## Task map
@@ -15,7 +15,7 @@ Read `llms.txt` first for the map. When this guide and `AGENTS.md` disagree, `AG
 ### Call a third-party API safely
 
 1. Use `externalApiPolicy` with `withResilience(fn, externalApiPolicy)`.
-2. Catch `ResilienceError` by `code` where you need to react.
+2. Check returned canonical failures with their definitions or `isFailure`; use RESILIENCE_FAILURES for RPC admission.
 
 ```ts
 import { externalApiPolicy, withResilience } from '@arki/resilience';
@@ -52,28 +52,28 @@ const answer = await withResilience(() => callBilling(), externalApiPolicy);
 - A second `.while()` narrows the first. Name all definitions in one call.
 - A negative predicate such as `reason => !(reason instanceof BadInput)` accepts failures too. Name the failures you want.
 - `wrap` rejects a policy that has a fallback or `onThrow`.
-- `RetriesExhaustedError` is exported, but the retry policy rethrows the last error as it was.
+- Raw callback throws reach retry and explicit fallback; an unmapped final throw returns `UnexpectedDefect`.
 - A cancel is never retried and never mapped.
 
 ## Observation
 
 Subscribe to policy events for diagnostics. Listeners run synchronously; their thrown errors and rejected promises are supervised, and pending promises are never awaited. Observer failure cannot retry completed work or prevent timeout settlement. Synchronous signal cancellation keeps its existing semantics. Put required effects in the operation callback.
 
-Default logger and Dot records contain canonical failure codes, not callback messages or returned payloads. Unknown throws and observer defects use `failure.unexpected_defect`. User listeners still receive original events. Reporter failure is nonauthoritative. OpenTelemetry spans and broader engine failure migration remain separate work.
+Default logger and Dot records contain canonical failure codes, not callback messages or returned payloads. Unknown throws and observer defects use `failure.unexpected_defect`. User listeners still receive original events. Reporter failure is nonauthoritative. OpenTelemetry spans remain separate work.
 
 Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
 
 ## Errors
 
-| Code                          | Error                   | What to do                                            |
-| ----------------------------- | ----------------------- | ----------------------------------------------------- |
-| `ARKI_RESILIENCE_E001`        | `CircuitOpenError`      | Wait for half-open, or serve a fallback               |
-| `ARKI_RESILIENCE_E002`        | `TimeoutError`          | Raise `timeoutMs`, or make the call faster            |
-| `ARKI_RESILIENCE_E003`        | `CancelledError`        | Your own signal aborted. Do not count it as an outage |
-| `ARKI_RESILIENCE_E004`        | `BulkheadRejectedError` | Retry later, raise the limits, or shed load           |
-| `ARKI_RESILIENCE_E005`        | `RetriesExhaustedError` | Read `lastError`. Exported for hosts                  |
-| `ARKI_RESILIENCE_E006`        | `InvalidBackoffError`   | Pass finite, non-negative numbers                     |
-| `ARKI_RESILIENCE_PLUGIN_E001` | Dot unit error          | Use a name from `definePresets`                       |
+| Code | Definition | What to do |
+| --- | --- | --- |
+| `resilience.circuit_open` | `CircuitOpen` | Wait for half-open or handle the returned refusal |
+| `resilience.timeout` | `Timeout` | Stop work through its signal; reconcile before retry |
+| `resilience.cancelled` | `Cancelled` | Stop this execution |
+| `resilience.bulkhead_rejected` | `BulkheadRejected` | Shed load or explicitly retry later |
+| `failure.unexpected_defect` | `UnexpectedDefect` | Inspect the private original cause |
+| `ARKI_RESILIENCE_E006` | `InvalidBackoffError` | Fix static backoff options |
+| `ARKI_RESILIENCE_PLUGIN_E001` | Dot unit error | Use a declared preset |
 
 ## Verify
 
@@ -92,4 +92,4 @@ dot doctor --json | jq '.data'
 
 ## Typed retry waits
 
-Retry execution returns `Cancelled` (`resilience.cancelled`) before an aborted attempt or when failed work/observers observe caller cancellation. Completed successes and returned failures retain identity. Cancellation during an actual clock wait still returns the original `SleepCancelled`; a returned clock defect remains `UnexpectedDefect`. The original definitions in `RETRY_FAILURES` infer `RetryFailure`, propagated through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without a throw fallback. Admit the full tuple on RPC routes that execute retry policies. `RETRY_WAIT_FAILURES`/`RetryWaitFailure` describe clock waits only. Other engine-only policies retain their existing thrown bridge during A-33 migration; cancellation reaching a retry loop becomes `Cancelled`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no retry failures. Pending callbacks remain cooperative: retry does not race or forcibly stop a callback that ignores its signal. Event callback throws and rejecting custom clocks remain part of the outstanding defect-boundary migration.
+Use `RETRY_FAILURES` for retry-only callers and `RESILIENCE_FAILURES` for composed policies/presets. `wrap` infers heterogeneous unions. `Policy<F, E>` includes common cancellation/defect outcomes and keeps fallback values separate. Returned engine refusals bypass `onThrow`/`withFallback` and never open a breaker; select them explicitly with `.while(...)` only when replay is safe. Actual clock waits preserve their original failures. Timeout captures cancellation origin before observers; retry-only callbacks remain cooperative.

@@ -3,12 +3,12 @@
 // It exercises each policy once with real timers; the unit tests cover the details.
 
 import { MockClock } from '@arki/clock';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, isFailure } from '@arki/failure';
 
 import {
   backoff,
   Cancelled,
-  CircuitOpenError,
+  CircuitOpen,
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
   createResiliencePolicy,
@@ -16,10 +16,9 @@ import {
   createTimeoutPolicy,
   definePresets,
   externalApiPolicy,
-  isBulkheadRejectedError,
-  isResilienceError,
+  BulkheadRejected,
   noop,
-  TimeoutError,
+  Timeout,
   withFallback,
   withResilience,
   wrap,
@@ -31,14 +30,7 @@ let cancelledCalls = 0;
 const cancelledResult = await createRetryPolicy().execute(() => { cancelledCalls++; return 'unexpected'; }, preAborted.signal);
 
 const pending = () => new Promise(() => undefined);
-const errorName = async promise => {
-  try {
-    await promise;
-    return 'resolved';
-  } catch (error) {
-    return error.name;
-  }
-};
+const failureCode = async promise => { const result = await promise; return isFailure(result) ? result.code : 'success'; };
 
 const retried = [];
 const retryResult = await createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) }).execute(
@@ -84,12 +76,12 @@ const clockResult = `${await clockRetry}@${clockCalls.join(',')}`;
 
 const presets = definePresets({ a: { circuitBreaker: { consecutiveFailures: 1 } }, b: {} });
 await presets.a.execute(() => Promise.reject(new Error('down'))).catch(() => undefined);
-const presetA = await errorName(presets.a.execute(() => 'x'));
+const presetA = await failureCode(presets.a.execute(() => 'x'));
 const presetB = await presets.b.execute(() => 'fine');
 const fellBack = await withFallback(presets.a, () => 'cached').execute(() => 'live');
 const notHidden = new AbortController();
 notHidden.abort();
-const abortKept = await errorName(
+const abortKept = await failureCode(
   withFallback(wrap(createTimeoutPolicy()), () => 'hidden').execute(pending, notHidden.signal),
 );
 
@@ -105,7 +97,7 @@ const mappedThrow = await createRetryPolicy({
 const mappedPolicy = createResiliencePolicy({
   retry: backoff.constant(1).upTo(0),
   circuitBreaker: { consecutiveFailures: 1 },
-  onThrow: cause => (cause instanceof CircuitOpenError ? 'open' : 'down'),
+  onThrow: () => 'down',
 });
 const mappedFirst = await mappedPolicy.execute(() => Promise.reject(new Error('down')));
 const mappedOpen = await mappedPolicy.execute(() => 'x');
@@ -120,12 +112,21 @@ const savedResult = await observedRetry.execute(() => { saved++; return 'saved';
 const observedTimeout = createTimeoutPolicy({ timeoutMs: 5 });
 observedTimeout.onTimeout(() => { throw new Error('private observer'); });
 observedTimeout.onTimeout(() => Promise.reject(new Error('private async observer')));
-const observedDeadline = await errorName(observedTimeout.execute(pending));
+const observedDeadline = await failureCode(observedTimeout.execute(pending));
+
+const sdkLookalike = { isBrokenCircuitError: true, message: 'private callback' };
+const provenance = await withFallback(createCircuitBreakerPolicy(), error => error).execute(() => { throw sdkLookalike; });
+const timedCaller = new AbortController();
+const originPolicy = createTimeoutPolicy({ timeoutMs: 5 });
+originPolicy.onTimeout(() => timedCaller.abort());
+const origin = await originPolicy.execute(pending, timedCaller.signal);
 
 const checks = [
+  ['callback provenance', provenance === sdkLookalike, true],
+  ['deadline origin before observer', Timeout.is(origin), true],
   ['observer cannot change success', savedResult, 'saved'],
   ['observer cannot repeat effects', saved, 1],
-  ['observer cannot block timeout', observedDeadline, 'TimeoutError'],
+  ['observer cannot block timeout', observedDeadline, Timeout.code],
   ['retry pre-abort outcome', Cancelled.is(cancelledResult), true],
   ['retry pre-abort no callback', cancelledCalls, 0],
   ['while(definition) retries its failure', namedRetry.delay(1, ExportUnavailable()), 1],
@@ -133,35 +134,35 @@ const checks = [
   ['while(definition) retries thrown errors', namedRetry.delay(1, new Error('down')), 1],
   ['onThrow maps a throw the retries gave up on', ExportUnavailable.is(mappedThrow), true],
   ['onThrow sees the first throw', mappedFirst, 'down'],
-  ['onThrow sees an open circuit', mappedOpen, 'open'],
-  ['preset breaker is its own', presetA, 'CircuitOpenError'],
+  ['onThrow bypasses an open circuit', CircuitOpen.is(mappedOpen), true],
+  ['preset breaker is its own', presetA, CircuitOpen.code],
   ['other preset unaffected', presetB, 'fine'],
-  ['fallback on open breaker', fellBack, 'cached'],
-  ['fallback does not hide a cancel', abortKept, 'CancelledError'],
+  ['fallback bypasses open breaker', CircuitOpen.is(fellBack), true],
+  ['fallback does not hide a cancel', abortKept, Cancelled.code],
   ['retry on a MockClock', clockResult, 'ok@0,5000,10000'],
   ['retry', retryResult, 'ok'],
   ['retry attempts', retried.join(','), '0,1'],
-  ['timeout', await errorName(createTimeoutPolicy({ timeoutMs: 5 }).execute(pending)), 'TimeoutError'],
+  ['timeout', await failureCode(createTimeoutPolicy({ timeoutMs: 5 }).execute(pending)), Timeout.code],
   [
     'timeout is ours',
-    (await createTimeoutPolicy({ timeoutMs: 5 })
+    Timeout.is(await createTimeoutPolicy({ timeoutMs: 5 })
       .execute(pending)
-      .catch(e => e)) instanceof TimeoutError,
+      .catch(e => e)),
     true,
   ],
-  ['breaker open', await errorName(breaker.execute(() => 'x')), 'CircuitOpenError'],
-  ['breaker is ours', (await breaker.execute(() => 'x').catch(e => e)) instanceof CircuitOpenError, true],
-  ['bulkhead full', isBulkheadRejectedError(await bulkhead.execute(() => 'x').catch(e => e)), true],
+  ['breaker open', await failureCode(breaker.execute(() => 'x')), CircuitOpen.code],
+  ['breaker is ours', CircuitOpen.is(await breaker.execute(() => 'x')), true],
+  ['bulkhead full', BulkheadRejected.is(await bulkhead.execute(() => 'x').catch(e => e)), true],
   ['cancelled', Cancelled.is(await cancelled), true],
   ['composed preset', composed, 'composed'],
   ['composed context', JSON.stringify(attempts), '[[0,true]]'],
   ['withResilience', await withResilience(() => 'through', noop), 'through'],
   [
     'own error passes through',
-    await errorName(noop.execute(() => Promise.reject(new RangeError('mine')))),
-    'RangeError',
+    await failureCode(noop.execute(() => Promise.reject(new RangeError('mine')))),
+    'failure.unexpected_defect',
   ],
-  ['predicate', isResilienceError(new Error('plain')), false],
+  ['predicate', isFailure(new Error('plain')), false],
 ];
 
 const runtime =

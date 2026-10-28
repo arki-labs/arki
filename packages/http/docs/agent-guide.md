@@ -115,3 +115,5 @@ dot doctor --json | jq '.data'
 For shared action execution and the validation owner, see Dot’s
 [action migration guide](../../dot/docs/upgrade-actions.md). Native adapters retain
 their own authorization, response headers and declared failures.
+
+Client policies admit the full ResilienceFailure union. CircuitOpen and BulkheadRejected remain canonical client outcomes; Timeout maps to RequestTimeout. Raw exhausted retryable responses and network exceptions retain their existing HTTP mapping through explicit throw fallback. Returned clock defects retain identity.

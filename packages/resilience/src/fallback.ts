@@ -1,13 +1,16 @@
-import type { Policy, PolicyCallback } from './policy.js';
+import { observeEvent } from './observers.js';
+import { Cancelled } from './errors.js';
+import { executeRaw, ownExecution } from './engine.js';
+import type { Policy, PolicyCallback, PolicyExecution } from './policy.js';
 
 /**
  * Give a policy a last answer. When the policy's call fails, `fallback` gets the error and its
  * result becomes the result of the call. Put it outermost: inside `wrap` it would hide the errors
  * the retry needs, so `wrap` does not accept a policy with a fallback.
  *
- * A fallback never hides a cancel: when the caller's signal is aborted, the error is rethrown
- * and `fallback` does not run. To fall back on some errors only, rethrow the others:
- * `(error) => { if (!isBrokenCircuitError(error)) throw error; return cached; }`.
+ * A fallback never handles a returned refusal or cancellation. Exhausted callback throws
+ * reach it unchanged before public defect normalization. To fall back on some errors only, rethrow the others:
+ * `(error) => { if (!(error instanceof TypeError)) throw error; return cached; }`.
  *
  * `onSuccess` and `onFailure` are the inner policy's events.
  *
@@ -18,19 +21,27 @@ import type { Policy, PolicyCallback } from './policy.js';
  * ```
  */
 export function withFallback<F, G = never, E = never>(
-  policy: Policy<G, E>,
+  policy: Policy<G, E>, fallback: (error: unknown) => F | PromiseLike<F>,
+): Policy<G | F, E>;
+export function withFallback<F, G = never, E = never>(
+  policy: PolicyExecution<G, E>, fallback: (error: unknown) => F | PromiseLike<F>,
+): PolicyExecution<G | F, E>;
+export function withFallback<F, G = never, E = never>(
+  policy: PolicyExecution<G, E> & Partial<Pick<Policy<G, E>, 'onSuccess' | 'onFailure'>>,
   fallback: (error: unknown) => F | PromiseLike<F>,
-): Policy<G | F, E> {
-  return {
-    onSuccess: policy.onSuccess,
-    onFailure: policy.onFailure,
-    async execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal): Promise<T | G | F | E> {
+) {
+  const execution: PolicyExecution<G | F, E> = {
+    async execute<T>(fn: PolicyCallback<T>, signal?: AbortSignal) {
       try {
-        return await policy.execute(fn, signal);
+        return await executeRaw(policy, fn, signal);
       } catch (error) {
-        if (signal?.aborted) throw error;
+        if (signal?.aborted) return Cancelled({ cause: signal.reason });
         return await fallback(error);
       }
     },
   };
+  return Object.assign(ownExecution(execution), {
+    onSuccess: policy.onSuccess === undefined ? undefined : observeEvent(policy.onSuccess, policy),
+    onFailure: policy.onFailure === undefined ? undefined : observeEvent(policy.onFailure, policy),
+  });
 }

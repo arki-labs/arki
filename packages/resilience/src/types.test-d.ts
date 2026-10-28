@@ -1,3 +1,4 @@
+import type { ExecutionFailure } from './errors.js';
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { ResilienceService } from './dot.js';
@@ -6,7 +7,7 @@ import { createRetryPolicy, definePresets, noop, withFallback, withResilience, w
 
 describe('policy types', () => {
   it('a fallback adds its type to the result: T | F', () => {
-    expectTypeOf(withFallback(noop, () => null).execute(() => 1)).toEqualTypeOf<Promise<number | null>>();
+    expectTypeOf(withFallback(noop, () => null).execute(() => 1)).toEqualTypeOf<Promise<number | null | ExecutionFailure>>();
   });
 
   it('an async fallback unwraps', () => {
@@ -40,13 +41,13 @@ describe('policy types', () => {
   });
 
   it('withResilience keeps T for a plain policy and adds F for a fallback', () => {
-    expectTypeOf(withResilience(() => 42, noop)).toEqualTypeOf<Promise<number>>();
+    expectTypeOf(withResilience(() => 42, noop)).toEqualTypeOf<Promise<number | ExecutionFailure>>();
     expectTypeOf(
       withResilience(
         () => 42,
         withFallback(noop, () => 'x'),
       ),
-    ).toEqualTypeOf<Promise<number | string>>();
+    ).toEqualTypeOf<Promise<number | string | ExecutionFailure>>();
   });
 });
 

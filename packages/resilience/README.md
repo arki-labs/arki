@@ -50,21 +50,13 @@ The full list of exports is in [API](#api).
 
 Observation defects are supervised separately: event listener errors never replace the operation outcome. Required work belongs in the operation callback, not an observer.
 
-A policy call has three kinds of outcome. Know which one you are handling.
+A call resolves to the callback's value, its returned canonical failure, or an exact owned policy failure. Check `isFailure(result)`.
 
-1. **A value.** Your function's own result. A policy with `withFallback` or `onThrow` can also resolve to what they return, typed as `T | F`.
-2. **A returned failure.** A function may return a failure from `@arki/failure` for an expected outcome such as "card declined". The failure goes back to you as the result. It is not retried, and it never opens a breaker. A retry happens only when `.while(Definition)` names that failure, or a predicate accepts it. When the retries run out on a returned failure, you get the last failure as a value. Nothing is thrown.
-3. **A throw.** A thrown error is retried by the backoff, then thrown again **unchanged** when the retries run out. Your own errors reach you as they were. The policies add their own errors, all extending `ResilienceError`: `CircuitOpenError`, `TimeoutError`, `CancelledError` and `BulkheadRejectedError`.
-
-How to handle them:
-
-- Check `isFailure(result)` after every call whose function can return a failure.
-- Catch `ResilienceError` by `error.code`, never by message. A `CancelledError` means your own signal aborted: do not count it as an outage.
-- Use `onThrow` when you want one error path with no `try/catch`. It maps what is still thrown to a value, except cancellation; retry returns its canonical outcome.
-- Use `withFallback` for a last answer when the policy gives up. It does not run on a cancel.
-- A bad `backoff` option throws `InvalidBackoffError` where the backoff is built, not later.
-
-`RetriesExhaustedError` is exported for hosts that want to wrap a final failure. The retry policy itself rethrows the last error as it was.
+- Callback throws retry by default. After retries and explicit `onThrow`/`withFallback`, an unmapped throw returns `UnexpectedDefect` with the original cause kept private.
+- Returned failures are final unless `.while(Definition)` or a predicate accepts them. This includes `CircuitOpen`, `Timeout` and `BulkheadRejected`. They never open an outer breaker and never enter a throw fallback.
+- Every owned execution can return `Cancelled` or `UnexpectedDefect`. `RETRY_FAILURES`, `CIRCUIT_FAILURES`, `TIMEOUT_FAILURES` and `BULKHEAD_FAILURES` contain the original definitions for each policy. `RESILIENCE_FAILURES` admits composed policies and presets; `wrap` infers the exact union of its inputs.
+- `Cancelled` means the owning signal stopped execution. A real retry wait preserves its original `SleepCancelled` or `UnexpectedDefect`.
+- Static backoff misuse still throws `InvalidBackoffError` (`ARKI_RESILIENCE_E006`) where the builder is called.
 
 ## Limits
 
@@ -80,6 +72,7 @@ Boundary example: `.upTo(2)` means two retries, so the function is called three 
 
 ```ts run
 import { MockClock } from '@arki/clock';
+import { UnexpectedDefect } from '@arki/failure';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
 let calls = 0;
@@ -90,12 +83,8 @@ const outcome = policy.execute(() => {
   calls++;
   throw new Error('down');
 });
-const settled = outcome.then(
-  () => 'resolved',
-  (error: unknown) => (error instanceof Error ? error.message : 'unknown'),
-);
 await clock.advanceAsync(100);
-if ((await settled) !== 'down') throw new Error('the last error must be thrown unchanged');
+if (!UnexpectedDefect.is(await outcome)) throw new Error('Expected the final callback defect');
 if (calls !== 3) throw new Error(`upTo(2) must call the function 3 times, got ${calls}`);
 ```
 
@@ -141,10 +130,10 @@ const quotes = withFallback(createResiliencePolicy(), () => null);
 const quote = await quotes.execute(() => fetchQuote()); // Quote | null
 ```
 
-`withFallback(policy, fallback)` returns a policy whose call resolves to `T | F`: the function's own result, or what `fallback(error)` returns when the policy gives up (retries used up, circuit open, timeout, ...). The type comes from the fallback, so `null` and `{ stale: true }` show up in the result type.
+`withFallback(policy, fallback)` returns a policy whose call resolves to `T | F | OwnedFailure`: the function's result, a policy refusal, or what `fallback(error)` returns after callback throws exhaust retry. The type comes from the fallback, so `null` and `{ stale: true }` show up in the result type.
 
-- A fallback never hides a cancel. Retry cancellation returns its canonical outcome. Engine-only cancellation keeps its thrown bridge; `fallback` does not run in either case.
-- To fall back on some errors only, rethrow the others: `(error) => { if (!isBrokenCircuitError(error)) throw error; return cached; }`.
+- A fallback never handles a returned failure, including cancellation, circuit refusal, timeout or capacity refusal.
+- To fall back on some errors only, rethrow the others: `(error) => { if (!(error instanceof TypeError)) throw error; return cached; }`.
 - Put it outermost. `wrap` does not accept a policy with a fallback (a compile error), because inside a retry it would hide the errors the retry needs.
 
 ### Throws as failures: `onThrow`
@@ -160,7 +149,7 @@ const batches = ['a', 'b'];
 export async function pushAll() {
   const push = createResiliencePolicy({
     retry: backoff.exponential({ base: 500 }).upTo(3).while(ExportUnavailable),
-    onThrow: cause => ExportUnavailable({ cause }), // the network, a deadline, an open circuit
+    onThrow: cause => ExportUnavailable({ cause }), // exhausted callback throws, before public normalization
   });
 
   const delivered: string[] = [];
@@ -173,12 +162,12 @@ export async function pushAll() {
 }
 ```
 
-`onThrow(error)` turns a thrown error that reaches the caller into a value, usually a failure from [`@arki/failure`](../failure). The call then resolves to `T | Mapped`, typed from the mapper. Without `onThrow`, the call throws as before. It is the same word as `attempt(run, onThrow)` in `@arki/failure`.
+`onThrow(error)` turns a thrown error that reaches the caller into a value, usually a failure from [`@arki/failure`](../failure). The call then resolves to `T | Mapped`, typed from the mapper. Without `onThrow`, final callback throws return `UnexpectedDefect`. It is the same word as `attempt(run, onThrow)` in `@arki/failure`.
 
 - It sees only what the retries gave up on, or what they never retry. A returned failure is the answer as before.
-- It is outermost, so an open circuit (`CircuitOpenError`), a deadline (`TimeoutError`) and a full bulkhead (`BulkheadRejectedError`) are throws that reach it too.
+- It is outermost. Engine refusals are already returned values and bypass it.
 - A cancel by the caller's signal is never mapped; the retry loop returns `Cancelled`.
-- Rethrow what you do not recognise, so unknown errors stay bugs: `cause => { if (!isNetworkError(cause)) throw cause; return Unavailable({ cause }); }`.
+- Rethrow what you do not recognise, so the public boundary returns an `UnexpectedDefect`: `cause => { if (!isNetworkError(cause)) throw cause; return Unavailable({ cause }); }`.
 - `createRetryPolicy` and `withRetry` take it too. A policy with `onThrow` is a `Policy<Mapped>`, so like a fallback it cannot go inside `wrap`.
 
 ### Named presets
@@ -277,6 +266,7 @@ Retry delays wait on a `Clock` from `@arki/clock`. Pass a `MockClock` and a retr
 
 ```ts
 import { MockClock } from '@arki/clock';
+import { UnexpectedDefect } from '@arki/failure';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
 declare function callFlakyApi(): Promise<string>;
@@ -316,31 +306,16 @@ const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 2 });
 await withResilience(() => callDownstream(), breaker); // opens after 2 failures in a row
 ```
 
-### Errors
-
-Errors thrown by your function reach you unchanged. Errors raised by the policies themselves all extend `ResilienceError`:
-
-- `CircuitOpenError` — the breaker is open; the function was not called.
-- `TimeoutError` — a timeout policy reached its deadline.
-- `CancelledError` — the caller's own signal aborted; `cause` is the signal's reason.
-- `BulkheadRejectedError` — every slot and queue place of a bulkhead was taken.
+### Handle a circuit refusal
 
 ```ts
-import { createResiliencePolicy, isBrokenCircuitError, isResilienceError, withResilience } from '@arki/resilience';
+import { CircuitOpen, createResiliencePolicy, withResilience } from '@arki/resilience';
 
 declare function callDownstream(): Promise<string>;
-class ServiceUnavailable extends Error {}
-
 const policy = createResiliencePolicy();
-
 export async function callWithCache(cachedAnswer: string) {
-  try {
-    return await withResilience(() => callDownstream(), policy);
-  } catch (error) {
-    if (isBrokenCircuitError(error)) return cachedAnswer;
-    if (isResilienceError(error)) throw new ServiceUnavailable('downstream is unavailable', { cause: error });
-    throw error;
-  }
+  const result = await withResilience(() => callDownstream(), policy);
+  return CircuitOpen.is(result) ? cachedAnswer : result;
 }
 ```
 
@@ -362,7 +337,7 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 Event listeners are observation only. They run synchronously, so a listener can still request cancellation through an owned `AbortController`. A listener throw or rejected promise never triggers another operation, opens the breaker, replaces a result, runs a fallback or prevents timeout settlement. Pending observation is never awaited. Put required persistence and other authoritative work in the operation callback.
 
-`attachPolicyLogger` and the Dot adapter log canonical failure codes instead of callback error messages or returned payloads. An unknown throw is labelled `failure.unexpected_defect`. Observer defects emit the same safe code through `arki:resilience`; a broken diagnostic reporter cannot affect execution. Explicit user listeners still receive the original event and own their logging policy. This does not add OpenTelemetry spans or change the remaining engine error bridges.
+`attachPolicyLogger` and the Dot adapter log canonical failure codes instead of callback error messages or returned payloads. An unknown throw is labelled `failure.unexpected_defect`. Observer defects emit the same safe code through `arki:resilience`; a broken diagnostic reporter cannot affect execution. Explicit user listeners still receive the original event and own their logging policy. This does not add OpenTelemetry spans.
 
 Observer-defect diagnostics are coalesced while a diagnostic reporter is pending. Reporting resumes after settlement; operation execution never waits for that reporter.
 
@@ -397,29 +372,14 @@ await app.services.resilience.run('carrier', () => callCarrier());
 - `@arki/resilience/dot`: `resilience(presets)` unit, `ResilienceService`, `RESILIENCE_PLUGIN_ERROR_CODES`.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
-- `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError`, `InvalidBackoffError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
+- `CircuitOpen`, `Timeout`, `Cancelled`, `BulkheadRejected` — canonical definitions with `.is`. `InvalidBackoffError` extends `ResilienceError` for static misuse only.
 - Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`, `Presets`, `ResiliencePolicy`, `ResilienceComponents`, `OnThrow`. `Policy<F>`, `RetryPolicy<F>` and `ResiliencePolicy<F>` carry the type `F` a fallback or `onThrow` may answer (`never` for a plain policy).
 
 ## Errors
 
-Every error the policies raise is a `ResilienceError` with a stable `code` and a `remediation`. Match on `error.code`, never on the message. Errors thrown by your own function pass through untouched.
+Operational outcomes use canonical dotted codes: `resilience.circuit_open`, `resilience.timeout`, `resilience.cancelled`, `resilience.bulkhead_rejected`, the original clock wait outcomes and `failure.unexpected_defect`. Match with each definition's `.is`; private causes are not serialized.
 
-| Code                   | Class                   | Meaning                                                          |
-| ---------------------- | ----------------------- | ---------------------------------------------------------------- |
-| `ARKI_RESILIENCE_E001` | `CircuitOpenError`      | The circuit breaker is open and rejected the call.               |
-| `ARKI_RESILIENCE_E002` | `TimeoutError`          | A timeout policy reached its deadline.                           |
-| `ARKI_RESILIENCE_E003` | `CancelledError`        | The caller's own signal aborted the call. `cause` is its reason. |
-| `ARKI_RESILIENCE_E004` | `BulkheadRejectedError` | Every execution slot and queue slot was taken.                   |
-| `ARKI_RESILIENCE_E005` | `RetriesExhaustedError` | Every retry attempt failed. `lastError` holds the last one.      |
-| `ARKI_RESILIENCE_E006` | `InvalidBackoffError`   | A `backoff` builder got an option it cannot use.                 |
-
-The codes are also exported as `RESILIENCE_ERROR_CODES`.
-
-The Dot unit has one code of its own, exported as `RESILIENCE_PLUGIN_ERROR_CODES`:
-
-| Code                          | Meaning                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `ARKI_RESILIENCE_PLUGIN_E001` | `for` or `run` got a name that is not in the presets (untyped JS only). Use a name from `definePresets`. |
+Static backoff misuse retains `ARKI_RESILIENCE_E006`; unknown Dot preset misuse retains `ARKI_RESILIENCE_PLUGIN_E001`.
 
 ## When does the overhead matter?
 
@@ -490,4 +450,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Typed retry waits
 
-Retry execution returns `Cancelled` (`resilience.cancelled`) before an aborted attempt or when failed work/observers observe caller cancellation. Completed successes and returned failures retain identity. Cancellation during an actual clock wait still returns the original `SleepCancelled`; a returned clock defect remains `UnexpectedDefect`. The original definitions in `RETRY_FAILURES` infer `RetryFailure`, propagated through `wrap`, `withFallback`, `withRetry`, `withResilience` and Dot presets without a throw fallback. Admit the full tuple on RPC routes that execute retry policies. `RETRY_WAIT_FAILURES`/`RetryWaitFailure` describe clock waits only. Other engine-only policies retain their existing thrown bridge during A-33 migration; cancellation reaching a retry loop becomes `Cancelled`. `Policy<F, E>` keeps fallback output and owned outcomes separate, so policies without retry acquire no retry failures. Pending callbacks remain cooperative: retry does not race or forcibly stop a callback that ignores its signal. Event callback throws and rejecting custom clocks remain part of the outstanding defect-boundary migration.
+Every public execution supervises final defects. Retry cancellation is cooperative; a callback that never settles needs an explicit timeout and must observe its signal to stop effects. The timeout engine captures deadline versus caller cancellation before forwarding observations. A timed-out callback may still run: reconcile uncertain effects before explicitly selecting `Timeout` for retry. `Policy<F, E>` keeps fallback values and owned policy outcomes separate; policies without retry do not acquire clock-wait failures.

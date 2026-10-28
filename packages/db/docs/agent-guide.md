@@ -274,3 +274,5 @@ dot doctor --json | jq '.data'
 ```
 
 `dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it.
+
+The retry policy maps raw exhausted SQLSTATE conflicts through onThrow before public defect normalization. Boxed transaction outcomes still bypass retry, including uncertain COMMIT acknowledgement and cleanup failures.

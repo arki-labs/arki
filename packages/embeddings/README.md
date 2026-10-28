@@ -484,3 +484,5 @@ Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/a
 ## License
 
 MIT
+
+Resilience middleware returns `UnexpectedDefect` for final callback or policy defects and preserves returned clock defects by identity. These are part of `EmbedFailure`; they do not become retryable model outages.

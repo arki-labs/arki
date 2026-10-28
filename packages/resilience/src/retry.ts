@@ -9,45 +9,22 @@
 // so, and when retrying stops the caller gets the last failure back as a value.
 
 import type { Clock } from '@arki/clock';
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import type { RetryFailure } from './errors.js';
 import { Cancelled } from './errors.js';
-import { superviseObserver } from './observers.js';
+import { createEvent } from './event.js';
+import { ownPolicy } from './engine.js';
 
 import type { Backoff } from './backoff.js';
 import type {
   FailureEvent,
   FailureReason,
   PolicyCallback,
-  PolicyEvent,
   RetryEvent,
   RetryPolicy,
   SuccessEvent,
 } from './policy.js';
-
-/** Listeners of one event. Listening is rare and emitting is per call, so a plain array. */
-function createEvent<E>(): { readonly on: PolicyEvent<E>; emit(event: E): void; readonly listening: () => boolean } {
-  const listeners: ((event: E) => void)[] = [];
-  return {
-    on(listener) {
-      const supervised = superviseObserver(listener);
-      listeners.push(supervised);
-      return {
-        dispose() {
-          const index = listeners.indexOf(supervised);
-          if (index !== -1) listeners.splice(index, 1);
-        },
-      };
-    },
-    emit(event) {
-      // Subscription changes apply to the next emission, not to an in-flight snapshot.
-      const snapshot = [...listeners];
-      for (const listener of snapshot) listener(event);
-    },
-    listening: () => listeners.length > 0,
-  };
-}
 
 /** Milliseconds since some fixed point, for event durations. */
 function nowMs(): number {
@@ -88,9 +65,12 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       } catch (error) {
         failed = { error };
       }
-      const delay = signal.aborted
-        ? undefined
-        : backoff.delay(attempt + 1, 'error' in failed ? failed.error : failed.value);
+      let delay: ReturnType<Backoff['delay']>;
+      try {
+        delay = signal.aborted ? undefined : backoff.delay(attempt + 1, 'error' in failed ? failed.error : failed.value);
+      } catch (error) {
+        return UnexpectedDefect({ cause: error });
+      }
       if (failure.listening()) {
         failure.emit({ duration: nowMs() - started, handled: delay !== undefined, reason: failed });
       }
@@ -110,17 +90,18 @@ export function buildRetryPolicy(backoff: Backoff, clock: Clock): RetryPolicy {
       retry.emit({ ...failed, attempt: attempt + 1, delay });
       const afterRetry = retryCancellation(signal);
       if (afterRetry !== undefined) return 'value' in failed ? failed.value : afterRetry;
-      const sleepResult = await clock.sleep(delay, signal);
-      if (sleepResult !== undefined) return sleepResult;
-
+      try {
+        const sleepResult = await clock.sleep(delay, signal);
+        if (sleepResult !== undefined) return sleepResult;
+      } catch (error) {
+        return UnexpectedDefect({ cause: error });
+      }
     }
   }
 
-  return {
-    execute,
-    onSuccess: success.on,
-    onFailure: failure.on,
+  const policy: RetryPolicy = { execute, onSuccess: success.on, onFailure: failure.on, onRetry: retry.on, onGiveUp: giveUp.on };
+  return Object.assign(ownPolicy(policy), {
     onRetry: retry.on,
     onGiveUp: giveUp.on,
-  };
+  });
 }

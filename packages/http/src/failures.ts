@@ -1,4 +1,5 @@
 /** Canonical client-owned outcomes; route-owned failures stay on each contract. */
+import { CircuitOpen, BulkheadRejected } from '@arki/resilience';
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure, InvalidInput, REVIVAL_FAILURES } from '@arki/failure';
 
@@ -164,6 +165,8 @@ export const HTTP_CLIENT_FAILURES = [
   InvalidInput,
   ...REVIVAL_FAILURES,
   ...HTTP_SERVER_FAILURES,
+  CircuitOpen,
+  BulkheadRejected,
   NetworkFailure,
   RequestTimeout,
   RequestCancelled,

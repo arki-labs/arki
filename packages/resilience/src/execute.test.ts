@@ -5,7 +5,7 @@ import {
   backoff,
   createCircuitBreakerPolicy,
   createRetryPolicy,
-  isBrokenCircuitError,
+  CircuitOpen,
   noop,
   withResilience,
   withRetry,
@@ -43,7 +43,7 @@ describe('execution helpers', () => {
         },
         { timeoutMs: 10 },
       ),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({ code: 'resilience.timeout' });
   });
 
   it('withResilience runs the call through the given policy', async () => {
@@ -54,7 +54,7 @@ describe('execution helpers', () => {
 
   // withResilience returns the policy's promise directly (no async wrapper), so a policy that throws
   // synchronously must still reach the caller as a rejection, never as a synchronous throw.
-  it('withResilience turns a synchronous throw from the policy into a rejection', async () => {
+  it('withResilience turns a synchronous throw from the policy into a defect', async () => {
     const thrown = new Error('policy broke');
     const broken: Policy = {
       onSuccess: noop.onSuccess,
@@ -68,7 +68,7 @@ describe('execution helpers', () => {
     expect(() => {
       call = withResilience(() => 1, broken);
     }).not.toThrow();
-    await expect(call).rejects.toBe(thrown);
+    await expect(call).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: thrown });
   });
 
   it('a reused circuit breaker opens and stops calling the failing function', async () => {
@@ -79,11 +79,11 @@ describe('execution helpers', () => {
       throw new Error('downstream down');
     };
 
-    await expect(withResilience(failing, breaker)).rejects.toThrow('downstream down');
-    await expect(withResilience(failing, breaker)).rejects.toThrow('downstream down');
+    await expect(withResilience(failing, breaker)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('downstream down') });
+    await expect(withResilience(failing, breaker)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('downstream down') });
     const third = await withResilience(failing, breaker).catch((error: unknown) => error);
 
-    expect(isBrokenCircuitError(third)).toBe(true);
+    expect(CircuitOpen.is(third)).toBe(true);
     expect(calls).toBe(2);
   });
 });

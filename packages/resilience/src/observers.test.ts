@@ -15,8 +15,8 @@ import {
   createResiliencePolicy,
   createRetryPolicy,
   createTimeoutPolicy,
-  isBulkheadRejectedError,
-  TimeoutError,
+  BulkheadRejected,
+  Timeout,
   withFallback,
 } from './index.js';
 import { superviseObserver } from './observers.js';
@@ -76,7 +76,7 @@ describe('observation cannot control policy outcomes', () => {
     });
     const outcome = policy.execute(work).catch((error: unknown) => error);
     await clock.advanceAsync(10);
-    expect(await outcome).toBe(original);
+    expect(await outcome).toMatchObject({ code: 'failure.unexpected_defect', cause: original });
     expect(work).toHaveBeenCalledTimes(2);
   });
 
@@ -108,7 +108,7 @@ describe('observation cannot control policy outcomes', () => {
       breaker.execute(() => {
         throw original;
       }),
-    ).rejects.toBe(original);
+    ).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: original });
     await vi.advanceTimersByTimeAsync(10);
     expect(await breaker.execute(() => 'recovered')).toBe('recovered');
     expect(await breaker.execute(() => 'healthy')).toBe('healthy');
@@ -126,8 +126,8 @@ describe('observation cannot control policy outcomes', () => {
     const first = policy.execute(() => late.promise).catch((error: unknown) => error);
     const second = policy.execute(pendingObserver).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(10);
-    expect(await first).toBeInstanceOf(TimeoutError);
-    expect(await second).toBeInstanceOf(TimeoutError);
+    expect(await first).toMatchObject({ code: Timeout.code });
+    expect(await second).toMatchObject({ code: Timeout.code });
     expect(timedOut).toHaveBeenCalledTimes(2);
     late.reject(privateError);
     await vi.advanceTimersByTimeAsync(0);
@@ -141,7 +141,7 @@ describe('observation cannot control policy outcomes', () => {
     const hold = deferred<string>();
     const first = policy.execute(() => hold.promise);
     const rejected = await policy.execute(() => 'unreachable').catch((error: unknown) => error);
-    expect(isBulkheadRejectedError(rejected)).toBe(true);
+    expect(BulkheadRejected.is(rejected)).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     hold.resolve('done');
     expect(await first).toBe('done');
@@ -317,7 +317,7 @@ describe('observation cannot control policy outcomes', () => {
     const error = vi.fn();
     attachPolicyLogger(policy, { info, warn: vi.fn(), error });
     expect(await policy.execute(() => 'saved')).toBe('saved');
-    await expect(policy.execute(throwObserver)).rejects.toBe(privateError);
+    await expect(policy.execute(throwObserver)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: privateError });
     expect(info).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledTimes(2);
   });
@@ -337,7 +337,7 @@ describe('observation cannot control policy outcomes', () => {
     const error = vi.fn(rejectObserver);
     attachPolicyLogger(policy, { info, error, warn: rejectObserver });
     expect(await policy.execute(() => 'done')).toBe('done');
-    await expect(policy.execute(throwObserver)).rejects.toBe(privateError);
+    await expect(policy.execute(throwObserver)).resolves.toMatchObject({ code: 'failure.unexpected_defect', cause: privateError });
     expect(error.mock.calls.length).toBe(2);
     await Promise.resolve();
   });
