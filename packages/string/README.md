@@ -106,7 +106,7 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 | `/interpolate` | `interpolate`, `MissingValue`                                                                                                                                                                                                                                                                                      |
 | `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
 | `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
-| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
+| `/base64`      | `toBase64`, `fromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
 | `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
 | `/keywords`    | `keywords`, `STOP_WORDS`                                                                                                                                                                                                                                                                           |
 | `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
@@ -119,7 +119,7 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 
 Interpolation and UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent interpolation and codecs return `StringValue` or the same failures. No submitted input is included in failures.
 
-Breaking: `tryFromBase64` now aliases `fromBase64` and never returns `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Interpolation returns `MissingValue` for missing values; narrow before reading a fluent result. Replace `missing: 'throw'` with `missing: 'fail'`; E005 is removed. Other static misuse still throws `StringError` from `@arki/string/errors`; the legacy E002/E003 diagnostic exports remain available.
+Breaking: `tryFromBase64` is removed; use `fromBase64`, which returns canonical failures instead of `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Interpolation returns `MissingValue` for missing values; narrow before reading a fluent result. Replace `missing: 'throw'` with `missing: 'fail'`; E005 is removed. Other static misuse still throws `StringError` from `@arki/string/errors`; only E001 (invalid argument) and E004 (malformed template) remain. E002/E003 are removed; narrow codec outcomes with `InvalidUtf8.is` or `InvalidBase64.is`.
 
 | Code                    | Raised by                                                                                                                        | Meaning                                                                               |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -333,7 +333,7 @@ textMetrics(article); // every count, score, and statistic in one object
 No `Buffer`, `atob`, or `btoa`. Text functions are UTF-8; byte functions take
 and return `Uint8Array`. Decoding is strict: whitespace, mixed alphabets, bad
 padding, impossible lengths, and nonzero unused bits return `InvalidBase64`;
-invalid UTF-8 returns `InvalidUtf8`. `tryFromBase64` is an alias of `fromBase64`.
+invalid UTF-8 returns `InvalidUtf8`. Use `fromBase64` to decode text.
 
 ```ts
 import { base64ToBytes, fromBase64, toBase64 } from '@arki/string/base64';

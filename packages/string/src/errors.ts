@@ -14,20 +14,6 @@ export const STRING_ERROR_CODES = {
    */
   invalidArgument: 'ARKI_STRING_E001',
   /**
-   * Text or bytes are not valid UTF-8: an unpaired surrogate, an overlong form, a bad lead byte.
-   *
-   * @fix Pass well-formed text with no lone surrogates, or valid UTF-8 bytes. Encoding APIs return canonical failures; narrow with `isFailure`.
-   * @verify bun run test
-   */
-  invalidUtf8: 'ARKI_STRING_E002',
-  /**
-   * An input is not valid strict base64: whitespace, a mixed alphabet, bad padding or an impossible length.
-   *
-   * @fix Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures; narrow with `isFailure`.
-   * @verify bun run test
-   */
-  invalidBase64: 'ARKI_STRING_E003',
-  /**
    * An `interpolate` template has a malformed placeholder.
    *
    * @fix Write placeholders as `{{ name }}` with an identifier inside, and close every `{{` with `}}`.
@@ -41,14 +27,10 @@ export type StringErrorCode = (typeof STRING_ERROR_CODES)[keyof typeof STRING_ER
 
 const REMEDIATIONS: Record<StringErrorCode, string> = {
   ARKI_STRING_E001: 'Check the argument against the range in the function reference.',
-  ARKI_STRING_E002:
-    'Pass well-formed text (no lone surrogates) or valid UTF-8 bytes. Encoding APIs return canonical failures.',
-  ARKI_STRING_E003:
-    'Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures.',
   ARKI_STRING_E004: 'Write placeholders as {{ name }} with an identifier inside, and close every {{ with }}.',
 };
 
-/** Legacy diagnostic for static misuse; encoding APIs return canonical failures. */
+/** Diagnostic for static misuse; encoding APIs return canonical failures. */
 export class StringError extends Error {
   readonly code: StringErrorCode;
   /** What to do about it, in one sentence. */

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { StringErrorCode } from './errors.js';
 import { fromBase64, interpolate, padStart, STRING_ERROR_CODES, StringError, toBase64 } from './index.js';
 
 function caught(run: () => unknown): unknown {
@@ -13,10 +14,9 @@ function caught(run: () => unknown): unknown {
 
 describe('StringError codes', () => {
   it('lets callers branch on the code, so each failure kind has its own stable code', () => {
+    expectTypeOf<StringErrorCode>().extract<'ARKI_STRING_E002' | 'ARKI_STRING_E003'>().toBeNever();
     expect(STRING_ERROR_CODES).toEqual({
       invalidArgument: 'ARKI_STRING_E001',
-      invalidUtf8: 'ARKI_STRING_E002',
-      invalidBase64: 'ARKI_STRING_E003',
       invalidTemplate: 'ARKI_STRING_E004',
     });
   });
@@ -28,7 +28,7 @@ describe('StringError codes', () => {
     expect(error instanceof StringError && error.remediation.length > 0).toBe(true);
   });
 
-  it('keeps UTF-8 failures (E002) apart from base64 failures (E003), so callers can report the right one', () => {
+  it('keeps canonical UTF-8 and base64 failures apart, so callers can report the right one', () => {
     expect(toBase64('\uD83D')).toMatchObject({ code: 'string.invalid_utf8' });
     expect(fromBase64('/w==')).toMatchObject({ code: 'string.invalid_utf8' });
     expect(fromBase64('abc')).toMatchObject({ code: 'string.invalid_base64' });

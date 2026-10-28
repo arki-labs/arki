@@ -218,6 +218,3 @@ export function fromBase64(encoded: string, options: Base64Options = {}) {
   const bytes = base64ToBytes(encoded, options);
   return isFailure(bytes) ? bytes : utf8Decode(bytes);
 }
-
-/** Alias of `fromBase64`. Breaking: returns the same failures, never null. */
-export const tryFromBase64 = fromBase64;

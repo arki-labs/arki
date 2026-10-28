@@ -2,6 +2,9 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { isFailure, orThrow } from '@arki/failure';
 
+import * as base64 from './base64.js';
+import * as string from './index.js';
+
 import {
   base64ToBytes,
   byteLength,
@@ -10,7 +13,6 @@ import {
   InvalidBase64,
   InvalidUtf8,
   toBase64,
-  tryFromBase64,
   utf8Decode,
   utf8Encode,
 } from './base64.js';
@@ -100,7 +102,7 @@ describe('strict decoding', () => {
     ['A', { alphabet: 'url' }],
   ] as const)('rejects %j with %j', (encoded, options) => {
     expect(InvalidBase64.is(base64ToBytes(encoded, options))).toBe(true);
-    expect(InvalidBase64.is(tryFromBase64(encoded, options))).toBe(true);
+    expect(InvalidBase64.is(fromBase64(encoded, options))).toBe(true);
   });
   it('accepts url input without padding by default', () => {
     expect(fromBase64('Zg', { alphabet: 'url' })).toBe('f');
@@ -108,7 +110,6 @@ describe('strict decoding', () => {
   it('separates binary from text decoding', () => {
     expect([...orThrow(base64ToBytes('/w=='))]).toEqual([255]);
     expect(InvalidUtf8.is(fromBase64('/w=='))).toBe(true);
-    expect(InvalidUtf8.is(tryFromBase64('/w=='))).toBe(true);
   });
   it.each([
     [[0xc0, 0x80], 'overlong'],
@@ -137,8 +138,6 @@ it('returns exact canonical failures and narrows successes without leaking input
   expectTypeOf<ReturnType<typeof base64ToBytes>>().toEqualTypeOf<Uint8Array<ArrayBuffer> | Base64Failure>();
   expectTypeOf<ReturnType<typeof toBase64>>().toEqualTypeOf<string | Utf8Failure>();
   expectTypeOf<ReturnType<typeof fromBase64>>().toEqualTypeOf<string | Utf8Failure | Base64Failure>();
-  expectTypeOf<typeof tryFromBase64>().toEqualTypeOf<typeof fromBase64>();
-  expect(tryFromBase64).toBe(fromBase64);
   const value = fromBase64('private input!');
   if (isFailure(value)) {
     expectTypeOf(value).toEqualTypeOf<Utf8Failure | Base64Failure>();
@@ -163,4 +162,11 @@ it('keeps both canonical failure envelopes safe and actionable', () => {
     expect(value.cause).toBeUndefined();
     expect(JSON.stringify(value)).not.toContain('secret');
   }
+});
+
+it('exposes one canonical decoder without the retired compatibility alias', () => {
+  expect(base64).not.toHaveProperty('tryFromBase64');
+  expect(string).not.toHaveProperty('tryFromBase64');
+  expectTypeOf<keyof typeof base64>().extract<'tryFromBase64'>().toBeNever();
+  expectTypeOf<keyof typeof string>().extract<'tryFromBase64'>().toBeNever();
 });

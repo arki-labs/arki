@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Breaking: remove the `tryFromBase64` compatibility alias; use `fromBase64`. Remove obsolete E002/E003 from `STRING_ERROR_CODES` and `StringErrorCode`; encoding outcomes remain `InvalidUtf8` and `InvalidBase64`. Static misuse retains E001/E004.
+
 - Breaking: interpolation returns `MissingValue` instead of throwing for absent runtime values. Rename `missing: 'throw'` to `missing: 'fail'` and narrow fluent results before chaining. The retired E005 diagnostic is removed; malformed syntax remains E004. See [the upgrade guide](docs/upgrades/0.3.0-to-0.4.0.md).
 
 ## 0.3.0

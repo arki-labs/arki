@@ -41,7 +41,7 @@ if (cut !== 'The quick…') throw new Error(cut);
 
 1. Call `fromBase64` and narrow with `isFailure` before using the text.
 2. `InvalidBase64` (`string.invalid_base64`) identifies malformed base64; `InvalidUtf8` (`string.invalid_utf8`) identifies invalid text bytes.
-3. Breaking: `tryFromBase64` aliases `fromBase64`; replace null checks and catches with failure narrowing. Fluent codecs also return failures or `StringValue`.
+3. Breaking: `tryFromBase64` is removed; use `fromBase64` and replace null checks and catches with failure narrowing. E002/E003 are removed; static misuse retains E001/E004. Fluent codecs also return failures or `StringValue`.
 
 ### Fill a template
 

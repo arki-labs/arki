@@ -42,7 +42,7 @@ check('fluent interpolation refusal', s.MissingValue.is(s.str('{{ name }}').inte
 check('interpolation recovery', s.interpolate('{{ name }}', {}, { missing: 'keep' }), '{{ name }}');
 check('slug', s.slugify('Привет мир & fooBar'), 'privet-mir-and-foo-bar');
 check('base64 roundtrip', s.fromBase64(s.toBase64('crème brûlée 👋')), 'crème brûlée 👋');
-check('base64 strict', s.InvalidBase64.is(s.tryFromBase64('Zg=')), true);
+check('base64 strict', s.InvalidBase64.is(s.fromBase64('Zg=')), true);
 check('utf8 strict', s.InvalidUtf8.is(s.fromBase64('/w==')), true);
 check('surrogate strict', s.InvalidUtf8.is(s.toBase64('\uD800')), true);
 check('readability level', s.fleschReadingEaseLevel(95), 'Very Easy');
