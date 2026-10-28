@@ -1,6 +1,6 @@
 # @arki/env
 
-> Type-safe environment variables: `defineEnv()` validates lazily with any Standard Schema, `secret()` keeps values out of logs, and `@arki/env/dot` validates at Dot boot. It is not a config-file loader.
+> Typed environment validation and explicit Node file/key operations. `defineEnv()` validates lazily with any Standard Schema, `secret()` keeps values out of logs, and `@arki/dot/env` validates at Dot boot.
 
 ## Import paths
 
@@ -8,7 +8,7 @@
 - `@arki/env`: The `presets` namespace of ready-made variable shapes, for `defineEnv()`. `presets`.
 - `@arki/env/core`: `defineEnv()` plus `secret()`, `reveal()` and `Redacted` for typed, lazily validated environments. `Redacted`, `SECRET_SCHEMA`, `defineEnv`, `describeEnv`, `formatIssues`, `isSecretSchema`, `presets`, `reveal`, `secret`; types `EnvDescription`, `EnvKeyDescription`.
 - `@arki/env/presets`: Ready-made Zod presets for ports, URLs, lists, JSON and other common variable shapes. `commonPresets`, `parsePresets`, `presets`, `urlPresets`.
-- `@arki/env/node`: Encrypted env files in the dotenvx 2.x format, for Node, Bun and Deno: load them into the environment (`loadEnvFiles`), edit them (`initEnvFile`, `setEnvFileValue`, ...), and the codec underneath. `DEFAULT_RESOLVERS`, `ENCRYPTED_PREFIX`, `ENV_FILES_ERROR_CODES`, `KEYS_FILE`, `decryptEnvFile`, `decryptValue`, `encryptEnvFile`, `encryptValue`, `envDirs`, `envHeader`, `envValues`, `findPrivateKey`; and 33 more.
+- `@arki/env/node`: Encrypted env files in the dotenvx 2.x format, for Node, Bun and Deno: load them into the environment (`loadEnvFiles`), edit them (`initEnvFile`, `setEnvFileValue`, ...), and the codec underneath. `DEFAULT_RESOLVERS`, `DecryptionFailed`, `ENCRYPTED_PREFIX`, `ENV_FILES_ERROR_CODES`, `EncryptionFailed`, `EnvCancelled`, `EnvDeadline`, `EnvFilesFailed`, `FileReadFailed`, `FileWriteFailed`, `KEYS_FILE`, `KeyGenerationFailed`; and 53 more.
 - `@arki/env/node/register`: Side-effect entry: load the env files into `process.env` as this module is imported.
 <!-- llms:end -->
 

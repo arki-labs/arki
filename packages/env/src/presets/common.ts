@@ -3,20 +3,16 @@ import { z } from 'zod';
 export const commonPresets = {
   string: (defaultValue?: string) => {
     const schema = z.string();
-    return defaultValue ? schema.default(defaultValue) : schema;
+    return defaultValue === undefined ? schema : schema.default(defaultValue);
   },
 
   number: (defaultValue?: number) => {
     const schema = z.coerce.number();
-    return defaultValue ? schema.default(defaultValue) : schema;
+    return defaultValue === undefined ? schema : schema.default(defaultValue);
   },
 
   port: (defaultValue = 3000) =>
-    z
-      .coerce.number()
-      .min(1, 'Port must be at least 1')
-      .max(65_535, 'Port must be at most 65535')
-      .default(defaultValue),
+    z.coerce.number().min(1, 'Port must be at least 1').max(65_535, 'Port must be at most 65535').default(defaultValue),
 
   nodeEnv: () => z.enum(['development', 'production', 'test']).default('development'),
 

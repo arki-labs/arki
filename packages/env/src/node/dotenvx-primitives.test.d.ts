@@ -7,6 +7,7 @@ declare module '@dotenvx/primitives' {
     keypair(): { publicKey: string; privateKey: string };
     encrypt(publicKey: string, value: string): string;
     decrypt(privateKey: string, value: string): string;
+    keyringSync(options: { fk: string; processEnv: Readonly<Record<string, string | undefined>> }): Readonly<Record<string, string>>;
   };
   export default primitives;
 }

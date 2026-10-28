@@ -4,15 +4,15 @@
  * agent, a pipe, CI), secret values in the child's stdout and stderr are replaced by `[redacted]`.
  */
 import { spawn } from 'node:child_process';
-
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { findPrivateKey, isKeyName, loadEnvFiles } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 import { MIN_SECRET_LENGTH } from '@arki/log';
 
+import { EnvCommandFailed } from '../../env-failures.js';
 import { envTargetInput, loadDescription, relative, resolveTarget } from '../../env-files.js';
-import { EnvCommandFailed, EnvLoadFailed } from '../../env-failures.js';
 import { createRedactor } from '../../env-redact.js';
 
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
@@ -21,21 +21,30 @@ export default defineCommand({
   describe: 'Run a command with the env files loaded; redacts secrets when output is not a terminal',
   input: z.object({
     command: z.array(z.string()).min(1).describe('The command and its arguments, after --'),
-    redact: z.boolean().optional().describe('Replace secret values in the output (default: on unless stdout is a terminal)'),
+    redact: z
+      .boolean()
+      .optional()
+      .describe('Replace secret values in the output (default: on unless stdout is a terminal)'),
     env: envTargetInput.env,
     cwd: envTargetInput.cwd,
   }),
   args: ['command'],
   passthrough: true,
   effects: 'write',
-  examples: ['dot env run -- bun run dev', 'dot env run -- drizzle-kit push', 'dot env run --no-redact -- printenv DB_URL'],
+  examples: [
+    'dot env run -- bun run dev',
+    'dot env run -- drizzle-kit push',
+    'dot env run --no-redact -- printenv DB_URL',
+  ],
   async run({ input, ui }) {
     const target = resolveTarget(input);
     const env: Record<string, string | undefined> = { ...process.env };
     const report = loadEnvFiles({ cwd: target.cwd, root: target.root, environment: target.environment, env });
-    if (report.errors.length > 0) return EnvLoadFailed({ errors: report.errors.map(error => ({ ...error, file: relative(target.root, error.file) })) });
-    for (const entry of report.shadowed) ui.warn(`${entry.key}: the environment overrides ${relative(target.root, entry.file)}:${String(entry.line)}`);
-    for (const entry of report.refused) ui.warn(`${entry.key} in ${relative(target.root, entry.file)} not loaded: ${entry.reason}`);
+    if (isFailure(report)) return report;
+    for (const entry of report.shadowed)
+      ui.warn(`${entry.key}: the environment overrides ${relative(target.root, entry.file)}:${String(entry.line)}`);
+    for (const entry of report.refused)
+      ui.warn(`${entry.key} in ${relative(target.root, entry.file)} not loaded: ${entry.reason}`);
 
     // The child never gets a private key: with it, `dot env run -- <agent>` would hand over every secret.
     const privateKeys: string[] = [];
@@ -45,7 +54,11 @@ export default defineCommand({
       delete env[key];
     }
     for (const value of report.values) {
-      if (value.kind === 'encrypted') privateKeys.push(...(findPrivateKey(value.file, { root: target.root, env: process.env })?.keys ?? []));
+      if (value.kind === 'encrypted') {
+        const found = findPrivateKey(value.file, { root: target.root, env: process.env });
+        if (isFailure(found)) return found;
+        privateKeys.push(...(found?.keys ?? []));
+      }
     }
 
     const redact = input.redact ?? process.stdout.isTTY !== true;
@@ -54,7 +67,9 @@ export default defineCommand({
     // was needed, the inherited value too.
     const secrets = [
       ...privateKeys,
-      ...report.values.flatMap(value => (value.kind === 'plain' && !declaredSecret.has(value.key) ? [] : [value.value ?? '', env[value.key] ?? ''])),
+      ...report.values.flatMap(value =>
+        value.kind === 'plain' && !declaredSecret.has(value.key) ? [] : [value.value ?? '', env[value.key] ?? ''],
+      ),
     ].filter(secret => secret !== '');
     if (redact) {
       for (const value of report.values) {
@@ -64,7 +79,11 @@ export default defineCommand({
       }
     }
     const [command = '', ...args] = input.command;
-    const child = spawn(command, args, { cwd: target.cwd, env, stdio: redact ? ['inherit', 'pipe', 'pipe'] : 'inherit' });
+    const child = spawn(command, args, {
+      cwd: target.cwd,
+      env,
+      stdio: redact ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+    });
     if (redact) {
       const out = createRedactor(secrets, text => process.stdout.write(text));
       const err = createRedactor(secrets, text => process.stderr.write(text));

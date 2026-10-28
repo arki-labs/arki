@@ -21,8 +21,8 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 3. Import `env` where you need a value.
 
 ```ts
-import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
+import { presets } from '@arki/env/presets';
 
 export const env = defineEnv({
   server: {
@@ -60,7 +60,7 @@ Do not read `.env.keys`. Agents are denied it. A process you start with `dot env
 
 ### Load env files outside `dot env run`
 
-Make `import '@arki/env/node/register'` the first import of the process entry. It throws with every `ARKI_ENV_FILES_*` problem listed.
+Make `import '@arki/env/node/register'` the first import of the process entry. This explicit boot import throws on returned load failures. Direct `loadEnvFiles()` callers check `isFailure` and handle `EnvFilesFailed.data.errors`, cancellation or deadline before starting work.
 
 ### Build a Docker image without secrets
 
@@ -93,13 +93,23 @@ const app = await defineApp('pizzeria')
 
 ## Errors
 
-| Code or error            | Meaning                                     | What to do                                                       |
-| ------------------------ | ------------------------------------------- | ---------------------------------------------------------------- |
-| `Error` from `defineEnv` | A variable failed its schema on first read. | Read the `path: message` lines. Fix the variables.               |
-| `ARKI_ENV_PLUGIN_E001`   | The Dot plugin found a bad env at boot.     | Set the listed variables before booting. Do not skip validation. |
-| `ARKI_ENV_FILES_E001`    | Encrypted values and no private key.        | Export the `DOTENV_PRIVATE_KEY_<ENV>` named, or `dot env keys pull`. |
-| `ARKI_ENV_FILES_E002`    | A value did not decrypt.                    | `dot env explain <KEY>`; set it again with `dot env set --stdin`.  |
-| `ARKI_ENV_FILES_E003`    | A reference did not resolve.                | Sign in to the provider CLI named in the message.                 |
+| Code or error             | Meaning                                     | What to do                                                           |
+| ------------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
+| `Error` from `defineEnv`  | A variable failed its schema on first read. | Read the `path: message` lines. Fix the variables.                   |
+| `ARKI_ENV_PLUGIN_E001`    | The Dot plugin found a bad env at boot.     | Set the listed variables before booting. Do not skip validation.     |
+| `env.missing_private_key` | Encrypted values and no private key.        | Export the `DOTENV_PRIVATE_KEY_<ENV>` named, or `dot env keys pull`. |
+| `env.decryption_failed`   | A value did not decrypt.                    | `dot env explain <KEY>`; set it again with `dot env set --stdin`.    |
+| `env.reference_failed`    | A reference did not resolve.                | Sign in to the provider CLI named in the message.                    |
+
+### Handle node operations
+
+Use `isFailure` before reading a generated keypair, loaded report, edit result or private-key source. Parse external strings with `parsePublicKey` / `parsePrivateKey`; never cast key brands. Expected filesystem/crypto/provider rejection is returned. Boot declaration misuse still throws.
+
+Pass a shared `timeoutMs` and optional `signal` to `loadEnvFiles`. Providers receive the remaining synchronous read budget; native subprocesses time out. Cancellation is cooperative between synchronous callbacks. Provider stderr stays in the local private cause.
+
+Keep `.env.keys` after `RotationIncomplete`. Every existing candidate local key store is staged as well as the root. Their existing comma-list format holds old and new generations; use it to retry. Old keys are removed only after every rewritten file reads back exactly as planned. Never print the file or attach keys to diagnostics.
+
+Node/provider OpenTelemetry is enabled through the API without SDK setup. It emits only bounded operation/outcome data, never file paths, references or secret bytes. Local declarations, schemas, text parsing and crypto helpers do not create redundant spans.
 
 ## Verify
 

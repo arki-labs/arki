@@ -7,11 +7,16 @@
  * what dotenvx writes, so files move freely between `dot env` and the `dotenvx` CLI.
  */
 import { Buffer } from 'node:buffer';
-
 import { decrypt, encrypt, PrivateKey } from 'eciesjs';
 import { Config } from 'eciesjs/config';
 
+import { attempt, isFailure } from '@arki/failure';
+import { ensure } from '@arki/schema';
+
+import type { EnvPrivateKey, EnvPublicKey } from './key-schemas.js';
 import { ENCRYPTED_PREFIX } from '../core/define-env.js';
+import { DecryptionFailed, EncryptionFailed, KeyGenerationFailed, UnrepresentableValue } from './errors.js';
+import { envPrivateKeySchema, envPublicKeySchema } from './key-schemas.js';
 
 export { ENCRYPTED_PREFIX } from '../core/define-env.js';
 
@@ -36,7 +41,7 @@ export type EnvDocument = {
 };
 
 /** A keypair as dotenvx writes it: a compressed public key (66 hex chars), a private key (64). */
-export type EnvKeypair = { readonly publicKey: string; readonly privateKey: string };
+export type EnvKeypair = { readonly publicKey: EnvPublicKey; readonly privateKey: EnvPrivateKey };
 
 /**
  * Parse `.env` text the way `dotenv` reads it: `export` prefixes, `#` comments, single, double and
@@ -81,9 +86,11 @@ export function envValues(document: EnvDocument): Map<string, EnvEntry> {
  * The text with `key` set to `value`. An existing assignment (the last one) is rewritten in place;
  * a new key is appended. Every other line is kept as written.
  */
-export function setEnvValue(text: string, key: string, value: string): string {
+export function setEnvValue(text: string, key: string, value: string) {
   const document = parseEnv(text);
-  const line = `${key}=${encodeValue(value)}`;
+  const encoded = encodeValue(value);
+  if (isFailure(encoded)) return encoded;
+  const line = `${key}=${encoded}`;
   const existing = document.entries.findLast(entry => entry.key === key);
   if (existing === undefined) {
     const body = document.lines.join('\n');
@@ -110,26 +117,45 @@ export function isEncrypted(value: string): boolean {
 }
 
 /** Encrypt `value` to a compressed or uncompressed secp256k1 public key (hex). */
-export function encryptValue(value: string, publicKey: string): string {
-  const sealed = encrypt(publicKey, new TextEncoder().encode(value), DOTENVX_ECIES);
-  return `${ENCRYPTED_PREFIX}${Buffer.from(sealed).toString('base64')}`;
+export function encryptValue(value: string, publicKey: EnvPublicKey) {
+  return attempt(
+    () => {
+      const sealed = encrypt(publicKey, new TextEncoder().encode(value), DOTENVX_ECIES);
+      return `${ENCRYPTED_PREFIX}${Buffer.from(sealed).toString('base64')}`;
+    },
+    cause => EncryptionFailed({ cause }),
+  );
 }
 
-/** Decrypt a value written by {@link encryptValue}. Throws when the key does not match. */
-export function decryptValue(value: string, privateKey: string): string {
-  const sealed = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
-  return new TextDecoder('utf-8', { fatal: true }).decode(decrypt(privateKey, sealed, DOTENVX_ECIES));
+/** Decrypt authenticated UTF-8, or return DecryptionFailed when the ciphertext/key does not match. */
+export function decryptValue(value: string, privateKey: EnvPrivateKey) {
+  if (!isEncrypted(value)) return DecryptionFailed();
+  return attempt(
+    () => {
+      const sealed = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
+      return new TextDecoder('utf-8', { fatal: true }).decode(decrypt(privateKey, sealed, DOTENVX_ECIES));
+    },
+    cause => DecryptionFailed({ cause }),
+  );
 }
 
 /** A new random keypair. */
-export function generateKeypair(): EnvKeypair {
-  const secret = new PrivateKey(undefined, DOTENVX_ECIES.ellipticCurve);
-  return { publicKey: secret.publicKey.toHex(true), privateKey: secret.toHex() };
+export function generateKeypair() {
+  return attempt(
+    () => {
+      const secret = new PrivateKey(undefined, DOTENVX_ECIES.ellipticCurve);
+      return {
+        publicKey: ensure(secret.publicKey.toHex(true), envPublicKeySchema),
+        privateKey: ensure(secret.toHex(), envPrivateKeySchema),
+      } satisfies EnvKeypair;
+    },
+    cause => KeyGenerationFailed({ cause }),
+  );
 }
 
-/** The compressed public key of a private key (hex). Throws on an invalid key. */
-export function publicKeyOf(privateKey: string): string {
-  return PrivateKey.fromHex(privateKey, DOTENVX_ECIES.ellipticCurve).publicKey.toHex(true);
+/** The compressed public key of an already validated private key. */
+export function publicKeyOf(privateKey: EnvPrivateKey): EnvPublicKey {
+  return ensure(PrivateKey.fromHex(privateKey, DOTENVX_ECIES.ellipticCurve).publicKey.toHex(true), envPublicKeySchema);
 }
 
 /**
@@ -138,7 +164,12 @@ export function publicKeyOf(privateKey: string): string {
  */
 export function keyNamesFor(fileName: string): { readonly publicKey: string; readonly privateKey: string } {
   const base = fileName.toLowerCase().replace(/\.txt$/, '');
-  const suffix = base.startsWith('.env.') ? `_${base.slice('.env.'.length).replaceAll(/[^a-z0-9]+/g, '_').toUpperCase()}` : '';
+  const suffix = base.startsWith('.env.')
+    ? `_${base
+        .slice('.env.'.length)
+        .replaceAll(/[^a-z0-9]+/g, '_')
+        .toUpperCase()}`
+    : '';
   return { publicKey: `DOTENV_PUBLIC_KEY${suffix}`, privateKey: `DOTENV_PRIVATE_KEY${suffix}` };
 }
 
@@ -148,7 +179,7 @@ export function isKeyName(key: string): boolean {
 }
 
 /** The dotenvx header for a file: banner, public key, and a `# <file>` line. */
-export function envHeader(fileName: string, publicKey: string): string {
+export function envHeader(fileName: string, publicKey: EnvPublicKey): string {
   return [
     '#/-------------------[DOTENV_PUBLIC_KEY]--------------------/',
     '#/            public-key encryption for .env files          /',
@@ -179,11 +210,11 @@ function decodeValue(raw: string, quote: string | undefined): string {
  * `\n`), then single, then backticks. A value no quoting can carry (it holds every quote character
  * and a line break, say) is refused rather than written in a form that could inject other keys.
  */
-function encodeValue(value: string): string {
+function encodeValue(value: string) {
   const candidates = [`"${value.replaceAll('\r', '\\r').replaceAll('\n', '\\n')}"`, `'${value}'`, `\`${value}\``];
   for (const candidate of candidates) {
     const document = parseEnv(`K=${candidate}`);
     if (document.entries.length === 1 && document.entries[0]?.value === value) return candidate;
   }
-  throw new Error('this value cannot be stored in a .env file: it holds every quote character together with a line break or an escape sequence');
+  return UnrepresentableValue();
 }

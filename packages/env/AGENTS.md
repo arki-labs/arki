@@ -13,6 +13,9 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 7. A bad environment fails loud: a thrown `Error` from `defineEnv`, or `ARKI_ENV_PLUGIN_E001` from the Dot plugin. Never fall back to defaults after a failure.
 8. The Dot adapter (`@arki/dot/env`) is a plugin: `configure` stays synchronous and validates nothing, so `dot explain` needs no secrets. The factory validates at boot.
 9. Never put benchmark numbers in prose. The `bench` block in the README is generated.
+10. Node execution returns canonical failures. Parse external key strings through their public/private key schemas. Never echo key bytes, provider stderr or raw causes into public diagnostics.
+11. Rotation saves both key generations before changing ciphertext and confirms every file before retiring recovery keys.
+12. Node/provider telemetry uses the API without configuring an SDK; never attach paths, references, values or key bytes.
 
 ## Changing this package
 

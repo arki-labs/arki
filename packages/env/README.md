@@ -13,8 +13,8 @@ bun add @arki/env
 Declare the variables once. Read them anywhere. A bad value throws on the first read, never at import.
 
 ```ts run expect
-import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
+import { presets } from '@arki/env/presets';
 
 const env = defineEnv({
   server: {
@@ -106,19 +106,19 @@ Load the files once, at the top of a process. Use `dot env run -- <command>` (th
 Mask loaded secrets in logs, wherever they appear:
 
 ```ts skip="needs encrypted env files on disk"
-import { configure, maskSecrets } from '@arki/log';
 import { secretValues } from '@arki/env/node';
+import { configure, maskSecrets } from '@arki/log';
 
 configure({ processors: [maskSecrets(secretValues)] });
 ```
 
-| Code                  | Meaning                                                  |
-| --------------------- | -------------------------------------------------------- |
-| `ARKI_ENV_FILES_E001` | A file has encrypted values and no private key was found. |
-| `ARKI_ENV_FILES_E002` | A value did not decrypt with the key that was found.     |
-| `ARKI_ENV_FILES_E003` | A reference could not be resolved by its provider CLI.   |
+| Code                      | Meaning                                                   |
+| ------------------------- | --------------------------------------------------------- |
+| `env.missing_private_key` | A file has encrypted values and no private key was found. |
+| `env.decryption_failed`   | A value did not decrypt with the key that was found.      |
+| `env.reference_failed`    | A reference could not be resolved by its provider CLI.    |
 
-Messages name the file and the key, never a value.
+Messages name the file and the key, never a value. `loadEnvFiles` returns `EnvFilesFailed` with these entries in `data.errors`; native file-read problems use `env.file_read_failed`. No entries are applied when loading fails. Raw provider errors and stderr stay in the failure's private cause.
 
 ## Presets
 
@@ -131,8 +131,8 @@ The `presets` namespace holds common variable shapes:
 ```ts run expect
 import { z } from 'zod';
 
-import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
+import { presets } from '@arki/env/presets';
 
 const env = defineEnv({
   server: {
@@ -158,8 +158,8 @@ console.log(env.FEATURES);
 `defineEnv` throws an `Error` on the first read of a bad environment. The message starts with your `name` and lists one `path: message` line per issue. Set `options.onValidationError` to throw something else.
 
 ```ts run expect
-import { presets } from '@arki/env/presets';
 import { defineEnv } from '@arki/env/core';
+import { presets } from '@arki/env/presets';
 
 const env = defineEnv({
   server: { PORT: presets.port(), DATABASE_URL: presets.url() },
@@ -180,6 +180,16 @@ invalid environment
 The Dot adapter (`env()` from `@arki/dot/env`) validates at boot. A bad environment stops `boot()` with `ARKI_ENV_PLUGIN_E001`. Its `remediation` tells you to set the listed variables. `dot explain` never validates.
 
 Handle it by fixing the variables. Do not catch the error and continue with defaults.
+
+Node execution is a separate contract. Codec, filesystem and provider operations return exact canonical failures from `@arki/failure`; check `isFailure(result)` before using a result. Key generation returns a keypair or `KeyGenerationFailed`; encryption returns text or `EncryptionFailed`; decryption returns text or `DecryptionFailed`; an unrepresentable dotenv value returns `UnrepresentableValue`. File operations return `FileReadFailed`, `FileWriteFailed` and their precise missing-key/crypto outcomes. Native errors remain private causes, never public messages.
+
+Parse external keys with `parsePublicKey` / `parsePrivateKey`. Their schemas create distinct `EnvPublicKey` and `EnvPrivateKey` types; a private key cannot be passed where a public key is required. Invalid keys return canonical schema failures without echoing their bytes.
+
+`loadEnvFiles({ signal, timeoutMs })` returns a report, `EnvFilesFailed`, `EnvCancelled` or `EnvDeadline`. Its default 30-second budget is shared by all reference reads. Synchronous provider callbacks receive the remaining budget and signal; cancellation is checked between calls. A synchronous syscall cannot be interrupted by a JavaScript abort handler while the event loop is blocked. Native provider subprocesses enforce their remaining timeout. `register` bridges these outcomes to a boot exception by explicit import.
+
+Rotation first atomically stores a comma-separated list containing the new and previous private keys in the root and every existing candidate local key store. Staging all stores finishes before ciphertext changes, preserving nearest-store precedence. This is the existing dotenvx multi-key format. It then replaces and reads back every env file before retiring the previous keys. `RotationIncomplete` identifies the recovery key store and committed count; keep that store and retry with it. Both generations remain usable after a partial rotation. Writes use exclusive temp files plus rename; this protects process interruption, not a power-loss durability guarantee.
+
+Owned node loads/edits, filesystem reads/writes and provider reads emit default OpenTelemetry spans and duration metrics through the API. No SDK is installed and no export I/O occurs without application configuration. Attributes contain bounded operation/outcome labels; paths, references, key bytes, values and raw causes are excluded. Pure definitions, schemas and local text/crypto transforms need no provider span.
 
 ## Limits
 

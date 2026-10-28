@@ -5,15 +5,22 @@
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { DEFAULT_RESOLVERS, envDirs, loadEnvFiles } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 
-import { envTargetInput, loadDescription, relative, resolveTarget, trackedFiles, trackedKeyFiles } from '../../env-files.js';
 import type { EnvFinding } from '../../env-failures.js';
 import { EnvCheckFailed } from '../../env-failures.js';
+import {
+  envTargetInput,
+  loadDescription,
+  relative,
+  resolveTarget,
+  trackedFiles,
+  trackedKeyFiles,
+} from '../../env-files.js';
 
 /** Resolvers that return a placeholder, so `check` stays offline unless `--resolve`. */
 const OFFLINE_RESOLVERS = Object.fromEntries(Object.keys(DEFAULT_RESOLVERS).map(scheme => [scheme, () => '']));
@@ -38,13 +45,16 @@ export default defineCommand({
       write: false,
       references: input.resolve ? DEFAULT_RESOLVERS : OFFLINE_RESOLVERS,
     });
+    if (isFailure(report)) return report;
     const schema = await loadDescription(target.cwd, input.schema);
     const secretKeys = new Set((schema.description?.keys ?? []).filter(key => key.secret).map(key => key.key));
     const tracked = trackedFiles(target.root, report.files);
     const keyFiles = trackedKeyFiles(target.root);
     const gitFailures = [tracked, keyFiles].flatMap(answer => (answer.ok ? [] : [answer.reason]));
     // Without the schema a plain value in a tracked file may be a secret nobody can rule out: fail closed.
-    const unclassified = report.values.filter(value => value.kind === 'plain' && tracked.ok && tracked.value.has(value.file)).map(value => value.key);
+    const unclassified = report.values
+      .filter(value => value.kind === 'plain' && tracked.ok && tracked.value.has(value.file))
+      .map(value => value.key);
     const findings: EnvFinding[] = [
       ...report.errors.map(error => ({
         code: error.code,
@@ -72,7 +82,8 @@ export default defineCommand({
                 unclassified.length === 0
                   ? `secret() keys not checked (every tracked value is encrypted): ${schema.problem}`
                   : `cannot tell whether plain ${unclassified.join(', ')} in tracked files are secret: ${schema.problem}`,
-              remediation: 'Run the check under Bun (`bun --bun dot env check`), or encrypt the values: `dot env encrypt`.',
+              remediation:
+                'Run the check under Bun (`bun --bun dot env check`), or encrypt the values: `dot env encrypt`.',
             },
           ]),
       ...[...new Set(gitFailures)].map(reason => ({
@@ -89,7 +100,9 @@ export default defineCommand({
         file,
       })),
       ...report.values
-        .filter(value => value.kind === 'plain' && secretKeys.has(value.key) && tracked.ok && tracked.value.has(value.file))
+        .filter(
+          value => value.kind === 'plain' && secretKeys.has(value.key) && tracked.ok && tracked.value.has(value.file),
+        )
         .map(value => ({
           code: 'dot.env.plaintext_secret',
           severity: 'error' as const,
@@ -118,7 +131,12 @@ export default defineCommand({
         })),
     ];
     if (findings.some(finding => finding.severity === 'error')) return EnvCheckFailed({ findings });
-    return { ok: true, environment: target.environment, files: report.files.map(file => relative(target.root, file)), findings };
+    return {
+      ok: true,
+      environment: target.environment,
+      files: report.files.map(file => relative(target.root, file)),
+      findings,
+    };
   },
   render(data, ui) {
     ui.out(`${data.environment}: ${String(data.files.length)} file(s) ok`);

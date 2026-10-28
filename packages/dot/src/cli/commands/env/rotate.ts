@@ -3,14 +3,14 @@
  * re-encrypted together (they share a key name), then the new private key replaces the old one.
  */
 import path from 'node:path';
-
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { rotateEnvFiles } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 
-import { envTargetInput, filesNamed, relative, resolveTarget } from '../../env-files.js';
 import { EnvNoChange } from '../../env-failures.js';
+import { envTargetInput, filesNamed, relative, resolveTarget } from '../../env-files.js';
 
 export default defineCommand({
   describe: 'Re-encrypt every .env.<env> file in the repository to a new keypair',
@@ -24,6 +24,7 @@ export default defineCommand({
     if (!files.ok) return EnvNoChange({ file: name, reason: `cannot list the repository files: ${files.reason}` });
     if (files.value.length === 0) return EnvNoChange({ file: name, reason: `no ${name} file in the repository` });
     const result = rotateEnvFiles(files.value, { root: target.root });
+    if (isFailure(result)) return result;
     return {
       privateKeyName: result.privateKeyName,
       files: result.files.map(file => ({ file: relative(target.root, file.file), values: file.values })),

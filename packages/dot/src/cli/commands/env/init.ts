@@ -1,11 +1,11 @@
 /** `dot env init`: give an env file a public key header, and keep private keys out of git and agents. */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-
 import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { initEnvFile } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 import { is } from '@arki/schema';
 
 import { envTargetInput, relative, resolveTarget } from '../../env-files.js';
@@ -13,7 +13,14 @@ import { envTargetInput, relative, resolveTarget } from '../../env-files.js';
 const KEYS_IGNORE = '.env.keys*';
 const AGENT_DENY = ['Read(**/.env.keys)', 'Read(**/.env.keys.*)'] as const;
 
-const claudeSettings = z.object({ permissions: z.object({ deny: z.array(z.string()).optional() }).loose().optional() }).loose();
+const claudeSettings = z
+  .object({
+    permissions: z
+      .object({ deny: z.array(z.string()).optional() })
+      .loose()
+      .optional(),
+  })
+  .loose();
 
 export default defineCommand({
   describe: 'Add a public key header to an env file; reuse or create the private key',
@@ -23,6 +30,7 @@ export default defineCommand({
   run({ input }) {
     const target = resolveTarget(input);
     const result = initEnvFile(target.file, { root: target.root });
+    if (isFailure(result)) return result;
     return {
       file: relative(target.root, result.file),
       publicKey: result.publicKey,
@@ -34,7 +42,8 @@ export default defineCommand({
   },
   render(data, ui) {
     ui.out(data.headerAdded ? `${data.file}: header added` : `${data.file}: already initialised`);
-    if (data.keysWritten !== null) ui.out(`private key written to ${data.keysWritten} (back it up: dot env keys push --vault <vault>)`);
+    if (data.keysWritten !== null)
+      ui.out(`private key written to ${data.keysWritten} (back it up: dot env keys push --vault <vault>)`);
     ui.out(`.gitignore: ${data.gitignore}; agent read-deny for .env.keys: ${data.agentDeny}`);
   },
 });

@@ -8,37 +8,30 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-
 import { z } from 'zod';
 
-import { decryptValue, envValues, isEncrypted, isKeyName, keyNamesFor, parseEnv } from './codec.js';
-import { findPrivateKey, keysFileCandidates } from './keys.js';
+import type { FailureOf } from '@arki/failure';
+import { attempt, isFailure } from '@arki/failure';
+import { ensure } from '@arki/schema';
+
+import type { EnvPrivateKey } from './key-schemas.js';
 import type { ReferenceResolver } from './references.js';
+import { decryptValue, envValues, isEncrypted, isKeyName, keyNamesFor, parseEnv } from './codec.js';
+import {
+  DecryptionFailed,
+  ENV_FILES_ERROR_CODES,
+  EnvCancelled,
+  EnvDeadline,
+  EnvFilesFailed,
+  FileReadFailed,
+  ReferenceFailed,
+} from './errors.js';
+import { readEnvText } from './files.js';
+import { findPrivateKey, keysFileCandidates } from './keys.js';
+import { nodeOperation } from './operation-telemetry.js';
 import { DEFAULT_RESOLVERS, referenceScheme } from './references.js';
 
-export const ENV_FILES_ERROR_CODES = {
-  /**
-   * An env file holds encrypted values and no private key for it was found.
-   *
-   * @fix Export the `DOTENV_PRIVATE_KEY_<ENV>` named in the message, or run `dot env keys pull`, or restore `.env.keys`.
-   * @verify dot env check --json | jq -e .ok
-   */
-  missingPrivateKey: 'ARKI_ENV_FILES_E001',
-  /**
-   * A value could not be decrypted: the private key is not the one the file was encrypted to, or the value is damaged.
-   *
-   * @fix Run `dot env explain <KEY>` to see which key was used; re-set the value with `dot env set <KEY> --stdin`.
-   * @verify dot env check --json | jq -e .ok
-   */
-  cannotDecrypt: 'ARKI_ENV_FILES_E002',
-  /**
-   * A `scheme://` reference could not be resolved by its provider CLI.
-   *
-   * @fix Install the provider CLI named in the message, log in, and check the reference path.
-   * @verify dot env check --resolve --json | jq -e .ok
-   */
-  unresolvedReference: 'ARKI_ENV_FILES_E003',
-} as const;
+export { ENV_FILES_ERROR_CODES } from './errors.js';
 
 /** How `loadEnvFiles` finds, reads and applies the files. */
 export type LoadEnvFilesOptions = {
@@ -56,6 +49,10 @@ export type LoadEnvFilesOptions = {
   readonly write?: boolean;
   /** Reference resolvers by scheme. Default: `op`, `infisical`, `doppler`. */
   readonly references?: Readonly<Record<string, ReferenceResolver>>;
+  /** Cooperative cancellation between synchronous reads; passed to provider callbacks. */
+  readonly signal?: AbortSignal;
+  /** Aggregate load budget, shared by all provider subprocesses. Default: 30 seconds. */
+  readonly timeoutMs?: number;
 };
 
 /** How a value is stored in its file. */
@@ -71,12 +68,7 @@ export type EnvFileValue = {
 };
 
 /** One problem, by name. Messages never contain a value. */
-export type EnvFilesError = {
-  readonly code: (typeof ENV_FILES_ERROR_CODES)[keyof typeof ENV_FILES_ERROR_CODES];
-  readonly message: string;
-  readonly file: string;
-  readonly key?: string;
-};
+export type EnvFilesError = FailureOf<typeof EnvFilesFailed>['data']['errors'][number];
 
 /** What a load found and did. Holds plaintext in `values`: never print it whole. */
 export type EnvFilesReport = {
@@ -90,7 +82,12 @@ export type EnvFilesReport = {
   /** Keys the real environment set to a different value, so the file value was not used. */
   readonly shadowed: readonly { readonly key: string; readonly file: string; readonly line: number }[];
   /** File entries never applied: loader-hijacking keys (`NODE_OPTIONS`, `LD_*`, `DYLD_*`) and references into public keys. */
-  readonly refused: readonly { readonly key: string; readonly file: string; readonly line: number; readonly reason: string }[];
+  readonly refused: readonly {
+    readonly key: string;
+    readonly file: string;
+    readonly line: number;
+    readonly reason: string;
+  }[];
   readonly errors: readonly EnvFilesError[];
 };
 
@@ -144,111 +141,188 @@ const PLAIN_NAME = /^[_a-z]\w*$/i;
 /** Keys bundlers inline into browser code. */
 const PUBLIC_KEY = /^(?:VITE_|NEXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)/;
 
-/** Load the env files. Never throws for bad files: problems are in `report.errors`. */
-export function loadEnvFiles(options: LoadEnvFilesOptions = {}): EnvFilesReport {
-  const target = options.env ?? process.env;
-  const cwd = path.resolve(options.cwd ?? process.cwd());
-  const root = path.resolve(options.root ?? findRoot(cwd));
-  const environment = options.environment ?? nonEmpty(target['NODE_ENV']) ?? 'development';
-  const names = options.files ?? [`.env.${environment}`, ...(environment === 'test' ? [] : ['.env.local'])];
-  const resolvers = options.references ?? DEFAULT_RESOLVERS;
+const loadBudget = z.number().int().min(1).max(2_147_483_647);
 
-  const files = envDirs(root, cwd)
-    .flatMap(dir => names.map(name => path.join(dir, name)))
-    .filter(file => existsSync(file));
+/** Load atomically into the env map: operational problems return canonical failures before applying values. */
+export function loadEnvFiles(options: LoadEnvFilesOptions = {}) {
+  const budget = ensure(options.timeoutMs ?? 30_000, loadBudget);
+  return nodeOperation('load', () => {
+    const deadline = Date.now() + budget;
+    const stopped = () =>
+      options.signal?.aborted
+        ? EnvCancelled({ cause: options.signal.reason })
+        : Date.now() >= deadline
+          ? EnvDeadline()
+          : undefined;
+    const initialStop = stopped();
+    if (initialStop !== undefined) return initialStop;
+    const errors: EnvFilesError[] = [];
+    const causes: unknown[] = [];
+    const target = options.env ?? process.env;
+    const cwd = path.resolve(options.cwd ?? process.cwd());
+    const root = path.resolve(options.root ?? findRoot(cwd));
+    const environment = options.environment ?? nonEmpty(target['NODE_ENV']) ?? 'development';
+    const names = options.files ?? [`.env.${environment}`, ...(environment === 'test' ? [] : ['.env.local'])];
+    const resolvers = options.references ?? DEFAULT_RESOLVERS;
 
-  const winners = new Map<string, { readonly file: string; readonly line: number; readonly raw: string }>();
-  const refused: { key: string; file: string; line: number; reason: string }[] = [];
-  for (const file of files) {
-    for (const [key, entry] of envValues(parseEnv(readFileSync(file, 'utf8')))) {
-      if (isKeyName(key)) continue;
-      if (REFUSED_KEY.test(key) || !PLAIN_NAME.test(key)) {
-        const reason = PLAIN_NAME.test(key) ? 'it changes what code a process runs or whom it trusts' : 'it is not a portable variable name';
-        refused.push({ key, file, line: entry.start + 1, reason });
+    const files = envDirs(root, cwd)
+      .flatMap(dir => names.map(name => path.join(dir, name)))
+      .filter(file => existsSync(file));
+
+    const winners = new Map<string, { readonly file: string; readonly line: number; readonly raw: string }>();
+    const refused: { key: string; file: string; line: number; reason: string }[] = [];
+    for (const file of files) {
+      const stop = stopped();
+      if (stop !== undefined) return stop;
+      const text = readEnvText(file);
+      if (isFailure(text)) {
+        errors.push({ code: ENV_FILES_ERROR_CODES.cannotRead, file, message: text.message });
+        causes.push(text);
         continue;
       }
-      winners.set(key, { file, line: entry.start + 1, raw: entry.value });
+      for (const [key, entry] of envValues(parseEnv(text))) {
+        if (isKeyName(key)) continue;
+        if (REFUSED_KEY.test(key) || !PLAIN_NAME.test(key)) {
+          const reason = PLAIN_NAME.test(key)
+            ? 'it changes what code a process runs or whom it trusts'
+            : 'it is not a portable variable name';
+          refused.push({ key, file, line: entry.start + 1, reason });
+          continue;
+        }
+        winners.set(key, { file, line: entry.start + 1, raw: entry.value });
+      }
     }
-  }
 
-  const errors: EnvFilesError[] = [];
-  const keysByFile = new Map<string, readonly string[] | null>();
-  const missingReported = new Set<string>();
-  /** The keys for `file`. A missing key is an error only when a value actually needs it (`required`). */
-  const privateKeysFor = (file: string, required: boolean): readonly string[] | null => {
-    if (!keysByFile.has(file)) keysByFile.set(file, findPrivateKey(file, { root, env: target })?.keys ?? null);
-    const keys = keysByFile.get(file) ?? null;
-    if (keys === null && required && !missingReported.has(file)) {
-      missingReported.add(file);
-      errors.push({
-        code: ENV_FILES_ERROR_CODES.missingPrivateKey,
-        file,
-        message: `${path.relative(root, file)} has encrypted values but no private key: set ${privateKeyHint(file)} or add it to ${keysFileCandidates(file, root)
-          .map(candidate => path.relative(root, candidate))
-          .join(' or ')}`,
-      });
-    }
-    return keys;
-  };
+    const keysByFile = new Map<string, readonly EnvPrivateKey[] | null>();
+    const missingReported = new Set<string>();
+    /** The keys for `file`. A missing key is an error only when a value actually needs it (`required`). */
+    const privateKeysFor = (file: string, required: boolean): readonly EnvPrivateKey[] | null => {
+      if (!keysByFile.has(file)) {
+        const found = findPrivateKey(file, { root, env: target });
+        if (isFailure(found)) {
+          causes.push(found);
+          errors.push({
+            code: FileReadFailed.is(found) ? ENV_FILES_ERROR_CODES.cannotRead : ENV_FILES_ERROR_CODES.cannotDecrypt,
+            file,
+            message: 'Cannot read a valid private key for this env file',
+          });
+          missingReported.add(file);
+          keysByFile.set(file, null);
+        } else keysByFile.set(file, found?.keys ?? null);
+      }
+      const keys = keysByFile.get(file) ?? null;
+      if (keys === null && required && !missingReported.has(file)) {
+        missingReported.add(file);
+        errors.push({
+          code: ENV_FILES_ERROR_CODES.missingPrivateKey,
+          file,
+          message: `${path.relative(root, file)} has encrypted values but no private key: set ${privateKeyHint(file)} or add it to ${keysFileCandidates(
+            file,
+            root,
+          )
+            .map(candidate => path.relative(root, candidate))
+            .join(' or ')}`,
+        });
+      }
+      return keys;
+    };
 
-  const values: EnvFileValue[] = [];
-  for (const [key, { file, line, raw }] of winners) {
-    if (isEncrypted(raw)) {
-      // A value the real environment already provides (Coolify, a parent `dot env run`) needs no key.
-      const current = nonEmpty(target[key]);
-      const keys = privateKeysFor(file, current === undefined || isEncrypted(current));
-      if (keys === null) {
-        values.push({ key, file, line, kind: 'encrypted' });
+    const values: EnvFileValue[] = [];
+    for (const [key, { file, line, raw }] of winners) {
+      const stop = stopped();
+      if (stop !== undefined) return stop;
+      if (isEncrypted(raw)) {
+        // A value the real environment already provides (Coolify, a parent `dot env run`) needs no key.
+        const current = nonEmpty(target[key]);
+        const keys = privateKeysFor(file, current === undefined || isEncrypted(current));
+        if (keys === null) {
+          values.push({ key, file, line, kind: 'encrypted' });
+          continue;
+        }
+        const value = tryDecrypt(raw, keys);
+        if (isFailure(value)) {
+          causes.push(value);
+          errors.push({
+            code: ENV_FILES_ERROR_CODES.cannotDecrypt,
+            file,
+            key,
+            message: `${key} in ${path.relative(root, file)}:${String(line)} cannot be decrypted with ${privateKeyHint(file)}`,
+          });
+          values.push({ key, file, line, kind: 'encrypted' });
+        } else {
+          values.push({ key, file, line, kind: 'encrypted', value });
+        }
         continue;
       }
-      const value = tryDecrypt(raw, keys);
-      if (value === undefined) {
-        errors.push({ code: ENV_FILES_ERROR_CODES.cannotDecrypt, file, key, message: `${key} in ${path.relative(root, file)}:${String(line)} cannot be decrypted with ${privateKeyHint(file)}` });
-        values.push({ key, file, line, kind: 'encrypted' });
-      } else {
-        values.push({ key, file, line, kind: 'encrypted', value });
+      const scheme = referenceScheme(raw, resolvers);
+      if (scheme === undefined) {
+        values.push({ key, file, line, kind: 'plain', value: raw });
+        continue;
       }
-      continue;
+      if (PUBLIC_KEY.test(key)) {
+        refused.push({
+          key,
+          file,
+          line,
+          reason: 'a public (browser-bundled) key cannot hold a secret-manager reference',
+        });
+        continue;
+      }
+      const resolved = attempt(
+        () =>
+          resolvers[scheme]?.(raw, {
+            timeoutMs: Math.min(30_000, Math.max(1, deadline - Date.now())),
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+          }),
+        cause => ReferenceFailed({ scheme }, { cause }),
+      );
+      const stopAfterProvider = stopped();
+      if (stopAfterProvider !== undefined) return stopAfterProvider;
+      if (EnvCancelled.is(resolved) || EnvDeadline.is(resolved)) return resolved;
+      if (isFailure(resolved) || resolved === undefined) {
+        const failure = isFailure(resolved) ? resolved : ReferenceFailed({ scheme });
+        causes.push(failure);
+        errors.push({
+          code: ENV_FILES_ERROR_CODES.unresolvedReference,
+          file,
+          key,
+          message: `${key} (${scheme}://) in ${path.relative(root, file)}:${String(line)} could not be resolved`,
+        });
+        values.push({ key, file, line, kind: 'reference' });
+      } else values.push({ key, file, line, kind: 'reference', value: resolved });
     }
-    const scheme = referenceScheme(raw, resolvers);
-    if (scheme === undefined) {
-      values.push({ key, file, line, kind: 'plain', value: raw });
-      continue;
-    }
-    if (PUBLIC_KEY.test(key)) {
-      refused.push({ key, file, line, reason: 'a public (browser-bundled) key cannot hold a secret-manager reference' });
-      continue;
-    }
-    try {
-      values.push({ key, file, line, kind: 'reference', value: resolvers[scheme]?.(raw) ?? '' });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'failed';
-      errors.push({ code: ENV_FILES_ERROR_CODES.unresolvedReference, file, key, message: `${key} (${scheme}://) in ${path.relative(root, file)}:${String(line)}: ${reason}` });
-      values.push({ key, file, line, kind: 'reference' });
-    }
-  }
+    // Validate every entry first: a failed boot must not leave a partially applied environment.
+    if (errors.length > 0) return EnvFilesFailed({ environment, errors }, { cause: causes });
 
-  const applied: string[] = [];
-  const shadowed: { key: string; file: string; line: number }[] = [];
-  const fromFiles = new Set(values.map(value => value.key));
-  for (const entry of values) {
-    if (entry.value === undefined) continue;
-    const current = nonEmpty(target[entry.key]);
-    if (current !== undefined && !isEncrypted(current)) {
-      if (current !== entry.value) shadowed.push({ key: entry.key, file: entry.file, line: entry.line });
-      continue;
+    const applied: string[] = [];
+    const shadowed: { key: string; file: string; line: number }[] = [];
+    const fromFiles = new Set(values.map(value => value.key));
+    for (const [key, value] of Object.entries(target)) {
+      if (value !== undefined && isEncrypted(value) && !fromFiles.has(key)) {
+        errors.push({
+          code: ENV_FILES_ERROR_CODES.cannotDecrypt,
+          file: '(environment)',
+          key,
+          message: `${key} holds an encrypted value that no loaded env file explains (a file auto-loaded by Bun?)`,
+        });
+      }
     }
-    if (entry.kind !== 'plain') loadedSecrets.add(entry.value);
-    if (options.write !== false) target[entry.key] = entry.value;
-    applied.push(entry.key);
-  }
-  for (const [key, value] of Object.entries(target)) {
-    if (value !== undefined && isEncrypted(value) && !fromFiles.has(key)) {
-      errors.push({ code: ENV_FILES_ERROR_CODES.cannotDecrypt, file: '(environment)', key, message: `${key} holds an encrypted value that no loaded env file explains (a file auto-loaded by Bun?)` });
-    }
-  }
 
-  return { root, environment, files, values, applied, shadowed, refused, errors };
+    if (errors.length > 0) return EnvFilesFailed({ environment, errors }, { cause: causes });
+    for (const entry of values) {
+      if (entry.value === undefined) continue;
+      const current = nonEmpty(target[entry.key]);
+      if (current !== undefined && !isEncrypted(current)) {
+        if (current !== entry.value) shadowed.push({ key: entry.key, file: entry.file, line: entry.line });
+        continue;
+      }
+      if (entry.kind !== 'plain') loadedSecrets.add(entry.value);
+      if (options.write !== false) target[entry.key] = entry.value;
+      applied.push(entry.key);
+    }
+
+    return { root, environment, files, values, applied, shadowed, refused, errors } satisfies EnvFilesReport;
+  });
 }
 
 /** Every value this process loaded from an encrypted or referenced entry: what log masking hides. */
@@ -257,8 +331,11 @@ export function secretValues(): readonly string[] {
 }
 
 /** The report's errors as one message, one line each. */
-export function formatEnvFilesErrors(report: EnvFilesReport): string {
-  return [`Cannot load env files (${report.environment}):`, ...report.errors.map(error => `  ${error.code} ${error.message}`)].join('\n');
+export function formatEnvFilesErrors(failure: FailureOf<typeof EnvFilesFailed>): string {
+  return [
+    `Cannot load env files (${failure.data.environment}):`,
+    ...failure.data.errors.map(error => `  ${error.code} ${error.message}`),
+  ].join('\n');
 }
 
 /** The nearest ancestor of `cwd` with `.git`, else with a `workspaces` package.json, else `cwd`. */
@@ -279,7 +356,9 @@ export function envDirs(root: string, cwd: string): readonly string[] {
   return [root, ...parts.map((_, index) => path.join(root, ...parts.slice(0, index + 1)))];
 }
 
-const workspaceManifest = z.object({ workspaces: z.union([z.array(z.string()), z.object({ packages: z.array(z.string()) })]) });
+const workspaceManifest = z.object({
+  workspaces: z.union([z.array(z.string()), z.object({ packages: z.array(z.string()) })]),
+});
 
 function isWorkspaceRoot(manifest: string): boolean {
   if (!existsSync(manifest)) return false;
@@ -290,15 +369,12 @@ function isWorkspaceRoot(manifest: string): boolean {
   }
 }
 
-function tryDecrypt(raw: string, keys: readonly string[]): string | undefined {
+function tryDecrypt(raw: string, keys: readonly EnvPrivateKey[]) {
   for (const key of keys) {
-    try {
-      return decryptValue(raw, key);
-    } catch {
-      // The next key may be the right one; a wrong or malformed key is reported once by the caller.
-    }
+    const value = decryptValue(raw, key);
+    if (!isFailure(value)) return value;
   }
-  return undefined;
+  return DecryptionFailed();
 }
 
 function privateKeyHint(file: string): string {

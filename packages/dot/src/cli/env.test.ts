@@ -236,7 +236,7 @@ describe('dot env run', () => {
     const result = run('--', 'node', '-e', 'console.log("started")');
     expect(result.status).toBe(3);
     expect(result.stdout).not.toContain('started');
-    expect(result.stdout).toContain('dot.env_load_failed');
+    expect(result.stdout).toContain('env.files_failed');
   });
 });
 

@@ -84,6 +84,7 @@ export {
   EnvRevealRefused,
   EnvValueMissing,
   EnvVaultFailed,
+  EnvVaultWriteUnconfirmed,
 } from './env-failures.js';
 export type { EnvFinding } from './env-failures.js';
 export type { DotNewOperation, DotNewResult } from './json.js';

@@ -191,6 +191,7 @@ The legacy rows below describe diagnostic IDs and their private cause classes. M
 | `dot.action_not_exposed` | Failure value | The adapter is not exposed by the action. | Use a declared binding. |
 | `dot.action_principal_required` | Failure value | No authenticated principal attestation. | Authenticate credentials and expiry at the adapter. |
 | `dot.action_approval_required` | Failure value | No invocation approval attestation. | Verify caller, action and input approval at the adapter. |
+| `dot.env_vault_write_unconfirmed` | Failure value | A 1Password create or edit was attempted without a confirmed result. | Read the provider item before retrying; a repeated push rereads the vault and accepts a matching key. |
 | `dot.preflight_failed`       | Failure value       | Managed preflight failed; `.error.data` contains `app`, `migrations`, `report` and `failure`. | Fix the reported lifecycle failure; exit code is 3.    |
 | `dot.lazy_closed`            | Failure value       | A lazy handle is used after its owner closed.                                                 | Obtain a handle from a live owner.                     |
 | `dot.runtime_replaced`       | Failure value       | HMR replaced this runtime.                                                                    | Use the current module.                                |

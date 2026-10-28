@@ -28,3 +28,21 @@ export { envDirs, ENV_FILES_ERROR_CODES, findRoot, formatEnvFilesErrors, loadEnv
 export type { EnvFilesError, EnvFilesReport, EnvFileValue, EnvValueKind, LoadEnvFilesOptions } from './load.js';
 export { DEFAULT_RESOLVERS, referenceScheme } from './references.js';
 export type { ReferenceResolver } from './references.js';
+export type { ReferenceOptions } from './references.js';
+export {
+  DecryptionFailed,
+  EncryptionFailed,
+  EnvCancelled,
+  EnvDeadline,
+  EnvFilesFailed,
+  FileReadFailed,
+  FileWriteFailed,
+  KeyGenerationFailed,
+  MissingPrivateKey,
+  MissingPublicKey,
+  ReferenceFailed,
+  RotationIncomplete,
+  UnrepresentableValue,
+} from './errors.js';
+export { envPrivateKeySchema, envPublicKeySchema, parsePrivateKey, parsePublicKey } from './key-schemas.js';
+export type { EnvPrivateKey, EnvPublicKey } from './key-schemas.js';

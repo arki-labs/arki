@@ -89,6 +89,7 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@t3-oss/env-core": "catalog:env",
     "eciesjs": "catalog:env",
     "zod": "catalog:"

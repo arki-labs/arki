@@ -2,9 +2,10 @@
  * The codec must stay byte-compatible with dotenvx (so a founder can leave Dot and keep the files)
  * and must edit files without disturbing the lines nobody touched (so a PR diff shows one changed key).
  */
+import dotenvx from '@dotenvx/primitives';
 import { describe, expect, it } from 'vitest';
 
-import dotenvx from '@dotenvx/primitives';
+import { orThrow } from '@arki/failure';
 
 import {
   decryptValue,
@@ -19,31 +20,35 @@ import {
   removeEnvValue,
   setEnvValue,
 } from './codec.js';
+import { DecryptionFailed, UnrepresentableValue } from './errors.js';
+import { parsePrivateKey, parsePublicKey } from './key-schemas.js';
 
 describe('encryption is interchangeable with dotenvx', () => {
   it('decrypts what dotenvx encrypts', () => {
     // WHY: files written by the dotenvx CLI (listio, 1Password integrations) must load in Dot.
     const pair = dotenvx.keypair();
     const sealed = dotenvx.encrypt(pair.publicKey, 'sk_live_ünicode');
-    expect(decryptValue(sealed, pair.privateKey)).toBe('sk_live_ünicode');
+    expect(decryptValue(sealed, orThrow(parsePrivateKey(pair.privateKey)))).toBe('sk_live_ünicode');
   });
 
   it('writes what dotenvx decrypts', () => {
     // WHY: leaving Dot must not strand a single secret.
-    const pair = generateKeypair();
-    expect(dotenvx.decrypt(pair.privateKey, encryptValue('postgres://u:p@h/db', pair.publicKey))).toBe('postgres://u:p@h/db');
+    const pair = orThrow(generateKeypair());
+    expect(dotenvx.decrypt(pair.privateKey, orThrow(encryptValue('postgres://u:p@h/db', pair.publicKey)))).toBe(
+      'postgres://u:p@h/db',
+    );
   });
 
   it('derives the same public key dotenvx does', () => {
     const pair = dotenvx.keypair();
-    expect(publicKeyOf(pair.privateKey)).toBe(pair.publicKey);
+    expect(publicKeyOf(orThrow(parsePrivateKey(pair.privateKey)))).toBe(pair.publicKey);
   });
 
   it('marks ciphertext and refuses a wrong key', () => {
-    const pair = generateKeypair();
-    const sealed = encryptValue('x', pair.publicKey);
+    const pair = orThrow(generateKeypair());
+    const sealed = orThrow(encryptValue('x', pair.publicKey));
     expect(isEncrypted(sealed)).toBe(true);
-    expect(() => decryptValue(sealed, generateKeypair().privateKey)).toThrow();
+    expect(DecryptionFailed.is(decryptValue(sealed, orThrow(generateKeypair()).privateKey))).toBe(true);
   });
 });
 
@@ -57,13 +62,14 @@ describe('key names follow dotenvx', () => {
   });
 
   it('writes the dotenvx header byte for byte', () => {
-    expect(envHeader('.env.production', 'PUB')).toBe(
+    const publicKey = orThrow(parsePublicKey('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'));
+    expect(envHeader('.env.production', publicKey)).toBe(
       [
         '#/-------------------[DOTENV_PUBLIC_KEY]--------------------/',
         '#/            public-key encryption for .env files          /',
         '#/       [how it works](https://dotenvx.com/encryption)     /',
         '#/----------------------------------------------------------/',
-        'DOTENV_PUBLIC_KEY_PRODUCTION="PUB"',
+        `DOTENV_PUBLIC_KEY_PRODUCTION="${publicKey}"`,
         '',
         '# .env.production',
       ].join('\n'),
@@ -112,8 +118,8 @@ describe('edits touch one entry only', () => {
   });
 
   it('round-trips values that contain quotes and newlines', () => {
-    for (const value of ['say "hi"', "it's \"both\"", 'two\nlines', '']) {
-      expect(readEnvValue(parseEnv(setEnvValue('', 'K', value)), 'K')).toBe(value);
+    for (const value of ['say "hi"', 'it\'s "both"', 'two\nlines', '']) {
+      expect(readEnvValue(parseEnv(orThrow(setEnvValue('', 'K', value))), 'K')).toBe(value);
     }
   });
 
@@ -125,12 +131,11 @@ describe('edits touch one entry only', () => {
 describe('values cannot inject other keys', () => {
   it('keeps a literal backslash-n as written', () => {
     // WHY: double quotes would turn it into a line break; the value must come back byte for byte.
-    expect(readEnvValue(parseEnv(setEnvValue('', 'K', 'a\\nb')), 'K')).toBe('a\\nb');
+    expect(readEnvValue(parseEnv(orThrow(setEnvValue('', 'K', 'a\\nb'))), 'K')).toBe('a\\nb');
   });
 
   it('refuses a value no quoting can carry instead of writing a second key', () => {
     // WHY: a value holding every quote plus a newline could otherwise end the quote and start `EVIL=`.
-    expect(() => setEnvValue('', 'K', 'a"b\'c`\nEVIL=1')).toThrow(/cannot be stored/);
+    expect(UnrepresentableValue.is(setEnvValue('', 'K', 'a"b\'c`\nEVIL=1'))).toBe(true);
   });
 });
-

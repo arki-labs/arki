@@ -3,14 +3,18 @@ import { z } from 'zod';
 
 import { defineCommand } from '@arki/cli';
 import { publicKeyIn, setEnvFileValue } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 
-import { loadDescription, readStdin, relative, resolveTarget, envTargetInput } from '../../env-files.js';
 import { EnvNoChange, EnvNoHeader, EnvPlainSecret, EnvValueMissing } from '../../env-failures.js';
+import { envTargetInput, loadDescription, readStdin, relative, resolveTarget } from '../../env-files.js';
 
 export default defineCommand({
   describe: 'Set a value, encrypted to the file public key (agents can write without reading)',
   input: z.object({
-    key: z.string().regex(/^[_a-z]\w*$/i).describe('Variable name'),
+    key: z
+      .string()
+      .regex(/^[_a-z]\w*$/i)
+      .describe('Variable name'),
     value: z.string().optional().describe('The value (prefer --stdin: an argument stays in shell history)'),
     stdin: z.boolean().default(false).describe('Read the value from stdin'),
     plain: z.boolean().default(false).describe('Store as plaintext (refused for secret() keys)'),
@@ -28,10 +32,17 @@ export default defineCommand({
     if (input.plain) {
       const schema = await loadDescription(target.cwd, input.schema);
       if (schema.problem !== undefined) ui.warn(schema.problem);
-      if (schema.description?.keys.some(key => key.key === input.key && key.secret) === true) return EnvPlainSecret({ key: input.key });
+      if (schema.description?.keys.some(key => key.key === input.key && key.secret) === true)
+        return EnvPlainSecret({ key: input.key });
     }
-    if (!input.plain && publicKeyIn(target.file) === undefined) return EnvNoHeader({ file });
-    if (!setEnvFileValue(target.file, input.key, value, { plain: input.plain })) return EnvNoChange({ file, reason: `${input.key} already holds this value` });
+    if (!input.plain) {
+      const publicKey = publicKeyIn(target.file);
+      if (isFailure(publicKey)) return publicKey;
+      if (publicKey === undefined) return EnvNoHeader({ file });
+    }
+    const changed = setEnvFileValue(target.file, input.key, value, { plain: input.plain });
+    if (isFailure(changed)) return changed;
+    if (!changed) return EnvNoChange({ file, reason: `${input.key} already holds this value` });
     const shell = process.env[input.key];
     const shadowedByShell = shell !== undefined && shell !== '' && shell !== value;
     if (shadowedByShell) ui.warn(`${input.key} is also set in this shell; it wins over the file until you unset it`);

@@ -9,7 +9,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { encryptValue, generateKeypair } from '@arki/env/node';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { Exec } from '../dev-db.js';
 import { prepareDb } from '../dev-db.js';
@@ -199,23 +199,32 @@ describe('prepareDb', () => {
 
   it('opens encrypted values: a local URL passes and reaches the app, a remote one is refused', async () => {
     // WHY: committed .env.development files are encrypted; read raw, every URL would look non-local.
-    const { publicKey, privateKey } = generateKeypair();
+    const { publicKey, privateKey } = orThrow(generateKeypair());
     const env = { DOTENV_PRIVATE_KEY_DEVELOPMENT: privateKey };
-    const local = encryptValue('postgres://u@localhost:5432/app', publicKey);
-    await writeFile(path.join(workDir, '.env.development'), `DATABASE_URL="${local}"\nAPI_KEY="${encryptValue('k-123456789', publicKey)}"\n`);
+    const local = orThrow(encryptValue('postgres://u@localhost:5432/app', publicKey));
+    await writeFile(
+      path.join(workDir, '.env.development'),
+      `DATABASE_URL="${local}"\nAPI_KEY="${orThrow(encryptValue('k-123456789', publicKey))}"\n`,
+    );
     const result = await prepareDb({ cwd: workDir, db: 'pg', allowRemoteDb: false, env, probe: open });
     if (isFailure(result)) throw new Error(result.message);
     expect(result.env.API_KEY).toBe('k-123456789');
 
-    await writeFile(path.join(workDir, '.env.development'), `DATABASE_URL="${encryptValue('postgres://u:s3cret@db.example.com/prod', publicKey)}"\n`);
+    await writeFile(
+      path.join(workDir, '.env.development'),
+      `DATABASE_URL="${orThrow(encryptValue('postgres://u:s3cret@db.example.com/prod', publicKey))}"\n`,
+    );
     const remote = await prepareDb({ cwd: workDir, db: 'pg', allowRemoteDb: false, env, probe: open });
     expect(isFailure(remote) && remote.code).toBe('dot.dev_remote_db_refused');
     expect(JSON.stringify(isFailure(remote) ? [remote.message, remote.data] : remote)).not.toContain('s3cret');
   });
 
   it('refuses an encrypted URL when no key opens it: an unknown database is never assumed local', async () => {
-    const { publicKey } = generateKeypair();
-    await writeFile(path.join(workDir, '.env.development'), `DATABASE_URL="${encryptValue('postgres://u@localhost/app', publicKey)}"\n`);
+    const { publicKey } = orThrow(generateKeypair());
+    await writeFile(
+      path.join(workDir, '.env.development'),
+      `DATABASE_URL="${orThrow(encryptValue('postgres://u@localhost/app', publicKey))}"\n`,
+    );
     const result = await prepareDb({ cwd: workDir, db: 'pg', allowRemoteDb: false, env: {}, probe: open });
     expect(isFailure(result) && result.code).toBe('dot.dev_remote_db_refused');
   });

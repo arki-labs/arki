@@ -21,8 +21,9 @@ import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { z } from 'zod';
 
-import { decryptValue, findPrivateKey, findRoot, isEncrypted } from '@arki/env/node';
 import type { Failure } from '@arki/failure';
+import { DecryptionFailed, decryptValue, FileReadFailed, findPrivateKey, findRoot, isEncrypted } from '@arki/env/node';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { DevEvent } from './dev-events.js';
@@ -74,34 +75,39 @@ function decrypted(
   file: string,
   values: Readonly<Record<string, string | undefined>>,
   processEnv: Readonly<Record<string, string | undefined>>,
-): Readonly<Record<string, string | undefined>> {
+) {
   if (!Object.values(values).some(value => value !== undefined && isEncrypted(value))) return values;
-  const keys = findPrivateKey(file, { root: findRoot(path.dirname(file)), env: processEnv })?.keys ?? [];
-  const open = (value: string): string => {
-    for (const key of keys) {
-      try {
-        return decryptValue(value, key);
-      } catch {
-        // Not this key: a comma list may hold an older one.
-      }
+  const found = findPrivateKey(file, { root: findRoot(path.dirname(file)), env: processEnv });
+  if (isFailure(found)) return found;
+  if (found === undefined) return values;
+  const open = (value: string) => {
+    for (const key of found.keys) {
+      const result = decryptValue(value, key);
+      if (!isFailure(result)) return result;
     }
-    return value;
+    return DecryptionFailed();
   };
-  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value !== undefined && isEncrypted(value) ? open(value) : value]));
+  const result: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const opened = value !== undefined && isEncrypted(value) ? open(value) : value;
+    if (isFailure(opened)) return opened;
+    result[key] = opened;
+  }
+  return result;
 }
 
 /** Each env file of the project (a missing one is empty), then the process env: lowest precedence first. */
-async function envSources(
-  cwd: string,
-  processEnv: Readonly<Record<string, string | undefined>>,
-): Promise<readonly EnvSource[]> {
+async function envSources(cwd: string, processEnv: Readonly<Record<string, string | undefined>>) {
   const sources: EnvSource[] = [];
   for (const name of ENV_FILES) {
     const file = path.join(cwd, name);
     try {
-      sources.push({ name, values: decrypted(file, parseEnv(await readFile(file, 'utf8')), processEnv) });
+      const values = decrypted(file, parseEnv(await readFile(file, 'utf8')), processEnv);
+      if (isFailure(values)) return values;
+      sources.push({ name, values });
     } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
+        return FileReadFailed({ file }, { cause: error });
     }
   }
   sources.push({ name: 'process env', values: processEnv });
@@ -119,8 +125,9 @@ function merge(sources: readonly EnvSource[]): Env {
 }
 
 /** The project's env files merged in precedence order, overridden by the process env. */
-export async function mergedEnv(cwd: string, processEnv: Readonly<Record<string, string | undefined>>): Promise<Env> {
-  return merge(await envSources(cwd, processEnv));
+export async function mergedEnv(cwd: string, processEnv: Readonly<Record<string, string | undefined>>) {
+  const sources = await envSources(cwd, processEnv);
+  return isFailure(sources) ? sources : merge(sources);
 }
 
 /** The URL for display: password replaced by `***`, also a `password` query parameter. */
@@ -316,6 +323,7 @@ export function withoutDbUrls(env: Env): Env {
  */
 export async function prepareDb(options: PrepareDbOptions): Promise<PreparedDb | Failure> {
   const sources = await envSources(options.cwd, options.env);
+  if (isFailure(sources)) return sources;
   const env = merge(sources);
   const exec = options.exec ?? execFile;
   let services: readonly ComposeService[] | null | undefined;

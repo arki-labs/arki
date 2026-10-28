@@ -138,3 +138,15 @@ export const EnvVaultFailed = defineFailure('dot.env_vault_failed', {
   message: '1Password: {reason}',
   remediation: 'Sign in with `op signin` and check `--vault`.',
 });
+
+/**
+ * A vault write was attempted but its result was not confirmed.
+ * @fix Read the item from 1Password before retrying; the write may already have completed.
+ * @verify dot env keys push --vault <vault> --json
+ */
+export const EnvVaultWriteUnconfirmed = defineFailure('dot.env_vault_write_unconfirmed', {
+  data: z.object({ operation: z.enum(['create', 'edit']) }),
+  message: '1Password {operation} result is unconfirmed',
+  remediation:
+    'Reconcile by reading the item in 1Password before retrying. A repeated push rereads the vault and accepts an already matching key; never blindly repeat a create or edit.',
+});

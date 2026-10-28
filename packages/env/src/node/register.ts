@@ -8,7 +8,11 @@
  *
  * Fails the import with every problem listed (names only, never values).
  */
+import { isFailure, orThrow } from '@arki/failure';
+
+import { EnvFilesFailed } from './errors.js';
 import { formatEnvFilesErrors, loadEnvFiles } from './load.js';
 
 const report = loadEnvFiles();
-if (report.errors.length > 0) throw new Error(formatEnvFilesErrors(report));
+if (EnvFilesFailed.is(report)) throw new Error(formatEnvFilesErrors(report), { cause: report });
+if (isFailure(report)) orThrow(report);

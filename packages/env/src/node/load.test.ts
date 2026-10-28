@@ -5,17 +5,19 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import { encryptValue, envHeader, generateKeypair } from './codec.js';
 import { initEnvFile, rotateEnvFiles, setEnvFileValue } from './edit.js';
+import { EnvFilesFailed, ReferenceFailed } from './errors.js';
 import { writePrivateKey } from './keys.js';
 import { ENV_FILES_ERROR_CODES, envDirs, findRoot, loadEnvFiles, secretValues } from './load.js';
 
 let root: string;
 let app: string;
-const pair = generateKeypair();
+const pair = orThrow(generateKeypair());
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'arki-env-'));
@@ -35,7 +37,7 @@ function write(dir: string, name: string, lines: readonly string[]): string {
 
 function load(initial: Record<string, string | undefined> = {}) {
   const env: Record<string, string | undefined> = { DOTENV_PRIVATE_KEY_DEVELOPMENT: pair.privateKey, ...initial };
-  return { env, report: loadEnvFiles({ cwd: app, environment: 'development', env }) };
+  return { env, report: orThrow(loadEnvFiles({ cwd: app, environment: 'development', env })) };
 }
 
 describe('precedence', () => {
@@ -70,14 +72,14 @@ describe('precedence', () => {
   it('skips .env.local under test', () => {
     writeFileSync(path.join(app, '.env.local'), 'A=local\n');
     const env: Record<string, string | undefined> = {};
-    loadEnvFiles({ cwd: app, environment: 'test', env });
+    orThrow(loadEnvFiles({ cwd: app, environment: 'test', env }));
     expect(env['A']).toBeUndefined();
   });
 });
 
 describe('encrypted values', () => {
   it('decrypts with the key from the environment and remembers the value as secret', () => {
-    write(app, '.env.development', [`TOKEN=${encryptValue('s3cret-token', pair.publicKey)}`]);
+    write(app, '.env.development', [`TOKEN=${orThrow(encryptValue('s3cret-token', pair.publicKey))}`]);
     const { env, report } = load();
     expect(env['TOKEN']).toBe('s3cret-token');
     expect(report.values.find(value => value.key === 'TOKEN')?.kind).toBe('encrypted');
@@ -85,16 +87,23 @@ describe('encrypted values', () => {
   });
 
   it('finds the key in .env.keys at the root when the environment has none', () => {
-    write(app, '.env.development', [`TOKEN=${encryptValue('from-keys-file', pair.publicKey)}`]);
-    writePrivateKey(path.join(root, '.env.keys'), 'DOTENV_PRIVATE_KEY_DEVELOPMENT', pair.privateKey, '.env.development');
+    write(app, '.env.development', [`TOKEN=${orThrow(encryptValue('from-keys-file', pair.publicKey))}`]);
+    orThrow(
+      writePrivateKey(
+        path.join(root, '.env.keys'),
+        'DOTENV_PRIVATE_KEY_DEVELOPMENT',
+        pair.privateKey,
+        '.env.development',
+      ),
+    );
     const env: Record<string, string | undefined> = {};
-    loadEnvFiles({ cwd: app, environment: 'development', env });
+    orThrow(loadEnvFiles({ cwd: app, environment: 'development', env }));
     expect(env['TOKEN']).toBe('from-keys-file');
   });
 
   it('replaces ciphertext Bun auto-loaded into the environment', () => {
     // WHY: Bun loads .env files before our code; its ciphertext must never count as a real value.
-    const sealed = encryptValue('real', pair.publicKey);
+    const sealed = orThrow(encryptValue('real', pair.publicKey));
     write(app, '.env.development', [`TOKEN=${sealed}`]);
     const { env, report } = load({ TOKEN: sealed });
     expect(env['TOKEN']).toBe('real');
@@ -102,27 +111,37 @@ describe('encrypted values', () => {
   });
 
   it('reports a missing key by name and never writes the ciphertext', () => {
-    write(app, '.env.development', [`TOKEN=${encryptValue('x', pair.publicKey)}`]);
+    write(app, '.env.development', [`TOKEN=${orThrow(encryptValue('x', pair.publicKey))}`]);
     const env: Record<string, string | undefined> = {};
     const report = loadEnvFiles({ cwd: app, environment: 'development', env });
-    expect(report.errors.map(error => error.code)).toEqual([ENV_FILES_ERROR_CODES.missingPrivateKey]);
-    expect(report.errors[0]?.message).toContain('DOTENV_PRIVATE_KEY_DEVELOPMENT');
+    if (!EnvFilesFailed.is(report)) return expect.fail('expected a canonical env load failure');
+    expect(report.data.errors.map(error => error.code)).toEqual([ENV_FILES_ERROR_CODES.missingPrivateKey]);
+    expect(report.data.errors[0]?.message).toContain('DOTENV_PRIVATE_KEY_DEVELOPMENT');
     expect(env['TOKEN']).toBeUndefined();
   });
 
   it('needs no private key for values the environment already provides', () => {
     // WHY: Coolify sets the values in production, and a nested `dot env run` gets them from its parent (without the key).
-    write(app, '.env.development', [`TOKEN=${encryptValue('x', pair.publicKey)}`]);
+    write(app, '.env.development', [`TOKEN=${orThrow(encryptValue('x', pair.publicKey))}`]);
     const env: Record<string, string | undefined> = { TOKEN: 'from-platform' };
-    const report = loadEnvFiles({ cwd: app, environment: 'development', env });
+    const report = orThrow(loadEnvFiles({ cwd: app, environment: 'development', env }));
     expect({ errors: report.errors, token: env['TOKEN'] }).toEqual({ errors: [], token: 'from-platform' });
   });
 
   it('reports a wrong key per value without leaking it', () => {
-    write(app, '.env.development', [`TOKEN=${encryptValue('top-secret', generateKeypair().publicKey)}`]);
-    const { report } = load();
-    expect(report.errors.map(error => [error.code, error.key])).toEqual([[ENV_FILES_ERROR_CODES.cannotDecrypt, 'TOKEN']]);
-    expect(JSON.stringify(report.errors)).not.toContain('top-secret');
+    write(app, '.env.development', [
+      `TOKEN=${orThrow(encryptValue('top-secret', orThrow(generateKeypair()).publicKey))}`,
+    ]);
+    const report = loadEnvFiles({
+      cwd: app,
+      environment: 'development',
+      env: { DOTENV_PRIVATE_KEY_DEVELOPMENT: pair.privateKey },
+    });
+    if (!EnvFilesFailed.is(report)) return expect.fail('expected a canonical decryption failure');
+    expect(report.data.errors.map(error => [error.code, error.key])).toEqual([
+      [ENV_FILES_ERROR_CODES.cannotDecrypt, 'TOKEN'],
+    ]);
+    expect(JSON.stringify(report)).not.toContain('top-secret');
   });
 });
 
@@ -131,7 +150,14 @@ describe('references', () => {
     // WHY: a postgres:// value must never be sent to a secret manager.
     write(app, '.env.development', ['STRIPE=vault://billing/stripe', 'DB_URL=postgres://u:p@h/db']);
     const env: Record<string, string | undefined> = {};
-    const report = loadEnvFiles({ cwd: app, environment: 'development', env, references: { vault: reference => `resolved:${reference}` } });
+    const report = orThrow(
+      loadEnvFiles({
+        cwd: app,
+        environment: 'development',
+        env,
+        references: { vault: reference => `resolved:${reference}` },
+      }),
+    );
     expect(env['STRIPE']).toBe('resolved:vault://billing/stripe');
     expect(env['DB_URL']).toBe('postgres://u:p@h/db');
     expect(report.values.find(value => value.key === 'STRIPE')?.kind).toBe('reference');
@@ -139,17 +165,27 @@ describe('references', () => {
 
   it('reports a failing provider by scheme', () => {
     write(app, '.env.development', ['STRIPE=vault://x']);
-    const report = loadEnvFiles({ cwd: app, environment: 'development', env: {}, references: { vault: () => { throw new Error('not logged in'); } } });
-    expect(report.errors.map(error => error.code)).toEqual([ENV_FILES_ERROR_CODES.unresolvedReference]);
-    expect(report.errors[0]?.message).toContain('not logged in');
+    const report = loadEnvFiles({
+      cwd: app,
+      environment: 'development',
+      env: {},
+      references: {
+        vault: () => {
+          throw new Error('not logged in');
+        },
+      },
+    });
+    if (!EnvFilesFailed.is(report)) return expect.fail('expected a canonical provider failure');
+    expect(report.data.errors.map(error => error.code)).toEqual([ENV_FILES_ERROR_CODES.unresolvedReference]);
+    expect(JSON.stringify(report)).not.toContain('not logged in');
   });
 });
 
 describe('editing', () => {
   it('reuses the environment key on init, so every app shares one development key', () => {
     // WHY: a second app's init must not mint a key that overwrites the first one's in .env.keys.
-    const first = initEnvFile(path.join(root, '.env.development'), { root, env: {} });
-    const second = initEnvFile(path.join(app, '.env.development'), { root, env: {} });
+    const first = orThrow(initEnvFile(path.join(root, '.env.development'), { root, env: {} }));
+    const second = orThrow(initEnvFile(path.join(app, '.env.development'), { root, env: {} }));
     expect(first.keysWritten).toBe(path.join(root, '.env.keys'));
     expect(second.keysWritten).toBeUndefined();
     expect(second.publicKey).toBe(first.publicKey);
@@ -157,31 +193,31 @@ describe('editing', () => {
 
   it('sets an encrypted value that loads back', () => {
     const file = path.join(app, '.env.development');
-    initEnvFile(file, { root, env: {} });
-    expect(setEnvFileValue(file, 'KEY', 'value-1', { plain: false })).toBe(true);
+    orThrow(initEnvFile(file, { root, env: {} }));
+    expect(orThrow(setEnvFileValue(file, 'KEY', 'value-1', { plain: false }))).toBe(true);
     const env: Record<string, string | undefined> = {};
-    loadEnvFiles({ cwd: app, environment: 'development', env });
+    orThrow(loadEnvFiles({ cwd: app, environment: 'development', env }));
     expect(env['KEY']).toBe('value-1');
   });
 
   it('reports a plain set that changes nothing', () => {
     // WHY: listio's `set` silently wrote nothing; the caller must be told.
     const file = path.join(app, '.env.development');
-    initEnvFile(file, { root, env: {} });
-    expect(setEnvFileValue(file, 'A', 'x', { plain: true })).toBe(true);
-    expect(setEnvFileValue(file, 'A', 'x', { plain: true })).toBe(false);
+    orThrow(initEnvFile(file, { root, env: {} }));
+    expect(orThrow(setEnvFileValue(file, 'A', 'x', { plain: true }))).toBe(true);
+    expect(orThrow(setEnvFileValue(file, 'A', 'x', { plain: true }))).toBe(false);
   });
 
   it('rotates every file of an environment together', () => {
     const files = [path.join(root, '.env.development'), path.join(app, '.env.development')];
     for (const file of files) {
-      initEnvFile(file, { root, env: {} });
-      setEnvFileValue(file, 'K', `v-${path.basename(path.dirname(file))}`, { plain: false });
+      orThrow(initEnvFile(file, { root, env: {} }));
+      orThrow(setEnvFileValue(file, 'K', `v-${path.basename(path.dirname(file))}`, { plain: false }));
     }
-    const result = rotateEnvFiles(files, { root, env: {} });
+    const result = orThrow(rotateEnvFiles(files, { root, env: {} }));
     expect(result.files.map(file => file.values)).toEqual([1, 1]);
     const env: Record<string, string | undefined> = {};
-    const report = loadEnvFiles({ cwd: app, environment: 'development', env });
+    const report = orThrow(loadEnvFiles({ cwd: app, environment: 'development', env }));
     expect(report.errors).toEqual([]);
     expect(env['K']).toBe('v-demo');
   });
@@ -220,15 +256,30 @@ describe('refused entries', () => {
     write(app, '.env.development', ['VITE_TOKEN=vault://x']);
     let called = false;
     const env: Record<string, string | undefined> = {};
-    const report = loadEnvFiles({ cwd: app, environment: 'development', env, references: { vault: () => { called = true; return 's'; } } });
-    expect({ called, value: env['VITE_TOKEN'], refused: report.refused.map(entry => entry.key) }).toEqual({ called: false, value: undefined, refused: ['VITE_TOKEN'] });
+    const report = orThrow(
+      loadEnvFiles({
+        cwd: app,
+        environment: 'development',
+        env,
+        references: {
+          vault: () => {
+            called = true;
+            return 's';
+          },
+        },
+      }),
+    );
+    expect({ called, value: env['VITE_TOKEN'], refused: report.refused.map(entry => entry.key) }).toEqual({
+      called: false,
+      value: undefined,
+      refused: ['VITE_TOKEN'],
+    });
   });
 });
 
 describe('reference paths', () => {
   it('rejects a segment that would read as a CLI flag', async () => {
     const { DEFAULT_RESOLVERS } = await import('./references.js');
-    expect(() => DEFAULT_RESOLVERS['doppler']?.('doppler://--token=x/cfg/NAME')).toThrow(/must match/);
+    expect(ReferenceFailed.is(DEFAULT_RESOLVERS['doppler']?.('doppler://--token=x/cfg/NAME'))).toBe(true);
   });
 });
-

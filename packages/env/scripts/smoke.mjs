@@ -4,8 +4,8 @@
 
 import { z } from 'zod';
 
-import { contracts, defineEnv, reveal, secret } from '../dist/core/index.js';
-import { contracts as rootContracts } from '../dist/index.js';
+import { defineEnv, presets, reveal, secret } from '../dist/core/index.js';
+import { presets as rootPresets } from '../dist/index.js';
 
 let checks = 0;
 function check(condition, message) {
@@ -18,12 +18,12 @@ const env = defineEnv({
   name: 'smoke',
   server: {},
   clientPrefix: 'APP_',
-  client: { APP_PORT: contracts.port(), APP_NAME: z.string().default('app') },
+  client: { APP_PORT: presets.port(), APP_NAME: z.string().default('app') },
   runtimeEnv: { APP_PORT: '8080' },
 });
 check(env.APP_PORT === 8080, 'a port string is coerced to a number');
 check(env.APP_NAME === 'app', 'a default applies when the key is absent');
-check(rootContracts === contracts, 'the root entry re-exports the same contracts');
+check(rootPresets === presets, 'the root entry re-exports the same presets');
 
 // Lazy by design: declaring an env reads nothing.
 let reads = 0;
