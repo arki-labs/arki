@@ -18,7 +18,6 @@ describe('StringError codes', () => {
       invalidUtf8: 'ARKI_STRING_E002',
       invalidBase64: 'ARKI_STRING_E003',
       invalidTemplate: 'ARKI_STRING_E004',
-      missingValue: 'ARKI_STRING_E005',
     });
   });
 
@@ -35,8 +34,8 @@ describe('StringError codes', () => {
     expect(fromBase64('abc')).toMatchObject({ code: 'string.invalid_base64' });
   });
 
-  it('separates a bad template (E004) from a missing value (E005), so callers can fix the data or the template', () => {
+  it('separates malformed syntax from returned missing-data failures', () => {
     expect(caught(() => interpolate('{{ open', {}))).toMatchObject({ code: 'ARKI_STRING_E004' });
-    expect(caught(() => interpolate('{{ name }}', {}))).toMatchObject({ code: 'ARKI_STRING_E005' });
+    expect(interpolate('{{ name }}', {})).toMatchObject({ code: 'string.missing_value' });
   });
 });

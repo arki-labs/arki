@@ -34,13 +34,6 @@ export const STRING_ERROR_CODES = {
    * @verify bun run test
    */
   invalidTemplate: 'ARKI_STRING_E004',
-  /**
-   * An `interpolate` placeholder has no value and `missing` is `'throw'`.
-   *
-   * @fix Pass a value for the placeholder, or set `missing` to `'keep'` or `'empty'`.
-   * @verify bun run test
-   */
-  missingValue: 'ARKI_STRING_E005',
 } as const;
 
 /** The code of a {@link StringError}. */
@@ -53,7 +46,6 @@ const REMEDIATIONS: Record<StringErrorCode, string> = {
   ARKI_STRING_E003:
     'Pass strict base64 of the chosen alphabet with correct padding. Encoding APIs return canonical failures.',
   ARKI_STRING_E004: 'Write placeholders as {{ name }} with an identifier inside, and close every {{ with }}.',
-  ARKI_STRING_E005: "Pass a value for the placeholder, or set missing to 'keep' or 'empty'.",
 };
 
 /** Legacy diagnostic for static misuse; encoding APIs return canonical failures. */

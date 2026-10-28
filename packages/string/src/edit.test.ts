@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
   deduplicate,
@@ -20,7 +20,8 @@ import {
   wrap,
 } from './edit.js';
 import { escapeHtml, escapeRegExp } from './escape.js';
-import { interpolate } from './interpolate.js';
+import type { InterpolateOptions } from './interpolate.js';
+import { interpolate, MissingValue } from './interpolate.js';
 
 describe('replace*', () => {
   it('replaces literally', () => {
@@ -109,11 +110,51 @@ describe('interpolate', () => {
     expect(interpolate('[{{ value }}]', { value: null })).toBe('[]');
   });
   it('handles missing keys per policy', () => {
-    expect(() => interpolate('{{ nope }}', {})).toThrowError(/ARKI_STRING_E005/);
-    expect(() => interpolate('{{ value }}', { value: undefined })).toThrowError(/ARKI_STRING_E005/);
+    expect(interpolate('{{ nope }}', {})).toMatchObject({ code: 'string.missing_value' });
+    expect(interpolate('{{ value }}', { value: undefined })).toMatchObject({ code: 'string.missing_value' });
     expect(interpolate('a {{ nope }} b', {}, { missing: 'keep' })).toBe('a {{ nope }} b');
     expect(interpolate('a {{ nope }} b', {}, { missing: 'empty' })).toBe('a  b');
-    expect(() => interpolate('{{ toString }}', {})).toThrowError(/ARKI_STRING_E005/);
+    expect(interpolate('{{ toString }}', {})).toMatchObject({ code: 'string.missing_value' });
+  });
+  it('rejects the removed policy for JavaScript callers instead of silently dropping missing text', () => {
+    expect(() => {
+      // @ts-expect-error -- Exercise a JavaScript caller with the removed configuration value.
+      return interpolate('{{ value }}', {}, { missing: 'throw' });
+    }).toThrowError('Interpolation missing policy must be fail, keep or empty.');
+  });
+  it('stops before later values and never exposes partial text or the missing key', () => {
+    let reads = 0;
+    const values = {
+      token: 'private-token',
+      get later() {
+        reads += 1;
+        return 'unused';
+      },
+    };
+    const result = interpolate('private-template {{ token }} {{ privateKey }} {{ later }}', values, {
+      missing: 'fail',
+    });
+
+    expect(MissingValue.is(result)).toBe(true);
+    expect(JSON.stringify(result)).toBe(JSON.stringify(MissingValue()));
+    expect(reads).toBe(0);
+  });
+  it('accepts own prototype-named keys and Unicode values without treating falsy data as missing', () => {
+    expect(interpolate('{{ toString }}', { toString: 'own value' })).toBe('own value');
+    expect(interpolate('{{ nume }}', { nume: '👩‍💻 é' })).toBe('👩‍💻 é');
+    expect(interpolate('{{ value }}', { value: null }, { missing: 'fail' })).toBe('');
+    expect(MissingValue.is(interpolate('{{ constructor }}', {}))).toBe(true);
+  });
+  it('infers the canonical refusal and unwrapped success without the old throw policy', () => {
+    expectTypeOf<Exclude<ReturnType<typeof interpolate>, string>>().toEqualTypeOf<ReturnType<typeof MissingValue>>();
+    expectTypeOf<Extract<ReturnType<typeof interpolate>, string>>().toEqualTypeOf<string>();
+    expectTypeOf<'throw'>().not.toMatchTypeOf<NonNullable<InterpolateOptions['missing']>>();
+    const result = interpolate('{{ name }}', {});
+    if (MissingValue.is(result)) {
+      expectTypeOf(result.code).toEqualTypeOf<'string.missing_value'>();
+    } else {
+      expectTypeOf(result).toEqualTypeOf<string>();
+    }
   });
   it('escapes and rejects malformed placeholders', () => {
     expect(interpolate(String.raw`\{{ raw }} and \\ slash`, {})).toBe(String.raw`{{ raw }} and \ slash`);

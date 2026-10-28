@@ -371,8 +371,9 @@ export class StringValue {
     return str(escapeRegExp(this.#value));
   }
   /** Treats the value as a `{{ name }}` template. */
-  interpolate(values: TemplateValues, options?: InterpolateOptions): StringValue {
-    return str(interpolate(this.#value, values, options));
+  interpolate(values: TemplateValues, options?: InterpolateOptions) {
+    const result = interpolate(this.#value, values, options);
+    return isFailure(result) ? result : str(result);
   }
   toBase64(options?: Base64Options) {
     const result = toBase64(this.#value, options);

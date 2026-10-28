@@ -35,6 +35,11 @@ check('edit replaceAll', s.replaceAll('é e', 'e', 'X'), 'é X');
 check('edit mask', s.mask('4111111111111111', { end: -4 }), '************1111');
 check('escape regexp', s.escapeRegExp('.b'), String.raw`\.b`); // a leading alphanumeric would be hex-escaped, as RegExp.escape does
 check('interpolate', s.interpolate('Hi {{ name }}', { name: 'Ada' }), 'Hi Ada');
+check('missing interpolation value', s.MissingValue.is(s.interpolate('{{ name }}', {})), true);
+check('inherited interpolation value', s.MissingValue.is(s.interpolate('{{ toString }}', {})), true);
+check('explicit interpolation refusal', s.MissingValue.is(s.interpolate('{{ name }}', {}, { missing: 'fail' })), true);
+check('fluent interpolation refusal', s.MissingValue.is(s.str('{{ name }}').interpolate({})), true);
+check('interpolation recovery', s.interpolate('{{ name }}', {}, { missing: 'keep' }), '{{ name }}');
 check('slug', s.slugify('Привет мир & fooBar'), 'privet-mir-and-foo-bar');
 check('base64 roundtrip', s.fromBase64(s.toBase64('crème brûlée 👋')), 'crème brûlée 👋');
 check('base64 strict', s.InvalidBase64.is(s.tryFromBase64('Zg=')), true);

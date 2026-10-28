@@ -103,7 +103,7 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 | `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                                                                                             |
 | `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                                                                                |
 | `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                                                                                                       |
-| `/interpolate` | `interpolate`                                                                                                                                                                                                                                                                                      |
+| `/interpolate` | `interpolate`, `MissingValue`                                                                                                                                                                                                                                                                                      |
 | `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
 | `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
 | `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
@@ -117,9 +117,9 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 
 ## Failure behaviour
 
-UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent codecs return `StringValue` or the same failures. No submitted input is included in failures.
+Interpolation and UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent interpolation and codecs return `StringValue` or the same failures. No submitted input is included in failures.
 
-Breaking: `tryFromBase64` now aliases `fromBase64` and never returns `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Other static misuse still throws `StringError` from `@arki/string/errors`; the legacy E002/E003 diagnostic exports remain available.
+Breaking: `tryFromBase64` now aliases `fromBase64` and never returns `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Interpolation returns `MissingValue` for missing values; narrow before reading a fluent result. Replace `missing: 'throw'` with `missing: 'fail'`; E005 is removed. Other static misuse still throws `StringError` from `@arki/string/errors`; the legacy E002/E003 diagnostic exports remain available.
 
 | Code                    | Raised by                                                                                                                        | Meaning                                                                               |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -127,7 +127,7 @@ Breaking: `tryFromBase64` now aliases `fromBase64` and never returns `null`. Rep
 | `string.invalid_utf8`   | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
 | `string.invalid_base64` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
 | `ARKI_STRING_E004`      | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
-| `ARKI_STRING_E005`      | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
+| `string.missing_value`      | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'fail'` (the default).                                |
 
 Handle bad user input without a try block:
 
@@ -378,7 +378,7 @@ slugify('我是谁', { replacements: chinese }); // 'wo-shi-shui'
 import { interpolate } from '@arki/string/interpolate';
 
 interpolate('Hi {{ name }}', { name: 'Ada' }); // 'Hi Ada'
-interpolate('{{ missing }}', {}); // throws StringError ARKI_STRING_E005
+interpolate('{{ missing }}', {}); // returned MissingValue, code string.missing_value
 interpolate('{{ missing }}', {}, { missing: 'keep' }); // '{{ missing }}'
 ```
 

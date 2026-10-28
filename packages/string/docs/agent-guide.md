@@ -46,7 +46,7 @@ if (cut !== 'The quick…') throw new Error(cut);
 ### Fill a template
 
 1. `interpolate('Hi {{ name }}', { name: 'Ada' })`.
-2. Choose `missing: 'keep'` or `'empty'` when a value may be absent. The default throws `ARKI_STRING_E005`.
+2. Narrow the returned `MissingValue` before using the text or fluent wrapper. The default `missing: 'fail'` returns a failure for an absent own key or an undefined value. Choose `'keep'` or `'empty'` only when that recovery is intended.
 
 ### Score how hard a text is to read
 
@@ -72,7 +72,7 @@ if (cut !== 'The quick…') throw new Error(cut);
 | `string.invalid_utf8`   | Text or bytes are not valid UTF-8.                                     | Pass well-formed text, and handle the returned failure.    |
 | `string.invalid_base64` | Input is not strict base64.                                            | Fix padding and alphabet, and handle the returned failure. |
 | `ARKI_STRING_E004`      | A placeholder is malformed.                                            | Write `{{ name }}` and close every `{{`.                   |
-| `ARKI_STRING_E005`      | A placeholder has no value and `missing` is `'throw'`.                 | Pass the value, or set `missing`.                          |
+| `string.missing_value`      | A placeholder has no value and `missing` is `'fail'`.                 | Pass the value, or set `missing`.                          |
 
 ## Verify
 

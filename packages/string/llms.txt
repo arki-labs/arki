@@ -1,11 +1,11 @@
 # @arki/string
 
-> Grapheme-aware string functions with canonical encoding failures from @arki/failure: case, format, search, edit, escape, slugs, base64, readability, distance and an immutable `str()` wrapper. It is not an HTML sanitizer or a validator.
+> Grapheme-aware string functions with canonical encoding and interpolation failures from @arki/failure: case, format, search, edit, escape, slugs, base64, readability, distance and an immutable `str()` wrapper. It is not an HTML sanitizer or a validator.
 
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/string`: Every function of @arki/string in one entry: case, format, search, edit, escape, slugs, base64, readability, distance and the fluent `str` wrapper. `InvalidBase64`, `InvalidUtf8`, `STOP_WORDS`, `STRING_ERROR_CODES`, `StringError`, `StringValue`, `TextAnalysis`, `after`, `analyze`, `at`, `automatedReadabilityIndex`, `base64ToBytes`; and 132 more.
+- `@arki/string`: Every function of @arki/string in one entry: case, format, search, edit, escape, slugs, base64, readability, distance and the fluent `str` wrapper. `InvalidBase64`, `InvalidUtf8`, `MissingValue`, `STOP_WORDS`, `STRING_ERROR_CODES`, `StringError`, `StringValue`, `TextAnalysis`, `after`, `analyze`, `at`, `automatedReadabilityIndex`; and 133 more.
 - `@arki/string/unicode`: Grapheme-aware positional operations. `at`, `chunk`, `fold`, `graphemeBoundaries`, `graphemes`, `length`, `reverse`, `slice`, `splice`, `take`; types `FoldOptions`.
 - `@arki/string/case`: Case conversion built on one tokenizer (`caseWords`), so every case style splits identifiers the same way. `camelCase`, `capitalize`, `caseWords`, `constantCase`, `dotCase`, `kebabCase`, `pascalCase`, `pathCase`, `sentenceCase`, `snakeCase`, `titleCase`, `uncapitalize`; and 1 more.
 - `@arki/string/format`: Whitespace cleanup and display formatting: initials, truncation, excerpts, wrapping. `collapseWhitespace`, `dedent`, `excerpt`, `initials`, `squish`, `truncate`, `wrapText`; types `ExcerptOptions`, `InitialsOptions`, `TruncateOptions`, `WrapTextOptions`.
@@ -14,7 +14,7 @@
 - `@arki/string/edit`: Literal editing, affixes, and grapheme-aware padding. `deduplicate`, `ensureEnd`, `ensureStart`, `mask`, `padBoth`, `padEnd`, `padStart`, `replaceAll`, `replaceEnd`, `replaceFirst`, `replaceLast`, `replaceStart`; and 6 more.
 - `@arki/string/errors`: Static misuse outside UTF-8/base64 raises a {@link StringError} with a stable `code`. `STRING_ERROR_CODES`, `StringError`; types `StringErrorCode`.
 - `@arki/string/escape`: Escaping for embedding text in other syntaxes. `escapeHtml`, `escapeRegExp`.
-- `@arki/string/interpolate`: `interpolate`; types `InterpolateOptions`, `TemplateValues`.
+- `@arki/string/interpolate`: `MissingValue`, `interpolate`; types `InterpolateOptions`, `TemplateValues`.
 - `@arki/string/base64`: `InvalidBase64`, `InvalidUtf8`, `base64ToBytes`, `byteLength`, `bytesToBase64`, `fromBase64`, `toBase64`, `tryFromBase64`, `utf8Decode`, `utf8Encode`; types `Base64Options`.
 - `@arki/string/slug`: URL-safe slugs with multi-script transliteration, and no dependencies. `rulesets`, `slugify`, `transliterate`; types `Replacements`, `SlugifyOptions`, `TransliterateOptions`.
 - `@arki/string/slug-cjk`: Chinese (pinyin) and Korean (romanization) rule sets. `chinese`, `korean`.

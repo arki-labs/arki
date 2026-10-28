@@ -4,8 +4,22 @@ import { isFailure, orThrow } from '@arki/failure';
 
 import { InvalidBase64, InvalidUtf8 } from './base64.js';
 import { str, StringValue } from './fluent.js';
+import { MissingValue } from './interpolate.js';
 
 describe('str()', () => {
+  it('preserves canonical interpolation refusals instead of wrapping them as text', () => {
+    const result = str('{{ name }}').interpolate({});
+    expectTypeOf<Exclude<typeof result, StringValue>>().toEqualTypeOf<ReturnType<typeof MissingValue>>();
+    expect(MissingValue.is(result)).toBe(true);
+    if (isFailure(result)) {
+      expect(result.code).toBe(MissingValue.code);
+    } else {
+      expectTypeOf(result).toEqualTypeOf<StringValue>();
+      throw new Error('Missing data must not become a StringValue');
+    }
+    expect(orThrow(str('{{ name }}').interpolate({}, { missing: 'keep' })).value()).toBe('{{ name }}');
+    expect(orThrow(str('{{ name }}').interpolate({}, { missing: 'empty' })).value()).toBe('');
+  });
   it('chains and extracts', () => {
     expect(str('  XML_http_request  ').squish().titleCase().truncate(24).value()).toBe('Xml Http Request');
     expect(str(' Ada@Example.COM ').trim().lower().value()).toBe('ada@example.com');
@@ -92,7 +106,7 @@ describe('str()', () => {
     expect(str('ab').swap({ a: 'b', b: 'c' }).value()).toBe('bc');
     expect(str('x').padBoth(4, '.').value()).toBe('.x..');
     expect(str('<b>').escapeHtml().value()).toBe('&lt;b&gt;');
-    expect(str('Hi {{ n }}').interpolate({ n: 'Ada' }).value()).toBe('Hi Ada');
+    expect(orThrow(str('Hi {{ n }}').interpolate({ n: 'Ada' })).value()).toBe('Hi Ada');
     expect(orThrow(orThrow(str('hi').toBase64()).fromBase64()).value()).toBe('hi');
     expect(str('Ada Lovelace').initials().value()).toBe('AL');
     expect(str('a b c').words()).toEqual(['a', 'b', 'c']);

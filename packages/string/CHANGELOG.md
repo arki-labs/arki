@@ -1,5 +1,9 @@
 # @arki/string
 
+## Unreleased
+
+- Breaking: interpolation returns `MissingValue` instead of throwing for absent runtime values. Rename `missing: 'throw'` to `missing: 'fail'` and narrow fluent results before chaining. The retired E005 diagnostic is removed; malformed syntax remains E004. See [the upgrade guide](docs/upgrades/0.3.0-to-0.4.0.md).
+
 ## 0.3.0
 
 ### Minor Changes
