@@ -1,5 +1,174 @@
 # @arki/dot
 
+## 0.8.0
+
+### Minor Changes
+
+- 133f0a6: `@arki/dot/orpc`: `rpcFor<RequestContext>()` makes the app's `implement` (and `bind`) once; a feature's implementer is `implement(contract).with(logic)` instead of `implement(contract).$context<RequestContext>().use(bind(logic))`. oRPC's config still passes through (`implement(contract, config).with(logic)`). New type `FeatureImplementer`.
+
+  Breaking: `rpc(contract, implementer, procedures)` takes one function of the implementer that returns the router (`(impl) => ({ ping: impl.ping.handler(…) })`) instead of a tree of per-leaf factories; a mounted child is `child.router`, no longer `() => child.router`. `Procedures` replaces `ProcedureFactories` and `BuiltRouter`; `ContractKeysGuard` now reads the returned router. A procedures file annotates `impl` once: `export const xProcedures = (impl: typeof rpcImplementer) => ({ … })`.
+
+- 3a0128f: `.usecases(factories, ...contributions)` takes application contributions (`ApplicationContribution`, `AnyApplicationContribution` from `@arki/dot/feature`). A contribution is application code that is not a usecase handle: the journal's effects, taps and workflows (`journalHandlers(core, …)` from `@arki/journal/dot`).
+
+  - Its static declarations are read before boot from `feature.contributions`, which `DefinedFeature` and `AnyDefinedFeature` now carry.
+  - `bind(deps)` runs once at the feature's boot with the usecase-level deps: needs that are not `entrypointOnly`, infra, domain services, children. Its payload lands in the slice record under its `key`; `sliceOf` reads it. A contribution and an entrypoint may not share a key (`ARKI_DOT_E024`, as for two entrypoints).
+  - It is never a `usecases` member and has no lifecycle hooks. Entrypoints still see only the usecases and the `entrypointOnly` needs.
+  - `ProjectionManifest` gains `meta`: adapter-owned JSON a projection module reads, checked for a JSON round trip at configure. A projection module may export `render(document)`; `dot explain --as <format>` prints its string, and `--json` keeps the document.
+  - `DomainServiceValues` is exported from `@arki/dot/feature`, so a declaration file can name `typeof core` for a feature with domain services.
+
+  docs: `docs/adapter-authoring.md` (Application contributions, Projection data), `docs/composition-doctrine.md`, `docs/agent-guide.md`, `docs/upgrades/0.7.0-to-0.8.0.md`.
+  no demo impact: no demo declares a contribution or a projection module.
+
+- 0f47e87: Each usecase factory now gets its own frozen copy of its deps. A factory that changes the deps object now fails boot with a `TypeError`. If you did this, build your own object inside the factory instead.
+- ef7fe42: `dot env`: encrypted env files from the command line. `init` (header, private key, `.gitignore`, agent read-deny), `set` (encrypts with the public key only, so agents can write without reading; refuses a no-op), `get` (shape only; `--reveal` on a terminal), `ls`, `check` (CI gate: unloadable files, refused keys, plaintext `secret()` keys in tracked files, tracked `.env.keys`), `encrypt` (`--from` imports a plaintext file), `decrypt`, `rotate` (every `.env.<env>` file together), `run -- <cmd>` (passthrough; redacts secrets when stdout is not a terminal), `explain`, and `keys push|pull` (1Password, key via stdin). Failures `dot.env_*`. Commands read `secret()` keys from the app's `src/env.ts` with validation skipped; where it cannot be imported (Node) they report `dot.env.schema_unavailable`, which fails `check` when a tracked file holds a plain value. `dot dev` now opens encrypted values in env files before its database check.
+
+  `@arki/cli`: a positional array argument is no longer split on commas (`node -e "f(a, b)"` stayed two pieces).
+
+- f49d490: New step `.domainServices({ name: factory })` in a feature chain, between `.infra()` and `.features()`. Use it for logic with dependencies that two or more usecases share, or that a child feature needs. Write a plain factory `(deps: Pick<DomainDeps, …>) => value`. It is built once per boot, usecases read it by key, and a child names it with `domainService(fn)`. A factory cannot return a `Failure`. Two new error codes: `ARKI_DOT_E034` (a child needs a domain service its parent does not declare) and `ARKI_DOT_E035` (`.domainServices()` called twice or out of order).
+- 1e47612: `Lazy<T>` and `resolveLazy` move from `@arki/ts` to `@arki/dot/plugin` as `Deferred<T>` and `resolveDeferred`. They are the "value now, or a thunk the adapter calls at boot" shape that Dot adapters accept, and the old name clashed with Dot's own `Lazy<Value, Cleanup>` service handle. Behaviour is unchanged. `@arki/ts` no longer exports them; to upgrade, import `Deferred` and `resolveDeferred` from `@arki/dot/plugin`.
+
+  `@arki/http` (`port`) and `@arki/kv` (`kv()`, `kv.optional()`) now type their deferred options as `Deferred<T>`, the same shape as before, and no longer depend on `@arki/ts`. `@arki/env` drops an `@arki/ts` dependency it never imported.
+
+  demo impact: none (neither demo imports `Lazy` or `resolveLazy`).
+
+- 818fd9c: The Dot adapter moved from `@arki/env/dot` to `@arki/dot/env`. `@arki/env` drops its `@arki/dot` peer; `@arki/dot` depends on `@arki/env`. `@arki/env/core` exports `formatIssues`. Migration: `packages/env/docs/upgrades/0.1.0-to-0.2.0.md`.
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- 240dc6a: `provides` factories now get only `{ usecases }`, and entrypoints get only usecases, request keys and needs marked `entrypointOnly(...)`. They can no longer read repos, infra or plain needs. To publish data that sits behind a repository, write a one-line usecase and provide it; a consumer in another feature then gets `Value | Failure<'failure.unexpected_defect'>`. `CoreServices` is gone; use `ProvidesDeps` and `EntrypointServices`.
+- 88daaeb: `infra.fromFeatures` and `entrypoint.fromFeatures` take one declaration, the same one `infra()` and `entrypoint()` take, instead of a callback `features => unit({...})`. Breaking: rewrite each callback (`docs/upgrades/0.7.0-to-0.8.0.md`, step 6).
+
+  - Every `provides` factory and lifecycle hook also gets `$features`, the app's mounted features, and `$state`, what the declaration's new `state()` returned for this app. The builder calls `state()` once per app, so two apps built from one binder never share a worker, a timer or a server. Without `state`, `$state` is `undefined`.
+  - `actions` may be a function of the mounted features.
+  - The binder has a static `name` and typed `provides` handles, so a feature needs a `fromFeatures` service by handle: `entrypointOnly(appJournal.provides.journal)`. A misplaced binder is reported by its name, not `infra.fromFeatures(...)`.
+  - New types: `FromFeaturesDefinition` and `FeaturesContext` (`@arki/dot/unit`, `@arki/dot/feature`). `UnitBinder` gains `name` and `provides`.
+  - `@arki/journal`: `journal({ j })` exposes `provides.journal`; `JournalDriven` is inferred from it. `journalWorker()` keeps its worker in `$state`.
+  - `@arki/schedule`: `schedule(...)` exposes `provides.scheduler`.
+  - `@arki/queue` (`queueWorker`) and `@arki/http` (`http`) keep their per-app runtime in `$state`. No change for their callers.
+
+  docs: `packages/dot/docs/unit-authoring.md` (Units built from the features), `composition-doctrine.md`, `di.md`, the upgrade note; `@arki/journal` README; `@arki/schedule` `docs/reference/dot.md`.
+  no demo impact: no demo calls `fromFeatures` directly.
+
+- c3e63ba: Entrypoint handlers are now typed with what they really receive at every builder stage. `EntrypointServicesOf<typeof core>` is new in `@arki/dot`: a feature's `entrypointOnly` needs plus its `usecases`. `endpoints(core, build)` and `schedules(core, defs)` use it, so a feature with no `.usecases()` can now read its `entrypointOnly` needs in a route or schedule, and can no longer read plain needs that never arrive. A rebound `entrypointOnly` lazy need (`feature.instance(name, rebind)`) now stays entrypoint-only.
+- a905468: One way to write middleware (RFC `docs/rfcs/2026-10-21-dot-middleware.md`, steps 1 and 2):
+
+  - A step is a plain function: `(ctx) => object | Failure`. It reads the least context it needs, adds the keys of the object it returns, or refuses the call with a typed failure.
+  - An around is a plain function: `<T>(ctx, next: () => Promise<T>) => Promise<T>`. It wraps everything declared after it and the handler, for a transaction, a retry or a span. It adds nothing to the context.
+  - Order is declaration order. A step sees every key added before it.
+
+  Each transport attaches the same functions:
+
+  - `@arki/dot/orpc`: `impl.refund.use(step(authed)).use(around(inTransaction))`. A refusal is thrown as the typed error the procedure declares; a procedure that does not declare the step's failure does not compile.
+  - `@arki/http`: `routes().use(step(authed)).use(around(inTransaction))`. A refusal answers with the same coded error envelope as a failure the handler returns; every route bound after the step must declare its failures. `step(fn, { failureHeaders })` adds response headers to a refusal (a `www-authenticate` challenge, say), typed by the step's own failures.
+  - `@arki/queue`: `q.job.use(step(actorFromData)).use(around(inTransaction))`. A refusal is the job's outcome, as if the handler had returned it.
+  - `@arki/schedule`: `defineSchedule({ …, with: [asSystem, inTransaction], handler })`. A refusal makes the run `refused`.
+  - `@arki/cli`: `defineCommand({ …, with: [asOperator], run })`. `with` also wraps `preview`. A refusal is the command's failure: same exit code and error output as a failure returned from `run`.
+
+  In `with: [...]` lists, an around is told from a step by `fn.length >= 2`: declare `next` as a plain second parameter (no default value, no rest parameter).
+
+  Outside oRPC, a refusal reaches an around as the value `next()` resolves to, not as a throw: the `Failure` itself on queue, schedule and CLI, the refusal's `Response` on HTTP. An around that must roll back on a refusal checks `isFailure` on the result (on HTTP, the response status). A thrown error still rejects `next()`.
+
+  `@arki/failure/orpc` adds `rpcError(failure, errors)`: the declared `ORPCError` for a failure already in hand, to throw.
+
+- 17e86d3: Breaking: the object-form feature API is removed. Write every feature as a `defineFeature(name).needs().infra().usecases().provides().entrypoints()` chain.
+
+  - `@arki/dot`: removed `feature()`, `plug`, `composeRouter`, `composeRepos`, `tokenOf`, `entrypointsOf` and the types `AnyFeature`, `MountedFeature`, `UnitOf`, `MountedUnitsOf`, `FeatureConfig`, `ComposedRouter`, `ComposedRepos`. `defineApp().features()` takes chain features only. Use `routerFor(rpcContract, features)` instead of `composeRouter`, and a feature's own `repos({...})` store instead of `composeRepos`. Read `f.entrypoints` instead of `entrypointsOf(f)`. Lifecycle hooks (`boot`, `start`, `stop`) live on an infra unit inside the feature.
+  - `@arki/http`: removed `endpoints(build)` and `EndpointsFeatureSlice` from the root export. Use `endpoints(core, build, { contracts })` from `@arki/http/dot` in `.entrypoints()`.
+  - `@arki/schedule`: removed the `schedules(needs, defs)` overload. Use `schedules(core, defs)` in `.entrypoints()`.
+  - `@arki/queue`, `@arki/journal`, `@arki/admin`: dropped their object-form branches. The chain API is unchanged.
+
+- 0511f4a: Return precise canonical env node outcomes, sanitize provider diagnostics, validate distinct public/private key domains and preserve recovery keys across partial rotation. Share bounded load deadlines and cooperative cancellation with provider reads, and instrument owned node/provider operations through OpenTelemetry without installing an SDK. Migrate Dot env commands and database preparation to handle the returned outcomes.
+
+  Keep explicit zero/empty defaults and report JSON parsing/output rejection through schema issues. Storage and crypto remain dotenvx-compatible; see `@arki/env/docs/upgrades/typed-node-outcomes.md`.
+
+  no demo impact: node env operations are exercised through the CLI and package tests.
+
+- f3e3cd5: `@arki/dot/vite`: a Vite plugin that configures the app while Vite builds. An app that does not configure fails `vite build` instead of the first production request; the manifest and every registered projection document (for example `openapi.json`) are written into the server output. `vite dev` re-checks on every change to the app's module graph. `createAppRuntime` gains `eager`: start the app when the module loads instead of on the first `get()`, for production servers that should boot before they serve.
+- 41e8f08: `servicesOf(ctx, units)` now rejects a `provides` factory context at compile time instead of throwing ARKI_DOT_E026 at boot, and `feature.instance(name, rebind)` keeps `entrypointOnly` on a rebound need.
+- 1a897f8: Handler events (RFC `docs/rfcs/2026-10-21-dot-middleware.md`, step 3). Every handler a Dot app mounts — an oRPC procedure through `bind`, an HTTP route or `rpc()` mount, a queue job, a schedule run — now reports to the app's lifecycle observers:
+
+  - A handler event has `kind: 'handler'`, `transport` (`'rpc' | 'http' | 'job' | 'schedule'`), `feature` (the owning unit) and `name` (the oRPC path, `METHOD /path`, the job or schedule name). Its `status` is `starting`, then `completed` (with `durationMs` and `outcome: 'ok' | 'refused'`; a refusal carries its `failure`) or `failed` (a throw, with `error`). A returned failure or a step's refusal is `completed/refused`, never `failed`. On oRPC, a thrown error below 500 is a refusal.
+  - `@arki/dot` adds two observers for `defineApp(name, { observers })`: `reportErrors({ report })` calls `report(error, { transport, feature, name })` for every `failed` handler, and `logHandlers()` writes one DEBUG line per handler on `arki:dot:handlers`. With no observer registered, a handler call costs nothing extra.
+  - Transport adapters reach the emitter through `handlerObserverOf(services)` from `@arki/dot/feature` (`watching()`, `run(ref, work, outcome?)`); the kernel context carries it as `$handlers`.
+  - Breaking: `errorCaptureMiddleware` is removed from `@arki/dot/orpc`. Register `reportErrors({ report })` instead; it keeps the same rule (a 4xx is traffic, anything else is reported).
+  - Breaking: `@arki/queue` removes its standard middleware (`timingMiddleware`, `loggingMiddleware`, `errorHandlingMiddleware`, `validationMiddleware` and the other `src/middleware` exports). Timing and logging are `logHandlers()`, error reporting is `reportErrors()`, validation is `.input(schema)`, timeouts are `options.timeoutMs`, and a per-job logger is a `step`.
+  - `@arki/failure/orpc`: the `ORPCError` that `rpcError` and `orThrowRpc` throw carries the failure as its `cause`, on the server only (oRPC never sends `cause` to the client).
+
+- 33e1cd6: `dot new` apps no longer depend on `@arki/design-systems`. The workbench theme (fonts, tokens and the Tailwind bridge) is now written into the app as `src/workbench.css`, and the app depends on its three `@fontsource` packages instead. The `versions.designSystems` option of the scaffold planner is gone.
+
+  no demo impact: no demo scaffolds an app or reads the scaffold versions.
+
+### Patch Changes
+
+- 301fd8e: `dot doctor` ends its text report with one plain sentence: "All systems nominal.", "Mostly fine. Read the warnings above." or "Not great. Each fix is listed above under remediation." The `[OK]`/`[WARN]`/`[FAIL]` tags and the JSON output do not change. The `dot new` minimal template README has a friendlier first line.
+- b435e76: A command declares the events it writes. Breaking (0.x, no shims):
+
+  - `j.command(name, input, options, handler)` replaces `j.command(name, input, handler, options?)`. `options.writes` is required: `{ writes: [OrderPaid] }`, or `{ writes: [] }` for a command that only runs child commands. `authorize` moves into the same object.
+  - `write` in a handler takes only the declared events: anything else is a type error. At run time an undeclared event fails the run with `BAD_DEFINITION`, naming the command and the event, and nothing commits, even when the handler catches the error.
+  - `Command` has a fifth type parameter, `Writes`, and a read-only `writes` field that keeps the exact tuple, so code can read it before boot. `CommandContext` has a third, `Declared`. `CommandOptions` has a fifth.
+  - New type `CommandWrite<MetaOut, Tx, Declared>`, the type of `context.write`. A helper that takes `write` names what it writes; a command can pass its `write` only when it declares at least those events.
+
+  `@arki/payments` moves its commands to the new form; its API does not change. The `@arki/dot` app-stack template and the `@arki/db` README show the new form.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 12.
+
+  docs: README (Quick start, Commands, Idempotent commands, Failures, Workflows, Dot), `docs/agent-guide.md` (model, write a command, rules that bite, errors, shared packages), `llms.txt`.
+  demo impact: `demos/faultline` (commands and lesson 02) moves to the new form.
+
+- 5d55e12: Docs only: `llms.txt` moves its glossary bullets under `Optional`. No code change.
+- 8444bbe: `@arki/tanstack-start/dot` adds `tanstackStart()`, the TanStack Start entrypoint of a Dot app. It takes typed `needs`, a `session` and an `rpc` function, and declares the `rpc`, `auth`, `cron` and `health` mounts at their `at` paths, so `dot explain` lists them. `rpcHandlers()`, `authHandlers()`, `cronHandlers()` and `healthHandlers()` make each mount a one-line server route. `startServer(app, { hot, eager, handler })` from `@arki/tanstack-start/server` owns the app runtime and hands every Start request a typed context (`services`, `rpc`, `session()`, `requestId`, `signal`); type it once with `RequestContextOf<typeof app>` in a `Register` augmentation of `@tanstack/react-start`.
+
+  Breaking: `createServerHandler` is removed; use `startServer`. The cron mount's `secret` and the `cors` option are functions read at boot (`secret: () => env.CRON_SECRET`), so `vite build` runs without the server env; a bad value stops the boot with `ARKI_TANSTACK_START_PLUGIN_E001` (cron secret) or `ARKI_TANSTACK_START_PLUGIN_E002` (CORS).
+
+  `@arki/dot`: `createAppRuntime(app, { eager: true })` starts the app when the runtime is created, so a production server boots before its first request.
+
+- dbaa1c0: `dot doctor` now shows why a plugin failed to boot. The `ARKI_DOT_E003` issue keeps its code, its message ends with the plugin's own failure message, and `metadata.failureCode` carries the plugin's failure code. This adds fields only.
+
+  no demo impact: the drop-studio and faultline `dot doctor` captures boot cleanly, so no issue text changes there.
+
+- ff85471: Go to Definition works on mapped keys again. Handle maps (`unit.provides.x`, feature handles), `PolicyTree`, `SessionValues`, `CronPolicy.respond`, `ChartConfig.theme`, `Operations` and the oRPC utils tree now map `[K in keyof T as K & string]` instead of `[K in keyof T & string]`. The old form cut the link from each key back to its declaration, so the editor found no definition. Types are otherwise unchanged.
+- 8c331b7: Hand-written object guards now come from `@arki/schema` (`is(value, recordSchema)` or `plainObjectSchema`), per A-39. Replaced: the `isRecord`/`isPlainObject`/`isObject` helpers in `dot`, `cli`, `http`, `expr`, `lock`, `mail`, `embeddings` (its internal `isRecord`, not a public export), `testing` and `payments`, plus inline `typeof x === 'object' && x !== null` checks on unknown values. Behaviour is the same, except that the inline checks and `lock`'s guard no longer let arrays through. `@arki/expr` and `@arki/lock` now depend on `@arki/schema`.
+- fa643f4: Units built by another package now mount in apps that turn on `exactOptionalPropertyTypes`. A package's emitted `.d.ts` wrote an authored unit's `boot` member out as `boot?: Fn | undefined`, so `.infra(...)` refused `log()`, `db()` and `dbMigrations()` with TS2345 in such apps. The member is now the exported `BootSlot` type, which the emitted declarations name instead.
+- 49517e2: The build no longer compiles type tests (`*.test-d.ts`). They stay in `typecheck`, but a type test can no longer fail the build, and the published `dist` no longer holds compiled type tests.
+
+  `@arki/db` exports the `OnDelete` type from `@arki/db/id` and `@arki/db/sqlite`. A package whose types come from `idColumns` (such as `@arki/auth`) can now build its declarations. Before, TypeScript could not name `OnDelete` and stopped with TS2883.
+
+  `@arki/ai` drops a `@ts-expect-error` above the `@huggingface/transformers` import. That package is now always installed, so the comment had no error to hide and failed the build.
+
+- 0511f4a: Keep 1Password diagnostics private and preserve existing env-key backups with in-place Password item edits. Confirm absence before creating, refuse duplicate titles and provider read failures, and return `dot.env_vault_write_unconfirmed` when a write needs provider reconciliation before retry. Repeated pushes reread the vault and accept an already matching key without another write.
+
+  Docs impact: the upgrade guide, failure table and agent guide explain safe reconciliation and the native-child timeout. No demo impact: demos do not invoke vault backup commands.
+
+- Updated dependencies [5d55e12]
+- Updated dependencies [8c331b7]
+- Updated dependencies [4b3dcb8]
+- Updated dependencies [ef7fe42]
+- Updated dependencies [307dcf6]
+- Updated dependencies [1e47612]
+- Updated dependencies [a7a4a9d]
+- Updated dependencies [818fd9c]
+- Updated dependencies [a905468]
+- Updated dependencies [0511f4a]
+- Updated dependencies [cd969bd]
+  - @arki/cli@0.2.0
+  - @arki/env@0.2.0
+
 ## 0.7.0
 
 ### Minor Changes

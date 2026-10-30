@@ -4,6 +4,85 @@
 
 - Breaking: retry cancellation returns canonical `Cancelled` before another attempt and after rejected cancelled work. `RetryFailure`/`RETRY_FAILURES` include the exact cancellation and clock outcomes. Pre-aborted retries no longer invoke callbacks. See [upgrade guidance](docs/upgrades/0.2.0-to-0.3.0.md).
 
+## 0.3.0
+
+### Minor Changes
+
+- d2fb034: Supervise policy event observers so synchronous throws, rejected promises and pending reporting cannot retry completed work, replace results, corrupt breaker accounting or block timeout settlement. Preserve synchronous cancellation requests and observe asynchronous logger returns. Default logger and Dot diagnostics now contain canonical failure codes instead of private callback messages or payloads.
+
+  Move required effects and control decisions from observers into the operation callback or explicit backoff predicate. See `docs/upgrades/0.2.0-to-0.3.0.md`. No demo impact: existing demos do not rely on observer exceptions or private error-message logging. Public operation failure unions and remaining engine throw bridges are unchanged.
+
+- b992897: Return canonical retry cancellation before dispatch and after cancelled rejected work, preserving completed outcomes and actual clock failure identity. Propagate the exact inferred RetryFailure union through helpers, composition and Dot; update Embeddings and HTTP policy types, RPC failure declarations and application template guidance. DB maps retry cancellation to its existing TransactionCancelled; Games Platform persists it as cancellation.
+
+  no demo impact: no demo declares the narrower retry-wait outcome type; application failure admission is migrated. Embeddings changes only its existing optional policy type/schema binding.
+
+- 11c5bc2: Keep failure detection total for opaque/revoked objects and inaccessible failure codes. Close discarded-failure escapes through void/comma expressions, erased callbacks/class fields, negative guard branches and bound/call/apply acceptance helpers; existing failure lint configurations now report these unhandled outcomes. Supervise retry observation timing so completed work cannot be retried by a reporting defect. Validate foreign Backoff delays and Clock outcomes against canonical contracts; malformed providers return the existing UnexpectedDefect before more work. Reject invalid static breaker/deadline/capacity options through schema-owned AssertError before engine construction. Preserve exact success/failure identity and public event types; omit unmeasurable duration events.
+
+  No demo impact: standard providers and typed call sites keep their existing contracts. Custom provider requirements and observation limits are documented in the Resilience upgrade guide.
+
+- e80211d: Return exact canonical engine refusals and final defects while preserving raw throw retry/fallback provenance. Remove obsolete operational error classes and guards; preserve static backoff diagnostics. Capture timeout/caller cancellation before observation. Infer heterogeneous policy unions.
+
+  Migrate HTTP response/network mapping, DB exhausted SQLSTATE conflicts, Embeddings defect admission and RPC consumers together. See the Resilience 0.2.0-to-0.3.0 upgrade guide. No demo impact: the affected app callers and generator admission guidance are migrated in place.
+
+### Patch Changes
+
+- fc299e7: Emit default bounded completion/duration metrics and circuit-breaker transition counts/events using the application's OpenTelemetry provider. Preserve exact outcomes, synchronous dispatch and single execution under broken reporting; no library SDK setup. Document overlapping durations and best-effort reporting.
+
+  No demo impact: existing standalone and Dot policies gain telemetry without call-site changes.
+
+- 8d71568: Trace owned logical policy calls, retry attempts/waits, circuit breaker, timeout and bulkhead execution by default. Preserve raw fallback provenance, precise outcomes and async caller context. Broken telemetry cannot repeat work, hide refusal or block settlement. Applications configure the SDK; no payloads or exception messages are recorded.
+
+  Docs describe span ownership and safe attributes. No demo impact: existing policy consumers receive instrumentation without API changes.
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- Updated dependencies [301fd8e]
+- Updated dependencies [b435e76]
+- Updated dependencies [5d55e12]
+- Updated dependencies [8444bbe]
+- Updated dependencies [dbaa1c0]
+- Updated dependencies [133f0a6]
+- Updated dependencies [ff85471]
+- Updated dependencies [3a0128f]
+- Updated dependencies [0f47e87]
+- Updated dependencies [8c331b7]
+- Updated dependencies [ef7fe42]
+- Updated dependencies [f49d490]
+- Updated dependencies [1e47612]
+- Updated dependencies [fa643f4]
+- Updated dependencies [818fd9c]
+- Updated dependencies [440c75f]
+- Updated dependencies [240dc6a]
+- Updated dependencies [88daaeb]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [a905468]
+- Updated dependencies [17e86d3]
+- Updated dependencies [0511f4a]
+- Updated dependencies [f3e3cd5]
+- Updated dependencies [49517e2]
+- Updated dependencies [41e8f08]
+- Updated dependencies [0511f4a]
+- Updated dependencies [1a897f8]
+- Updated dependencies [33e1cd6]
+  - @arki/dot@0.8.0
+
 ## 0.2.0
 
 ### Minor Changes

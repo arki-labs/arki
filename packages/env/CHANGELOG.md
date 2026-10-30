@@ -1,5 +1,33 @@
 # @arki/env
 
+## 0.2.0
+
+### Minor Changes
+
+- 307dcf6: Encrypted env files in the dotenvx 2.x format. New `@arki/env/node`: `loadEnvFiles()` reads `.env.<environment>` and `.env.local` from the repository root down to the working directory, decrypts `encrypted:` values (via `eciesjs`, byte-compatible with dotenvx), resolves `op://`, `infisical://` and `doppler://` references, and writes what the real environment does not set into it (real values win; differing ones are reported as shadowed). Also the codec and file edits behind `dot env`. New side-effect entry `@arki/env/node/register`. `@arki/env/core` adds `describeEnv`, `isSecretSchema` and `SECRET_SCHEMA`, and `defineEnv` now refuses a value that is still `encrypted:` instead of accepting ciphertext as a string. New codes `ARKI_ENV_FILES_E001`–`E003`.
+- a7a4a9d: Fix the foundation findings of the T08 review.
+
+  - `@arki/log`: `maskSecrets` and `otelSink` handle an object that contains itself (the cycle becomes `[Circular]`) instead of dropping the record. A `.to('name')` logger whose channel is not defined no longer throws into the caller at log time; the fault is reported once and the channel is skipped. `file()` throws a coded `LogError` (`ARKI_LOG_E006`) when it cannot open its path.
+  - `@arki/async`: `debounce` and `throttle` take an `onError` option. An error thrown by the callback, or a promise it returns that rejects, goes there. Without it the error is rethrown from a microtask. The schedule stays consistent and a leading call never throws into the caller.
+  - `@arki/env`: `rotateEnvFiles` returns an `InvalidInput` failure for an empty list or files of two environments (it threw a plain `Error`). The default `onValidationError` of `defineEnv` throws an `UnexpectedFailure` that carries the new `env.invalid_environment` failure (`InvalidEnvironment`).
+
+- 818fd9c: The Dot adapter moved from `@arki/env/dot` to `@arki/dot/env`. `@arki/env` drops its `@arki/dot` peer; `@arki/dot` depends on `@arki/env`. `@arki/env/core` exports `formatIssues`. Migration: `packages/env/docs/upgrades/0.1.0-to-0.2.0.md`.
+- 0511f4a: Return precise canonical env node outcomes, sanitize provider diagnostics, validate distinct public/private key domains and preserve recovery keys across partial rotation. Share bounded load deadlines and cooperative cancellation with provider reads, and instrument owned node/provider operations through OpenTelemetry without installing an SDK. Migrate Dot env commands and database preparation to handle the returned outcomes.
+
+  Keep explicit zero/empty defaults and report JSON parsing/output rejection through schema issues. Storage and crypto remain dotenvx-compatible; see `@arki/env/docs/upgrades/typed-node-outcomes.md`.
+
+  no demo impact: node env operations are exercised through the CLI and package tests.
+
+- cd969bd: Breaking: `@arki/env/contracts` is now `@arki/env/presets`. `contracts` is `presets` (also from `@arki/env` and `@arki/env/core`), and `commonContracts`, `urlContracts`, `parseContracts` are `commonPresets`, `urlPresets`, `parsePresets`. The validators are unchanged. See `docs/upgrades/0.1.0-to-0.2.0.md`.
+
+### Patch Changes
+
+- 1e47612: `Lazy<T>` and `resolveLazy` move from `@arki/ts` to `@arki/dot/plugin` as `Deferred<T>` and `resolveDeferred`. They are the "value now, or a thunk the adapter calls at boot" shape that Dot adapters accept, and the old name clashed with Dot's own `Lazy<Value, Cleanup>` service handle. Behaviour is unchanged. `@arki/ts` no longer exports them; to upgrade, import `Deferred` and `resolveDeferred` from `@arki/dot/plugin`.
+
+  `@arki/http` (`port`) and `@arki/kv` (`kv()`, `kv.optional()`) now type their deferred options as `Deferred<T>`, the same shape as before, and no longer depend on `@arki/ts`. `@arki/env` drops an `@arki/ts` dependency it never imported.
+
+  demo impact: none (neither demo imports `Lazy` or `resolveLazy`).
+
 ## 0.1.0
 
 ### Minor Changes
