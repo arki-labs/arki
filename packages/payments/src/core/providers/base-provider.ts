@@ -1,6 +1,6 @@
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result } from '@arki/failure';
-import type { Money } from '@arki/money';
+import type { Money, MoneyFailure } from '@arki/money';
 
 import type { RefundId } from '../../refunds/primitives.js';
 import type {
@@ -26,6 +26,8 @@ import type { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './pro
 type Declined = FailureOf<typeof CardDeclined>;
 type Conflict = FailureOf<typeof IdempotencyConflict>;
 type NotFound = FailureOf<typeof ReferenceNotFound>;
+/** An amount in a provider answer that `@arki/money` refuses: an unknown currency, or units off the provider's rule. */
+type BadAmount = MoneyFailure;
 
 export type PaymentProviderConfig = {
   apiKey: string;
@@ -90,7 +92,7 @@ export abstract class BasePaymentProvider {
   }): Promise<Result<Plan, IdGenerationFailure>>;
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
-  abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound>>;
+  abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | BadAmount>>;
 
   abstract updatePlan(
     planId: PlanId,
@@ -98,11 +100,11 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<Plan, NotFound>>;
+  ): Promise<Result<Plan, NotFound | BadAmount>>;
 
   abstract deletePlan(planId: PlanId): Promise<Result<undefined, NotFound>>;
 
-  abstract listPlans(): Promise<Plan[]>;
+  abstract listPlans(): Promise<Result<Plan[], BadAmount>>;
 
   // Subscription Management
   abstract createSubscription(params: {
@@ -150,7 +152,7 @@ export abstract class BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }): Promise<Result<SubscriptionPreview, NotFound>>;
+  }): Promise<Result<SubscriptionPreview, NotFound | BadAmount>>;
 
   // Payment Management
   abstract createPayment(params: {
@@ -159,13 +161,13 @@ export abstract class BasePaymentProvider {
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Payment, Declined | NotFound | IdGenerationFailure>>;
+  }): Promise<Result<Payment, Declined | NotFound | IdGenerationFailure | BadAmount>>;
 
-  abstract getPayment(paymentId: PaymentId): Promise<Payment | null>;
+  abstract getPayment(paymentId: PaymentId): Promise<Result<Payment | null, BadAmount>>;
 
-  abstract confirmPayment(paymentId: PaymentId): Promise<Result<Payment, Declined | NotFound>>;
+  abstract confirmPayment(paymentId: PaymentId): Promise<Result<Payment, Declined | NotFound | BadAmount>>;
 
-  abstract cancelPayment(paymentId: PaymentId): Promise<Result<Payment, NotFound>>;
+  abstract cancelPayment(paymentId: PaymentId): Promise<Result<Payment, NotFound | BadAmount>>;
 
   abstract refundPayment(
     paymentId: PaymentId,

@@ -10,7 +10,7 @@ import { assert, describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
-import { money } from '@arki/money';
+import { money, UnknownCurrency } from '@arki/money';
 
 import type { Customer, Payment, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
@@ -295,6 +295,46 @@ describe('plans', () => {
     });
   });
 
+  it('getPlan, updatePlan and listPlans return the money failure when Stripe sends a currency money does not know', async () => {
+    const { stripe } = provider(() => ({ body: list([stripePrice({ currency: 'zzz' })]) }));
+    const single = provider(() => ({ body: stripePrice({ currency: 'zzz' }) }));
+
+    expect(UnknownCurrency.is(await single.stripe.getPlan(planId))).toBe(true);
+    expect(UnknownCurrency.is(await single.stripe.updatePlan(planId, { metadata: { badge: 'new' } }))).toBe(true);
+    expect(UnknownCurrency.is(await stripe.listPlans())).toBe(true);
+  });
+
+  it('getPayment, confirmPayment and cancelPayment return the money failure for an amount off Stripe rules', async () => {
+    const { stripe } = provider(() => ({ body: stripeIntent({ currency: 'zzz' }) }));
+    const refunded = provider(() => ({
+      body: stripeIntent({ latest_charge: { id: 'ch_1', object: 'charge', amount_refunded: 5, receipt_url: null } }),
+    }));
+
+    expect(UnknownCurrency.is(await stripe.getPayment(paymentRow.id))).toBe(true);
+    expect(UnknownCurrency.is(await stripe.confirmPayment(paymentRow.id))).toBe(true);
+    expect(UnknownCurrency.is(await stripe.cancelPayment(paymentRow.id))).toBe(true);
+    // JPY has no minor unit: 1500 is fine, a refund total of 5.5 yen is not a whole number
+    const half = provider(() => ({
+      body: stripeIntent({ latest_charge: { id: 'ch_1', object: 'charge', amount_refunded: 5.5, receipt_url: null } }),
+    }));
+    expect(isFailure(await half.stripe.getPayment(paymentRow.id))).toBe(true);
+    expect(isFailure(await refunded.stripe.getPayment(paymentRow.id))).toBe(false);
+  });
+
+  it('previewSubscriptionChange returns the money failure for a line amount in an unknown currency', async () => {
+    const { stripe } = provider(request =>
+      request.path === '/v1/invoices/create_preview'
+        ? {
+            body: { id: 'in_preview', object: 'invoice', currency: 'zzz', lines: list([line(100, true)]) },
+          }
+        : { body: stripeSubscription() },
+    );
+
+    const preview = await stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId });
+
+    expect(isFailure(preview)).toBe(true);
+  });
+
   it('getPlan is null for an unknown plan', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
     expect(await stripe.getPlan(orThrow(createPlanId()))).toBeNull();
@@ -341,7 +381,7 @@ describe('plans', () => {
       ]),
     }));
 
-    const plans = await stripe.listPlans();
+    const plans = orThrow(await stripe.listPlans());
 
     expect(requests[0]).toMatchObject({
       method: 'GET',

@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
 import { orThrow } from '@arki/failure';
+import { UnknownCurrency } from '@arki/money';
 
 import { fromMinorColumn } from '../core/money.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
@@ -111,11 +112,32 @@ describe('segment criteria', () => {
     await pay(big, 2000);
     await pay(small, 500);
 
-    const matches = await service.getCustomersMatchingCriteria({
+    const matches = orThrow(await service.getCustomersMatchingCriteria({
       totalSpent: { min: fromMinorColumn(1000, 'EUR').toJSON() },
-    });
+    }));
 
     expect(matches.map(row => row.id)).toEqual([big.id]);
+  });
+
+  it('totalSpent: a stored range `@arki/money` refuses is returned as its failure, not read as a filter', async () => {
+    const range = { totalSpent: { min: { amount: '10', currency: 'ZZZ' } } };
+
+    expect(UnknownCurrency.is(await service.getCustomersMatchingCriteria(range))).toBe(true);
+    expect(UnknownCurrency.is(await service['calculateSegmentCustomerCount'](range))).toBe(true);
+  });
+
+  it('createSegment and updateSegment with a bad spend range return the failure and write nothing', async () => {
+    const before = await db.select().from(tables.customerSegments);
+    const bad = { totalSpent: { min: { amount: '10', currency: 'ZZZ' } } };
+
+    const created = await service.createSegment({ name: 'Bad range', type: 'custom', criteria: bad, autoUpdate: true, updateFrequency: 24 }, 'usr_admin');
+    expect(UnknownCurrency.is(created)).toBe(true);
+    expect(await db.select().from(tables.customerSegments)).toHaveLength(before.length);
+
+    const good = orThrow(await service.createSegment({ name: 'Good', type: 'custom', criteria: {}, autoUpdate: false, updateFrequency: 24 }, 'usr_admin'));
+    const updated = await service.updateSegment(good.id, { criteria: bad });
+    expect(UnknownCurrency.is(updated)).toBe(true);
+    expect((await service.getSegment(good.id))?.criteria).toEqual({});
   });
 
   it('planTier: customers on a plan of that tier match', async () => {
@@ -133,13 +155,13 @@ describe('segment criteria', () => {
       currentPeriodEnd: add(now(), { hours: 24 }),
     });
 
-    const matches = await service.getCustomersMatchingCriteria({ planTier: ['pro'] });
+    const matches = orThrow(await service.getCustomersMatchingCriteria({ planTier: ['pro'] }));
 
     expect(matches.map(row => row.id)).toEqual([pro.id]);
   });
 
   it('counts the matching customers as a number', async () => {
-    const count = await service['calculateSegmentCustomerCount']({});
+    const count = orThrow(await service['calculateSegmentCustomerCount']({}));
 
     expect(typeof count).toBe('number');
     expect(count).toBeGreaterThan(0);
@@ -167,7 +189,7 @@ describe('customer history', () => {
     await pay(buyer, 900_000, 'JPY');
 
     const payments = await service['getCustomerPaymentHistory'](buyer.id);
-    const profile = await service.updateCustomerRiskProfile(buyer.id);
+    const profile = orThrow(await service.updateCustomerRiskProfile(buyer.id));
 
     expect(payments).toMatchObject({ totalPayments: 3, successfulPayments: 3, averageAmount: 2000, currency: 'EUR' });
     expect(profile.paymentHistory).toMatchObject({ averageAmount: 2000, currency: 'EUR' });

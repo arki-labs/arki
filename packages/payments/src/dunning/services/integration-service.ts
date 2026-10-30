@@ -4,7 +4,8 @@ import type { UserId } from '../../core/user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import { getLogger } from '@arki/log';
-import { orThrow } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
@@ -107,7 +108,10 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Handle payment failure events from the payment system
+   * Handle payment failure events from the payment system.
+   *
+   * A campaign whose stored spend range is not valid money (`@arki/money` refuses it) is skipped, and the
+   * first such failure is returned after the other campaigns have run, so one bad campaign stops no other.
    */
   async handlePaymentFailure(event: {
     paymentId: PaymentId;
@@ -117,7 +121,7 @@ export class DunningIntegrationService {
     amount: Money;
     failureCount: number;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     logger.info('Processing payment failure', {
       customerId: event.customerId,
       paymentId: event.paymentId,
@@ -131,10 +135,12 @@ export class DunningIntegrationService {
     }
 
     // Update customer risk profile with payment failure
-    await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    if (isFailure(riskProfile)) return riskProfile;
 
     // Get customer segments to determine applicable campaigns
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
+    if (isFailure(customerSegments)) return customerSegments;
 
     // Find active campaigns for payment failure trigger
     const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
@@ -143,10 +149,18 @@ export class DunningIntegrationService {
     );
 
     // Execute applicable campaigns
+    let badRange: MoneyFailure | undefined;
     for (const campaign of applicableCampaigns) {
       try {
         // Check if campaign conditions are met
-        if (this.evaluateCampaignConditions(campaign, event)) {
+        const applies = this.evaluateCampaignConditions(campaign, event);
+        if (isFailure(applies)) {
+          logger.error('Campaign {campaignId} has a spend range that is not valid money: {code}', {
+            campaignId: campaign.id,
+            code: applies.code,
+          });
+          badRange ??= applies;
+        } else if (applies) {
           await this.executeCampaignForCustomer(campaign.id, event);
         }
       } catch (error) {
@@ -157,6 +171,7 @@ export class DunningIntegrationService {
         });
       }
     }
+    return badRange;
   }
 
   /**
@@ -168,7 +183,7 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     logger.info('Processing subscription status change', {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
@@ -177,16 +192,13 @@ export class DunningIntegrationService {
     });
 
     // Update customer risk profile
-    await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    if (isFailure(riskProfile)) return riskProfile;
 
     // Handle different status transitions
-    if (event.newStatus === 'past_due') {
-      await this.handlePastDueSubscription(event);
-    } else if (event.newStatus === 'canceled') {
-      await this.handleSubscriptionCancellation(event);
-    } else if (event.newStatus === 'active' && event.oldStatus === 'past_due') {
-      await this.handleSubscriptionRecovery(event);
-    }
+    if (event.newStatus === 'past_due') return this.handlePastDueSubscription(event);
+    if (event.newStatus === 'canceled') return this.handleSubscriptionCancellation(event);
+    if (event.newStatus === 'active' && event.oldStatus === 'past_due') return this.handleSubscriptionRecovery(event);
   }
 
   /**
@@ -198,7 +210,7 @@ export class DunningIntegrationService {
     trialEndDate: Instant;
     daysUntilEnd: number;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     logger.info('Processing trial ending', {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
@@ -207,6 +219,7 @@ export class DunningIntegrationService {
     });
 
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
+    if (isFailure(customerSegments)) return customerSegments;
 
     const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
       'trial_ending',
@@ -245,7 +258,7 @@ export class DunningIntegrationService {
     subscriptionId?: SubscriptionId;
     amount: Money;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     logger.info('Processing successful payment', {
       customerId: event.customerId,
       paymentId: event.paymentId,
@@ -253,7 +266,8 @@ export class DunningIntegrationService {
     });
 
     // Update customer risk profile with successful payment
-    await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    if (isFailure(riskProfile)) return riskProfile;
 
     // Stop any active dunning campaigns for this customer if configured
     await this.stopDunningCampaignsOnPaymentSuccess(event.customerId, event.subscriptionId);
@@ -293,8 +307,9 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
+    if (isFailure(customerSegments)) return customerSegments;
 
     const applicableCampaigns = await this.campaignService.findActiveCampaignsForTrigger(
       'subscription_status',
@@ -334,10 +349,11 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     // Stop any active dunning campaigns for this subscription
     // Update customer risk profile to reflect cancellation
-    await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    if (isFailure(riskProfile)) return riskProfile;
 
     // Could trigger win-back campaigns (different from dunning)
     logger.info('Subscription canceled, stopping dunning campaigns', {
@@ -355,12 +371,13 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void> {
+  }): Promise<void | MoneyFailure> {
     // Stop any active dunning campaigns for this customer
     await this.stopDunningCampaignsOnPaymentSuccess(event.customerId, event.subscriptionId);
 
     // Update customer risk profile positively
-    await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
+    if (isFailure(riskProfile)) return riskProfile;
 
     logger.info('Subscription recovered', {
       subscriptionId: event.subscriptionId,
@@ -451,7 +468,7 @@ export class DunningIntegrationService {
       failureCount: number;
       metadata?: Record<string, unknown>;
     },
-  ): boolean {
+  ): boolean | MoneyFailure {
     const conditions = campaign.trigger.conditions;
 
     // Check payment failure count condition
@@ -464,9 +481,16 @@ export class DunningIntegrationService {
     const range = campaign.trigger.filters?.totalSpent;
     const bound = range?.min ?? range?.max;
     if (range && bound) {
-      if (event.amount.currency.code !== orThrow(Money.fromJSON(bound)).currency.code) return false;
-      if (range.min && event.amount.lt(orThrow(Money.fromJSON(range.min)))) return false;
-      if (range.max && event.amount.gt(orThrow(Money.fromJSON(range.max)))) return false;
+      // The range is stored JSON: a bound `@arki/money` refuses is returned, not read as "does not apply"
+      const boundAmount = Money.fromJSON(bound);
+      if (isFailure(boundAmount)) return boundAmount;
+      const min = range.min ? Money.fromJSON(range.min) : undefined;
+      if (isFailure(min)) return min;
+      const max = range.max ? Money.fromJSON(range.max) : undefined;
+      if (isFailure(max)) return max;
+      if (event.amount.currency.code !== boundAmount.currency.code) return false;
+      if (min && event.amount.lt(min)) return false;
+      if (max && event.amount.gt(max)) return false;
     }
 
     // Add more condition evaluations as needed

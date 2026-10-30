@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
-import { money } from '@arki/money';
+import { money, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId } from '../core/primitives.js';
 import { PaymentProviderError } from '../core/providers/provider-error.js';
@@ -57,12 +57,25 @@ describe('calculateTax', () => {
       line_items: { data: [] },
     });
 
-    const result = await tax.calculateTax(input);
+    const result = orThrow(await tax.calculateTax(input));
 
     expect(requests[0]).toMatchObject({ path: '/v1/tax/calculations', form: { currency: 'usd' } });
     expect(result.taxAmount.toDecimalString()).toBe('19.00');
     expect(result.total.toDecimalString()).toBe('119.00');
     expect(result.subtotal.toDecimalString()).toBe('100.00');
+  });
+
+  it('returns the money failure when Stripe answers an amount in an unknown currency, never a tax figure', async () => {
+    const { tax } = serviceAnswering(200, {
+      object: 'tax.calculation',
+      currency: 'zzz',
+      amount_total: 11_900,
+      tax_amount_exclusive: 1900,
+      tax_amount_inclusive: 0,
+      line_items: { data: [] },
+    });
+
+    expect(UnknownCurrency.is(await tax.calculateTax(input))).toBe(true);
   });
 
   it('rejects when Stripe Tax is down, so a sale is not priced with zero tax', async () => {

@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
-import { money } from '@arki/money';
+import { money, UnknownCurrency } from '@arki/money';
 
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
@@ -144,6 +144,28 @@ describe('healthCheck', () => {
 });
 
 describe('calculateTax', () => {
+  it('returns the money failure when Stripe answers an amount in a currency money does not know', async () => {
+    const { stripe } = provider(() => ({
+      body: {
+        id: 'taxcalc_1',
+        object: 'tax.calculation',
+        currency: 'zzz',
+        amount_total: 1190,
+        tax_amount_exclusive: 190,
+        tax_amount_inclusive: 0,
+        line_items: { object: 'list', data: [] },
+      },
+    }));
+
+    const result = await stripe.calculateTax({
+      customerId: orThrow(createCustomerId()),
+      currency: 'eur',
+      lineItems: [{ amount: money('10.00', 'EUR'), reference: 'plan' }],
+    });
+
+    expect(UnknownCurrency.is(result)).toBe(true);
+  });
+
   it('reports the tax code of the line item, not the level of the jurisdiction', async () => {
     const { stripe } = provider(request => ({
       body: {
@@ -171,11 +193,11 @@ describe('calculateTax', () => {
       },
     }));
 
-    const result = await stripe.calculateTax({
+    const result = orThrow(await stripe.calculateTax({
       customerId: orThrow(createCustomerId()),
       currency: 'eur',
       lineItems: [{ amount: money('10.00', 'EUR'), reference: 'plan' }],
-    });
+    }));
 
     expect(result.taxBreakdown[0]).toMatchObject({ jurisdiction: 'Germany', rate: 19, taxCode: 'txcd_10103001' });
   });

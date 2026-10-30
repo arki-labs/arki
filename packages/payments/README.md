@@ -75,6 +75,13 @@ ID generators return their successful ID or the canonical `IdGenerationFailure` 
 
 Answers a correct caller must handle are returned as [`@arki/failure`](https://www.npmjs.com/package/@arki/failure) values, never thrown. Check them with `isFailure`, `Definition.is` or `match`. Bugs, bad input and provider faults (`rate_limited`, `unavailable`, `authentication`, `not_configured`) are still thrown, as `PaymentProviderError` or `RefundError`.
 
+Amounts that come from outside are read with `@arki/money`, which returns a `MoneyFailure` (`money.unknown_currency`, `money.provider_amount`, `money.out_of_range`, `money.invalid_shape`, ...) for a bad one. Payments passes it on and never turns it into a throw or a wrong amount:
+
+- Stripe answers (`getPlan`, `updatePlan`, `listPlans`, `previewSubscriptionChange`, `getPayment`, `createPayment`, `confirmPayment`, `cancelPayment`, `calculateTax`, `createTaxTransaction`) and `TaxService.calculateTax`, `calculateSubscriptionTax`, `calculateOneTimeTax`, `createTaxTransaction` return it.
+- `WebhookHandler.processWebhook` returns it for a `payment.refunded` charge with a bad amount. The event stays unprocessed with its error recorded, and no refund is written. Reject the delivery, as for any returned failure.
+- Stored JSON is outside data too: `TaxReportingService.getCustomerTaxSummary` (a payment's recorded `taxAmount`), the segment calls (`getCustomersInSegment`, `getCustomersMatchingCriteria`, `updateSegmentCustomerCount`, `getCustomerSegments`, `updateCustomerRiskProfile`, `createSegment`, `updateSegment`) and `DunningIntegrationService.handlePaymentFailure` / `handleSubscriptionStatusChange` / `handleTrialEnding` (a campaign's or segment's stored spend range).
+- Journal folds read events the journal wrote itself, and a fold cannot return a failure, so a refused amount there is a corrupt log and throws.
+
 | Failure                  | Code                                | Status | Returned by                                                                      |
 | ------------------------ | ----------------------------------- | ------ | -------------------------------------------------------------------------------- |
 | `CardDeclined`           | `payments.card_declined`            | 402    | Provider calls that charge or check a card. Data: `providerCode`, `declineCode`. |

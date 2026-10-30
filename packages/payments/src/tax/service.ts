@@ -3,6 +3,7 @@ import { fromDate, now, sub } from '@arki/date';
 import type { FailureOf, Result } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import type { MoneyFailure } from '@arki/money';
 import { Money, sum } from '@arki/money';
 
 import type { ReferenceNotFound } from '../core/providers/provider-error.js';
@@ -22,7 +23,7 @@ export type TaxServiceReads = {
 
 const logger = getLogger('arki:payments:tax');
 
-type TaxBreakdownLine = Awaited<ReturnType<StripeProvider['calculateTax']>>['taxBreakdown'][number];
+type TaxBreakdownLine = Exclude<Awaited<ReturnType<StripeProvider['calculateTax']>>, MoneyFailure>['taxBreakdown'][number];
 
 /** How Stripe names the level of each jurisdiction type of ours. */
 const STRIPE_LEVEL: Record<TaxJurisdiction['type'], string> = {
@@ -161,8 +162,11 @@ export class TaxService {
    * breakdown, unless the tax is inclusive (it is part of the price then, and stays). A line that is
    * wholly exempt is not sent to Stripe. An exemption needs what its type says it is for (a customer, a product or a
    * jurisdiction): one without would exempt every sale, so it is never applied.
+   *
+   * A Stripe amount that `@arki/money` refuses (an unknown currency, units off Stripe's rule) is returned as a
+   * `MoneyFailure`, so a sale is never priced with a wrong tax.
    */
-  async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult> {
+  async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult | MoneyFailure> {
     const currency = input.currency.toUpperCase();
     // An exemption "for a customer" must name the customer; same for the other two types
     const applicable = await this.reads.exemptions.findApplicableExemptions(input.customerId);
@@ -217,6 +221,7 @@ export class TaxService {
         currency: input.currency,
         customerDetails: input.customerDetails,
       });
+      if (isFailure(result)) return result;
 
       subtotal = exemptSubtotal.plus(result.amountTotal.minus(result.taxAmountExclusive));
       taxAmount = result.taxAmountExclusive;
@@ -303,7 +308,7 @@ export class TaxService {
     occurredAt?: Instant;
     /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
     originalReference?: string;
-  }): Promise<Result<TaxTransaction, FailureOf<typeof ReferenceNotFound>>> {
+  }): Promise<Result<TaxTransaction, FailureOf<typeof ReferenceNotFound> | MoneyFailure>> {
     const currency = params.currency.toUpperCase();
     const taxCode = params.lineItems[0]?.taxCode;
 
@@ -446,7 +451,7 @@ export class TaxService {
     planInterval: 'monthly' | 'yearly' | 'weekly' | 'daily';
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
-  }): Promise<TaxCalculationResult> {
+  }): Promise<TaxCalculationResult | MoneyFailure> {
     return this.calculateTax({
       customerId: params.customerId,
       lineItems: [{
@@ -470,7 +475,7 @@ export class TaxService {
     description: string;
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
-  }): Promise<TaxCalculationResult> {
+  }): Promise<TaxCalculationResult | MoneyFailure> {
     return this.calculateTax({
       customerId: params.customerId,
       lineItems: [{

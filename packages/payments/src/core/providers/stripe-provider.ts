@@ -3,8 +3,9 @@ import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
 import { fromUnix, now } from '@arki/date';
-import { isFailure, orThrow } from '@arki/failure';
-import { Money, sum } from '@arki/money';
+import { isFailure } from '@arki/failure';
+import type { MoneyFailure } from '@arki/money';
+import { Currency, Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
 
 import type { RefundId } from '../../refunds/primitives.js';
@@ -360,14 +361,15 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Our plan row, refreshed with the price and product Stripe holds now. */
-  private toPlan(row: Plan, price: Stripe.Price, productName?: string): Plan {
+  private toPlan(row: Plan, price: Stripe.Price, productName?: string): Plan | MoneyFailure {
     if (price.unit_amount === null || !price.recurring) {
       throw new PaymentProviderError(
         'unknown',
         `Stripe price ${price.id} is not a flat recurring price, so it is not a plan`,
       );
     }
-    const amount = orThrow(fromStripeAmount(price.unit_amount, price.currency));
+    const amount = fromStripeAmount(price.unit_amount, price.currency);
+    if (isFailure(amount)) return amount;
     return {
       ...row,
       name: productName ?? row.name,
@@ -480,6 +482,7 @@ export class StripeProvider extends BasePaymentProvider {
     }
 
     const refreshed = this.toPlan(row, price, name);
+    if (isFailure(refreshed)) return refreshed;
     return params.metadata === undefined ? refreshed : { ...refreshed, metadata: { ...row.metadata, ...params.metadata } };
   }
 
@@ -497,7 +500,7 @@ export class StripeProvider extends BasePaymentProvider {
    * The active plans Stripe sells that this package created: prices carrying our `planId` in their
    * metadata, whose row still exists. Prices made in the Stripe dashboard have no row here and are left out.
    */
-  async listPlans(): Promise<Plan[]> {
+  async listPlans(): Promise<Plan[] | MoneyFailure> {
     const references = this.requireReferences();
     const prices = await this.call(() =>
       this.stripe.prices
@@ -510,7 +513,10 @@ export class StripeProvider extends BasePaymentProvider {
       const parsed = planIdSchema.safeParse(price.metadata.planId);
       if (!parsed.success) continue;
       const row = await references.findPlanById(parsed.data);
-      if (row) plans.push(this.toPlan(row, price, this.expandedProductName(price)));
+      if (!row) continue;
+      const plan = this.toPlan(row, price, this.expandedProductName(price));
+      if (isFailure(plan)) return plan;
+      plans.push(plan);
     }
     return plans;
   }
@@ -720,12 +726,15 @@ export class StripeProvider extends BasePaymentProvider {
       }),
     );
 
-    const currency = invoice.currency;
-    let charged = Money.zero(currency.toUpperCase());
-    let credited = Money.zero(currency.toUpperCase());
-    let next = Money.zero(currency.toUpperCase());
+    // The invoice's currency is Stripe's answer: one money refuses is a returned failure, not a throw
+    const currency = Currency.parse(invoice.currency.toUpperCase());
+    if (isFailure(currency)) return currency;
+    let charged = Money.zero(currency);
+    let credited = Money.zero(currency);
+    let next = Money.zero(currency);
     for (const line of invoice.lines.data) {
-      const amount = orThrow(fromStripeAmount(line.amount, currency));
+      const amount = fromStripeAmount(line.amount, currency);
+      if (isFailure(amount)) return amount;
       const proration = line.parent?.subscription_item_details?.proration ?? false;
       if (!proration) {
         next = next.plus(amount);
@@ -740,7 +749,7 @@ export class StripeProvider extends BasePaymentProvider {
     const preview: SubscriptionPreview = {
       planId: params.planId,
       proration: {
-        immediateTotal: (net.isNegative() ? Money.zero(currency.toUpperCase()) : net).toJSON(),
+        immediateTotal: (net.isNegative() ? Money.zero(currency) : net).toJSON(),
         nextInvoiceTotal: next.toJSON(),
         creditApplied: credited.toJSON(),
       },
@@ -754,14 +763,15 @@ export class StripeProvider extends BasePaymentProvider {
   private toPayment(
     intent: Stripe.PaymentIntent,
     base: Pick<Payment, 'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'>,
-  ): Payment {
-    const amount = orThrow(fromStripeAmount(intent.amount, intent.currency));
+  ): Payment | MoneyFailure {
+    const amount = fromStripeAmount(intent.amount, intent.currency);
+    if (isFailure(amount)) return amount;
     const paymentMethod = intent.payment_method;
     const charge = intent.latest_charge;
     const chargeObject = charge !== null && typeof charge === 'object' ? charge : null;
-    const refundedMinor = chargeObject
-      ? toMinorColumn(orThrow(fromStripeAmount(chargeObject.amount_refunded, intent.currency)))
-      : 0;
+    const refunded = chargeObject ? fromStripeAmount(chargeObject.amount_refunded, intent.currency) : null;
+    if (isFailure(refunded)) return refunded;
+    const refundedMinor = refunded ? toMinorColumn(refunded) : 0;
 
     return {
       id: base.id,
@@ -859,7 +869,7 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  async getPayment(paymentId: PaymentId): Promise<Payment | null> {
+  async getPayment(paymentId: PaymentId): Promise<Payment | MoneyFailure | null> {
     const row = await this.requireReferences().findPaymentById(paymentId);
     if (!row) return null;
 
@@ -1233,17 +1243,24 @@ export class StripeProvider extends BasePaymentProvider {
       level: string;
       taxCode?: string;
     }[];
-  }> {
+  } | MoneyFailure> {
     const request = toTaxCalculationParams(params);
     const calculation = await this.call(() => this.stripe.tax.calculations.create(request));
 
-    return {
-      amountTotal: orThrow(fromStripeAmount(calculation.amount_total, calculation.currency)),
-      taxAmountExclusive: orThrow(fromStripeAmount(calculation.tax_amount_exclusive, calculation.currency)),
-      taxAmountInclusive: orThrow(fromStripeAmount(calculation.tax_amount_inclusive, calculation.currency)),
-      taxBreakdown: calculation.line_items?.data?.flatMap((item: Stripe.Tax.CalculationLineItem) =>
-        item.tax_breakdown?.map((breakdown: Stripe.Tax.CalculationLineItem.TaxBreakdown) => ({
-          amount: orThrow(fromStripeAmount(breakdown.amount, calculation.currency)),
+    const amountTotal = fromStripeAmount(calculation.amount_total, calculation.currency);
+    if (isFailure(amountTotal)) return amountTotal;
+    const taxAmountExclusive = fromStripeAmount(calculation.tax_amount_exclusive, calculation.currency);
+    if (isFailure(taxAmountExclusive)) return taxAmountExclusive;
+    const taxAmountInclusive = fromStripeAmount(calculation.tax_amount_inclusive, calculation.currency);
+    if (isFailure(taxAmountInclusive)) return taxAmountInclusive;
+
+    const taxBreakdown = [];
+    for (const item of calculation.line_items?.data ?? []) {
+      for (const breakdown of item.tax_breakdown ?? []) {
+        const amount = fromStripeAmount(breakdown.amount, calculation.currency);
+        if (isFailure(amount)) return amount;
+        taxBreakdown.push({
+          amount,
           rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
             ? breakdown.tax_rate_details.percentage_decimal
             : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
@@ -1252,9 +1269,11 @@ export class StripeProvider extends BasePaymentProvider {
           state: breakdown.jurisdiction.state ?? undefined,
           level: breakdown.jurisdiction.level,
           taxCode: item.tax_code,
-        })) || []
-      ) || [],
-    };
+        });
+      }
+    }
+
+    return { amountTotal, taxAmountExclusive, taxAmountInclusive, taxBreakdown };
   }
 
   /**
@@ -1275,12 +1294,17 @@ export class StripeProvider extends BasePaymentProvider {
     if (!lines) {
       throw new PaymentProviderError('unknown', `Stripe tax transaction ${transaction.id} came back without line items`);
     }
-    let net = Money.zero(transaction.currency.toUpperCase());
+    const currency = Currency.parse(transaction.currency.toUpperCase());
+    if (isFailure(currency)) return currency;
+    let net = Money.zero(currency);
     let taxExclusive = net;
     let taxInclusive = net;
     for (const line of lines) {
-      const tax = orThrow(fromStripeAmount(line.amount_tax, transaction.currency));
-      net = net.plus(orThrow(fromStripeAmount(line.amount, transaction.currency)));
+      const tax = fromStripeAmount(line.amount_tax, transaction.currency);
+      if (isFailure(tax)) return tax;
+      const lineAmount = fromStripeAmount(line.amount, transaction.currency);
+      if (isFailure(lineAmount)) return lineAmount;
+      net = net.plus(lineAmount);
       if (line.tax_behavior === 'inclusive') {
         taxInclusive = taxInclusive.plus(tax);
       } else {

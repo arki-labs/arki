@@ -1,7 +1,8 @@
 import type { Instant } from '@arki/date';
 import { compareAsc, fromDate, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
-import { orThrow } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+import type { MoneyFailure } from '@arki/money';
 import { Money, sum } from '@arki/money';
 
 import type { PaymentRepository } from '../core/repository.js';
@@ -149,8 +150,10 @@ function totalsByCurrency(amounts: readonly Money[]): Money[] {
  * The tax a payment recorded in its metadata at checkout (`taxAmount`, `Money` JSON), as `Money`
  * in the payment's currency. No `taxAmount` means no tax was recorded: zero. One that is not
  * `Money` JSON, or is in another currency than the payment, throws: a wrong total must not pass.
+ * `Money` JSON that `@arki/money` refuses (an unknown currency, too many decimals) is a stored value
+ * from outside: it is returned as that `MoneyFailure`.
  */
-function recordedTax(paymentId: string, metadata: Record<string, unknown> | null, currency: string): Money {
+function recordedTax(paymentId: string, metadata: Record<string, unknown> | null, currency: string): Money | MoneyFailure {
   const recorded = metadata?.taxAmount;
   if (recorded === undefined || recorded === null) return Money.zero(currency);
 
@@ -158,7 +161,8 @@ function recordedTax(paymentId: string, metadata: Record<string, unknown> | null
   if (!parsed.success) {
     throw new Error(`Payment ${paymentId} has a taxAmount that is not money: ${JSON.stringify(recorded)}`);
   }
-  const tax = orThrow(Money.fromJSON(parsed.data));
+  const tax = Money.fromJSON(parsed.data);
+  if (isFailure(tax)) return tax;
   if (tax.currency.code !== currency) {
     throw new Error(`Payment ${paymentId} is in ${currency} but records tax in ${tax.currency.code}`);
   }
@@ -211,7 +215,7 @@ export class TaxReportingService {
    * Get customer tax summary for a specific year (UTC): the customer's succeeded payments with the
    * tax recorded on each, and the exemptions in force during the year.
    */
-  async getCustomerTaxSummary(customerId: CustomerId, year: number): Promise<CustomerTaxSummary> {
+  async getCustomerTaxSummary(customerId: CustomerId, year: number): Promise<CustomerTaxSummary | MoneyFailure> {
     const startDate = fromDate(new Date(Date.UTC(year, 0, 1)));
     const endDate = sub(fromDate(new Date(Date.UTC(year + 1, 0, 1))), { nanoseconds: 1 });
 
@@ -229,11 +233,13 @@ export class TaxReportingService {
 
       for (const payment of page) {
         const amount = Money.fromMinor(payment.amountMinor, payment.currency.toUpperCase());
+        const tax = recordedTax(payment.id, payment.metadata, amount.currency.code);
+        if (isFailure(tax)) return tax;
         transactions.push({
           id: payment.id,
           date: payment.createdAt,
           amount,
-          tax: recordedTax(payment.id, payment.metadata, amount.currency.code),
+          tax,
           type: payment.subscriptionId ? 'subscription' : 'one_time',
           description: payment.description ?? '',
         });

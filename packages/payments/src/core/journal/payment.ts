@@ -169,6 +169,9 @@ export function createPaymentJournal<
         fromDate(e.recordedAt),
       ),
     )
+    // The two `orThrow` reads below fold events this journal wrote itself, from `Money#toJSON()` after the
+    // command's schema accepted the amount. A fold cannot return a failure; a refusal here is a corrupt
+    // event log (a bug), so it throws.
     .create(PaymentInitiatedV2, e =>
       started(e.data, toMinorColumn(orThrow(Money.fromJSON(e.data.amount))), e.data.amount.currency, fromDate(e.recordedAt)),
     )

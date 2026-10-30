@@ -192,6 +192,8 @@ export function createRefundsJournal<
         fromDate(e.recordedAt),
       ),
     )
+    // The `orThrow` reads fold an event this journal wrote itself, from `Money#toJSON()` after the command's
+    // schema accepted the amounts. A fold cannot return a failure; a refusal is a corrupt log (a bug), so it throws.
     .create(RefundRequestedV2, e =>
       requested(
         e.data,

@@ -365,11 +365,11 @@ describe('calculateTax', () => {
   it('sends JPY line items in yen and reads totals back in yen', async () => {
     const { stripe, requests } = taxProvider();
 
-    const result = await stripe.calculateTax({
+    const result = orThrow(await stripe.calculateTax({
       customerId: orThrow(createCustomerId()),
       currency: 'jpy',
       lineItems: [{ amount: money(1500, 'JPY'), reference: 'plan' }],
-    });
+    }));
 
     expect(requests[0]?.form['line_items[0][amount]']).toBe('1500');
     expect(result.amountTotal.toString()).toBe('1650 JPY');

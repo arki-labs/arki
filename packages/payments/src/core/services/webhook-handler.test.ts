@@ -22,6 +22,7 @@ import { afterAll, assert, beforeAll, beforeEach, describe, expect, it, vi } fro
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { add, fromUnix, now, sub } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
+import { UnknownCurrency } from '@arki/money';
 import { initJournal } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../../test-support.js';
@@ -583,6 +584,28 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     expect(result).toMatchObject({ success: false, retryable: true });
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: false, refundedAmountMinor: 0 });
+  });
+
+  it('payment.refunded with an amount in a currency money refuses answers that failure, records no refund and is not processed', async () => {
+    const seeded = await seedPayment(writesOn(db), null, '25');
+    await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
+    const charge = stripeCharge(seeded.providerPaymentId, { amount_refunded: 1000, currency: 'zzz' });
+
+    // `deliver` asserts the answer is not a failure; this test is about the failure
+    const result = await stateHandler('payment.refunded', charge).processWebhook(
+      'stripe',
+      JSON.stringify({ id: freshEventId(), type: 'customer.subscription.created' }),
+      't=0,v1=stub',
+      '0',
+      '203.0.113.7',
+      'whsec_test',
+    );
+
+    expect(UnknownCurrency.is(result)).toBe(true);
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: false, refundedAmountMinor: 0 });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
+    const stored = await db.select().from(webhookEvents).where(isNotNull(webhookEvents.errorMessage));
+    expect(stored.some(row => !row.processed && row.errorMessage?.startsWith('money.unknown_currency'))).toBe(true);
   });
 
   it('payment.refunded for a charge without a payment intent is acknowledged and records nothing', async () => {

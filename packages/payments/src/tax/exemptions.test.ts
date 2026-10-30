@@ -11,6 +11,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import { StripeProvider } from '../core/providers/stripe-provider.js';
@@ -154,7 +155,7 @@ describe('calculateTax with exemptions', () => {
   it('charges tax when nothing exempts the customer', async () => {
     const { service } = serviceWithStripe();
 
-    const result = await service.calculateTax(sale);
+    const result = orThrow(await service.calculateTax(sale));
 
     expect(result.taxAmount.toDecimalString()).toBe('19.00');
     expect(result.total.toDecimalString()).toBe('119.00');
@@ -171,11 +172,11 @@ describe('calculateTax with exemptions', () => {
     });
     const { service, requests } = serviceWithStripe();
 
-    const pending = await service.calculateTax(sale);
+    const pending = orThrow(await service.calculateTax(sale));
     expect(pending.taxAmount.toDecimalString()).toBe('19.00');
 
     await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
-    const result = await service.calculateTax(sale);
+    const result = orThrow(await service.calculateTax(sale));
 
     expect(result.taxAmount.toDecimalString()).toBe('0.00');
     expect(result.subtotal.toDecimalString()).toBe('100.00');
@@ -185,7 +186,7 @@ describe('calculateTax with exemptions', () => {
     expect(requests).toHaveLength(1);
 
     await repos.exemptions.revokeExemption(exemption.id);
-    const taxed = await service.calculateTax(sale);
+    const taxed = orThrow(await service.calculateTax(sale));
     expect(taxed.taxAmount.toDecimalString()).toBe('19.00');
   });
 
@@ -209,8 +210,8 @@ describe('calculateTax with exemptions', () => {
     await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
     const { service } = serviceWithStripe();
 
-    const owner = await service.calculateTax({ ...sale, customerId: 'cust_owner' });
-    const stranger = await service.calculateTax({ ...sale, customerId: 'cust_stranger' });
+    const owner = orThrow(await service.calculateTax({ ...sale, customerId: 'cust_owner' }));
+    const stranger = orThrow(await service.calculateTax({ ...sale, customerId: 'cust_stranger' }));
 
     expect(owner.taxAmount.toDecimalString()).toBe('0.00');
     expect(stranger.taxAmount.toDecimalString()).toBe('19.00');
@@ -228,13 +229,13 @@ describe('calculateTax with exemptions', () => {
     await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
     const { service } = serviceWithStripe();
 
-    const result = await service.calculateTax({
+    const result = orThrow(await service.calculateTax({
       ...sale,
       lineItems: [
         ...sale.lineItems,
         { amount: money('40', 'EUR'), description: 'Book', reference: 'line_2', taxCode: 'txcd_10501000' },
       ],
-    });
+    }));
 
     // Stripe priced the taxable line only (100 EUR + 19 tax); the 40 EUR book is added tax-free
     expect(result.subtotal.toDecimalString()).toBe('140.00');
@@ -261,10 +262,10 @@ describe('calculateTax with exemptions', () => {
     await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
     const { service } = serviceWithStripe();
 
-    const result = await service.calculateTax({
+    const result = orThrow(await service.calculateTax({
       ...sale,
       lineItems: [{ amount: money('100', 'EUR'), description: 'Pro', reference: 'line_1', taxCode: 'txcd_other' }],
-    });
+    }));
 
     expect(result.breakdown).toEqual([]);
     expect(result.taxAmount.toDecimalString()).toBe('0.00');
@@ -292,16 +293,16 @@ describe('calculateTax with exemptions', () => {
     const country = { display_name: 'Georgia', level: 'country', country: 'GE', state: null };
     const lines = [{ amount: money('100', 'EUR'), description: 'Pro', reference: 'line_1', taxCode: 'txcd_other' }];
 
-    const inUs = await serviceWithStripe(usState).service.calculateTax({
+    const inUs = orThrow(await serviceWithStripe(usState).service.calculateTax({
       ...sale,
       customerId: 'cust_georgia',
       lineItems: lines,
-    });
-    const inGeorgia = await serviceWithStripe(country).service.calculateTax({
+    }));
+    const inGeorgia = orThrow(await serviceWithStripe(country).service.calculateTax({
       ...sale,
       customerId: 'cust_georgia',
       lineItems: lines,
-    });
+    }));
 
     expect(inUs.taxAmount.toDecimalString()).toBe('19.00');
     expect(inUs.breakdown).toHaveLength(1);

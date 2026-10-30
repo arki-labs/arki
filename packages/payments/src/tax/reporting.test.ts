@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
 import { orThrow } from '@arki/failure';
+import { UnknownCurrency } from '@arki/money';
 
 import type { PaymentId } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
@@ -122,7 +123,7 @@ afterAll(async () => {
 
 describe('getCustomerTaxSummary', () => {
   it('says nothing was paid in a year with no payments, instead of inventing one', async () => {
-    const summary = await reporting.getCustomerTaxSummary(customerId, thisYear - 1);
+    const summary = orThrow(await reporting.getCustomerTaxSummary(customerId, thisYear - 1));
 
     expect(summary.transactions).toEqual([]);
     expect(summary.totalPaid).toEqual([]);
@@ -144,7 +145,7 @@ describe('getCustomerTaxSummary', () => {
       metadata: { taxAmount: { amount: '99', currency: 'USD' } },
     });
 
-    const summary = await reporting.getCustomerTaxSummary(customerId, thisYear);
+    const summary = orThrow(await reporting.getCustomerTaxSummary(customerId, thisYear));
 
     expect(summary.customerId).toBe(customerId);
     expect(summary.transactions.map(t => [t.description, t.amount.toDecimalString(), t.tax.toDecimalString()])).toEqual(
@@ -165,8 +166,18 @@ describe('getCustomerTaxSummary', () => {
     ]);
   });
 
+  it('returns the money failure for a stored tax amount `@arki/money` refuses, never a wrong total', async () => {
+    await payment({
+      customer: otherCustomerId,
+      amount: '20',
+      metadata: { taxAmount: { amount: '2', currency: 'ZZZ' } },
+    });
+
+    expect(UnknownCurrency.is(await reporting.getCustomerTaxSummary(otherCustomerId, thisYear))).toBe(true);
+  });
+
   it('lists the exemptions in force during the year: not revoked, not ended before it, not another customer’s', async () => {
-    const summary = await reporting.getCustomerTaxSummary(customerId, thisYear);
+    const summary = orThrow(await reporting.getCustomerTaxSummary(customerId, thisYear));
 
     expect(summary.exemptions).toHaveLength(1);
     expect(summary.exemptions[0]).toMatchObject({

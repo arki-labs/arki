@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { now, sub } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import type { MoneyFailure } from '@arki/money';
 import { fromStripeAmount } from '@arki/money/stripe';
 import type { SchemaInput } from '@arki/schema';
 
@@ -117,7 +118,7 @@ export type WebhookHandlerConfig = {
 
 export class WebhookHandler extends EventEmitter {
   private readonly config: WebhookHandlerConfig;
-  private readonly eventHandlers = new Map<WebhookEventType, (data: WebhookEventData) => Promise<void>>();
+  private readonly eventHandlers = new Map<WebhookEventType, (data: WebhookEventData) => Promise<void | MoneyFailure>>();
 
   constructor(
     private readonly paymentRepository: WebhookEventStore,
@@ -148,7 +149,7 @@ export class WebhookHandler extends EventEmitter {
     timestamp: string,
     sourceIp: string,
     webhookSecret: string,
-  ): Promise<WebhookProcessingResult | IdGenerationFailure> {
+  ): Promise<WebhookProcessingResult | IdGenerationFailure | MoneyFailure> {
     try {
       // 1. Validate webhook security
       const validation = await this.webhookSecurity.validateWebhook(
@@ -238,7 +239,9 @@ export class WebhookHandler extends EventEmitter {
       if (this.config.enableAsync) {
         void this.processEventAsync(webhookId, eventType, provider, data);
       } else {
-        await this.runClaimed(webhookId, eventType, provider, data);
+        // An amount the provider sent that `@arki/money` refuses is answered as that failure, never as success
+        const outcome = await this.runClaimed(webhookId, eventType, provider, data);
+        if (isFailure(outcome)) return outcome;
       }
       return { success: true, webhookId };
     } catch (error) {
@@ -270,7 +273,15 @@ export class WebhookHandler extends EventEmitter {
             continue;
           }
           try {
-            await this.runClaimed(event.id, event.eventType, event.provider, event.data);
+            const outcome = await this.runClaimed(event.id, event.eventType, event.provider, event.data);
+            if (isFailure(outcome)) {
+              this.emit('webhook:processing_error', {
+                webhookId: event.id,
+                eventType: event.eventType,
+                provider: event.provider,
+                error: outcome.code,
+              });
+            }
           } catch (error) {
             this.emit('webhook:processing_error', {
               webhookId: event.id,
@@ -309,7 +320,10 @@ export class WebhookHandler extends EventEmitter {
     // Process in background
     setImmediate(async () => {
       try {
-        await this.runClaimed(webhookId, eventType, provider, data);
+        const outcome = await this.runClaimed(webhookId, eventType, provider, data);
+        if (isFailure(outcome)) {
+          this.emit('webhook:processing_error', { webhookId, eventType, provider, error: outcome.code });
+        }
       } catch (error) {
         this.emit('webhook:processing_error', {
           webhookId,
@@ -328,16 +342,22 @@ export class WebhookHandler extends EventEmitter {
 
   /**
    * Run an event this caller has claimed. On failure, record the error on the
-   * row, so the next resend may take the event over, and rethrow.
+   * row, so the next resend may take the event over, and rethrow. A `MoneyFailure` the handler
+   * returns is recorded the same way and returned: the event is not marked processed.
    */
   private async runClaimed(
     webhookId: WebhookId,
     eventType: WebhookEventType,
     provider: PaymentProviderType,
     data: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<void | MoneyFailure> {
     try {
-      await this.processEvent(webhookId, eventType, provider, data);
+      const outcome = await this.processEvent(webhookId, eventType, provider, data);
+      if (isFailure(outcome)) {
+        await this.paymentRepository.updateWebhookEvent(webhookId, { errorMessage: `${outcome.code}: ${outcome.message}` });
+        logger.warn('Webhook {webhookId} carries an amount that is not valid: {code}', { webhookId, code: outcome.code });
+      }
+      return outcome;
     } catch (error) {
       await this.paymentRepository.updateWebhookEvent(webhookId, {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
@@ -352,7 +372,7 @@ export class WebhookHandler extends EventEmitter {
     eventType: WebhookEventType,
     provider: PaymentProviderType,
     data: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<void | MoneyFailure> {
     try {
       const eventData: WebhookEventData = {
         type: eventType,
@@ -364,7 +384,8 @@ export class WebhookHandler extends EventEmitter {
       // Execute specific event handler
       const handler = this.eventHandlers.get(eventType);
       if (handler) {
-        await handler(eventData);
+        const handled = await handler(eventData);
+        if (isFailure(handled)) return handled;
       } else {
         logger.warn('No handler for webhook event type {eventType}', { eventType });
       }
@@ -410,9 +431,7 @@ export class WebhookHandler extends EventEmitter {
     });
 
     // Payment events
-    this.eventHandlers.set('payment.refunded', async (data: WebhookEventData) => {
-      await this.handlePaymentRefunded(data);
-    });
+    this.eventHandlers.set('payment.refunded', data => this.handlePaymentRefunded(data));
 
     this.eventHandlers.set('refund.updated', async (data: WebhookEventData) => {
       await this.handleRefundUpdated(data);
@@ -534,7 +553,7 @@ export class WebhookHandler extends EventEmitter {
    * Stripe reports the total refunded so far on the charge, so a resent or out-of-order event
    * cannot double or lower the amount. A charge made outside a PaymentIntent has no local payment.
    */
-  private async handlePaymentRefunded(data: WebhookEventData): Promise<void> {
+  private async handlePaymentRefunded(data: WebhookEventData): Promise<void | MoneyFailure> {
     try {
       const charge = parseStripeCharge(data.data);
       if (charge.providerPaymentId === null) {
@@ -549,8 +568,10 @@ export class WebhookHandler extends EventEmitter {
         throw new Error(`No local payment for provider payment ${charge.providerPaymentId}`);
       }
 
-      const refundedAmount = orThrow(fromStripeAmount(charge.amountRefunded, charge.currency)).toJSON();
-      await orThrow(this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount }));
+      // Stripe's amount is outside data: one `@arki/money` refuses is returned, and no refund is recorded
+      const refunded = fromStripeAmount(charge.amountRefunded, charge.currency);
+      if (isFailure(refunded)) return refunded;
+      await orThrow(this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount: refunded.toJSON() }));
       await this.reconcileRefunds(charge.refunds, data.webhookId);
 
       this.emit('payment:refunded', { paymentData: data.data, webhookId: data.webhookId });

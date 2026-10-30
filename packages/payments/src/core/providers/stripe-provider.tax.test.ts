@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { now } from '@arki/date';
 import { orThrow } from '@arki/failure';
-import { money } from '@arki/money';
+import { money, UnknownCurrency } from '@arki/money';
 
 import type { Customer } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
@@ -60,6 +60,24 @@ function transaction(
 }
 
 describe('createTaxTransaction', () => {
+  it('returns the money failure when the recorded transaction is in a currency money does not know', async () => {
+    const { stripe } = provider(request =>
+      request.path === '/v1/tax/calculations'
+        ? { body: { id: 'taxcalc_1', object: 'tax.calculation', currency: 'usd' } }
+        : { body: transaction('tax_txn_1', 'zzz', [{ amount: 2000, amount_tax: 400, tax_behavior: 'exclusive' }]) },
+    );
+
+    const result = await stripe.createTaxTransaction({
+      reference: 'order_8',
+      type: 'sale',
+      customerId: customer.id,
+      currency: 'USD',
+      lineItems: [{ amount: money('10.00', 'USD'), quantity: 2, reference: 'plan' }],
+    });
+
+    expect(UnknownCurrency.is(result)).toBe(true);
+  });
+
   it('records a sale: calculates the tax, then records that calculation, and returns the recorded totals', async () => {
     const { stripe, requests } = provider(request =>
       request.path === '/v1/tax/calculations'
