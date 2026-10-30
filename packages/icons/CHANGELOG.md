@@ -1,5 +1,20 @@
 # @arki/icons
 
+## 0.2.0
+
+### Minor Changes
+
+- cd41ee3: `@arki/icons/vite`: `phosphorPerIcon()` rewrites every named icon import from `@arki/icons/phosphor` or `@phosphor-icons/react` to the icon's own module at build time (`@phosphor-icons/react/dist/csr/<Icon>`), and `IconContext` to its context module. The app's imports stay as they are; the server stops loading the whole Phosphor index (about 300 ms at cold start) and loads only the icons it renders. `rewriteIconImports` and `phosphorIconNames` are exported for scripts.
+
+### Patch Changes
+
+- b31c52d: The published `dist/api.json` no longer lists one row per icon. The 22,000 same-type icon constants are one group row, and their names ship in `dist/api-names/`. The tarball is about 4 MB smaller; the exports themselves are unchanged.
+
+  no docs impact: only the machine-readable API index changes, no page or example does.
+  no demo impact: no export, behavior or type changes.
+
+- 5d55e12: Docs only: `llms.txt` import paths list `./vite`. No code change.
+
 ## 0.1.2
 
 ### Patch Changes

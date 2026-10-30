@@ -1,5 +1,43 @@
 # @arki/ui
 
+## 0.2.0
+
+### Minor Changes
+
+- 1511bbd: Adds the hooks from `@arki/react-hooks` as `@arki/ui/hooks/*`, one subpath per hook: `hooks/debounce`, `hooks/local-storage`, `hooks/media-query`, `hooks/hotkeys`, `hooks/copy-to-clipboard`, `hooks/timeout`, `hooks/toggle`, `hooks/pagination`, `hooks/async-memo`, `hooks/is-client`, `hooks/long-press`, `hooks/touch`, `hooks/use-viewport`, `hooks/use-swipe-gesture`, `hooks/use-touch-feedback`. The code is unchanged. `@arki/ui` no longer depends on `@arki/react-hooks`; that package is retired. To upgrade, replace `@arki/react-hooks/<name>` with `@arki/ui/hooks/<name>`.
+
+  demo impact: drop-studio's `arki.deps.json` lists `@arki/react-hooks` only as a transitive dependency of `@arki/ui` (no direct import); drop that entry on its next upgrade. faultline: none.
+
+- a225249: Breaking: `@arki/ui/design-system` is removed, and `@arki/ui` no longer depends on `@arki/design-systems`. The components read the standard shadcn token names, so any shadcn-compatible theme works; the README shows a minimal setup. Migrate: import design-system ids and helpers from the package that defines your themes instead.
+
+  no demo impact: no demo imports `@arki/ui/design-system`.
+
+- dd8839f: New `@arki/ui/styles/nav.css`: the page navigation crossfade (a view transition scoped to the `nav` type). It moved here from `@arki/design-systems/transitions/nav.css`. Migrate: change the `@import` path in your global stylesheet.
+
+  no demo impact: no demo imports the navigation transition stylesheet.
+
+- 74a447e: Adds the theme from `@arki/theme` as `@arki/ui/theme` (`ThemeProvider`, `useTheme`) and `@arki/ui/theme/script` (`themeScript`, `themeDetectionFn`, `THEME_STORAGE_KEY`). The code is unchanged, plus the unreleased `themeClasses` option: a theme can set several classes on the root element, and changing the theme removes them all. `@arki/ui` no longer depends on `@arki/theme`; that package is retired. To upgrade, replace `@arki/theme` with `@arki/ui/theme` and `@arki/theme/script` with `@arki/ui/theme/script`.
+
+  demo impact: drop-studio's and faultline's `arki.deps.json` list `@arki/theme`; rename their imports and drop that entry on their next upgrade.
+
+- ebc681b: `useAsyncMemo` now returns `{ value, isPending, failure, retry }` instead of the bare value. A rejected promise becomes `failure` instead of an unhandled rejection, and `retry()` runs the factory again. `useViewport` returns the server desktop default on the first client render and reads the real window after mount, so a phone no longer hydrates different markup. `DatePicker` shows the placeholder for an invalid `Date`. `useFormField` names `<Form>` or `<FormField>` as the missing parent (the field context default is now `null`). Touch-feedback errors log through `@arki/log` at debug (`arki:ui:touch`). New subpath `@arki/ui/copy-text` (`copyText`, moved from `@arki/chat-ui` so `Pre` and `CodeBlock` share one clipboard helper). Chart tooltip and legend items are typed, no `any`.
+
+### Patch Changes
+
+- fb2103b: Fix runtime failures that plain input could trigger.
+
+  - `@arki/string`: `words`, `wordCount` and every count built on them scan text in linear steps. One regex with a repeating group overflowed the engine's stack on Node for megabytes of text such as `a-a-a-`. Results on ordinary text are unchanged.
+  - `@arki/chat-ui`: the `CodeBlock` copy button awaits the clipboard write. A refused write shows "Copy failed" for 2 seconds instead of an unhandled rejection.
+  - `@arki/content-react`: a markdown image with no alt text renders as a decorative image (`alt=""`) instead of throwing during render, and an image with no source renders nothing. The code-block copy button shows a failed state when the clipboard is refused or missing. `useSearch` adds `isError` and `retry()`.
+  - `@arki/ui`: the sidebar logs through `@arki/log` instead of `debug`, so importing it no longer reads `process.env.DEBUG` (Deno without env permission threw at import). Its debug output now follows the app's `@arki/log` configuration. A refused cookie write no longer throws; the sidebar just does not remember its state.
+
+- fcc97e9: `ThemeProvider` now shows a stored theme after hydration. Its first render read `localStorage` in the browser but not on the server, and React keeps mismatched attributes during hydration, so a theme switcher stayed on the server's default (for example "Auto" while Lamplight was active). The provider now renders the default on both sides, reads the stored theme and the OS preference in a layout effect before the first paint, and leaves the pre-paint script's classes alone until then. No docs impact: behaviour now matches what the theme docs already describe. No demo impact: no demo covers theme hydration.
+- ff85471: Go to Definition works on mapped keys again. Handle maps (`unit.provides.x`, feature handles), `PolicyTree`, `SessionValues`, `CronPolicy.respond`, `ChartConfig.theme`, `Operations` and the oRPC utils tree now map `[K in keyof T as K & string]` instead of `[K in keyof T & string]`. The old form cut the link from each key back to its declaration, so the editor found no definition. Types are otherwise unchanged.
+- Updated dependencies [b31c52d]
+- Updated dependencies [cd41ee3]
+- Updated dependencies [5d55e12]
+  - @arki/icons@0.2.0
+
 ## 0.1.6
 
 ### Patch Changes
