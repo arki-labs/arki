@@ -1,5 +1,29 @@
 # @arki/async
 
+## 0.2.0
+
+### Minor Changes
+
+- d7e9886: Return canonical owned cancellation, deadline and provider/callback defect outcomes from async waits and concurrency. Preserve fulfilled Failure elements, heterogeneous result inference, joined work and late settlement observation; contain foreign scope-listener failures. Add default operation telemetry without changing callback execution or exposing private causes. Retire migrated exception-only exports and update callers and runtime examples. AI Flow propagates retry-wait defects unchanged; Clock docs clarify its existing supervised sleep contract.
+
+  no demo impact: public examples and runtime smoke checks cover the changed behaviour; no separate demo application exists.
+
+### Patch Changes
+
+- Updated dependencies [11c5bc2]
+- Updated dependencies [a905468]
+- Updated dependencies [11c5bc2]
+- Updated dependencies [a07bccc]
+- Updated dependencies [49517e2]
+- Updated dependencies [d7e9886]
+- Updated dependencies [1a897f8]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b76c8a6]
+- Updated dependencies [cac4bc6]
+  - @arki/failure@0.3.0
+  - @arki/clock@0.2.0
+  - @arki/schema@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes

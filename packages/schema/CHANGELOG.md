@@ -4,6 +4,33 @@
 
 `parse` and `parseAsync` return canonical typed failures through the shared failure executor. `SchemaError` and validation-related `SchemaRunError` codes are removed; `ARKI_SCHEMA_E003` remains for unsupported JSON Schema targets.
 
+## 0.3.0
+
+### Minor Changes
+
+- b76c8a6: Preserve valid operation keys such as `__proto__` as own enumerable properties in frozen operation trees, including nested keys and JSON serialization.
+
+  Schema capability predicates now return `false` when a foreign protocol cannot be inspected. Thrown accessors and revoked proxies cannot escape a predicate. Native promises returned or thrown by accessors are observed once when their constructor/species hooks permit registration, without awaiting them or invoking arbitrary `then` accessors. Provider objects that prohibit handler registration retain ownership of their asynchronous rejection; no provider mutation or global rejection handler is installed. Native validator execution and JSON Schema conversion contracts are unchanged.
+
+  No demo impact: the fixes preserve operation identities and safely refuse malformed provider protocols without changing application authoring.
+
+### Patch Changes
+
+- 49517e2: The build no longer compiles type tests (`*.test-d.ts`). They stay in `typecheck`, but a type test can no longer fail the build, and the published `dist` no longer holds compiled type tests.
+
+  `@arki/db` exports the `OnDelete` type from `@arki/db/id` and `@arki/db/sqlite`. A package whose types come from `idColumns` (such as `@arki/auth`) can now build its declarations. Before, TypeScript could not name `OnDelete` and stopped with TS2883.
+
+  `@arki/ai` drops a `@ts-expect-error` above the `@huggingface/transformers` import. That package is now always installed, so the comment had no error to hide and failed the build.
+
+- 5d55e12: Docs only: README sections and the agent guide follow the library layout. No code change.
+- Updated dependencies [11c5bc2]
+- Updated dependencies [a905468]
+- Updated dependencies [11c5bc2]
+- Updated dependencies [49517e2]
+- Updated dependencies [1a897f8]
+- Updated dependencies [cac4bc6]
+  - @arki/failure@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

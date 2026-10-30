@@ -1,6 +1,6 @@
 {
   "name": "@arki/string",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "String toolkit — grapheme-aware slicing and truncation, case conversion, whitespace and word helpers, literal search and editing, HTML/RegExp escaping, templating, strict universal base64, multi-script slugs, and an immutable fluent wrapper.",
   "keywords": [
     "arki",

@@ -1,5 +1,11 @@
 # @arki/log
 
+## 0.3.1
+
+### Patch Changes
+
+- b7a783b: Contain context, trace, sink lifecycle and deferred descriptor faults so logging preserves application outcomes. Observe asynchronous rejections, clean up every sink independently, and keep reentrant deduplication records for the next flush.
+
 ## 0.3.0
 
 ### Minor Changes

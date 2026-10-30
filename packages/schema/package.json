@@ -1,6 +1,6 @@
 {
   "name": "@arki/schema",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "Standard Schema for every validator: the spec types, a sync and an async parse that return typed failures, issue paths and messages, and a JSON Schema bridge. Works with Zod, Valibot, ArkType or a hand-written schema.",
   "keywords": [

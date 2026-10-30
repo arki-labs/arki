@@ -6,6 +6,28 @@
 
 - Breaking: interpolation returns `MissingValue` instead of throwing for absent runtime values. Rename `missing: 'throw'` to `missing: 'fail'` and narrow fluent results before chaining. The retired E005 diagnostic is removed; malformed syntax remains E004. See [the upgrade guide](docs/upgrades/0.3.0-to-0.4.0.md).
 
+## 0.4.0
+
+### Minor Changes
+
+- 4e63bb1: Return canonical MissingValue failures from interpolation and its fluent wrapper instead of throwing for absent runtime values. Rename missing: throw to missing: fail, remove the retired E005 diagnostic, and preserve explicit keep/empty recovery. Failure metadata contains no template or supplied values.
+
+  Upgrade guidance and package examples cover result narrowing. No demo impact: no demo interpolation caller was found in the source audit.
+
+- dbc6ee5: Remove `tryFromBase64`; use `fromBase64` with the same options and exact returned failures. Remove obsolete E002/E003 codec diagnostics from `STRING_ERROR_CODES` and its inferred `StringErrorCode`; E001/E004 static misuse remains. Upgrade guidance and Hyphenate's caller are migrated.
+
+  no demo impact: no demo imports the removed exports; the Hyphenate app import is updated with unchanged decoding behavior.
+
+### Patch Changes
+
+- Updated dependencies [11c5bc2]
+- Updated dependencies [a905468]
+- Updated dependencies [11c5bc2]
+- Updated dependencies [49517e2]
+- Updated dependencies [1a897f8]
+- Updated dependencies [cac4bc6]
+  - @arki/failure@0.3.0
+
 ## 0.3.0
 
 ### Minor Changes

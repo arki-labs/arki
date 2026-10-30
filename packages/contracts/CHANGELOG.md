@@ -1,5 +1,46 @@
 # @arki/contracts
 
+## 0.4.0
+
+### Minor Changes
+
+- 517d297: `@arki/contracts/drizzle` exports `JsonStorableSchema` and `jsonStorageSchema`: the schema rule `jsonColumn` requires and the refined schema it stamps on the column. `@arki/db`'s column kit uses the same pair for `c.json(name, schema)`, so insert and select schemas check kit JSON columns exactly as they check `jsonColumn`.
+
+### Patch Changes
+
+- a07bccc: Remove the retired Clock abort exception code; cancellation remains the canonical SleepCancelled value. Preserve prototype-shaped operation keys in TanStack client utilities, and run Contracts native/provider inspections through identity-preserving source schemas. Forged array methods no longer bypass operation identity validation.
+
+  Docs describe the retired code and identity guarantees. No demo impact: existing demos use live cancellation outcomes and ordinary operation keys.
+
+- 5d55e12: `defineId` now returns named types: `IdDeclaration<P>`, and the new `BrandedIdDeclaration<P, Kind>` for an id with a `kind`. A package that exports an id now prints this name in its `.d.ts` instead of the whole object with its Zod schema type. The `schema` type and every inferred id type are unchanged.
+
+  No demo impact: no call site changes.
+
+- 9c220aa: `defineId(prefix)` with a generic prefix now publishes its id type as `${P}${string}`. Before, a package that built ids from a caller's type parameter (`createTombstoneTable<TPrefix>` in `@arki/ai`) emitted Zod's template-literal inference into its `.d.ts`, which tsc printed as `[TPrefix] extends $ZodTemplateLiteralPart[] ? never : never`. Apps reading the published types saw those ids as `never`, and the declaration exposed Zod internals (`TYPES_E001`). Ids with a literal prefix and branded ids (`{ kind }`) are unchanged.
+
+  Test: `src/ids.emitted.test.ts` builds the contracts declarations, a producer with a generic prefix, and a consumer that reads only declarations.
+
+  no docs impact: the public types already documented `${P}${string}`; only the emitted text changes.
+  no demo impact: no demo builds ids from a generic prefix.
+
+- b76c8a6: Preserve valid operation keys such as `__proto__` as own enumerable properties in frozen operation trees, including nested keys and JSON serialization.
+
+  Schema capability predicates now return `false` when a foreign protocol cannot be inspected. Thrown accessors and revoked proxies cannot escape a predicate. Native promises returned or thrown by accessors are observed once when their constructor/species hooks permit registration, without awaiting them or invoking arbitrary `then` accessors. Provider objects that prohibit handler registration retain ownership of their asynchronous rejection; no provider mutation or global rejection handler is installed. Native validator execution and JSON Schema conversion contracts are unchanged.
+
+  No demo impact: the fixes preserve operation identities and safely refuse malformed provider protocols without changing application authoring.
+
+- ff85471: Go to Definition works on mapped keys again. Handle maps (`unit.provides.x`, feature handles), `PolicyTree`, `SessionValues`, `CronPolicy.respond`, `ChartConfig.theme`, `Operations` and the oRPC utils tree now map `[K in keyof T as K & string]` instead of `[K in keyof T & string]`. The old form cut the link from each key back to its declaration, so the editor found no definition. Types are otherwise unchanged.
+- Updated dependencies [11c5bc2]
+- Updated dependencies [a905468]
+- Updated dependencies [11c5bc2]
+- Updated dependencies [49517e2]
+- Updated dependencies [1a897f8]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b76c8a6]
+- Updated dependencies [cac4bc6]
+  - @arki/failure@0.3.0
+  - @arki/schema@0.3.0
+
 ## 0.3.0
 
 ### Minor Changes

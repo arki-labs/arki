@@ -1,6 +1,6 @@
 {
   "name": "@arki/failure",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "Typed failures for TypeScript without a wrapper: define a failure once, return it as a value, and the compiler makes every caller handle it. Early return, partial handling, cause chains, revival after JSON, a must-use lint rule and oRPC error maps.",
   "keywords": [
