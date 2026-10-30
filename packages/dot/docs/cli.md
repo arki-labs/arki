@@ -165,10 +165,24 @@ tracked file has a plain value.
 `dot dev` opens encrypted values in the app's env files with the same keys
 before its database check.
 
-Failure codes: `dot.env_load_failed`, `dot.env_check_failed`,
-`dot.env_no_change`, `dot.env_no_header`, `dot.env_plain_secret`,
-`dot.env_key_not_found`, `dot.env_reveal_refused`, `dot.env_decrypt_tracked`,
-`dot.env_value_missing`, `dot.env_command_failed`, `dot.env_vault_failed`.
+### `dot env` failures
+
+Each failure is exported from `@arki/dot/cli`. It comes back in the `error` field of the JSON envelope. Branch on `.error.code`. No message ever holds a value.
+
+| Failure | Code | When it is returned | How to fix it |
+| --- | --- | --- | --- |
+| `EnvCheckFailed` | `dot.env_check_failed` | `dot env check` found at least one error. | Work through `.error.data.findings`; each has its own `remediation`. Run `check` again. |
+| `EnvLoadFailed` | `dot.env_load_failed` | The env files cannot load: a private key is missing, a value cannot be decrypted, or a reference cannot be resolved. | Read each entry in `.error.data.errors` (codes `ARKI_ENV_FILES_E00x`). Restore the key with `dot env keys pull` or export `DOTENV_PRIVATE_KEY_<ENV>`. |
+| `EnvNoChange` | `dot.env_no_change` | The command would write nothing: the value is already there, or there was nothing to encrypt or decrypt. | Read `.error.data.reason`. A variable exported in the shell does not change the file. Check `--env` and `--file`. |
+| `EnvNoHeader` | `dot.env_no_header` | The file has no public key header, so values cannot be encrypted into it. | Run `dot env init` with the same `--env` or `--file`. |
+| `EnvPlainSecret` | `dot.env_plain_secret` | `--plain` was used on a key that the env schema declares with `secret()`. | Run the same command without `--plain`. |
+| `EnvKeyNotFound` | `dot.env_key_not_found` | The key is in none of the loaded env files. | Check the name and `--env`. `dot env ls` lists the keys; `dot env set <KEY>` adds one. |
+| `EnvRevealRefused` | `dot.env_reveal_refused` | A value was asked for where it would leave the terminal (a pipe, a file, an agent transcript). | Use `dot env get <KEY> --reveal` in an interactive terminal. To give the value to a program, use `dot env run -- <cmd>`. |
+| `EnvDecryptTracked` | `dot.env_decrypt_tracked` | `dot env decrypt` would write plaintext secrets into a file that git tracks. | Read one value with `--reveal`, or pass `--force` and do not commit the result. |
+| `EnvValueMissing` | `dot.env_value_missing` | `dot env set` got the value from both an argument and `--stdin`, or from neither. | Give exactly one. Prefer `--stdin`; an argument stays in shell history. |
+| `EnvCommandFailed` | `dot.env_command_failed` | The command after `--` in `dot env run` could not start. | Check that the command exists on PATH and comes after `--`. |
+| `EnvVaultFailed` | `dot.env_vault_failed` | The 1Password CLI (`op`) failed or is not signed in during `keys push` or `keys pull`. | Install `op`, run `op signin`, and check `--vault`. |
+| `EnvVaultWriteUnconfirmed` | `dot.env_vault_write_unconfirmed` | A 1Password create or edit was sent but its result was not confirmed. `.error.data.operation` says which. | Read the item in 1Password first; the write may have landed. A repeated `keys push` rereads the vault and accepts a matching key. Never blindly repeat a create or edit. |
 
 ## Other `dot.*` failures and helpers
 
