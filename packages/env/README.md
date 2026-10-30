@@ -187,7 +187,7 @@ console.log(env.FEATURES);
 
 ## Failure behaviour
 
-`defineEnv` throws an `Error` on the first read of a bad environment. The message starts with your `name` and lists one `path: message` line per issue. Set `options.onValidationError` to throw something else.
+`defineEnv` throws an `Error` on the first read of a bad environment. The message starts with your `name` and lists one `path: message` line per issue. The thrown error is an `UnexpectedFailure` that carries the `InvalidEnvironment` failure (code `env.invalid_environment`, exported from `@arki/env/core`), so a catcher can match on the code. Set `options.onValidationError` to throw something else.
 
 ```ts run expect
 import { defineEnv } from '@arki/env/core';

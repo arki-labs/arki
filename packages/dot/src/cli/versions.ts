@@ -35,11 +35,11 @@ export function readDotVersion(): string {
  * placeholder is `{{<camelCaseKey>Version}}` (see `new.ts`).
  */
 export const TEMPLATE_VERSIONS = {
-  env: '0.1.0',
-  log: '0.2.0',
+  env: '0.2.0',
+  log: '0.4.0',
   db: '0.4.0',
   journal: '0.3.0',
-  failure: '0.1.0',
+  failure: '0.3.0',
   ui: '0.1.6',
 } as const;
 

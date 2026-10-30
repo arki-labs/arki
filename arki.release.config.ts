@@ -73,7 +73,11 @@ export const config: ReleaseConfig = {
       // @arki/cli publishes first: the dot CLI runs on it (A-32). `@arki/env`
       // and `@arki/resilience` moved here from Foundation 2026-10-21: both peer
       // on `@arki/dot`, and a wave may depend only on earlier waves.
-      packages: ['@arki/cli', '@arki/dot', '@arki/env', '@arki/resilience'],
+      // `@arki/dot` and `@arki/resilience` moved to infrastructure-adapters
+      // 2026-10-30 (founder): `dot new` scaffolds an app on `@arki/db`,
+      // `@arki/journal` and `@arki/ui`, and db and journal depend on dot, so dot
+      // must ship in the same candidate as them for its scaffold check to pass.
+      packages: ['@arki/cli', '@arki/env'],
     },
     {
       id: 'frontend',
@@ -108,7 +112,10 @@ export const config: ReleaseConfig = {
       // `@arki/schedule`, `@arki/queue` and `@arki/testing` joined 2026-10-21
       // (A-40, B8): schedule before queue (queue depends on it); testing last
       // (it peers on auth and needs db + kv).
+      // `@arki/dot` and `@arki/resilience` joined 2026-10-30 from dot-kernel
+      // (see there); they lead because db, journal and the rest build on dot.
       packages: [
+        '@arki/dot', '@arki/resilience',
         '@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live',
         '@arki/lock', '@arki/mail', '@arki/auth', '@arki/schedule', '@arki/queue',
         '@arki/testing',

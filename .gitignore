@@ -35,3 +35,6 @@ coverage/
 
 # test and bench output
 .generated/
+
+# Demo apps are their own repos, cloned here for the release demo checks.
+/demos/
