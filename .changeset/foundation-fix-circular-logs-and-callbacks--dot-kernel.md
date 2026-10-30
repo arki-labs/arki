@@ -1,6 +1,4 @@
 ---
-'@arki/log': minor
-'@arki/async': minor
 '@arki/env': minor
 ---
 
