@@ -224,7 +224,9 @@ lowercase letter follows.
 | `don't-stop`     | `dont`, `stop`           | `dont_stop`        |
 
 Casing is locale-independent unless you pass `{ locale: 'tr' }`; the machine
-locale is never used. `titleCase` and `sentenceCase` build labels from tokens
+locale is never used. A malformed locale tag, such as a raw `Accept-Language`
+header or cookie value, does not throw: the function falls back to
+locale-independent casing and logs the swap at DEBUG (`arki:string:locale`). `titleCase` and `sentenceCase` build labels from tokens
 and discard punctuation; `capitalize` only touches the first grapheme.
 
 ### Format

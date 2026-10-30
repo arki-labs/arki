@@ -126,7 +126,7 @@ const outcome = await done; // no real minute passed
 if (isFailure(outcome)) throw new Error(outcome.code);
 ```
 
-### `debounce(fn, wait, { leading, trailing, maxWait, clock }?)`
+### `debounce(fn, wait, { leading, trailing, maxWait, clock, onError }?)`
 
 Delays `fn` until `wait` ms pass without a new call.
 
@@ -136,12 +136,15 @@ Delays `fn` until `wait` ms pass without a new call.
 | `trailing` | `true`  | Call after the burst ends, with the latest arguments.                     |
 | `maxWait`  | none    | Longest a burst may delay the call. Values below `wait` are raised to it. |
 | `clock`    | system  | The `Clock` whose time and timers it uses. Pass a `MockClock` in tests.   |
+| `onError`  | none    | Receives an error `fn` throws, or a rejection of the promise it returns.  |
 
 With `leading` and `trailing` both on, `fn` runs on the trailing edge only if there was more than one call in the burst.
 
-### `throttle(fn, wait, { leading, trailing, clock }?)`
+An error from `fn` never reaches the caller and never breaks the schedule. It goes to `onError`; without `onError` it is rethrown from a microtask, so it still shows up as an uncaught error.
 
-Calls `fn` at most once per `wait` ms. It is `debounce` with `maxWait = wait`, and both edges on by default. `clock` works as in `debounce`.
+### `throttle(fn, wait, { leading, trailing, clock, onError }?)`
+
+Calls `fn` at most once per `wait` ms. It is `debounce` with `maxWait = wait`, and both edges on by default. `clock` and `onError` work as in `debounce`.
 
 ### `Scheduled<A>`
 
