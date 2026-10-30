@@ -86,8 +86,6 @@ export function Links() {
 }
 ```
 
-<!-- bench:start -->
-
 ## Vite plugin: `@arki/icons/vite`
 
 `import { Heart } from '@arki/icons/phosphor'` reads the whole Phosphor index to get one component. The browser bundle tree-shakes the rest away; the server does not, and evaluates all 1,500 icons at cold start (about 300 ms under Bun). `phosphorPerIcon()` rewrites every named icon import at build time to the icon's own module, so the server loads only what it renders. The import in your code stays the same.
@@ -110,13 +108,15 @@ export default defineConfig({
 
 Rewritten statements keep their line count, so stack traces and source maps still point at the right line. `rewriteIconImports(code, icons)` and `phosphorIconNames()` are exported for scripts and tests. `vite` is an optional peer.
 
+<!-- bench:start -->
+
 ## Benchmarks
 
 Bundle size of the same icons imported from @arki/icons and from popular React icon libraries. The main entry of @arki/icons is Phosphor, so Phosphor imported directly is a plain row to show the wrapper cost.
 
-Measured on Node 22.13.1 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.0.1 (mitata 1.0.34) · publish, seed 1592639052 · commit 34146416b3 (uncommitted changes) · 2026-10-13.
+Measured on Node 26.11.1 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.1.0 (mitata 1.0.34) · publish, seed 1592639052 · commit 6ef27e464e · 2026-10-30.
 
-Versions: @arki/bench 0.0.1 · @arki/icons 0.1.1 · @phosphor-icons/react 2.1.10 · lucide-react 0.542.0 · mitata 1.0.34 · react-icons 5.7.0.
+Versions: @arki/bench 0.1.0 · @arki/icons 0.1.2 · @phosphor-icons/react 2.1.10 · lucide-react 0.542.0 · mitata 1.0.34 · react-icons 5.7.0.
 
 ### 1 icon
 
@@ -124,7 +124,7 @@ Rows marked _different contract_ do other work: they are measured and shown, nev
 
 | Library                        | Version | JS+CSS gzip |  brotli |     raw | Budget (gzip) | vs @arki/icons                                 |
 | ------------------------------ | ------- | ----------: | ------: | ------: | ------------- | ---------------------------------------------- |
-| **@arki/icons**                | 0.1.1   |       850 B |   752 B | 2.13 kB | 1 kB          | baseline                                       |
+| **@arki/icons**                | 0.1.2   |       850 B |   752 B | 2.13 kB | 1 kB          | baseline                                       |
 | @phosphor-icons/react (direct) | 2.1.10  |       853 B |   741 B | 2.13 kB | —             | ≈ same                                         |
 | lucide-react                   | 0.542.0 |       746 B |   649 B | 1.25 kB | —             | different contract: other drawings, one weight |
 | react-icons (fa6)              | 5.7.0   |     1.23 kB | 1.09 kB | 2.76 kB | —             | different contract: other drawings, one weight |
@@ -135,7 +135,7 @@ Rows marked _different contract_ do other work: they are measured and shown, nev
 
 | Library                        | Version | JS+CSS gzip |  brotli |     raw | Budget (gzip) | vs @arki/icons                                 |
 | ------------------------------ | ------- | ----------: | ------: | ------: | ------------- | ---------------------------------------------- |
-| **@arki/icons**                | 0.1.1   |     7.01 kB | 5.94 kB | 29.1 kB | 8 kB          | baseline                                       |
+| **@arki/icons**                | 0.1.2   |     7.01 kB | 5.94 kB | 29.1 kB | 8 kB          | baseline                                       |
 | @phosphor-icons/react (direct) | 2.1.10  |     7.06 kB | 5.95 kB | 29.1 kB | —             | ≈ same                                         |
 | lucide-react                   | 0.542.0 |      1.4 kB | 1.25 kB | 2.89 kB | —             | different contract: other drawings, one weight |
 | react-icons (fa6)              | 5.7.0   |     2.73 kB | 2.33 kB | 7.08 kB | —             | different contract: other drawings, one weight |
@@ -149,9 +149,19 @@ check, x, menu, search, user, settings, home, arrow-right, trash, plus.
 - react-icons is measured through its Font Awesome 6 set (`react-icons/fa6`), the set most guides show first.
 - Sizes are minified, tree-shaken, with react left out, for the browser.
 
+**Provenance**
+
+- command: `arki-bench run --profile publish`
+- profile: publish
+- packages: @arki/bench 0.1.0, @arki/bench 0.1.0, @arki/icons 0.1.2, @phosphor-icons/react 2.1.10, lucide-react 0.542.0, mitata 1.0.34, react-icons 5.7.0
+- machine: Darwin 27.0.0 arm64, Apple M2 Max (12 cores), 96 GB RAM
+- source commit: 6ef27e464e30bca328554a621063e1618e34fdfe
+
+provenance: 6ef27e464e30bca328554a621063e1618e34fdfe
+
 Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 
-<!-- bench:meta {"schema":1,"suite":"@arki/icons","specHash":"e7708cf7a5281c3b","profile":"publish","date":"2026-10-13T08:58:55.063Z","harness":"0.0.1"} -->
+<!-- bench:meta {"schema":1,"suite":"@arki/icons","specHash":"e7708cf7a5281c3b","profile":"publish","date":"2026-10-30T19:11:12.370Z","harness":"0.1.0"} -->
 <!-- bench:end -->
 
 ## Documentation
