@@ -28,7 +28,7 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 
 ### Read and show money
 
-1. Read user text with `parseMoney(text, currency, { locale })` from `@arki/money/parse`. You choose the currency; it is never guessed.
+1. Read user text with `parseMoney(text, currency, { locale })` from `@arki/money/parse`. You choose the currency; it is never guessed. It returns the `Money` or a failure: check `isMoneyFailure(result)` and show `result.remediation`.
 2. Show it with `formatMoney` from `@arki/money/format`.
 
 ### Convert currencies
@@ -40,7 +40,7 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 ### Charge through Stripe
 
 1. Call `toStripe(money)` for `{ amount, currency }` from `@arki/money/stripe`.
-2. Call `fromStripeAmount(amount, currency)` to read a Stripe amount back.
+2. Call `fromStripeAmount(amount, currency)` to read a Stripe amount back. It returns `UnknownCurrency` or `ProviderAmount` instead of throwing.
 
 ### Store money
 
@@ -51,7 +51,9 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 
 - `money(0.1 + 0.2, 'EUR')` throws. A number is read as written. Use strings.
 - `price.times('1.19')` throws `RoundingNecessaryError`. Pass a mode.
-- `Currency.of('ZZZ')` throws `UnknownCurrencyError`.
+- `Currency.of('ZZZ')` throws `UnknownCurrencyError`. For a code from outside use `Currency.parse(code)`, which returns `UnknownCurrency`.
+- Parsers return, builders throw. `Money.parse`, `Money.fromJSON`, `parseMoney`, `fromStripeAmount` and `fromProviderUnits` return a failure; never pass outside text to `money()` or `Money.of`.
+- Two values read from data can hold different currencies: `a.plus(b)` then throws `CurrencyMismatchError`. Compare `a.currency.code` first.
 - Do not mutate a `Money`. It is not frozen.
 - Convert in one step. Converting in two rounded steps drifts by a cent.
 - On Hermes for Apple platforms, `parseMoney` with a `locale` throws. Pass `symbols`.
@@ -65,6 +67,8 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 | `ARKI_MONEY_E003` | `ExchangeRateError`     | Pass a rate for the pair, or opt in to `inverse` or `via` |
 | `ARKI_MONEY_E004` | `ProviderAmountError`   | Round to the provider's step or choose another currency   |
 | `ARKI_MATH_*`     | Shared math errors      | `RoundingNecessaryError`: pass a mode. See `@arki/math`   |
+
+Returned failures (from the `parse*` doors) are listed in `MONEY_FAILURES`, codes `money.*`; the README's "Failure behaviour" has the table.
 
 ## Verify
 

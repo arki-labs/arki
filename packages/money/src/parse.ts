@@ -8,25 +8,23 @@
  *
  * Strict means it refuses instead of guessing: grouping in the wrong place
  * (`'1,23,4'`), a decimal separator the locale does not use, two signs, mixed
- * digit scripts, a different currency's symbol, or any trailing text all throw
- * `NumberFormatError`. Text without grouping is always fine: `'1234.5'`.
+ * digit scripts, a different currency's symbol, or any trailing text all return
+ * the `InvalidMoneyText` failure. Text without grouping is always fine: `'1234.5'`.
+ * Parsing never throws for bad text: it returns a failure from `failures.ts`.
  *
- * Runtimes without `formatToParts` (React Native's Hermes on iOS) throw
- * `UnsupportedFeatureError`; pass `symbols` to parse without `Intl`.
+ * A locale tag the runtime rejects returns `UnsupportedLocale`. Runtimes without
+ * `formatToParts` (React Native's Hermes on iOS) throw `UnsupportedFeatureError`;
+ * pass `symbols` to parse without `Intl`.
  */
 
 import type { RoundingMode } from '@arki/math/rounding';
-import {
-  NumberFormatError,
-  ResourceLimitError,
-  RoundingNecessaryError,
-  UnsupportedFeatureError,
-} from '@arki/math/errors';
+import { UnsupportedFeatureError } from '@arki/math/errors';
 
 import type { Currency, CurrencyLike } from './currency.js';
 import { toCurrency } from './currency.js';
+import { InputTooLarge, InvalidMoneyText, UnsupportedLocale } from './failures.js';
 import { MAX_INPUT_LENGTH } from './internal/units.js';
-import { Money } from './money.js';
+import { checkScale, fromDecimalText } from './money.js';
 
 export type ParseSymbols = {
   /** Decimal separator, such as `','`. */
@@ -42,7 +40,7 @@ export type ParseSymbols = {
 export type ParseOptions = {
   /** BCP 47 locale. Defaults to `'en-US'`; there is no global locale. */
   locale?: string;
-  /** How to drop digits beyond the scale. Without it, extra digits throw `RoundingNecessaryError`. */
+  /** How to drop digits beyond the scale. Without it, extra digits return `RoundingNecessary`. */
   rounding?: RoundingMode;
   /** Decimals to keep. Defaults to the currency's. */
   scale?: number;
@@ -51,10 +49,8 @@ export type ParseOptions = {
 };
 
 export type MoneyParser<C extends string> = {
-  /** Parses or throws `NumberFormatError` (bad text) or `RoundingNecessaryError` (too many decimals). */
-  parse(text: string): Money<C>;
-  /** Parses or returns `undefined`, for form validation. Still throws for runtime capability errors. */
-  tryParse(text: string): Money<C> | undefined;
+  /** The amount, or `InvalidMoneyText`, `InputTooLarge` or `RoundingNecessary` (too many decimals). Never throws for bad text. */
+  parse(text: string): ReturnType<typeof parseWith<C>>;
 };
 
 type Grammar = {
@@ -96,12 +92,16 @@ function sortMarks(marks: readonly string[]): string[] {
     .sort((a, b) => b.length - a.length);
 }
 
-function grammarFromIntl(currency: Currency, locale: string): Grammar {
+function grammarFromIntl(currency: Currency, locale: string) {
   let plain: Intl.NumberFormat;
   try {
     plain = new Intl.NumberFormat(locale, { minimumFractionDigits: 1, useGrouping: true });
   } catch (error) {
-    throw new UnsupportedFeatureError(`This runtime's Intl does not support the locale ${locale}`, { cause: error });
+    // Intl throws RangeError for a tag it rejects; anything else means Intl itself is missing or broken.
+    if (error instanceof RangeError) return UnsupportedLocale({ cause: error });
+    throw new UnsupportedFeatureError('This runtime has no usable Intl.NumberFormat; pass options.symbols', {
+      cause: error,
+    });
   }
   if (typeof plain.formatToParts !== 'function') {
     throw new UnsupportedFeatureError('This runtime lacks Intl.NumberFormat#formatToParts; pass options.symbols');
@@ -147,15 +147,9 @@ function grammarFromIntl(currency: Currency, locale: string): Grammar {
   };
 }
 
-function fail(text: string, reason: string): never {
-  throw new NumberFormatError(`Cannot read ${JSON.stringify(text.slice(0, 40))} as money: ${reason}`);
-}
-
-/** Turns locale text into plain `'-1234.56'`, or throws `NumberFormatError`. */
-function toPlainDecimal(input: string, grammar: Grammar): string {
-  if (input.length > MAX_INPUT_LENGTH) {
-    throw new ResourceLimitError(`Money text is longer than ${MAX_INPUT_LENGTH} characters`);
-  }
+/** Turns locale text into plain `'-1234.56'`, or returns `InvalidMoneyText` or `InputTooLarge`. */
+function toPlainDecimal(input: string, grammar: Grammar) {
+  if (input.length > MAX_INPUT_LENGTH) return InputTooLarge();
   let text = normalizeSpaces(input.replaceAll(BIDI, '')).trim();
   let negative = false;
   if (text.startsWith('(') && text.endsWith(')')) {
@@ -181,10 +175,10 @@ function toPlainDecimal(input: string, grammar: Grammar): string {
   }
   const trailing = grammar.marks.find(candidate => text.endsWith(candidate));
   if (trailing !== undefined) {
-    if (sawMark) fail(input, 'the currency appears twice');
+    if (sawMark) return InvalidMoneyText(); // the currency appears twice
     text = text.slice(0, -trailing.length).trim();
   }
-  if (sawSign && negative && input.trim().startsWith('(')) fail(input, 'it has both parentheses and a minus sign');
+  if (sawSign && negative && input.trim().startsWith('(')) return InvalidMoneyText(); // it has both parentheses and a minus sign
 
   // Local digits → ASCII, refusing a mix of scripts.
   if (grammar.digits !== undefined) {
@@ -201,18 +195,18 @@ function toPlainDecimal(input: string, grammar: Grammar): string {
         converted += String(index);
       }
     }
-    if (local && ascii) fail(input, 'it mixes digit scripts');
+    if (local && ascii) return InvalidMoneyText(); // it mixes digit scripts
     text = converted;
   }
 
   const pieces = text.split(grammar.decimal);
-  if (pieces.length > 2) fail(input, `the decimal separator ${JSON.stringify(grammar.decimal)} appears twice`);
+  if (pieces.length > 2) return InvalidMoneyText(); // the decimal separator appears twice
   const [whole = '', fraction] = pieces;
-  if (fraction !== undefined && !ASCII_DIGITS.test(fraction)) fail(input, 'the decimals are not digits');
+  if (fraction !== undefined && !ASCII_DIGITS.test(fraction)) return InvalidMoneyText(); // the decimals are not digits
 
   const group = grammar.group;
   if (!ASCII_DIGITS.test(group === undefined ? whole : whole.replaceAll(group, ''))) {
-    fail(input, 'it is not a number in this locale');
+    return InvalidMoneyText(); // it is not a number in this locale
   }
   let digits = whole;
   if (group !== undefined && whole.includes(group)) {
@@ -224,55 +218,54 @@ function toPlainDecimal(input: string, grammar: Grammar): string {
       if (index === 0) return group.length <= (last === 1 ? grammar.primary : grammar.secondary);
       return group.length === grammar.secondary;
     });
-    if (!valid) fail(input, 'the digit grouping does not match the locale');
+    if (!valid) return InvalidMoneyText(); // the digit grouping does not match the locale
     digits = groups.join('');
   }
-  if (!ASCII_DIGITS.test(digits)) fail(input, 'it is not a number in this locale');
+  if (!ASCII_DIGITS.test(digits)) return InvalidMoneyText(); // it is not a number in this locale
   return `${negative ? '-' : ''}${digits}${fraction === undefined ? '' : `.${fraction}`}`;
+}
+
+/** Reads one text with a prepared grammar. Its return type is `MoneyParser#parse`'s. */
+function parseWith<C extends string>(
+  text: string,
+  grammar: Grammar,
+  currency: Currency<C>,
+  scale: number,
+  rounding: RoundingMode | undefined,
+) {
+  // Plain JavaScript and untyped payloads can pass anything.
+  if (typeof text !== 'string') return InvalidMoneyText();
+  const plain = toPlainDecimal(text, grammar);
+  if (typeof plain !== 'string') return plain;
+  return fromDecimalText(plain, currency, scale, rounding);
 }
 
 /**
  * Prepares the locale's grammar once, for forms and imports:
- * `const parse = createMoneyParser('EUR', { locale: 'de-DE' }); parse.parse('1.234,56 €')`.
+ * `const parser = createMoneyParser('EUR', { locale: 'de-DE' }); parser.parse('1.234,56 €')`.
+ * Returns `UnsupportedLocale` when the runtime rejects `options.locale`, which often comes from
+ * outside (`Accept-Language`). The currency and scale are your code's: an unknown code or a
+ * bad scale throws.
  */
-export function createMoneyParser<const C extends string>(
-  currency: CurrencyLike<C>,
-  options: ParseOptions = {},
-): MoneyParser<C> {
+export function createMoneyParser<const C extends string>(currency: CurrencyLike<C>, options: ParseOptions = {}) {
   const target = toCurrency(currency);
+  const scale = options.scale === undefined ? target.scale : checkScale(options.scale);
+  const rounding = options.rounding;
   const grammar =
     options.symbols === undefined
       ? grammarFromIntl(target, options.locale ?? 'en-US')
       : grammarFromSymbols(target, options.symbols);
-  const settle = { rounding: options.rounding, scale: options.scale };
-  const parse = (text: string): Money<C> => {
-    if (typeof text !== 'string') throw new TypeError('Expected text to parse');
-    return Money.of(toPlainDecimal(text, grammar), target, settle);
-  };
-  return {
-    parse,
-    tryParse(text) {
-      try {
-        return parse(text);
-      } catch (error) {
-        if (
-          error instanceof NumberFormatError ||
-          error instanceof RoundingNecessaryError ||
-          error instanceof ResourceLimitError
-        ) {
-          return;
-        }
-        throw error;
-      }
-    },
-  };
+  if (UnsupportedLocale.is(grammar)) return grammar;
+  const parser: MoneyParser<C> = { parse: text => parseWith(text, grammar, target, scale, rounding) };
+  return parser;
 }
 
-/** One-shot form of `createMoneyParser`: `parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' })`. */
-export function parseMoney<const C extends string>(
-  text: string,
-  currency: CurrencyLike<C>,
-  options?: ParseOptions,
-): Money<C> {
-  return createMoneyParser(currency, options).parse(text);
+/**
+ * One-shot form of `createMoneyParser`: `parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' })`.
+ * Returns the amount or a failure (`InvalidMoneyText`, `InputTooLarge`, `RoundingNecessary`,
+ * `UnsupportedLocale`); it never throws for bad text.
+ */
+export function parseMoney<const C extends string>(text: string, currency: CurrencyLike<C>, options?: ParseOptions) {
+  const parser = createMoneyParser(currency, options);
+  return UnsupportedLocale.is(parser) ? parser : parser.parse(text);
 }

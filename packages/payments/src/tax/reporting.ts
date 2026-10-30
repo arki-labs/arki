@@ -1,6 +1,7 @@
 import type { Instant } from '@arki/date';
 import { compareAsc, fromDate, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
+import { orThrow } from '@arki/failure';
 import { Money, sum } from '@arki/money';
 
 import type { PaymentRepository } from '../core/repository.js';
@@ -157,7 +158,7 @@ function recordedTax(paymentId: string, metadata: Record<string, unknown> | null
   if (!parsed.success) {
     throw new Error(`Payment ${paymentId} has a taxAmount that is not money: ${JSON.stringify(recorded)}`);
   }
-  const tax = Money.fromJSON(parsed.data);
+  const tax = orThrow(Money.fromJSON(parsed.data));
   if (tax.currency.code !== currency) {
     throw new Error(`Payment ${paymentId} is in ${currency} but records tax in ${tax.currency.code}`);
   }

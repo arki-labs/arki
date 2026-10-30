@@ -10,13 +10,9 @@
  */
 
 import type { RoundingMode } from '@arki/math/rounding';
-import {
-  DivisionByZeroError,
-  NumberFormatError,
-  NumericRangeError,
-  ResourceLimitError,
-  RoundingNecessaryError,
-} from '@arki/math/errors';
+import { DivisionByZeroError, ResourceLimitError, RoundingNecessaryError } from '@arki/math/errors';
+
+import { AmountOutOfRange, InputTooLarge, InvalidMoneyText } from '../failures.js';
 
 export type Units = number | bigint;
 
@@ -29,8 +25,45 @@ export const MAX_SCALE = 100;
 export const MAX_INPUT_LENGTH = 1000;
 /** Largest number of parts `allocate` and `split` produce. */
 export const MAX_PARTS = 10_000;
+/**
+ * Largest amount, in decimal digits. An amount reaches this through repeated
+ * `times` or a huge bigint, and past it a bigint product can crash Hermes with a
+ * raw `RangeError`. Checked as hexadecimal digits, which is linear-time: 8 305 of
+ * them hold 33 220 bits, which is 10 000 decimal digits.
+ */
+export const MAX_DIGITS = 10_000;
+const MAX_HEX_DIGITS = Math.ceil((MAX_DIGITS * Math.log2(10)) / 4);
 
 const POW10 = [1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15];
+
+/** Hexadecimal digits of a `bigint` magnitude. Linear-time, unlike decimal `toString()`. */
+function hexDigits(value: bigint): number {
+  return (value < 0n ? -value : value).toString(16).length;
+}
+
+function tooManyDigits(): ResourceLimitError {
+  return new ResourceLimitError(`An amount may have at most about ${MAX_DIGITS} digits`);
+}
+
+/** Whether a `bigint` has more than {@link MAX_DIGITS} decimal digits. */
+export function exceedsDigits(value: bigint): boolean {
+  return hexDigits(value) > MAX_HEX_DIGITS;
+}
+
+/** Returns the value, or throws `ResourceLimitError` past {@link MAX_DIGITS} digits. */
+function limitDigits(value: bigint): bigint {
+  if (exceedsDigits(value)) throw tooManyDigits();
+  return value;
+}
+
+/**
+ * `a × b`, refused before it is built when it could pass {@link MAX_DIGITS}: the
+ * product has at most as many hexadecimal digits as both factors together.
+ */
+function mulBig(a: bigint, b: bigint): bigint {
+  if (hexDigits(a) + hexDigits(b) > MAX_HEX_DIGITS + 1) throw tooManyDigits();
+  return a * b;
+}
 
 /** Brings a `bigint` to canonical form. */
 export function canon(value: bigint): Units {
@@ -49,7 +82,7 @@ export function addUnits(a: Units, b: Units): Units {
     // Two safe integers add exactly whenever the true sum is itself safe.
     if (sum <= MAX && sum >= -MAX) return sum;
   }
-  return canon(BigInt(a) + BigInt(b));
+  return canon(limitDigits(BigInt(a) + BigInt(b)));
 }
 
 /** Exact product. */
@@ -60,7 +93,7 @@ export function mulUnits(a: Units, b: Units): Units {
     // as safe is the exact product. `+ 0` turns `-0` into `0`.
     if (product <= MAX && product >= -MAX) return product + 0;
   }
-  return canon(BigInt(a) * BigInt(b));
+  return canon(mulBig(BigInt(a), BigInt(b)));
 }
 
 export function negUnits(a: Units): Units {
@@ -117,7 +150,7 @@ export function mulDiv(units: Units, numerator: Units, denominator: Units, mode?
       return product < 0 ? quotient - 1 : quotient + 1;
     }
   }
-  const product = BigInt(units) * BigInt(numerator);
+  const product = mulBig(BigInt(units), BigInt(numerator));
   const divisor = BigInt(denominator);
   const quotient = product / divisor;
   const remainder = product - quotient * divisor;
@@ -157,44 +190,63 @@ const DECIMAL = /^([+-]?)(\d+)(?:\.(\d+))?(?:e([+-]?\d{1,4}))?$/i;
 
 /**
  * Reads plain decimal text: an optional sign, digits, an optional fraction, an
- * optional exponent. No grouping, no spaces, no `Infinity`. Throws
- * `NumberFormatError` otherwise.
+ * optional exponent. No grouping, no spaces, no `Infinity`. Returns
+ * `InvalidMoneyText` otherwise, and `InputTooLarge` past the length or exponent limit.
  */
-export function parseDecimal(text: string): Parsed {
-  if (text.length > MAX_INPUT_LENGTH) {
-    throw new ResourceLimitError(`Amount text is longer than ${MAX_INPUT_LENGTH} characters`);
-  }
+export function parseDecimal(text: string) {
+  if (text.length > MAX_INPUT_LENGTH) return InputTooLarge();
   const match = DECIMAL.exec(text);
-  if (match === null) {
-    throw new NumberFormatError(`${JSON.stringify(text.slice(0, 40))} is not a decimal number such as "19.99"`);
-  }
+  if (match === null) return InvalidMoneyText();
   const whole = match[2] ?? '';
   const fractionDigits = match[3] ?? '';
   const digits = whole + fractionDigits;
   const magnitude = digits.length <= 15 ? Number(digits) : canon(BigInt(digits));
   const coefficient = match[1] === '-' ? negUnits(magnitude) : magnitude;
   const fraction = fractionDigits.length - (match[4] === undefined ? 0 : Number(match[4]));
-  if (fraction > MAX_INPUT_LENGTH || fraction < -MAX_INPUT_LENGTH) {
-    throw new ResourceLimitError(`The exponent in ${JSON.stringify(text.slice(0, 40))} is too large`);
-  }
-  if (fraction >= 0) return { coefficient, fraction };
-  return { coefficient: mulUnits(coefficient, pow10(-fraction)), fraction: 0 };
+  if (fraction > MAX_INPUT_LENGTH || fraction < -MAX_INPUT_LENGTH) return InputTooLarge();
+  const parsed: Parsed =
+    fraction >= 0 ? { coefficient, fraction } : { coefficient: mulUnits(coefficient, pow10(-fraction)), fraction: 0 };
+  return parsed;
 }
 
 /**
  * Reads a JS number through its shortest decimal spelling, so `19.99` means
  * exactly 19.99 — what was typed, not the binary approximation. It cannot undo
  * earlier float arithmetic: `0.1 + 0.2` arrives as `0.30000000000000004`.
+ * `NaN`, infinities and integers past 2^53 (their digits are already lost) return `AmountOutOfRange`.
  */
-export function parseNumber(value: number): Parsed {
-  if (Number.isSafeInteger(value)) return { coefficient: value + 0, fraction: 0 };
-  if (!Number.isFinite(value)) throw new NumericRangeError(`${value} is not a finite number`);
-  if (Number.isInteger(value)) {
-    throw new NumericRangeError(
-      `${value} is not a safe integer; its digits are already lost. Pass a string or bigint instead`,
-    );
+export function parseNumber(value: number) {
+  if (Number.isSafeInteger(value)) {
+    const parsed: Parsed = { coefficient: value + 0, fraction: 0 };
+    return parsed;
   }
+  if (!Number.isFinite(value) || Number.isInteger(value)) return AmountOutOfRange();
   return parseDecimal(String(value));
+}
+
+const INTEGER = /^[+-]?\d+$/;
+
+/**
+ * Whole minor units from a safe-integer `number`, a `bigint`, or integer text (as
+ * databases return `BIGINT`). Returns `AmountOutOfRange` for an unsafe or fractional
+ * number, `InputTooLarge` past the digit or length limit, `InvalidMoneyText` otherwise.
+ */
+export function toUnits(value: number | bigint | string) {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? value + 0 : AmountOutOfRange();
+  if (typeof value === 'bigint') return exceedsDigits(value) ? InputTooLarge() : canon(value);
+  if (typeof value === 'string') {
+    if (value.length > MAX_INPUT_LENGTH) return InputTooLarge();
+    if (INTEGER.test(value)) return canon(BigInt(value));
+  }
+  return InvalidMoneyText();
+}
+
+/** Whether `coefficient × 10^-fraction` has no digits past `scale` decimals, so moving it there needs no rounding. */
+export function isExactAtScale(coefficient: Units, fraction: number, scale: number): boolean {
+  if (fraction <= scale) return true;
+  const divisor = pow10(fraction - scale);
+  if (typeof coefficient === 'number' && typeof divisor === 'number') return coefficient % divisor === 0;
+  return BigInt(coefficient) % BigInt(divisor) === 0n;
 }
 
 /** Throws `DivisionByZeroError` for a zero divisor. */

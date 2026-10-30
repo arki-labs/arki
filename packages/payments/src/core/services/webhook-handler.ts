@@ -549,7 +549,7 @@ export class WebhookHandler extends EventEmitter {
         throw new Error(`No local payment for provider payment ${charge.providerPaymentId}`);
       }
 
-      const refundedAmount = fromStripeAmount(charge.amountRefunded, charge.currency).toJSON();
+      const refundedAmount = orThrow(fromStripeAmount(charge.amountRefunded, charge.currency)).toJSON();
       await orThrow(this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount }));
       await this.reconcileRefunds(charge.refunds, data.webhookId);
 

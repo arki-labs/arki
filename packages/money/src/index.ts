@@ -14,3 +14,4 @@ export type {
 } from './money.js';
 export * from './errors.js';
 export type { RoundingMode } from '@arki/math/rounding';
+export * from './failures.js';

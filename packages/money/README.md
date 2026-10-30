@@ -66,7 +66,22 @@ On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and fo
 
 ## Failure behaviour
 
-Every deliberate failure throws. No call returns `NaN` or a rounded guess.
+Parsers return, builders throw. No call returns `NaN` or a rounded guess.
+
+Values from outside (typed text, JSON, provider payloads) go through a door that returns the value or an `@arki/failure` value: `Money.parse`, `Money.fromJSON`, `Currency.parse`, `Currency.parseNumeric`, `parseMoney`, `createMoneyParser`, `fromProviderUnits` and `fromStripeAmount`. Each failure is listed once in `MONEY_FAILURES`; check with `isMoneyFailure(result)` or `InvalidMoneyText.is(result)`, and match on `code`. Failures carry no input text, so they are safe to log or send.
+
+| Code                       | Failure             | Status | What to do                                                  |
+| -------------------------- | ------------------- | ------ | ----------------------------------------------------------- |
+| `money.invalid_text`       | `InvalidMoneyText`  | 400    | Show the expected format, such as `19.99 EUR`; do not guess |
+| `money.invalid_shape`      | `InvalidMoneyShape` | 400    | Send `{ amount, currency }` as strings                      |
+| `money.unknown_currency`   | `UnknownCurrency`   | 400    | Use an ISO 4217 code, or pass your custom currencies        |
+| `money.rounding_necessary` | `RoundingNecessary` | 400    | Ask for fewer decimals, or pass a rounding mode             |
+| `money.out_of_range`       | `AmountOutOfRange`  | 400    | Send minor units past 2^53 as a string or bigint            |
+| `money.input_too_large`    | `InputTooLarge`     | 413    | Refuse the input; real amounts are far shorter              |
+| `money.unsupported_locale` | `UnsupportedLocale` | 400    | Pass a valid BCP 47 tag, or `symbols`                       |
+| `money.provider_amount`    | `ProviderAmount`    | 422    | Check the provider amount; never round it to fit            |
+
+Builders and arithmetic (`money`, `Money.of`, `Money.fromMinor`, `Currency.of`, `times`, `dividedBy`, `plus`) throw, because their input is your code's. Never pass outside text to a builder.
 
 Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Each has a stable `code` and a `remediation`; match on the code, never on the message. The money-only codes are `ARKI_MONEY_E001` (`CurrencyMismatchError`), `E002` (`UnknownCurrencyError`; the bad text is `currencyCode`), `E003` (`ExchangeRateError`) and `E004` (`ProviderAmountError`), also exported as `MONEY_ERROR_CODES`. Shared ones keep their `ARKI_MATH_*` codes: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
 
@@ -126,7 +141,7 @@ Report a bug or ask a question in the [Arki issue tracker](https://github.com/ar
 | `money('0.1234', 'EUR', { scale: 4 })`              | Keep more decimals, for unit prices.                                                  |
 | `Money.fromMinor(1999, 'EUR')`                      | From cents. Also takes a `bigint` or an integer string, as databases return `BIGINT`. |
 | `Money.zero('EUR')`                                 | Zero.                                                                                 |
-| `Money.parse('19.99 EUR')` / `Money.fromJSON(json)` | Reads what `toString()` / `toJSON()` write.                                           |
+| `Money.parse('19.99 EUR')` / `Money.fromJSON(json)` | Reads what `toString()` / `toJSON()` write; returns a failure for bad input.          |
 | `Money.of(m, 'EUR')`                                | Checks a `Money<string>` is EUR and narrows its type to `Money<'EUR'>`.               |
 
 `money()` also accepts a `Decimal` or a `Rational` from `@arki/math`.
@@ -200,19 +215,20 @@ Formatting passes the amount to `Intl` as exact text, so digits past 2^53 surviv
 ## Reading what people type
 
 ```ts
+import { isMoneyFailure } from '@arki/money';
 import { createMoneyParser, parseMoney } from '@arki/money/parse';
 
 parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' }); // 1234.56 EUR
 parseMoney('₹1,23,456.78', 'INR', { locale: 'en-IN' }); // 123456.78 INR
 parseMoney('($1,234.56)', 'USD'); // -1234.56 USD
 parseMoney('$10', 'CAD'); // 10.00 CAD — you say which currency, so '$' is never guessed
-parseMoney('1,23,4', 'USD'); // throws NumberFormatError: grouping does not match the locale
+parseMoney('1,23,4', 'USD'); // InvalidMoneyText (money.invalid_text): grouping does not match the locale
 
-const form = createMoneyParser('EUR', { locale: 'de-DE' }); // reads the locale once
-form.tryParse('12,505 €'); // undefined — too many decimals, for form validation
+const form = createMoneyParser('EUR', { locale: 'de-DE' }); // reads the locale once; UnsupportedLocale for a bad tag
+if (!isMoneyFailure(form)) form.parse('12,505 €'); // RoundingNecessary (money.rounding_necessary): too many decimals
 ```
 
-Separators, digits, minus sign and currency symbols come from `Intl` for the locale. Parsing is strict: wrong grouping, the other locale's decimal separator, two signs, mixed digit scripts or a different currency's symbol throw instead of being guessed. Text without grouping (`'1234.5'`) is always accepted. On runtimes without `formatToParts` (Hermes on iOS), pass `symbols: { decimal: ',', group: '.' }` instead of a locale.
+Separators, digits, minus sign and currency symbols come from `Intl` for the locale. Parsing is strict: wrong grouping, the other locale's decimal separator, two signs, mixed digit scripts or a different currency's symbol return `InvalidMoneyText` instead of being guessed. Text without grouping (`'1234.5'`) is always accepted. On runtimes without `formatToParts` (Hermes on iOS), pass `symbols: { decimal: ',', group: '.' }` instead of a locale.
 
 ## Converting currencies
 
@@ -240,7 +256,7 @@ toStripe(money('10.99', 'EUR')); // { amount: 1099, currency: 'eur' }
 toStripeAmount(money(5, 'ISK')); // 500 — Stripe sends ISK with two decimals that are always 00
 toStripeAmount(money('10.50', 'MGA')); // throws ProviderAmountError — MGA is zero-decimal at Stripe
 toStripeAmount(money('10.45', 'HUF'), 'payout'); // throws — HUF payouts must be whole forints
-fromStripeAmount(1099, 'usd'); // 10.99 USD
+fromStripeAmount(1099, 'usd'); // 10.99 USD; a payload Stripe has no rule for returns ProviderAmount
 ```
 
 Rules come from docs.stripe.com/currencies, checked on 2026-10-12 (`STRIPE_RULES_VERSION`). Stripe documents no rule for currencies with 3 or 4 decimals, so those throw instead of being guessed. For other providers, describe their units with `toProviderUnits(money, { scale, step })` and `fromProviderUnits` from `@arki/money/provider`.

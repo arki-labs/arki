@@ -12,6 +12,7 @@ import { InvalidArgumentError } from '@arki/math/errors';
 
 import { ISO_4217 } from './data/iso4217.js';
 import { CurrencyMismatchError, UnknownCurrencyError } from './errors.js';
+import { UnknownCurrency } from './failures.js';
 import { MAX_SCALE } from './internal/units.js';
 
 export { ISO_4217_VERSION } from './data/iso4217.js';
@@ -58,15 +59,39 @@ export class Currency<C extends string = string> {
   /**
    * The ISO 4217 currency with this upper-case code: `Currency.of('EUR')`.
    * Throws `UnknownCurrencyError` for anything not in the table, including `'eur'`.
+   * For codes your code writes; read a code from outside with `Currency.parse`.
    */
   static of<const C extends string>(code: C): Currency<C> {
-    const found = Currency.table().get(code);
-    if (found === undefined || !hasCode(found, code)) throw new UnknownCurrencyError(String(code));
+    const found = Currency.parse(code);
+    if (UnknownCurrency.is(found)) throw new UnknownCurrencyError(String(code));
     return found;
   }
 
-  /** The ISO 4217 currency with this numeric code: `Currency.fromNumeric('978')` or `(978)` → EUR. */
+  /**
+   * Reads a currency code from outside (a form, JSON, a provider payload): the
+   * currency in `currencies` with that code, else the ISO 4217 one. Returns the
+   * `UnknownCurrency` failure (`money.unknown_currency`) instead of throwing.
+   */
+  static parse<const C extends string>(code: C, currencies?: readonly Currency[]) {
+    if (currencies !== undefined) {
+      for (const currency of currencies) if (hasCode(currency, code)) return currency;
+    }
+    const found = Currency.table().get(code);
+    return found !== undefined && hasCode(found, code) ? found : UnknownCurrency();
+  }
+
+  /**
+   * The ISO 4217 currency with this numeric code: `Currency.fromNumeric('978')` or `(978)` → EUR.
+   * Throws `UnknownCurrencyError`; read a numeric code from outside with `Currency.parseNumeric`.
+   */
   static fromNumeric(numeric: string | number): Currency {
+    const found = Currency.parseNumeric(numeric);
+    if (UnknownCurrency.is(found)) throw new UnknownCurrencyError(String(numeric).slice(0, 32));
+    return found;
+  }
+
+  /** `Currency.fromNumeric` for outside values: returns `UnknownCurrency` instead of throwing. */
+  static parseNumeric(numeric: string | number) {
     const key = typeof numeric === 'number' ? String(numeric).padStart(3, '0') : numeric;
     if (byNumeric === undefined) {
       byNumeric = new Map();
@@ -74,9 +99,7 @@ export class Currency<C extends string = string> {
         if (currency.numeric !== undefined) byNumeric.set(currency.numeric, currency);
       }
     }
-    const found = byNumeric.get(key);
-    if (found === undefined) throw new UnknownCurrencyError(key);
-    return found;
+    return byNumeric.get(key) ?? UnknownCurrency();
   }
 
   /**
@@ -160,12 +183,11 @@ export function toCurrency<C extends string>(currency: CurrencyLike<C>): Currenc
   return Currency.of(currency);
 }
 
-/** Finds a currency by code among `custom`, then in the ISO table. */
-export function resolveCurrency(code: string, custom: readonly Currency[] | undefined): Currency {
-  if (custom !== undefined) {
-    for (const currency of custom) if (currency.code === code) return currency;
-  }
-  return Currency.of(code);
+/** `Currency.parse` for a builder: throws `UnknownCurrencyError` with the code cut to 32 characters. */
+export function requireCurrency(code: string, custom: readonly Currency[] | undefined): Currency {
+  const found = Currency.parse(code, custom);
+  if (UnknownCurrency.is(found)) throw new UnknownCurrencyError(code.slice(0, 32));
+  return found;
 }
 
 /** Throws `CurrencyMismatchError` unless the two are the same currency. */

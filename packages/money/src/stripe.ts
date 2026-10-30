@@ -10,16 +10,17 @@
  * - Other currencies with 2 ISO decimals: two decimals.
  *
  * Stripe documents no rule for currencies with 3 or 4 ISO decimals, so those
- * throw `ProviderAmountError` instead of being guessed. Whether your account
+ * throw `ProviderAmountError` (or return `ProviderAmount` when reading) instead of being guessed. Whether your account
  * can charge a currency, and its minimum and maximum amounts, are Stripe's to
  * enforce; this module only gets the units right.
  */
 
-import type { Currency, CurrencyLike } from './currency.js';
+import type { CurrencyLike } from './currency.js';
 import type { Money } from './money.js';
 import type { ProviderUnitRule } from './provider.js';
-import { toCurrency } from './currency.js';
+import { Currency, toCurrency } from './currency.js';
 import { ProviderAmountError } from './errors.js';
+import { isMoneyFailure, ProviderAmount } from './failures.js';
 import { fromProviderUnits, toProviderUnits } from './provider.js';
 
 /** When Stripe's rules in this module were last checked. */
@@ -47,16 +48,26 @@ const ZERO_DECIMAL = new Set([
 const WHOLE_UNITS_TWO_DECIMALS = new Set(['ISK', 'UGX']);
 const WHOLE_UNIT_PAYOUTS = new Set(['HUF', 'TWD']);
 
-/** Stripe's unit rule for a currency and operation. Throws `ProviderAmountError` where Stripe documents none. */
-export function stripeRule(currency: CurrencyLike, operation: StripeOperation = 'charge'): ProviderUnitRule {
-  const target: Currency = toCurrency(currency);
+/** Stripe's documented rule, or `undefined` where Stripe documents none (custom currencies, 3 or 4 ISO decimals). */
+function ruleFor(target: Currency, operation: StripeOperation): ProviderUnitRule | undefined {
   const code = target.code;
-  if (!target.iso) throw new ProviderAmountError(`${code} is a custom currency; Stripe has no rule for it`);
+  if (!target.iso) return undefined;
   if (ZERO_DECIMAL.has(code)) return { scale: 0 };
   if (WHOLE_UNITS_TWO_DECIMALS.has(code)) return { scale: 2, step: 100 };
   if (WHOLE_UNIT_PAYOUTS.has(code)) return operation === 'payout' ? { scale: 2, step: 100 } : { scale: 2 };
   if (target.scale === 2) return { scale: 2 };
-  throw new ProviderAmountError(`Stripe documents no amount rule for ${code} (${target.scale} decimals in ISO 4217)`);
+  return undefined;
+}
+
+/** Stripe's unit rule for a currency and operation. Throws `ProviderAmountError` where Stripe documents none. */
+export function stripeRule(currency: CurrencyLike, operation: StripeOperation = 'charge'): ProviderUnitRule {
+  const target: Currency = toCurrency(currency);
+  const rule = ruleFor(target, operation);
+  if (rule !== undefined) return rule;
+  if (!target.iso) throw new ProviderAmountError(`${target.code} is a custom currency; Stripe has no rule for it`);
+  throw new ProviderAmountError(
+    `Stripe documents no amount rule for ${target.code} (${target.scale} decimals in ISO 4217)`,
+  );
 }
 
 /**
@@ -68,14 +79,21 @@ export function toStripeAmount(amount: Money, operation: StripeOperation = 'char
   return toProviderUnits(amount, stripeRule(amount.currency, operation));
 }
 
-/** `fromStripeAmount(1099, 'usd')` → `10.99 USD`. Accepts Stripe's lower-case codes. */
+/**
+ * `fromStripeAmount(1099, 'usd')` → `10.99 USD`, for amounts read from Stripe. Accepts Stripe's
+ * lower-case codes. Returns `UnknownCurrency`, `ProviderAmount` (no Stripe rule, or an amount off
+ * the rule), `AmountOutOfRange`, `InputTooLarge` or `InvalidMoneyText` instead of throwing.
+ */
 export function fromStripeAmount(
   amount: number | bigint | string,
   currency: string | Currency,
   operation: StripeOperation = 'charge',
-): Money {
-  const target = typeof currency === 'string' ? toCurrency(currency.toUpperCase()) : currency;
-  return fromProviderUnits(amount, target, stripeRule(target, operation));
+) {
+  const target = typeof currency === 'string' ? Currency.parse(currency.toUpperCase()) : currency;
+  if (isMoneyFailure(target)) return target;
+  const rule = ruleFor(target, operation);
+  if (rule === undefined) return ProviderAmount();
+  return fromProviderUnits(amount, target, rule);
 }
 
 /** The `{ amount, currency }` pair a Stripe request takes: `{ amount: 1099, currency: 'usd' }`. */

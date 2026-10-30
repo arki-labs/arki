@@ -4,6 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
+import { orThrow } from '@arki/failure';
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../../core/tables.js';
@@ -229,7 +230,7 @@ export class CustomerSegmentationService {
         .where(
           and(
             eq(this.payments.status, 'succeeded'),
-            eq(this.payments.currency, Money.fromJSON(spendBound).currency.code),
+            eq(this.payments.currency, orThrow(Money.fromJSON(spendBound)).currency.code),
           ),
         )
         .groupBy(this.payments.customerId);
@@ -239,7 +240,7 @@ export class CustomerSegmentationService {
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total >= ${toMinorColumn(Money.fromJSON(min))}
+                        WHERE total >= ${toMinorColumn(orThrow(Money.fromJSON(min)))}
                       )
           `,
         );
@@ -250,7 +251,7 @@ export class CustomerSegmentationService {
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total <= ${toMinorColumn(Money.fromJSON(max))}
+                        WHERE total <= ${toMinorColumn(orThrow(Money.fromJSON(max)))}
                       )
           `,
         );

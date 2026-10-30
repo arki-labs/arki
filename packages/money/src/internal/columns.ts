@@ -8,8 +8,9 @@ import { InvalidArgumentError, NumericRangeError } from '@arki/math/errors';
 import type { Currency } from '../currency.js';
 import type { Money } from '../money.js';
 import type { Units } from './units.js';
-import { assertSameCurrency, resolveCurrency } from '../currency.js';
+import { assertSameCurrency, requireCurrency } from '../currency.js';
 import { Money as MoneyClass } from '../money.js';
+import { orRaise } from './raise.js';
 import { quantize } from './units.js';
 
 /** What drivers hand back for an integer column. */
@@ -63,12 +64,18 @@ export function jsonToDriver(value: Money): string {
   return JSON.stringify(value.toJSON());
 }
 
-/** Reads JSON text, or an object for drivers that parse JSON columns themselves. */
+/**
+ * Reads JSON text, or an object for drivers that parse JSON columns themselves.
+ * Stored data that is not valid money throws (`SyntaxError`, `InvalidArgumentError`,
+ * `UnknownCurrencyError`, `NumberFormatError`), so the query rejects instead of
+ * returning a wrong amount: a Drizzle `fromDriver` has no failure channel, and
+ * `@arki/db`'s own columns throw on bad stored values the same way.
+ */
 export function jsonFromDriver(value: unknown, currencies: readonly Currency[] | undefined): Money {
   const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
   if (typeof parsed !== 'object' || parsed === null || !('currency' in parsed) || typeof parsed.currency !== 'string') {
     throw new InvalidArgumentError('A money JSON column holds { amount, currency }');
   }
-  resolveCurrency(parsed.currency, currencies);
-  return MoneyClass.fromJSON(parsed, currencies);
+  requireCurrency(parsed.currency, currencies);
+  return orRaise(MoneyClass.fromJSON(parsed, currencies));
 }

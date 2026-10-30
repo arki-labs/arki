@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
 import { fromUnix, now } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
 
@@ -367,7 +367,7 @@ export class StripeProvider extends BasePaymentProvider {
         `Stripe price ${price.id} is not a flat recurring price, so it is not a plan`,
       );
     }
-    const amount = fromStripeAmount(price.unit_amount, price.currency);
+    const amount = orThrow(fromStripeAmount(price.unit_amount, price.currency));
     return {
       ...row,
       name: productName ?? row.name,
@@ -725,7 +725,7 @@ export class StripeProvider extends BasePaymentProvider {
     let credited = Money.zero(currency.toUpperCase());
     let next = Money.zero(currency.toUpperCase());
     for (const line of invoice.lines.data) {
-      const amount = fromStripeAmount(line.amount, currency);
+      const amount = orThrow(fromStripeAmount(line.amount, currency));
       const proration = line.parent?.subscription_item_details?.proration ?? false;
       if (!proration) {
         next = next.plus(amount);
@@ -755,12 +755,12 @@ export class StripeProvider extends BasePaymentProvider {
     intent: Stripe.PaymentIntent,
     base: Pick<Payment, 'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'>,
   ): Payment {
-    const amount = fromStripeAmount(intent.amount, intent.currency);
+    const amount = orThrow(fromStripeAmount(intent.amount, intent.currency));
     const paymentMethod = intent.payment_method;
     const charge = intent.latest_charge;
     const chargeObject = charge !== null && typeof charge === 'object' ? charge : null;
     const refundedMinor = chargeObject
-      ? toMinorColumn(fromStripeAmount(chargeObject.amount_refunded, intent.currency))
+      ? toMinorColumn(orThrow(fromStripeAmount(chargeObject.amount_refunded, intent.currency)))
       : 0;
 
     return {
@@ -1238,12 +1238,12 @@ export class StripeProvider extends BasePaymentProvider {
     const calculation = await this.call(() => this.stripe.tax.calculations.create(request));
 
     return {
-      amountTotal: fromStripeAmount(calculation.amount_total, calculation.currency),
-      taxAmountExclusive: fromStripeAmount(calculation.tax_amount_exclusive, calculation.currency),
-      taxAmountInclusive: fromStripeAmount(calculation.tax_amount_inclusive, calculation.currency),
+      amountTotal: orThrow(fromStripeAmount(calculation.amount_total, calculation.currency)),
+      taxAmountExclusive: orThrow(fromStripeAmount(calculation.tax_amount_exclusive, calculation.currency)),
+      taxAmountInclusive: orThrow(fromStripeAmount(calculation.tax_amount_inclusive, calculation.currency)),
       taxBreakdown: calculation.line_items?.data?.flatMap((item: Stripe.Tax.CalculationLineItem) =>
         item.tax_breakdown?.map((breakdown: Stripe.Tax.CalculationLineItem.TaxBreakdown) => ({
-          amount: fromStripeAmount(breakdown.amount, calculation.currency),
+          amount: orThrow(fromStripeAmount(breakdown.amount, calculation.currency)),
           rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
             ? breakdown.tax_rate_details.percentage_decimal
             : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
@@ -1279,8 +1279,8 @@ export class StripeProvider extends BasePaymentProvider {
     let taxExclusive = net;
     let taxInclusive = net;
     for (const line of lines) {
-      const tax = fromStripeAmount(line.amount_tax, transaction.currency);
-      net = net.plus(fromStripeAmount(line.amount, transaction.currency));
+      const tax = orThrow(fromStripeAmount(line.amount_tax, transaction.currency));
+      net = net.plus(orThrow(fromStripeAmount(line.amount, transaction.currency)));
       if (line.tax_behavior === 'inclusive') {
         taxInclusive = taxInclusive.plus(tax);
       } else {

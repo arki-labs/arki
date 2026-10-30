@@ -31,7 +31,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
@@ -195,8 +195,8 @@ export function createRefundsJournal<
     .create(RefundRequestedV2, e =>
       requested(
         e.data,
-        toMinorColumn(Money.fromJSON(e.data.originalAmount)),
-        toMinorColumn(Money.fromJSON(e.data.refundAmount)),
+        toMinorColumn(orThrow(Money.fromJSON(e.data.originalAmount))),
+        toMinorColumn(orThrow(Money.fromJSON(e.data.refundAmount))),
         e.data.refundAmount.currency,
         fromDate(e.recordedAt),
       ),

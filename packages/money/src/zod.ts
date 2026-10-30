@@ -13,11 +13,13 @@
 import { z } from 'zod';
 
 import type { CurrencyLike } from './currency.js';
+import type { MoneyFailure } from './failures.js';
 import type { Money, MoneyOptions } from './money.js';
 import type { ParseOptions } from './parse.js';
-import { Currency, resolveCurrency, toCurrency } from './currency.js';
-import { MathError } from './errors.js';
-import { Money as MoneyClass } from './money.js';
+import { Currency, toCurrency } from './currency.js';
+import { isMoneyFailure } from './failures.js';
+import { orRaise } from './internal/raise.js';
+import { fromDecimalText } from './money.js';
 import { createMoneyParser } from './parse.js';
 
 export type MoneySchemaOptions<C extends string> = {
@@ -33,8 +35,9 @@ export type AnyMoneySchemaOptions = MoneySchemaOptions<string> & {
   currencies?: readonly Currency[];
 };
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : 'Invalid money';
+/** A returned failure as a Zod issue. `params.code` carries the failure code to match on. */
+function addFailure(ctx: z.RefinementCtx, failure: MoneyFailure, path?: string[]): void {
+  ctx.addIssue({ code: 'custom', message: failure.message, params: { code: failure.code }, path });
 }
 
 function checkBounds<C extends string>(value: Money<C>, options: MoneySchemaOptions<C>, ctx: z.RefinementCtx): void {
@@ -54,15 +57,13 @@ function settle<C extends string>(
   options: MoneySchemaOptions<C>,
   ctx: z.RefinementCtx,
 ): Money<C> {
-  try {
-    const value = MoneyClass.of(amount, currency, { rounding: options.rounding });
-    checkBounds(value, options, ctx);
-    return value;
-  } catch (error) {
-    if (!(error instanceof MathError)) throw error;
-    ctx.addIssue({ code: 'custom', message: message(error), path: ['amount'] });
+  const value = fromDecimalText(amount, currency, currency.scale, options.rounding);
+  if (isMoneyFailure(value)) {
+    addFailure(ctx, value, ['amount']);
     return z.NEVER;
   }
+  checkBounds(value, options, ctx);
+  return value;
 }
 
 /**
@@ -83,12 +84,9 @@ export function moneySchema<const C extends string>(currency: CurrencyLike<C>, o
 /** `{ amount, currency }` in any ISO (or listed custom) currency → `Money`. */
 export function anyMoneySchema(options: AnyMoneySchemaOptions = {}) {
   return moneyJsonShape.transform((input, ctx): Money => {
-    let currency: Currency;
-    try {
-      currency = resolveCurrency(input.currency, options.currencies);
-    } catch (error) {
-      if (!(error instanceof MathError)) throw error;
-      ctx.addIssue({ code: 'custom', message: message(error), path: ['currency'] });
+    const currency = Currency.parse(input.currency, options.currencies);
+    if (isMoneyFailure(currency)) {
+      addFailure(ctx, currency, ['currency']);
       return z.NEVER;
     }
     return settle(input.amount, currency, options, ctx);
@@ -97,23 +95,22 @@ export function anyMoneySchema(options: AnyMoneySchemaOptions = {}) {
 
 /**
  * A form field: locale text such as `'1.234,56 €'` → `Money<C>`, with the
- * strict rules of `@arki/money/parse`.
+ * strict rules of `@arki/money/parse`. A locale the runtime rejects throws here, when the
+ * schema is built: the schema is your code's.
  */
 export function moneyInputSchema<const C extends string>(
   currency: CurrencyLike<C>,
   options: ParseOptions & Pick<MoneySchemaOptions<C>, 'min' | 'max'> = {},
 ) {
-  const parser = createMoneyParser(currency, options);
+  const parser = orRaise(createMoneyParser(currency, options));
   return z.string().transform((text, ctx): Money<C> => {
-    try {
-      const value = parser.parse(text);
-      checkBounds(value, options, ctx);
-      return value;
-    } catch (error) {
-      if (!(error instanceof MathError)) throw error;
-      ctx.addIssue({ code: 'custom', message: message(error) });
+    const value = parser.parse(text);
+    if (isMoneyFailure(value)) {
+      addFailure(ctx, value);
       return z.NEVER;
     }
+    checkBounds(value, options, ctx);
+    return value;
   });
 }
 

@@ -17,7 +17,7 @@ import { ratio } from '@arki/math/rational';
 
 import type { Currency, CurrencyLike } from './currency.js';
 import type { Amount, FactorInput, MoneyJSON, MoneyOptions } from './money.js';
-import { assertSameCurrency, resolveCurrency, toCurrency } from './currency.js';
+import { assertSameCurrency, requireCurrency, toCurrency } from './currency.js';
 import { Money, toFraction } from './money.js';
 
 const BRAND = Symbol('RationalMoney');
@@ -80,7 +80,7 @@ export class RationalMoney<C extends string = string> {
     if (typeof amount !== 'string' || typeof currency !== 'string') {
       throw new InvalidArgumentError('Expected { amount: string, currency: string }');
     }
-    return RationalMoney.of(amount, resolveCurrency(currency, currencies));
+    return RationalMoney.of(amount, requireCurrency(currency, currencies));
   }
 
   /** @internal */

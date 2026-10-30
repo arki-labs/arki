@@ -1,11 +1,13 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { RoundingMode } from '@arki/math/rounding';
+import { orThrow } from '@arki/failure';
 import { decimal } from '@arki/math/decimal';
 import { ratio } from '@arki/math/rational';
 import { ROUNDING_MODES } from '@arki/math/rounding';
 
 import { toDecimal, toRational } from './exact.js';
+import { InvalidMoneyShape, InvalidMoneyText } from './failures.js';
 import {
   average,
   Currency,
@@ -399,15 +401,15 @@ describe('output and serialization', () => {
 
   it('round-trips through toString/parse and JSON, keeping the scale', () => {
     const unitPrice = money('0.1234', 'EUR', { scale: 4 });
-    expect(Money.parse(unitPrice.toString()).eq(unitPrice)).toBe(true);
-    expect(Money.parse(unitPrice.toString()).scale).toBe(4);
-    expect(Money.parse('EUR 19.99').toString()).toBe('19.99 EUR');
+    expect(orThrow(Money.parse(unitPrice.toString())).eq(unitPrice)).toBe(true);
+    expect(orThrow(Money.parse(unitPrice.toString())).scale).toBe(4);
+    expect(orThrow(Money.parse('EUR 19.99')).toString()).toBe('19.99 EUR');
     expect(JSON.stringify(money('19.99', 'EUR'))).toBe('{"amount":"19.99","currency":"EUR"}');
-    expect(Money.fromJSON(JSON.parse('{"amount":"19.99","currency":"EUR"}')).toString()).toBe('19.99 EUR');
+    expect(orThrow(Money.fromJSON(JSON.parse('{"amount":"19.99","currency":"EUR"}'))).toString()).toBe('19.99 EUR');
     const btc = Currency.custom({ code: 'BTC', scale: 8 });
-    expect(Money.parse('0.5 BTC', [btc]).toString()).toBe('0.50000000 BTC');
-    expect(() => Money.fromJSON({ amount: 19.99, currency: 'EUR' })).toThrow(InvalidArgumentError);
-    expect(() => Money.parse('19.99')).toThrow(NumberFormatError);
+    expect(orThrow(Money.parse('0.5 BTC', [btc])).toString()).toBe('0.50000000 BTC');
+    expect(InvalidMoneyShape.is(Money.fromJSON({ amount: 19.99, currency: 'EUR' }))).toBe(true);
+    expect(InvalidMoneyText.is(Money.parse('19.99'))).toBe(true);
   });
 
   it('never turns into a float by accident', () => {

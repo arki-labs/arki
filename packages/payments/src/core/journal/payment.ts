@@ -24,7 +24,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { CommandConflict, CommandInvalid, CommandNotFound } from '@arki/journal';
 import { Money } from '@arki/money';
 
@@ -170,7 +170,7 @@ export function createPaymentJournal<
       ),
     )
     .create(PaymentInitiatedV2, e =>
-      started(e.data, toMinorColumn(Money.fromJSON(e.data.amount)), e.data.amount.currency, fromDate(e.recordedAt)),
+      started(e.data, toMinorColumn(orThrow(Money.fromJSON(e.data.amount))), e.data.amount.currency, fromDate(e.recordedAt)),
     )
     .on(PaymentCompleted, (_row, e) => ({
       status: 'succeeded',
@@ -185,7 +185,7 @@ export function createPaymentJournal<
     .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: fromDate(e.recordedAt) }))
     .on(PaymentRequiresAction, (_row, e) => ({ status: 'requires_action', updatedAt: fromDate(e.recordedAt) }))
     .on(PaymentRefundRecorded, (_row, e) => {
-      const refundedAmount = Money.fromJSON(e.data.refundedAmount);
+      const refundedAmount = orThrow(Money.fromJSON(e.data.refundedAmount));
 
       return {
         refunded: !refundedAmount.isZero(),

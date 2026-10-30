@@ -4,6 +4,7 @@ import type { UserId } from '../../core/user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import { getLogger } from '@arki/log';
+import { orThrow } from '@arki/failure';
 import { Money } from '@arki/money';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
@@ -463,9 +464,9 @@ export class DunningIntegrationService {
     const range = campaign.trigger.filters?.totalSpent;
     const bound = range?.min ?? range?.max;
     if (range && bound) {
-      if (event.amount.currency.code !== Money.fromJSON(bound).currency.code) return false;
-      if (range.min && event.amount.lt(Money.fromJSON(range.min))) return false;
-      if (range.max && event.amount.gt(Money.fromJSON(range.max))) return false;
+      if (event.amount.currency.code !== orThrow(Money.fromJSON(bound)).currency.code) return false;
+      if (range.min && event.amount.lt(orThrow(Money.fromJSON(range.min)))) return false;
+      if (range.max && event.amount.gt(orThrow(Money.fromJSON(range.max)))) return false;
     }
 
     // Add more condition evaluations as needed
