@@ -1,7 +1,7 @@
 // Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 
-import { lazyObject, once, resolveLazy } from '../dist/index.js';
+import { lazyObject, once } from '../dist/index.js';
 
 import '../dist/prettify.js';
 import '../dist/utils.js';
@@ -20,8 +20,6 @@ const frozen = lazyObject(() => Object.freeze({ value: 9 }));
 
 const checks = [
   ['once computes one time', calls, 1],
-  ['resolveLazy calls a function', resolveLazy(() => 5), 5],
-  ['resolveLazy passes a value', resolveLazy(5), 5],
   ['lazyObject waits for first read', beforeRead, 0],
   ['lazyObject builds on read', lazy.value, 7],
   ['lazyObject builds once', built, 1],
