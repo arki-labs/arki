@@ -4,7 +4,7 @@
  */
 
 import { sentenceEnds } from './internal/sentences.js';
-import { WORD } from './internal/words.js';
+import { wordBounds } from './internal/words.js';
 
 const LINE_BREAK = /\r\n|[\n\r\u0085\u2028\u2029]/u;
 /** A run of terminal punctuation; what follows is inspected by hand, so long runs stay linear. */
@@ -20,12 +20,17 @@ export function lines(text: string): string[] {
  * `3.14` are each one word. Scripts without word spacing yield one word per run.
  */
 export function words(text: string): string[] {
-  return text.match(WORD) ?? [];
+  const found: string[] = [];
+  for (const [start, end] of wordBounds(text)) found.push(text.slice(start, end));
+  return found;
 }
 
 /** Number of prose words, using exactly `words()`. */
 export function wordCount(text: string): number {
-  return words(text).length;
+  let count = 0;
+  const scan = wordBounds(text);
+  while (scan.next().done !== true) count += 1;
+  return count;
 }
 
 /**

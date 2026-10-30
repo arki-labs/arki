@@ -701,6 +701,7 @@
   "dependencies": {
     "@arki/date": "workspace:*",
     "@arki/icons": "workspace:*",
+    "@arki/log": "workspace:*",
     "@base-ui/react": "catalog:",
     "@hookform/resolvers": "catalog:validation",
     "@mantine/hooks": "catalog:",
@@ -710,7 +711,6 @@
     "clsx": "catalog:styling",
     "cmdk": "catalog:",
     "colord": "catalog:styling",
-    "debug": "catalog:",
     "embla-carousel-react": "catalog:",
     "input-otp": "catalog:",
     "katex": "catalog:",

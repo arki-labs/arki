@@ -63,3 +63,17 @@ describe('sentences stays linear on long punctuation runs', () => {
     expect(sentences('v1.2.3 shipped')).toEqual(['v1.2.3 shipped']);
   });
 });
+
+describe('words / wordCount on very large text', () => {
+  it('counts 10 MB of hyphen-joined text without a stack overflow', () => {
+    const text = 'a-a-a-'.repeat(Math.ceil((10 * 1024 * 1024) / 6));
+    // `a-a-a-` repeated is one long word per run: every `a` joins the next through a hyphen.
+    // The last hyphen of each repeat joins the next repeat, so the whole text is one word minus the trailing hyphen.
+    expect(wordCount(text)).toBe(1);
+    expect(words(text)).toHaveLength(1);
+  });
+
+  it('counts a million separate words', () => {
+    expect(wordCount('ab '.repeat(1_000_000))).toBe(1_000_000);
+  });
+});

@@ -1,8 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { Check, Copy } from '@arki/icons/phosphor';
+import { Check, Copy, Warning } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
+
+import { copyText } from './copy-text';
 
 type CodeBlockProps = React.ComponentProps<'div'> & {
   code: string;
@@ -13,8 +15,8 @@ type CodeBlockProps = React.ComponentProps<'div'> & {
  * Code block with language label and copy-to-clipboard button.
  *
  * Renders code within a styled container using a monospace font.
- * The copy button provides visual feedback (check icon) for 2 seconds
- * after copying.
+ * The copy button shows a check icon for 2 seconds after a copy, or
+ * "Copy failed" for 2 seconds when the browser refuses the clipboard write.
  *
  * @example
  * ```tsx
@@ -22,12 +24,16 @@ type CodeBlockProps = React.ComponentProps<'div'> & {
  * ```
  */
 function CodeBlock({ className, code, language, ...props }: CodeBlockProps) {
-  const [copied, setCopied] = React.useState(false);
+  const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'failed'>('idle');
 
-  function handleCopy() {
-    void navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  React.useEffect(() => {
+    if (copyState === 'idle') return;
+    const timer = setTimeout(() => setCopyState('idle'), 2000);
+    return () => clearTimeout(timer);
+  }, [copyState]);
+
+  async function handleCopy() {
+    setCopyState(await copyText(code));
   }
 
   return (
@@ -44,13 +50,19 @@ function CodeBlock({ className, code, language, ...props }: CodeBlockProps) {
         )}
         <button
           type="button"
-          onClick={handleCopy}
+          onClick={() => void handleCopy()}
+          aria-live="polite"
           className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 text-xs transition-colors"
         >
-          {copied ? (
+          {copyState === 'copied' ? (
             <>
               <Check className="size-3" />
               Copied
+            </>
+          ) : copyState === 'failed' ? (
+            <>
+              <Warning className="size-3" />
+              Copy failed
             </>
           ) : (
             <>
