@@ -17,6 +17,7 @@ import { Rational } from '@arki/math/rational';
 
 import type { Context, RatFun } from './context.js';
 import type { Monomial, Poly, Term } from './poly.js';
+import { treeOrThrow } from './core.js';
 import { compareMonomials, constantValue, ONE, scale } from './poly.js';
 
 /** The span of a node cas built: it points nowhere in the input. */
@@ -281,8 +282,10 @@ export function exprOf(node: Node, ctx: Context): Expr {
   ctx.budget.check('nodes', nodes);
   const text = print(node, { limits: { depth: depth + 1 } });
   const size = text.length + 1;
-  return parse(text, {
-    language: ctx.language,
-    limits: { length: size, tokens: size, depth: 2 * depth + 2, nodes: 2 * nodes + 2 },
-  });
+  return treeOrThrow(
+    parse(text, {
+      language: ctx.language,
+      limits: { length: size, tokens: size, depth: 2 * depth + 2, nodes: 2 * nodes + 2 },
+    }),
+  );
 }

@@ -15,8 +15,9 @@ Parse a formula a user typed, print it in the form you store, then evaluate it i
 ```ts run
 import { parse, print } from '@arki/expr';
 import { evaluate } from '@arki/expr/decimal';
+import { orThrow } from '@arki/failure';
 
-const stored = print(parse('2x^2 + sin(x)'));
+const stored = print(orThrow(parse('2x^2 + sin(x)')));
 if (stored !== '2 * x^2 + sin(x)') throw new Error(`unexpected canonical form: ${stored}`);
 
 const sum = evaluate('0.1 + 0.2').toString();
@@ -29,16 +30,17 @@ The longer example below shows names, warnings, other syntaxes and errors.
 
 ```ts
 import { decimalComma, names, parse, print } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 
-const expr = parse('2x^2 + sin(x)');
+const expr = orThrow(parse('2x^2 + sin(x)'));
 print(expr); // '2 * x^2 + sin(x)' — the canonical form to store
 print(expr, { style: 'display' }); // '2x^2 + sin(x)'
 names(expr); // { variables: ['x'], constants: [], functions: ['sin'] }
 
-parse('1/2x').warnings[0]?.hint; // 'write (1/2)x or 1/(2x)'
-print(parse('log(0,5; 2)', { syntax: decimalComma })); // 'log(0.5, 2)'
+orThrow(parse('1/2x')).warnings[0]?.hint; // 'write (1/2)x or 1/(2x)'
+print(orThrow(parse('log(0,5; 2)', { syntax: decimalComma }))); // 'log(0.5, 2)'
 
-// parse('foo(x)') throws ParseError { code: 'not-a-function', span: { start: 0, end: 3 } }
+// parse('foo(x)') returns InvalidExpression; its cause is ParseError { code: 'not-a-function', span: { start: 0, end: 3 } }
 ```
 
 `walk(node, visit)` visits a parsed tree parent first, left to right; return `false` from `visit` to skip that node's children. It uses a loop, so deep trees never overflow the stack. `syntaxFor(locale)` picks the `decimalComma` preset for locales that write `1,5`, and `canonical` otherwise. It throws `UnsupportedFeatureError` where `Intl.NumberFormat#formatToParts` is missing (Hermes on iOS); pass a preset there.
@@ -58,35 +60,36 @@ Pure TypeScript with no `eval`, no `new Function`, and no Node built-ins. It run
 
 ## Public imports
 
-| Import                | What it gives you                                                         |
-| --------------------- | ------------------------------------------------------------------------- |
-| `@arki/expr`          | `parse`, `parseEquation`, `print`, `names`, `fromJSON`, languages, errors |
-| `@arki/expr/float`    | `compile`, `compileEquation`, `evaluate` on `number`                      |
-| `@arki/expr/decimal`  | The same verbs on `Decimal`, with `scale` and `rounding`                  |
-| `@arki/expr/rational` | The same verbs on `Rational`, never rounding                              |
-| `@arki/expr/complex`  | The same verbs on `Complex`                                               |
-| `@arki/expr/latex`    | `toLatex`                                                                 |
+| Import                | What it gives you                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `@arki/expr`          | `parse`, `parseEquation`, `print`, `names`, `fromJSON`, languages, failures and errors |
+| `@arki/expr/float`    | `compile`, `compileEquation`, `evaluate` on `number`                                   |
+| `@arki/expr/decimal`  | The same verbs on `Decimal`, with `scale` and `rounding`                               |
+| `@arki/expr/rational` | The same verbs on `Rational`, never rounding                                           |
+| `@arki/expr/complex`  | The same verbs on `Complex`                                                            |
+| `@arki/expr/latex`    | `toLatex`                                                                              |
 
 ## Failure behaviour
 
 Parsers of outside values return, builders throw. Nothing returns `NaN`, `Infinity` or a half-built value.
 
-- **`evaluate(text)`** in every domain reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES`: `InvalidExpression` (`expr.invalid_text`), `ExpressionOverBudget` (`expr.over_budget`) or `NoValue` (`expr.no_value`, for example `0^i` or `1/0`). The thrown error is kept as `cause`, so `cause.span` still places the caret.
+- **`parse(text)`, `parseEquation(text)` and `fromJSON(stored)`** read outside text or stored JSON, so they return the tree or a failure from `PARSE_FAILURES`: `InvalidExpression` (`expr.invalid_text`) or `ExpressionOverBudget` (`expr.over_budget`). The thrown `ParseError` or `ExprLimitError` is kept as `cause`: `cause.span` places the caret, `cause.code` says why (`unexpected-token`, `unknown-name`, `arity`, `not-in-domain`, and the others in `ParseErrorCode`), `cause.expected` lists what would fit. Show the user the span; do not retry the same text. Code that parses text it wrote itself uses `orThrow(parse(text))` from `@arki/failure`.
+- **`evaluate(text)`** in every domain reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES` (the parse failures, then `NoValue`): `InvalidExpression` (`expr.invalid_text`), `ExpressionOverBudget` (`expr.over_budget`) or `NoValue` (`expr.no_value`, for example `0^i` or `1/0`). The thrown error is kept as `cause`, so `cause.span` still places the caret.
 - **`syntaxFor(locale)`** returns `InvalidLocale` (`expr.invalid_locale`) for a tag `Intl` rejects, and reads the mark with `format`, so Hermes on iOS works without `formatToParts`.
 - **`parseSyntax(stored)`** reads a stored setting and returns `InvalidSyntax` (`expr.invalid_syntax`). `defineSyntax` is the builder for syntax written in code and throws.
 
-`parse`, `compile` and compiled functions throw:
+`compile`, `compileEquation`, `defineLanguage` and compiled functions are builders: they take a tree or a definition that code made, so they throw. A bug in the call (a non-string text, a language that `defineLanguage` did not build) throws from the parsers too.
 
-- **Bad text or a bad stored AST:** `ParseError`. Read `code` (`unexpected-token`, `unknown-name`, `arity`, `not-in-domain`, and the others in `ParseErrorCode`), `span` for the caret, and `expected` for what would fit. Show the user the span; do not retry the same text.
-- **Over a budget:** `ExprLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.
+- **A name or arity the language rejects at compile:** `ParseError` (`unknown-name`, `name-conflict`, `not-in-domain`, `arity`) with `span`. The tree came from `parse`, so a user's text that reaches this was already accepted; show the span.
+- **Over a budget at compile or evaluation:** `ExprLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.
 - **A value with no result** (`sqrt(-1)`, `x/0`, overflow): the typed errors of `@arki/math` (`InvalidArgumentError`, `DivisionByZeroError`, `NumericRangeError`). In the Decimal and Rational domains a step that would round throws `RoundingNecessaryError` until you pass a rounding mode.
 - **Plot gaps:** `f.sample` is the one call that returns `NaN`, and only to mark a point with no value.
 
-Catch `ParseError` at the edge where users type. Let the other errors reach your error boundary.
+Branch on the failure at the edge where users type. Let the other errors reach your error boundary.
 
 ## Limits
 
-Every input has a budget. A text, an AST or a call that goes over one throws `ExprLimitError` before the costly work starts.
+Every input has a budget. A text or stored AST that goes over one is returned as `ExpressionOverBudget` (`cause` is the `ExprLimitError`); a compile or call that goes over one throws `ExprLimitError`. Either way it stops before the costly work starts.
 
 | Budget                               | Default                   | Checked                                                                                                                                                                       |
 | ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -96,21 +99,20 @@ Every input has a budget. A text, an AST or a call that goes over one throws `Ex
 
 `sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal, root + rational and root + complex ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational, ≈ 13 kB complex).
 
-Boundary example: a text of 10 001 characters throws `ExprLimitError` with `budget: 'length'`, `limit: 10000` and `actual: 10001`. A text of 10 000 characters parses.
+Boundary example: a text of 10 001 characters returns `ExpressionOverBudget` whose `cause` is an `ExprLimitError` with `budget: 'length'`, `limit: 10000` and `actual: 10001`. A text of 10 000 characters parses.
 
 ```ts run
 import { ExprLimitError, parse } from '@arki/expr';
+import { isFailure, orThrow } from '@arki/failure';
 
-parse('x'.repeat(10_000)); // parses
-let caught: ExprLimitError | undefined;
-try {
-  parse('x'.repeat(10_001));
-} catch (error) {
-  if (error instanceof ExprLimitError) caught = error;
-}
-if (caught?.budget !== 'length' || caught.limit !== 10_000 || caught.actual !== 10_001) {
+orThrow(parse('x'.repeat(10_000))); // parses
+const tooLong = parse('x'.repeat(10_001));
+if (!isFailure(tooLong) || tooLong.code !== 'expr.over_budget' || !(tooLong.cause instanceof ExprLimitError)) {
   throw new Error('the length budget did not trip at 10 001');
 }
+const { budget, limit, actual } = tooLong.cause;
+if (budget !== 'length' || limit !== 10_000 || actual !== 10_001)
+  throw new Error('the length budget has the wrong numbers');
 ```
 
 ## Documentation
@@ -133,18 +135,19 @@ The language can only do what the host registered. The grammar has no member acc
 ```ts
 import { parse, parseEquation } from '@arki/expr';
 import { compile, compileEquation, evaluate } from '@arki/expr/float';
+import { orThrow } from '@arki/failure';
 
 evaluate('2^10 - 1'); // 1023, for the keypad
 evaluate('sin(90)', { angle: 'deg' }); // 1
 
 const xs = new Float64Array([0, 0.5, 1]);
 const out = new Float64Array(xs.length);
-const f = compile(parse('2x^2 + sin(x)'), { variables: ['x'] });
+const f = compile(orThrow(parse('2x^2 + sin(x)')), { variables: ['x'] });
 f({ x: 1.5 }); // typed errors, never NaN or Infinity
 f.at(1.5); // one variable, no scope object
 f.sample(xs, out); // Float64Array in and out; NaN marks a gap in a plot
 
-const { left, right, difference } = compileEquation(parseEquation('x^2 = 2x'), { variables: ['x'] });
+const { left, right, difference } = compileEquation(orThrow(parseEquation('x^2 = 2x')), { variables: ['x'] });
 ```
 
 - **Errors, not NaN.** `f()` and `f.at()` throw `@arki/math`'s errors: `sqrt(-1)` and `ln(0)` are `InvalidArgumentError`, `x/0` is `DivisionByZeroError`, overflow is `NumericRangeError`. `sample` is the only call that returns `NaN`: it marks a point with no value.
@@ -157,13 +160,20 @@ const { left, right, difference } = compileEquation(parseEquation('x^2 = 2x'), {
 ```ts
 import { parse } from '@arki/expr';
 import { compile, evaluate } from '@arki/expr/decimal';
+import { orThrow } from '@arki/failure';
 
 evaluate('0.1 + 0.2').toString(); // '0.3' — literals are read from their text
 
-const price = compile(parse('base * (1 + rate)'), { variables: ['base', 'rate'], scale: 2, rounding: 'halfEven' });
+const price = compile(orThrow(parse('base * (1 + rate)')), {
+  variables: ['base', 'rate'],
+  scale: 2,
+  rounding: 'halfEven',
+});
 price({ base: '19.99', rate: '0.19' }).toString(); // '23.7881' — multiplication never rounds
-compile(parse('total / 3'), { variables: ['total'], scale: 2, rounding: 'halfEven' })({ total: '10' }).toString(); // '3.33'
-compile(parse('1/3 * 3'), { scale: 4, rounding: 'halfEven' }).detailed(); // { value: 0.9999, exact: false } — show ≈
+compile(orThrow(parse('total / 3')), { variables: ['total'], scale: 2, rounding: 'halfEven' })({
+  total: '10',
+}).toString(); // '3.33'
+compile(orThrow(parse('1/3 * 3')), { scale: 4, rounding: 'halfEven' }).detailed(); // { value: 0.9999, exact: false } — show ≈
 ```
 
 - **Exact or rounded where you said.** `+ - *` and integer powers never round. `/` is exact when the quotient terminates (`1/8` is `0.125` at any scale) and otherwise rounds to `{ scale, rounding }`. Functions — `sqrt cbrt nthRoot exp ln log log10 log2`, non-integer powers — and the constants `pi`, `e` return their correctly rounded value at `scale` (default 20).
@@ -191,11 +201,12 @@ Both exact domains fold constant subtrees at compile and take `{ signal }` per c
 ```ts
 import { parse } from '@arki/expr';
 import { compile, evaluate } from '@arki/expr/complex';
+import { orThrow } from '@arki/failure';
 
 evaluate('sqrt(-4)').toString(); // '2i'
 evaluate('ln(-1)').toString(); // '3.141592653589793i'
 evaluate('i^i').toString(); // '0.20787957635076193' (e^(-π/2))
-compile(parse('z^2 + 1'), { variables: ['z'] })({ z: { re: 0, im: 1 } }).toString(); // '0'
+compile(orThrow(parse('z^2 + 1')), { variables: ['z'] })({ z: { re: 0, im: 1 } }).toString(); // '0'
 ```
 
 Values are `Complex` from `@arki/math/complex`: float64 parts, never exact, so `f.detailed()` always reports `exact: false`. Principal branches as `@arki/math/complex` defines them (C99 Annex G, Kahan's counter-clockwise rule on the cuts: `asin(2)` is `π/2 − 1.317i`, as in mathjs and Mathematica). On the real axis, wherever the float domain has a value, this domain returns exactly that value (`log10(1000)` is 3, `cos(90)` in degrees is 0); it leaves the axis only where float has no real answer (`sqrt(-2)`, `asin(2)`, `(-8)^(1/3)`).
@@ -212,8 +223,9 @@ Values are `Complex` from `@arki/math/complex`: float64 parts, never exact, so `
 ```ts
 import { parse } from '@arki/expr';
 import { toLatex } from '@arki/expr/latex';
+import { orThrow } from '@arki/failure';
 
-toLatex(parse('sqrt(x)/2 + |x|')); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
+toLatex(orThrow(parse('sqrt(x)/2 + |x|'))); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
 ```
 
 `\frac` for `/`, `^{}`, `\sqrt[n]{}`, `\sin`-style commands, `\pi`, `n!`, `\cdot` for an explicit `*` and juxtaposition for an implicit one. Host functions use their language `latex` command, otherwise `\operatorname{name}`.

@@ -20,7 +20,7 @@ export type {
   WarningCode,
 } from './ast.js';
 export { children, walk } from './ast.js';
-export type { Budget, ParseErrorCode, Span } from './errors.js';
+export type { Budget, ParseErrorCode, ParseFailure, Span } from './errors.js';
 export { ExprLimitError, ParseError } from './errors.js';
 export type { FromJSONOptions } from './json.js';
 export { fromJSON } from './json.js';

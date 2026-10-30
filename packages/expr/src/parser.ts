@@ -8,6 +8,7 @@
  * budget before the stack is: a 100 000-paren input throws `ExprLimitError`,
  * never `RangeError`.
  */
+import { attempt } from '@arki/failure';
 import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { BinaryNode, CallNode, Equation, Expr, Node, Warning } from './ast.js';
@@ -15,7 +16,7 @@ import type { Language } from './language.js';
 import type { Token } from './lexer.js';
 import type { Limits, ResolvedLimits } from './limits.js';
 import type { Syntax } from './syntax.js';
-import { ExprLimitError, ParseError } from './errors.js';
+import { ExprLimitError, ParseError, parseFailure } from './errors.js';
 import { isLanguage, scientific } from './language.js';
 import { tokenize } from './lexer.js';
 import { resolveLimits } from './limits.js';
@@ -457,19 +458,31 @@ function start(text: string, options: ParseOptions): Parser {
 }
 
 /**
- * Parses an expression. Throws `ParseError` (with a span) for text the
- * grammar rejects and `ExprLimitError` when a budget breaks. Warnings flag
- * legal but easily misread inputs such as `1/2x`.
+ * Parses an expression, or returns `InvalidExpression` (`expr.invalid_text`; the
+ * `ParseError` with its span is the `cause`) for text the grammar rejects and
+ * `ExpressionOverBudget` (`expr.over_budget`) when a budget breaks. Warnings
+ * flag legal but easily misread inputs such as `1/2x`. A non-string `text` or a
+ * language not built by `defineLanguage` is a bug and still throws.
  */
-export function parse(text: string, options: ParseOptions = {}): Expr {
+export function parse(text: string, options: ParseOptions = {}) {
+  return attempt(() => parseText(text, options), parseFailure);
+}
+
+/** `parse` for text that is a bug if it fails (the engine's own text): throws the `ParseError` or `ExprLimitError`. */
+export function parseText(text: string, options: ParseOptions = {}): Expr {
   const parser = start(text, options);
   const root = parser.parseSum();
   parser.expectEnd(false);
   return { version: 1, source: text, root, warnings: parser.warnings };
 }
 
-/** Parses `lhs = rhs`, with exactly one `=`. */
-export function parseEquation(text: string, options: ParseOptions = {}): Equation {
+/** Parses `lhs = rhs`, with exactly one `=`. Returns the same failures as {@link parse}. */
+export function parseEquation(text: string, options: ParseOptions = {}) {
+  return attempt(() => parseEquationText(text, options), parseFailure);
+}
+
+/** `parseEquation` for text that is a bug if it fails: throws the `ParseError` or `ExprLimitError`. */
+export function parseEquationText(text: string, options: ParseOptions = {}): Equation {
   const parser = start(text, options);
   const left = parser.parseSum();
   const equals = parser.current;

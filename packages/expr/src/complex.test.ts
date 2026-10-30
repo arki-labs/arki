@@ -1,21 +1,20 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { isFailure } from '@arki/failure';
-
 import type { Complex } from '@arki/math/complex';
+import { isFailure } from '@arki/failure';
 import { complex } from '@arki/math/complex';
 import { DivisionByZeroError, InvalidArgumentError, NumericRangeError } from '@arki/math/errors';
 
 import type { EvaluateOptions } from './complex.js';
-import { compile, compileEquation, evaluate as evaluateText } from './complex.js';
 import type { Scientific } from './exact.js';
 import type { Language } from './language.js';
+import { compile, compileEquation, evaluate as evaluateText } from './complex.js';
 import { compile as compileDecimal } from './decimal.js';
 import { ExpressionOverBudget, InvalidExpression, NoValue, ParseError } from './errors.js';
 import { compile as compileFloat, evaluate as evaluateFloat } from './float.js';
 import { defineLanguage, scientific } from './language.js';
-import { parse, parseEquation } from './parser.js';
+import { parseEquationText, parseText } from './parser.js';
 import { compile as compileRational } from './rational.js';
 
 /** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
@@ -79,7 +78,10 @@ describe('RFC §8: the complex row', () => {
 
   it('/0 throws DivisionByZeroError, the same class as float, also when the divisor is complex zero', () => {
     expect(evaluateText('1/0')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
-    expect(evaluateText('(1 + i)/(i - i)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
+    expect(evaluateText('(1 + i)/(i - i)')).toMatchObject({
+      code: 'expr.no_value',
+      cause: expect.any(DivisionByZeroError),
+    });
     expect(evaluateText('0^(-1)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
@@ -99,8 +101,8 @@ describe('RFC §8: the complex row', () => {
   });
 
   it('never claims exactness: Complex is float64 (§8 exactness rules)', () => {
-    expect(compile(parse('1 + 1')).detailed().exact).toBe(false);
-    expect(compile(parse('x'), { variables: ['x'] }).detailed({ x: 2 }).exact).toBe(false);
+    expect(compile(parseText('1 + 1')).detailed().exact).toBe(false);
+    expect(compile(parseText('x'), { variables: ['x'] }).detailed({ x: 2 }).exact).toBe(false);
   });
 });
 
@@ -171,8 +173,8 @@ describe('the real axis is the float domain', () => {
       fc.constantFrom(-2, -1, -0.5, 0, 0.5, 1, 2, 30, 45, 90, 180, 1000, 1e-7),
     );
     for (const name of FUNCTIONS) {
-      const float = compileFloat(parse(`${name}(x)`), { variables: ['x'], angle });
-      const f = compile(parse(`${name}(x)`), { variables: ['x'], angle });
+      const float = compileFloat(parseText(`${name}(x)`), { variables: ['x'], angle });
+      const f = compile(parseText(`${name}(x)`), { variables: ['x'], angle });
       fc.assert(
         fc.property(xs, x => {
           let expected: number;
@@ -206,13 +208,19 @@ describe('errors', () => {
   it('overflow is NumericRangeError, never an infinite part', () => {
     expect(evaluateText('10^400')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
     expect(evaluateText('exp(1000)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
-    expect(evaluateText('1e300 * 1e300 i')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
+    expect(evaluateText('1e300 * 1e300 i')).toMatchObject({
+      code: 'expr.no_value',
+      cause: expect.any(NumericRangeError),
+    });
     expect(evaluateText('1e400')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
   });
 
   it('poles are InvalidArgumentError, as in float', () => {
     for (const text of ['ln(0)', 'cot(0)', 'csc(0)', 'atanh(1)', 'acoth(1)', 'asec(0)', 'log(5, 1)']) {
-      expect([text, evaluateFloat(text)]).toEqual([text, expect.objectContaining({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) })]);
+      expect([text, evaluateFloat(text)]).toEqual([
+        text,
+        expect.objectContaining({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) }),
+      ]);
       expect([text, thrown(() => evaluate(text))]).toEqual([text, expect.any(InvalidArgumentError)]);
     }
   });
@@ -220,29 +228,29 @@ describe('errors', () => {
 
 describe('names and the function table', () => {
   it('declaring i is a name-conflict here only: float, decimal and rational leave i free', () => {
-    expect(parseError(() => compile(parse('i + 1'), { variables: ['i'] })).code).toBe('name-conflict');
-    expect(compileFloat(parse('i + 1'), { variables: ['i'] }).at(2)).toBe(3);
-    expect(compileDecimal(parse('i + 1'), { variables: ['i'] })({ i: '2' }).toString()).toBe('3');
-    expect(compileRational(parse('i + 1'), { variables: ['i'] })({ i: '2' }).toString()).toBe('3');
+    expect(parseError(() => compile(parseText('i + 1'), { variables: ['i'] })).code).toBe('name-conflict');
+    expect(compileFloat(parseText('i + 1'), { variables: ['i'] }).at(2)).toBe(3);
+    expect(compileDecimal(parseText('i + 1'), { variables: ['i'] })({ i: '2' }).toString()).toBe('3');
+    expect(compileRational(parseText('i + 1'), { variables: ['i'] })({ i: '2' }).toString()).toBe('3');
   });
 
   it('a declared letter next to i splits into a product with the constant', () => {
-    expect(parts(compile(parse('2xi'), { variables: ['x'] })({ x: 3 }))).toEqual([0, 6]);
+    expect(parts(compile(parseText('2xi'), { variables: ['x'] })({ x: 3 }))).toEqual([0, 6]);
   });
 
   it('functions without a complex definition are not-in-domain at compile, pointing at the name', () => {
     for (const name of ['cbrt', 'sign', 'ceil', 'floor', 'round', 'fix', 'factorial', 'gamma']) {
-      const error = parseError(() => compile(parse(`1 + ${name}(2)`)));
+      const error = parseError(() => compile(parseText(`1 + ${name}(2)`)));
       expect([name, error.code, error.span]).toEqual([name, 'not-in-domain', { start: 4, end: 4 + name.length }]);
     }
-    expect(parseError(() => compile(parse('nthRoot(8, 3)'))).code).toBe('not-in-domain');
-    expect(parseError(() => compile(parse('mod(8, 3)'))).code).toBe('not-in-domain');
-    expect(parseError(() => compile(parse('5!'))).code).toBe('not-in-domain');
+    expect(parseError(() => compile(parseText('nthRoot(8, 3)'))).code).toBe('not-in-domain');
+    expect(parseError(() => compile(parseText('mod(8, 3)'))).code).toBe('not-in-domain');
+    expect(parseError(() => compile(parseText('5!'))).code).toBe('not-in-domain');
   });
 
   it('a host may supply its own function under a scientific name the domain lacks', () => {
     const conjugate = defineLanguage({ extends: scientific, functions: { conj: { arity: 1 } } });
-    const f = compile(parse('conj(z)', { language: conjugate }), {
+    const f = compile(parseText('conj(z)', { language: conjugate }), {
       language: conjugate,
       variables: ['z'],
       functions: { conj: (z: Complex) => z.conjugate() },
@@ -258,12 +266,21 @@ describe('degrees measure real angles', () => {
     expect(parts(evaluate('cos(90)', deg))).toEqual([0, 0]);
     expect(evaluate('sin(30)', deg).re).toBe(evaluateFloat('sin(30)', deg));
     expect(evaluate('asin(0.5)', deg).re).toBe(evaluateFloat('asin(0.5)', deg));
-    expect(evaluateText('tan(90)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('tan(90)', deg)).toMatchObject({
+      code: 'expr.no_value',
+      cause: expect.any(InvalidArgumentError),
+    });
   });
 
   it('a complex angle, or an inverse with no real angle, is InvalidArgumentError', () => {
-    expect(evaluateText('sin(i)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
-    expect(evaluateText('asin(2)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('sin(i)', deg)).toMatchObject({
+      code: 'expr.no_value',
+      cause: expect.any(InvalidArgumentError),
+    });
+    expect(evaluateText('asin(2)', deg)).toMatchObject({
+      code: 'expr.no_value',
+      cause: expect.any(InvalidArgumentError),
+    });
   });
 
   it('everything else is unaffected: hyperbolics, roots and logarithms take no angle', () => {
@@ -274,13 +291,13 @@ describe('degrees measure real angles', () => {
   it('an unknown unit is InvalidArgumentError', () => {
     // Reflect.apply: the types already refuse 'grad'; a JavaScript caller can still pass it.
     expect(() => {
-      Reflect.apply(compile, undefined, [parse('1'), { angle: 'grad' }]);
+      Reflect.apply(compile, undefined, [parseText('1'), { angle: 'grad' }]);
     }).toThrow(InvalidArgumentError);
   });
 });
 
 describe('scope', () => {
-  const f = compile(parse('z * w'), { variables: ['z', 'w'] });
+  const f = compile(parseText('z * w'), { variables: ['z', 'w'] });
 
   it('accepts a Complex, a number (a real) or { re, im } parts', () => {
     expect(parts(f({ z: complex(0, 1), w: 2 }))).toEqual([0, 2]);
@@ -294,17 +311,20 @@ describe('scope', () => {
     }).toThrow(InvalidArgumentError);
     expect(() => f({ z: Number.NaN, w: 1 })).toThrow(InvalidArgumentError);
     expect(() => f({ z: { re: 1, im: Infinity }, w: 1 })).toThrow(InvalidArgumentError);
-    expect(() => compile(parse('z'), { variables: ['z'] })()).toThrow(InvalidArgumentError);
+    expect(() => compile(parseText('z'), { variables: ['z'] })()).toThrow(InvalidArgumentError);
   });
 
   it('host constants take the same inputs', () => {
     const omega = defineLanguage({ extends: scientific, constants: { w: {} } });
-    const value = compile(parse('w^2', { language: omega }), { language: omega, constants: { w: { re: 0, im: 2 } } })();
+    const value = compile(parseText('w^2', { language: omega }), {
+      language: omega,
+      constants: { w: { re: 0, im: 2 } },
+    })();
     expect(parts(value)).toEqual([-4, 0]);
   });
 
   it('compileEquation shares slots across both sides and their difference', () => {
-    const eq = compileEquation(parseEquation('z^2 = -1'), { variables: ['z'] });
+    const eq = compileEquation(parseEquationText('z^2 = -1'), { variables: ['z'] });
     expect(parts(eq.difference({ z: complex(0, 1) }))).toEqual([0, 0]);
     expect(eq.left.variables).toEqual(['z']);
   });

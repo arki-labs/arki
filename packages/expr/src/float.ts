@@ -24,7 +24,7 @@ import { evaluationFailure, ExprLimitError, ParseError } from './errors.js';
 import { builtins, FLOAT_CONSTANTS, powChecked } from './float-builtins.js';
 import { isLanguage, scientific } from './language.js';
 import { resolveCompileLimits } from './limits.js';
-import { parse } from './parser.js';
+import { parseText } from './parser.js';
 
 export type { Angle } from './float-builtins.js';
 export type { Reading } from './bind.js';
@@ -631,7 +631,7 @@ export function compileEquation<const V extends string = never, L extends Langua
 export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) {
   const settings: EvaluateOptions<L> | undefined = options;
   return attempt(() => {
-    const expr = parse(text, { language: settings?.language, syntax: settings?.syntax, limits: settings?.limits });
+    const expr = parseText(text, { language: settings?.language, syntax: settings?.syntax, limits: settings?.limits });
     const built = core([expr.root], expr.source, expr.warnings, [], settings ?? {});
     const root = rootOf(built, 0);
     return closure(root.ir, true)(NO_VALUES);

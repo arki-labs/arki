@@ -28,6 +28,7 @@ import { expand, factor, gcd, polynomialIn } from '@arki/cas/polynomial';
 import { simplify } from '@arki/cas/simplify';
 import { parse } from '@arki/expr';
 import { compile } from '@arki/expr/float';
+import { orThrow } from '@arki/failure';
 import { Rational } from '@arki/math/rational';
 
 import fixtures from '../test/reference/fixtures/factor.json' with { type: 'json' };
@@ -57,7 +58,7 @@ const Y = 0.6;
 
 /** The values of a printed result at the sample points (y fixed), parsed by @arki/expr. */
 function valuesOf(text: string): number[] {
-  const f = compile(parse(text), { variables: ['x', 'y'] });
+  const f = compile(orThrow(parse(text)), { variables: ['x', 'y'] });
   return XS.map(x => f({ x, y: Y }));
 }
 
@@ -93,7 +94,7 @@ function monic(text: string): string {
 
 /** The factors of a printed product, monic, one entry per multiplicity, sorted; constant factors are units. */
 function factorsOf(text: string): string[] {
-  const { root, source } = parse(text, { limits: { length: 100_000, tokens: 100_000 } });
+  const { root, source } = orThrow(parse(text, { limits: { length: 100_000, tokens: 100_000 } }));
   const keys: string[] = [];
   const stack: [Node, number][] = [[root, 1]];
   for (let item = stack.pop(); item !== undefined; item = stack.pop()) {

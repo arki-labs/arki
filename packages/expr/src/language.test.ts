@@ -5,7 +5,7 @@ import { InvalidArgumentError } from '@arki/math/errors';
 import { InvalidLocale, InvalidSyntax, ParseError } from './errors.js';
 import { defineLanguage, scientific } from './language.js';
 import { names } from './names.js';
-import { parse } from './parser.js';
+import { parseText } from './parser.js';
 import { print } from './print.js';
 import { canonical, decimalComma, defineSyntax, parseSyntax, syntaxFor } from './syntax.js';
 
@@ -19,7 +19,7 @@ describe('defineLanguage', () => {
   it('extends a language with host functions and constants', () => {
     expect(physics.functionSpec('hypot')).toEqual({ arity: [2, 16], latex: '\\operatorname{hypot}', cost: 1 });
     expect(physics.functionSpec('sin')).toEqual(scientific.functionSpec('sin'));
-    const expr = parse('hypot(x, g) + sin(x)', { language: physics });
+    const expr = parseText('hypot(x, g) + sin(x)', { language: physics });
     // names() classifies against the language it is given, like parse.
     expect(names(expr).variables).toEqual(['g', 'x']);
     expect(names(expr, { language: physics })).toEqual({
@@ -30,13 +30,13 @@ describe('defineLanguage', () => {
   });
 
   it('is a whitelist: only what the language registers is callable', () => {
-    expect(() => parse('hypot(3, 4)')).toThrow(expect.objectContaining({ code: 'not-a-function' }));
+    expect(() => parseText('hypot(3, 4)')).toThrow(expect.objectContaining({ code: 'not-a-function' }));
     const bare = defineLanguage({ functions: { f: { arity: 1 } } });
-    expect(() => parse('sin(x)', { language: bare })).toThrow(ParseError);
+    expect(() => parseText('sin(x)', { language: bare })).toThrow(ParseError);
     // `|x|` and `√x` are notations for abs and sqrt, so they need them too.
-    expect(() => parse('|x|', { language: bare })).toThrow(expect.objectContaining({ code: 'not-a-function' }));
-    expect(() => parse('√x', { language: bare })).toThrow(expect.objectContaining({ code: 'not-a-function' }));
-    expect(print(parse('f(x)', { language: bare }))).toBe('f(x)');
+    expect(() => parseText('|x|', { language: bare })).toThrow(expect.objectContaining({ code: 'not-a-function' }));
+    expect(() => parseText('√x', { language: bare })).toThrow(expect.objectContaining({ code: 'not-a-function' }));
+    expect(print(parseText('f(x)', { language: bare }))).toBe('f(x)');
   });
 
   it('rejects invalid names, arities and every collision', () => {
@@ -75,7 +75,7 @@ describe('defineLanguage', () => {
     }
     const odd = defineLanguage({ functions: { ['__proto__']: { arity: 1 }, constructor: { arity: 1 } } });
     expect(odd.functionNames()).toEqual(['__proto__', 'constructor']);
-    expect(parse('constructor(__proto__(1))', { language: odd }).root).toMatchObject({
+    expect(parseText('constructor(__proto__(1))', { language: odd }).root).toMatchObject({
       kind: 'call',
       fn: 'constructor',
     });
@@ -83,7 +83,7 @@ describe('defineLanguage', () => {
 
   it('rejects a language object it did not build', () => {
     const fake = { ...scientific };
-    expect(() => parse('x', { language: fake })).toThrow(InvalidArgumentError);
+    expect(() => parseText('x', { language: fake })).toThrow(InvalidArgumentError);
   });
 });
 
@@ -100,14 +100,16 @@ describe('syntax', () => {
   });
 
   it('never accepts group separators inside expressions', () => {
-    expect(() => parse('1,234')).toThrow(expect.objectContaining({ code: 'unexpected-token' }));
-    expect(() => parse('1.234,5', { syntax: decimalComma })).toThrow(ParseError);
+    expect(() => parseText('1,234')).toThrow(expect.objectContaining({ code: 'unexpected-token' }));
+    expect(() => parseText('1.234,5', { syntax: decimalComma })).toThrow(ParseError);
   });
 
   it('decimal comma: f(1,5; 2) is unambiguous and stores as f(1.5, 2)', () => {
-    expect(print(parse('log(1,5; 2)', { syntax: decimalComma }))).toBe('log(1.5, 2)');
-    expect(() => parse('log(1, 5)', { syntax: decimalComma })).toThrow(expect.objectContaining({ code: 'bad-number' }));
-    expect(() => parse('log(x,y)', { syntax: decimalComma })).toThrow(/separates arguments with ";"/);
+    expect(print(parseText('log(1,5; 2)', { syntax: decimalComma }))).toBe('log(1.5, 2)');
+    expect(() => parseText('log(1, 5)', { syntax: decimalComma })).toThrow(
+      expect.objectContaining({ code: 'bad-number' }),
+    );
+    expect(() => parseText('log(x,y)', { syntax: decimalComma })).toThrow(/separates arguments with ";"/);
   });
 
   it('syntaxFor maps a locale to a preset, calling Intl only when called', () => {

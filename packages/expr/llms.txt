@@ -2,7 +2,7 @@
 
 > A safe expression language for user-typed formulas: a parser, a typed AST, canonical printing, and evaluation in float, decimal, rational and complex domains. It is not a computer algebra system and not a scripting language.
 
-Never store the user's raw text. Store `print(parse(text))`, and treat every stored AST as untrusted.
+Never store the user's raw text. Store `print(tree)` of a parsed tree, and treat every stored AST as untrusted. `parse`, `parseEquation`, `fromJSON` and `evaluate` return a failure (`InvalidExpression`, `ExpressionOverBudget`, `NoValue`) for bad outside values; the `ParseError` with the span is its `cause`.
 
 ## Import paths
 
@@ -30,7 +30,7 @@ Never store the user's raw text. Store `print(parse(text))`, and treat every sto
 
 ## Rules that bite
 
-- Only `f.sample` returns `NaN`. Every other failure throws.
+- Only `f.sample` returns `NaN`. Bad outside text or stored JSON returns a failure from `parse`, `parseEquation`, `fromJSON` and `evaluate`; `compile` and compiled functions throw.
 - The Decimal domain throws `RoundingNecessaryError` until you pass a rounding mode.
 - No domain falls back to float; a missing function is `not-in-domain`.
-- Every input has a budget; going over throws `ExprLimitError`.
+- Every input has a budget; text over it returns `ExpressionOverBudget`, and a compile over it throws `ExprLimitError`.

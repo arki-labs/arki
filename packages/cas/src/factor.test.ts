@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
 import { CasLimitError } from './core.js';
@@ -111,9 +112,10 @@ describe('factor budgets: each throws CasLimitError, never a partial answer labe
     let seed = 7;
     const digit = (): number => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) % 10;
     const coefficient = (): string => `${1 + (digit() % 9)}${Array.from({ length: 299 }, digit).join('')}`;
-    const input = parse(
-      Array.from({ length: 129 }, (_, k) => `(${k % 3 === 0 ? '-' : ''}${coefficient()})*x^${k}`).join(' + '),
-      { limits: { length: 100_000, tokens: 100_000, nodes: 10_000 } },
+    const input = orThrow(
+      parse(Array.from({ length: 129 }, (_, k) => `(${k % 3 === 0 ? '-' : ''}${coefficient()})*x^${k}`).join(' + '), {
+        limits: { length: 100_000, tokens: 100_000, nodes: 10_000 },
+      }),
     );
     const timed = fastest(() => factor(input, 'x', { limits: { nodes: 10_000 } }), 1000);
     expect(timed.ms).toBeLessThan(1000);

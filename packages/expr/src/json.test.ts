@@ -4,7 +4,7 @@ import type { ParseError } from './errors.js';
 import { ExprLimitError } from './errors.js';
 import { fromJSON } from './json.js';
 import { defineLanguage } from './language.js';
-import { parse, parseEquation } from './parser.js';
+import { parseEquationText, parseText } from './parser.js';
 
 /** What a cache or worker hands back: the JSON text of a tree, parsed again. */
 function viaJSON(value: unknown): unknown {
@@ -13,22 +13,25 @@ function viaJSON(value: unknown): unknown {
 }
 
 function rejection(value: unknown, code: ParseError['code'] = 'unexpected-token'): void {
-  expect(() => fromJSON(value)).toThrow(expect.objectContaining({ name: 'ParseError', code }));
+  expect(fromJSON(value)).toMatchObject({
+    code: 'expr.invalid_text',
+    cause: expect.objectContaining({ name: 'ParseError', code }),
+  });
 }
 
 describe('fromJSON', () => {
   it('rebuilds expressions and equations exactly, as fresh objects', () => {
-    const expr = parse('2x^2 + |y| - √z! / log(t, 2) + 1/2x');
+    const expr = parseText('2x^2 + |y| - √z! / log(t, 2) + 1/2x');
     const restored = fromJSON(viaJSON(expr));
     expect(restored).toEqual(expr);
-    const equation = parseEquation('x^2 = 2x + 1');
+    const equation = parseEquationText('x^2 = 2x + 1');
     expect(fromJSON(viaJSON(equation))).toEqual(equation);
     const input = viaJSON(expr);
     expect(fromJSON(input)).not.toBe(input);
   });
 
   it('accepts only version 1: a stored AST is a cache, never migrated', () => {
-    const json = { ...parse('x') };
+    const json = { ...parseText('x') };
     rejection({ ...json, version: 2 });
     rejection({ ...json, version: '1' });
   });
@@ -89,13 +92,18 @@ describe('fromJSON', () => {
   it('runs the depth, node and length budgets without recursing past them', () => {
     let deep: unknown = { kind: 'name', name: 'x', span: { start: 0, end: 1 } };
     for (let index = 0; index < 100_000; index++) deep = { kind: 'group', inner: deep, span: { start: 0, end: 1 } };
-    expect(() => fromJSON({ version: 1, source: 'x', warnings: [], root: deep })).toThrow(
-      expect.objectContaining({ name: 'ExprLimitError', budget: 'depth' }),
-    );
-    const wide = parse(Array.from({ length: 40 }, () => 'x').join(' * '), { limits: { depth: 1000 } });
-    expect(() => fromJSON(viaJSON(wide), { limits: { nodes: 20, depth: 1000 } })).toThrow(ExprLimitError);
-    expect(() => fromJSON({ ...parse('x'), source: 'x'.repeat(10_001) })).toThrow(
-      expect.objectContaining({ budget: 'length' }),
-    );
+    expect(fromJSON({ version: 1, source: 'x', warnings: [], root: deep })).toMatchObject({
+      code: 'expr.over_budget',
+      cause: expect.objectContaining({ name: 'ExprLimitError', budget: 'depth' }),
+    });
+    const wide = parseText(Array.from({ length: 40 }, () => 'x').join(' * '), { limits: { depth: 1000 } });
+    expect(fromJSON(viaJSON(wide), { limits: { nodes: 20, depth: 1000 } })).toMatchObject({
+      code: 'expr.over_budget',
+      cause: expect.any(ExprLimitError),
+    });
+    expect(fromJSON({ ...parseText('x'), source: 'x'.repeat(10_001) })).toMatchObject({
+      code: 'expr.over_budget',
+      cause: expect.objectContaining({ budget: 'length' }),
+    });
   });
 });

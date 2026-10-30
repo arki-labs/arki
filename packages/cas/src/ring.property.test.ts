@@ -18,6 +18,7 @@ import type { Expr, Node } from '@arki/expr';
 import type { Rational } from '@arki/math/rational';
 import { parse, print } from '@arki/expr';
 import { compile } from '@arki/expr/rational';
+import { orThrow } from '@arki/failure';
 import { DivisionByZeroError } from '@arki/math/errors';
 
 import { expand, polynomialIn, rationalize } from './polynomial.js';
@@ -133,7 +134,7 @@ describe('values are preserved exactly (π and e substituted by rationals)', () 
   it('expand of a polynomial equals its input at every rational point', () => {
     fc.assert(
       fc.property(polynomials, point, (text, p) => {
-        const input = parse(text);
+        const input = orThrow(parse(text));
         const { result } = expand(input);
         const before = valueAt(input, p);
         const after = valueAt(result, p);
@@ -148,7 +149,7 @@ describe('values are preserved exactly (π and e substituted by rationals)', () 
   it('rationalize: where the input is defined, the result is defined and equal; conditions only name divisors', () => {
     fc.assert(
       fc.property(quotients, point, (text, p) => {
-        const input = parse(text);
+        const input = orThrow(parse(text));
         let form: ReturnType<typeof rationalize>;
         try {
           form = rationalize(input);
@@ -179,11 +180,11 @@ describe('values are preserved exactly (π and e substituted by rationals)', () 
     fc.assert(
       fc.property(polynomials, text => {
         const { result } = expand(text);
-        expect(print(parse(result.source))).toBe(result.source);
+        expect(print(orThrow(parse(result.source)))).toBe(result.source);
         expect(expand(result).result.source).toBe(result.source);
         const form = polynomialIn(result, 'x');
         if (form.kind !== 'polynomial') return;
-        for (const c of form.coefficients) expect(print(parse(c.value.source))).toBe(c.value.source);
+        for (const c of form.coefficients) expect(print(orThrow(parse(c.value.source)))).toBe(c.value.source);
       }),
       { numRuns: 200 },
     );

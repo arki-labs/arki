@@ -8,7 +8,8 @@
  */
 import type { Language, Node, Span } from '@arki/expr';
 import { parse, scientific } from '@arki/expr';
-import { DivisionByZeroError, InvalidArgumentError, MathError } from '@arki/math/errors';
+import { isFailure } from '@arki/failure';
+import { DivisionByZeroError, InvalidArgumentError } from '@arki/math/errors';
 
 import type { Assumption, CasOptions } from './core.js';
 import type { Poly } from './poly.js';
@@ -104,11 +105,10 @@ export class Context {
   /** Throws `bad-variable` unless `variable` is a plain name that is neither a constant nor a function. */
   checkVariable(variable: string): void {
     let ok = false;
-    try {
-      const root = parse(variable, { language: this.language }).root;
+    const parsed = parse(variable, { language: this.language });
+    if (!isFailure(parsed)) {
+      const root = parsed.root;
       ok = root.kind === 'name' && root.name === variable && this.language.constantSpec(variable) === undefined;
-    } catch (error) {
-      if (!(error instanceof MathError)) throw error;
     }
     if (!ok || this.language.functionSpec(variable) !== undefined) {
       throw new CasError(

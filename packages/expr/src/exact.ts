@@ -24,7 +24,7 @@ import { Binder } from './bind.js';
 import { ExprLimitError, ParseError } from './errors.js';
 import { isLanguage, scientific } from './language.js';
 import { resolveCompileLimits, resolveDigits } from './limits.js';
-import { parse } from './parser.js';
+import { parseText } from './parser.js';
 
 /** Per-call state. `settings` is the domain's own context (Decimal: `{ scale, rounding }`). */
 export type Env<S> = {
@@ -617,7 +617,7 @@ export function evaluateExact<T, S>(
   text: string,
   options: ExactEvaluateOptions<T>,
 ): T {
-  const expr = parse(text, { language: options.language, syntax: options.syntax, limits: options.limits });
+  const expr = parseText(text, { language: options.language, syntax: options.syntax, limits: options.limits });
   // Everything folds here, so the fold honours the signal; a fold it aborts runs again, and throws, below.
   const built = core(domain, settings, [expr.root], expr.source, expr.warnings, [], options, options.signal);
   const env: Env<S> = { exact: true, signal: options.signal, digits: built.digits, settings };

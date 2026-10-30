@@ -8,8 +8,8 @@ A safe expression language for user-typed formulas. Read these before you change
 
 1. The root entry holds no numeric code. Evaluation lives in the domain entries (`float`, `decimal`, `rational`, `complex`). Do not import a domain from the root.
 2. No `eval`, no `new Function`, no regular expressions in the lexer. Names resolve through private `Map`s, so `constructor` and `__proto__` are unknown names.
-3. Every input has a budget (`length`, `tokens`, `depth`, `nodes`, `steps`, `digits`). A check runs before the costly work and throws `ExprLimitError`.
-4. A stored AST is untrusted. `fromJSON` re-validates it field by field against the same budgets.
+3. Every input has a budget (`length`, `tokens`, `depth`, `nodes`, `steps`, `digits`). A check runs before the costly work. `parse`, `parseEquation` and `fromJSON` return `ExpressionOverBudget` (the `ExprLimitError` is the `cause`); `compile` throws `ExprLimitError`.
+4. A stored AST is untrusted. `fromJSON` re-validates it field by field against the same budgets and returns `InvalidExpression` for a bad tree.
 5. Errors, not `NaN`. Only `f.sample` may return `NaN`, to mark a plot gap.
 6. The Decimal domain defaults to rounding `'unnecessary'`. A step that would round throws until the caller picks a mode. Never add a silent default rounding.
 7. A domain never falls back to float. A function with no exact meaning is `not-in-domain` at compile time.

@@ -5,13 +5,15 @@
  * registered function with a valid arity; the length, depth and node budgets
  * run as in `parse`. The result is a fresh copy, never the input.
  */
+import { attempt } from '@arki/failure';
+import { InvalidArgumentError } from '@arki/math/errors';
 import { is, plainObjectSchema } from '@arki/schema';
 
 import type { CallNotation, Equation, Expr, Node, Warning, WarningCode } from './ast.js';
 import type { Span } from './errors.js';
 import type { Language } from './language.js';
 import type { Limits, ResolvedLimits } from './limits.js';
-import { ExprLimitError, ParseError } from './errors.js';
+import { ExprLimitError, ParseError, parseFailure } from './errors.js';
 import { isLanguage, scientific } from './language.js';
 import { isName, isNumberLiteral } from './lexer.js';
 import { resolveLimits } from './limits.js';
@@ -78,7 +80,7 @@ class Reader {
 
   constructor(options: FromJSONOptions) {
     const language = options.language ?? scientific;
-    if (!isLanguage(language)) throw invalid('options.language', ['a language from defineLanguage'], language);
+    if (!isLanguage(language)) throw new InvalidArgumentError('options.language must be built by defineLanguage');
     this.language = language;
     this.limits = resolveLimits(options.limits);
   }
@@ -232,12 +234,17 @@ class Reader {
 
 /**
  * Rebuilds an expression or equation from AST JSON (the value, not the
- * text: pass `JSON.parse(text)`). Throws `ParseError` for anything that is
- * not a valid version-1 tree in `options.language`, and `ExprLimitError`
- * when it is over budget. Pre-1.0 there is no migration: only version 1 is
- * accepted.
+ * text: pass `JSON.parse(text)`). Returns `InvalidExpression` (the
+ * `ParseError` is the `cause`) for anything that is not a valid version-1 tree
+ * in `options.language`, and `ExpressionOverBudget` when it is over budget.
+ * Pre-1.0 there is no migration: only version 1 is accepted. A language not
+ * built by `defineLanguage` is a bug and still throws.
  */
-export function fromJSON(value: unknown, options: FromJSONOptions = {}): Expr | Equation {
+export function fromJSON(value: unknown, options: FromJSONOptions = {}) {
+  return attempt(() => readTree(value, options), parseFailure);
+}
+
+function readTree(value: unknown, options: FromJSONOptions): Expr | Equation {
   const reader = new Reader(options);
   if (!is(value, plainObjectSchema)) throw invalid('(root)', ['an object'], value);
   const isEquation = 'left' in value;

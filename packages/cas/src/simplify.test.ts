@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { Assumptions } from './index.js';
@@ -193,7 +194,7 @@ describe('the readable normal form (RFC §5.4)', () => {
 
   it('results are canonical expr ASTs that round-trip', () => {
     const { result } = simplify('exp(x)*cos(x) - exp(x)*sin(x) + 1/(x - 1)^2');
-    expect(parse(result.source).source).toBe(result.source);
+    expect(orThrow(parse(result.source)).source).toBe(result.source);
     expect(simplify(result).result.source).toBe(result.source);
   });
 });

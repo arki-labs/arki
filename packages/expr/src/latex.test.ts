@@ -4,9 +4,9 @@ import type { Node } from './ast.js';
 import { ExprLimitError } from './errors.js';
 import { defineLanguage, scientific } from './language.js';
 import { toLatex } from './latex.js';
-import { parse, parseEquation } from './parser.js';
+import { parseEquationText, parseText } from './parser.js';
 
-const latex = (text: string): string => toLatex(parse(text));
+const latex = (text: string): string => toLatex(parseText(text));
 
 describe('toLatex (RFC §12, C-26)', () => {
   it.each([
@@ -36,7 +36,7 @@ describe('toLatex (RFC §12, C-26)', () => {
   });
 
   it('prints equations', () => {
-    expect(toLatex(parseEquation('x^2 = 2x'))).toBe('x^{2} = 2x');
+    expect(toLatex(parseEquationText('x^2 = 2x'))).toBe('x^{2} = 2x');
   });
 
   it('uses a host function’s command, otherwise \\operatorname', () => {
@@ -45,7 +45,7 @@ describe('toLatex (RFC §12, C-26)', () => {
       functions: { hypot: { arity: 2 }, erf: { arity: 1, latex: String.raw`\mathrm{erf}` } },
       constants: { g: { latex: 'g' }, c0: {} },
     });
-    const expr = parse('hypot(x, g) + erf(c0)', { language: physics });
+    const expr = parseText('hypot(x, g) + erf(c0)', { language: physics });
     expect(toLatex(expr, { language: physics })).toBe(
       String.raw`\operatorname{hypot}\left(x, g\right) + \mathrm{erf}\left(\mathit{c0}\right)`,
     );

@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import type { Expr } from '@arki/expr';
 import { parse } from '@arki/expr';
 import { compile } from '@arki/expr/float';
+import { orThrow } from '@arki/failure';
 import { derivative as numericDerivative } from '@arki/math/differentiate';
 import { ConvergenceError } from '@arki/math/errors';
 
@@ -47,13 +48,13 @@ const smooth = fc.letrec<{ node: string }>(tie => ({
 const point = fc.double({ min: -2, max: 2, noNaN: true });
 
 function valueOf(expr: Expr | string, x: number): number {
-  const f = compile(typeof expr === 'string' ? parse(expr) : expr, { variables: ['x'] });
+  const f = compile(typeof expr === 'string' ? orThrow(parse(expr)) : expr, { variables: ['x'] });
   return f({ x });
 }
 
 /** The numeric derivative, or `undefined` where Ridders cannot reach its tolerance. */
 function oracle(expr: Expr | string, x: number): { value: number; error: number } | undefined {
-  const f = compile(typeof expr === 'string' ? parse(expr) : expr, { variables: ['x'] });
+  const f = compile(typeof expr === 'string' ? orThrow(parse(expr)) : expr, { variables: ['x'] });
   try {
     const { value, errorEstimate } = numericDerivative(t => f({ x: t }), x);
     return { value, error: errorEstimate };

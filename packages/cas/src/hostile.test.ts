@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse, ParseError } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 
 import { CasLimitError } from './index.js';
 import { expand, gcd, polynomialIn } from './polynomial.js';
@@ -33,14 +34,16 @@ describe('budgets break before the work', () => {
   });
 
   it('checks the depth of a hand-built AST without recursion', () => {
-    const deep = parse(`${'('.repeat(400)}x${')'.repeat(400)}`, { limits: { depth: 1000 } });
+    const deep = orThrow(parse(`${'('.repeat(400)}x${')'.repeat(400)}`, { limits: { depth: 1000 } }));
     expect(budgetOf(() => polynomialIn(deep, 'x'))).toBe('depth');
   });
 
   it('checks the node count of the input and of the output before printing', () => {
-    const wide = parse(Array.from({ length: 3000 }, (_, i) => `x^${i}`).join(' + '), {
-      limits: { length: 100_000, tokens: 100_000, nodes: 100_000, depth: 5000 },
-    });
+    const wide = orThrow(
+      parse(Array.from({ length: 3000 }, (_, i) => `x^${i}`).join(' + '), {
+        limits: { length: 100_000, tokens: 100_000, nodes: 100_000, depth: 5000 },
+      }),
+    );
     expect(budgetOf(() => expand(wide, { limits: { depth: 10_000 } }))).toBe('nodes');
     expect(budgetOf(() => expand('(x + y + 1)^30', { limits: { nodes: 2000 } }))).toBe('nodes');
   });

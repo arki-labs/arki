@@ -5,7 +5,7 @@ import type { Node } from './ast.js';
 import type { PrintOptions } from './print.js';
 import type { Syntax } from './syntax.js';
 import { ExprLimitError } from './errors.js';
-import { parse } from './parser.js';
+import { parseText } from './parser.js';
 import { print } from './print.js';
 import { canonical, decimalComma } from './syntax.js';
 
@@ -176,26 +176,26 @@ const runs = 400;
 const tree = fc.record({ seed: fc.integer(), size: fc.integer({ min: 0, max: 6 }) });
 
 function roundTrip(node: Node, options: PrintOptions, syntax: Syntax): Node {
-  return parse(print(node, options), { syntax, variables: VARIABLES }).root;
+  return parseText(print(node, options), { syntax, variables: VARIABLES }).root;
 }
 
 describe('print', () => {
   it('canonical style: ASCII, explicit *, spaces around binary operators', () => {
-    expect(print(parse('2x^2+sin(x)'))).toBe('2 * x^2 + sin(x)');
-    expect(print(parse('√(x) × π − 1 ÷ 2'))).toBe('sqrt((x)) * pi - 1 / 2');
-    expect(print(parse('log(x,2)'))).toBe('log(x, 2)');
+    expect(print(parseText('2x^2+sin(x)'))).toBe('2 * x^2 + sin(x)');
+    expect(print(parseText('√(x) × π − 1 ÷ 2'))).toBe('sqrt((x)) * pi - 1 / 2');
+    expect(print(parseText('log(x,2)'))).toBe('log(x, 2)');
   });
 
   it('display style: juxtaposition, ·, −, √ and π, as typed', () => {
     const display = { style: 'display' } as const;
-    expect(print(parse('2x^2 + 3*y - √x + 2pi'), display)).toBe('2x^2 + 3 · y − √x + 2π');
-    expect(print(parse('x y'), display)).toBe('x y');
+    expect(print(parseText('2x^2 + 3*y - √x + 2pi'), display)).toBe('2x^2 + 3 · y − √x + 2π');
+    expect(print(parseText('x y'), display)).toBe('x y');
     // `2e2` would read back as the literal 200, so the product keeps a space.
-    expect(print(parse('2 e2'), display)).toBe('2 e2');
+    expect(print(parseText('2 e2'), display)).toBe('2 e2');
   });
 
   it('decimal-comma syntax prints 0,5 and separates arguments with ;', () => {
-    const typed = parse('log(0,50; 2)', { syntax: decimalComma });
+    const typed = parseText('log(0,50; 2)', { syntax: decimalComma });
     expect(typed.root).toMatchObject({ args: [{ raw: '0.50' }, { raw: '2' }] });
     expect(print(typed)).toBe('log(0.50, 2)');
     expect(print(typed, { syntax: decimalComma })).toBe('log(0,50; 2)');
@@ -230,7 +230,7 @@ describe('print', () => {
 });
 
 describe('round trip properties', () => {
-  it('parse(print(ast)) equals ast apart from spans, in display style', () => {
+  it('parseText(print(ast)) equals ast apart from spans, in display style', () => {
     fc.assert(
       fc.property(tree, ({ seed, size }) => {
         const ast = generate(seed, size);
@@ -240,7 +240,7 @@ describe('round trip properties', () => {
     );
   });
 
-  it('parse(print(ast)) equals ast apart from spans and storage presentation, in canonical style', () => {
+  it('parseText(print(ast)) equals ast apart from spans and storage presentation, in canonical style', () => {
     fc.assert(
       fc.property(tree, ({ seed, size }) => {
         const ast = generate(seed, size);
@@ -262,12 +262,12 @@ describe('round trip properties', () => {
     );
   });
 
-  it('print(parse(s)) is idempotent', () => {
+  it('print(parseText(s)) is idempotent', () => {
     fc.assert(
       fc.property(tree, fc.boolean(), ({ seed, size }, display) => {
         const text = print(generate(seed, size), display ? { style: 'display' } : {});
-        const once = print(parse(text, { variables: VARIABLES }));
-        expect(print(parse(once, { variables: VARIABLES }))).toBe(once);
+        const once = print(parseText(text, { variables: VARIABLES }));
+        expect(print(parseText(once, { variables: VARIABLES }))).toBe(once);
       }),
       { numRuns: runs },
     );

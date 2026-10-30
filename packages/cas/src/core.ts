@@ -2,8 +2,9 @@
  * Shared types, errors and budgets (RFC §10–§12). Internal module: the public
  * names are re-exported by `index.ts` and the verb entries.
  */
-import type { Expr, Language, Span } from '@arki/expr';
+import type { Expr, Language, ParseFailure, Span } from '@arki/expr';
 import type { AbortSignalLike } from '@arki/expr/float';
+import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { InvalidArgumentError, MathError, ResourceLimitError } from '@arki/math/errors';
 
 export type { AbortSignalLike } from '@arki/expr/float';
@@ -201,4 +202,14 @@ function resolveLimits(limits: Partial<CasLimits> | undefined): CasLimits {
     resolved[key] = value;
   }
   return resolved;
+}
+
+/**
+ * The tree from `parse`, or the error `parse` caught as the failure's `cause`: cas verbs return a result or throw, so
+ * a `ParseError` (with its span) or `ExprLimitError` still reaches the caller as before.
+ */
+export function treeOrThrow(parsed: Expr | ParseFailure): Expr {
+  if (!isFailure(parsed)) return parsed;
+  if (parsed.cause instanceof Error) throw parsed.cause;
+  throw new UnexpectedFailure(parsed);
 }

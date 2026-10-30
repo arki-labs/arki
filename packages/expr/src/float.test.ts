@@ -2,17 +2,16 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import { isFailure } from '@arki/failure';
-
 import { DivisionByZeroError, InvalidArgumentError, MathError, NumericRangeError } from '@arki/math/errors';
 
 import type { Node } from './ast.js';
-import { ExprLimitError, ParseError } from './errors.js';
-import type { EvaluateOptions } from './float.js';
-import { compile, compileEquation, evaluate as evaluateText } from './float.js';
 import type { Scientific } from './exact.js';
+import type { EvaluateOptions } from './float.js';
 import type { Language } from './language.js';
+import { ExprLimitError, ParseError } from './errors.js';
+import { compile, compileEquation, evaluate as evaluateText } from './float.js';
 import { defineLanguage, scientific } from './language.js';
-import { parse, parseEquation } from './parser.js';
+import { parseEquationText, parseText } from './parser.js';
 import { decimalComma } from './syntax.js';
 
 /** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
@@ -38,7 +37,7 @@ function parseError(run: () => unknown): ParseError {
 }
 
 const at = (text: string, x: number, angle: 'rad' | 'deg' = 'rad'): number =>
-  compile(parse(text), { variables: ['x'], angle }).at(x);
+  compile(parseText(text), { variables: ['x'], angle }).at(x);
 
 describe('acceptance (RFC §3)', () => {
   it('C-12: degree mode converts forward-trig arguments and inverse-trig results at any depth', () => {
@@ -65,8 +64,8 @@ describe('acceptance (RFC §3)', () => {
   });
 
   it('C-16: compile once, evaluate many with a scope', () => {
-    const f = compile(parse('2x^2 + sin(x)'), { variables: ['x'] });
-    const r = compile(parse('cos(3theta)'), { variables: ['theta'] });
+    const f = compile(parseText('2x^2 + sin(x)'), { variables: ['x'] });
+    const r = compile(parseText('cos(3theta)'), { variables: ['theta'] });
     for (let index = 0; index < 300; index++) {
       const x = -5 + index / 30;
       expect(f({ x })).toBe(2 * x ** 2 + Math.sin(x));
@@ -76,7 +75,7 @@ describe('acceptance (RFC §3)', () => {
   });
 
   it('C-17: several compiled functions on one scope, for back-substituting roots', () => {
-    const { left, right, difference } = compileEquation(parseEquation('x^2 + 2 = 3x'), { variables: ['x'] });
+    const { left, right, difference } = compileEquation(parseEquationText('x^2 + 2 = 3x'), { variables: ['x'] });
     for (const root of [1, 2]) {
       const scope = { x: root };
       expect(left(scope)).toBe(right(scope));
@@ -87,21 +86,21 @@ describe('acceptance (RFC §3)', () => {
   });
 
   it('C-18: pi and e resolve without the scope, so passing them is harmless and declaring them is a conflict', () => {
-    const f = compile(parse('theta * pi + e'), { variables: ['theta'] });
+    const f = compile(parseText('theta * pi + e'), { variables: ['theta'] });
     const scope = { theta: 2, pi: 3, e: 2 };
     expect(f(scope)).toBe(2 * Math.PI + Math.E);
-    expect(parseError(() => compile(parse('2pi'), { variables: ['pi'] })).code).toBe('name-conflict');
+    expect(parseError(() => compile(parseText('2pi'), { variables: ['pi'] })).code).toBe('name-conflict');
   });
 
   it('i may be declared as a variable: the float domain has no imaginary unit, so the name is free', () => {
     // Real formulas use i as an index or a current (sum of a_i, V = iR). Rejecting it
     // as a name-conflict would block them for a constant this domain cannot evaluate.
-    expect(compile(parse('2i + 1'), { variables: ['i'] }).at(3)).toBe(7);
-    expect(compile(parse('xi'), { variables: ['x', 'i'] })({ x: 2, i: 5 })).toBe(10);
+    expect(compile(parseText('2i + 1'), { variables: ['i'] }).at(3)).toBe(7);
+    expect(compile(parseText('xi'), { variables: ['x', 'i'] })({ x: 2, i: 5 })).toBe(10);
     // Undeclared, i is still the complex constant, reported as outside this domain.
-    expect(parseError(() => compile(parse('2i'), { variables: ['x'] })).code).toBe('not-in-domain');
+    expect(parseError(() => compile(parseText('2i'), { variables: ['x'] })).code).toBe('not-in-domain');
     // pi and e have values here, so declaring them stays a conflict.
-    expect(parseError(() => compile(parse('e'), { variables: ['e'] })).code).toBe('name-conflict');
+    expect(parseError(() => compile(parseText('e'), { variables: ['e'] })).code).toBe('name-conflict');
   });
 
   it('C-21: one result type: always a number, and sqrt(-1) is an error, not a Complex', () => {
@@ -113,9 +112,9 @@ describe('acceptance (RFC §3)', () => {
   it('C-22: points with no value become NaN gaps in sample, never exceptions', () => {
     const xs = new Float64Array([-1, 0, 1, 4, Number.NaN]);
     const out = new Float64Array(xs.length);
-    compile(parse('1/x + sqrt(x)'), { variables: ['x'] }).sample(xs, out);
+    compile(parseText('1/x + sqrt(x)'), { variables: ['x'] }).sample(xs, out);
     expect([...out]).toEqual([Number.NaN, Number.NaN, 2, 2.25, Number.NaN]);
-    const tan = compile(parse('tan(x)'), { variables: ['x'], angle: 'deg' });
+    const tan = compile(parseText('tan(x)'), { variables: ['x'], angle: 'deg' });
     expect([...tan.sample(new Float64Array([45, 90, 135]), new Float64Array(3))].map(y => Math.round(y))).toEqual([
       1,
       Number.NaN,
@@ -124,7 +123,7 @@ describe('acceptance (RFC §3)', () => {
   });
 
   it('C-27: a parsed tree evaluates directly', () => {
-    expect(compile(parse('2 + 3 * 4'))()).toBe(14);
+    expect(compile(parseText('2 + 3 * 4'))()).toBe(14);
   });
 });
 
@@ -168,7 +167,7 @@ describe('typed errors instead of NaN or Infinity', () => {
   });
 
   it('an error inside a constant subtree is raised at the call, not at compile', () => {
-    const f = compile(parse('x + 1/0'), { variables: ['x'] });
+    const f = compile(parseText('x + 1/0'), { variables: ['x'] });
     expect(thrown(() => f.at(1))).toBeInstanceOf(DivisionByZeroError);
   });
 
@@ -181,7 +180,7 @@ describe('typed errors instead of NaN or Infinity', () => {
     });
     formulas.push('x^y', 'x/y', 'x!', 'x*y*1e300');
     const compiled = ['rad', 'deg'].flatMap(angle =>
-      formulas.map(text => compile(parse(text), { variables: ['x', 'y'], angle: angle === 'deg' ? 'deg' : 'rad' })),
+      formulas.map(text => compile(parseText(text), { variables: ['x', 'y'], angle: angle === 'deg' ? 'deg' : 'rad' })),
     );
     const value = fc.oneof(
       fc.double({ noNaN: true, noDefaultInfinity: true }),
@@ -208,7 +207,7 @@ describe('variables and the scope', () => {
   it('rejects a missing or non-finite value instead of computing with undefined', () => {
     // Declared as string[], as an app would, so the scope type is a plain record.
     const variables: string[] = ['x', 'y'];
-    const f = compile(parse('x + y'), { variables });
+    const f = compile(parseText('x + y'), { variables });
     expect(thrown(() => f({ x: 1 }))).toBeInstanceOf(InvalidArgumentError);
     expect(thrown(() => f({ x: 1, y: Number.NaN }))).toBeInstanceOf(InvalidArgumentError);
     expect(thrown(() => f())).toBeInstanceOf(InvalidArgumentError);
@@ -216,13 +215,13 @@ describe('variables and the scope', () => {
   });
 
   it('rejects invalid and duplicate variable names', () => {
-    expect(thrown(() => compile(parse('x'), { variables: ['x', 'x'] }))).toBeInstanceOf(InvalidArgumentError);
-    expect(thrown(() => compile(parse('x'), { variables: ['x', '1a'] }))).toBeInstanceOf(InvalidArgumentError);
-    expect(parseError(() => compile(parse('x'), { variables: ['x', 'sin'] })).code).toBe('name-conflict');
+    expect(thrown(() => compile(parseText('x'), { variables: ['x', 'x'] }))).toBeInstanceOf(InvalidArgumentError);
+    expect(thrown(() => compile(parseText('x'), { variables: ['x', '1a'] }))).toBeInstanceOf(InvalidArgumentError);
+    expect(parseError(() => compile(parseText('x'), { variables: ['x', 'sin'] })).code).toBe('name-conflict');
   });
 
   it('an undeclared name fails at compile with its span, before any point is evaluated', () => {
-    const error = parseError(() => compile(parse('2 * q + x'), { variables: ['x'] }));
+    const error = parseError(() => compile(parseText('2 * q + x'), { variables: ['x'] }));
     expect(error.code).toBe('unknown-name');
     expect(error.span).toEqual({ start: 4, end: 5 });
   });
@@ -230,40 +229,40 @@ describe('variables and the scope', () => {
 
 describe('multi-letter names (RFC §4.3)', () => {
   it('splits a name into declared letters and reports the reading', () => {
-    const f = compile(parse('2xy + 1'), { variables: ['x', 'y'] });
+    const f = compile(parseText('2xy + 1'), { variables: ['x', 'y'] });
     expect(f({ x: 3, y: 5 })).toBe(31);
     expect(f.readings).toEqual([{ span: { start: 1, end: 3 }, name: 'xy', letters: ['x', 'y'] }]);
   });
 
   it('an exact declared name wins over a split', () => {
-    const f = compile(parse('xy'), { variables: ['xy', 'x', 'y'] });
+    const f = compile(parseText('xy'), { variables: ['xy', 'x', 'y'] });
     expect(f({ xy: 7, x: 2, y: 3 })).toBe(7);
     expect(f.readings).toEqual([]);
   });
 
   it('splits into constants too, but not into multi-letter constants', () => {
-    expect(compile(parse('xe'), { variables: ['x'] }).at(2)).toBe(2 * Math.E);
-    const error = parseError(() => compile(parse('xpi'), { variables: ['x'] }));
+    expect(compile(parseText('xe'), { variables: ['x'] }).at(2)).toBe(2 * Math.E);
+    const error = parseError(() => compile(parseText('xpi'), { variables: ['x'] }));
     expect(error.code).toBe('unknown-name');
     // i is a constant of scientific (complex), so only p is missing; pi itself is never a letter.
     expect(error.message).toContain('missing: p)');
-    expect(parseError(() => compile(parse('xi'), { variables: ['x'] })).code).toBe('not-in-domain');
+    expect(parseError(() => compile(parseText('xi'), { variables: ['x'] })).code).toBe('not-in-domain');
   });
 
   it('lists the letters that are not declared', () => {
-    expect(parseError(() => compile(parse('xyz'), { variables: ['x'] })).message).toContain('missing: y, z');
+    expect(parseError(() => compile(parseText('xyz'), { variables: ['x'] })).message).toContain('missing: y, z');
   });
 
   it('warns that a/bc reads as a/(b·c) when bc is split, unlike a/b c', () => {
-    const f = compile(parse('a/bc'), { variables: ['a', 'b', 'c'] });
+    const f = compile(parseText('a/bc'), { variables: ['a', 'b', 'c'] });
     expect(f({ a: 12, b: 2, c: 3 })).toBe(2);
     expect(f.warnings.map(warning => warning.code)).toEqual(['split-after-division']);
     expect(f.warnings[0]?.hint).toBe('write a/(b*c) or (a/b)*c');
-    expect(compile(parse('a/bc'), { variables: ['a', 'bc'] }).warnings).toEqual([]);
+    expect(compile(parseText('a/bc'), { variables: ['a', 'bc'] }).warnings).toEqual([]);
   });
 
   it('keeps the parse warnings', () => {
-    expect(compile(parse('1/2x'), { variables: ['x'] }).warnings.map(warning => warning.code)).toEqual([
+    expect(compile(parseText('1/2x'), { variables: ['x'] }).warnings.map(warning => warning.code)).toEqual([
       'implicit-after-division',
     ]);
   });
@@ -271,14 +270,14 @@ describe('multi-letter names (RFC §4.3)', () => {
 
 describe('sample', () => {
   it('matches the checked tree wherever the checked tree has a value', () => {
-    const f = compile(parse('sin(x)*x^2 + 3x - 1'), { variables: ['x'] });
+    const f = compile(parseText('sin(x)*x^2 + 3x - 1'), { variables: ['x'] });
     const xs = Float64Array.from({ length: 2048 }, (_, index) => index / 100 - 10);
     const out = f.sample(xs, new Float64Array(xs.length));
     for (const [index, x] of xs.entries()) expect(out[index]).toBe(f.at(x));
   });
 
   it('checks the signal every 1 024 points', () => {
-    const f = compile(parse('x'), { variables: ['x'] });
+    const f = compile(parseText('x'), { variables: ['x'] });
     const reason = new Error('stop');
     const xs = new Float64Array(4096);
     expect(thrown(() => f.sample(xs, new Float64Array(4096), { signal: { aborted: true, reason } }))).toBe(reason);
@@ -294,7 +293,7 @@ describe('sample', () => {
   });
 
   it('checks the steps budget before the first point: nodes × points', () => {
-    const f = compile(parse('x + 1'), { variables: ['x'], limits: { steps: 100 } });
+    const f = compile(parseText('x + 1'), { variables: ['x'], limits: { steps: 100 } });
     const error = thrown(() => f.sample(new Float64Array(50), new Float64Array(50)));
     expect(error).toBeInstanceOf(ExprLimitError);
     expect(error instanceof ExprLimitError && error.actual).toBe(150);
@@ -302,9 +301,9 @@ describe('sample', () => {
   });
 
   it('needs one variable and matching lengths', () => {
-    const two = compile(parse('x + y'), { variables: ['x', 'y'] });
+    const two = compile(parseText('x + y'), { variables: ['x', 'y'] });
     expect(thrown(() => two.sample(new Float64Array(2), new Float64Array(2)))).toBeInstanceOf(InvalidArgumentError);
-    const one = compile(parse('x'), { variables: ['x'] });
+    const one = compile(parseText('x'), { variables: ['x'] });
     expect(thrown(() => one.sample(new Float64Array(2), new Float64Array(3)))).toBeInstanceOf(InvalidArgumentError);
   });
 });
@@ -312,7 +311,7 @@ describe('sample', () => {
 describe('budgets', () => {
   it('a 256-deep expression compiles and evaluates; a deeper hand-built tree is rejected by compile', () => {
     const deep = `${'('.repeat(255)}x${')'.repeat(255)}`;
-    expect(compile(parse(deep), { variables: ['x'] }).at(3)).toBe(3);
+    expect(compile(parseText(deep), { variables: ['x'] }).at(3)).toBe(3);
     let node: Node = { kind: 'name', name: 'x', span: { start: 0, end: 1 } };
     for (let index = 0; index < 300; index++) node = { kind: 'group', inner: node, span: { start: 0, end: 1 } };
     const expr = { version: 1, source: 'x', root: node, warnings: [] } as const;
@@ -323,9 +322,9 @@ describe('budgets', () => {
   it('checks steps statically, counting a host function at its declared cost', () => {
     const heavy = defineLanguage({ extends: scientific, functions: { slow: { arity: 1, cost: 50 } } });
     const options = { language: heavy, variables: ['x'], functions: { slow: (a: number) => a } } as const;
-    expect(compile(parse('slow(x) + 1', { language: heavy }), options).at(1)).toBe(2);
+    expect(compile(parseText('slow(x) + 1', { language: heavy }), options).at(1)).toBe(2);
     const error = thrown(() =>
-      compile(parse('slow(x) + 1', { language: heavy }), { ...options, limits: { steps: 50 } }),
+      compile(parseText('slow(x) + 1', { language: heavy }), { ...options, limits: { steps: 50 } }),
     );
     expect(error instanceof ExprLimitError && error.budget).toBe('steps');
   });
@@ -339,7 +338,7 @@ describe('host functions and constants (RFC §9)', () => {
   });
 
   it('are required by the types and supplied at compile', () => {
-    const f = compile(parse('hypot(x, 4) + g', { language: physics }), {
+    const f = compile(parseText('hypot(x, 4) + g', { language: physics }), {
       language: physics,
       variables: ['x'],
       functions: { hypot: Math.hypot },
@@ -347,7 +346,7 @@ describe('host functions and constants (RFC §9)', () => {
     });
     expect(f.at(3)).toBe(5 + 9.806_65);
     // @ts-expect-error -- the language declares hypot and g, so both implementations are required
-    const missing = () => compile(parse('hypot(3, 4)', { language: physics }), { language: physics });
+    const missing = () => compile(parseText('hypot(3, 4)', { language: physics }), { language: physics });
     expect(thrown(missing)).toBeInstanceOf(InvalidArgumentError);
   });
 
@@ -357,7 +356,7 @@ describe('host functions and constants (RFC §9)', () => {
       calls.push([this, ...args]);
       return 1;
     }
-    const f = compile(parse('hypot(x, x + 1, 2)', { language: physics }), {
+    const f = compile(parseText('hypot(x, x + 1, 2)', { language: physics }), {
       language: physics,
       variables: ['x'],
       functions: { hypot: spy },
@@ -368,7 +367,7 @@ describe('host functions and constants (RFC §9)', () => {
   });
 
   it('a host result of NaN or Infinity is a typed error in f() and a gap in sample', () => {
-    const f = compile(parse('hypot(x, 1)', { language: physics }), {
+    const f = compile(parseText('hypot(x, 1)', { language: physics }), {
       language: physics,
       variables: ['x'],
       functions: { hypot: (a: number) => (a < 0 ? Number.NaN : a > 10 ? Number.POSITIVE_INFINITY : a) },
@@ -383,7 +382,7 @@ describe('host functions and constants (RFC §9)', () => {
     const lang = defineLanguage({ extends: scientific, functions: { inner: { arity: 1 } } });
     const self: { f?: (x: number) => number } = {};
     // x is read after the nested call returns, so a clobbered slot would show.
-    const g = compile(parse('inner(x) + x', { language: lang }), {
+    const g = compile(parseText('inner(x) + x', { language: lang }), {
       language: lang,
       variables: ['x'],
       functions: { inner: (a: number) => (a > 1 && self.f !== undefined ? self.f(a - 1) : 0) },
@@ -397,7 +396,7 @@ describe('host functions and constants (RFC §9)', () => {
 describe('security', () => {
   it('prototype names are ordinary variables, read only from the scope’s own keys', () => {
     const variables: string[] = ['constructor', '__proto__', 'toString'];
-    const f = compile(parse('constructor + __proto__ * toString'), { variables });
+    const f = compile(parseText('constructor + __proto__ * toString'), { variables });
     const scope = Object.defineProperty({ constructor: 1, toString: 3 }, '__proto__', {
       value: 2,
       enumerable: true,
@@ -408,13 +407,13 @@ describe('security', () => {
   });
 
   it('a prototype name is not a constant or a function', () => {
-    expect(parseError(() => compile(parse('constructor'))).code).toBe('unknown-name');
-    expect(parseError(() => compile(parse('valueOf + 1'), { constants: {} })).code).toBe('unknown-name');
+    expect(parseError(() => compile(parseText('constructor'))).code).toBe('unknown-name');
+    expect(parseError(() => compile(parseText('valueOf + 1'), { constants: {} })).code).toBe('unknown-name');
   });
 
   it('builds closures, never code from text', () => {
     // A name that would be code in JavaScript is only a name here.
-    const f = compile(parse('process + globalThis'), { variables: ['process', 'globalThis'] });
+    const f = compile(parseText('process + globalThis'), { variables: ['process', 'globalThis'] });
     expect(f({ process: 1, globalThis: 2 })).toBe(3);
   });
 });
@@ -433,7 +432,7 @@ describe('gamma', () => {
   });
 
   it('marks poles as gaps in sample()', () => {
-    const f = compile(parse('gamma(x)'), { variables: ['x'] });
+    const f = compile(parseText('gamma(x)'), { variables: ['x'] });
     const out = new Float64Array(3);
     f.sample(Float64Array.of(-1, 0.5, 3), out);
     expect(Number.isNaN(out[0])).toBe(true);

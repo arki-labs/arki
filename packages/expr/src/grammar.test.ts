@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { Node } from './ast.js';
 import type { ParseOptions } from './parser.js';
 import { children, walk } from './ast.js';
-import { ParseError } from './errors.js';
+import { ExprLimitError, InvalidExpression, ParseError } from './errors.js';
 import { scientific } from './language.js';
 import { names } from './names.js';
-import { parse, parseEquation } from './parser.js';
+import { parse, parseEquation, parseEquationText, parseText } from './parser.js';
 import { print } from './print.js';
 
 /** A fully bracketed reading of the tree, so a test sees structure, not just text. */
@@ -37,13 +39,13 @@ function sexpr(node: Node): string {
 }
 
 function read(text: string, options?: ParseOptions): { tree: string; canonical: string } {
-  const expr = parse(text, options);
+  const expr = parseText(text, options);
   return { tree: sexpr(expr.root), canonical: print(expr) };
 }
 
 function parseError(text: string, options?: ParseOptions): ParseError {
   try {
-    parse(text, options);
+    parseText(text, options);
   } catch (error) {
     if (error instanceof ParseError) return error;
     throw error;
@@ -84,7 +86,7 @@ describe('§4.2 precedence, one test per row', () => {
   });
 
   it('7: = appears only in equations, at the lowest level', () => {
-    const equation = parseEquation('x^2 + 1 = 2x');
+    const equation = parseEquationText('x^2 + 1 = 2x');
     expect([sexpr(equation.left), sexpr(equation.right)]).toEqual(['(+ (^ x 2) 1)', '(· 2 x)']);
     expect(print(equation)).toBe('x^2 + 1 = 2 * x');
     expect(parseError('x = 1').code).toBe('unexpected-token');
@@ -141,11 +143,11 @@ describe('§4.3 juxtaposition table, one test per cell', () => {
   });
 
   it('2e+1 is the literal 20; 2e alone is 2·e, and canonical text keeps the two apart', () => {
-    expect(parse('2e+1').root).toMatchObject({ kind: 'number', raw: '2e+1' });
+    expect(parseText('2e+1').root).toMatchObject({ kind: 'number', raw: '2e+1' });
     expect(read('2e').tree).toBe('(· 2 e)');
     expect(read('2e + 1')).toEqual({ tree: '(+ (· 2 e) 1)', canonical: '2 * e + 1' });
     // The stored text reads back as a product, never as the literal 2e+1 = 20.
-    expect(sexpr(parse(print(parse('2e + 1'))).root)).toBe('(+ (* 2 e) 1)');
+    expect(sexpr(parseText(print(parseText('2e + 1'))).root)).toBe('(+ (* 2 e) 1)');
   });
 
   it('functions need parentheses: sin x and sin^2(x) are errors with a hint', () => {
@@ -164,7 +166,7 @@ describe('§4.3 juxtaposition table, one test per cell', () => {
   });
 
   it('2^3x is (2^3)·x = 8x and 1/2x is (1/2)·x, each with a warning that shows the reading', () => {
-    const power = parse('2^3x');
+    const power = parseText('2^3x');
     expect(sexpr(power.root)).toBe('(· (^ 2 3) x)');
     expect(power.warnings).toEqual([
       expect.objectContaining({
@@ -173,7 +175,7 @@ describe('§4.3 juxtaposition table, one test per cell', () => {
         hint: 'write (2^3)x or 2^(3x)',
       }),
     ]);
-    const division = parse('1/2x');
+    const division = parseText('1/2x');
     expect(division.warnings).toEqual([
       expect.objectContaining({
         code: 'implicit-after-division',
@@ -181,16 +183,16 @@ describe('§4.3 juxtaposition table, one test per cell', () => {
         hint: 'write (1/2)x or 1/(2x)',
       }),
     ]);
-    expect(parse('a/b c', variables).warnings).toHaveLength(1);
-    expect(parse('2x^2').warnings).toEqual([]);
-    expect(parse('(1/2)x').warnings).toEqual([]);
+    expect(parseText('a/b c', variables).warnings).toHaveLength(1);
+    expect(parseText('2x^2').warnings).toEqual([]);
+    expect(parseText('(1/2)x').warnings).toEqual([]);
   });
 });
 
 describe('acceptance (RFC §3, parse side)', () => {
   it('C-01: number literals, including what toString() feeds back from the keypad', () => {
     for (const raw of ['0', '42', '3.14', '.5', '1e-7', '2E+3', '0.30000000000000004', '1e+21', '0.50']) {
-      expect(parse(raw).root).toEqual({ kind: 'number', raw, span: { start: 0, end: raw.length } });
+      expect(parseText(raw).root).toEqual({ kind: 'number', raw, span: { start: 0, end: raw.length } });
     }
     expect(parseError('2.').code).toBe('bad-number');
     expect(parseError('1.2.3')).toMatchObject({ code: 'bad-number', span: { start: 0, end: 5 } });
@@ -210,16 +212,16 @@ describe('acceptance (RFC §3, parse side)', () => {
   });
 
   it('C-05: parentheses stay as group nodes with their content', () => {
-    const root = parse('(x+1)').root;
+    const root = parseText('(x+1)').root;
     expect(root.kind).toBe('group');
     expect(root.kind === 'group' && root.inner.kind).toBe('binary');
   });
 
   it('C-06: implicit multiplication forms are flagged implicit', () => {
     for (const text of ['2x', '2(x+1)', '(x+1)(x-1)', '3sin(x)', '2pi']) {
-      expect(parse(text).root).toMatchObject({ kind: 'binary', op: '*', implicit: true });
+      expect(parseText(text).root).toMatchObject({ kind: 'binary', op: '*', implicit: true });
     }
-    expect(parse('2*x').root).toMatchObject({ implicit: false });
+    expect(parseText('2*x').root).toMatchObject({ implicit: false });
   });
 
   it('C-07: calls with 1..n arguments, checked against the arity', () => {
@@ -243,12 +245,16 @@ describe('acceptance (RFC §3, parse side)', () => {
     for (const fn of expected) {
       const [min] = scientific.functionSpec(fn)?.arity ?? [1];
       const args = Array.from({ length: min }, () => 'x').join(', ');
-      expect(parse(`${fn}(${args})`).root).toMatchObject({ kind: 'call', fn });
+      expect(parseText(`${fn}(${args})`).root).toMatchObject({ kind: 'call', fn });
     }
   });
 
   it('C-09: pi, e and i are constants of the scientific language', () => {
-    expect(names(parse('pi + e + i + x'))).toEqual({ variables: ['x'], constants: ['e', 'i', 'pi'], functions: [] });
+    expect(names(parseText('pi + e + i + x'))).toEqual({
+      variables: ['x'],
+      constants: ['e', 'i', 'pi'],
+      functions: [],
+    });
   });
 
   it('C-10: display operators × · ÷ − read as their ASCII forms', () => {
@@ -262,15 +268,17 @@ describe('acceptance (RFC §3, parse side)', () => {
   });
 
   it('C-13: named variables, including Greek', () => {
-    expect(names(parse('x + t + theta + θ')).variables).toEqual(['t', 'theta', 'x', 'θ']);
+    expect(names(parseText('x + t + theta + θ')).variables).toEqual(['t', 'theta', 'x', 'θ']);
   });
 
   it('C-14: equations split on exactly one =', () => {
-    const equation = parseEquation('x^2 = 2x + 1');
+    const equation = parseEquationText('x^2 = 2x + 1');
     expect(print(equation)).toBe('x^2 = 2 * x + 1');
-    expect(() => parseEquation('a = b = c')).toThrow(ParseError);
-    expect(() => parseEquation('x + 1')).toThrow(expect.objectContaining({ code: 'unexpected-end', expected: ['='] }));
-    expect(() => parseEquation('(a = b)')).toThrow(expect.objectContaining({ code: 'unexpected-token' }));
+    expect(() => parseEquationText('a = b = c')).toThrow(ParseError);
+    expect(() => parseEquationText('x + 1')).toThrow(
+      expect.objectContaining({ code: 'unexpected-end', expected: ['='] }),
+    );
+    expect(() => parseEquationText('(a = b)')).toThrow(expect.objectContaining({ code: 'unexpected-token' }));
   });
 
   it('C-19: parse-only validation gives a readable, located error', () => {
@@ -290,16 +298,16 @@ describe('acceptance (RFC §3, parse side)', () => {
   });
 
   it('C-23: free-variable analysis without a hand-kept function list', () => {
-    expect(names(parse('2x^2 + sin(x) + pi*y + |z| + √w'))).toEqual({
+    expect(names(parseText('2x^2 + sin(x) + pi*y + |z| + √w'))).toEqual({
       variables: ['w', 'x', 'y', 'z'],
       constants: ['pi'],
       functions: ['abs', 'sin', 'sqrt'],
     });
-    expect(names(parseEquation('a = b + 1')).variables).toEqual(['a', 'b']);
+    expect(names(parseEquationText('a = b + 1')).variables).toEqual(['a', 'b']);
   });
 
   it('C-24: nodes expose kind, operator, arguments, function name and group content', () => {
-    const root = parse('(a + 1) * log(b, 2)').root;
+    const root = parseText('(a + 1) * log(b, 2)').root;
     expect(children(root).map(child => child.kind)).toEqual(['group', 'call']);
     const visited: string[] = [];
     walk(root, node => {
@@ -311,19 +319,64 @@ describe('acceptance (RFC §3, parse side)', () => {
 
   it('C-25: canonical text parses back to the same tree', () => {
     for (const text of ['2 * x^2 + sin(x)', '-(a + b)^2 / 3!', 'log(|x - 1|, 2)', '2^-3^2']) {
-      expect(sexpr(parse(print(parse(text))).root)).toBe(sexpr(parse(text).root));
-      expect(print(parse(text))).toBe(text);
+      expect(sexpr(parseText(print(parseText(text))).root)).toBe(sexpr(parseText(text).root));
+      expect(print(parseText(text))).toBe(text);
     }
   });
 });
 
 describe('spans', () => {
   it('are UTF-16 offsets covering what the user typed', () => {
-    const root = parse(' √(x) + |y| ').root;
+    const root = parseText(' √(x) + |y| ').root;
     expect(root.span).toEqual({ start: 1, end: 11 });
     expect(root.kind === 'binary' && [root.left.span, root.right.span]).toEqual([
       { start: 1, end: 5 },
       { start: 8, end: 11 },
     ]);
+  });
+});
+
+describe('parse and parseEquation return failures for outside text', () => {
+  it('returns InvalidExpression with the ParseError span as the cause, for the caret', () => {
+    const result = parse('2 + * 3');
+    expect(isFailure(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'expr.invalid_text',
+      cause: expect.objectContaining({ code: 'unexpected-token', span: { start: 4, end: 5 }, found: '*' }),
+    });
+    expect(result).toMatchObject({ cause: expect.any(ParseError) });
+  });
+
+  it('returns ExpressionOverBudget with the ExprLimitError as the cause', () => {
+    expect(parse('x+y', { limits: { length: 2 } })).toMatchObject({
+      code: 'expr.over_budget',
+      cause: expect.objectContaining({ budget: 'length' }),
+    });
+    expect(parseEquation('a = b + c', { limits: { nodes: 3 } })).toMatchObject({
+      code: 'expr.over_budget',
+      cause: expect.any(ExprLimitError),
+    });
+  });
+
+  it('parseEquation returns the failure for a missing or second =', () => {
+    expect(parseEquation('x + 1')).toMatchObject({
+      code: 'expr.invalid_text',
+      cause: expect.objectContaining({ code: 'unexpected-end', expected: ['='] }),
+    });
+    expect(parseEquation('a = b = c')).toMatchObject({ code: 'expr.invalid_text' });
+  });
+
+  it('returns the tree itself for good text, and agrees with the throwing engine entry', () => {
+    expect(parse('2x^2 + sin(x)')).toEqual(parseText('2x^2 + sin(x)'));
+    expect(parseEquation('x = 1')).toEqual(parseEquationText('x = 1'));
+  });
+
+  it('still throws for a bug: a non-string text, or a language that defineLanguage did not build', () => {
+    // @ts-expect-error a number is not text: the type system rejects it, the runtime guard backs that up
+    expect(() => parse(5)).toThrow(TypeError);
+  });
+
+  it('keeps InvalidExpression a stable code apps can branch on', () => {
+    expect(InvalidExpression.code).toBe('expr.invalid_text');
   });
 });

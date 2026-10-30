@@ -14,14 +14,14 @@ import { ratio } from '@arki/math/rational';
 import type { Context, RatFun } from './context.js';
 import type { CasInput } from './core.js';
 import { rationalValue } from './context.js';
-import { CasError } from './core.js';
+import { CasError, treeOrThrow } from './core.js';
 import { Emitter, textOf } from './emit.js';
 import { constant, constantValue, generator } from './poly.js';
 
 /** Parses a string, or checks a given AST against the `nodes` and `depth` budgets (without recursion). */
 export function inputExpr(input: CasInput, ctx: Context): Expr {
   const { nodes, depth } = ctx.budget.limits;
-  if (typeof input === 'string') return parse(input, { language: ctx.language, limits: { nodes, depth } });
+  if (typeof input === 'string') return treeOrThrow(parse(input, { language: ctx.language, limits: { nodes, depth } }));
   // Stored ASTs come from JSON: check the version at run time, whatever the type says.
   const version: number = input.version;
   if (version !== 1) throw new InvalidArgumentError(`cas reads expr AST version 1, got ${String(version)}`);

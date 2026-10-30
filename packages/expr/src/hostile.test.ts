@@ -1,12 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
 import { InvalidArgumentError, ResourceLimitError } from '@arki/math/errors';
 
 import type { Limits } from './limits.js';
 import { ExprLimitError, ParseError } from './errors.js';
 import { names } from './names.js';
-import { parse, parseEquation } from './parser.js';
+import { parse, parseEquation, parseEquationText, parseText } from './parser.js';
 import { print } from './print.js';
 import { decimalComma } from './syntax.js';
 
@@ -24,28 +25,28 @@ function limitError(run: () => unknown): ExprLimitError {
 
 describe('security', () => {
   it('constructor, __proto__ and toString are plain variable names', () => {
-    const expr = parse('constructor + __proto__ * toString - hasOwnProperty');
+    const expr = parseText('constructor + __proto__ * toString - hasOwnProperty');
     expect(names(expr).variables).toEqual(['__proto__', 'constructor', 'hasOwnProperty', 'toString']);
     expect(print(expr)).toBe('constructor + __proto__ * toString - hasOwnProperty');
   });
 
   it('prototype names are never callable', () => {
     for (const text of ['constructor(1)', 'toString(x)', '__proto__(x)', 'valueOf()']) {
-      expect(() => parse(text)).toThrow(expect.objectContaining({ code: 'not-a-function' }));
+      expect(() => parseText(text)).toThrow(expect.objectContaining({ code: 'not-a-function' }));
     }
   });
 
   it('there is no member access, indexing or strings to reach anything else', () => {
     for (const text of ['x.constructor', 'x["a"]', "'a'", 'x[0]', 'a;b', 'f = x', '`x`', 'import(x)']) {
-      expect(() => parse(text)).toThrow(ParseError);
+      expect(() => parseText(text)).toThrow(ParseError);
     }
   });
 
   it('100 000 nested parentheses throw ExprLimitError (depth), never RangeError', () => {
     const text = `${'('.repeat(100_000)}x${')'.repeat(100_000)}`;
-    expect(limitError(() => parse(text, { limits: roomy }))).toMatchObject({ budget: 'depth', limit: 256 });
+    expect(limitError(() => parseText(text, { limits: roomy }))).toMatchObject({ budget: 'depth', limit: 256 });
     // With the default budgets the length check fires first, before lexing.
-    expect(limitError(() => parse(text)).budget).toBe('length');
+    expect(limitError(() => parseText(text)).budget).toBe('length');
   });
 
   it('every other nesting form is bounded by the same depth budget', () => {
@@ -59,7 +60,7 @@ describe('security', () => {
       Array.from({ length: 50_000 }, () => 'x').join('+'),
     ];
     for (const text of forms) {
-      const error = limitError(() => parse(text, { limits: { ...roomy, nodes: 1_000_000 } }));
+      const error = limitError(() => parseText(text, { limits: { ...roomy, nodes: 1_000_000 } }));
       expect(error.budget).toBe('depth');
       expect(error).toBeInstanceOf(ResourceLimitError);
     }
@@ -67,34 +68,37 @@ describe('security', () => {
 
   it('a 256-deep expression parses; one level more does not', () => {
     const fits = `${'('.repeat(255)}x${')'.repeat(255)}`;
-    expect(print(parse(fits))).toBe(fits);
-    expect(limitError(() => parse(`(${fits})`))).toMatchObject({ budget: 'depth', limit: 256, actual: 257 });
+    expect(print(parseText(fits))).toBe(fits);
+    expect(limitError(() => parseText(`(${fits})`))).toMatchObject({ budget: 'depth', limit: 256, actual: 257 });
   });
 });
 
 describe('budgets', () => {
   it('length is checked before lexing, so even garbage is a limit error', () => {
-    expect(limitError(() => parse('$'.repeat(10_001)))).toMatchObject({
+    expect(limitError(() => parseText('$'.repeat(10_001)))).toMatchObject({
       budget: 'length',
       limit: 10_000,
       actual: 10_001,
     });
-    expect(limitError(() => parse('x+y', { limits: { length: 2 } })).budget).toBe('length');
+    expect(limitError(() => parseText('x+y', { limits: { length: 2 } })).budget).toBe('length');
   });
 
   it('tokens are counted while lexing', () => {
-    expect(limitError(() => parse('1+1+1', { limits: { tokens: 4 } }))).toMatchObject({ budget: 'tokens', actual: 5 });
-    expect(parse('1+1+1', { limits: { tokens: 5 } }).root.kind).toBe('binary');
+    expect(limitError(() => parseText('1+1+1', { limits: { tokens: 4 } }))).toMatchObject({
+      budget: 'tokens',
+      actual: 5,
+    });
+    expect(parseText('1+1+1', { limits: { tokens: 5 } }).root.kind).toBe('binary');
   });
 
   it('nodes are counted while parsing', () => {
-    expect(limitError(() => parse('sin(1, 2, 3)', { limits: { nodes: 2 } })).budget).toBe('nodes');
-    expect(limitError(() => parseEquation('a = b + c', { limits: { nodes: 3 } })).budget).toBe('nodes');
+    expect(limitError(() => parseText('sin(1, 2, 3)', { limits: { nodes: 2 } })).budget).toBe('nodes');
+    expect(limitError(() => parseEquationText('a = b + c', { limits: { nodes: 3 } })).budget).toBe('nodes');
   });
 
   it('limits must be positive integers', () => {
-    expect(() => parse('x', { limits: { depth: 0 } })).toThrow(InvalidArgumentError);
-    expect(() => parse('x', { limits: { nodes: Number.NaN } })).toThrow(InvalidArgumentError);
+    expect(() => parseText('x', { limits: { depth: 0 } })).toThrow(InvalidArgumentError);
+    expect(() => parseText('x', { limits: { nodes: Number.NaN } })).toThrow(InvalidArgumentError);
   });
 });
 
@@ -116,28 +120,38 @@ const ALPHABET = [
 
 const tight: Limits = { length: 200, tokens: 80, depth: 12, nodes: 60 };
 
-/** Parses `text` and asserts the only escapes are ParseError and ExprLimitError, within 50 ms. */
+/**
+ * Parses `text` as both an expression and an equation and asserts that nothing
+ * escapes: bad text and broken budgets come back as failures (a `ParseError` with
+ * an in-range span, or an `ExprLimitError`), within 50 ms per entry.
+ */
 function survives(text: string, limits: Limits | undefined): void {
-  const started = Date.now();
-  for (const syntax of [undefined, decimalComma]) {
-    try {
-      const expr = parse(text, { limits, syntax });
-      print(expr);
-    } catch (error) {
-      if (!(error instanceof ParseError) && !(error instanceof ExprLimitError)) throw error;
-      if (error instanceof ParseError) {
-        expect(error.span.start).toBeGreaterThanOrEqual(0);
-        expect(error.span.end).toBeLessThanOrEqual(text.length);
+  for (const entry of [parse, parseEquation]) {
+    const started = Date.now();
+    for (const syntax of [undefined, decimalComma]) {
+      const parsed = entry(text, { limits, syntax });
+      if (!isFailure(parsed)) {
+        print(parsed);
+        continue;
+      }
+      expect(['expr.invalid_text', 'expr.over_budget']).toContain(parsed.code);
+      if (parsed.cause instanceof ParseError) {
+        expect(parsed.code).toBe('expr.invalid_text');
+        expect(parsed.cause.span.start).toBeGreaterThanOrEqual(0);
+        expect(parsed.cause.span.end).toBeLessThanOrEqual(text.length);
+      } else {
+        expect(parsed.code).toBe('expr.over_budget');
+        expect(parsed.cause).toBeInstanceOf(ExprLimitError);
       }
     }
+    expect(Date.now() - started).toBeLessThan(50);
   }
-  expect(Date.now() - started).toBeLessThan(50);
 }
 
 const SEEDS = ['2x^2 + sin(x)', '||x|-|y||', 'log(0.5, 2) / 3!', '-(a + b)^-2', '√(x)(y)', '1/2x', '2e+1'];
 
 describe('parser fuzz', () => {
-  it('random strings: only ParseError or ExprLimitError escape, each in < 50 ms', () => {
+  it('random strings: nothing escapes parse, failures are returned, each in < 50 ms', () => {
     fc.assert(
       fc.property(fc.array(fc.constantFrom(...ALPHABET), { maxLength: 120 }), fc.boolean(), (parts, budgets) => {
         survives(parts.join(''), budgets ? tight : undefined);

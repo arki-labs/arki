@@ -20,6 +20,7 @@ import type { Rational } from '@arki/math/rational';
 import { children, parse, print } from '@arki/expr';
 import { compile as compileFloat } from '@arki/expr/float';
 import { compile } from '@arki/expr/rational';
+import { orThrow } from '@arki/failure';
 import { DivisionByZeroError, InvalidArgumentError, MathError, RoundingNecessaryError } from '@arki/math/errors';
 
 import type { Condition } from './index.js';
@@ -130,7 +131,7 @@ function largestPart(expr: Expr, x: number, y: number): number | undefined {
   let most = 0;
   const stack: Node[] = [expr.root];
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    const value = floatAt(parse(print(node)), x, y);
+    const value = floatAt(orThrow(parse(print(node))), x, y);
     if (value === undefined) return undefined;
     most = Math.max(most, Math.abs(value));
     stack.push(...children(node));
@@ -165,7 +166,7 @@ describe('simplify preserves values exactly where the input is defined', () => {
   ])('%s', (_, inputs) => {
     fc.assert(
       fc.property(inputs, point, (text, p) => {
-        const input = parse(text);
+        const input = orThrow(parse(text));
         const before = exactAt(input, p);
         if (before === 'undefined' || before === 'inexact') return;
         const r = attempt(text);
@@ -189,7 +190,7 @@ describe('kernel rules preserve values in floating point', () => {
       .map(([a, b]) => [a / 8, b / 8] as const);
     fc.assert(
       fc.property(transcendental, xs, (text, [x, y]) => {
-        const input = parse(text);
+        const input = orThrow(parse(text));
         const before = floatAt(input, x, y);
         // Rounding grows with the magnitude of intermediate values (sin of a huge exp): compare only where they stay small.
         const largest = largestPart(input, x, y);
@@ -228,7 +229,7 @@ describe('conditions are necessary: breaking one makes the input undefined, whil
   ])('%s at x = %d', (text, x) => {
     const r = simplify(text);
     expect(r.conditions.length).toBeGreaterThan(0);
-    expect(floatAt(parse(text), x, 0)).toBeUndefined();
+    expect(floatAt(orThrow(parse(text)), x, 0)).toBeUndefined();
     expect(floatAt(r.result, x, 0)).toBeDefined();
     const broken = r.conditions.some(c => {
       const v = floatAt(c.subject, x, 0);
@@ -250,7 +251,7 @@ describe('idempotence and round trip', () => {
       fc.property(inputs, text => {
         const r = attempt(text);
         if (r === undefined) return;
-        expect(print(parse(r.result.source))).toBe(r.result.source);
+        expect(print(orThrow(parse(r.result.source)))).toBe(r.result.source);
         expect(simplify(r.result).result.source).toBe(r.result.source);
       }),
       { numRuns: 300 },

@@ -1,9 +1,11 @@
 /**
- * Parsers of outside values return, builders throw. `evaluate(text)`,
- * `syntaxFor(locale)` and `parseSyntax(stored)` return the failures below.
- * `parse`, `compile` and compiled functions throw: anything about the text is
- * a `ParseError` with a span; anything about the values is one of math's own
- * errors, unchanged.
+ * Parsers of outside values return, builders throw. `parse`, `parseEquation`,
+ * `fromJSON`, `evaluate(text)`, `syntaxFor(locale)` and `parseSyntax(stored)`
+ * return the failures below; the thrown `ParseError` or `ExprLimitError` is the
+ * failure's `cause`, with the span for the caret. `compile`, `compileEquation`,
+ * `defineLanguage`, `defineSyntax` and compiled functions take typed values the
+ * caller built, so they throw: a `ParseError` for a name or arity the language
+ * rejects, or one of math's own errors for the values, unchanged.
  */
 import type { FailureOf } from '@arki/failure';
 import { defineFailure } from '@arki/failure';
@@ -59,24 +61,24 @@ export class ParseError extends MathError {
 export type Budget = 'length' | 'tokens' | 'depth' | 'nodes' | 'steps' | 'digits';
 
 /**
- * The text given to `evaluate` is not an expression the language accepts. `cause` is the `ParseError`, with `span`, `expected` and `found` for the caret.
+ * The text given to `parse`, `parseEquation` or `evaluate`, or the stored JSON given to `fromJSON`, is not an expression the language accepts. `cause` is the `ParseError`, with `span`, `expected` and `found` for the caret.
  *
  * @fix Show the user the span from `cause` and ask for the expression again; do not retry the same text.
- * @verify cd packages/expr && bun run vitest run src/complex.test.ts
+ * @verify cd packages/expr && bun run vitest run src/complex.test.ts src/grammar.test.ts src/json.test.ts
  */
-export const InvalidExpression = defineFailure('expr.invalid_text', {
+export const InvalidExpression = /* @__PURE__ */ defineFailure('expr.invalid_text', {
   status: 400,
   message: 'The text is not an expression this language accepts.',
   remediation: 'Fix the text at the span of the cause, then evaluate again.',
 });
 
 /**
- * The text given to `evaluate` went over a length, token, depth, node, step or digit budget. `cause` is the `ExprLimitError`.
+ * The text given to `parse`, `parseEquation` or `evaluate`, or the JSON given to `fromJSON`, went over a length, token, depth, node, step or digit budget. `cause` is the `ExprLimitError`.
  *
  * @fix Reject the input as too large, or raise `options.limits` on purpose.
- * @verify cd packages/expr && bun run vitest run src/complex.test.ts
+ * @verify cd packages/expr && bun run vitest run src/complex.test.ts src/hostile.test.ts
  */
-export const ExpressionOverBudget = defineFailure('expr.over_budget', {
+export const ExpressionOverBudget = /* @__PURE__ */ defineFailure('expr.over_budget', {
   status: 400,
   message: 'The expression is over its budget.',
   remediation: 'Shorten the expression, or raise the budget in options.limits on purpose.',
@@ -88,7 +90,7 @@ export const ExpressionOverBudget = defineFailure('expr.over_budget', {
  * @fix Show the user that the expression has no value; read `cause.code` for which rule, or pass a rounding mode for an exact domain.
  * @verify cd packages/expr && bun run vitest run src/complex.test.ts src/rational.test.ts src/decimal.test.ts
  */
-export const NoValue = defineFailure('expr.no_value', {
+export const NoValue = /* @__PURE__ */ defineFailure('expr.no_value', {
   status: 400,
   message: 'The expression has no value in this domain.',
   remediation: 'Change the expression, or for Decimal and Rational pass a rounding mode.',
@@ -100,7 +102,7 @@ export const NoValue = defineFailure('expr.no_value', {
  * @fix Pass a BCP 47 tag such as `'de-DE'`, or a syntax preset (`canonical`, `decimalComma`).
  * @verify cd packages/expr && bun run vitest run src/language.test.ts
  */
-export const InvalidLocale = defineFailure('expr.invalid_locale', {
+export const InvalidLocale = /* @__PURE__ */ defineFailure('expr.invalid_locale', {
   status: 400,
   message: 'The locale is not a valid BCP 47 tag.',
   remediation: 'Pass a BCP 47 locale tag such as de-DE, or a syntax preset.',
@@ -112,20 +114,39 @@ export const InvalidLocale = defineFailure('expr.invalid_locale', {
  * @fix Store `canonical` or `decimalComma`, or `{ decimal: '.', separator: ',' | ';' }` or `{ decimal: ',', separator: ';' }`.
  * @verify cd packages/expr && bun run vitest run src/language.test.ts
  */
-export const InvalidSyntax = defineFailure('expr.invalid_syntax', {
+export const InvalidSyntax = /* @__PURE__ */ defineFailure('expr.invalid_syntax', {
   status: 400,
   message: 'The stored value is not a syntax.',
   remediation: 'Store a decimal mark of "." or "," and a separator of "," or ";", never "," for both.',
 });
 
-/** What `evaluate(text)` returns instead of a value. The one list; {@link EvaluateFailure} is derived from it. */
-export const EVALUATE_FAILURES = [InvalidExpression, ExpressionOverBudget, NoValue] as const;
+/** What `parse`, `parseEquation` and `fromJSON` return instead of a tree. The one list; {@link ParseFailure} is derived from it. */
+export const PARSE_FAILURES = [InvalidExpression, ExpressionOverBudget] as const;
+
+/** What `evaluate(text)` returns instead of a value: the parse failures, then {@link NoValue}. {@link EvaluateFailure} is derived from it. */
+// A spread is not side-effect free to a bundler, so the pure call lets entries that never parse drop these lists.
+export const EVALUATE_FAILURES = /* @__PURE__ */ (() => [...PARSE_FAILURES, NoValue] as const)();
 
 /** Every failure this package returns. */
-export const EXPR_FAILURES = [...EVALUATE_FAILURES, InvalidLocale, InvalidSyntax] as const;
+export const EXPR_FAILURES = /* @__PURE__ */ (() => [...EVALUATE_FAILURES, InvalidLocale, InvalidSyntax] as const)();
+
+/** A failure value returned by `parse`, `parseEquation` and `fromJSON`. */
+export type ParseFailure = FailureOf<(typeof PARSE_FAILURES)[number]>;
 
 /** A failure value returned by `evaluate(text)`. */
 export type EvaluateFailure = FailureOf<(typeof EVALUATE_FAILURES)[number]>;
+
+/**
+ * `parse`, `parseEquation` and `fromJSON` read outside text: a thrown
+ * `ParseError` or `ExprLimitError` becomes its returned failure, with the error
+ * as `cause`. Anything else (a non-string argument, a language that is not
+ * built by `defineLanguage`: a bug) is thrown on.
+ */
+export function parseFailure(error: unknown) {
+  if (error instanceof ParseError) return InvalidExpression({ cause: error });
+  if (error instanceof ExprLimitError) return ExpressionOverBudget({ cause: error });
+  throw error;
+}
 
 /**
  * `evaluate` reads outside text: a thrown `ParseError`, `ExprLimitError` or

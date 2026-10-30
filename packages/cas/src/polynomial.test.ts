@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse, print } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 import { MathError, ResourceLimitError } from '@arki/math/errors';
 
 import { CasError, CasLimitError, conditionToLatex } from './index.js';
@@ -157,7 +158,7 @@ describe('the readable normal form (RFC §5.4)', () => {
 
   it('round-trips: the result is canonical text that parses to the same tree', () => {
     const { result } = expand('(x - 1)*(x + 2)/3');
-    expect(print(parse(result.source))).toBe(result.source);
+    expect(print(orThrow(parse(result.source)))).toBe(result.source);
     expect(print(result)).toBe(result.source);
   });
 

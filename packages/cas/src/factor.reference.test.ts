@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse } from '@arki/expr';
+import { orThrow } from '@arki/failure';
 import { Rational } from '@arki/math/rational';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
@@ -37,7 +38,7 @@ describe('factor against SymPy', () => {
   for (const c of fixture.cases) {
     it(`${c.name} (degree ${c.input.length - 1})`, () => {
       // The largest inputs are longer than expr's default 10 000-character parse budget.
-      const input = parse(text(c.input), { limits: { length: 100_000, tokens: 100_000 } });
+      const input = orThrow(parse(text(c.input), { limits: { length: 100_000, tokens: 100_000 } }));
       // Two random products have ~380-digit coefficients, over the default factorDigits budget of 300.
       const timed = fastest(() => factor(input, 'x', { limits: { factorDigits: 1000 } }), 1000);
       expect(timed.ms).toBeLessThan(1000);
