@@ -1,5 +1,16 @@
 # @arki/string
 
+## 0.5.0
+
+### Minor Changes
+
+- ed4abd5: A malformed locale tag (an `Accept-Language` header, a cookie) no longer throws. Case functions, `initials`, `fold`, `keywords`, `textMetrics`, the vocabulary functions and `StringValue.upper/lower` use locale-independent casing and log the swap at DEBUG (`arki:string:locale`). `truncate` with `boundary: 'word-before'` or `'sentence'` is linear on a long run of whitespace (it was quadratic: 200,000 spaces took minutes). `@arki/log` is a new dependency.
+
+### Patch Changes
+
+- Updated dependencies [a7a4a9d]
+  - @arki/log@0.4.0
+
 ## 0.4.1
 
 ### Patch Changes

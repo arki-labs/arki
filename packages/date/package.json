@@ -1,6 +1,6 @@
 {
   "name": "@arki/date",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Date and time math for ARKI — Temporal-based calendar dates, instants, zoned date-times, durations and interval algebra with a small, explicit API. Runs on Node, Bun, Deno, browsers and edge runtimes.",
   "keywords": [
     "arki",

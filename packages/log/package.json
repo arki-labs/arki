@@ -1,6 +1,6 @@
 {
   "name": "@arki/log",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Zero-dependency structured logging for every JavaScript runtime \u2014 message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
   "license": "MIT",
   "type": "module",
