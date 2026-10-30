@@ -162,3 +162,11 @@ it('returns canonical operational failures for read, write and clear without rej
   vi.mocked(idb.del).mockRejectedValueOnce(new Error('delete acknowledgement lost'));
   expect(QueuePersistenceUnconfirmed.is(await storage.clear())).toBe(true);
 });
+
+it('returns QueueEncodingFailure and writes nothing when an entry fails the stored schema', async () => {
+  const { QueueEncodingFailure } = await import('../../src/mutations/failures.ts');
+  const storage = createQueueStorage('encoding-failure');
+  const outcome = await storage.write([makeMutation({ enqueuedAt: Number.NaN })]);
+  expect(QueueEncodingFailure.is(outcome)).toBe(true);
+  expect(store['encoding-failure']).toBeUndefined();
+});

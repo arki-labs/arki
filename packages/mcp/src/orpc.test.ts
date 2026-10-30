@@ -433,3 +433,56 @@ describe('fromRpc', () => {
     ).toEqual([]);
   });
 });
+
+describe('fromRpc exact adapter failures', () => {
+  it('returns mcp.approval_required when a destructive call has no approver or the approver refuses', async () => {
+    let executions = 0;
+    const tools = fromRpc(
+      {
+        feature: 'catalog',
+        router: {},
+        contract: {
+          remove: asTool(oc, {
+            description: 'Remove an item.',
+            access: 'public',
+            effect: 'destructive',
+            confirm: 'elicit',
+          }),
+        },
+      },
+      {
+        client: () => ({
+          remove: () => {
+            executions++;
+            return Promise.resolve({});
+          },
+        }),
+      },
+    );
+    expect(await tools.catalog_remove.run(undefined, call)).toMatchObject({ code: 'mcp.approval_required' });
+    expect(await tools.catalog_remove.run(undefined, { ...call, approve: () => false })).toMatchObject({
+      code: 'mcp.approval_required',
+    });
+    expect(executions).toBe(0);
+  });
+
+  it('returns mcp.invalid_input when the model sends arguments the real router rejects', async () => {
+    const root = implement({ lookup });
+    const router = root.router({
+      lookup: root.lookup.handler(({ input }) => ({ name: input.id })),
+    });
+    const client = createRouterClient(router);
+    const tools = fromRpc({ feature: 'catalog', contract: { lookup }, router }, { client: () => client });
+    const wrong: unknown = { id: 42 };
+    // @ts-expect-error A model can send any JSON; the router must refuse it.
+    const result = await tools.catalog_lookup.run(wrong, call);
+    expect(result).toMatchObject({ code: 'mcp.invalid_input' });
+  });
+
+  it('returns mcp.internal when the tool output cannot be written as JSON', () => {
+    expect(toolResult({ big: 1n }, 8000)).toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringContaining('mcp.internal') }],
+    });
+  });
+});

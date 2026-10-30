@@ -35,6 +35,17 @@ describe('zod', () => {
     expect(schema.safeParse({ amount: '1', currency: 'ZZZ' }).error?.issues[0]?.path).toEqual(['currency']);
   });
 
+  it('keeps the money failure code on the Zod issue, so a client can match it', () => {
+    const codeOf = (error: { issues: readonly { params?: Record<string, unknown> }[] } | undefined) =>
+      error?.issues[0]?.params?.['code'];
+    expect(codeOf(moneySchema('EUR').safeParse({ amount: '1.005', currency: 'EUR' }).error)).toBe(
+      'money.rounding_necessary',
+    );
+    expect(codeOf(moneySchema('EUR').safeParse({ amount: '1,5', currency: 'EUR' }).error)).toBe('money.invalid_text');
+    expect(codeOf(anyMoneySchema().safeParse({ amount: '1', currency: 'ZZZ' }).error)).toBe('money.unknown_currency');
+    expect(codeOf(moneyInputSchema('EUR', { locale: 'de-DE' }).safeParse('1,23,4').error)).toBe('money.invalid_text');
+  });
+
   it('parses form text with the locale rules', () => {
     const field = moneyInputSchema('EUR', { locale: 'de-DE', max: money(10_000, 'EUR') });
     expect(field.parse('1.234,56 €').toString()).toBe('1234.56 EUR');
