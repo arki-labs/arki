@@ -22,7 +22,8 @@ import { orThrow } from '@arki/failure';
 
 import { journal, journalHandlers, journalWorker, needsOf } from './dot.js';
 import { initJournal } from './journal.js';
-import { tables } from './test-support.js';
+import type { OrderId } from './test-support.js';
+import { orders, tables } from './test-support.js';
 import { openJournalDb } from './testing.js';
 
 const POLL_MS = 20;
@@ -35,7 +36,7 @@ let counter = 0;
 const apps: Parameters<typeof track>[0][] = [];
 
 beforeAll(async () => {
-  ({ db, client } = await openJournalDb(tables));
+  ({ db, client } = await openJournalDb({ ...tables, orders }));
 });
 afterEach(async () => {
   for (const app of apps.splice(0)) {
@@ -51,6 +52,7 @@ function track<App extends { stop(): Promise<unknown>; dispose(): Promise<unknow
 }
 
 const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
+const orderIdOf = (id: string): OrderId => `ord_${id}`;
 const freshJournal = () => initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 
 /** What a feature's steps talk to: a provider that has a name. */
@@ -263,6 +265,51 @@ describe('a workflow need on an app infra handle', () => {
 });
 
 describe('journalWorker() and workflows', () => {
+  it('an event wait wakes with no effect in the feature: the wake is mounted with the workflow', async () => {
+    // Why: a feature author writes a wait, never its plumbing. A forgotten effect would be a run parked for good.
+    const wj = freshJournal();
+    const DotPlaced = wj.event('DotPlaced', z.object({}));
+    const DotPaid = wj.event('DotPaid', z.object({ amount: z.int() }));
+    const dotOrder = wj
+      .entity('dot-order', orders, { events: 'stored' })
+      .create(DotPlaced, () => ({ customerId: 'c', total: 1, status: 'placed' }))
+      .on(DotPaid, () => ({ status: 'paid' }));
+    const flow = wj
+      .workflow('dot.wait', { version: 1, input: z.object({ orderId: z.templateLiteral(['ord_', z.string()]) }) })
+      .waitFor('paid', {
+        on: { order: { entity: dotOrder, events: [DotPaid], match: ({ input }) => input.orderId } },
+      })
+      .finish(({ results }) => results.paid.event.data.amount);
+    const waitingCore = defineFeature('waiting');
+    const waiting = waitingCore.usecases({}, journalHandlers(waitingCore, { workflows: [flow] })).entrypoints();
+    const app = track(
+      await orThrow(
+        defineApp('wf-wake')
+          .infra(dbPlugin())
+          .infra(journal({ j: wj, workflowMeta }))
+          .features([waiting])
+          .entrypoints(journalWorker({ pollMs: POLL_MS }))
+          .boot(),
+      ),
+    );
+    await orThrow(app.start());
+    const orderId = orderIdOf(newId());
+    orThrow(
+      await app.services.journal.write(db, dotOrder, orderId, { meta: caller, events: () => [DotPlaced({})] }),
+    );
+    const id = newId();
+    orThrow(await app.services.journal.run(db, flow.start, { input: { orderId }, id }, caller));
+    orThrow(
+      await app.services.journal.write(db, dotOrder, orderId, {
+        meta: caller,
+        events: () => [DotPaid({ amount: 7 })],
+      }),
+    );
+    await completed(id);
+    const [row] = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
+    expect(row?.output).toBe(7);
+  });
+
   it('the worker runs workflow steps and timers like any effect', async () => {
     // Why: the sleep is woken by `workflow.timer`, the steps around it run in `workflow.step`: one worker serves both.
     const wj = freshJournal();

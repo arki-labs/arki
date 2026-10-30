@@ -389,6 +389,8 @@ Personal data written into an event stays in the log until the log forgets it. A
 
 `journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction. An erased form the schema rejects is `BAD_DEFINITION` and nothing changes. A history replay cannot rebuild, such as a legacy row that was never adopted, is `NO_HISTORY` and nothing changes: adopt it first. Running it twice is safe; the first erased time is kept. It returns `{ erased, row }`.
 
+A workflow run that waited for one of the entity's events keeps no copy of it: the run stores a pointer to the event, so the erased form is what every run reads after `forget` (see [Wait for an event](#wait-for-an-event)).
+
 Projections are not rerun and no job is queued: the app owns its read models and forgets them itself, in the same request. Recorded events carry `erasedAt`, so a projection that is rerun later can tell an erased event from a live one.
 
 ### A row removed outside the journal
@@ -1038,7 +1040,8 @@ The other nodes:
 - `next: 'node'` or `next: ({ result }) => 'node' | 'next'` jumps back to an earlier node, so a loop is a step with `next`. A name later in the list does not compile.
 - `.command(name, command, ({ input, results }) => commandInput, options?)` runs one command exactly once. See [Command nodes](#command-nodes).
 - `.waitFor(name, { signal, schema, timeout?, onTimeout?, when? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node. `when` works as on a step: when it returns false the run does not park, the result is `null`, and the type says so (`payload | null`).
-- `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time.
+- `.waitFor(name, { on, timeout | until, onTimeout?, when? })` parks the run until one of the app's own events is recorded. See [Wait for an event](#wait-for-an-event).
+- `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time. `.sleep(name, until, { next })` loops back as a step's `next` does: an earlier node, `'next'`, or a function of `{ runId, input, results }` that picks one.
 - `.child(name, def, { input })` starts another workflow and waits for it. The result is the child's output.
 - `.map(name, def, { items, input, wait?, concurrency? })` starts one child per item. The result is the outputs in item order. With `wait: 'any'` the first child to finish wins, and the others are cancelled.
 - `.finish(fn?)` works out the output. Without `fn` the output is the last node's result. With an `output` schema, `fn` must return that schema's output, or it does not compile.
@@ -1072,7 +1075,7 @@ export const fulfil = j
 
 ### Compose
 
-Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds three effects (`workflow.step`, `workflow.timer`, `workflow.limitTimer`), one more per workflow with a `startOn` (`workflow.start:<name>`, see [Start on an event](#start-on-an-event)), and one projection (the `workflow_steps` table).
+Pass the definitions to `compose`, with `workflowMeta`, the meta the runner records on its own checkpoints and on each command a body runs without a meta. The library never invents an actor: the app chose this one. List every workflow a `child` or `map` node starts too. The steps' needs come from `services`, like an effect's. Composing adds three effects (`workflow.step`, `workflow.timer`, `workflow.limitTimer`), one more per workflow with a `startOn` (`workflow.start:<name>`, see [Start on an event](#start-on-an-event)), one more per entity a wait watches (`workflow.wake:<entity kind>`, see [Wait for an event](#wait-for-an-event)), and one projection (the `workflow_steps` table).
 
 ```ts continue
 const released: string[] = [];
@@ -1104,7 +1107,7 @@ A finished definition has three commands and one read. The commands run through 
 - `def.startBatch` takes `{ items, batchId? }` and starts many runs of one workflow in one transaction. Each item is what `def.start` takes, and there are 1 to `BATCH_LIMIT` (1000) items. It returns `{ batchId, runs }`: `runs[i]` is item i's outcome, `{ runId }` or its refusal (`WorkflowBusy`, `CommandConflict`, `CommandInvalid`). Each item runs in its own savepoint, so a refused item rolls back only itself and the others start. An item that does not fit the start schema, or a wrong number of items, is a caller bug: the whole batch is `InvalidInput` and nothing starts. The default batch id is `wfb_<random>`; every run stores it in `batchId`. `journal.workflows.batch(db, batchId)` counts its runs by state, and `runs(db, { batchId })` lists them (§ Operators).
 - `def.signal(name)` takes `{ runId, deliveryId, payload }`. `name` must be a signal one of the `waitFor` nodes declares. `deliveryId` is the sender's own id, such as the webhook event id. It returns a `status`: `woke` (the run moved on), `kept` (stored; the run takes it when it reaches the wait), `duplicate` (this `deliveryId` was seen) or `finished` (the run is over, so it was dropped) or `no-run` (no run of this workflow has that id, or the id belongs to another workflow; nothing is stored). `no-run` is a status, not a failure, so a webhook for a missing run is answered 200 and the provider stops resending. The operator verb `journal.workflows.signal` names a specific run and still refuses an unknown one.
 - `def.cancel` takes `{ runId, reason }`. It returns `{ state: 'compensating' }` while the run undoes its steps, or `{ state: 'cancelled' }` when there was nothing to undo.
-- `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema). A result without a schema is `unknown`. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
+- `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema, the events of an event wait). A result without a schema is `unknown`. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
 
 ```ts continue
 const { db, client } = await openJournalDb(tables); // in an app: the root database
@@ -1245,6 +1248,90 @@ await client.close();
 | `workflow.limits.pause`, `workflow.limits.resume`, `workflow.limits.override`, `workflow.limits.reset`                                     | action | `workflow:limits`     | high   |
 
 The run reads show `scope`, `tags`, `rootId`, `batchId`, `replayOf`, `startAt`, `delayedUntil`, `ttlAt` and the overrides (`maxAttempts`, `stepTimeoutMs`, `priority`); `metadata` is shown as the `payload` option allows. `workflow.runs` filters by `state` (`queued` and `expired` too), `name`, `version`, `parentId`, `stuck`, `tag`, `scope`, `rootId`, `batchId`, `from` and `to`. A run action's approval is taken on the run's revision: its version less its metadata and tag changes, so `setMetadata` and `addTags` void no approval, not even each other's, while any event that moves the run does. A limit action's approval is taken on the limit's `version` (`LimitView.version`), which only operator changes move; runs that take or free a slot do not. `workflow.replay` also takes a finished run. Its refusals are `JOURNAL_WORKFLOWS_ERROR_CODES`, `ARKI_JOURNAL_E010` to `E017` (a stale limit approval is `E010` too). The newer verbs answer the journal's own refusals with their codes and statuses: `journal.not_found` (an unknown limit), `journal.invalid` (too many tags, an override of a limit that caps nothing), `journal.conflict` (a reschedule of a run that has started) and `journal.workflow_busy` (a replay at a busy key, with its `limitName` and `reason`).
+
+### Wait for an event
+
+A signal comes from outside the app. An event wait is for the app's own events: it parks the run until an entity records one, with no effect in between. A process waits for `PaymentSettled` the way a person waits for a reply.
+
+```ts
+import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
+
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+
+type PrayerId = `pry_${string}`;
+const prayers = pgTable('prayers', {
+  id: varchar('id', { length: 256 }).primaryKey().$type<PrayerId>(),
+  version: integer('version').notNull().default(0),
+});
+const j = initJournal({ tables: journalTables(), meta: z.object({ actorId: z.string() }) });
+
+const PrayerReminderSet = j.event('PrayerReminderSet', z.object({ everyHours: z.int().positive() }));
+const PrayerAnswered = j.event('PrayerAnswered', z.object({ how: z.string() }));
+const prayer = j
+  .entity('prayer', prayers)
+  .create(PrayerReminderSet, () => ({}))
+  .on(PrayerReminderSet, () => ({}))
+  .on(PrayerAnswered, () => ({}));
+
+export const reminder = j
+  .workflow('prayer-reminder', {
+    version: 1,
+    input: z.object({ prayerId: z.templateLiteral(['pry_', z.string()]), everyHours: z.int().positive() }),
+    startOn: {
+      entity: prayer,
+      event: PrayerReminderSet,
+      id: e => `reminder:${e.entityId}:${e.seq}`,
+      input: e => ({ prayerId: e.entityId, everyHours: e.data.everyHours }),
+      timing: 'with-event',
+    },
+  })
+  .step('due', ({ input }) => ({ at: new Date(Date.now() + input.everyHours * 3_600_000).toISOString() }))
+  // Sleeps until the reminder is due, and any of these events cuts the sleep short.
+  .waitFor('stop', {
+    on: {
+      prayer: {
+        entity: prayer,
+        events: [PrayerAnswered, PrayerReminderSet],
+        match: ({ input }) => input.prayerId,
+      },
+    },
+    until: ({ results }) => new Date(results.due.at),
+    onTimeout: 'continue',
+  })
+  // `when` skips the push once an event stopped the wait, and a skipped step ignores `next`, so the run ends.
+  .step('remind', ({ key }) => key, { when: ({ results }) => results.stop === null, next: 'due' })
+  .finish(({ results }) => {
+    if (results.stop === null) return 'no reminder left';
+    // `via` names the label, and `event.type` narrows `data`.
+    return results.stop.event.type === 'PrayerAnswered' ? results.stop.event.data.how : 'replaced';
+  });
+```
+
+- `on` has one label per thing to watch. `entity` and `events` must belong together, and `match` must return that entity's id type: both are compile errors otherwise, and `workflow()` throws `BAD_DEFINITION` for a caller who skips the types. `match` runs once per visit, when the run gets to the wait.
+- `where: ({ input, results, event }) => boolean` on a label passes over the events it refuses. It must decide from its arguments alone: it runs again on every read of the log.
+- The result is `{ via: label, event }`, a union with one member per label. `event` is the recorded event, typed by the entity and the listed events, decoded as a job's event is, so its upcasters apply. `def.read` gives the same type, and checks the stored value with the event's schema.
+- `timeout` is an age and `until` a function that gives a `Date`. Give one or neither. `onTimeout: 'fail'` (the default) fails the node. `onTimeout: 'continue'` goes on with `null`, which is how a wait doubles as a sleep that an event cuts short. `when` works as on a step.
+- An entity must keep its events in `journal_events`, because a wait reads them there. A wait on a `'transient'` entity, or one with its own event log, throws `BAD_DEFINITION`.
+
+**Which events count.** A wait counts every event since the run was admitted: after the event that started it for a `startOn`, after `RunStarted` for a direct start. So an event recorded before the worker reaches the wait is kept, and the run takes it on arrival without parking. A wait takes the oldest event it finds. A later visit in a `next` loop reads on from the last event that wait took, and a deadline moves nothing, so an event recorded between two rounds of a loop is there for the next round. One event is taken once per run, as a signal is: a second wait for the same type needs a second event.
+
+**No wake-up is lost.** A parked wait writes one row per label in `workflow_waits`. Composing adds the effect `workflow.wake:<entity kind>`, with a job for every recorded event of a watched type, and the app writes none of this. A park takes a lock on the key `(entity kind, entity id)`, reads the log, and writes its row; the wake takes the same lock, then reads the rows. Whichever commits second sees the other. The rows are indexed by that key, so a wake never scans the running runs. Retention keeps what a wait needs: the sweeper never touches `journal_events` or a run that has not ended, and a run's rows go with the run.
+
+**One winner.** A deadline and an event contend on the run's row, so one moves the run and the other finds it moved. An event that committed before the timer ran wins, even with its wake job still queued. A repeat of a wake job finds the event taken. `WaitEventTaken` on the run records each one, with the event's id as `deliveryId`.
+
+**Costs.** Each recorded event of a watched type queues one job, whether or not a run waits for it. A changed `on` changes the shape hash, so it needs a new `version`.
+
+**No copy of the event.** The node's result is stored as a pointer, `{ via, seq }`, and the event is read from `journal_events` when a body, `def.read` or an operator view asks for it. So `forget` on the entity reaches every run that took its events: an event with an erased form reads in that form in a parked run, a running run and a finished one, and no `workflow_runs`, `workflow_steps` or run event row holds the original. A run keeps going after its event is erased and reads the erased form from then on. What a body derives from the event (a step result, the output) is the workflow's own data, and `forget` does not rewrite it: derive nothing personal, or give that step its own retention.
+
+### Stop a loop with `limits.transitions`
+
+A `next` loop can run for as long as its condition holds, so every workflow has a cap: `limits: { transitions }`, 1000 by default. A **transition** is the first try of a node. Each visit of a node in a loop is one, and so is a node its `when` skips. A retry of a step and an undo are not. The run counts them in `workflow_runs.transitions`, written by the same event that schedules the node, so the count survives a crash and a restart.
+
+A node that would be transition `transitions + 1` does not run. The run compensates, as it does for a deadline, and ends `failed` with `WorkflowTransitionLimit` as its error (`journal.workflow_transition_limit`, with `data.limit` and `data.transitions`). This holds whatever `onDeadStep` says: a loop that must stop does not wait for an operator. The stopped node's body never runs, so no work is done and lost. `transitions` on the stopped run is `limit + 1`: it counts the node that was refused.
+
+Size the cap from the loop. A loop of `spin` then `rest` for `n` rounds makes `2n` transitions, plus the nodes before and after it. A reminder that goes round once a day for years needs `rounds * nodes in the loop`, and the prayer reminder above sets `limits: { transitions: 50_000 }` for that reason. A cap that is too low fails a healthy run, and one that is too high lets a bug loop for long. A run is checked against the cap in the code that runs it, so raising the cap in code lets the runs that are still open go on. A run that already ended `failed` stays failed.
 
 ### Start on an event
 
@@ -1574,10 +1661,12 @@ export const app = defineApp('shop')
 
 ### Testing
 
-`workflowHarness({ setup })` from `@arki/journal/testing` gives a test an in-memory database and control of time and crashes. `setup` builds the runtime: `initJournal`, the definitions and the compose. It returns `tables`, `journal` and the definitions the test uses. The harness adds:
+`workflowHarness({ setup })` from `@arki/journal/testing` gives a test an in-memory database and control of time, jobs and crashes. `workflowHarnessOn(db, { setup })` does the same on a database the test opened, such as a real Postgres with two pools for a race: the schema is the test's to push, and `close()` leaves it open. `setup` builds the runtime: `initJournal`, the definitions and the compose. It returns `tables`, `journal` and the definitions the test uses. The harness adds:
 
-- `tick(age)` moves time forward by shifting the stored due times back.
+- `tick(age)` moves time forward by shifting the stored due times back. Now stays now, so a body that reads `Date.now()` and a query that reads `now()` keep agreeing.
+- `tickTo(at)` moves time forward to `at`, read from a row `tick` moves, such as a run's `wakeAt`.
 - `drain()` runs jobs until none is due.
+- `dueJobs()` lists what a worker could claim now, in claim order. `release(job => boolean)` runs the first job the function picks and no other, so a test can put an event, a wake and a timer in the order it wants to see.
 - `crash()` is a restart: the rows stay, and `setup` runs again, so the journal and the definitions are new.
 - `close()` closes the database.
 
@@ -1807,7 +1896,7 @@ The procedure must have `journal` and a `db` the journal can write through on it
 
 ## Tables
 
-`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps`, `workflowSignals` and `limits`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
+`journalTables()` returns the tables: `events`, `receipts`, `cursors`, `jobs`, `jobAttempts`, `jobArchive`, `jobOperations`, `workflowRuns`, `workflowSteps`, `workflowSignals`, `workflowWaits` and `limits`. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
 
 `workflowRuns` has three nullable columns for start timing: `start_at` (the planned start of a delayed run), `ttl_at` (when a run that has not started expires) and `ttl_ms` (the `ttl`, so `reschedule` can move `ttl_at`). Its `state` may be `expired`. An app upgrading from an earlier version generates a migration for them.
 
@@ -1816,6 +1905,8 @@ The procedure must have `journal` and a `db` the journal can write through on it
 `workflowRuns` has three nullable `integer` columns for the run's overrides: `max_attempts`, `step_timeout_ms` and `priority`, from `def.start`. An app upgrading generates a migration for them (`drizzle-kit generate`); old runs keep `null`, so their steps run as their definitions say.
 
 `workflowRuns.state` may be `queued` (`onBusy: 'queue'`), and a partial index on the queued runs, `workflow_runs_queued_idx` on `(started_at, id) where state = 'queued'`, finds the oldest one a freed slot promotes. An app upgrading generates a migration for it (`drizzle-kit generate`).
+
+`workflowRuns` has `transitions` (`integer not null default 0`): how many nodes the run started on a first try, which `limits.transitions` caps. An app upgrading generates a migration for it (`drizzle-kit generate`), and backfills the runs that are still open (see the upgrade note).
 
 `workflowRuns` has `limits` (`text[] not null default '{}'`): the shared limits (`concurrency.shared`) the run holds, with a GIN index on the unfinished runs (`workflow_runs_limits_idx`). A workflow's own limit is not listed: it counts the runs by `name`, so runs started before this column count too. `limits` (`journal_limits`) is the `journal.limit` entity: `name varchar(256) primary key`, `paused boolean not null default false`, `total integer`, `per_key integer`, `keys jsonb not null default '{}'` (per key `{ perKey, until }`) and `version`. A limit nobody changed has no row. An app upgrading generates a migration for both (`drizzle-kit generate`).
 
@@ -1992,6 +2083,7 @@ The agent guide has the [error table](docs/agent-guide.md#errors) and the [recov
 - **Any worker claims any job.** Run the worker in the process that holds what its effects talk to.
 - **The job table holds pending and dead work only.** Finished jobs leave. Retention decides what is kept.
 - **Workflow steps are at least once.** A step can run again after a crash. The step body owns idempotency (`ctx.key`).
+- **A loop is capped by `limits.transitions`** (1000 by default). A run that would pass it compensates and ends `failed` with `WorkflowTransitionLimit`. See [Stop a loop with `limits.transitions`](#stop-a-loop-with-limitstransitions).
 - **Workflow values are small JSON.** The input, each result, each signal payload and the output must stay under `limits.payload` (65 536 bytes by default). A larger input makes `start` return `CommandConflict`; a larger result fails its step with `WORKFLOW_LIMIT`. A value must also come back from JSON unchanged (no `Date`, no class instance), or it is `UNSTABLE_SCHEMA`. Store big data elsewhere and keep a reference.
 
 ## Documentation

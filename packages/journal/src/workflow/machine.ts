@@ -28,12 +28,24 @@ export const shapeSchema = z
         z
           .object({
             name: z.string().min(1),
-            kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map', 'command']),
+            kind: z.enum(['step', 'waitFor', 'eventWait', 'sleep', 'child', 'map', 'command']),
             undo: z.boolean(),
             onCancel: z.enum(['cancel', 'detach']).optional(),
             signal: z.string().min(1).optional(),
             command: z.string().min(1).optional(),
             undoCommand: z.string().min(1).optional(),
+            on: z
+              .array(
+                z
+                  .object({
+                    label: z.string().min(1),
+                    entity: z.string().min(1),
+                    events: z.array(z.string().min(1)).readonly(),
+                  })
+                  .readonly(),
+              )
+              .readonly()
+              .optional(),
           })
           .readonly(),
       )
@@ -85,6 +97,8 @@ export function workflowMachine<
       priority: z.int32().optional(),
       // The shared limits the run holds, left out when it holds none: an older run holds none.
       limits: z.array(z.string().min(1)).readonly().optional(),
+      // Set by `startOn` only: the seq of the event that started the run. An event wait counts events after it.
+      triggerSeq: z.int().positive().optional(),
       // Set by `startBatch` and by `replay` only; `replay` also records its operator.
       batchId: z.string().optional(),
       replayOf: z.string().optional(),
@@ -191,6 +205,20 @@ export function workflowMachine<
     'SignalReceived',
     z.object({ name: z.string().min(1), deliveryId: z.string().min(1), at, ...byOperator }),
   );
+  /**
+   * An event wait took a recorded event of the app. `seq` is that event's: the wait's next visit reads on from it, and
+   * no other wait of the run takes it. `deliveryId` is its id, as a signal's delivery id names one delivery.
+   */
+  const WaitEventTaken = j.event(
+    'WaitEventTaken',
+    z.object({
+      node: nodePath,
+      label: z.string().min(1),
+      seq: z.int().positive(),
+      deliveryId: z.string().min(1),
+      at,
+    }),
+  );
   const TimerFired = j.event('TimerFired', z.object({ node: nodePath, at }));
   const DeadlineReached = j.event('DeadlineReached', z.object({ at }));
   const CancelRequested = j.event(
@@ -250,6 +278,7 @@ export function workflowMachine<
       metadata: e.data.metadata ?? {},
       rootId: e.data.rootId ?? null,
       fieldChanges: 0,
+      transitions: 0,
       startAt: date(e.data.startAt),
       ttlAt: date(e.data.ttlAt),
       ttlMs: e.data.ttlMs ?? null,
@@ -270,6 +299,8 @@ export function workflowMachine<
       state: row.state === 'compensating' ? 'compensating' : 'running',
       wakeAt: null,
       waitingFor: null,
+      // The first try of a `do` node is a transition. A retry, a resolve and an undo are the same transition or none.
+      transitions: e.data.phase === 'do' && e.data.attempt === 1 ? row.transitions + 1 : row.transitions,
     }))
     // Only a `do` result is a result of the run; an undo has none to keep.
     .on(NodeCompleted, (row, e) =>
@@ -301,6 +332,8 @@ export function workflowMachine<
     .on(JobRetried, () => ({}))
     // The signal row is written by the signal command; the wake that follows is NodeCompleted.
     .on(SignalReceived, () => ({}))
+    // The wake that follows is NodeCompleted, in the same write.
+    .on(WaitEventTaken, () => ({}))
     .on(TimerFired, row => ({
       state: row.state === 'parked' ? 'running' : row.state,
       wakeAt: null,
@@ -436,6 +469,7 @@ export function workflowMachine<
       ChildrenPlanned,
       JobRetried,
       SignalReceived,
+      WaitEventTaken,
       TimerFired,
       DeadlineReached,
       CancelRequested,

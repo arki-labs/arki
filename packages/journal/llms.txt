@@ -48,6 +48,9 @@
 - `kurrentEvents({ client, prefix? })` from `@arki/journal/kurrentdb` keeps events in KurrentDB: one stream per entity (`<kind>-<id>`, no `-` in the kind), `all` over `$all`, no `forget`.
 - Pass ids exactly as they are stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
+- A workflow waits for an app event with `.waitFor(name, { on: { [label]: { entity, events, match } }, timeout | until, onTimeout })`. It counts from admission, so an early event is kept, and one event is taken once per run. `onTimeout: 'continue'` gives `null`: a sleep an event cuts short. The wake effect is mounted for you. The table is `workflow_waits`.
+- An event wait stores a pointer `{ via, seq }`, not a copy of the event, so `forget` reaches every run that took the entity's events (parked, running or finished): an event with an `erased` form reads in that form. What a body derives from the event is the workflow's own data.
+- `limits: { transitions }` caps a run (1000 by default). A transition is the first try of a node: each visit in a loop and each `when`-skipped node count, a retry and an undo do not. A node past the cap does not run: the run compensates and ends `failed` with `WorkflowTransitionLimit` (`journal.workflow_transition_limit`). The count is `workflow_runs.transitions`; the upgrade note has the migration and a backfill.
 - An effect has no `run`. An event that must run a command starts a `j.task` or a `j.workflow` with `startOn`. `startOn.timing` is required: `'after-commit'`, or `'with-event'` (the run is written in the event's transaction; `onBusy: 'refuse'` does not compile).
 - A `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` node commits the command with its checkpoint: exactly once. Its result comes from the command's `output` schema.
 

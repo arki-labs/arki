@@ -334,6 +334,23 @@ export const WorkflowBusy = defineFailure('journal.workflow_busy', {
 /** A {@link WorkflowBusy} failure value. */
 export type WorkflowBusy = ReturnType<typeof WorkflowBusy>;
 
+/** A run tried to start a node past its workflow's `limits.transitions`, so it stops: it compensates, then ends `failed`
+ * with this failure as its error. `limit` is the workflow's `limits.transitions`; `transitions` is the count the run
+ * had reached. A transition is the first try of a node: each visit of a node in a loop counts, and so does a node its
+ * `when` skips; a retry and an undo do not.
+ * @fix Find why the run loops (a `next` that never leaves the loop), or raise `limits.transitions` when the loop is as long as the work needs.
+ * @verify bun run test -- src/workflow/transitions.pg.test.ts
+ */
+export const WorkflowTransitionLimit = defineFailure('journal.workflow_transition_limit', {
+  status: 409,
+  data: z.object({ runId: z.string(), name: z.string(), limit: z.number().int(), transitions: z.number().int(), detail: z.string() }),
+  message: '{detail}',
+  remediation:
+    'Find why the run loops (a next that never leaves the loop), or raise limits.transitions when the loop is as long as the work needs.',
+});
+/** A {@link WorkflowTransitionLimit} failure value. */
+export type WorkflowTransitionLimit = ReturnType<typeof WorkflowTransitionLimit>;
+
 /** What `def.read` returns when a stored value of the run does not fit its schema. `field` is `input`, `output` or
  * `results.<node>`; `detail` is the `WORKFLOW_READ_MISMATCH` message, and the cause is the schema's `InvalidInput`,
  * with its issues.

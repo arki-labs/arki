@@ -1,11 +1,13 @@
 /**
- * The schemas that check the run fields, timing, overrides and run changes. The types are the source, in the Zod-free
- * `run-fields.ts` that public signatures name (A-43); `schemas.test-d.ts` locks each schema to its type both ways. Only
- * the runner and the run machine use these, so no public `.d.ts` reaches this file.
+ * The schemas that check the run fields, timing, overrides and run changes, plus the stored result of an event wait.
+ * The run field types are the source, in the Zod-free `run-fields.ts` that public signatures name (A-43);
+ * `schemas.test-d.ts` locks each schema to its type both ways. Only the runner, the run machine and the private body
+ * of `define.ts` use these, so no public `.d.ts` reaches this file.
  */
 import { z } from 'zod';
 
 import { AGE_UNITS, parseAge } from '../retention.js';
+import { storedEventRowSchema } from '../zod.js';
 import { RUN_FIELD_LIMITS, RUN_OVERRIDE_LIMITS } from './run-fields.js';
 
 /**
@@ -70,3 +72,12 @@ export const metadataChangeSchema = z
 
 /** Checks the tags `ctx.tags.add` and `journal.workflows.addTags` take: at least one, each as at start. */
 export const addedTagsSchema = z.array(z.string().min(1).max(RUN_FIELD_LIMITS.tag)).min(1).readonly();
+
+/**
+ * What an event wait stores as its result: the label that took the event and the `seq` of the event's log row. The run
+ * keeps no copy of the event, so erasing the event in the log (`forget`) erases it for every run that took it.
+ */
+export const waitPointerSchema = z.object({ via: z.string().min(1), seq: z.int().positive() });
+
+/** The result an event wait gives a body: the label and the log row, in its JSON form. It is read from the log, never stored. */
+export const storedWaitResultSchema = z.object({ via: z.string().min(1), event: storedEventRowSchema });

@@ -56,7 +56,7 @@ import { CommandNotFound, JournalError } from './errors.js';
 import { routeOf } from './event-log.js';
 import { defineEvent } from './event.js';
 import { bindEffectFrom, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
-import { createHistory } from './history.js';
+import { createEventDecoder, createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
 import { createJobOps } from './outbox.js';
 import { trackRefusals } from './refusals.js';
@@ -217,6 +217,7 @@ function createInit<
     { event: defineEvent, entity, command, projection },
     tables,
     retention,
+    createEventDecoder(metaSchema),
   );
   return {
     event: defineEvent,

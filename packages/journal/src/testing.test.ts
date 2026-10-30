@@ -11,7 +11,7 @@ import { isFailure, orThrow } from '@arki/failure';
 
 import { initJournal } from './journal.js';
 import { tables } from './test-support.js';
-import { workflowHarness } from './testing.js';
+import { openJournalDb, workflowHarness, workflowHarnessOn } from './testing.js';
 
 const caller = { actorId: 'usr_test' };
 const workflowMeta = { actorId: 'system:workflow' };
@@ -254,10 +254,77 @@ describe('workflowHarness', () => {
 // The published types, not the source: declaration emit once printed the inferred return as `Promise<never>`, so every
 // member of a user's harness was `never` and any misuse compiled. `turbo test` builds first, so `dist` is current here;
 // `testing.test-d.ts` proves the named type itself is right.
+describe('workflowHarness, one job at a time', () => {
+  it('dueJobs shows what a worker could claim, and release runs the one picked and no other', async () => {
+    log.length = 0;
+    const first = newId('nap');
+    const second = newId('nap');
+    orThrow(await h.journal.run(h.db, h.napping.start, { input: {}, id: first }, caller));
+    orThrow(await h.journal.run(h.db, h.napping.start, { input: {}, id: second }, caller));
+    const due = await h.dueJobs();
+    expect(due.filter(job => job.runId === second)).toEqual([
+      expect.objectContaining({ effect: 'workflow.step', type: 'NodeScheduled', runId: second }),
+    ]);
+
+    // The later run goes first, though a worker left alone would have claimed the earlier one.
+    orThrow(await h.release(job => job.runId === second));
+    expect(orThrow(await h.napping.read(h.db, second))?.run.state).toBe('running');
+    expect(log).toEqual(['before']);
+    expect(orThrow(await h.napping.read(h.db, first))?.run.state).toBe('running');
+    // The job it held back is due again, as it was: nothing lost its place.
+    const stillDue = await h.dueJobs();
+    const stillDueIds = stillDue.map(job => job.id);
+    expect(stillDueIds).toContain(due.find(job => job.runId === first)?.id);
+    expect(stillDueIds).not.toContain(due.find(job => job.runId === second)?.id);
+    orThrow(await h.drain());
+    expect(orThrow(await h.napping.read(h.db, first))?.run.state).toBe('parked');
+  });
+
+  it('tickTo a time that has passed moves nothing, so a test can never move time back', async () => {
+    await expect(h.tickTo(new Date(Date.now() - 60_000))).resolves.toBeUndefined();
+  });
+
+  it('release says what was due when nothing fits', async () => {
+    await expect(h.release(job => job.effect === 'no.such.effect')).rejects.toThrow(/no due job fits/);
+  });
+
+  it('tickTo moves time to a stored moment: one second short leaves the timer waiting', async () => {
+    const id = newId('nap');
+    orThrow(await h.journal.run(h.db, h.napping.start, { input: {}, id }, caller));
+    orThrow(await h.drain());
+    const wakeAt = async () => {
+      const at = orThrow(await h.napping.read(h.db, id))?.run.wakeAt;
+      if (at === null || at === undefined) throw new Error('the run is not parked on a time');
+      return at;
+    };
+    const parkedUntil = await wakeAt();
+    await h.tickTo(new Date(parkedUntil.getTime() - 1000));
+    expect(orThrow(await h.drain())).toBe(0);
+    // `tick` moved the stored time too, so it is read again.
+    await h.tickTo(await wakeAt());
+    orThrow(await h.drain());
+    expect(orThrow(await h.napping.read(h.db, id))?.run.state).toBe('completed');
+  });
+});
+
+describe('workflowHarnessOn', () => {
+  it('runs on the database it is given, and leaves it open', async () => {
+    const { db, client } = await openJournalDb(tables);
+    const on = workflowHarnessOn(db, { setup });
+    orThrow(await on.journal.run(on.db, on.napping.start, { input: {}, id: 'run_on' }, caller));
+    orThrow(await on.drain());
+    expect(orThrow(await on.napping.read(db, 'run_on'))?.run.state).toBe('parked');
+    await on.close();
+    // `close` is the test's: the database still answers.
+    expect(await db.select().from(tables.workflowRuns)).toHaveLength(1);
+    await client.close();
+  });
+});
+
 describe('workflowHarness, as published', () => {
   it('declares its named return type, not an inferred one', () => {
     const published = readFileSync(new URL('../dist/testing.d.ts', import.meta.url), 'utf8');
-    expect(published).toContain('): Promise<WorkflowHarness<S>>;');
+    expect(published).toContain('): Promise<WorkflowHarness<S, PgliteDb>>;');
     expect(published).not.toContain('Promise<never>');
   });
 });

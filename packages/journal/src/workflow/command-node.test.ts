@@ -637,6 +637,7 @@ describe('the shape of a command node', () => {
     expect(() =>
       workflow('ends-refused', { version: 1, input })
         .command('pay', note, () => ({ orderId: orderId(1), note: 'x' }), { accept: [Declined] })
+        // @ts-expect-error -- the same rule is a type error; this proves the definition-time backstop.
         .finish(),
     ).toThrow(/finish needs a function/);
     expect(() =>

@@ -104,17 +104,13 @@ function assertStoredEvents(
   );
 }
 
-export function createHistory<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
-  deps: HistoryDeps<Meta>,
-) {
+/**
+ * Turns a stored log row into a recorded event, parsing data and meta with their current schemas. `id` is the row's
+ * entity id as the caller types it. Workflows decode the events a wait takes with this too, so a wait reads an event as
+ * replay and the worker read it.
+ */
+export function createEventDecoder<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(metaSchema: Meta) {
   type MetaOut = SchemaOutput<Meta>;
-  const { metaSchema } = deps;
-  const { jobs: jobsTable, jobArchive } = deps.tables;
-
-  /**
-   * Turn a stored log row into a recorded event, parsing data and meta with
-   * their current schemas. `id` is the row's entity id as the caller types it.
-   */
   /**
    * Lift a row's data from the schema version it was written at to the event's current
    * one, one step at a time. Each step parses with its own `from` schema first, so a bad
@@ -199,6 +195,18 @@ export function createHistory<Meta extends StandardSchemaV1<unknown, Record<stri
       erasedAt: row.erasedAt,
     });
   };
+
+  return decodeStoredEvent;
+}
+
+export function createHistory<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>>(
+  deps: HistoryDeps<Meta>,
+) {
+  type MetaOut = SchemaOutput<Meta>;
+  const { metaSchema } = deps;
+  const { jobs: jobsTable, jobArchive } = deps.tables;
+
+  const decodeStoredEvent = createEventDecoder<Meta>(metaSchema);
 
   /** The entity's own log on `db`: bound when it joins transactions, used as it is when it cannot. */
   const logAt = (db: DbHandle, entity: { readonly kind: string; readonly eventStorage: EventStorage }) => {

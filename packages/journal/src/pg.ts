@@ -327,6 +327,11 @@ export function journalTables(schema?: PgSchema) {
        * that moved the run, so an approval taken on a run is not voided by its progress reports.
        */
       fieldChanges: integer('field_changes').notNull().default(0),
+      /**
+       * How many times the run started a node on its first try: the count `limits.transitions` caps. A retry and an undo
+       * are not counted; each visit of a node in a loop is, and so is a node its `when` skips.
+       */
+      transitions: integer('transitions').notNull().default(0),
       /** When the run's first node is due, from `start({ delay })` or `reschedule`. Null: it was due at once. */
       startAt: timestamp('start_at', { withTimezone: true, mode: 'date' }),
       /** When a run whose first node has not started gives up and ends `expired`. Null: it never expires. */
@@ -445,6 +450,34 @@ export function journalTables(schema?: PgSchema) {
     t => [unique('workflow_signals_run_name_delivery_unique').on(t.runId, t.name, t.deliveryId)],
   );
 
+  /**
+   * One row per label of an event wait a run is parked on: what the wake effect looks up when an event is recorded.
+   * The row goes when the run leaves the park, so the table holds parked waits only.
+   */
+  const workflowWaits = table(
+    'workflow_waits',
+    {
+      runId: varchar('run_id', { length: 256 })
+        .notNull()
+        .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+      /** The wait node's path inside the run. */
+      node: varchar('node', { length: 256 }).notNull(),
+      /** The label of `on` this row is for. */
+      label: varchar('label', { length: 128 }).notNull(),
+      entityKind: varchar('entity_kind', { length: 64 }).notNull(),
+      entityId: varchar('entity_id', { length: 256 }).notNull(),
+      /** The event types this label waits for. */
+      types: varchar('types', { length: 128 }).array().notNull(),
+      /** The wait counts events with a higher `seq`. */
+      afterSeq: bigint('after_seq', { mode: 'number' }).notNull(),
+    },
+    t => [
+      primaryKey({ name: 'workflow_waits_pk', columns: [t.runId, t.node, t.label] }),
+      // The correlation key: a recorded event finds its waits here, never by scanning running runs.
+      index('workflow_waits_entity_idx').on(t.entityKind, t.entityId),
+    ],
+  );
+
   return {
     events,
     jobs,
@@ -456,6 +489,7 @@ export function journalTables(schema?: PgSchema) {
     workflowRuns,
     workflowSteps,
     workflowSignals,
+    workflowWaits,
     limits,
   };
 }

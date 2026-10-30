@@ -38,6 +38,7 @@ import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
 import { parseRunKeep } from '../retention.js';
 import { LIMIT_BOUNDS } from './limit-types.js';
+import { storedWaitResultSchema } from './run-field-schemas.js';
 import { START_TIMINGS } from './states.js';
 
 /** What a node body sees. `results` has one key per earlier node. */
@@ -91,6 +92,13 @@ export function isCheckedRead<Input, ReadOutput, ReadResults extends AnyResults>
 /** What a command node keeps of a command that declares no `output`: nothing, so its result is `null`. */
 const noOutput: StandardSchemaV1<unknown, null> = z.null();
 
+/**
+ * How an event wait stores its result: the label, and the event as the log row, the same JSON an effect job's `args`
+ * holds. The runner decodes that row for bodies and for `def.read` as a job's event is decoded, so upcasters apply.
+ * Annotated so no Zod type reaches `define.d.ts` (A-43).
+ */
+const waitResultSchema: StandardSchemaV1 = storedWaitResultSchema;
+
 /** The schema a stored node result is checked with, and whether `null` (skipped, or timed out into `continue`) is kept. */
 export function resultSchemaOf(node: WorkflowNode) {
   if (node.kind === 'step' && node.options.output !== undefined) {
@@ -101,6 +109,9 @@ export function resultSchemaOf(node: WorkflowNode) {
   }
   if (node.kind === 'waitFor') {
     return { schema: node.schema, nullable: node.onTimeout === 'continue' || node.when !== undefined };
+  }
+  if (node.kind === 'eventWait') {
+    return { schema: waitResultSchema, nullable: node.onTimeout === 'continue' || node.when !== undefined };
   }
   return;
 }
@@ -119,6 +130,19 @@ export type CommandNodeView<Input, Results> = {
   readonly results: Results;
 };
 type ErasedCommandView = CommandNodeView<unknown, Readonly<Record<string, unknown>>>;
+
+/** What an event wait's `match`, `until`, `when` and `where` see. Plain data, with no worker behind it. */
+export type WaitView<Input, Results> = Pick<CommandNodeView<Input, Results>, 'runId' | 'input' | 'results'>;
+type ErasedWaitView = WaitView<unknown, Readonly<Record<string, unknown>>>;
+
+/** One label of an event wait, as a node keeps it: nothing is known about its entity or its events. */
+export type ErasedWaitSource = {
+  readonly label: string;
+  readonly entity: AnyEntity;
+  readonly events: readonly AnyEventDef[];
+  readonly match: BivariantFn<[view: ErasedWaitView], string>;
+  readonly where?: BivariantFn<[view: ErasedWaitView & { readonly event: Recorded }], boolean> | undefined;
+};
 
 /**
  * A command as a node keeps it: nothing is known about its input, its result or its journal. `Command` needs the
@@ -153,6 +177,9 @@ export type WorkflowNode =
         readonly retry?: Backoff;
         readonly timeout?: RetentionAge;
         readonly when?: Body<boolean>;
+        /** The failures the step may return and the run goes on from, when `onFailure` is `'continue'`. */
+        readonly failures?: readonly ErasedFailureDefinition[];
+        readonly onFailure?: 'continue';
         /** An earlier node name, `'next'`, or a function that picks one. */
         readonly next?: string | BivariantFn<[ctx: ErasedContext & { readonly result: unknown }], string>;
       };
@@ -168,10 +195,22 @@ export type WorkflowNode =
       readonly when?: Body<boolean>;
     }
   | {
+      readonly kind: 'eventWait';
+      readonly name: string;
+      readonly undo: false;
+      readonly on: readonly ErasedWaitSource[];
+      readonly timeout?: RetentionAge | undefined;
+      readonly until?: BivariantFn<[view: ErasedWaitView], Date> | undefined;
+      readonly onTimeout: 'fail' | 'continue';
+      readonly when?: BivariantFn<[view: ErasedWaitView], boolean> | undefined;
+    }
+  | {
       readonly kind: 'sleep';
       readonly name: string;
       readonly undo: false;
       readonly until: RetentionAge | Body<Date>;
+      /** An earlier node, `'next'`, or a function that picks one, as on a step. */
+      readonly next?: string | BivariantFn<[view: ErasedWaitView], string> | undefined;
     }
   | {
       readonly kind: 'child';
@@ -216,6 +255,11 @@ export type WorkflowNode =
 
 export type WorkflowLimits = {
   readonly payload: number;
+  /**
+   * The most nodes a run may start on a first try (1000 by default). Each visit of a node in a loop counts, and so does
+   * a node its `when` skips; a retry and an undo do not. A node past the cap does not run: the run compensates and ends
+   * `failed` with `WorkflowTransitionLimit`.
+   */
   readonly transitions: number;
   readonly children: number;
 };
@@ -444,7 +488,7 @@ type AddSignal<Signals extends AnySignals, Name extends string, Payload extends 
   readonly [K in keyof Signals | Name]: K extends Name ? Payload : K extends keyof Signals ? Signals[K] : never;
 };
 
-type StepOptions<Context, Result, Earlier extends string> = {
+type StepOptions<Context, Result, Earlier extends string, Kept = never> = {
   /** Parses the stored result. Needed for an operator to supply a result by hand. */
   readonly output?: StandardSchemaV1<unknown, Result>;
   readonly undo?: (ctx: Context & { readonly result: Result }) => unknown;
@@ -452,7 +496,7 @@ type StepOptions<Context, Result, Earlier extends string> = {
   readonly retry?: Backoff;
   readonly timeout?: RetentionAge;
   /** Backward jump only: an earlier node, or `'next'` to carry on. */
-  readonly next?: Earlier | 'next' | ((ctx: Context & { readonly result: Result }) => Earlier | 'next');
+  readonly next?: Earlier | 'next' | ((ctx: Context & { readonly result: Result | Kept }) => Earlier | 'next');
 };
 
 /** What a command node reads of a command. `Output` is the command's `output` schema, when it declares one. */
@@ -472,6 +516,10 @@ type AcceptedBy<Refusal> = {
   readonly dataSchema: StandardSchemaV1 | undefined;
   is(value: unknown): boolean;
 };
+/** The failures a step keeps as its result: its listed `failures`, when `onFailure` is `'continue'`. */
+type KeptFailures<OnFailure, Failures extends readonly AcceptedBy<unknown>[]> = OnFailure extends 'continue'
+  ? ReturnType<Failures[number]>
+  : never;
 /** What a command node stores: the output of the command's `output` schema, or `null` when it declares none. */
 type StoredResult<Output> = [Output] extends [StandardSchemaV1] ? SchemaOutput<Output> : null;
 /** A command node's result: what it stores, or an accepted failure, and `null` when its `when` can skip it. */
@@ -497,60 +545,77 @@ export type WorkflowBuilder<
     Returned,
     When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
     Output extends StandardSchemaV1<unknown, Resolved<Returned>> | undefined = undefined,
+    const Failures extends readonly AcceptedBy<RefusalOf<Returned>>[] = readonly [],
+    OnFailure extends 'continue' | undefined = undefined,
   >(
     name: Fresh<Results, Name>,
     run: (ctx: Ctx<Input, Results, N, Where>) => Returned,
     // `NoInfer`: the result comes from the body alone. Inferred from `output` as well, the schema would win and an
     // async body (a promise of the result) would no longer match it.
-    options?: StepOptions<Ctx<Input, Results, N, Where>, NoInfer<Resolved<Returned>>, keyof Results & string> & {
+    options?: StepOptions<
+      Ctx<Input, Results, N, Where>,
+      NoInfer<Resolved<Returned>>,
+      keyof Results & string,
+      KeptFailures<OnFailure, Failures>
+    > & {
       /** When it returns false the step is skipped and its result is `null`. */
       readonly when?: When;
       readonly output?: Output;
+      /**
+       * The failures the step may return. Each must be one the body can return, and carries the schema that checks its
+       * stored data. Without `onFailure` a returned failure fails the step, as ever.
+       */
+      readonly failures?: Failures;
+      /**
+       * `'continue'`: a returned failure that `failures` lists is the step's result and the run goes on from it. The
+       * result is stored as the failure's envelope and read back as a real failure. Any other failure fails the step.
+       */
+      readonly onFailure?: OnFailure;
     },
   ): WorkflowBuilder<
     Input,
-    Add<Results, Name, StepResult<Returned, When>>,
+    Add<Results, Name, StepResult<Returned, When, KeptFailures<OnFailure, Failures>>>,
     N,
     Declared,
-    StepResult<Returned, When>,
+    StepResult<Returned, When, KeptFailures<OnFailure, Failures>>,
     Where,
     Ext,
     Signals,
-    [Output] extends [StandardSchemaV1] ? Add<Checked, Name, StepResult<SchemaOutput<Output>, When>> : Checked
+    [Output] extends [StandardSchemaV1]
+      ? Add<Checked, Name, StepResult<SchemaOutput<Output>, When, KeptFailures<OnFailure, Failures>>>
+      : Checked
   >;
 
-  waitFor<
-    Name extends string,
-    Signal extends string,
-    Payload extends StandardSchemaV1,
-    When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
-    OnTimeout extends 'fail' | 'continue' = 'fail',
-  >(
-    name: Fresh<Results, Name>,
-    options: {
-      /** The signal's name. One name has one payload schema: two waits for it must share the same schema object. */
-      readonly signal: Signal;
-      readonly schema: Payload;
-      readonly timeout?: RetentionAge;
-      readonly onTimeout?: OnTimeout;
-      /** When it returns false the wait is skipped: the run does not park, and the result is `null`. */
-      readonly when?: When;
-    },
-  ): WorkflowBuilder<
-    Input,
-    Add<Results, Name, Waited<Payload, OnTimeout, When>>,
-    N,
-    Declared,
-    Waited<Payload, OnTimeout, When>,
-    Where,
-    Ext,
-    AddSignal<Signals, Signal, Payload>,
-    Add<Checked, Name, Waited<Payload, OnTimeout, When>>
-  >;
+  /**
+   * Parks the run until something arrives. Two forms:
+   *
+   * - `{ signal, schema }`: a signal from outside the app (`def.signal`). The result is its payload.
+   * - `{ on: { [label]: { entity, events, match, where? } } }`: an event of the app. `match` gives the entity id to
+   *   watch and must return that entity's id type; `events` must be events of that entity. `where` drops an event the
+   *   wait does not want. The result is `{ via: label, event }`, and narrowing `event.type` types `event.data`.
+   *
+   * An event wait counts every event since the run was admitted (its `startOn` event, or its start), so one recorded
+   * before the worker gets here is kept. It takes the oldest it finds; a later visit in a `next` loop reads on from the
+   * last one it took, and one event is taken once per run. `timeout` or `until` end the wait: `onTimeout: 'continue'`
+   * gives `null` and goes on, which makes the wait a sleep that an event cuts short.
+   */
+  waitFor: WaitForSignal<Input, Results, N, Declared, Where, Ext, Signals, Checked> &
+    WaitForEvent<Input, Results, N, Declared, Where, Ext, Signals, Checked>;
 
+  /**
+   * Parks the run until a time. `next` loops as a step's does: an earlier node, `'next'`, or a function that picks one.
+   * Its function sees plain data, and runs in the transaction that ends the sleep.
+   */
   sleep<Name extends string>(
     name: Fresh<Results, Name>,
     until: RetentionAge | ((ctx: Ctx<Input, Results, N, Where>) => Date),
+    options?: {
+      /** Backward jump only: an earlier node, or `'next'` to carry on. */
+      readonly next?:
+        | (keyof Results & string)
+        | 'next'
+        | ((view: WaitView<SchemaOutput<Input>, Results>) => (keyof Results & string) | 'next');
+    },
   ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals, Checked>;
 
   child<Name extends string, Def extends WorkflowDef>(
@@ -637,15 +702,130 @@ export type WorkflowBuilder<
   /**
    * Without a function the output is the last node's result. With an `output` schema the function must return that
    * schema's output (or a failure, or a promise of either): a wrong return does not compile. Without a function the
-   * last result must fit the schema, or the function is required. A last node that can end in an accepted failure needs
-   * the function too, and `finish` throws `BAD_DEFINITION` without it: a run's output is never a failure.
+   * last result must fit the schema, or the function is required. A last node whose result can be a failure (a command's
+   * `accept`, a step's `failures` with `onFailure: 'continue'`) needs the function too: a run's output is never a
+   * failure, so leaving it out does not compile. `finish` still throws `BAD_DEFINITION` for an erased definition that
+   * gets past the types.
    */
   finish<Returned extends FinishBound<Declared> = Last>(
-    ...run: [Last] extends [FinishBound<Declared>]
+    // One condition, so the implementation's `run` stays assignable: the last result fits the bound and is no failure.
+    ...run: [Last, Extract<Last, Failure>] extends [FinishBound<Declared>, never]
       ? [run?: (ctx: FinishContext<Input, Results>) => Returned]
       : [run: (ctx: FinishContext<Input, Results>) => Returned]
   ): Finished<Input, Results, N, Declared, Returned, Signals, Checked, Ext>;
 };
+
+/** `.waitFor(name, { signal, schema })`: the form that waits for a signal from outside the app. */
+type WaitForSignal<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Ext extends DefExtension,
+  Signals extends AnySignals,
+  Checked extends AnyResults,
+> = <
+  Name extends string,
+  Signal extends string,
+  Payload extends StandardSchemaV1,
+  When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
+  OnTimeout extends 'fail' | 'continue' = 'fail',
+>(
+  name: Fresh<Results, Name>,
+  options: {
+    /** The signal's name. One name has one payload schema: two waits for it must share the same schema object. */
+    readonly signal: Signal;
+    readonly schema: Payload;
+    readonly timeout?: RetentionAge;
+    readonly onTimeout?: OnTimeout;
+    /** When it returns false the wait is skipped: the run does not park, and the result is `null`. */
+    readonly when?: When;
+  },
+) => WorkflowBuilder<
+  Input,
+  Add<Results, Name, Waited<Payload, OnTimeout, When>>,
+  N,
+  Declared,
+  Waited<Payload, OnTimeout, When>,
+  Where,
+  Ext,
+  AddSignal<Signals, Signal, Payload>,
+  Add<Checked, Name, Waited<Payload, OnTimeout, When>>
+>;
+
+/** The entity of each label of an event wait. */
+type WaitEntities = Readonly<Record<string, AnyEntity>>;
+/** The events each label of an event wait takes, as one union per label. */
+type WaitEvents<Entities extends WaitEntities> = Readonly<Record<keyof Entities, AnyEventDef>>;
+/** The event a label gives: its id type and meta come from the entity, its type and data from the events it lists. */
+type WaitEvent<Entity, Events> = RecordedOf<Events, MetaOfEntity<Entity>, EntityIdOf<Entity>>;
+/**
+ * `on` of an event wait. Two mapped types, each reversed by the compiler for one type parameter: `Entities` from each
+ * label's `entity`, `Events` from its `events`. So `where` sees the event of its own label, and no caller writes a type.
+ */
+type WaitOn<View, Entities extends WaitEntities, Events extends WaitEvents<Entities>> = {
+  readonly [L in keyof Entities]: {
+    readonly entity: Entities[L];
+    readonly events: readonly EventsOf<Entities[L]>[];
+    /** The id of the entity to watch. It is worked out once per visit, when the run gets to the wait. */
+    match(view: View): EntityIdOf<Entities[L]>;
+  };
+} & {
+  readonly [L in keyof Events]: {
+    readonly events: readonly Events[L][];
+    /** Takes only the events it returns true for. It must decide from its arguments alone. */
+    where?(view: View & { readonly event: WaitEvent<Entities[L & keyof Entities], Events[L]> }): boolean;
+  };
+};
+/** How an event wait ends with no event: after `timeout`, at `until`, or never. */
+type WaitDeadline<View> =
+  | { readonly timeout: RetentionAge; readonly until?: never }
+  | { readonly until: (view: View) => Date; readonly timeout?: never }
+  | { readonly timeout?: never; readonly until?: never };
+/** An event wait's result: one member per label, so `via` narrows the label and `event.type` the event. */
+type WaitResult<Entities extends WaitEntities, Events extends WaitEvents<Entities>> = {
+  [L in keyof Entities & string]: { readonly via: L; readonly event: WaitEvent<Entities[L], Events[L]> };
+}[keyof Entities & string];
+/** The result of an event wait: `null` when it timed out into `continue` or its `when` skipped it. */
+type EventWaited<Entities extends WaitEntities, Events extends WaitEvents<Entities>, OnTimeout, When> =
+  OnTimeout extends 'continue' ? WaitResult<Entities, Events> | null : Skippable<WaitResult<Entities, Events>, When>;
+
+/** `.waitFor(name, { on })`: the form that waits for an event of the app. */
+type WaitForEvent<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Ext extends DefExtension,
+  Signals extends AnySignals,
+  Checked extends AnyResults,
+> = <
+  Name extends string,
+  Entities extends WaitEntities,
+  Events extends WaitEvents<Entities>,
+  When extends ((view: WaitView<SchemaOutput<Input>, Results>) => boolean) | undefined,
+  OnTimeout extends 'fail' | 'continue' = 'fail',
+>(
+  name: Fresh<Results, Name>,
+  options: {
+    readonly on: WaitOn<WaitView<SchemaOutput<Input>, Results>, Entities, Events>;
+    readonly onTimeout?: OnTimeout;
+    /** When it returns false the wait is skipped: the run does not park, and the result is `null`. */
+    readonly when?: When;
+  } & WaitDeadline<WaitView<SchemaOutput<Input>, Results>>,
+) => WorkflowBuilder<
+  Input,
+  Add<Results, Name, EventWaited<Entities, Events, OnTimeout, When>>,
+  N,
+  Declared,
+  EventWaited<Entities, Events, OnTimeout, When>,
+  Where,
+  Ext,
+  Signals,
+  Add<Checked, Name, EventWaited<Entities, Events, OnTimeout, When>>
+>;
 
 /** What `finish` builds: the definition, typed by what the builder grew, with what a journal adds to it. */
 type Finished<
@@ -720,7 +900,7 @@ type ReadResultsOf<Results extends AnyResults, Checked extends AnyResults> = {
 
 /** A node's result, and `null` when the node has a `when` that can skip it. */
 type Skippable<Result, When> = undefined extends When ? Result : Result | null;
-type StepResult<Returned, When> = Skippable<Resolved<Returned>, When>;
+type StepResult<Returned, When, Kept = never> = Skippable<Resolved<Returned> | Kept, When>;
 type FinishOutput<Declared extends StandardSchemaV1 | undefined, Returned> = [Declared] extends [StandardSchemaV1]
   ? SchemaOutput<Declared>
   : Resolved<Returned>;
@@ -802,6 +982,15 @@ function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
       undo: node.undo,
       ...(node.kind === 'child' ? { onCancel: node.onCancel } : {}),
       ...(node.kind === 'waitFor' ? { signal: node.signal } : {}),
+      ...(node.kind === 'eventWait'
+        ? {
+            on: node.on.map(source => ({
+              label: source.label,
+              entity: source.entity.kind,
+              events: source.events.map(event => event.type),
+            })),
+          }
+        : {}),
       ...(node.kind === 'command' ? { command: node.command.name } : {}),
       ...(node.kind === 'command' && node.options.undo !== undefined
         ? { undoCommand: node.options.undo.command.name }
@@ -811,13 +1000,15 @@ function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
 }
 
 /**
- * What the shape hash reads of one node. A command node adds its commands' names, so changing a command is a shape
- * change. Every other kind keeps exactly these three fields: its hash must not move, or running workflows strand.
+ * What the shape hash reads of one node. A command node adds its commands' names and an event wait its `on`, so
+ * changing either is a shape change. Every other kind keeps exactly these three fields: its hash must not move, or
+ * running workflows strand.
  */
-const hashedFields = (entry: WorkflowShape['nodes'][number]) =>
-  entry.kind === 'command'
-    ? [entry.name, entry.kind, entry.undo, entry.command, entry.undoCommand ?? null]
-    : [entry.name, entry.kind, entry.undo];
+const hashedFields = (entry: WorkflowShape['nodes'][number]) => {
+  if (entry.kind === 'command') return [entry.name, entry.kind, entry.undo, entry.command, entry.undoCommand ?? null];
+  if (entry.kind === 'eventWait') return [entry.name, entry.kind, entry.undo, entry.on ?? null];
+  return [entry.name, entry.kind, entry.undo];
+};
 
 const isPositiveInt = (value: number) => Number.isInteger(value) && value > 0;
 
@@ -858,6 +1049,34 @@ function checkConcurrency<Input extends StandardSchemaV1>(
   }
 }
 
+/** The longest label `workflow_waits.label` holds. */
+const WAIT_LABEL_LIMIT = 128;
+
+/** The rules of an event wait's `on` that need no types: a wrong one could never wake, or would wake on the wrong log. */
+function checkWaitSources(workflowName: string, name: string, on: readonly ErasedWaitSource[]) {
+  if (on.length === 0) refuse(workflowName, `waitFor '${name}' needs at least one label in on`);
+  for (const { label, entity, events } of on) {
+    if (label === '' || label.length > WAIT_LABEL_LIMIT) {
+      refuse(workflowName, `waitFor '${name}' needs labels of 1 to ${WAIT_LABEL_LIMIT} characters, got '${label}'`);
+    }
+    if (events.length === 0) refuse(workflowName, `waitFor '${name}': label '${label}' lists no events`);
+    if (entity.eventStorage !== 'stored') {
+      refuse(
+        workflowName,
+        `waitFor '${name}': entity "${entity.kind}" does not keep its events in journal_events, and a wait reads them there; declare it with events: 'stored'`,
+      );
+    }
+    for (const event of events) {
+      if (entity.events.get(event.type) !== event) {
+        refuse(
+          workflowName,
+          `waitFor '${name}': entity "${entity.kind}" does not record event "${event.type}"; pass an event the entity declares`,
+        );
+      }
+    }
+  }
+}
+
 /** Adds a node after checking the rules that need no types. */
 function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
   state: BuilderState<Input, Ext>,
@@ -868,17 +1087,34 @@ function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
   if (state.nodes.some(existing => existing.name === node.name)) {
     refuse(state.name, `node '${node.name}' is declared twice; node names are unique per workflow`);
   }
-  if (node.kind === 'step') {
-    const { next } = node.options;
+  if (node.kind === 'step' || node.kind === 'sleep') {
+    const next = node.kind === 'step' ? node.options.next : node.next;
     if (typeof next === 'string' && next !== 'next' && !state.nodes.some(existing => existing.name === next)) {
       refuse(
         state.name,
-        `step '${node.name}' has next: '${next}', which is not an earlier node; next may only jump back`,
+        `${node.kind} '${node.name}' has next: '${next}', which is not an earlier node; next may only jump back`,
       );
     }
   }
   return { ...state, nodes: [...state.nodes, node] };
 }
+
+/** `waitFor`'s options as the builder reads them, in either form. */
+type ErasedWaitOptions =
+  | {
+      readonly signal: string;
+      readonly schema: StandardSchemaV1;
+      readonly timeout?: RetentionAge;
+      readonly onTimeout?: 'fail' | 'continue';
+      readonly when?: Body<boolean>;
+    }
+  | {
+      readonly on: Readonly<Record<string, Omit<ErasedWaitSource, 'label'>>>;
+      readonly timeout?: RetentionAge;
+      readonly until?: BivariantFn<[view: ErasedWaitView], Date>;
+      readonly onTimeout?: 'fail' | 'continue';
+      readonly when?: BivariantFn<[view: ErasedWaitView], boolean>;
+    };
 
 function refuseUndo(workflowName: string, kind: string, name: string, options: object | undefined) {
   if (options !== undefined && 'undo' in options) {
@@ -903,6 +1139,9 @@ function finishDef<
   const last = state.nodes.at(-1);
   if (finish === undefined && last?.kind === 'command' && last.accept.length > 0) {
     refuse(state.name, `command '${last.name}' can end in an accepted failure, so finish needs a function: a run's output is never a failure`);
+  }
+  if (finish === undefined && last?.kind === 'step' && last.options.onFailure === 'continue') {
+    refuse(state.name, `step '${last.name}' can end in a returned failure, so finish needs a function: a run's output is never a failure`);
   }
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
@@ -936,12 +1175,41 @@ function makeBuilder<
   state: BuilderState<Input, Ext>,
 ): WorkflowBuilder<Input, Results, N, Declared, Last, Where, Ext, Signals, Checked> {
   return {
-    step: (name, run, options) =>
-      makeBuilder(
+    step: (name, run, options) => {
+      if (options?.onFailure === 'continue' && (options.failures ?? []).length === 0) {
+        refuse(state.name, `step '${name}' has onFailure 'continue' and lists no failures to continue on`);
+      }
+      if (options?.failures !== undefined && options.failures.length > 0 && options.onFailure === undefined) {
+        refuse(state.name, `step '${name}' lists failures but has no onFailure: set onFailure to 'continue'`);
+      }
+      return makeBuilder(
         withNode(state, { kind: 'step', name, undo: options?.undo !== undefined, run, options: options ?? {} }),
-      ),
-    waitFor: (name, options) => {
+      );
+    },
+    waitFor: <R extends AnyResults, L, S extends AnySignals, C extends AnyResults>(
+      name: string,
+      options: ErasedWaitOptions,
+    ): WorkflowBuilder<Input, R, N, Declared, L, Where, Ext, S, C> => {
       refuseUndo(state.name, 'waitFor', name, options);
+      if ('on' in options) {
+        const on = Object.entries(options.on).map(([label, source]) => ({ ...source, label }));
+        checkWaitSources(state.name, name, on);
+        if (options.timeout !== undefined && options.until !== undefined) {
+          refuse(state.name, `waitFor '${name}' takes timeout or until, not both`);
+        }
+        return makeBuilder(
+          withNode(state, {
+            kind: 'eventWait',
+            name,
+            undo: false,
+            on,
+            timeout: options.timeout,
+            until: options.until,
+            onTimeout: options.onTimeout ?? 'fail',
+            when: options.when,
+          }),
+        );
+      }
       if (options.signal === '') refuse(state.name, `waitFor '${name}' needs a signal name`);
       const sharing = state.nodes.find(
         node => node.kind === 'waitFor' && node.signal === options.signal && node.schema !== options.schema,
@@ -965,9 +1233,9 @@ function makeBuilder<
         }),
       );
     },
-    sleep: (name, until, extra?: object) => {
-      refuseUndo(state.name, 'sleep', name, extra);
-      return makeBuilder(withNode(state, { kind: 'sleep', name, undo: false, until }));
+    sleep: (name, until, options) => {
+      refuseUndo(state.name, 'sleep', name, options);
+      return makeBuilder(withNode(state, { kind: 'sleep', name, undo: false, until, next: options?.next }));
     },
     child: (name, def, options) => {
       return makeBuilder(
@@ -1012,7 +1280,7 @@ function makeBuilder<
           options: { undo: options?.undo, when: options?.when, retry: options?.retry },
         }),
       ),
-    finish: run => finishDef(state, run),
+    finish: (...run: [run?: WorkflowDef['finish']]) => finishDef(state, run[0]),
   };
 }
 
@@ -1055,7 +1323,7 @@ export function taskOf<
 ): TaskDef<Input, N, Declared, Ext, Returned> {
   // Only the step's own options: the rest of `options` are the workflow's, and `output` there is the run's output.
   const { retry, timeout, undo, key } = options;
-  return builder.step(TASK_STEP, run, { retry, timeout, undo, key }).finish();
+  return builder.step(TASK_STEP, run, { retry, timeout, undo, key }).finish(({ results }) => results[TASK_STEP]);
 }
 
 /**

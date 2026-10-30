@@ -12,7 +12,7 @@
  * exactly-once: its command runs in a savepoint of the transaction that holds the checkpoint, so both commit or
  * neither does.
  */
-import { and, asc, count, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { AsyncSchemaFailure, Failure } from '@arki/failure';
@@ -35,13 +35,17 @@ import { ensure, is, parseAsync } from '@arki/schema';
 
 import type { CommandContext, JournalDefinitions, LimitOps, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
 import type { CommandFailure } from '../errors.js';
+import type { createEventDecoder } from '../history.js';
 import type { OwnedEffectContext } from '../internal-context.js';
-import type { JournalTables } from '../pg.js';
+import type { JournalTables, StoredEventRow } from '../pg.js';
 import type { JobRetention, ResolvedRetention, RetentionAge } from '../retention.js';
 import type {
+  AnyEntity,
+  AnyEventDef,
   DbHandle,
   Needed,
   Needs,
+  Recorded,
   RecordedOf,
   RootDb,
   Services,
@@ -87,6 +91,7 @@ import {
   JournalError,
   WorkflowBusy,
   WorkflowReadMismatch,
+  WorkflowTransitionLimit,
 } from '../errors.js';
 import { givenServices, ownedEffectFor } from '../handlers.js';
 import { createHookPoint } from '../hooks.js';
@@ -110,11 +115,14 @@ import {
   runFieldsSchema,
   runOverridesSchema,
   runTimingSchema,
+  storedWaitResultSchema,
   ttlAgeSchema,
+  waitPointerSchema,
 } from './run-field-schemas.js';
 import { BATCH_LIMIT, changedMetadata, metadataRefusal, newTags, RUN_FIELD_LIMITS } from './run-fields.js';
 import { STEP_PHASES } from './states.js';
 import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
+import { withWaitEvents } from './wait-results.js';
 
 /** The library-owned effect that runs one node attempt. */
 export const STEP_EFFECT = 'workflow.step';
@@ -126,8 +134,14 @@ export const LIMIT_TIMER_EFFECT = 'workflow.limitTimer';
 export const START_EFFECT = 'workflow.start';
 /** The library-owned effect that runs a definition's lifecycle hooks (`on`) when a run ends. */
 export const LIFECYCLE_EFFECT = 'workflow.on';
+/** The library-owned effects that wake event waits: `workflow.wake:<entity kind>`. Mounted for each entity a wait watches. */
+export const WAKE_EFFECT = 'workflow.wake';
 /** The actor on the job operation rows the runner writes, such as the timer it cancels when a signal wins. */
 const WORKFLOW_ACTOR = 'system:workflow';
+/** The command that finds the runs parked on an event, under the key's lock. Internal: only the wake effect runs it. */
+const WAITERS_COMMAND = 'workflow.waiters';
+/** The command that wakes one parked run on an event. Internal: only the wake effect runs it. */
+const WAKE_COMMAND = 'workflow.wake';
 /** The command that moves a run on after a node attempt. Internal: only the step effect runs it. */
 const CHECKPOINT_COMMAND = 'workflow.checkpoint';
 /** The command that runs one attempt of a command node, and moves the run on in the same transaction. Internal. */
@@ -431,6 +445,13 @@ const routeSchema = z.discriminatedUnion('go', [
 ]);
 type Route = z.infer<typeof routeSchema>;
 /** The child runs of one visit of a child or map node. */
+const waitKeySchema = z.object({
+  label: z.string().min(1),
+  entityKind: z.string().min(1),
+  entityId: z.string().min(1),
+  types: z.array(z.string().min(1)).min(1),
+});
+type WaitKey = z.infer<typeof waitKeySchema>;
 const childrenPlanSchema = z.object({
   /** The node path, with the visit of a loop appended (`fan`, `fan:2`): the `parentPath` of every child. */
   base: z.string().min(1),
@@ -462,13 +483,21 @@ const nodeCheckpointSchema = z.object({
     /** An undo ran. */
     z.object({ kind: z.literal('undone'), result: z.unknown() }),
     /** A `waitFor` or `sleep` node has nothing to run: the run parks until the signal or `wakeAt`. */
-    z.object({ kind: z.literal('park'), waitingFor: z.string().min(1).nullable(), wakeAt: isoTime.nullable() }),
+    z.object({
+      kind: z.literal('park'),
+      waitingFor: z.string().min(1).nullable(),
+      wakeAt: isoTime.nullable(),
+      /** An event wait's keys, worked out once per visit. The checkpoint locks each one before it reads the log. */
+      waits: z.array(waitKeySchema).optional(),
+    }),
     /** A `child` or `map` node worked out its child runs (ids and checked inputs): the run parks and starts them. */
     z.object({ kind: z.literal('children'), plan: childrenPlanSchema }),
     /** The first node's first try found the run's `ttl` passed: the run ends `expired` if the database agrees. */
     z.object({ kind: z.literal('expired') }),
     /** A command node found the run compensating before its command ran: the node is dropped, and the undos go on. */
     z.object({ kind: z.literal('dropped') }),
+    /** The node was about to make more transitions than `limits.transitions`: the run compensates, then fails with `error`. */
+    z.object({ kind: z.literal('transition-limit'), error: z.string().min(1) }),
   ]),
 });
 /** A timer job fired: the wake time of a park, or the deadline of the run. */
@@ -499,8 +528,31 @@ function signalSchemaFor<Payload extends StandardSchemaV1>(): SignalSchema<Paylo
   };
 }
 
+/** The arguments of the two commands of the wake effect. */
+const waitersSchema = z.object({
+  entityKind: z.string().min(1),
+  entityId: z.string().min(1),
+  type: z.string().min(1),
+  seq: z.int().positive(),
+});
+const wakeWaitSchema = z.object({ runId: z.string().min(1), node: z.string().min(1) });
+/** What the wait rules read of a `WaitEventTaken` event. */
+const takenEventSchema = z.object({ node: z.string().min(1), seq: z.int().positive() });
+type TakenEvent = z.infer<typeof takenEventSchema>;
+/** What a wait reads of `RunStarted`: the event that started the run, when one did. */
+const triggerSchema = z.object({ triggerSeq: z.int().positive().optional() });
+/** The lock of one correlation key. Park and wake both take it, so whichever commits second sees the other. */
+const waitLockId = (entityKind: string, entityId: string) => `workflow-wait:${entityKind}:${entityId}`;
+/** How many log rows a wait reads at a time, while `where` keeps refusing what it finds. */
+const WAIT_READ_BATCH = 100;
+
 type Verdict =
-  | { readonly kind: 'park'; readonly waitingFor: string | null; readonly wakeAt: string | null }
+  | {
+      readonly kind: 'park';
+      readonly waitingFor: string | null;
+      readonly wakeAt: string | null;
+      readonly waits?: WaitKey[];
+    }
   | { readonly kind: 'skipped'; readonly reason: string; readonly route: Route }
   | {
       readonly kind: 'completed';
@@ -564,6 +616,9 @@ function failureOutcome(
 const REFUSED = '~refused';
 const refusedResultSchema = z.strictObject({ [REFUSED]: z.looseObject({ code: z.string().min(1) }) });
 type CommandNode = Extract<WorkflowNode, { readonly kind: 'command' }>;
+type EventWaitNode = Extract<WorkflowNode, { readonly kind: 'eventWait' }>;
+/** `decodeEvent`, as the plain functions below use it: they pass its result on and check only for a failure. */
+type DecodeEvent = (row: StoredEventRow, def: AnyEventDef | undefined, id: string) => unknown;
 
 /** The failure a command node stored, real again, or `undefined` when its `accept` list no longer names it. */
 function revivedRefusal(node: CommandNode, stored: unknown): Failure | undefined {
@@ -571,13 +626,27 @@ function revivedRefusal(node: CommandNode, stored: unknown): Failure | undefined
   return isFailure<unknown>(revived) && node.accept.some(known => known.is(revived)) ? revived : undefined;
 }
 
+/** An event wait's stored result as a body gets it: the event decoded as a job's event is, so its upcasters apply. */
+function liveWaitResult(node: EventWaitNode, stored: unknown, decode: DecodeEvent) {
+  const { via, event } = ensure(stored, storedWaitResultSchema);
+  const source = node.on.find(candidate => candidate.label === via);
+  const decoded = decode(event, source?.entity.events.get(event.type), event.entityId);
+  return isFailure(decoded) ? decoded : { via, event: decoded };
+}
+
 /**
  * `results` as a body reads them: an accepted failure is a real failure again, so `PaymentDeclined.is(results.pay)`
- * works. The stored JSON stays as it is.
+ * works, and an event wait's event has its `Date`s and its current schema. The stored JSON stays as it is. A value that
+ * is live already is left alone, so this may run on a row a worker has made live.
  */
-function liveResults(def: WorkflowDef, runId: string, stored: AnyResults): AnyResults {
+function liveResults(def: WorkflowDef, runId: string, stored: AnyResults, decode: DecodeEvent): AnyResults {
   const live = { ...stored };
   for (const node of def.nodes) {
+    if (node.kind === 'eventWait' && is(stored[node.name], storedWaitResultSchema)) {
+      const result = liveWaitResult(node, stored[node.name], decode);
+      if (isFailure(result)) throw new JournalError('REPLAY_FAILED', 'workflow', runId, reasonText(result));
+      live[node.name] = result;
+    }
     if (node.kind !== 'command' || !is(stored[node.name], refusedResultSchema)) continue;
     const failure = revivedRefusal(node, stored[node.name]);
     if (failure === undefined) {
@@ -710,6 +779,21 @@ function nodeOfBase(def: WorkflowDef, base: string): WorkflowNode | undefined {
   return looped?.[1] === undefined ? undefined : def.nodes.find(node => node.name === looped[1]);
 }
 /** A cancel of the parent leaves a detached child running, and compensation does not wait for it. */
+/** The index `target` names after node `index`: `'next'` is the following node, anything else must be an earlier one. */
+function jumpTarget(def: WorkflowDef, index: number, target: string, runId: string) {
+  if (target === 'next') return index + 1;
+  const targetIndex = def.nodes.findIndex(candidate => candidate.name === target);
+  if (targetIndex === -1 || targetIndex >= index) {
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'workflow',
+      runId,
+      `node '${def.nodes[index]?.name}' routed to '${target}', which is not an earlier node; next may only jump back`,
+    );
+  }
+  return targetIndex;
+}
+
 const isDetached = (node: WorkflowNode | undefined) => node?.kind === 'child' && node.onCancel === 'detach';
 /** The step key of a run's first node: its first visit, so a promoted queued run gets the key a start would give it. */
 const firstKeyOf = (runId: string, path: string) => `${runId}:${path}:do`;
@@ -857,12 +941,17 @@ export function createWorkflows<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->(j: Definitions<Meta, Tx, AppDb>, tables: JournalTables, retention: JobRetention | undefined) {
+>(
+  j: Definitions<Meta, Tx, AppDb>,
+  tables: JournalTables,
+  retention: JobRetention | undefined,
+  decodeEvent: ReturnType<typeof createEventDecoder<Meta>>,
+) {
   type MetaOut = SchemaOutput<Meta>;
   const policy = resolveRetention(retention);
   const machine = workflowMachine<Meta, Tx>(j, tables);
   const { run, events } = machine;
-  const { workflowRuns, workflowSteps, workflowSignals } = tables;
+  const { workflowRuns, workflowSteps, workflowSignals, workflowWaits } = tables;
   const limits = limitMachine<Meta, Tx>(j, tables);
   const limitGate = createLimitGate(tables);
   /**
@@ -978,6 +1067,21 @@ export function createWorkflows<
     },
   });
 
+  /**
+   * The failure that stops a run whose node is about to make more transitions than `limits.transitions` allows, or
+   * `undefined` while it is within the limit. `row.transitions` already counts the node that is starting.
+   */
+  const transitionLimitFailure = (def: WorkflowDef, row: Row) =>
+    row.transitions <= def.limits.transitions
+      ? undefined
+      : WorkflowTransitionLimit({
+          runId: row.id,
+          name: def.name,
+          limit: def.limits.transitions,
+          transitions: row.transitions,
+          detail: `workflow '${def.name}' run ${row.id} would make transition ${row.transitions}; limits.transitions is ${def.limits.transitions}`,
+        });
+
   /** `node` index `targetIndex` is next; past the last node the run is over and its output is worked out here. */
   async function routeAt(
     def: WorkflowDef,
@@ -988,9 +1092,14 @@ export function createWorkflows<
   ): Promise<Route | AsyncSchemaFailure> {
     const target = def.nodes[targetIndex];
     if (target !== undefined) return { go: 'node', name: target.name };
-    const results = { ...row.results, [lastPath]: lastResult };
     const produced =
-      def.finish === undefined ? lastResult : await def.finish({ runId: row.id, input: row.input, results });
+      def.finish === undefined
+        ? lastResult
+        : await def.finish({
+            runId: row.id,
+            input: row.input,
+            results: liveResults(def, row.id, { ...row.results, [lastPath]: lastResult }, decodeEvent),
+          });
     if (isFailure(produced)) {
       throw new JournalError(
         'BAD_DEFINITION',
@@ -1323,12 +1432,24 @@ export function createWorkflows<
     return beginCompensation(tx, def, row, at, [failedNode], { closed: true, cause: error });
   };
 
+  /** Where a run goes after the wait node `index`: the next node, or where a sleep's `next` says. */
+  const indexAfterWait = (def: WorkflowDef, index: number, row: Row, result: unknown) => {
+    const node = def.nodes[index];
+    if (node?.kind !== 'sleep' || node.next === undefined) return index + 1;
+    if (typeof node.next === 'string') return jumpTarget(def, index, node.next, row.id);
+    const results = liveResults(def, row.id, { ...row.results, [node.name]: result }, decodeEvent);
+    return jumpTarget(def, index, node.next({ runId: row.id, input: row.input, results }), row.id);
+  };
+
   /** The wait node `index` is over with `result`: it completes and the run goes on. */
   const completeWait = async (tx: Tx, def: WorkflowDef, index: number, row: Row, result: unknown, at: string) => {
     const path = def.nodes[index]?.name ?? '';
+    // An event wait's `result` is a pointer. Routing reads results as a body does, so it reads them with the events.
+    const results = await withWaitEvents(tx, tables, row.id, def.nodes, { ...row.results, [path]: result });
+    const live = { ...row, results };
     let route: Route;
     try {
-      const routed = await routeAt(def, index + 1, row, path, result);
+      const routed = await routeAt(def, indexAfterWait(def, index, live, results[path]), live, path, results[path]);
       if (isFailure(routed)) return failWait(tx, def, row, path, reasonText(routed), at);
       route = routed;
     } catch (error) {
@@ -1373,6 +1494,150 @@ export function createWorkflows<
     return completeWait(tx, def, index, row, stored.value, at);
   };
 
+  /** What the run's event waits took so far, oldest first: their cursors, and the events no other wait may take. */
+  const takenBy = async (tx: Tx, runId: string): Promise<TakenEvent[]> => {
+    const rows = await tx
+      .select({ data: tables.events.data })
+      .from(tables.events)
+      .where(
+        and(
+          eq(tables.events.kind, 'workflow.run'),
+          eq(tables.events.entityId, runId),
+          eq(tables.events.type, 'WaitEventTaken'),
+        ),
+      )
+      .orderBy(asc(tables.events.seq));
+    return rows.map(taken => takenEventSchema.parse(taken.data));
+  };
+
+  /**
+   * Where a visit of the event wait `node` starts counting: after the last event it took, or, on its first take, after
+   * the event that started the run, or after `RunStarted` for a run with no such event. A deadline moves nothing, so an
+   * event recorded while the run was between two visits of a loop is still there for the next visit.
+   */
+  const waitStartOf = async (tx: Tx, runId: string, node: string, taken: readonly TakenEvent[]) => {
+    const own = taken.findLast(event => event.node === node);
+    if (own !== undefined) return own.seq;
+    const [startedRun] = await tx
+      .select({ seq: tables.events.seq, data: tables.events.data })
+      .from(tables.events)
+      .where(
+        and(
+          eq(tables.events.kind, 'workflow.run'),
+          eq(tables.events.entityId, runId),
+          eq(tables.events.type, 'RunStarted'),
+        ),
+      );
+    if (startedRun === undefined) {
+      throw new JournalError('HISTORY_GAP', 'workflow', runId, 'an event wait found no RunStarted event for its run');
+    }
+    return triggerSchema.parse(startedRun.data).triggerSeq ?? startedRun.seq;
+  };
+
+  /**
+   * The oldest event in the log that the wait `node` may take, read in `seq` order, which is commit order. An event
+   * belongs to the first label that wants it. One that any wait of this run took already is passed over.
+   */
+  const oldestEligible = async (
+    tx: Tx,
+    def: WorkflowDef,
+    node: EventWaitNode,
+    row: Row,
+    waits: readonly (WaitKey & { readonly afterSeq: number })[],
+    taken: readonly TakenEvent[],
+  ) => {
+    const used = new Set(taken.map(event => event.seq));
+    const view = {
+      runId: row.id,
+      input: row.input,
+      results: liveResults(def, row.id, await withWaitEvents(tx, tables, row.id, def.nodes, row.results), decodeEvent),
+    };
+    // The labels of one visit share one start: a wait's cursor is the node's, not the label's.
+    let readTo = Math.min(...waits.map(wait => wait.afterSeq));
+    while (true) {
+      const found = await tx
+        .select()
+        .from(tables.events)
+        .where(
+          and(
+            gt(tables.events.seq, readTo),
+            or(
+              ...waits.map(wait =>
+                and(
+                  eq(tables.events.kind, wait.entityKind),
+                  eq(tables.events.entityId, wait.entityId),
+                  inArray(tables.events.type, wait.types),
+                ),
+              ),
+            ),
+          ),
+        )
+        .orderBy(asc(tables.events.seq))
+        .limit(WAIT_READ_BATCH);
+      for (const stored of found) {
+        readTo = stored.seq;
+        if (used.has(stored.seq)) continue;
+        for (const source of node.on) {
+          const wait = waits.find(candidate => candidate.label === source.label);
+          if (
+            wait === undefined ||
+            stored.kind !== wait.entityKind ||
+            stored.entityId !== wait.entityId ||
+            !wait.types.includes(stored.type)
+          ) {
+            continue;
+          }
+          // The log row is untyped JSON: the event's own schema, with its upcasters, makes it a recorded event.
+          const event = decodeEvent(stored, source.entity.events.get(stored.type), stored.entityId);
+          if (isFailure(event)) return event;
+          if (source.where === undefined || source.where({ ...view, event })) {
+            return { label: source.label, stored };
+          }
+        }
+      }
+      if (found.length < WAIT_READ_BATCH) return;
+    }
+  };
+
+  /** The wait node `index` takes `stored`: the taking is recorded, and the stored row is the node's result. */
+  const takeEvent = async (
+    tx: Tx,
+    def: WorkflowDef,
+    index: number,
+    row: Row,
+    found: { readonly label: string; readonly stored: StoredEventRow },
+    at: string,
+  ) => {
+    const path = def.nodes[index]?.name ?? '';
+    const { label, stored } = found;
+    // The event as a body reads it must fit `limits.payload`, though the run stores only its pointer.
+    const held = storable(
+      storedWaitResultSchema.encode({ via: label, event: stored }),
+      def.limits.payload,
+      `the event '${path}' took`,
+      row.id,
+    );
+    if (held instanceof JournalError) return failWait(tx, def, row, path, reasonText(held), at);
+    const pointer = waitPointerSchema.encode({ via: label, seq: stored.seq });
+    const completed = await completeWait(tx, def, index, row, pointer, at);
+    if (isFailure(completed)) return completed;
+    return [
+      events.WaitEventTaken({ node: path, label, seq: stored.seq, deliveryId: stored.id, at }),
+      ...completed,
+    ];
+  };
+
+  /** The run is parked on the event wait `index`: it takes what the log holds for it now, or the events stay `[]`. */
+  const wakeOnEvent = async (tx: Tx, def: WorkflowDef, index: number, node: EventWaitNode, row: Row, at: string) => {
+    const waits = await tx
+      .select()
+      .from(workflowWaits)
+      .where(and(eq(workflowWaits.runId, row.id), eq(workflowWaits.node, node.name)));
+    const found = await oldestEligible(tx, def, node, row, waits, await takenBy(tx, row.id));
+    if (isFailure(found)) return failWait(tx, def, row, node.name, reasonText(found), at);
+    return found === undefined ? [] : takeEvent(tx, def, index, row, found, at);
+  };
+
   /** A timer fired. It acts only if the run is still parked on the very park the timer was made for. */
   const onTimer = async (tx: Tx, row: Row, fired: z.infer<typeof timerCheckpointSchema>['fired'], at: string) => {
     const def = definitionOf(row);
@@ -1399,10 +1664,20 @@ export function createWorkflows<
     if (pastDeadline(row)) return deadlineEvents(tx, def, row, at);
     const index = def.nodes.findIndex(candidate => candidate.name === fired.node);
     const node = def.nodes[index];
-    if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
+    if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'eventWait' && node.kind !== 'sleep')) {
       throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no wait node '${fired.node}'`);
     }
+    // An event that committed before this deadline wins, even when its wake job has not run yet.
+    if (node.kind === 'eventWait') {
+      const woke = await wakeOnEvent(tx, def, index, node, row, at);
+      if (isFailure(woke) || woke.length > 0) return woke;
+    }
     const timerFired = events.TimerFired({ node: fired.node, at });
+    if (node.kind === 'eventWait' && node.onTimeout === 'fail') {
+      const failed = await failWait(tx, def, row, node.name, `waitFor '${node.name}' got no event in time`, at);
+      if (isFailure(failed)) return failed;
+      return [timerFired, ...failed];
+    }
     if (node.kind === 'waitFor' && node.onTimeout === 'fail') {
       const error = `waitFor '${node.name}' got no '${node.signal}' signal in time`;
       const failed = await failWait(tx, def, row, node.name, error, at);
@@ -1708,6 +1983,10 @@ export function createWorkflows<
     });
     if (isFailure(cancelled)) return cancelled;
     const { row } = written;
+    // Only a run whose shape has an event wait touches the table, so an app that uses none needs no migration for it.
+    if (wasParked && ended.park && row?.shape.nodes.some(node => node.kind === 'eventWait')) {
+      await ctx.tx.delete(workflowWaits).where(eq(workflowWaits.runId, runId));
+    }
     if (row === null || written.events.length === 0) return;
     if (row.state === 'compensating') {
       const moved = await driveChildren(ctx, row);
@@ -1812,6 +2091,11 @@ export function createWorkflows<
     { writes: runEvents },
     async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' } | CommandFailure> => {
       const { write } = context;
+      // Before `write` takes the append lock: the wake effect takes a key's lock first too, so the two cannot deadlock.
+      if ('outcome' in input && input.outcome.kind === 'park') {
+        const keys = (input.outcome.waits ?? []).map(wait => waitLockId(wait.entityKind, wait.entityId));
+        for (const key of [...new Set(keys)].sort()) await lockExclusive(context.tx, key);
+      }
       const before = { parked: false };
       const settled = { value: false };
       const planned: { value: { readonly plan: Planned; readonly room: number } | undefined } = { value: undefined };
@@ -1913,6 +2197,13 @@ export function createWorkflows<
             settled.value = true;
             return beginCompensation(inside.tx, def, row, at, [failedNode], { closed: true, cause: outcome.error });
           }
+          case 'transition-limit': {
+            if (compensating && phase === 'do') return failedWhileCompensating(outcome.error);
+            const failedNode = events.NodeFailed({ path, phase, attempt: input.attempt, error: outcome.error, at });
+            // Whatever `onDeadStep` says: a run that loops past its limit must end, not wait for an operator.
+            settled.value = true;
+            return beginCompensation(inside.tx, def, row, at, [failedNode], { closed: true, cause: outcome.error });
+          }
           case 'children': {
             if (row.state === 'parked') return [];
             const node = def.nodes.find(candidate => candidate.name === path);
@@ -1945,7 +2236,7 @@ export function createWorkflows<
             if (row.state === 'parked') return [];
             const index = def.nodes.findIndex(candidate => candidate.name === path);
             const node = def.nodes[index];
-            if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
+            if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'eventWait' && node.kind !== 'sleep')) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no wait node '${path}'`);
             }
             const dropped = events.NodeSkipped({
@@ -1968,6 +2259,19 @@ export function createWorkflows<
               // The signal came before the run got here: it was kept, and this wait takes it.
               const early = await takeSignal(inside.tx, row.id, node.signal, node.name);
               if (early !== undefined) return wakeOnSignal(inside.tx, def, index, row, early.payload, at);
+            }
+            if (node.kind === 'eventWait') {
+              // Under the key's lock: an event that committed before this read is found here, and one that commits
+              // after it runs its wake job after this commit, which finds the rows written below.
+              const taken = await takenBy(inside.tx, row.id);
+              const afterSeq = await waitStartOf(inside.tx, row.id, node.name, taken);
+              const waits = (outcome.waits ?? []).map(wait => ({ ...wait, afterSeq }));
+              const found = await oldestEligible(inside.tx, def, node, row, waits, taken);
+              if (isFailure(found)) return failWait(inside.tx, def, row, node.name, reasonText(found), at);
+              if (found !== undefined) return takeEvent(inside.tx, def, index, row, found, at);
+              await inside.tx
+                .insert(workflowWaits)
+                .values(waits.map(wait => ({ ...wait, runId: row.id, node: node.name })));
             }
             return [
               events.Parked({
@@ -2210,6 +2514,8 @@ export function createWorkflows<
         readonly scope: string | null;
       };
       readonly refusal?: AdmissionRefusal;
+      /** The seq of the event that started the run, for a `startOn` start. */
+      readonly trigger?: number;
     } = {},
   ): Promise<
     | { readonly runId: string; readonly created: boolean }
@@ -2218,7 +2524,7 @@ export function createWorkflows<
     | CommandInvalid
     | CommandFailure
   > => {
-    const { parent, refusal = 'refuse' } = how;
+    const { parent, refusal = 'refuse', trigger } = how;
     if (!started.has(`${def.name}@${def.version}`)) {
       throw new JournalError(
         'WORKFLOW_UNKNOWN',
@@ -2295,6 +2601,7 @@ export function createWorkflows<
           ...overrides,
           // Left out when unset, so a plain start's event stays as it was before batches, replays and limits.
           ...(sharedLimits.length === 0 ? {} : { limits: sharedLimits }),
+          ...(trigger === undefined ? {} : { triggerSeq: trigger }),
           ...(args.batchId === undefined ? {} : { batchId: args.batchId }),
           ...(args.replayOf === undefined ? {} : { replayOf: args.replayOf }),
           ...args.by,
@@ -2362,6 +2669,23 @@ export function createWorkflows<
       { writes: runEvents },
       async (args, context): Promise<StartOutcome | CommandFailure> => {
         const outcome = await startRun(def, context, args);
+        return isFailure(outcome) ? outcome : { runId: outcome.runId };
+      },
+    );
+
+  /**
+   * The start a `startOn` job runs: `def.start`, and the seq of the event that started the run, where its event waits
+   * begin to count. Not on the definition: only the event knows that seq.
+   */
+  const startOnCommandFor = (def: WorkflowDef) =>
+    j.command(
+      `${def.name}.startOn`,
+      z.object({ trigger: z.int().positive(), start: z.unknown() }),
+      { writes: runEvents },
+      async ({ trigger, start }, context): Promise<StartOutcome | AsyncSchemaFailure | CommandFailure> => {
+        const args = await parseAsync(startSchema(def.input), start);
+        if (isFailure(args)) return args;
+        const outcome = await startRun(def, context, args, { trigger });
         return isFailure(outcome) ? outcome : { runId: outcome.runId };
       },
     );
@@ -2536,6 +2860,56 @@ export function createWorkflows<
     if (isFailure(settlement)) return settlement;
     return result;
   }
+
+  /**
+   * The runs parked on an event, read under the key's lock: a park holds that lock until it commits, so a park this read
+   * misses reads the log after this lock is free, and finds the event there. `seq` leaves out the waits that start
+   * after it, such as a run this very event started.
+   */
+  const waitersOf = j.command(WAITERS_COMMAND, waitersSchema, { writes: [] }, async (input, context) => {
+    await lockExclusive(context.tx, waitLockId(input.entityKind, input.entityId));
+    const rows = await context.tx
+      .select({ runId: workflowWaits.runId, node: workflowWaits.node })
+      .from(workflowWaits)
+      .where(
+        and(
+          eq(workflowWaits.entityKind, input.entityKind),
+          eq(workflowWaits.entityId, input.entityId),
+          sql`${input.type} = any(${workflowWaits.types})`,
+          lt(workflowWaits.afterSeq, input.seq),
+        ),
+      );
+    // Two labels of one wait can watch one entity: the run is woken once.
+    return [...new Map(rows.map(row => [`${row.runId}:${row.node}`, row])).values()];
+  });
+
+  /**
+   * Wakes one parked run on what the log holds for its wait. It contends on the run row with the wait's timer, so one of
+   * them moves the run and the other finds it moved. A repeat of the event's job finds the event taken.
+   */
+  const wakeWait = j.command(
+    WAKE_COMMAND,
+    wakeWaitSchema,
+    { writes: runEvents },
+    async (input, context): Promise<void | CommandFailure> => {
+      const before = { parked: false };
+      const written = await context.write(run, input.runId, async (row, inside) => {
+        if (row === null || row.state !== 'parked' || row.node !== input.node) return [];
+        const def = definitionOf(row);
+        const index = def.nodes.findIndex(candidate => candidate.name === input.node);
+        const node = def.nodes[index];
+        if (node?.kind !== 'eventWait') {
+          throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no event wait '${input.node}'`);
+        }
+        before.parked = true;
+        const at = nowIso();
+        if (pastDeadline(row)) return deadlineEvents(inside.tx, def, row, at);
+        return wakeOnEvent(inside.tx, def, index, node, row, at);
+      });
+      if (isFailure(written)) return written;
+      return settle(context, input.runId, written, before.parked);
+    },
+  );
 
   /** `def.signal(name)`: the command that delivers one of the definition's signals. */
   const signalCommandFor = <Signals extends AnySignals>(def: WorkflowDef<StandardSchemaV1, unknown, Signals>) =>
@@ -2857,7 +3231,8 @@ export function createWorkflows<
       if (node?.kind !== 'command') {
         throw new JournalError('BAD_DEFINITION', 'workflow', runId, `"${def.name}" has no command node '${path}'`);
       }
-      const row = { ...open.row, results: liveResults(def, runId, open.row.results) };
+      const waited = await withWaitEvents(context.tx, tables, runId, def.nodes, open.row.results);
+      const row = { ...open.row, results: liveResults(def, runId, waited, decodeEvent) };
       const verdict =
         phase === 'undo'
           ? await undoCommand(context, def, node, row, key)
@@ -3503,6 +3878,16 @@ export function createWorkflows<
     return { value: parsed };
   };
 
+  /** An event wait's stored result as `def.read` gives it. A row its current schema refuses is an error to report. */
+  const readWaitResult = (node: EventWaitNode, stored: unknown) => {
+    try {
+      return liveWaitResult(node, stored, decodeEvent);
+    } catch (error) {
+      if (isJournalError(error, 'REPLAY_FAILED')) return error;
+      throw error;
+    }
+  };
+
   /** `def.read`: one run of `def`, its stored values checked by the schemas `def` declares. */
   const readFor =
     <Input extends StandardSchemaV1, ReadOutput, ReadResults extends AnyResults>(
@@ -3543,6 +3928,13 @@ export function createWorkflows<
           const checked = await checkStored(own.schema, stored, runId, field);
           if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
           results[node.name] = checked.value;
+          if (node.kind === 'eventWait') {
+            const live = readWaitResult(node, stored);
+            if (isFailure(live) || live instanceof JournalError) {
+              return WorkflowReadMismatch({ runId, field, detail: `${field}: ${reasonText(live)}` });
+            }
+            results[node.name] = live;
+          }
         }
         checkedFields.add(field);
       }
@@ -3735,19 +4127,7 @@ export function createWorkflows<
     ): Promise<Route | AsyncSchemaFailure> {
       const next = node.kind === 'step' ? node.options.next : undefined;
       const target = typeof next === 'function' ? next({ ...build(signal), result }) : (next ?? 'next');
-      let targetIndex = index + 1;
-      if (target !== 'next') {
-        targetIndex = def.nodes.findIndex(candidate => candidate.name === target);
-        if (targetIndex < 0 || targetIndex >= index) {
-          throw new JournalError(
-            'BAD_DEFINITION',
-            'workflow',
-            row.id,
-            `step '${node.name}' routed to '${target}', which is not an earlier node; next may only jump back`,
-          );
-        }
-      }
-      return routeAt(def, targetIndex, row, node.name, result);
+      return routeAt(def, jumpTarget(def, index, target, row.id), row, node.name, result);
     }
 
     /**
@@ -3957,11 +4337,17 @@ export function createWorkflows<
     async function attemptWait(
       def: WorkflowDef,
       index: number,
-      node: Extract<WorkflowNode, { readonly kind: 'waitFor' | 'sleep' }>,
+      node: Extract<WorkflowNode, { readonly kind: 'waitFor' | 'eventWait' | 'sleep' }>,
       row: Row,
       event: NodeScheduledEvent,
       ctx: StepEffectContext,
     ): Promise<Verdict> {
+      const wakeAtOf = (due: Date) => {
+        if (!(due instanceof Date) || Number.isNaN(due.getTime())) {
+          throw new TypeError(`node '${node.name}' needs a valid Date to wake at`);
+        }
+        return due.toISOString();
+      };
       const body: ErasedContext = {
         ...ctx,
         ...runChangesOf(ctx, row.id),
@@ -3974,6 +4360,28 @@ export function createWorkflows<
         signal: ctx.signal,
       };
       try {
+        if (node.kind === 'eventWait') {
+          // Plain data, as the type says: these run again wherever a wake needs them, with no worker behind them.
+          const view = { runId: row.id, input: row.input, results: row.results };
+          if (node.when !== undefined && !node.when(view)) {
+            const route = await routeAt(def, index + 1, row, node.name, null);
+            return isFailure(route) ? failed(route, false) : { kind: 'skipped', reason: 'when', route };
+          }
+          const waits = node.on.map(source => ({
+            label: source.label,
+            entityKind: source.entity.kind,
+            entityId: source.match(view),
+            types: source.events.map(known => known.type),
+          }));
+          const timeoutAt = node.timeout === undefined ? null : inMs(parseAge(node.timeout));
+          return {
+            kind: 'park',
+            // The column holds 128 characters, and this is for people to read: `node` names the wait exactly.
+            waitingFor: waits.map(wait => wait.label).join(' | ').slice(0, 128),
+            wakeAt: node.until === undefined ? timeoutAt : wakeAtOf(node.until(view)),
+            waits,
+          };
+        }
         if (node.kind === 'waitFor') {
           if (node.when !== undefined && !node.when(body)) {
             const route = await routeAt(def, index + 1, row, node.name, null);
@@ -3984,10 +4392,7 @@ export function createWorkflows<
         }
         const { until } = node;
         const due = typeof until === 'function' ? until(body) : new Date(Date.now() + parseAge(until));
-        if (!(due instanceof Date) || Number.isNaN(due.getTime())) {
-          throw new TypeError(`sleep '${node.name}' needs a valid Date to wake at`);
-        }
-        return { kind: 'park', waitingFor: null, wakeAt: due.toISOString() };
+        return { kind: 'park', waitingFor: null, wakeAt: wakeAtOf(due) };
       } catch (error) {
         return failed(error);
       }
@@ -4153,7 +4558,15 @@ export function createWorkflows<
         warnStranded(stored, def);
         return strandedFailure(stored, def);
       }
-      const row = { ...stored, results: liveResults(def, runId, stored.results) };
+      const row = {
+        ...stored,
+        results: liveResults(
+          def,
+          runId,
+          await withWaitEvents(outer.db, tables, runId, def.nodes, stored.results),
+          decodeEvent,
+        ),
+      };
       // A body's command without a meta records the app's `workflowMeta`; one with a meta records that one.
       const run: WorkflowCommandRunner<Meta, Tx> = (command, input, given, call) =>
         outer.run(command, input, given === undefined ? meta : given, call);
@@ -4180,6 +4593,26 @@ export function createWorkflows<
         if (expired.status === 'settled') return undefined;
       }
 
+      // A node past `limits.transitions` is not run: the run stops before its body, so no work is done and lost. Only a
+      // first try is asked: an operator who raised the limit retries the dead node, and that retry is allowed.
+      const overLimit =
+        data.phase === 'do' && data.attempt === 1 && data.resolution === undefined
+          ? transitionLimitFailure(def, row)
+          : undefined;
+      if (overLimit !== undefined) {
+        const stopped = await ctx.run(
+          checkpoint,
+          {
+            runId,
+            path: data.path,
+            phase: 'do',
+            attempt: data.attempt,
+            outcome: { kind: 'transition-limit', error: reasonText(overLimit) },
+          },
+          meta,
+        );
+        return isFailure(stopped) ? stopped : undefined;
+      }
       let verdict: Verdict;
       if (node.kind === 'command') {
         if (data.resolution === undefined) return attemptCommandNode(stored, event, ctx);
@@ -4325,7 +4758,7 @@ export function createWorkflows<
      * but its effect stays, so jobs queued before the workflow moved to `with-event` still start their runs.
      */
     const startEffectFor = (def: WorkflowDef, startOn: ErasedStartOn) => {
-      const start = startCommandFor(def);
+      const start = startOnCommandFor(def);
       return ownedEffect(
         `${START_EFFECT}:${def.name}`,
         startOn.entity,
@@ -4334,7 +4767,8 @@ export function createWorkflows<
           [startOn.event.type]: async (event, ctx) => {
             const runId = startOn.id(event);
             if (await runExists(ctx.db, runId)) return void startsNothing(def, runId, event.seq);
-            const outcome = await ctx.run(start, { id: runId, input: startOn.input(event) }, meta);
+            const startArgs = { id: runId, input: startOn.input(event) };
+            const outcome = await ctx.run(start, { trigger: event.seq, start: startArgs }, meta);
             // Another start took the id between the look-up and this one: the run exists, so the job is done. The row
             // decides, not the refusal: a conflict for an id with no run (a payload over the limit) still fails the job.
             if (CommandConflict.is(outcome) && (await runExists(ctx.db, runId))) {
@@ -4362,7 +4796,7 @@ export function createWorkflows<
         const runId = startOn.id(event);
         const args = await parseAsync(startSchema(def.input), { id: runId, input: startOn.input(event) });
         if (isFailure(args)) return args;
-        const outcome = await startRun(def, host, args, { refusal: 'queue' });
+        const outcome = await startRun(def, host, args, { refusal: 'queue', trigger: event.seq });
         if (CommandConflict.is(outcome) && (await runExists(host.tx, runId))) {
           return void startsNothing(def, runId, event.seq);
         }
@@ -4480,6 +4914,52 @@ export function createWorkflows<
           ];
 
     /**
+     * The wake of the event waits on one entity kind: one job per recorded event of a type some wait watches, written
+     * with the event. Each run is woken in its own transaction, so a run that fails holds up no other. A stranded run
+     * comes back as a failure once the others are woken: the job is dead until its code is back.
+     */
+    const wakeEffectFor = (entity: AnyEntity, types: ReadonlySet<string>) => {
+      const wake = async (
+        event: Recorded<string, unknown, MetaOut>,
+        ctx: OwnedEffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
+      ) => {
+        const lookup = { entityKind: event.kind, entityId: event.entityId, type: event.type, seq: event.seq };
+        const waiters = await ctx.run(waitersOf, lookup, meta);
+        if (isFailure(waiters)) return waiters;
+        let stranded: ReturnType<typeof strandedFailure> | undefined;
+        for (const waiter of waiters) {
+          const refused = await refuseStranded(waiter.runId, ctx.db);
+          if (refused !== undefined) {
+            stranded ??= refused;
+            continue;
+          }
+          const woke = await ctx.run(wakeWait, waiter, meta);
+          if (isFailure(woke)) return woke;
+        }
+        return stranded;
+      };
+      return ownedEffect(
+        `${WAKE_EFFECT}:${entity.kind}`,
+        entity,
+        {},
+        Object.fromEntries([...types].map(type => [type, wake])),
+      ).withSchedule({ retry: strandedRetry });
+    };
+    /** Each entity some registered wait watches, with every event type a wait of any version takes. */
+    const watched = new Map<string, { readonly entity: AnyEntity; readonly types: Set<string> }>();
+    for (const def of defs) {
+      for (const node of def.nodes) {
+        if (node.kind !== 'eventWait') continue;
+        for (const source of node.on) {
+          const entry = watched.get(source.entity.kind) ?? { entity: source.entity, types: new Set() };
+          for (const known of source.events) entry.types.add(known.type);
+          watched.set(source.entity.kind, entry);
+        }
+      }
+    }
+    const wakes = [...watched.values()].map(({ entity, types }) => wakeEffectFor(entity, types));
+
+    /**
      * A key's `perKey` override runs out with no event of its own, so each one gets a timer at its `until`: then the
      * queued runs of the limit that now fit start. One replaced or reset before then finds nothing new to start.
      */
@@ -4492,7 +4972,7 @@ export function createWorkflows<
       },
     ).withSchedule({ runAt: event => untilOf(event.data) });
 
-    return { effects: [effect, timer, limitTimer, ...starts, ...lifecycle], steps: machine.steps, eventStarts };
+    return { effects: [effect, timer, limitTimer, ...starts, ...wakes, ...lifecycle], steps: machine.steps, eventStarts };
   }
 
   return {

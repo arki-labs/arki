@@ -13,5 +13,6 @@ export {
   WorkflowBusy,
   WorkflowReadMismatch,
   WorkflowStranded,
+  WorkflowTransitionLimit,
 } from './errors.js';
 export type { CommandFailure } from './errors.js';

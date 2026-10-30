@@ -69,7 +69,7 @@ const checks = [
   [
     'tables',
     Object.keys(journalTables()).join(','),
-    'events,jobs,jobAttempts,jobArchive,jobOperations,receipts,cursors,workflowRuns,workflowSteps,workflowSignals',
+    'events,jobs,jobAttempts,jobArchive,jobOperations,receipts,cursors,workflowRuns,workflowSteps,workflowSignals,workflowWaits,limits',
   ],
 ];
 

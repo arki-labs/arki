@@ -34,6 +34,7 @@ export {
   WorkflowBusy,
   WorkflowReadMismatch,
   WorkflowStranded,
+  WorkflowTransitionLimit,
   isJournalError,
 } from './errors.js';
 export type { CommandFailure, JournalErrorCode } from './errors.js';

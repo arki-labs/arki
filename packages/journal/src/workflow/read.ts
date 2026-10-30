@@ -27,6 +27,7 @@ import { bounded, cursorText, LIST_LIMIT, pageOf, pastCursor } from '../outbox.j
 import { stepStatusSql } from './machine.js';
 import { BATCH_LIMIT } from './run-fields.js';
 import { codeOf } from './stranded.js';
+import { withWaitEvents } from './wait-results.js';
 
 /** Why a run has no code to go on with: no registered workflow has its name and version, or the registered one has other nodes. */
 export type StrandedReason = WorkflowStranded['data']['reason'];
@@ -425,10 +426,21 @@ export function createWorkflowReads(deps: {
       .from(signals)
       .where(and(eq(signals.runId, id), isNull(signals.consumedAt)))
       .orderBy(asc(signals.receivedAt), asc(signals.id));
+    // An event wait stores a pointer to its event: an operator reads the event as the log has it now.
+    const nodes = base.shape.nodes;
+    const results = await withWaitEvents(db, tables, id, nodes, base.results);
+    const doResults = await withWaitEvents(
+      db,
+      tables,
+      id,
+      nodes,
+      Object.fromEntries(stepRows.filter(step => step.phase === 'do').map(step => [step.path, step.result])),
+    );
     return {
-      run: { ...base, stuck, stranded: strandedOf(base) },
+      run: { ...base, results, stuck, stranded: strandedOf(base) },
       steps: stepRows.map(step => ({
         ...step,
+        result: step.phase === 'do' ? (doResults[step.path] ?? step.result) : step.result,
         stuck:
           base.finishedAt === null &&
           step.status === 'failed' &&

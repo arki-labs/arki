@@ -6,7 +6,7 @@
 export type WorkflowShape = {
   readonly nodes: readonly {
     readonly name: string;
-    readonly kind: 'step' | 'waitFor' | 'sleep' | 'child' | 'map' | 'command';
+    readonly kind: 'step' | 'waitFor' | 'eventWait' | 'sleep' | 'child' | 'map' | 'command';
     readonly undo: boolean;
     /** A child node's choice when its parent cancels or compensates; only on `child` nodes. */
     readonly onCancel?: 'cancel' | 'detach';
@@ -16,5 +16,7 @@ export type WorkflowShape = {
     readonly command?: string;
     /** The name of the command that undoes a `command` node; only on one with an `undo`. */
     readonly undoCommand?: string;
+    /** What an `eventWait` node waits for: each label with its entity kind and event types. Part of the shape hash. */
+    readonly on?: readonly { readonly label: string; readonly entity: string; readonly events: readonly string[] }[];
   }[];
 };

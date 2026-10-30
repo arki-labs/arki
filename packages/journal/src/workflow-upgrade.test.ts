@@ -27,7 +27,7 @@ beforeAll(async () => {
   // The T13 schema: today's tables with everything T12 added taken away again.
   const current = await pushSchema(tables, db);
   await current.apply();
-  await db.execute(sql`drop table workflow_steps, workflow_signals, workflow_runs`);
+  await db.execute(sql`drop table workflow_waits, workflow_steps, workflow_signals, workflow_runs`);
   await db.execute(sql`alter table journal_jobs drop column run_id`);
   await db.execute(sql`alter table journal_job_archive drop column run_id`);
   await db.execute(
@@ -43,7 +43,7 @@ beforeAll(async () => {
 afterAll(() => client.close());
 
 describe('the T12 migration on an app with old job rows', () => {
-  it('creates the three workflow tables, so runs have somewhere to live', async () => {
+  it('creates the workflow tables, so runs have somewhere to live', async () => {
     const found = await db.execute<{ table_name: string }>(
       sql`select table_name from information_schema.tables where table_schema = 'public' and table_name like 'workflow_%'`,
     );
@@ -51,6 +51,7 @@ describe('the T12 migration on an app with old job rows', () => {
       'workflow_runs',
       'workflow_signals',
       'workflow_steps',
+      'workflow_waits',
     ]);
   });
 
