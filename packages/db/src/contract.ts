@@ -14,3 +14,11 @@ export {
   TransactionUnavailable,
 } from './errors.js';
 export type { TransactionFailure } from './errors.js';
+export {
+  MIGRATION_APPLY_FAILURES,
+  MIGRATION_READ_FAILURES,
+  MIGRATION_STATE_FAILURES,
+  MigrationReadFailed,
+  MigrationStateFailed,
+  MigrationUnconfirmed,
+} from './migrate-failures.js';

@@ -171,9 +171,22 @@ both cleanup error and original returned failure.
 
 ### Migration dependencies and instrumentation
 
-`migrate.ts` still parses database result rows with Zod `.parse()`; its typed
-validation/migration boundary is separate work, alongside initialization and
-repository/query ownership. No casts bypass those dependencies.
+`readMigrations`, `pendingMigrations` and `migrateDb` return exact failures from
+`MIGRATION_READ_FAILURES`, `MIGRATION_STATE_FAILURES` and `MIGRATION_APPLY_FAILURES`.
+Source schemas validate bookkeeping rows; malformed rows return `UnexpectedDefect`.
+Dot forwards migration refusals and stops boot. See [reconciliation](upgrades/migration-outcomes.md).
+
+| Code | Definition | Policy |
+| --- | --- | --- |
+| `db.migration_read_failed` | `MigrationReadFailed` | Restore generated source files before another attempt. |
+| `db.migration_state_failed` | `MigrationStateFailed` | Restore database access and inspect bookkeeping. |
+| `db.migration_unconfirmed` | `MigrationUnconfirmed` | Schema or bookkeeping may have changed; reconcile before explicitly applying again. |
+
+Default `db.migrations.read`, `db.migrations.pending` and `db.migrations.apply`
+spans preserve caller context and include only canonical failure codes. Reporting
+cannot replace an outcome or repeat a migration. Raw paths, SQL, names and private
+causes stay out of spans. These operations do not cancel an in-flight driver call;
+configure native driver timeouts and await its outcome before deciding recovery.
 
 Existing retry logs and `arki:db:outcome` classified attempt logs are the scoped
 observability surface. Driver query instrumentation owns query spans. Default

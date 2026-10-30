@@ -19,11 +19,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } f
 import { z } from 'zod';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
-import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { defineFailure, findCause, isFailure, orThrow } from '@arki/failure';
 
 import type { TransactionalDb } from './composition.js';
 import { transactionalProcedure, transactionalProcedureConfig, transactionErrorMap } from './orpc.js';
-import { DB_TRANSACTION_ERROR_CODES, TransactionConflict } from './transaction.js';
+import { DB_TRANSACTION_ERROR_CODES, DbTransactionError, TransactionConflict, TransactionDefect } from './transaction.js';
 
 const accounts = pgTable('accounts', { id: text('id').primaryKey(), balance: integer('balance').notNull() });
 
@@ -182,14 +182,17 @@ describe('transactionalProcedure: retry', () => {
     expect(attempts).toBe(1);
   });
 
-  it('out of retries: ORPCError CONFLICT, status 409, without the database error as cause', async () => {
+  it('returns the canonical conflict with status 409 and keeps its cause off the wire', async () => {
     const root = flaky(100);
     const error = await call(transferProcedure(root.db, 1), { from: 'a', to: 'b', cents: 10 }).catch(
       (error_: unknown) => error_,
     );
     expect(error).toBeInstanceOf(ORPCError);
     expect(error).toMatchObject({ code: TransactionConflict.code, status: 409, defined: true });
-    expect(error instanceof ORPCError ? error.cause : 'not an ORPCError').toBeUndefined();
+    if (!(error instanceof ORPCError)) throw new Error('Expected the native RPC bridge');
+    expect(TransactionConflict.is(error.cause)).toBe(true);
+    expect(error.toJSON()).not.toHaveProperty('cause');
+    expect(JSON.stringify(error.toJSON())).not.toContain('sqlstate 40001');
     expect(runs).toBe(2);
     expect(await balanceOf('a')).toBe(100);
   });
@@ -215,13 +218,17 @@ describe('transactionalProcedure: output inside the transaction', () => {
     expect(await balanceOf('a')).toBe(100);
   });
 
-  it('refuses a stream (ARKI_DB_TX_E005) and rolls back: it would be read after the commit', async () => {
+  it('returns a canonical defect for a stream and rolls back writes made before producing it', async () => {
     const transact = transactionalProcedure(db, { repos: () => repositories });
-    const stream = impl.stream.use(transact).handler(async function* ({ context: { repos } }) {
+    const stream = impl.stream.use(transact).handler(async ({ context: { repos } }) => {
       await repos.accounts.add('a', 1);
-      yield 1;
+      return (async function* () { yield Promise.resolve(1); })();
     });
-    await expect(call(stream, {})).rejects.toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.unsupportedOutput });
+    const error: unknown = await call(stream, {}).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ORPCError);
+    expect(error).toMatchObject({ code: TransactionDefect.code });
+    expect(findCause(error, DbTransactionError)).toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.unsupportedOutput });
+    if (error instanceof ORPCError) expect(error.toJSON()).not.toHaveProperty('cause');
     expect(await balanceOf('a')).toBe(100);
   });
 });
@@ -244,11 +251,24 @@ describe('transactionalProcedure: the pipeline is checked, fail closed', () => {
     await expect(call(outside, {})).rejects.toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.invalidPipeline });
   });
 
-  it('refuses a transactional procedure called from inside another one (ARKI_DB_TX_E003)', async () => {
+  it('supervises a nested-transaction defect, rolls back outer writes and never runs inner work', async () => {
     const transact = transactionalProcedure(db, { repos: () => repositories });
-    const inner = impl.isolation.use(transact).handler(() => 'inner');
-    const outer = impl.isolation.use(transact).handler(({ context }) => call(inner, undefined, { context }));
-    await expect(call(outer, {})).rejects.toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.nestedTransaction });
+    let innerRuns = 0;
+    const inner = impl.isolation.use(transact).handler(() => {
+      innerRuns++;
+      return 'inner';
+    });
+    const outer = impl.isolation.use(transact).handler(async ({ context }) => {
+      await context.repos.accounts.add('a', 1);
+      return call(inner, undefined, { context });
+    });
+    const error: unknown = await call(outer, {}).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ORPCError);
+    expect(error).toMatchObject({ code: TransactionDefect.code });
+    expect(findCause(error, DbTransactionError)).toMatchObject({ code: DB_TRANSACTION_ERROR_CODES.nestedTransaction });
+    if (error instanceof ORPCError) expect(error.toJSON()).not.toHaveProperty('cause');
+    expect(innerRuns).toBe(0);
+    expect(await balanceOf('a')).toBe(100);
   });
 
   it('refuses bad settings when built, not on the first request (ARKI_DB_TX_E002)', () => {

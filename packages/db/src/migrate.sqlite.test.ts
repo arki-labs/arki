@@ -51,22 +51,22 @@ describe('migrations on libSQL', () => {
 
   it('applies pending migrations in order, then finds none pending and applies nothing again', async () => {
     // Running twice must not re-run the seed: a second insert of w1 would fail on the primary key.
-    await migrateDb(opened.db, { migrationsFolder });
-    await migrateDb(opened.db, { migrationsFolder });
+    expect(await migrateDb(opened.db, { migrationsFolder })).toBeUndefined();
+    expect(await migrateDb(opened.db, { migrationsFolder })).toBeUndefined();
     expect(await opened.db.select().from(widgets)).toEqual([{ id: 'w1', label: 'first' }]);
     expect(await pendingMigrations(opened.db, { migrationsFolder })).toEqual([]);
   });
 
   it('applies only what was added since the last run', async () => {
-    await migrateDb(opened.db, { migrationsFolder });
+    expect(await migrateDb(opened.db, { migrationsFolder })).toBeUndefined();
     writeMigration('20260103000000_more', ["INSERT INTO `widgets` (`id`, `label`) VALUES ('w2', 'second');"]);
     expect(await pendingMigrations(opened.db, { migrationsFolder })).toEqual(['20260103000000_more']);
-    await migrateDb(opened.db, { migrationsFolder });
+    expect(await migrateDb(opened.db, { migrationsFolder })).toBeUndefined();
     expect(await opened.db.$count(widgets)).toBe(2);
   });
 
   it('honours a custom bookkeeping table name', async () => {
-    await migrateDb(opened.db, { migrationsFolder, migrationsTable: 'schema_history' });
+    expect(await migrateDb(opened.db, { migrationsFolder, migrationsTable: 'schema_history' })).toBeUndefined();
     const tables = await opened.db.all(sql`select name from sqlite_master where name = 'schema_history'`);
     expect(tables).toHaveLength(1);
     expect(await pendingMigrations(opened.db, { migrationsFolder, migrationsTable: 'schema_history' })).toEqual([]);

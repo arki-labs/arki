@@ -46,8 +46,8 @@ describe('migrateDb', () => {
   it('applies pending migrations and does nothing the second time', async () => {
     const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     try {
-      await migrateDb(handle, { migrationsFolder });
-      await migrateDb(handle, { migrationsFolder });
+      expect(await migrateDb(handle, { migrationsFolder })).toBeUndefined();
+      expect(await migrateDb(handle, { migrationsFolder })).toBeUndefined();
       const rows = await handle.select().from(widgets);
       expect(rows).toEqual([{ id: 'w1', label: 'first' }]);
       const applied = await handle.execute(sql`select count(*)::int as n from drizzle.__drizzle_migrations`);
@@ -60,14 +60,14 @@ describe('migrateDb', () => {
 
 describe('migrateDb with in-memory migrations', () => {
   it('applies a list read at build time, so a bundled server needs no folder on disk', async () => {
-    const migrations = readMigrations(migrationsFolder);
+    const migrations = orThrow(readMigrations(migrationsFolder));
     expect(migrations).toHaveLength(1);
     expect(migrations[0]?.sql).toHaveLength(2);
 
     const { db: handle, close } = await orThrow(initDbRuntimeLocal({ memory: true }, { relations }));
     try {
-      await migrateDb(handle, { migrations });
-      await migrateDb(handle, { migrations });
+      expect(await migrateDb(handle, { migrations })).toBeUndefined();
+      expect(await migrateDb(handle, { migrations })).toBeUndefined();
       const rows = await handle.select().from(widgets);
       expect(rows).toEqual([{ id: 'w1', label: 'first' }]);
     } finally {

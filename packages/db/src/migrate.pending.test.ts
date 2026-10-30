@@ -45,7 +45,7 @@ describe('pendingMigrations', () => {
         '20260101000000_widgets',
         '20260102000000_gadgets',
       ]);
-      await migrateDb(handle, { migrationsFolder });
+      expect(await migrateDb(handle, { migrationsFolder })).toBeUndefined();
       expect(await pendingMigrations(handle, { migrationsFolder })).toEqual([]);
 
       addMigration('20260103000000_doohickeys', 'doohickeys');

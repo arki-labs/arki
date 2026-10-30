@@ -11,7 +11,7 @@ import type { LocalRuntimeCloseFailure, LocalRuntimeFailure } from './runtime-lo
 import { debugInit } from './debug.js';
 import { acquireOwnerLock, classifyLocalRuntimeFailure, lockableDataDir } from './owner-lock.js';
 import { LocalRuntimeCleanupFailed } from './runtime-local-failures.js';
-import { observeLocalRuntime } from './runtime-local-telemetry.js';
+import { observeDbOperation } from './runtime-local-telemetry.js';
 
 export { DB_RUNTIME_LOCAL_ERROR_CODES, DbRuntimeLocalError } from './owner-lock.js';
 export type { DbRuntimeLocalErrorCode } from './owner-lock.js';
@@ -45,7 +45,7 @@ class LockedPGlite extends PGlite {
     // Reserve ownership before tracing can reenter; release it only after reporting ends.
     this.#closing = Promise.resolve()
       .then(() =>
-        observeLocalRuntime('db.local.close', async () => {
+        observeDbOperation('db.local.close', async () => {
           try {
             // A failed driver close may leave a live database. Its lock must remain held.
             if (!this.closed) await super.close();
@@ -106,7 +106,7 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
     }
   | LocalRuntimeFailure
 > {
-  return observeLocalRuntime('db.local.init', async () => {
+  return observeDbOperation('db.local.init', async () => {
     let pglite: LockedPGlite | undefined;
     let release: (() => Promise<void | LocalRuntimeCloseFailure>) | undefined;
     try {
@@ -115,7 +115,7 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
       const pgliteOptions: PGliteOptions = options.extensions ? { extensions: options.extensions } : {};
       const lockDir = lockableDataDir(url);
       if (lockDir !== null) {
-        const acquired = await observeLocalRuntime('db.local.acquire', () => acquireOwnerLock(lockDir));
+        const acquired = await observeDbOperation('db.local.acquire', () => acquireOwnerLock(lockDir));
         if (isFailure(acquired)) return acquired;
         release = acquired;
       }

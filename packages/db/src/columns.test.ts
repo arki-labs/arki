@@ -75,7 +75,7 @@ describe('sqliteColumns, through drizzle-kit and migrateDb on libSQL', () => {
       { cwd: packageRoot, stdio: 'pipe' },
     );
     opened = createLibsqlDb({ url: `file:${path.join(dir, 'app.db')}`, relations });
-    await migrateDb(opened.db, { migrationsFolder });
+    expect(await migrateDb(opened.db, { migrationsFolder })).toBeUndefined();
   }, 60_000);
 
   afterAll(() => {

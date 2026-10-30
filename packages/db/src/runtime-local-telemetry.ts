@@ -1,29 +1,30 @@
-import type { Span } from '@opentelemetry/api';
-import { context, SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 /** Application-owned reporting cannot change resource ownership or its outcome. */
-function report(observe: () => unknown): void {
+function report<T>(observe: () => T): T | undefined {
   try {
-    void Promise.resolve(observe()).catch(() => {
+    const result = observe();
+    void Promise.resolve(result).catch(() => {
       // Also observe rejected promises from defective instrumentation.
     });
+    return result;
   } catch {
     // Reporting is best effort.
+    return undefined;
   }
 }
 
 /** Preserve the operation's exact result and run it once, even under a broken context manager. */
-export async function observeLocalRuntime<T>(name: string, run: () => T | Promise<T>): Promise<T> {
-  let span: Span | undefined;
-  report(() => {
-    span = trace.getTracer('@arki/db').startSpan(name);
-  });
+export async function observeDbOperation<T>(name: string, run: () => T | Promise<T>): Promise<T> {
+  const span = startSpan(name);
   let execution: Promise<T> | undefined;
   const execute = () => (execution ??= Promise.resolve().then(run));
-  report(() => {
-    if (span !== undefined) return context.with(trace.setSpan(context.active(), span), execute);
+  void report(() => {
+    const parent = report(() => context.active());
+    const active = report(() => (span === undefined ? undefined : trace.setSpan(parent ?? ROOT_CONTEXT, span)));
+    if (active !== undefined) return context.with(active, execute);
     return;
   });
   const failed = (code: string) => {
@@ -36,6 +37,58 @@ export async function observeLocalRuntime<T>(name: string, run: () => T | Promis
     return result;
   } catch (error) {
     failed(UnexpectedDefect.code);
+    throw error;
+  } finally {
+    report(() => span?.end());
+  }
+}
+
+/** Observe every acquired telemetry object as well as later reporter returns. */
+function startSpan(name: string) {
+  const parent = report(() => context.active());
+  const tracer = report(() => trace.getTracer('@arki/db'));
+  return report(() => tracer?.startSpan(name, {}, parent ?? ROOT_CONTEXT));
+}
+
+/** Synchronous file reads retain their synchronous contract and cache either terminal outcome. */
+export function observeDbSyncOperation<T>(name: string, run: () => T): T {
+  const span = startSpan(name);
+  let terminal: { readonly value: T } | { readonly error: unknown } | undefined;
+  let running = false;
+  const execute = () => {
+    if (terminal !== undefined) {
+      if ('value' in terminal) return terminal.value;
+      throw terminal.error;
+    }
+    if (running) throw new Error('Reentrant synchronous database observation.');
+    running = true;
+    try {
+      const value = run();
+      terminal = { value };
+      return value;
+    } catch (error) {
+      terminal = { error };
+      throw error;
+    } finally {
+      running = false;
+    }
+  };
+  void report(() => {
+    const parent = report(() => context.active());
+    const active = report(() => (span === undefined ? undefined : trace.setSpan(parent ?? ROOT_CONTEXT, span)));
+    if (active !== undefined) return context.with(active, execute);
+    return;
+  });
+  try {
+    const result = execute();
+    if (isFailure<unknown>(result)) {
+      report(() => span?.setAttribute('failure.code', result.code));
+      report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+    }
+    return result;
+  } catch (error) {
+    report(() => span?.setAttribute('failure.code', UnexpectedDefect.code));
+    report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
     throw error;
   } finally {
     report(() => span?.end());

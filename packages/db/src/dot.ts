@@ -399,12 +399,14 @@ export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(opt
     needs: { db: service<MigratableDb<TRelations>>() },
     provides: {
       // Factories run before `boot`, so this reads the database before any migration is applied.
-      migrations: async ({ db }): Promise<{ readonly pending: readonly string[] }> => ({
-        pending: await pendingMigrations(db, options),
-      }),
+      migrations: async ({ db }) => {
+        const pending = await pendingMigrations(db, options);
+        if (isFailure(pending)) return pending;
+        return { pending: Object.freeze(pending) } as const;
+      },
     },
     async boot({ db }) {
-      await migrateDb(db, options);
+      return migrateDb(db, options);
     },
   });
 }

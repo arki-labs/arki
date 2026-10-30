@@ -137,12 +137,12 @@ describe.runIf(process.env['ARKI_DB_CRDB'] === '1')('@arki/db on CockroachDB', (
   // Why: deploys run migrateDb; it must create the drizzle bookkeeping table and apply steps in order.
   it('migrateDb applies a two-step folder and records both in drizzle.__drizzle_migrations', async () => {
     const db = open();
-    await migrateDb(db, { migrationsFolder });
+    expect(await migrateDb(db, { migrationsFolder })).toBeUndefined();
     const widgets = await db.execute(sql`select id, label, note from widgets`);
     expect(widgets.rows).toEqual([{ id: 'w1', label: 'first', note: 'n' }]);
     const applied = await db.execute(sql`select count(*)::int4 as n from drizzle.__drizzle_migrations`);
     expect(applied.rows[0]).toEqual({ n: 2 });
-    await migrateDb(db, { migrationsFolder });
+    expect(await migrateDb(db, { migrationsFolder })).toBeUndefined();
   }, 60_000);
 
   // Why: records a known gap. CockroachDB has no LISTEN/NOTIFY, so hosts on it must use polling.

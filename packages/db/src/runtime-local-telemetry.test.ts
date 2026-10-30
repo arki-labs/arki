@@ -13,7 +13,7 @@ import { RandomSourceUnavailable } from '@arki/contracts';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { ownerId } from './owner-lock.js';
-import { observeLocalRuntime } from './runtime-local-telemetry.js';
+import { observeDbOperation, observeDbSyncOperation } from './runtime-local-telemetry.js';
 import { DataDirInUse, initDbRuntimeLocal, LocalRuntimeCleanupFailed } from './runtime-local.js';
 
 class TestContextManager implements ContextManager {
@@ -158,6 +158,44 @@ describe('local runtime telemetry ownership', () => {
 });
 
 describe('local runtime observer isolation', () => {
+  it.each(['sync', 'async'] as const)('observes rejected telemetry acquisition for %s operations', async mode => {
+    installTelemetry();
+    const failure = RandomSourceUnavailable();
+    for (const acquisition of [
+      { owner: trace, name: 'getTracer' },
+      { owner: context, name: 'active' },
+      { owner: trace.getTracer('@arki/db'), name: 'startSpan' },
+    ]) {
+      const original: unknown = Reflect.get(acquisition.owner, acquisition.name);
+      const run = vi.fn(() => failure);
+      Reflect.set(acquisition.owner, acquisition.name, () => Promise.reject(new Error('private reporter rejection')));
+      try {
+        const result = mode === 'sync'
+          ? observeDbSyncOperation('db.migrations.read', run)
+          : await observeDbOperation('db.migrations.pending', run);
+        expect(result).toBe(failure);
+        expect(run).toHaveBeenCalledTimes(1);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      } finally {
+        Reflect.set(acquisition.owner, acquisition.name, original);
+      }
+    }
+  });
+
+  it('reserves synchronous work across repeated context callbacks and observes its canonical code', () => {
+    const exporter = installTelemetry();
+    const failure = RandomSourceUnavailable();
+    const run = vi.fn(() => failure);
+    const withContext = context.with.bind(context);
+    vi.spyOn(context, 'with').mockImplementation((current, callback) => {
+      withContext(current, callback);
+      return withContext(current, callback);
+    });
+    expect(observeDbSyncOperation('db.migrations.read', run)).toBe(failure);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(exporter.getFinishedSpans()[0]?.attributes).toEqual({ 'failure.code': failure.code });
+  });
+
   it.each(['omit', 'repeat', 'throw-before', 'throw-after', 'reject'] as const)(
     'executes once and preserves failure identity when context managers %s',
     async mode => {
@@ -173,7 +211,7 @@ describe('local runtime observer isolation', () => {
       });
       const failure = RandomSourceUnavailable();
       const run = vi.fn(() => failure);
-      expect(await observeLocalRuntime('db.local.init', run)).toBe(failure);
+      expect(await observeDbOperation('db.local.init', run)).toBe(failure);
       expect(run).toHaveBeenCalledTimes(1);
       // Exporters also use context.with; a broken manager may suppress export itself.
       if (mode !== 'omit' && mode !== 'throw-before')
@@ -185,7 +223,7 @@ describe('local runtime observer isolation', () => {
     const exporter = installTelemetry();
     const error = new Error('private directory and extension details');
     await expect(
-      observeLocalRuntime('db.local.init', () => {
+      observeDbOperation('db.local.init', () => {
         throw error;
       }),
     ).rejects.toBe(error);
@@ -201,7 +239,7 @@ describe('local runtime observer isolation', () => {
     });
     const result = {};
     const run = vi.fn(() => result);
-    expect(await observeLocalRuntime('db.local.init', run)).toBe(result);
+    expect(await observeDbOperation('db.local.init', run)).toBe(result);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -212,7 +250,7 @@ describe('local runtime observer isolation', () => {
       throw new Error('broken tracer');
     });
     const run = vi.fn(() => 'success');
-    expect(await observeLocalRuntime('db.local.init', run)).toBe('success');
+    expect(await observeDbOperation('db.local.init', run)).toBe('success');
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -227,7 +265,7 @@ describe('local runtime observer isolation', () => {
       return span;
     });
     const result = {};
-    expect(await observeLocalRuntime('db.local.init', () => result)).toBe(result);
+    expect(await observeDbOperation('db.local.init', () => result)).toBe(result);
     await Promise.resolve();
   });
 
@@ -250,7 +288,7 @@ describe('local runtime observer isolation', () => {
     });
     const failure = RandomSourceUnavailable();
     const run = vi.fn(() => failure);
-    expect(await observeLocalRuntime('db.local.init', run)).toBe(failure);
+    expect(await observeDbOperation('db.local.init', run)).toBe(failure);
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
