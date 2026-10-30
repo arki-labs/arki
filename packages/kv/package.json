@@ -93,6 +93,7 @@
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@keyv/redis": "catalog:backend",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@t3-oss/env-core": "catalog:env",
     "ioredis": "catalog:",
     "keyv": "catalog:backend",

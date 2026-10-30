@@ -7,7 +7,7 @@ A Redis key-value store and rate limiter, with a Dot unit. When a doc and the co
 ## Laws
 
 1. A TTL on `KV` is in seconds. A TTL on the idempotency cache is in milliseconds. Never mix them in one API.
-2. A missing Redis must not crash the rate limiter. It falls back to memory.
+2. A missing Redis must not crash the rate limiter. It falls back to memory, and the fallback is reported (warning log, `degradedRateLimiters`).
 3. The Redis idempotency cache checks the owner token in one Lua script. A slow request whose key was taken by another must not touch the new entry.
 4. `@arki/http` and `@arki/dot` stay optional peers. The root entry never imports them.
 5. Every error code has JSDoc with a summary, `@fix` and `@verify`.

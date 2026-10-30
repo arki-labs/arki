@@ -29,7 +29,7 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
       });
     }
     debugKV.debug('[instance] Running without KV in development mode');
-    console.warn('⚠️  KV_URL not defined. Running without KV store (development mode).');
+    debugKV.warn('[instance] KV_URL not defined. Running without KV store (development mode).');
     return null;
   }
 
@@ -39,8 +39,7 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     debugKV.debug('[instance] Creating KV instance (namespace: {namespace})', {
       namespace: resolvedNamespace ?? 'none',
     });
-    console.log('Initializing KV connection...');
-    const instance = new KV(env.KV_URL, resolvedNamespace);
+    const instance = new KV(env.KV_URL, resolvedNamespace, undefined, { allowUnverifiedTls: env.KV_ALLOW_UNVERIFIED_TLS });
 
     // Test the connection with a simple operation
     // keyv might connect lazily, so a quick set/get ensures it's working.
@@ -58,7 +57,6 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     }
 
     debugKV.debug('[instance] KV initialized and connection test passed');
-    console.log('✅ KV connection successful.');
     return instance;
   } catch (error) {
     debugKV.debug('[instance] Initialization failed: {reason}', {
@@ -74,7 +72,9 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
       });
     }
     debugKV.debug('[instance] Running without KV in development mode after error');
-    console.error('⚠️  Failed to connect to KV store. Running without KV (development mode).', error);
+    debugKV.error(error instanceof Error ? error : new Error(String(error)), {
+      note: 'Failed to connect to KV store. Running without KV (development mode).',
+    });
     return null;
   }
 }
@@ -114,10 +114,8 @@ export function createKVInstance(namespace?: string): KV | null {
     debugKV.debug('[instance] Creating KV instance (namespace: {namespace}, lazy connection)', {
       namespace: resolvedNamespace ?? 'none',
     });
-    console.log('Creating KV instance (connection will be established lazily)...');
-    const instance = new KV(env.KV_URL, resolvedNamespace);
+    const instance = new KV(env.KV_URL, resolvedNamespace, undefined, { allowUnverifiedTls: env.KV_ALLOW_UNVERIFIED_TLS });
     debugKV.debug('[instance] KV instance created successfully');
-    console.log('✅ KV instance created.');
     return instance;
   } catch (error) {
     debugKV.debug('[instance] Creation failed: {reason}', {
@@ -133,16 +131,9 @@ export function createKVInstance(namespace?: string): KV | null {
       });
     }
     debugKV.debug('[instance] Returning null in development mode after error');
-    console.error('⚠️  Failed to create KV instance. Running without KV (development mode).', error);
+    debugKV.error(error instanceof Error ? error : new Error(String(error)), {
+      note: 'Failed to create KV instance. Running without KV (development mode).',
+    });
     return null;
   }
 }
-
-/**
- * @deprecated Use createKVInstance() or initializeKV() in your application singleton instead.
- * This export is kept for backward compatibility but will be removed in a future version.
- *
- * Direct usage of this export causes re-initialization on every module import,
- * especially problematic in Next.js development with HMR.
- */
-export const kv = createKVInstance();

@@ -97,14 +97,21 @@ const SIZE_UNITS: Readonly<Record<string, number>> = {
 /**
  * Parses a size budget such as `'8 kB'`, `'1.5MB'`, `'512 B'` or `'10 KiB'`
  * into bytes. kB/MB are decimal (1000), KiB/MiB binary (1024); unit case is
- * ignored. Returns undefined when the string does not parse.
+ * ignored. Returns `{ bytes }`, or `{ problem }` naming the part that did not parse.
  */
-export function parseSize(limit: string): number | undefined {
+export function parseSize(limit: string): { readonly bytes: number } | { readonly problem: string } {
   const match = /^\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*$/i.exec(limit);
-  if (!match) return undefined;
-  const factor = SIZE_UNITS[match[2]!.toLowerCase()];
-  if (factor === undefined) return undefined;
-  return Math.round(Number(match[1]) * factor);
+  if (!match) {
+    return { problem: `limit "${limit}" is not a number followed by a unit (use e.g. '8 kB', '1.5 KiB', '900 B').` };
+  }
+  const unit = match[2]!.toLowerCase();
+  const factor = SIZE_UNITS[unit];
+  if (factor === undefined) {
+    return {
+      problem: `limit "${limit}" has the unknown unit "${match[2]}" (use ${Object.keys(SIZE_UNITS).join(', ')}).`,
+    };
+  }
+  return { bytes: Math.round(Number(match[1]) * factor) };
 }
 
 function checkId(problems: string[], what: string, id: string, pattern = ID_PATTERN): void {
@@ -152,9 +159,8 @@ function validateGroup(problems: string[], group: GroupSpec): void {
     case 'size': {
       checkBaseline(problems, where, group.baseline, group.cases);
       for (const [key, sizeCase] of Object.entries(group.cases)) {
-        if (sizeCase.limit !== undefined && parseSize(sizeCase.limit) === undefined) {
-          problems.push(`${where}, case "${key}": limit "${sizeCase.limit}" does not parse (e.g. '8 kB', '512 B').`);
-        }
+        const parsed = sizeCase.limit === undefined ? undefined : parseSize(sizeCase.limit);
+        if (parsed !== undefined && 'problem' in parsed) problems.push(`${where}, case "${key}": ${parsed.problem}`);
       }
       break;
     }

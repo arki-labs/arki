@@ -90,7 +90,7 @@ try {
 }
 ```
 
-When the rate-limiter Redis client is not ready, the limiter transparently falls back to an in-memory implementation — your code keeps working, persistence is briefly lost.
+When the rate-limiter Redis client is not ready, the limiter falls back to an in-memory implementation, so your code keeps working. The fallback is not silent: a warning is logged and the id is listed in `kv.degradedRateLimiters`. Once Redis is ready, the next `getRateLimiter` call for that id returns a Redis-backed limiter.
 
 ## Idempotency response cache (Redis)
 
@@ -117,7 +117,8 @@ Upgrade with all old writers stopped: drain active requests, inventory legacy pe
 
 | Variable                  | Purpose                                       |
 | ------------------------- | --------------------------------------------- |
-| `KV_URL`                  | Primary Redis/Keyv URL (use `rediss://` TLS). |
+| `KV_URL`                  | Primary Redis/Keyv URL (use `rediss://` TLS; the certificate is verified). |
+| `KV_ALLOW_UNVERIFIED_TLS` | `true` skips certificate checks for `rediss://`. Only for a self-signed server you trust. Default off. |
 | `KV_NAMESPACE`            | Optional default namespace for keys.          |
 | `RATE_LIMIT_REDIS_URL`    | Dedicated Redis URL for rate limiting.        |
 | `RATE_LIMIT_PREFIX`       | Prefix for rate-limit keys (default `rl`).    |

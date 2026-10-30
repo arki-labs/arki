@@ -42,6 +42,8 @@
 import type { Deferred } from '@arki/dot/unit';
 import { DotUnitError, infra, resolveDeferred } from '@arki/dot/unit';
 
+import { orThrow } from '@arki/failure';
+
 import { KV } from './index.js';
 
 /**
@@ -81,6 +83,11 @@ export type KvDotOptions = {
   readonly namespace?: string;
   /** Optional prefix for rate-limit keys (default `rl`). */
   readonly rateLimitPrefix?: string;
+  /**
+   * Skip TLS certificate checks for a `rediss://` URL (default `false`: the certificate is verified).
+   * Turn it on only for a server with a self-signed certificate that you trust.
+   */
+  readonly allowUnverifiedTls?: boolean;
   /**
    * Prove the connection at boot with a set/get/delete round trip (default
    * `false`). A bad or unreachable URL then fails boot instead of the first
@@ -125,6 +132,8 @@ async function probe(client: KV, timeoutMs: number): Promise<KV> {
     await Promise.race([roundTrip(client), timeout]);
     return client;
   } catch (error) {
+    // The probe failure is the error that matters; a close failure on top of it adds nothing.
+    // eslint-disable-next-line failure/must-use -- see above
     await client.close();
     throw new DotUnitError({
       code: KV_PLUGIN_ERROR_CODES.probeFailed,
@@ -139,7 +148,7 @@ async function probe(client: KV, timeoutMs: number): Promise<KV> {
 
 /** Open the client for `url`; with `probe: true`, only once a round trip worked. */
 function open(url: string, config: KvDotOptions): KV | Promise<KV> {
-  const client = new KV(url, config.namespace, config.rateLimitPrefix);
+  const client = new KV(url, config.namespace, config.rateLimitPrefix, { allowUnverifiedTls: config.allowUnverifiedTls });
   return config.probe === true ? probe(client, config.probeTimeoutMs ?? 5000) : client;
 }
 
@@ -177,7 +186,8 @@ export function kv(options: Deferred<KvDotOptions> = {}) {
       },
     },
     async dispose({ kv: client }) {
-      await client.close();
+      const failed = await client.close();
+      if (failed) orThrow(failed);
     },
   });
 }
@@ -208,7 +218,8 @@ kv.optional = function optional(options: Deferred<KvDotOptions> = {}) {
       },
     },
     async dispose({ kv: client }) {
-      await client?.close();
+      const failed = await client?.close();
+      if (failed) orThrow(failed);
     },
   });
 };

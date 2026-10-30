@@ -24,6 +24,11 @@ export class ReadmeError extends Error {
   override name = 'ReadmeError';
 }
 
+/** The reason of a file system error, such as `EISDIR: illegal operation on a directory`. */
+function describeIoError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function count(text: string, marker: string): number {
   return text.split(marker).length - 1;
 }
@@ -48,7 +53,12 @@ function locate(path: string, text: string): { problem: string } | { start: numb
 export function writeReadme(path: string, markdown: string): void {
   if (!existsSync(path))
     throw new ReadmeError(`${path} does not exist. Create it with ${START_MARKER} and ${END_MARKER} markers first.`);
-  const text = readFileSync(path, 'utf8');
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new ReadmeError(`${path} could not be read: ${describeIoError(error)}`, { cause: error });
+  }
   const found = locate(path, text);
   if ('problem' in found) throw new ReadmeError(found.problem);
   if (markdown.includes(START_MARKER) || markdown.includes(END_MARKER)) {
@@ -57,13 +67,23 @@ export function writeReadme(path: string, markdown: string): void {
     );
   }
   const next = `${text.slice(0, found.start)}\n${markdown.trim()}\n${text.slice(found.end)}`;
-  if (next !== text) writeFileSync(path, next);
+  if (next === text) return;
+  try {
+    writeFileSync(path, next);
+  } catch (error) {
+    throw new ReadmeError(`${path} could not be written: ${describeIoError(error)}`, { cause: error });
+  }
 }
 
 /** Reads the `bench:meta` line of the marked section, if there is one. */
 export function readReadmeMeta(path: string): { meta?: ReadmeMeta; problem?: string } {
   if (!existsSync(path)) return { problem: `${path} does not exist` };
-  const text = readFileSync(path, 'utf8');
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    return { problem: `${path} could not be read: ${describeIoError(error)}` };
+  }
   const found = locate(path, text);
   if ('problem' in found) return { problem: found.problem };
   const section = text.slice(found.start, found.end);

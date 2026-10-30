@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { BenchResult, Block, CaseResult, GroupResult, ProgressEvent, Warning } from '../core/types.js';
 import { compareBlocks, compareMedians, summarize, summarizeValues } from '../core/stats.js';
+import { BenchRunError } from './run-error.js';
 import { combineRuntimes, mergeProcessResults, runFile } from './run.js';
 
 const SEED = 7;
@@ -210,6 +211,12 @@ describe('combineRuntimes', () => {
   it('a missing runtime blocks publishing', () => {
     const missing: Warning = { code: 'runtime-missing', message: 'deno is not installed' };
     expect(combineRuntimes([run('node', true)], [missing]).publishable).toBe(false);
+  });
+});
+
+describe('runFile refusals are BenchRunError, which the CLI turns into an exit code', () => {
+  it('rejects a missing suite file', async () => {
+    await expect(runFile(path.join(tmpdir(), 'arki-bench-no-such.bench.ts'))).rejects.toBeInstanceOf(BenchRunError);
   });
 });
 

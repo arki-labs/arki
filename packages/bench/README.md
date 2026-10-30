@@ -466,7 +466,7 @@ export async function publishReadme(): Promise<void> {
 | `compare`, `scenario`, `size`, `metric` | Identity helpers that set `kind` and infer case types.                                                           |
 | `validateSuite`                         | `(spec) => void`; throws `SpecError` with every problem in `problems`.                                           |
 | `SpecError`                             | `Error` with `problems: readonly string[]`.                                                                      |
-| `parseSize`                             | `(limit: string) => number \| undefined`: `'8 kB'` → 8000, `'10 KiB'` → 10240.                                   |
+| `parseSize`                             | `(limit: string) => { bytes } \| { problem }`: `'8 kB'` → `{ bytes: 8000 }`; bad text gives the `problem`.    |
 | `specHash`                              | `(suite) => string`: hash of everything the suite declares (README freshness).                                   |
 | `workHash`                              | `(group, key) => string`: hash of what one case measures (CI compatibility).                                     |
 | `runSuite`                              | `(suite, options?: RunOptions) => Promise<BenchResult>`. Prints nothing.                                         |

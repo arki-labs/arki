@@ -37,6 +37,7 @@ import { compareBlocks, summarize, summarizeValues } from '../core/stats.js';
 import { findDeclaredNode, withNodeVersionCheck } from './node-version.js';
 import { applyLoadCheck, collectProvenance, currentLoad } from './provenance.js';
 import { parseResult } from './result-schema.js';
+import { BenchRunError } from './run-error.js';
 import { createSizeRunner } from './size.js';
 import { registerTypeScriptResolver } from './ts-resolver.js';
 
@@ -185,7 +186,7 @@ export async function loadSuite(file: string): Promise<SuiteSpec> {
   const module: unknown = await import(pathToFileURL(file).href);
   const suite = typeof module === 'object' && module !== null && 'default' in module ? module.default : undefined;
   if (!isSuiteLike(suite)) {
-    throw new Error(
+    throw new BenchRunError(
       `${file} does not export a suite. Make its default export a suite: \`export default defineSuite({ id, groups: [...] })\`.`,
     );
   }
@@ -256,7 +257,7 @@ const STRIP_TYPES = '--experimental-strip-types';
 
 function assertNodeCanStripTypes(file: string): void {
   if (currentRuntime() === 'node' && !process.allowedNodeEnvironmentFlags.has(STRIP_TYPES)) {
-    throw new Error(
+    throw new BenchRunError(
       `Node ${process.version} cannot load the TypeScript suite ${file}: it lacks ${STRIP_TYPES} (Node 22.6 or later). ` +
         'Fix it one of these ways: upgrade Node to 22.6+, run with Bun (`bun x arki-bench …`) or Deno, or compile the suite to JavaScript.',
     );
@@ -369,7 +370,9 @@ function runWorker(
       }
     });
 
-    child.on('error', reject);
+    child.on('error', error => {
+      reject(new BenchRunError(`${label} could not start: ${error.message}`, { cause: error }));
+    });
     child.on('close', code => {
       if (failure) {
         const { message, problems: listed = [] } = failure;
@@ -378,15 +381,12 @@ function runWorker(
           .filter(problem => !message.includes(problem))
           .map(problem => `\n  - ${problem}`)
           .join('');
-        const error = new Error(`${label} failed: ${message}${problems}`);
-        // Named so the CLI prints it as a clean message instead of a stack trace.
-        error.name = 'BenchRunError';
-        reject(error);
+        reject(new BenchRunError(`${label} failed: ${message}${problems}`));
       } else if (code === 0 && result) {
         resolvePromise(result);
       } else {
         const output = tail.length > 0 ? `\n${tail.join('\n')}` : '';
-        reject(new Error(`${label} exited with code ${String(code)} without a result.${output}`));
+        reject(new BenchRunError(`${label} exited with code ${String(code)} without a result.${output}`));
       }
     });
   });
@@ -555,7 +555,7 @@ export async function runFile(file: string, options: RunFileOptions = {}): Promi
     throw new RangeError(`processes must be a whole number of at least 1, got ${String(processes)}.`);
   }
   const suitePath = path.resolve(cwd, file);
-  if (!existsSync(suitePath)) throw new Error(`Benchmark file not found: ${suitePath}`);
+  if (!existsSync(suitePath)) throw new BenchRunError(`Benchmark file not found: ${suitePath}`);
   const root = findPackageRoot(suitePath);
 
   const count = processes;
@@ -581,7 +581,7 @@ export async function runFile(file: string, options: RunFileOptions = {}): Promi
       results.push(await runProcesses(runtime, count, suitePath, root, runOptions, node));
     }
     if (results.length === 0) {
-      throw new Error(`None of the requested runtimes is installed: ${[...new Set(runtimes)].join(', ')}.`);
+      throw new BenchRunError(`None of the requested runtimes is installed: ${[...new Set(runtimes)].join(', ')}.`);
     }
     result = combineRuntimes(
       results.map(item => withNodeVersionCheck(item, declaredNode)),

@@ -30,6 +30,7 @@ import type {
 } from '../core/types.js';
 import { parseSize } from '../core/spec.js';
 import { exactComparison } from '../core/stats.js';
+import { BenchRunError } from './run-error.js';
 
 /**
  * Left out of every bundle unless the group sets its own `externals` (which
@@ -106,10 +107,10 @@ export async function bundleWithBun(bun: BunApi, request: BundleRequest): Promis
     });
   } catch (error) {
     const details = error instanceof AggregateError ? error.errors.map(item => describe(item)) : [describe(error)];
-    throw new Error(`Bundling ${request.entry} failed:\n${details.join('\n')}`, { cause: error });
+    throw new BenchRunError(`Bundling ${request.entry} failed:\n${details.join('\n')}`, { cause: error });
   }
   if (!result.success) {
-    throw new Error(`Bundling ${request.entry} failed:\n${result.logs.map(item => describe(item)).join('\n')}`);
+    throw new BenchRunError(`Bundling ${request.entry} failed:\n${result.logs.map(item => describe(item)).join('\n')}`);
   }
 
   const bytesByInput = new Map<string, number>();
@@ -194,22 +195,26 @@ function bundleInBunProcess(request: BundleRequest): Promise<BundleOutput> {
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     child.on('error', error => {
-      reject('code' in error && error.code === 'ENOENT' ? new BunMissingError('bun is not on PATH') : error);
+      reject(
+        'code' in error && error.code === 'ENOENT'
+          ? new BunMissingError('bun is not on PATH')
+          : new BenchRunError(`The bun size worker could not start: ${error.message}`, { cause: error }),
+      );
     });
     child.on('close', code => {
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `The bun size worker exited with code ${String(code)}.`));
+        reject(new BenchRunError(stderr.trim() || `The bun size worker exited with code ${String(code)}.`));
         return;
       }
       let parsed: unknown;
       try {
         parsed = JSON.parse(stdout);
       } catch {
-        reject(new Error(`The bun size worker printed something that is not JSON:\n${stdout.slice(0, 500)}`));
+        reject(new BenchRunError(`The bun size worker printed something that is not JSON:\n${stdout.slice(0, 500)}`));
         return;
       }
       if (isBundleOutput(parsed)) resolvePromise(parsed);
-      else reject(new Error('The bun size worker returned an unexpected answer.'));
+      else reject(new BenchRunError('The bun size worker returned an unexpected answer.'));
     });
   });
 }
@@ -289,12 +294,11 @@ export function createSizeRunner(options: { cwd: string }): SizeRunner {
       const name = `${safe(group.id)}-${safe(key)}`;
       const entry = path.join(cacheDir, `${name}.${spec.ext ?? 'js'}`);
       const outdir = path.join(cacheDir, name);
-      const limit = spec.limit === undefined ? undefined : parseSize(spec.limit);
-      if (spec.limit !== undefined && limit === undefined) {
-        throw new Error(
-          `Size case "${key}" in "${group.id}": invalid limit "${spec.limit}" (use e.g. '8 kB', '1.5 KiB', '900 B').`,
-        );
+      const parsedLimit = spec.limit === undefined ? undefined : parseSize(spec.limit);
+      if (parsedLimit !== undefined && 'problem' in parsedLimit) {
+        throw new BenchRunError(`Size case "${key}" in "${group.id}": ${parsedLimit.problem}`);
       }
+      const limit = parsedLimit?.bytes;
       await writeFile(entry, spec.source);
       await rm(outdir, { recursive: true, force: true });
 

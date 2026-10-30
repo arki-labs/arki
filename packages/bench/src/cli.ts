@@ -18,6 +18,7 @@ import { specHash } from './core/spec.js';
 import { compareRuns } from './core/stats.js';
 import { checkReadme, readReadmeMeta, writeReadme } from './node/readme.js';
 import { parseResult, ResultError } from './node/result-schema.js';
+import { BenchRunError } from './node/run-error.js';
 
 // ---------------------------------------------------------------------------
 // Command-line grammar
@@ -997,7 +998,8 @@ export async function main(argv: readonly string[], io: Io = processIo()): Promi
     }
     if (
       error instanceof CommandError ||
-      (error instanceof Error && ['ReadmeError', 'SpecError', 'BenchRunError'].includes(error.name))
+      error instanceof BenchRunError ||
+      (error instanceof Error && ['ReadmeError', 'SpecError'].includes(error.name))
     ) {
       // A SpecError lists every problem; print the ones its message does not already contain.
       const listed = 'problems' in error && Array.isArray(error.problems) ? error.problems.map(String) : [];

@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { BenchResult } from '../core/types.js';
 import { renderMarkdown } from '../core/report/index.js';
-import { checkReadme, END_MARKER, START_MARKER, writeReadme } from './readme.js';
+import { checkReadme, END_MARKER, ReadmeError, START_MARKER, writeReadme } from './readme.js';
 
 function readme(content: string): string {
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'arki-bench-readme-')), 'README.md');
@@ -58,6 +58,28 @@ describe('writeReadme', () => {
 
   it('refuses a section that contains a marker, so the README stays updatable', () => {
     expect(() => writeReadme(readme(PAGE), `text ${END_MARKER}`)).toThrow(/contains a bench marker/);
+  });
+});
+
+describe('README paths that cannot be read or written', () => {
+  const directory = () => mkdtempSync(path.join(tmpdir(), 'arki-bench-readme-dir-'));
+
+  it('writeReadme throws ReadmeError, not a raw EISDIR', () => {
+    expect(() => writeReadme(directory(), 'x')).toThrow(ReadmeError);
+  });
+
+  it('writeReadme throws ReadmeError when the file cannot be written', () => {
+    const file = readme(PAGE);
+    chmodSync(file, 0o444);
+    // A root user can write to a read-only file; the test then proves nothing, so it stays quiet.
+    if (process.getuid?.() === 0) return;
+    expect(() => writeReadme(file, 'changed')).toThrow(ReadmeError);
+  });
+
+  it('checkReadme names the read error as the reason', () => {
+    const checked = checkReadme(directory(), { schema: 1, suite: { id: 'x', specHash: 'y' } });
+    expect(checked.upToDate).toBe(false);
+    expect(checked.reason).toMatch(/could not be read: EISDIR/);
   });
 });
 

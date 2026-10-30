@@ -8,22 +8,18 @@
  */
 
 import type { IRateLimiterOptions } from 'rate-limiter-flexible';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { KV } from './index.js';
 
 let kv: KV;
 
 beforeAll(() => {
-  vi.spyOn(console, 'warn').mockImplementation(() => {
-    /* the in-memory fallback warns on every new limiter */
-  });
   kv = new KV('redis://127.0.0.1:1', 'test', 'rl');
 });
 
 afterAll(async () => {
-  await kv.close();
-  vi.restoreAllMocks();
+  expect(await kv.close()).toBeUndefined();
 });
 
 const get = (id: string, options: Partial<IRateLimiterOptions>) => kv.getRateLimiter(id, options);

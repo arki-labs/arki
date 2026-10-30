@@ -15,6 +15,11 @@ export const env = defineEnv({
     // KV/Redis Configuration
     KV_URL: z.url().optional(),
     KV_NAMESPACE: z.string().optional(),
+    /** `true` turns TLS certificate checking off for `rediss://` URLs. Verified by default. */
+    KV_ALLOW_UNVERIFIED_TLS: z
+      .string()
+      .optional()
+      .transform(val => val === 'true'),
 
     // Redis-specific configurations (for advanced Redis features)
     REDIS_HOST: z.string().optional(),

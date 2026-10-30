@@ -31,14 +31,17 @@ describe('@arki/kv/instance', () => {
   });
 
   it('throws a KVInitializationError in production without KV_URL', async () => {
-    await expect(loadInstance('production')).rejects.toMatchObject({
-      name: 'KVInitializationError',
-      code: KV_INITIALIZATION_ERROR_CODES.urlRequiredInProduction,
-    });
+    // Importing the module builds nothing; the error comes from the call.
+    const instance = await loadInstance('production');
+    expect(() => instance.createKVInstance()).toThrowError(
+      expect.objectContaining({
+        name: 'KVInitializationError',
+        code: KV_INITIALIZATION_ERROR_CODES.urlRequiredInProduction,
+      }),
+    );
   });
 
   it('returns null in development without KV_URL', async () => {
-    vi.spyOn(console, 'warn').mockReturnValue();
     const instance = await loadInstance('development');
     expect(instance.createKVInstance()).toBeNull();
     await expect(instance.initializeKV()).resolves.toBeNull();

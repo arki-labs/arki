@@ -554,25 +554,29 @@ function listener(connect: () => Promise<ListenClient>): {
       await promise;
     },
     async dispose() {
- return observeLock('store.dispose', async () => {
-      try {
-      if (disposed) return;
-      disposed = true;
-      const pending = connection;
-      connection = undefined;
-      wakeAll();
-      if (pending === undefined) return;
-      try {
-        const client = await pending;
-        client.release(true);
-      } catch {
-        // The connection never opened, or a connection error already released it.
-      }
-    
+      return observeLock('store.dispose', async () => {
+        if (disposed) return;
+        disposed = true;
+        const pending = connection;
+        connection = undefined;
+        wakeAll();
+        if (pending === undefined) return;
+        let client: ListenClient;
+        try {
+          client = await pending;
+        } catch {
+          // The connection never opened, or a connection error already released it. Nothing is left to release,
+          // and the waiter that asked for it already got the error.
+          return;
+        }
+        try {
+          client.release(true);
+        } catch (error) {
+          // The LISTEN connection could not be released, so it may still hold a pool slot.
+          return storeFailure(error, 'dispose');
+        }
         return;
-      } catch (error) { return storeFailure(error, 'dispose'); }
-
- });
-},
+      });
+    },
   };
 }

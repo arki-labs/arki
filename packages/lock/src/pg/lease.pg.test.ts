@@ -20,7 +20,7 @@ import type { CaseStore } from '../testing/index.js';
 import type { ManualScheduler } from '../testing/manual-scheduler.js';
 import type { Duration, Store } from '../types.js';
 import type { LeaseDb } from './lease.js';
-import { LockError, LockHeld } from '../errors.js';
+import { LockError, LockHeld, LockStoreFailure } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { chaos } from '../testing/chaos.js';
@@ -339,6 +339,34 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
       controller.abort();
       orThrow(await waiter.dispose?.());
     }
+  });
+
+  it('dispose returns a lock.store failure when the LISTEN connection cannot be released', async () => {
+    // The pooled client is real; only its release is made to fail, which a live connection cannot be forced to do.
+    const waiter = pgLease(dbA, {
+      ttl: TTL,
+      table: TABLE,
+      listen: async () => {
+        const client = await poolA.connect();
+        const release = client.release.bind(client);
+        client.release = () => {
+          release(true);
+          throw new Error('release refused');
+        };
+        return client;
+      },
+    });
+    const controller = new AbortController();
+    const waiting =
+      waiter.waitFor?.(createKey('listen', `dispose-${Math.random()}`), controller.signal) ??
+      Promise.reject(new Error('no waitFor'));
+    await sleep(200);
+    const disposed = await waiter.dispose?.();
+    controller.abort();
+    expect(await waiting).toBeUndefined();
+    // Before the fix the release error was swallowed and dispose resolved as if it had worked.
+    expect(LockStoreFailure.is(disposed)).toBe(true);
+    expect(disposed?.data).toMatchObject({ method: 'dispose', outcome: 'unknown' });
   });
 
   it('an aborted wait settles at once, so a cancelled caller never hangs', async () => {

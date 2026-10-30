@@ -479,7 +479,8 @@ export class IntegrationTester<
     if (this._kv) {
       debugTester.debug('[tester] Closing KV instance');
       try {
-        await this._kv.close();
+        const closeFailure = await this._kv.close();
+        if (closeFailure) console.error('Failed to close KV instance:', closeFailure.message);
         debugTester.debug('[tester] KV instance closed');
       } catch (error) {
         debugTester.debug('[tester] Error closing KV', {

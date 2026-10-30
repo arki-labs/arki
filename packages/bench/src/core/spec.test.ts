@@ -132,7 +132,7 @@ describe('validateSuite', () => {
       /"differs-base": the baseline "a" cannot be marked `differs`/,
       /"differs-base" has 1 case\(s\)/,
       /"variant-base": the baseline "a" cannot be marked `variant`/,
-      /limit "eight kB" does not parse/,
+      /limit "eight kB" is not a number followed by a unit/,
       /"metric": baseline "nope" is not one of its cases/,
       /"scenario": `inputs` is empty/,
     ];
@@ -153,12 +153,15 @@ describe('validateSuite', () => {
 
 describe('parseSize', () => {
   it('reads decimal and binary units', () => {
-    expect(parseSize('8 kB')).toBe(8000);
-    expect(parseSize('1.5MB')).toBe(1_500_000);
-    expect(parseSize('10 KiB')).toBe(10_240);
-    expect(parseSize('512 B')).toBe(512);
-    expect(parseSize('8')).toBeUndefined();
-    expect(parseSize('8 parsecs')).toBeUndefined();
+    expect(parseSize('8 kB')).toEqual({ bytes: 8000 });
+    expect(parseSize('1.5MB')).toEqual({ bytes: 1_500_000 });
+    expect(parseSize('10 KiB')).toEqual({ bytes: 10_240 });
+    expect(parseSize('512 B')).toEqual({ bytes: 512 });
+  });
+
+  it('says which part did not parse, so the caller can show a reason', () => {
+    expect(parseSize('8')).toEqual({ problem: expect.stringContaining('not a number followed by a unit') });
+    expect(parseSize('8 parsecs')).toEqual({ problem: expect.stringContaining('unknown unit "parsecs"') });
   });
 });
 

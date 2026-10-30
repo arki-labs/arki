@@ -1,5 +1,7 @@
 /** `RateLimitExceededError` and the initialization error codes. */
 import type { IRateLimiterRes } from 'rate-limiter-flexible';
+import { z } from '@arki/contracts';
+import { defineFailure } from '@arki/failure';
 
 export class RateLimitExceededError extends Error {
   readonly limiterResult: IRateLimiterRes;
@@ -20,6 +22,23 @@ export class RateLimitExceededError extends Error {
     };
   }
 }
+
+/**
+ * `KV.close()` could not disconnect one of its two Redis connections. The connection may still be open.
+ * `target` says which one: `store` (the Keyv connection) or `limiter` (the rate limiter connection).
+ *
+ * @fix Check the Redis server and the network. The process can still end; the server drops idle clients after its timeout.
+ * @verify bun run test -- src/kv.redis.test.ts
+ */
+export const KvCloseFailed = /* @__PURE__ */ defineFailure('kv.close_failed', {
+  status: 503,
+  data: z.object({ target: z.enum(['store', 'limiter']), reason: z.string() }),
+  message: ({ target, reason }) => `the KV ${target} connection did not close: ${reason}`,
+  remediation: 'Check the Redis server and the network. The server drops idle clients after its timeout.',
+});
+
+/** A {@link KvCloseFailed} failure value. */
+export type KvCloseFailed = ReturnType<typeof KvCloseFailed>;
 
 export const KV_INITIALIZATION_ERROR_CODES = {
   /**
@@ -43,6 +62,13 @@ export const KV_INITIALIZATION_ERROR_CODES = {
    * @verify bun run test -- src/instance.test.ts
    */
   creationFailed: 'KV_INIT_E003',
+  /**
+   * A factory (`createKV`, `createRateLimitKV`) ran without a Redis URL.
+   *
+   * @fix Set `KV_URL` (or `RATE_LIMIT_REDIS_URL` for `createRateLimitKV`).
+   * @verify bun run test -- src/factory.test.ts
+   */
+  urlNotConfigured: 'KV_INIT_E004',
 } as const;
 
 /** The KV store could not be set up in production. The caller decides whether to end the program. */

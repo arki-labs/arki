@@ -102,6 +102,17 @@ describe('parseArgs', () => {
 });
 
 describe('main', () => {
+  it('exits 1 with a plain message, not a stack trace, when no requested runtime is installed', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'arki-bench-cli-'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0' }));
+    writeFileSync(path.join(dir, 'a.bench.ts'), 'export default { id: "a", groups: [] };\n');
+    const { io, out, err } = capture(dir);
+    // Before the fix runFile threw a plain Error that main rethrew: an unhandled rejection with a stack trace.
+    expect(await main(['run', 'a.bench.ts', '--runtime', 'node', '--node', '/no/such/node'], io)).toBe(1);
+    expect(err()).toMatch(/arki-bench: None of the requested runtimes is installed: node\.\n$/);
+    expect(out()).toBe('');
+  });
+
   it('exits 2 with the suggestion on stderr for a bad command line, and keeps stdout clean', async () => {
     const { io, out, err } = capture(tmpdir());
     expect(await main(['--profle', 'publish'], io)).toBe(2);
