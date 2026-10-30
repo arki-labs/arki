@@ -114,13 +114,15 @@ function configError(message: string, remediation: string): ReleaseError {
 
 const depsFileSchema = z.object({
   linkRoot: z.string(),
-  packages: z.record(z.string(), z.object({ path: z.string(), version: z.string() })),
+  // `version: null`: not released yet; the demo links the package from source.
+  packages: z.record(z.string(), z.object({ path: z.string(), version: z.string().nullable() })),
 });
 
 const packageJsonVersionSchema = z.object({ version: z.string() });
 
 export type DemoPin = {
-  readonly pinned: string;
+  /** Released version the demo pins; `null` when the package has no release yet. */
+  readonly pinned: string | null;
   /** Version of the package in this workspace; absent when it is not a package. */
   readonly sourceVersion?: string;
 };
@@ -289,7 +291,7 @@ export function demosUsing(registry: DemoRegistry, pkg: string): DemoUse[] {
     const proofs = (registry.proofs[pkg] ?? []).filter(p => p.demo === demo.entry.name);
     if (proofs.length > 0) via.push('proof');
     if (via.length === 0) continue;
-    const pinned = demo.pins.get(pkg)?.pinned;
+    const pinned = demo.pins.get(pkg)?.pinned ?? undefined;
     uses.push({
       demo: demo.entry.name,
       via,

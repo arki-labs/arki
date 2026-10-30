@@ -61,6 +61,26 @@ describe('loadDemos', () => {
     expect(codes).toContain(`${DEMO_ERROR_CODES.importNotPinned}:@arki/log`);
     expect(registry.demos[0]?.pins.get('@arki/dot')).toEqual({ pinned: '0.4.1', sourceVersion: '0.6.1' });
   });
+
+  it('reads a null pin as a package with no release yet, not as an unreadable file', async () => {
+    // Why: a demo uses packages before their first release and links them from source
+    // (`version: null`). Rejecting the whole file hid every other pin and blocked demo lag.
+    write('packages/ai/package.json', JSON.stringify({ version: '0.1.0' }));
+    write('packages/dot/package.json', JSON.stringify({ version: '0.6.1' }));
+    write(
+      'demos/shop/arki.deps.json',
+      JSON.stringify({
+        linkRoot: '../../packages',
+        packages: { '@arki/ai': { path: 'ai', version: null }, '@arki/dot': { path: 'dot', version: '0.4.1' } },
+      }),
+    );
+    write('demos/shop/backend/src/app.ts', "import { ai } from '@arki/ai';\nimport { dot } from '@arki/dot/plugin';\n");
+    const registry = await loadDemos(root, config);
+    expect(registry.errors).toEqual([]);
+    expect(registry.demos[0]?.pins.get('@arki/ai')).toEqual({ pinned: null, sourceVersion: '0.1.0' });
+    expect(demosUsing(registry, '@arki/ai')).toEqual([{ demo: 'shop', via: ['import'], scenarios: [] }]);
+    expect(demosUsing(registry, '@arki/dot')[0]?.pinned).toBe('0.4.1');
+  });
 });
 
 describe('demosUsing', () => {

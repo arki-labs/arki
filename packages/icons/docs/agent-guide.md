@@ -70,7 +70,6 @@ Add a subpath with its own entry file and a one-line summary comment. Add the `e
 
 ## Rules that bite
 
-- `@arki/icons/home` needs `unplugin-icons`. Do not import it elsewhere.
 - `Flag` does not ship the SVG files.
 - `phosphor/ssr` icons ignore `IconContext`.
 - The wc `Icon` fetches unregistered icons over the network.

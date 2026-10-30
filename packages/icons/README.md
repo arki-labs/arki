@@ -52,7 +52,7 @@ Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStac
 | `@arki/icons/wc`                | Iconify icons by name, loaded as a web component             |
 | `@arki/icons/spinners`          | Names of the animated SVG spinners                           |
 | `@arki/icons/types`             | `IconSVG`                                                    |
-| `@arki/icons/home`              | A Twemoji house, built by `unplugin-icons`                   |
+| `@arki/icons/home`              | `HomeIcon`, a Twemoji house as a plain SVG component         |
 
 ## Failure behaviour
 
@@ -66,7 +66,6 @@ Nothing here throws at runtime. Mistakes show up as types or as a missing pictur
 ## Limits
 
 - `Flag` loads `/flags/<size>/<code>.svg` from your own server. Copy the `flagpack-core` SVGs into `public/flags/` or the picture is broken. The package does not copy them.
-- `@arki/icons/home` imports `~icons/twemoji/house`, a virtual module from `unplugin-icons`. It fails to build unless the plugin is in your bundler config. Do not import it otherwise.
 - `Icon` from `@arki/icons/wc` fetches icons you did not register with `addIcon` from the Iconify API, over the network. Register the icons you need if the page must work offline.
 - Phosphor icons read `IconContext`, so they re-render when the provider value changes. In a server component or a long list, import `@arki/icons/phosphor/ssr` instead. Boundary: an `ssr` icon ignores `AtelierIconDefaults` and uses Phosphor's own size and weight.
 
@@ -93,6 +92,7 @@ export function Links() {
 ```ts
 // vite.config.ts
 import { phosphorPerIcon } from '@arki/icons/vite';
+import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [phosphorPerIcon()],

@@ -798,7 +798,7 @@ async function finish(options: ShipOptions, dir: string, deps: ShipDeps): Promis
   for (const demo of registry.demos.filter(d => d.present)) {
     const bumps = packages.flatMap(p => {
       const pinned = demo.pins.get(p.name)?.pinned;
-      return pinned !== undefined && pinned !== p.version ? [`${p.name} ${pinned} -> ${p.version}`] : [];
+      return pinned !== undefined && pinned !== p.version ? [`${p.name} ${pinned ?? 'unreleased'} -> ${p.version}`] : [];
     });
     if (bumps.length === 0) continue;
     steps.push({

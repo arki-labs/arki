@@ -70,8 +70,8 @@
     },
     "./home": {
       "types": "./dist/src/home.d.ts",
-      "import": "./src/home.ts",
-      "browser": "./src/home.ts"
+      "import": "./src/home.tsx",
+      "browser": "./src/home.tsx"
     },
     "./index": {
       "types": "./dist/src/index.d.ts",
@@ -128,7 +128,7 @@
         "src/brands/index.ts"
       ],
       "home": [
-        "src/home.ts"
+        "src/home.tsx"
       ],
       "index": [
         "src/index.ts"

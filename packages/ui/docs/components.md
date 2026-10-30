@@ -100,6 +100,7 @@ Most components are small wrappers over a Base UI primitive. They take the primi
 
 - `Slot`: merges its props onto its single child element.
 - `withAsChild`: lets a component render its child instead of its own element (the Radix-style `asChild` pattern).
+- `copyText` (`@arki/ui/copy-text`): writes text to the clipboard and resolves to `'copied'` or `'failed'`. A refused write is `'failed'`, never a rejection.
 
 ## Hooks
 

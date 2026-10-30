@@ -13,7 +13,7 @@
 - `@arki/icons/vite`: `phosphorIconNames`, `phosphorPerIcon`, `rewriteIconImports`.
 - `@arki/icons/spinners`: Animated SVG spinners. `getSpinnerUrl`, `spinnerNames`; types `SpinnerName`.
 - `@arki/icons/brands/index`: Brand marks from Simple Icons, as plain data you render yourself. `si1001tracklists`, `si1and1`, `si1dot1dot1dot1`, `si1panel`, `si1password`, `si2fas`, `si2k`, `si30secondsofcode`, `si365datascience`, `si3m`, `si42`, `si4chan`; and 3453 more.
-- `@arki/icons/home`: `HomeIcon` and `HouseIcon`: a Twemoji house, built at compile time by `unplugin-icons`. `HomeIcon`, `HouseIcon`.
+- `@arki/icons/home`: `HomeIcon` and `HouseIcon`: the Twemoji house as a plain React SVG component. `HomeIcon`, `HouseIcon`.
 - `@arki/icons/index`: The default entry: every Phosphor icon plus the shared `IconSVG` type. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3037 more.
 - `@arki/icons/phosphor-ssr`: Phosphor Icons — SSR / static variant. `Acorn`, `AcornIcon`, `ActivityIcon`, `AddressBook`, `AddressBookIcon`, `AddressBookTabs`, `AddressBookTabsIcon`, `AirTrafficControl`, `AirTrafficControlIcon`, `Airplane`, `AirplaneIcon`, `AirplaneInFlight`; and 3031 more.
 - `@arki/icons/spinners/index`: Animated SVG spinners. `getSpinnerUrl`, `spinnerNames`; types `SpinnerName`.
@@ -36,5 +36,4 @@
 ## Rules that bite
 - The root import is Phosphor only. Other sets use subpaths.
 - `Flag` needs your app to serve `/flags/<size>/<code>.svg`.
-- `@arki/icons/home` only builds with `unplugin-icons`.
 - `phosphor/ssr` icons ignore `IconContext` and the defaults providers.
