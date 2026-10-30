@@ -1,8 +1,9 @@
 /**
  * The Dot bridge. `journal(...)` is the infra part: it publishes the journal so
  * features can write through it. `journalWorker(...)` is the entrypoint: it runs
- * the effects, taps and async projections. `journalHandlers(...)` lets a feature
- * hand over its projections, effects and taps.
+ * the effects, taps and async projections. `journalHandlers(core, …)` is the
+ * application contribution that hands a feature's effects, taps and workflows over;
+ * `journalProjections(...)` hands over its projections.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -10,7 +11,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { EntrypointServicesOf } from '@arki/dot/feature';
+import type { DepsOf, EntrypointServicesOf } from '@arki/dot/feature';
 import type { EmptyShape, Provided, UnitSourceGuard } from '@arki/dot/unit';
 import { defineApp, rename } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
@@ -18,8 +19,8 @@ import { infra, service, token } from '@arki/dot/unit';
 import { orThrow } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
-import { journal, journalEffects, journalHandlers, journalProjections, journalWorker } from './dot.js';
-import { need } from './handlers.js';
+import type { Need } from './types.js';
+import { journal, journalHandlers, journalProjections, journalWorker, needsOf } from './dot.js';
 import { initJournal } from './journal.js';
 import {
   customerOrderCounts,
@@ -91,6 +92,7 @@ const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]), customerId: z.string().default('c1') }),
+  { writes: [OrderPlaced] },
   (input, { write }) => write(order, input.id, () => [OrderPlaced({ customerId: input.customerId, total: 1 })]),
 );
 
@@ -293,15 +295,13 @@ describe('journal({ j }) with features', () => {
   it('builds the journal from the mounted features alone: one command fires each inline projection and, through the worker, each effect', async () => {
     const ordersMail = recorder('dot-orders-mail');
     const billingMail = recorder('dot-billing-mail');
-    const ordersCore = defineFeature('orders')
-      .infra(journalProjections(countPlaced('dot-orders-count', 'orders')))
-      .usecases({});
-    const orders = ordersCore.entrypoints(journalEffects(ordersCore, { effects: [ordersMail.effect] }));
-    const billingCore = defineFeature('billing')
-      .infra(journalProjections(countPlaced('dot-billing-count', 'billing')))
-      .usecases({});
-    const billing = billingCore.entrypoints(journalEffects(billingCore, { effects: [billingMail.effect] }));
-    // A feature with no journal slice is allowed: it contributes nothing.
+    const ordersCore = defineFeature('orders').infra(journalProjections(countPlaced('dot-orders-count', 'orders')));
+    const orders = ordersCore.usecases({}, journalHandlers(ordersCore, { effects: [ordersMail.effect] })).entrypoints();
+    const billingCore = defineFeature('billing').infra(journalProjections(countPlaced('dot-billing-count', 'billing')));
+    const billing = billingCore
+      .usecases({}, journalHandlers(billingCore, { effects: [billingMail.effect] }))
+      .entrypoints();
+    // A feature with no journal contribution is allowed: it contributes nothing.
     const plain = defineFeature('plain').usecases({}).entrypoints();
 
     // The features are listed once: `journal` and `journalWorker` are both bound to them.
@@ -370,35 +370,56 @@ describe('journal({ j }) with features', () => {
     expect(await placedCount('boot:at-boot')).toBe(1);
   });
 
-  it('lets an effect declared with `journalEffects` run a command of another feature through `ctx.run`', async () => {
+  it('lets a task declared with `journalHandlers` run a command of another feature, under the actor it names', async () => {
     // Billing owns the command and hears the payment. Ordering only reacts to its own event.
     const payOrder = j.command(
       'payOrder',
       z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+      { writes: [OrderPaid] },
       (input, { write }) => write(order, input.id, () => [OrderPaid({ amount: 1 })]),
     );
     const paid = signal();
-    const orderingCore = defineFeature('ordering').usecases({});
-    const ordering = orderingCore.entrypoints(
-      journalEffects(orderingCore, {
-        effects: [
-          j.effect('dot-pay-on-place', order, {
-            OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, { actorId: 'system' }),
-          }),
-        ],
-      }),
-    );
-    const billingCore = defineFeature('billing').usecases({});
-    const billing = billingCore.entrypoints(
-      journalEffects(billingCore, {
-        effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })],
-      }),
-    );
+    const tasks = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+    const orderingCore = defineFeature('ordering');
+    const ordering = orderingCore
+      .usecases(
+        {},
+        journalHandlers(orderingCore, {
+          workflows: [
+            // An event that must run a command is a task, not an effect (D-11). It names a system actor (D-8).
+            tasks.task(
+              'dot-pay-on-place',
+              {
+                version: 1,
+                input: z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+                startOn: {
+                  entity: order,
+                  event: OrderPlaced,
+                  timing: 'after-commit',
+                  id: e => `pay:${e.entityId}`,
+                  input: e => ({ id: e.entityId }),
+                },
+              },
+              ({ input, run }) => run(payOrder, { id: input.id }, { actorId: 'system' }),
+            ),
+          ],
+        }),
+      )
+      .entrypoints();
+    const billingCore = defineFeature('billing');
+    const billing = billingCore
+      .usecases(
+        {},
+        journalHandlers(billingCore, {
+          effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })],
+        }),
+      )
+      .entrypoints();
     const app = track(
       await orThrow(
         defineApp('cross-feature')
           .infra(dbPlugin())
-          .infra(journal({ j }))
+          .infra(journal({ j: tasks, workflowMeta: { actorId: 'system:workflow' } }))
           .features([ordering, billing])
           .entrypoints(journalWorker({ pollMs: POLL_MS }))
           .boot(),
@@ -417,10 +438,10 @@ describe('journal({ j }) with features', () => {
 
   it('lists an effect in the feature manifest, so `dot explain` shows which feature owns the async work', () => {
     const mail = recorder('dot-listed-mail');
-    const slice = journalHandlers({ effects: [mail.effect] });
+    const contribution = journalHandlers(defineFeature('listed'), { effects: [mail.effect] });
 
-    expect(slice.key).toBe('journal');
-    expect(slice.actions).toEqual([
+    expect(contribution.key).toBe('journal');
+    expect(contribution.actionsOf('listed')).toEqual([
       {
         id: 'dot-listed-mail.run',
         binding: 'journal',
@@ -433,14 +454,11 @@ describe('journal({ j }) with features', () => {
   });
 
   type Emitter = { emit(id: OrderId): void };
-  /** An effect that needs an emitter. It does not say which one: the feature that lists it does. */
-  const announce = (name: string) =>
-    j.effect(
-      `dot-${name}-announce`,
-      order,
-      { emitter: need<Emitter>() },
-      { OrderPlaced: (e, { emitter }) => emitter.emit(e.entityId) },
-    );
+  /** An effect that needs an emitter. It does not say which one: the feature that picks it with `needsOf` does. */
+  const announce = (name: string, needs: { readonly emitter: Need<Emitter> }) =>
+    j.effect(`dot-${name}-announce`, order, needs, { OrderPlaced: (e, { emitter }) => emitter.emit(e.entityId) });
+  /** A feature with an emitter need: the type tests below pick from it. */
+  const announcing = defineFeature('announcing').needs({ emitter: service<Emitter>() });
 
   it('gives each effect the services of the feature that listed it, so two features can use one need name for two different services', async () => {
     const heard: { orders: OrderId[]; billing: OrderId[] } = { orders: [], billing: [] };
@@ -466,16 +484,18 @@ describe('journal({ j }) with features', () => {
       return { emitter, EmitterToken };
     };
     const ordersParts = emitterOf('orders');
-    const ordersCore = defineFeature('orders').needs({ emitter: ordersParts.EmitterToken }).usecases({});
+    const ordersCore = defineFeature('orders').needs({ emitter: ordersParts.EmitterToken });
+    const ordersAnnounce = announce('orders', needsOf((_: DepsOf<typeof ordersCore>) => ['emitter']));
     const orders = {
       emitter: ordersParts.emitter,
-      feature: ordersCore.entrypoints(journalEffects(ordersCore, { effects: [announce('orders')] })),
+      feature: ordersCore.usecases({}, journalHandlers(ordersCore, { effects: [ordersAnnounce] })).entrypoints(),
     };
     const billingParts = emitterOf('billing');
-    const billingCore = defineFeature('billing').needs({ emitter: billingParts.EmitterToken }).usecases({});
+    const billingCore = defineFeature('billing').needs({ emitter: billingParts.EmitterToken });
+    const billingAnnounce = announce('billing', needsOf((_: DepsOf<typeof billingCore>) => ['emitter']));
     const billing = {
       emitter: billingParts.emitter,
-      feature: billingCore.entrypoints(journalEffects(billingCore, { effects: [announce('billing')] })),
+      feature: billingCore.usecases({}, journalHandlers(billingCore, { effects: [billingAnnounce] })).entrypoints(),
     };
 
     const app = track(
@@ -499,7 +519,8 @@ describe('journal({ j }) with features', () => {
   });
 
   it('lists an effect with needs in the feature manifest like any other, so `dot explain` never misses async work', () => {
-    expect(journalHandlers({ effects: [announce('listed')] }).actions).toEqual([
+    const listed = announce('listed', needsOf((_: DepsOf<typeof announcing>) => ['emitter']));
+    expect(journalHandlers(announcing, { effects: [listed] }).actionsOf('announcing')).toEqual([
       {
         id: 'dot-listed-announce.run',
         binding: 'journal',
@@ -512,29 +533,36 @@ describe('journal({ j }) with features', () => {
   });
 
   it('makes the feature declare what its effects need, so a forgotten service is a compile error, and a boot error when the types were bypassed', () => {
-    const slice = journalHandlers({ effects: [recorder('dot-needs-nothing').effect, announce('typed')] });
-    expectTypeOf(slice.resolve).parameter(0).toEqualTypeOf<{ readonly emitter: Emitter }>();
-    // A feature whose effects need nothing asks its services for nothing.
-    expectTypeOf(journalHandlers({ effects: [recorder('dot-plain').effect] }).resolve)
+    const typedAnnounce = announce('typed', needsOf((_: DepsOf<typeof announcing>) => ['emitter']));
+    const contribution = journalHandlers(announcing, {
+      effects: [recorder('dot-needs-nothing').effect, typedAnnounce],
+    });
+    expectTypeOf(contribution.bind).parameter(0).toEqualTypeOf<{ readonly emitter: Emitter }>();
+    // A feature whose effects need nothing asks its deps for nothing.
+    expectTypeOf(journalHandlers(announcing, { effects: [recorder('dot-plain').effect] }).bind)
       .parameter(0)
       .toBeUnknown();
-    const forgetful = defineFeature('forgetful').usecases({});
-    // @ts-expect-error -- this feature needs no `emitter`, so it cannot list the effect
-    forgetful.entrypoints(journalEffects(forgetful, { effects: [announce('typed')] }));
+    const forgetful = defineFeature('forgetful');
+    // @ts-expect-error -- this feature has no `emitter`, so it cannot list the effect
+    journalHandlers(forgetful, { effects: [typedAnnounce] });
 
     expect(() =>
-      // @ts-expect-error -- type test: these services have no `emitter`, so they do not fit the slice
-      slice.resolve({}),
+      // @ts-expect-error -- type test: these deps have no `emitter`, so they do not fit the contribution
+      contribution.bind({}),
     ).toThrow(
       'journal: effect "dot-typed-announce" needs "emitter", but no service with that name was given; pass it as j.compose({ services: { emitter } }), or in a Dot app add it to the `needs` of the feature that lists this effect',
     );
   });
 
   it('fails the boot and names the effect and both features when two features declare the same effect name, so a job never has two owners and nobody has to search for the second one', async () => {
-    const firstCore = defineFeature('first').usecases({});
-    const first = firstCore.entrypoints(journalEffects(firstCore, { effects: [recorder('dot-twice').effect] }));
-    const secondCore = defineFeature('second').usecases({});
-    const second = secondCore.entrypoints(journalEffects(secondCore, { effects: [recorder('dot-twice').effect] }));
+    const firstCore = defineFeature('first');
+    const first = firstCore
+      .usecases({}, journalHandlers(firstCore, { effects: [recorder('dot-twice').effect] }))
+      .entrypoints();
+    const secondCore = defineFeature('second');
+    const second = secondCore
+      .usecases({}, journalHandlers(secondCore, { effects: [recorder('dot-twice').effect] }))
+      .entrypoints();
 
     await expect(
       defineApp('twice').infra(dbPlugin()).infra(journal({ j })).features([first, second]).boot(),
@@ -567,10 +595,15 @@ describe('journal({ j }) with features', () => {
   });
 
   it('says so when one feature lists the same effect name twice, so the message does not send the reader to a second feature', async () => {
-    const onlyCore = defineFeature('only').usecases({});
-    const only = onlyCore.entrypoints(
-      journalEffects(onlyCore, { effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] }),
-    );
+    const onlyCore = defineFeature('only');
+    const only = onlyCore
+      .usecases(
+        {},
+        journalHandlers(onlyCore, {
+          effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect],
+        }),
+      )
+      .entrypoints();
 
     await expect(
       defineApp('once').infra(dbPlugin()).infra(journal({ j })).features([only]).boot(),
@@ -582,10 +615,10 @@ describe('journal({ j }) with features', () => {
     });
   });
 
-  it('refuses a `journal` slice that `journalHandlers` did not make, so a wiring mistake fails at boot and not inside a write', async () => {
+  it('refuses a `journal` contribution that `journalHandlers` did not make, so a wiring mistake fails at boot and not inside a write', async () => {
     const broken = defineFeature('broken')
-      .usecases({})
-      .entrypoints({ kind: 'journal', key: 'journal', actions: [], resolve: () => ({}) });
+      .usecases({}, { kind: 'journal', key: 'journal', bind: () => ({}) })
+      .entrypoints();
 
     await expect(
       defineApp('broken').infra(dbPlugin()).infra(journal({ j })).features([broken]).boot(),

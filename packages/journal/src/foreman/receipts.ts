@@ -80,6 +80,7 @@ export function journalReceiptStore<
   const claimCommand = j.command(
     'foreman.receipts.claim',
     z.object({ receipt: pendingReceiptSchema }),
+    { writes: [ReceiptClaimed] },
     async (input, { write }): Promise<ReceiptClaimResult> => {
       const { row, events } = orThrow(
         await write(receipt, input.receipt.executionId, held =>
@@ -93,6 +94,7 @@ export function journalReceiptStore<
   const settleCommand = j.command(
     'foreman.receipts.settle',
     z.object({ receipt: settledReceiptSchema }),
+    { writes: [ReceiptSettled] },
     async (input, { write }): Promise<void> => {
       orThrow(
         await write(receipt, input.receipt.executionId, held => {

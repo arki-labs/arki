@@ -1,9 +1,9 @@
-// What the lease fence costs one effect that runs one command. The fence is one indexed
+// What the lease fence costs one task that runs one command. The fence is one indexed
 // `SELECT … FOR SHARE` on the job's open attempt row, inside the command's transaction.
 //
-// The rival is the same effect that runs the same command through `journal.run` instead of `ctx.run`:
+// The rival is the same task that runs the same command through `journal.run` instead of `ctx.run`:
 // the same work minus the fence (`journal.run` is the unfenced path `ctx.run` wraps). Both cases write
-// the order's events and drain the one job, so the gap is the fence plus noise.
+// the order's events and drain the same jobs, so the gap is the fence plus noise.
 // Run: `bun run bench`.
 
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
@@ -23,29 +23,56 @@ const notes = pgTable('bench_notes', {
 
 const tables = journalTables();
 const j = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+// A second journal for the rival: workflows compose once per `initJournal`.
+const rival = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
 const NoteOpened = j.event('NoteOpened', z.object({ note: z.string() }));
 const NoteSent = j.event('NoteSent', z.object({}));
 const noteEntity = j
   .entity('note', notes)
   .create(NoteOpened, event => ({ note: event.data.note }))
   .on(NoteSent, row => row);
-const touch = j.command('touch', z.object({ id: z.string() }), (input, { write }) =>
+const touch = j.command('touch', z.object({ id: z.string() }), { writes: [] }, (input, { write }) =>
   write(noteEntity, input.id, () => []),
 );
 const meta = { actorId: 'usr_bench' };
 
 type Db = Awaited<ReturnType<typeof openJournalDb>>['db'];
-const fenced = j.effect('fenced', noteEntity, {
-  NoteSent: (event, ctx) => ctx.run(touch, { id: event.entityId }, meta),
-});
-const fencedJournal = j.compose({ effects: [fenced] });
-// Reads `unfencedJournal` only when the effect runs, after `compose` has returned it.
-const unfenced = j.effect('unfenced', noteEntity, {
-  NoteSent: async (event, ctx) => {
-    return unfencedJournal.run(ctx.db, touch, { id: event.entityId }, meta);
+const taskInput = z.object({ id: z.string() });
+const fenced = j.task(
+  'fenced',
+  {
+    version: 1,
+    input: taskInput,
+    startOn: {
+      entity: noteEntity,
+      event: NoteSent,
+      timing: 'after-commit',
+      id: event => `fence:${event.entityId}`,
+      input: event => ({ id: event.entityId }),
+    },
   },
-});
-const unfencedJournal = j.compose({ effects: [unfenced] });
+  ({ input, run }) => run(touch, { id: input.id }, meta),
+);
+const fencedJournal = j.compose({ workflows: [fenced], workflowMeta: meta });
+// Reads `unfencedJournal` only when the step runs, after `compose` has returned it.
+const unfenced = rival.task(
+  'unfenced',
+  {
+    version: 1,
+    input: taskInput,
+    startOn: {
+      entity: noteEntity,
+      event: NoteSent,
+      timing: 'after-commit',
+      id: event => `fence:${event.entityId}`,
+      input: event => ({ id: event.entityId }),
+    },
+  },
+  async ({ input, db }) => {
+    orThrow(await unfencedJournal.run(db, touch, { id: input.id }, meta));
+  },
+);
+const unfencedJournal = rival.compose({ workflows: [unfenced], workflowMeta: meta });
 
 let pending: Promise<Db> | undefined;
 const environment = (): Promise<Db> => (pending ??= openJournalDb({ ...tables, notes }).then(opened => opened.db));
@@ -65,7 +92,7 @@ async function viaEffect(effectJournal: typeof fencedJournal, note: string): Pro
 export default defineSuite({
   id: '@arki/journal/effect-fence',
   intro:
-    'One effect that runs one command (`ctx.run`), against the same effect that runs the same command through `journal.run`, which skips the lease fence. Same in-memory PGlite, same writes, same drain.',
+    'One task that runs one command (`ctx.run`), against the same task that runs the same command through `journal.run`, which skips the lease fence. Same in-memory PGlite, same writes, same drain.',
   notes: [
     'The fence is one indexed `SELECT … FOR SHARE` on the job’s open attempt row, inside the command’s transaction. The race it closes is proven in `src/fence.pg.test.ts`, not timed here.',
     'PGlite has one connection, so this is the cost of one extra statement, not of lock contention.',

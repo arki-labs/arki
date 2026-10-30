@@ -8,17 +8,18 @@ import { sql } from 'drizzle-orm';
 
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Failure, SchemaFailure } from '@arki/failure';
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure, isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import type { NextEvents, WriteInput, WriteResult } from './api.js';
+import type { CommandContext, NextEvents, WriteInput, WriteResult } from './api.js';
 import type { EventToAppend, JoinedLog } from './event-log.js';
 import type { History } from './history.js';
 import type { StoredEventRow } from './pg.js';
 import type { PgStore } from './store.js';
 import type {
   AnyEventDef,
+  BivariantFn,
   Effect,
   EntityDef,
   EntityId,
@@ -82,6 +83,22 @@ export function sortedByVersion<Row extends { readonly version: number }>(rows: 
   return [...rows].sort((a, b) => a.version - b.version);
 }
 
+/**
+ * A `with-event` `startOn`: a run that starts in the transaction of the event. `start` writes through `host`, which is
+ * the write's savepoint and this same write path, so the run, its first node and that node's job roll back with the
+ * event. No body runs here. `meta` is what the run's events record, the app's `workflowMeta`, as for an `after-commit`
+ * start. A failure `start` returns refuses the write; anything else it cannot do, it throws.
+ */
+export type EventStart<MetaIn, MetaOut, Tx extends TransactionSource<Tx>> = {
+  readonly kind: string;
+  readonly type: string;
+  readonly meta: MetaIn;
+  readonly start: BivariantFn<
+    [host: Pick<CommandContext<MetaOut, Tx>, 'tx' | 'write'>, event: Recorded<string, unknown, MetaOut>],
+    Promise<SchemaFailure | undefined>
+  >;
+};
+
 /** What a write needs from the journal. */
 export type WriteDeps<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
@@ -98,6 +115,8 @@ export type WriteDeps<
   readonly asyncProjections: readonly Pick<Projection, 'types' | 'entities'>[];
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
   readonly effects: readonly Pick<Effect<SchemaOutput<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
+  /** The `with-event` `startOn`s: they run inside the write, right after the inline projections. */
+  readonly eventStarts: readonly EventStart<SchemaInput<Meta>, SchemaOutput<Meta>, Tx>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'assertLogSaysGone'>;
 };
 
@@ -109,8 +128,17 @@ export function createWriter<
   Tx extends TransactionSource<Tx>,
 >(deps: WriteDeps<Meta, Tx>) {
   type MetaOut = SchemaOutput<Meta>;
-  const { metaSchema, projections, asyncProjections, effects } = deps;
+  const { metaSchema, projections, asyncProjections, effects, eventStarts } = deps;
   const { decodeStoredEvent, assertLogSaysGone } = deps.history;
+
+  /** `meta` parsed for one write, and held to surviving JSON storage. */
+  const validatedMeta = (meta: SchemaInput<Meta>, kind: string, id: string): MetaOut | SchemaFailure => {
+    const parsed = parse<SchemaOutput<Meta>>(metaSchema, meta);
+    if (isSchemaFailure(parsed)) return parsed;
+    const checked = assertRoundTrips(metaSchema, parsed, kind, id, 'meta');
+    if (isFailure(checked)) return checked;
+    return parsed;
+  };
 
   /**
    * `write` with `getValidatedMeta` giving the parsed and checked meta. `journal.write`
@@ -131,7 +159,12 @@ export function createWriter<
     events: NextEvents<Tbl, E, Tx, Returned>,
     trace: Trace,
     onJobs?: (count: number) => void,
-    opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
+    opts?: {
+      readonly mode?: 'write' | 'adopt';
+      readonly expectedVersion?: number;
+      /** Sees each event `events` returned, before any is stored. A throw refuses the write. */
+      readonly beforeEvent?: (event: PendingOf<E>) => void;
+    },
   ): Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure> => {
     const adopting = opts?.mode === 'adopt';
     const route = routeOf(entity.eventStorage, deps.log);
@@ -177,6 +210,7 @@ export function createWriter<
         const pending: PendingOf<E>[] = [];
         for (const event of returned) {
           if (isSchemaFailure(event)) return refusal.settle(event);
+          opts?.beforeEvent?.(event);
           pending.push(event);
         }
         if (pending.length === 0) {
@@ -391,6 +425,31 @@ export function createWriter<
           }
         }
 
+        // After the projections, on the write's savepoint: a refusal here takes the event back with the run.
+        for (const event of recorded) {
+          for (const { kind, type, meta: startMeta, start } of eventStarts) {
+            if (kind !== entity.kind || type !== event.type) continue;
+            const refused = await start(
+              {
+                tx: sp,
+                write: (target, targetId, targetEvents, targetOpts) =>
+                  writeWithValidatedMeta(
+                    sp,
+                    target,
+                    targetId,
+                    () => validatedMeta(startMeta, target.kind, targetId),
+                    targetEvents,
+                    { ...trace, causeSeq: event.seq },
+                    onJobs,
+                    targetOpts,
+                  ),
+              },
+              event,
+            );
+            if (refused !== undefined) return refusal.settle(refused);
+          }
+        }
+
         // Every effect job carries its event: `args` is the stored row as stamped, the same row the
         // log holds, so the worker runs it without reading the log back. `eventSeq` points at
         // a log row, so a transient entity's job leaves it null.
@@ -472,13 +531,7 @@ export function createWriter<
       tx,
       entity,
       id,
-      () => {
-        const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
-        if (isSchemaFailure(meta)) return meta;
-        const checked = assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
-        if (isFailure(checked)) return checked;
-        return meta;
-      },
+      () => validatedMeta(input.meta, entity.kind, id),
       input.events,
       // No command and no cause. A fresh chain, so every recorded event has a correlation id.
       { commandId: null, causeSeq: null, correlationId: chainId },
@@ -508,13 +561,7 @@ export function createWriter<
       tx,
       entity,
       id,
-      () => {
-        const meta = parse<SchemaOutput<Meta>>(metaSchema, input.meta);
-        if (isSchemaFailure(meta)) return meta;
-        const checked = assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
-        if (isFailure(checked)) return checked;
-        return meta;
-      },
+      () => validatedMeta(input.meta, entity.kind, id),
       input.events,
       { commandId: null, causeSeq: null, correlationId: chainId },
       undefined,

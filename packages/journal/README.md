@@ -81,6 +81,7 @@ export const order = j
 export const payOrder = j.command(
   'payOrder',
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
+  { writes: [OrderPaid] },
   (input, { write }) =>
     write(order, input.orderId, row => {
       if (!row) return CommandNotFound({ detail: 'Order not found' });
@@ -101,8 +102,8 @@ export const customerStats = j.projection('customer-stats', order, {
       }),
 });
 
-// Async lane: after commit, at least once. The context also has `db`, the root database,
-// and `run`, which runs a command. An effect lists what else it needs and gets it in the context.
+// Async lane: after commit, at least once. The context also has `db`, the root database.
+// An effect only reaches out: it runs no command. It lists what it needs and gets it in the context.
 export const orderMail = j.effect(
   'order-mail',
   order,
@@ -146,12 +147,16 @@ The core and `@arki/journal/errors` hold no driver. They load on Node, Bun, Deno
 
 ## Commands
 
-`j.command(name, inputSchema, handler)` returns a plain value with `name`, `input` (the schema, so a procedure can reuse or `.pick` it) and the handler. Nothing is registered anywhere. The handler gets the parsed input and a context:
+`j.command(name, inputSchema, options, handler)` returns a plain value with `name`, `input` (the schema, so a procedure can reuse or `.pick` it), `writes` and the handler. Nothing is registered anywhere. The handler gets the parsed input and a context:
 
 - `tx`: the command's transaction. Use it for reads, or for writes outside any entity.
 - `meta`: the parsed metadata. Every `write` in the command records it.
 - `write(entity, id, events)`: `journal.write` bound to `tx` and `meta`. `events` is `(row, { tx }) => pending events`, sync or async.
 - `run(child, input)`: run another command in a savepoint of the same transaction, with the same `meta`.
+
+`options.writes` lists the events the handler writes, and it is required. `write` takes only those events: anything else is a type error, and `writes: []` is a command that only runs child commands, whose lists are their own. The list stays on the command value as an exact tuple (`placeOrder.writes`), so code can read it before the journal boots.
+
+A handler that gets past the types is stopped at run time: the first undeclared event fails the run with `BAD_DEFINITION`, naming the command and the event, and nothing commits, even when the handler catches the error. A helper that takes `write` names what it writes: `CommandWrite<Meta, Tx, typeof OrderPlaced | typeof OrderPaid>`, or `Pick<CommandContext<Meta, Tx, typeof OrderPlaced>, 'write' | 'tx'>`. A command can pass its `write` to a helper only when it declares at least those events. The types do not catch the other direction: an event in `writes` that the handler never writes compiles and runs.
 
 `journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a schema failure returns before the handler runs) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
 
@@ -168,8 +173,8 @@ The types are all inferred: the handler's `input` from the schema, `journal.run`
 Every recorded event says where it came from. The library stamps three columns; the app never sets them.
 
 - `commandId`: the `cmd_` id of the run that wrote the event. A child run gets its own. A bare `journal.write` has none.
-- `causeSeq`: inside an effect's `ctx.run`, the `seq` of the event the job was for. So a reaction points at what it reacts to.
-- `correlationId`: one id for the whole chain. A run from an effect continues the cause event's chain. A root run starts a new chain, unless `journal.run(db, cmd, input, meta, { correlationId })` or `journal.bind(db, meta, { correlationId })` seeds it, for example with the request id. A bare write starts its own chain.
+- `causeSeq`: inside a workflow step's `ctx.run`, the `seq` of the event the job was for. So a reaction points at what it reacts to.
+- `correlationId`: one id for the whole chain. A run from a workflow step continues the cause event's chain. A root run starts a new chain, unless `journal.run(db, cmd, input, meta, { correlationId })` or `journal.bind(db, meta, { correlationId })` seeds it, for example with the request id. A bare write starts its own chain.
 
 The command context exposes `commandId` and `correlationId` for logs. To read a chain: `select * from journal_events where correlation_id = $1 order by seq`. Rows written before these columns existed have `null` in all three.
 
@@ -187,9 +192,9 @@ Each span ends with `journal.outcome`: `ok`, `failure` (a returned failure, with
 
 A webhook or a retried request can run the same command twice. `journal.run(db, cmd, input, meta, { idempotencyKey })` makes the second run answer like the first and write nothing. The first run records the key, the command name, the parsed input and its result in `journal_receipts`, inside its own transaction, so a receipt exists exactly when the run committed. A later run with the same key and the same input returns the stored result without running the handler; hooks still run and see `ctx.idempotencyKey`. The same key with another input, or with another command, returns `CommandConflict` (`journal.conflict`). A concurrent repeat waits for the first to commit, then replays it. A key cannot be reused inside its own run.
 
-The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and an effect's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
+The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and a workflow step's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
 
-A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it returns a failure (`CommandForbidden`, usually) to refuse, and a refused replay changes nothing. `journal.run` returns that failure, and the command's type includes it. A throw refuses too.
+A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, { writes, authorize: (input, { tx, meta }) => ... }, handler)`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it returns a failure (`CommandForbidden`, usually) to refuse, and a refused replay changes nothing. `journal.run` returns that failure, and the command's type includes it. A throw refuses too.
 
 Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
 
@@ -220,27 +225,39 @@ The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the sam
 | Job       | `journal.run(db, command, payload, job.meta)`                     | The queue owns retries.                                                   |
 | Schedule  | `journal.run(db, command, input, { actorId: 'system' })`          | A clear system actor; `meta` keeps its schema.                            |
 | Webhook   | `journal.run(db, command, mappedInput, trustedMeta)`              | The adapter verifies the signature and maps the payload.                  |
-| Effect    | `ctx.run(command, input, { actorId: 'system' })`                  | See below. An effect never imports the journal root.                      |
+| Task      | `run(command, input, { actorId: 'system' })`                      | See below. A task never imports the journal root.                         |
 | Script    | `journal.run(db, command, input, { actorId: 'script:backfill' })` | One call per item; each is its own transaction.                           |
 | Test      | `journal.run(db, command, input, meta)`                           | No procedure, no HTTP. The same validation and transaction.               |
 
-An effect that needs to write runs a command with `run` from its context:
+An event that must run a command starts a task or a workflow. An effect only reaches out: its context has no `run`, so that call does not compile.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
-// src/features/orders/effects.ts
-export const closeAfterPayment = j.effect('close-after-payment', order, {
-  OrderPaid: (e, { run }) => run(closeOrder, { orderId: e.entityId }, { actorId: 'system' }),
-});
+// src/features/orders/tasks.ts
+export const closeAfterPayment = j.task(
+  'close-after-payment',
+  {
+    version: 1,
+    input: z.object({ orderId: z.string() }),
+    startOn: {
+      entity: order,
+      event: OrderPaid,
+      timing: 'after-commit',
+      id: e => `close:${e.entityId}`,
+      input: e => ({ orderId: e.entityId }),
+    },
+  },
+  ({ input, run }) => run(closeOrder, { orderId: input.orderId }, { actorId: 'system' }),
+);
 
 // src/journal.root.ts
-export const journal = j.compose({ effects: [closeAfterPayment] });
+export const journal = j.compose({ workflows: [closeAfterPayment], workflowMeta: { actorId: 'system:workflow' } });
 ```
 
 - `run(command, input, meta)` is `journal.run` on the root database that the worker or `drain` was given. It opens its own transaction and commits before it returns.
-- `meta` is required. The library never picks an actor. An app may still wrap `run` in one small helper, so the system actor is written in one place.
-- If the command throws, nothing of the command is committed, and `run` returns the throw as `TransactionDefect`. An effect that throws it on (`orThrow`) is retried with backoff, like any throw. An effect that returns it is dead: a returned failure is final.
-- If the effect fails after `run` returned, the command stays committed and the job runs again. So the command can run twice. Make it safe: check the row and return `[]`, or pass `jobId` in the input and store it as the key. `jobId` is the same on every retry.
-- A command that queues a job wakes the worker. A chain of effects does not wait for the poll.
+- `meta` names the actor. A workflow body may leave it out: the command then records the `workflowMeta` the app gave `compose`. The library never picks an actor.
+- If the command throws, nothing of the command is committed, and `run` returns the throw as `TransactionDefect`. A body that throws it on is tried again by its retry policy. A body that returns it fails: a returned failure is final.
+- If the body fails after `run` returned, the command stays committed and the body runs again. So the command can run twice. Make it safe: check the row and return `[]`, or pass `key` from the context in the input and store it. Or use a [command node](#command-nodes), which commits the command with its checkpoint, so it runs exactly once.
+- A command that queues a job wakes the worker. A chain of jobs does not wait for the poll.
 
 ## The low-level write
 
@@ -444,10 +461,10 @@ Durable workflows resume their pinned name and version, with persisted step iden
 
 A rule of the app that rejects a request returns a failure from `@arki/failure`. The journal has four, each with `{ detail }`, the message written for the client: `CommandNotFound` (`journal.not_found`, 404), `CommandInvalid` (`journal.invalid`, 400), `CommandForbidden` (`journal.forbidden`, 403) and `CommandConflict` (`journal.conflict`, 409). An app may return its own `defineFailure` values too. A command handler, its `authorize` and an `events` function can return one. The command's transaction rolls back exactly as for a throw, and `journal.run` returns the same failure instance; its type is inferred from the handler. A child's failure comes back from `context.run` as a value: its savepoint is already rolled back, and the parent returns it on. Once a write's `events` or a child command returned a failure, the command is doomed: it must end with a failure, that one or another. A handler that still returns a success is missing an `if (isFailure(x)) return x;`, so the run returns `TransactionDefect` with a private `JournalError` `IGNORED_FAILURE` cause, which names the write or child and the failure code, and nothing commits. An ignored refusal never commits the rest of the command. An effect whose `ctx.run` returned a failure it did not accept, and that still returns a success, fails its job with that failure: dead after one try by default, not retried, because a retry would run again the commands that did commit. A failure is never stored as an idempotency receipt, so a repeat runs again. It is not a `JournalError`: a `JournalError` is the library's own failure, a command failure is the app saying no.
 
-A handler that meets a refusal and still has a good answer says so with `accept(result)`, on the command context and on an effect's context. Check the value first, then accept it. `accept` lifts only this command's own check: a refused child's savepoint stays rolled back, and the fallback's own refusals are tracked too. It returns nothing and commits nothing by itself: a handler that accepts a failure and then returns it still rolls back. Every refusal is tracked by identity, once per return: two refusals with the same code need two `accept` calls, and so does the same object returned twice. Accepting one and ignoring another is still `IGNORED_FAILURE`. An accepted success is stored as the idempotency receipt like any success. `accept` throws `JournalError` `INVALID_ACCEPT` for a value no `write` or `run` of this handler returned (hand-built, from a helper, a copy, or one only the parent received), for a second call on one return, for a call after the handler finished, and for a value that is not a failure. A parent may accept a failure its child passed up, and a child's `authorize` refusal, since both come back from `run` as the same instance.
+A handler that meets a refusal and still has a good answer says so with `accept(result)`, on the command context and on a workflow step's context. Check the value first, then accept it. `accept` lifts only this command's own check: a refused child's savepoint stays rolled back, and the fallback's own refusals are tracked too. It returns nothing and commits nothing by itself: a handler that accepts a failure and then returns it still rolls back. Every refusal is tracked by identity, once per return: two refusals with the same code need two `accept` calls, and so does the same object returned twice. Accepting one and ignoring another is still `IGNORED_FAILURE`. An accepted success is stored as the idempotency receipt like any success. `accept` throws `JournalError` `INVALID_ACCEPT` for a value no `write` or `run` of this handler returned (hand-built, from a helper, a copy, or one only the parent received), for a second call on one return, for a call after the handler finished, and for a value that is not a failure. A parent may accept a failure its child passed up, and a child's `authorize` refusal, since both come back from `run` as the same instance.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
-const placeOrder = j.command('placeOrder', orderInput, async (input, { write, run, accept }) => {
+const placeOrder = j.command('placeOrder', orderInput, { writes: [OrderPlaced] }, async (input, { write, run, accept }) => {
   await write(order, input.orderId, () => [OrderPlaced({ customerId: input.customerId, total: input.total })]);
   const stock = await run(reserveStock, input.line);
   if (OutOfStock.is(stock)) {
@@ -472,7 +489,7 @@ import { commandErrors } from '@arki/journal/orpc';
 export const publicProcedure = os.use(appErrors).use(commandErrors());
 ```
 
-`commandErrors()` answers a failure, thrown or returned by the procedure, with the `ORPCError` of its code, status, message and data, and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. The `TransactionDefect` that `journal.run` returns for such a conflict gets the same 409. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A procedure with an output schema, and every contract-first one, hands the command's result to `orThrowRpc(result, errors)` from `@arki/failure/orpc`, with the failures listed in the contract by `errorMap(CommandNotFound, ...)`; the client then gets them typed. A host without oRPC reads the failure's `status`, or matches it with `CommandNotFound.is(result)` and the like. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules).
+`commandErrors()` answers a failure, thrown or returned by the procedure, with the `ORPCError` of its code, status, message and data, and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. The `TransactionDefect` that `journal.run` returns for such a conflict gets the same 409. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A procedure with an output schema, and every contract-first one, hands the command's result to `orThrowCommand(result, errors)` from `@arki/journal/orpc`. The contract lists its business failures with `errorMap(OrderRefused, ...)`, and the client gets them typed. The journal's own failures (`CommandFailure`: bad input, a lost race, a failed transaction) need no listing: they answer through `toORPCError`. `orThrowRpc(result, errors)` from `@arki/failure/orpc` is the stricter form, for a contract that lists every failure. A host without oRPC reads the failure's `status`, or matches it with `CommandNotFound.is(result)` and the like. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules).
 
 Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { after, batchSize })`, `drain(db, { batchSize, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
 
@@ -517,12 +534,12 @@ A projection runs inline by default: inside the write's transaction, so the read
 
 ## Effects
 
-An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db, run })`.
+An effect runs after the commit, at least once, from a row in `journal_jobs`. An effect reaches out: a mail, a webhook, a provider. A handler gets the event and a context: `(e, { jobId, signal, db })`.
 
 - `jobId` stays the same across retries. Pass it on as an idempotency key.
 - `signal` is the `signal` given to `drain`.
 - `db` is the root database given to `drain` or `worker`: the same object. Use it to read committed rows. The effect needs no closure for the database.
-- `run` runs a command on that database: `run(command, input, meta)`. See [Where commands run from](#where-commands-run-from).
+- There is no `run`. An event that must run a command starts a task or a workflow. See [Where commands run from](#where-commands-run-from).
 
 An effect that needs a service (a mailer, an in-process emitter) lists it. The list is the third argument:
 
@@ -540,7 +557,7 @@ export const orderMail = j.effect(
 export const journal = j.compose({ effects: [orderMail], services: { mailer } });
 ```
 
-- `need<Mailer>()` comes from `@arki/journal`. It is a marker: it holds the type and no value.
+- `need<Mailer>()` comes from `@arki/journal`. It is a marker: it holds the type and no value. In a Dot feature, `needsOf((_: Deps) => ['mailer'])` makes the same record with the type read from the feature (see [A `defineFeature` feature](#a-definefeature-feature)).
 - Each handler gets the service in its context, under the name of the need, with its type.
 - The app gives the real services once, in `services`. Every need of every listed effect must be there. A missing one is a compile error, and `compose` throws: `journal: effect "order-mail" needs "mailer", but no service with that name was given; ...`.
 - Two effects that use the same name get the same service.
@@ -1019,6 +1036,7 @@ The other nodes:
 - `.step(name, fn, options?)`. `fn` gets the context: `input`, `results`, `key`, `attempt`, `runId`, `signal` (an `AbortSignal` for a lost lease or a timeout), `db`, `run` (runs a command), `accept`, `metadata` and `tags` (change the run's fields, below), and the needs by name. `run(command, input)` may leave the meta out: the command then records the `workflowMeta` the app gave `compose`. A meta passed as the third argument is used as given. Options: `undo`, `output` (a schema for the stored result), `key` (your own idempotency key), `retry` (a `Backoff`), `timeout`, `when` and `next`.
 - `when: ctx => boolean` skips the step when it returns false. Its result is then `null`, and its type says so (`R | null`).
 - `next: 'node'` or `next: ({ result }) => 'node' | 'next'` jumps back to an earlier node, so a loop is a step with `next`. A name later in the list does not compile.
+- `.command(name, command, ({ input, results }) => commandInput, options?)` runs one command exactly once. See [Command nodes](#command-nodes).
 - `.waitFor(name, { signal, schema, timeout?, onTimeout?, when? })` parks the run until `def.signal(name)` delivers the signal. The result is the payload, typed by `schema`. With `onTimeout: 'continue'` a timeout goes on with `null`; the default `'fail'` fails the node. `when` works as on a step: when it returns false the run does not park, the result is `null`, and the type says so (`payload | null`).
 - `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time.
 - `.child(name, def, { input })` starts another workflow and waits for it. The result is the child's output.
@@ -1230,12 +1248,18 @@ The run reads show `scope`, `tags`, `rootId`, `batchId`, `replayOf`, `startAt`, 
 
 ### Start on an event
 
-`startOn: { entity, event, id, input }` starts a run when `entity` records `event`. `id` gives the run id and `input` the run's input, both from the recorded event: `e.entityId` has the entity's key type, `e.data` the event's data, and `input` must return the workflow's input, or it does not compile. Composing adds one effect for it, `workflow.start:<workflow name>`.
+`startOn: { entity, event, timing, id, input }` starts a run when `entity` records `event`. `id` gives the run id and `input` the run's input, both from the recorded event: `e.entityId` has the entity's key type, `e.data` the event's data, and `input` must return the workflow's input, or it does not compile. Composing adds one effect for it, `workflow.start:<workflow name>`.
 
+- `timing` is required. `'after-commit'`: a job written with the event starts the run after the commit. `'with-event'`: the run itself is written with the event.
 - The job is written in the transaction that records the event, so the run starts once, even when that command is retried.
 - The run starts with the app's `workflowMeta`, at the highest registered version, like `def.start`.
 - An id that already has a run, whatever its input or version, starts nothing. The job ends done, not dead.
 - Only the highest registered version may declare `startOn`. A lower one with `startOn` makes `compose` throw `BAD_DEFINITION`.
+
+`timing: 'with-event'` writes `RunStarted`, the first scheduled node and its job in the event's transaction, through the same write path as inline projections. No body runs inline: the job runs after the commit, as always. What it changes is the moment the run exists. A rollback of the command removes the run, and a read after the commit finds it.
+
+- A paused limit, or a join with nothing to join, queues the run. It never refuses, because the caller of the event has nobody to hand a refusal to. So `concurrency.onBusy: 'refuse'` with `'with-event'` is a type error, and `workflow()` throws `BAD_DEFINITION`.
+- An input that fails the workflow's schema refuses the write with the schema's failure. An input over the payload limit is a bug in the mapping: it throws, and the transaction rolls back.
 
 ```ts run
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
@@ -1264,6 +1288,7 @@ export const welcome = j
     startOn: {
       entity: order,
       event: OrderPlaced,
+      timing: 'after-commit',
       id: e => `welcome:${e.entityId}`, // the order id: one run per order
       input: e => ({ orderId: e.entityId, total: e.data.total }),
     },
@@ -1271,8 +1296,11 @@ export const welcome = j
   .step('thank', ({ input }) => `thanks for ${input.total}`)
   .finish();
 
-const placeOrder = j.command('orders.place', z.object({ id: z.string(), total: z.int().positive() }), (input, { write }) =>
-  write(order, input.id, () => [OrderPlaced({ total: input.total })]),
+const placeOrder = j.command(
+  'orders.place',
+  z.object({ id: z.string(), total: z.int().positive() }),
+  { writes: [OrderPlaced] },
+  (input, { write }) => write(order, input.id, () => [OrderPlaced({ total: input.total })]),
 );
 
 const journal = j.compose({ workflows: [welcome], workflowMeta: { actorId: 'system:workflow' } });
@@ -1286,6 +1314,85 @@ const thanked = orThrow(await welcome.read(db, 'welcome:ord_1'));
 if (thanked?.run.output !== 'thanks for 500') throw new Error('the order started the run');
 await client.close();
 ```
+
+### Command nodes
+
+A step runs at least once: a crash after its `run` and before its checkpoint runs the body, and the command, again. A command node has no body. The command runs as a savepoint inside the checkpoint's transaction, so the command's writes, the checkpoint and the next node's job commit together. A crash leaves all of them or none, and a job that runs again finds the node settled. Exactly once per node, on one condition: everything the command does is a write in that transaction. A command that calls a provider belongs in a step.
+
+```ts run
+import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
+
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { initJournal } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+
+const orders = pgTable('orders', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  held: integer('held').notNull(),
+  version: integer('version').notNull().default(0),
+});
+const FundsHeld = j.event('FundsHeld', z.object({ amount: z.int() }));
+const FundsReleased = j.event('FundsReleased', z.object({}));
+const order = j
+  .entity('order', orders)
+  .create(FundsHeld, e => ({ held: e.data.amount }))
+  .on(FundsReleased, () => ({ held: 0 }));
+const OverLimit = defineFailure('orders.over_limit', { status: 402, data: z.object({ limit: z.int() }) });
+
+const hold = j.command(
+  'orders.hold',
+  z.object({ orderId: z.string(), amount: z.int() }),
+  // `output` is what the run stores. The node's `results.hold` comes from it.
+  { writes: [FundsHeld], output: z.object({ orderId: z.string() }) },
+  async (input, { write }) => {
+    if (input.amount > 100) return OverLimit({ limit: 100 });
+    const held = await write(order, input.orderId, () => [FundsHeld({ amount: input.amount })]);
+    return isFailure(held) ? held : { orderId: input.orderId };
+  },
+);
+const release = j.command(
+  'orders.release',
+  z.object({ orderId: z.string() }),
+  { writes: [FundsReleased] },
+  (input, { write }) => write(order, input.orderId, () => [FundsReleased({})]),
+);
+
+export const checkout = j
+  .workflow('orders.checkout', { version: 1, input: z.object({ orderId: z.string(), amount: z.int() }) })
+  .command('hold', hold, ({ input }) => input, {
+    accept: [OverLimit],
+    undo: { command: release, input: ({ result }) => ({ orderId: result.orderId }) },
+  })
+  .step('tell', ({ results }) => (OverLimit.is(results.hold) ? `limit ${results.hold.data.limit}` : 'held'))
+  .finish();
+
+const journal = j.compose({ workflows: [checkout], workflowMeta: { actorId: 'system:workflow' } });
+const { db, client } = await openJournalDb({ ...tables, orders });
+const operator = { actorId: 'usr_ada' };
+
+orThrow(await journal.run(db, checkout.start, { id: 'co_1', input: { orderId: 'ord_1', amount: 500 } }, operator));
+await journal.drain(db); // the command is refused: its savepoint rolls back, the failure is the node's result
+await journal.drain(db); // tell
+
+const over = orThrow(await checkout.read(db, 'co_1'));
+if (over?.run.output !== 'limit 100') throw new Error('the refusal is a real failure for later nodes');
+await client.close();
+```
+
+- The input function, `when` and `undo.input` get plain data: `{ runId, key, input, results }`. They run no command and read no database, so the node stays one command.
+- The result is what the command's `output` schema gives: `j.command(name, input, { writes, output }, handler)`. A command with no `output` stores `null`. The schema must fit what the handler returns: another schema does not compile. A result that fails the schema, or does not survive JSON, rolls the command back and fails the attempt.
+- A refused command rolls back its savepoint, and the node's failure still commits. The node then fails like a step that returned a failure: `retry` with a `while` that accepts it tries again, and without one the step is dead, so `onDeadStep` decides (`'compensate'` fails the run, `'wait'` leaves it for an operator).
+- `accept: [OverLimit]` names failures the run goes on from. Only failures the command returns compile. The savepoint stays rolled back and the failure is the node's result, so `results.x` and `def.read` have the type `Output | ReturnType<typeof OverLimit>`. The stored JSON is checked: a code no definition in `accept` knows reads as `WorkflowReadMismatch`.
+- A last node with `accept` needs a function in `.finish`: a run's output is never a failure. `finish` throws `BAD_DEFINITION` without it.
+- `undo: { command, input }` runs in compensation, in reverse order, exactly once, the same way. `input` also gets `result`, the stored result. A node that ended in an accepted failure did nothing, so its undo is skipped.
+- `when` skips the node: the command does not run and the result is `null`. `retry` works as on a step. There is no `timeout`: a transaction is not the place to wait.
+- The shape stores the kind `command` and the command names, so changing a node's command is a new shape. Bump the version.
+- The input function's return gets no help from the command's type for literals, the same as `.child`. Write `kind: 'card' as const` for a field that takes a union of strings.
 
 ### Concurrency and limits
 
@@ -1414,16 +1521,17 @@ Defaults: `completed` 7 days, `failed` 90 days, `cancelled` and `expired` the sa
 
 ### Workflows in Dot
 
-A feature lists its workflows with `journalWorkflows(core, defs)` in `.entrypoints(...)`, or with `journalHandlers({ workflows })`. The app passes `workflowMeta` to `journal({ j, workflowMeta })`. A step gets the services of the feature that lists its workflow, by need name. The feature must declare each need, or it does not compile. Each workflow is an action in the manifest: `<name>@<version>.run`, with its signals in the meta.
+A feature lists its workflows with `journalHandlers(core, { workflows })` in `.usecases(...)`, with its effects and taps. The app passes `workflowMeta` to `journal({ j, workflowMeta })`. A workflow picks its deps from the feature with `needsOf((_: Deps) => ['payments'])`. A step gets the services of the feature that lists its workflow. A dep the feature lacks does not compile. Each workflow is an action in the manifest: `<name>@<version>.run`, with its signals in the meta.
 
 ```ts
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature } from '@arki/dot/feature';
 import { infra } from '@arki/dot/unit';
-import { initJournal, need } from '@arki/journal';
-import { journal, journalWorker, journalWorkflows } from '@arki/journal/dot';
+import { initJournal } from '@arki/journal';
+import { journal, journalHandlers, journalWorker, needsOf } from '@arki/journal/dot';
 import { journalTables } from '@arki/journal/pg';
 import { openJournalDb } from '@arki/journal/testing';
 
@@ -1431,15 +1539,6 @@ type Payments = { refund(paymentId: string, idempotencyKey: string): Promise<{ r
 
 const tables = journalTables();
 const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
-
-const refund = j
-  .workflow('payments.refund', {
-    version: 1,
-    input: z.object({ paymentId: z.string() }),
-    needs: { payments: need<Payments>() },
-  })
-  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, key))
-  .finish();
 
 const { db } = await openJournalDb(tables); // the app's root database
 const stripe = infra({
@@ -1449,9 +1548,19 @@ const stripe = infra({
   },
 });
 
-// The feature declares what its workflows need, in the core.
-const core = defineFeature('refunds').needs({ payments: stripe.provides.payments }).usecases({});
-export const refunds = core.entrypoints(journalWorkflows(core, [refund]));
+// The feature declares what its workflows may use, in the core.
+const core = defineFeature('refunds').needs({ payments: stripe.provides.payments });
+
+const refund = j
+  .workflow('payments.refund', {
+    version: 1,
+    input: z.object({ paymentId: z.string() }),
+    needs: needsOf((_: DepsOf<typeof core>) => ['payments']),
+  })
+  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, key))
+  .finish();
+
+export const refunds = core.usecases({}, journalHandlers(core, { workflows: [refund] })).entrypoints();
 
 export const app = defineApp('shop')
   .infra(infra({ name: 'db', provides: { db: () => db } }))
@@ -1461,7 +1570,7 @@ export const app = defineApp('shop')
   .entrypoints(journalWorker());
 ```
 
-`journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` entrypoint, so a feature with both effects and workflows lists them together with `journalHandlers`.
+`journalWorker()` runs the workflow jobs like any effect. A feature has one `journal` contribution, so it lists its effects, taps and workflows in one `journalHandlers` call.
 
 ### Testing
 
@@ -1553,11 +1662,13 @@ The refusals are `ModuleError`s (see `@arki/admin`), so Foreman answers each wit
 
 ## Dot
 
-`@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters and one feature slice. `@arki/dot` is an optional peer. The core entry never imports it.
+`@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters, one infra unit for projections and one application contribution. `@arki/dot` is an optional peer. The core entry never imports it.
 
 - `journal(...)`: the infra part, for `.infra()`. It publishes `services.journal`, so features can write through it.
-- `journalWorker(...)`: the entrypoint part, for `.entrypoints()`. It runs effects, taps and async projections between `start` and `stop`. With `jobs` it also runs queue rows.
-- `journalHandlers(...)`: the feature slice. A feature lists its projections, effects and taps with it.
+- `journalWorker(...)`: the only entrypoint, for `.entrypoints()`. It runs effects, taps and async projections between `start` and `stop`. With `jobs` it also runs queue rows.
+- `journalProjections(...)`: a feature's projections, for its `.infra(...)`.
+- `journalHandlers(core, { effects, taps, workflows })`: a feature's reactions, for its `.usecases(factories, …)`. An effect is application code, not an entrypoint.
+- `needsOf((_: Deps) => ['mailer'])`: the deps an effect, tap or workflow picks from its feature, typed from the selector's parameter.
 
 **Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
 
@@ -1572,13 +1683,14 @@ await worker.start();
 await worker.stop();
 ```
 
-**Dot app.** Each feature lists its own handlers with `journalHandlers`. The app lists its features once, in `.features([...])`. Both adapters read that list. There is no root file.
+**Dot app.** Each feature lists its own projections with `journalProjections` and its own reactions with `journalHandlers`. The app lists its features once, in `.features([...])`. Both adapters read that list. There is no root file.
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
 // src/features/orders/feature.ts
-export const orders = defineFeature('orders')
+export const core = defineFeature('orders')
   .needs({ mailer: mailerInfra.provides.mailer }) // typed handle; service<Mailer>() also works
-  .entrypoints(journalHandlers({ projections: [customerStats], effects: [orderMail] }));
+  .infra(journalProjections(customerStats));
+export const orders = core.usecases({}, journalHandlers(core, { effects: [orderMail(core)] })).entrypoints();
 
 // src/app.ts
 export const app = defineApp('shop')
@@ -1593,40 +1705,90 @@ const run = services.journal.bind(services.db, { actorId: user.id });
 await run(payOrder, input);
 ```
 
-- `journal(...)` boots before the features. It reads their `journalHandlers` declarations, not their booted services, so a feature can `need` the journal and write through it, even in its own `boot`.
+- `journal(...)` boots before the features. It reads their `journalProjections` and `journalHandlers` declarations, not their booted services, so a feature can `need` the journal and write through it, even in its own `boot`.
 - `journal({ j })` has typed handles before any app is built. Name the journal once, `const appJournal = journal({ j })`, mount it with `.infra(appJournal)`, and need it by handle: `.needs({ journal: entrypointOnly(appJournal.provides.journal) })`. `Provided<typeof appJournal.provides.journal>` is the composed journal's type.
 - This works because a write never needs an effect's services. A write runs the inline projections, which get only the transaction, and queues each effect's job. The journal is composed with `services: 'worker'`. `journalWorker()` gives each effect and tap its services when it runs it.
 - `journal(...)` needs the root database under the `db` key. A transaction there is a compile error.
 - `journalWorker()` starts one worker on `start` and stops it on `stop`. Each app that mounts it gets its own worker, also when two apps share one `journalWorker()` value. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`, `jobs`. `jobs` is a `JobsSource`: it names the services the runner needs and builds a `JobRunner` once the features have booted. `@arki/queue/dot` ships one, `outboxJobs({ needs, context })`. A `jobs` source adds a `<job>.consume` action per job to the worker's manifest, under the unit `journal-worker`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
-- An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile. A missing service fails that feature's boot.
+- An effect picks its deps with `needsOf((_: Deps) => keys)`: a need that is not `entrypointOnly`, a private infra service or a domain service of the feature that lists it. A dep the feature lacks is a compile error. A missing service fails that feature's boot, and the message names it.
 - Two features may use the same need name for two different services. Each effect gets the service of its own feature.
 - Every effect is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Projections are never listed: they run inside the write.
-- Two features with the same projection name or the same effect name fail the boot. The message names the duplicate and both features.
+- Two features with the same projection, effect, tap or workflow name fail the boot. The message names the duplicate and both features.
 - A feature without `journalHandlers` adds nothing. That is allowed.
-- An app that composed its journal itself passes it: `journal({ journal })`. Serve `journalWorker()` if it has effects, taps or async projections. `journalHandlers` slices are not read in this mode.
+- An app that composed its journal itself passes it: `journal({ journal })`. Serve `journalWorker()` if it has effects, taps or async projections. Feature declarations are not read in this mode.
 - A second journal uses Dot's `rename`: `rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal')`.
-- An effect runs a command with `ctx.run` in both modes. It needs no closure over the journal.
+- A task or a workflow step runs a command with `ctx.run` in both modes. It needs no closure over the journal.
 
 ### A `defineFeature` feature
 
-A feature can declare the same handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above.
+A feature declares its handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above.
+
+Application code is organised by business behaviour. A behaviour file in `usecases/` holds the decision (the command) and the reactions it owns:
+
+```text
+orders/
+  model/order.ts             event schemas, the entity and its fold
+  usecases/place-order.ts    placeOrder (the command) and sendReceipt (its effect)
+  infra/placed-count.ts      the read-model projection
+  entrypoints/procedures.ts  transport: context.run(placeOrder, input)
+  feature.ts
+```
 
 ```ts skip="fragment: part of an app (schema, features, journal root), not a standalone module"
-// features/orders/feature.ts
-export const core = defineFeature('orders')
-  .needs({ journal: service<AppJournal>(), db: database.provides.db })
-  .infra(mailer, journalProjections(customerStats)) // projections keep read models: infra
-  .usecases({ placeOrder }); // commands live here, one file per usecase
-export const orders = core.entrypoints(rpc(ordersContract, os, { place: placeProcedure }), orderEffects(core));
+// usecases/place-order.ts
+export const placeOrder = j.command('orders.place', placeOrderInput, { writes: [OrderPlaced] }, async (input, { write }) => {
+  const written = await write(order, input.id, () => [OrderPlaced({ customerId: input.customerId, total: input.total })]);
+  return isFailure(written) ? written : { id: input.id };
+});
 
-// features/orders/entrypoints/journal.ts — `import type` only
-export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail], taps: [] });
+// reactions/send-receipt.ts — `import type { Deps }` only, so there is no import cycle.
+import type { Deps } from '../feature';
+
+export const sendReceipt = j.effect('send-receipt', order, needsOf((_: Deps) => ['mailer']), {
+  OrderPlaced: (event, { mailer, signal }) =>
+    mailer.sendReceipt({ orderId: event.entityId, idempotencyKey: `receipt:${event.id}`, signal }),
+});
+
+// entrypoints/procedures.ts — a procedure runs a command; no command list.
+export const procedures = (impl: typeof rpcImplementer) => ({
+  place: impl.place.use(asActor).handler(({ context, input, errors }) => orThrowCommand(context.run(placeOrder, input), errors)),
+});
+
+// feature.ts
+export const core = defineFeature('orders')
+  .needs({
+    db: entrypointOnly(database.provides.db),
+    journal: entrypointOnly(appJournal.provides.journal),
+  })
+  .infra(mailer, journalProjections(placedCount)); // projections keep read models: infra
+
+export type Deps = DepsOf<typeof core>; // the stage before `.usecases()`: what a reaction may ask for
+
+const logic = core.usecases({}, journalHandlers(core, { effects: [sendReceipt] }));
+export const rpcImplementer = implement(ordersRpcContract).with(logic);
+export const orders = logic.entrypoints(rpc(ordersRpcContract, rpcImplementer, procedures));
 ```
 
 - `journalProjections(...projections)` is an infra unit that boots nothing; its unit is `<feature>/journal-projections`.
-- `journalEffects(core, { effects, taps })` is an entrypoint. An effect's needs come from the feature by name: a need alias, an infra service (the feature's private `mailer` above) or `usecases`. A missing one is a compile error at this call, and a boot error for callers that skip the types.
+- `journalHandlers(core, { effects, taps, workflows })` is an application contribution, the second argument of `.usecases(factories, …)`. It binds once, at the feature's boot, to what a usecase sees: the needs that are not `entrypointOnly`, the private infra and the domain services. It is never a `context.usecases` member, so a procedure cannot call an effect.
+- `needsOf((_: Deps) => ['mailer'])` picks the deps. Its types come from the selector's annotation, with no type arguments. `needsOf` calls the selector once to read the keys and never reads its argument. An `entrypointOnly` key or a key the feature lacks is a compile error. A key missing at runtime fails the feature's boot and names the key.
+- A reaction file is a plain exported value: `export const sendReceipt = j.effect(…)`. It imports `Deps` as a type only, so the feature may import it in either order.
+- A domain service types its deps from the `.infra()` stage, never from `Deps`. It is part of `Deps`, so TypeScript reports TS7022 on the feature.
+- A task that runs a command names a system actor: `ctx.run(cmd, input, { actorId: 'system' })`.
+- `journalWorker()` is the only journal entrypoint. Entrypoints still see only the usecases and the `entrypointOnly` needs.
 - Duplicate names are refused across features, naming both.
-- `dot explain --as journal-flow` lists which event starts which effect (`OrderPaid → order-mail`, owned by `orders`). It reads the effects' manifest actions; nothing extra is collected. It is the only way to see that paying an order sends a mail, short of reading every file.
+- A reaction that serves several behaviours gets its own business-named file in `usecases/`. A reaction that crosses features belongs to the consuming feature. Keeping a command and its reactions in one file assigns ownership. It never limits who subscribes, and it never implies one transaction.
+
+**The event graph.** `dot explain --as journal-flow` prints, per event, the entity fold, the projections and the reactions. Each line gives the timing, the owner feature, the deps and the retry policy:
+
+```text
+OrderPlaced
+  fold order  [same transaction]
+  projection placed-count  [same transaction]  owner orders
+  effect send-receipt  [after commit, at least once]  owner orders; deps mailer; retry default, 7 retries
+```
+
+It is derived from the declarations when the app is configured; nothing is collected at runtime. With `--json` it is one graph for the whole app: `nodes` (`event`, `entity`, `projection`, `effect`, `tap`, `workflow`, `feature`) and `edges` that read subject to object (`folds`, `projects`, `reacts`, `owned-by`), each edge to an event with its `timing` and `delivery`. A workflow without `startOn` is listed under "Started by no event".
 
 **The actor.** `actorRun(select)` from `@arki/journal/orpc` is a middleware that adds `context.run`, the journal's runner bound to the request's database and actor. The app's `select` says who the actor is; the journal assumes no session shape.
 

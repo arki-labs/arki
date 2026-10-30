@@ -64,7 +64,7 @@ describe('entropy ownership', () => {
         : undefined,
     );
     const handler = vi.fn(() => 'committed');
-    const command = j.command('entropy-before-handler', z.object({}), handler);
+    const command = j.command('entropy-before-handler', z.object({}), { writes: [] }, handler);
     const result = await journal.run(db, command, {}, meta);
     expect(throws ? UnexpectedDefect.is(result) : RandomSourceUnavailable.is(result)).toBe(true);
     expect(handler).not.toHaveBeenCalled();
@@ -74,7 +74,7 @@ describe('entropy ownership', () => {
     const refused = RandomSourceUnavailable();
     vi.spyOn(ids, 'commandId').mockReturnValue(refused);
     const handler = vi.fn(() => 'wrong success');
-    const command = j.command('entropy-command-id', z.object({}), handler);
+    const command = j.command('entropy-command-id', z.object({}), { writes: [] }, handler);
     expect(await journal.run(db, command, {}, meta, { correlationId: 'cor_existing' })).toBe(refused);
     expect(handler).not.toHaveBeenCalled();
   });
@@ -107,7 +107,7 @@ describe('entropy ownership', () => {
     const refused = RandomSourceUnavailable();
     vi.spyOn(ids, 'eventId').mockReturnValue(refused);
     const target = orderId(++next);
-    const writeCommand = j.command('entropy-atomic', z.object({}), async (_input, context) => {
+    const writeCommand = j.command('entropy-atomic', z.object({}), { writes: [OrderPlaced] }, async (_input, context) => {
       await context.tx.insert(orders).values({ id, customerId: 'entropy', total: 1, status: 'placed' });
       return context.write(order, target, input.events);
     });
@@ -121,7 +121,7 @@ describe('entropy ownership', () => {
   it('rolls back when a handler ignores an entropy refusal', async () => {
     const id = orderId(++next);
     vi.spyOn(ids, 'eventId').mockReturnValue(RandomSourceUnavailable());
-    const command = j.command('entropy-ignored', z.object({}), async (_input, context) => {
+    const command = j.command('entropy-ignored', z.object({}), { writes: [OrderPlaced] }, async (_input, context) => {
       // eslint-disable-next-line failure/must-use -- Prove the owner rolls back a handler that ignores entropy refusal.
       await context.write(order, id, input.events);
       return 'wrong success';

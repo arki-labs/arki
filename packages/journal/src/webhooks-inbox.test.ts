@@ -31,6 +31,7 @@ const journal = j.compose({});
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]), total: z.int().positive() }),
+  { writes: [OrderPlaced] },
   (input, { write }) =>
     write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: input.total })]).then(() => ({ id: input.id })),
 );

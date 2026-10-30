@@ -3,6 +3,8 @@
  *
  * - `toORPCError(error)` maps one error, or one returned failure.
  * - `commandErrors()` is the middleware that maps whatever a procedure throws, and a failure it returns.
+ * - `orThrowCommand(result, errors)` answers a command run in a contract-first procedure: the
+ *   contract lists the business failures, and the journal's own failures map through `toORPCError`.
  * - `actorRun(select)` is the middleware that puts `context.run`, bound to the request's
  *   actor, on a procedure's context.
  *
@@ -16,10 +18,14 @@
 import type { IntersectPick } from '@orpc/server';
 import { ORPCError, os } from '@orpc/server';
 
+import type { Failure } from '@arki/failure';
+import type { DeclaredErrors } from '@arki/failure/orpc';
 import { TransactionDefect } from '@arki/db/errors';
 import { isFailure } from '@arki/failure';
+import { rpcError } from '@arki/failure/orpc';
 
 import type { RunOptions } from './api.js';
+import type { CommandFailure } from './errors.js';
 import { isJournalError } from './errors.js';
 
 /**
@@ -81,6 +87,38 @@ export function commandErrors() {
     if (isFailure<unknown>(result.output)) throw toORPCError(result.output);
     return result;
   });
+}
+
+/**
+ * The command's result, or throw its failure as the error the client should see. For a
+ * contract-first procedure that runs a command (`context.run(command, input)`):
+ *
+ * - a failure the contract lists becomes the contract's typed error, as `orThrowRpc` from
+ *   `@arki/failure/orpc` throws it;
+ * - one of the journal's own `CommandFailure`s (bad input, a lost race, a failed transaction) that
+ *   the contract does not list goes through `toORPCError`: a lost race answers `CONFLICT` (409), any
+ *   other its own code and status.
+ *
+ * So the contract lists its business failures only. Each of those must be listed: one the contract
+ * does not list is a compile error, as with `orThrowRpc`. A contract may still list a journal
+ * failure, and then the client gets that one typed too.
+ *
+ * ```ts
+ * place: impl.place.use(asActor).handler(async ({ context, input, errors }) => {
+ *   const placed = await orThrowCommand(context.run(placeOrder, input), errors);
+ *   return { id: placed.row.id };
+ * }),
+ * ```
+ */
+export function orThrowCommand<Value>(
+  result: PromiseLike<Value>,
+  errors: NoInfer<DeclaredErrors<Exclude<Value, CommandFailure>>>,
+): Promise<Exclude<Value, Failure>>;
+export async function orThrowCommand(result: PromiseLike<unknown>, errors: DeclaredErrors<Failure>): Promise<unknown> {
+  const value = await result;
+  if (!isFailure(value)) return value;
+  if (Object.hasOwn(errors, value.code)) throw rpcError(value, errors);
+  throw toORPCError(value);
 }
 
 /**

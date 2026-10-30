@@ -1,5 +1,5 @@
 /**
- * `ctx.attempt` and the lease fence of an effect's `ctx.run`, on PGlite (one connection).
+ * `ctx.attempt` and the lease fence of a workflow step's `ctx.run`, on PGlite (one connection).
  * The race between two real workers is in `fence.pg.test.ts`; here the attempt row is closed by hand,
  * which is exactly what a claim by another worker does to it.
  */
@@ -30,10 +30,11 @@ afterAll(async () => {
 const noteOrder = j.command(
   'noteOrder',
   z.object({ orderId: z.templateLiteral(['ord_', z.string()]), note: z.string().min(1) }),
+  { writes: [OrderNoted] },
   (input, { write }) => write(order, input.orderId, () => [OrderNoted({ note: input.note })]),
 );
 
-/** Places and pays an order, which queues one job for the effects of the journal under test. */
+/** Places and pays an order, which queues one job for the handlers of the journal under test. */
 async function payOrder(journal: { write: typeof countingJournal.write }) {
   const id: `ord_${number}` = `ord_${++next}`;
   orThrow(
@@ -59,28 +60,39 @@ const counting = j
 const countingJournal = j.compose({ effects: [counting] });
 
 const outcomes: string[] = [];
-const fenced = j.effect('fenced-writer', order, {
-  OrderPaid: async (event, ctx) => {
-    // A claim by another worker closes this attempt; nothing else about the job changes for this handler.
-    await db
-      .update(tables.jobAttempts)
-      .set({ finishedAt: new Date(), outcome: 'superseded' })
-      .where(and(eq(tables.jobAttempts.jobId, ctx.jobId), isNull(tables.jobAttempts.finishedAt)));
+/** Set by a test: a claim by another worker closes this attempt before the step runs its command. */
+let takenOver = false;
+const noteWriter = j.task(
+  'note-writer',
+  {
+    version: 1,
+    input: z.object({ orderId: z.templateLiteral(['ord_', z.string()]) }),
+    startOn: {
+      entity: order,
+      event: OrderPaid,
+      timing: 'after-commit',
+      id: e => `note:${e.entityId}`,
+      input: e => ({ orderId: e.entityId }),
+    },
+  },
+  async ({ input, run }) => {
+    // Nothing else about the job changes for this body.
+    if (takenOver) {
+      await db
+        .update(tables.jobAttempts)
+        .set({ finishedAt: new Date(), outcome: 'superseded' })
+        .where(isNull(tables.jobAttempts.finishedAt));
+    }
     try {
-      orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note: 'from a stale worker' }, meta));
+      orThrow(await run(noteOrder, { orderId: input.orderId, note: 'from the step' }, meta));
       outcomes.push('committed');
     } catch (error) {
       outcomes.push(isJournalError(findCause(error, JournalError), 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
       throw error;
     }
   },
-});
-const fencedJournal = j.compose({ effects: [fenced] });
-
-const healthy = j.effect('healthy-writer', order, {
-  OrderPaid: (event, ctx) => ctx.run(noteOrder, { orderId: event.entityId, note: 'from the owner' }, meta),
-});
-const healthyJournal = j.compose({ effects: [healthy] });
+);
+const fencedJournal = j.compose({ workflows: [noteWriter], workflowMeta: meta });
 
 const noteOf = async (id: string) => {
   const rows = await db
@@ -106,14 +118,18 @@ describe('ctx.attempt', () => {
 
 describe('the lease fence of ctx.run', () => {
   it('a command from a handler whose attempt is still open commits, so the fence costs a healthy job nothing', async () => {
-    const id = await payOrder(healthyJournal);
-    expect(await healthyJournal.drain(db).then(result => orThrow(result))).toBe(1);
+    const id = await payOrder(fencedJournal);
+    // The start job, then the step job.
+    expect(await fencedJournal.drain(db).then(result => orThrow(result))).toBe(2);
+    expect(outcomes).toEqual(['committed']);
     expect(await noteOf(id)).toHaveLength(1);
   });
 
   it('a handler whose attempt was taken over gets LEASE_LOST and its command commits nothing', async () => {
+    outcomes.length = 0;
+    takenOver = true;
     const id = await payOrder(fencedJournal);
-    expect(await fencedJournal.drain(db).then(result => orThrow(result))).toBe(1);
+    expect(await fencedJournal.drain(db).then(result => orThrow(result))).toBe(2);
     expect(outcomes).toEqual(['LEASE_LOST']);
     expect(await noteOf(id)).toHaveLength(0);
   });

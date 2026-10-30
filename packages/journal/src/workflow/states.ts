@@ -44,6 +44,13 @@ export const LIMIT_BUSY_REASONS = ['full', 'paused'] as const;
  */
 export const ON_BUSY = ['refuse', 'join', 'queue'] as const;
 
+/**
+ * When `startOn` starts a run (`startOn.timing`). `after-commit`: the start job commits with the event, and the run
+ * starts later. `with-event`: `RunStarted`, the first scheduled node and its job are written in the event's
+ * transaction, so a rollback removes the run and a reader sees it when the command returns. No body runs inline.
+ */
+export const START_TIMINGS = ['after-commit', 'with-event'] as const;
+
 /** Every phase `workflow_steps.phase` stores: `do` runs the step, `undo` compensates it. */
 export const STEP_PHASES = ['do', 'undo'] as const;
 export type StepPhase = (typeof STEP_PHASES)[number];

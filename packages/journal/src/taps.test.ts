@@ -114,10 +114,15 @@ describe('taps', () => {
       orThrow(
         await journal.run(
           db,
-          j.command('placeAndPay', OrderPlaced.schema, async (input, { write }) => {
-            orThrow(await write(order, id, () => [OrderPlaced(input)]));
-            orThrow(await write(order, id, () => [OrderPaid({ amount: 1 })]));
-          }),
+          j.command(
+            'placeAndPay',
+            OrderPlaced.schema,
+            { writes: [OrderPlaced, OrderPaid] },
+            async (input, { write }) => {
+              orThrow(await write(order, id, () => [OrderPlaced(input)]));
+              orThrow(await write(order, id, () => [OrderPaid({ amount: 1 })]));
+            },
+          ),
           { customerId: 'tapped', total: 1 },
           meta,
         ),

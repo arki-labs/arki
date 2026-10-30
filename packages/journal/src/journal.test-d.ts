@@ -92,20 +92,25 @@ describe('the job surface, as types', () => {
 describe('accept, as types', () => {
   const OutOfStock = defineFailure('stock.out', { status: 409, data: z.object({ sku: z.string() }) });
   type OutOfStock = ReturnType<typeof OutOfStock>;
-  const reserve = j.command('reserveTyped', z.object({ qty: z.int() }), input => {
+  const reserve = j.command('reserveTyped', z.object({ qty: z.int() }), { writes: [] }, input => {
     if (input.qty <= 0) return CommandInvalid({ detail: 'Reserve at least one' });
     if (input.qty > 5) return OutOfStock({ sku: 'a' });
     return { reservationId: 'res_1' };
   });
-  const placeOrder = j.command('placeOrderTyped', z.object({ qty: z.int() }), async (input, { run, accept }) => {
-    const stock = await run(reserve, input);
-    if (OutOfStock.is(stock)) {
-      accept(stock);
-      return { status: 'backordered' as const };
-    }
-    if (isFailure(stock)) return stock;
-    return { status: 'reserved' as const, reservationId: stock.reservationId };
-  });
+  const placeOrder = j.command(
+    'placeOrderTyped',
+    z.object({ qty: z.int() }),
+    { writes: [] },
+    async (input, { run, accept }) => {
+      const stock = await run(reserve, input);
+      if (OutOfStock.is(stock)) {
+        accept(stock);
+        return { status: 'backordered' as const };
+      }
+      if (isFailure(stock)) return stock;
+      return { status: 'reserved' as const, reservationId: stock.reservationId };
+    },
+  );
 
   it('the check the developer writes drops the accepted code from the inferred result; nothing is restated', async () => {
     const _result = await journal.run(db, placeOrder, { qty: 1 }, meta);
@@ -114,20 +119,25 @@ describe('accept, as types', () => {
     expectTypeOf<Exclude<typeof _result, Failure>['status']>().toEqualTypeOf<'backordered' | 'reserved'>();
   });
 
-  it('accept takes only a failure, on commands and effects alike: one shared type', () => {
-    j.command('acceptsSuccess', z.object({}), (_input, { accept }) => {
+  it('accept takes only a failure', () => {
+    j.command('acceptsSuccess', z.object({}), { writes: [] }, (_input, { accept }) => {
       // @ts-expect-error a success is not a refusal
       accept({ status: 'ok' });
       return 'ok';
     });
-    j.effect('accepts-string', order, {
-      OrderPaid: (_event, { accept }) => {
-        // @ts-expect-error a code is not the refusal itself
-        accept('stock.out');
+    expectTypeOf<CommandContext<unknown>['accept']>().toEqualTypeOf<AcceptFailure>();
+    expectTypeOf<ReturnType<AcceptFailure>>().toEqualTypeOf<void>();
+  });
+
+  it('an effect only reaches out: it has no `run` and nothing to accept, so a command from one does not compile', () => {
+    expectTypeOf<keyof EffectContext>().toEqualTypeOf<'jobId' | 'attempt' | 'signal' | 'db'>();
+    j.effect('reaches-out', order, {
+      OrderPaid: (_event, ctx) => {
+        // @ts-expect-error D-11: an event that must run a command is a `j.task` or a `j.workflow` with `startOn`
+        void ctx.run;
+        // @ts-expect-error nothing to accept: an effect receives no refusal
+        void ctx.accept;
       },
     });
-    expectTypeOf<CommandContext<unknown>['accept']>().toEqualTypeOf<AcceptFailure>();
-    expectTypeOf<EffectContext['accept']>().toEqualTypeOf<AcceptFailure>();
-    expectTypeOf<ReturnType<AcceptFailure>>().toEqualTypeOf<void>();
   });
 });

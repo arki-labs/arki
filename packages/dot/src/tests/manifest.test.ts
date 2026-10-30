@@ -12,6 +12,7 @@ import { orThrow } from '@arki/failure';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
+import type { JsonObject } from '../manifest.js';
 import { toJsonObject } from '../manifest.js';
 import { infra, service } from '../unit-contract.js';
 
@@ -80,6 +81,27 @@ describe('DOT manifest', () => {
     ]);
     expect(m.services).toEqual([{ name: 'stripe', plugin: 'billing', kind: 'custom' }]);
     orThrow(await app.dispose());
+  });
+
+  // Why: a projection module reads its `meta` from the manifest file, so the meta must stay plain JSON.
+  it("keeps a projection's JSON meta, and refuses meta that does not survive a JSON round trip", () => {
+    const flow = (meta: Readonly<JsonObject>) =>
+      infra({
+        name: 'flow',
+        configure(ctx) {
+          ctx.registerProjection({ format: 'flow', binding: 'journal', module: './flow.js', meta });
+        },
+      });
+    const configured = orThrow(defineApp('meta').infra(flow({ events: ['A'] })).configure());
+    expect(configured.manifest.projections).toEqual([
+      { format: 'flow', binding: 'journal', module: './flow.js', plugin: 'flow', meta: { events: ['A'] } },
+    ]);
+    // NaN types as a number, but JSON turns it into null.
+    const lossy = defineApp('lossy').infra(flow({ count: Number.NaN })).configure();
+    expect(lossy).toMatchObject({
+      code: 'failure.unexpected_defect',
+      cause: { message: expect.stringContaining('JSON-serializable object without lossy coercions') },
+    });
   });
 
   it('collects declarative actions from hook-less units without adding configure lifecycle entries', () => {

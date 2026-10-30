@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import { InvalidInput, orThrow } from '@arki/failure';
 
-import type { RootCommandRunner, WriteResult } from './api.js';
+import type { WorkflowCommandRunner, WriteResult } from './api.js';
 import type { CommandFailure } from './errors.js';
 import type { AccountId, order } from './test-support.js';
 import type {
@@ -346,40 +346,42 @@ void typedDb;
 
 // --- An effect's `run` takes the commands `journal.run` takes, and no others
 
-const dbPay = jd.command('pay', z.object({ id: z.string() }), (input, { tx }) => {
+const dbPay = jd.command('pay', z.object({ id: z.string() }), { writes: [] }, (input, { tx }) => {
   expectTypeOf(tx).toEqualTypeOf<AppTx>();
   return input.id.length;
 });
 // Written for the structural transaction: any journal with this meta can run it.
-const plainPay = j.command('pay', z.object({ id: z.string() }), input => input.id.length);
+const plainPay = j.command('pay', z.object({ id: z.string() }), { writes: [] }, input => input.id.length);
 const tenants = initJournal({ tables, meta: z.object({ tenantId: z.string() }) });
-const tenantPay = tenants.command('pay', z.object({ id: z.string() }), input => input.id.length);
+const tenantPay = tenants.command('pay', z.object({ id: z.string() }), { writes: [] }, input => input.id.length);
 
-const dbRuns = jd.effect('db-runs', dbOrder, {
-  OrderPaid: async (e, { run }) => {
-    expectTypeOf(run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
-    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number | CommandFailure>();
-    orThrow(await run(plainPay, { id: e.entityId }, { actorId: 'system' }));
-    // @ts-expect-error -- `meta` is required: the library never invents an actor
-    orThrow(await run(dbPay, { id: e.entityId }));
+// A workflow body runs the commands of its own journal. `meta` may be left out there: the app chose `workflowMeta`.
+const dbRuns = jd
+  .workflow('db-runs', { version: 1, input: z.object({ id: z.string() }) })
+  .step('pay', async ({ input, run }) => {
+    expectTypeOf(run).toEqualTypeOf<WorkflowCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
+    expectTypeOf(await run(dbPay, { id: input.id }, { actorId: 'system' })).toEqualTypeOf<number | CommandFailure>();
+    orThrow(await run(plainPay, { id: input.id }, { actorId: 'system' }));
+    orThrow(await run(dbPay, { id: input.id }));
     // @ts-expect-error -- not the meta of this journal
-    orThrow(await run(dbPay, { id: e.entityId }, { tenantId: 't' }));
+    orThrow(await run(dbPay, { id: input.id }, { tenantId: 't' }));
     // @ts-expect-error -- the input is checked against the command's schema
     orThrow(await run(dbPay, { id: 1 }, { actorId: 'system' }));
     // @ts-expect-error -- a command for another meta shape: its handler would read `meta.tenantId`
-    orThrow(await run(tenantPay, { id: e.entityId }, { actorId: 'system' }));
-  },
-});
-const plainRuns = j.effect('plain-runs', typed, {
-  OrderPaid: async (e, { run }) => {
-    orThrow(await run(plainPay, { id: e.entityId }, meta));
+    orThrow(await run(tenantPay, { id: input.id }, { actorId: 'system' }));
+  })
+  .finish();
+const plainRuns = j
+  .workflow('plain-runs', { version: 1, input: z.object({ id: z.string() }) })
+  .step('pay', async ({ input, run }) => {
+    orThrow(await run(plainPay, { id: input.id }, meta));
     // @ts-expect-error -- a command for the app's transaction type: this journal would hand it a plain `DbHandle`
-    orThrow(await run(dbPay, { id: e.entityId }, meta));
-  },
-});
-// The same journal that types `run` composes these effects.
-void jd.compose({ effects: [dbRuns] });
-void j.compose({ effects: [plainRuns] });
+    orThrow(await run(dbPay, { id: input.id }, meta));
+  })
+  .finish();
+// The same journal that types `run` composes these workflows.
+void jd.compose({ workflows: [dbRuns], workflowMeta: { actorId: 'system' } });
+void j.compose({ workflows: [plainRuns], workflowMeta: meta });
 
 // --- An effect's needs reach its handlers, and `compose` asks for a service for each one
 
@@ -396,12 +398,12 @@ const needsMail = jd.effect(
       expectTypeOf(ctx.db).toEqualTypeOf<PgliteDatabase>();
       expectTypeOf(ctx.jobId).toEqualTypeOf<string>();
       expectTypeOf(ctx.signal).toEqualTypeOf<AbortSignal>();
-      expectTypeOf(ctx.run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
       // @ts-expect-error -- `clock` is not a need of this effect, so its handlers must not see one
       void ctx.clock;
     },
   },
 );
+const noNeeds = jd.effect('no-needs', dbOrder, { OrderPaid: () => {} });
 const needsClock = jd.effect(
   'needs-clock',
   dbOrder,
@@ -410,24 +412,24 @@ const needsClock = jd.effect(
 );
 function needsFit(mailer: Mailer, clock: Clock) {
   // One `services` object covers every effect in the list. Effects without needs sit next to them.
-  void jd.compose({ effects: [dbRuns, needsMail, needsClock], services: { mailer, clock } });
+  void jd.compose({ effects: [noNeeds, needsMail, needsClock], services: { mailer, clock } });
   // @ts-expect-error -- `needsClock` needs `clock`: every need of every listed effect must be given
   void jd.compose({ effects: [needsMail, needsClock], services: { mailer } });
   // @ts-expect-error -- an effect in the list has a need, so `services` is required
   void jd.compose({ effects: [needsMail] });
   // @ts-expect-error -- an effect without needs next to it must not hide the need
-  void jd.compose({ effects: [dbRuns, needsMail] });
+  void jd.compose({ effects: [noNeeds, needsMail] });
   // @ts-expect-error -- a service must have the type its need names
   void jd.compose({ effects: [needsMail], services: { mailer: clock } });
   // @ts-expect-error -- an effect is typed for its own journal: this one reads `ctx.db` as a `PgliteDatabase` with `AppTx` commands
   void tenants.compose({ effects: [needsMail], services: { mailer } });
 }
 void needsFit;
-type Both = ServicesFor<[typeof needsMail, typeof dbRuns, typeof needsClock]>;
+type Both = ServicesFor<[typeof needsMail, typeof noNeeds, typeof needsClock]>;
 expectTypeOf<Both['mailer']>().toEqualTypeOf<Mailer>();
 expectTypeOf<Both['clock']>().toEqualTypeOf<Clock>();
 // No effect needs anything: there is nothing to ask for.
-expectTypeOf<ServicesFor<[typeof dbRuns]>>().toBeUnknown();
+expectTypeOf<ServicesFor<[typeof noNeeds]>>().toBeUnknown();
 
 async function dbFits() {
   const db = drizzle({ client: new PGlite('memory://') });

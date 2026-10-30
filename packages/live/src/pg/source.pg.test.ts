@@ -53,6 +53,7 @@ const post = j.entity('post', posts).create(PostCreated, e => ({ title: e.data.t
 const createPost = j.command(
   'create-post',
   z.object({ id: z.templateLiteral(['pst_', z.string()]), title: z.string().min(1) }),
+  { writes: [PostCreated] },
   (input, { write }) => write(post, input.id, () => [PostCreated({ title: input.title })]),
 );
 /** Runs in the worker, after the command's commit: a write no command makes. */

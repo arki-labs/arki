@@ -107,8 +107,8 @@ const parked = j
   .waitFor('confirm', { signal: 'confirm', schema: z.object({}) })
   .finish();
 
-/** The contexts an app effect was given, to check it never gets the steps' unwatched runner. */
-const appContexts: EffectContext<unknown, unknown>[] = [];
+/** The contexts an app effect was given, to check it never gets the steps' runners. */
+const appContexts: EffectContext<unknown>[] = [];
 const appEffect = j.effect('test.changes-app', order, {
   OrderPlaced: (_event, ctx) => {
     appContexts.push(ctx);
@@ -279,7 +279,7 @@ describe('ctx.metadata and ctx.tags without await', () => {
 });
 
 describe('the unwatched runner belongs to the journal', () => {
-  it("an app effect's context has no way around the refusal watch: no runUnwatched, no hidden key", async () => {
+  it("an app effect's context has no command runner at all: no run, no accept, no runUnwatched, no hidden key", async () => {
     appContexts.length = 0;
     const placed = await db.transaction(tx =>
       journal.write(tx, order, orderId(++counter), {
@@ -292,6 +292,8 @@ describe('the unwatched runner belongs to the journal', () => {
 
     expect(appContexts).toHaveLength(1);
     const [context] = appContexts;
+    expect(context).not.toHaveProperty('run');
+    expect(context).not.toHaveProperty('accept');
     expect(context).not.toHaveProperty('runUnwatched');
     expect(Object.getOwnPropertySymbols(context)).toEqual([]);
   });

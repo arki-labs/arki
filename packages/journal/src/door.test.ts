@@ -34,8 +34,11 @@ const journal = j.compose({ effects: [notify] });
 
 const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
 
-const placeOrder = j.command('placeOrder', z.object({ id: orderIdSchema }), (input, { write }) =>
-  write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
+const placeOrder = j.command(
+  'placeOrder',
+  z.object({ id: orderIdSchema }),
+  { writes: [OrderPlaced] },
+  (input, { write }) => write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
 );
 
 /** Shaped like `@arki/payments`' `writes(run)`: it takes a runner and calls commands through it. */
@@ -62,14 +65,19 @@ describe('an error thrown by app code', () => {
     const thrown = new Error('the app gave up');
     // The first write succeeds. The app then throws inside the second write's
     // savepoint, so the error crosses a savepoint and the command's transaction.
-    const placeThenThrow = j.command('placeThenThrow', z.object({ id: orderIdSchema }), async (input, { write }) => {
-      orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
-      orThrow(
-        await write(order, input.id, () => {
-          throw thrown;
-        }),
-      );
-    });
+    const placeThenThrow = j.command(
+      'placeThenThrow',
+      z.object({ id: orderIdSchema }),
+      { writes: [OrderPlaced] },
+      async (input, { write }) => {
+        orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
+        orThrow(
+          await write(order, input.id, () => {
+            throw thrown;
+          }),
+        );
+      },
+    );
 
     const error: unknown = await journal.run(db, placeThenThrow, { id }, meta).catch((error_: unknown) => error_);
 
@@ -152,8 +160,14 @@ describe('journal.bind', () => {
       .entity('order', orders)
       .create(Placed, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
       .on(Noted, (_row, e) => ({ note: e.data.note }));
-    const touch = jd.command('touch', z.object({ id: orderIdSchema }), (input, { write }) =>
-      write(tracedOrder, input.id, row => (row ? [Noted({ note: 'again' })] : [Placed({ customerId: 'c', total: 1 })])),
+    const touch = jd.command(
+      'touch',
+      z.object({ id: orderIdSchema }),
+      { writes: [Noted, Placed] },
+      (input, { write }) =>
+        write(tracedOrder, input.id, row =>
+          row ? [Noted({ note: 'again' })] : [Placed({ customerId: 'c', total: 1 })],
+        ),
     );
     const id = orderId(next++);
     const run = jd.compose({}).bind(db, { actorId: 'usr_door' });
@@ -176,14 +190,22 @@ describe('journal.bind', () => {
       const written = orThrow(await writes(run));
       expectTypeOf(written.row).toEqualTypeOf<typeof orders.$inferSelect | null>();
 
-      const noteOrder = j.command('noteOrder', z.object({ id: orderIdSchema }), (input, { write }) =>
-        write(order, input.id, () => [OrderNoted({ note: 'seen' })]),
+      const noteOrder = j.command(
+        'noteOrder',
+        z.object({ id: orderIdSchema }),
+        { writes: [OrderNoted] },
+        (input, { write }) => write(order, input.id, () => [OrderNoted({ note: 'seen' })]),
       );
       // @ts-expect-error -- the input is checked against the command's schema
       orThrow(await run(noteOrder, { id: 7 }));
 
       const other = initJournal({ tables, meta: z.object({ tenantId: z.string() }) });
-      const otherCommand = other.command('otherCommand', z.object({}), (_input, { meta: otherMeta }) => otherMeta);
+      const otherCommand = other.command(
+        'otherCommand',
+        z.object({}),
+        { writes: [] },
+        (_input, { meta: otherMeta }) => otherMeta,
+      );
       // @ts-expect-error -- a command of a journal with another meta shape would read a `tenantId` this door never gives
       orThrow(await run(otherCommand, {}));
     };

@@ -128,6 +128,57 @@ export function project(manifest) {
 
     expect(projected).toEqual({ format: 'custom:doc', document: { title: 'shop-api', actionCount: 1 } });
   });
+
+  // Why: a projection's JSON document is for tools, its text is for a reader. `render(document)` lets the
+  // adapter print a reading view without a second document format, and the projection's own `meta` carries
+  // data no action holds (the journal's folds and inline projections).
+  it("adds the module's render(document) as text, and hands the projection's meta to project()", async () => {
+    const appFilePath = path.join(workDir, 'app.ts');
+    await writeFile(appFilePath, '');
+    await writeFile(
+      path.join(workDir, 'flow.ts'),
+      `
+export function project(manifest) {
+  return { events: manifest.projections[0].meta.events };
+}
+export function render(document) {
+  return document.events.join('\\n');
+}
+`,
+    );
+    const manifest = manifestOf({
+      projections: [
+        { format: 'flow', binding: 'journal', module: './flow.ts', plugin: 'journal', meta: { events: ['A', 'B'] } },
+      ],
+    });
+
+    const projected = await renderProjection({ manifest, format: 'flow', appFilePath });
+
+    expect(projected).toEqual({ format: 'flow', document: { events: ['A', 'B'] }, text: 'A\nB' });
+  });
+
+  it('refuses a render(document) that returns no string, so the CLI never prints a non-string', async () => {
+    const appFilePath = path.join(workDir, 'app.ts');
+    await writeFile(appFilePath, '');
+    await writeFile(
+      path.join(workDir, 'bad-render.ts'),
+      `
+export function project() {
+  return {};
+}
+export function render() {
+  return 42;
+}
+`,
+    );
+    const manifest = manifestOf({
+      projections: [{ format: 'bad', binding: 'x', module: './bad-render.ts', plugin: 'x' }],
+    });
+
+    const projected = await renderProjection({ manifest, format: 'bad', appFilePath });
+
+    expect(projected).toMatchObject({ code: 'dot.projection_execution_failed' });
+  });
 });
 
 describe('runExplain projection flow', () => {

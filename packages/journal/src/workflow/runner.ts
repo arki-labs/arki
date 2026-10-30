@@ -8,35 +8,35 @@
  *                       + NodeScheduled(next) | RunCompleted         so a stale owner commits nothing
  *
  * A step is at-least-once: a crash after the body and before the checkpoint runs the body again with
- * the same `ctx.key`. The checkpoint itself commits at most once per node attempt.
+ * the same `ctx.key`. The checkpoint itself commits at most once per node attempt. A command node is
+ * exactly-once: its command runs in a savepoint of the transaction that holds the checkpoint, so both commit or
+ * neither does.
  */
 import { and, asc, count, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
-import type { AsyncSchemaFailure } from '@arki/failure';
+import type { AsyncSchemaFailure, Failure } from '@arki/failure';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { Deadline } from '@arki/async';
+import { TransactionDefect } from '@arki/db/contract';
 import {
   defineFailure,
   InvalidInput,
   isAsyncSchemaFailure,
   isFailure,
+  isSchemaFailure,
   orThrow,
+  revive,
+  serialize,
   UnexpectedDefect,
   ValidatorDefect,
 } from '@arki/failure';
-import { ensure, parseAsync } from '@arki/schema';
+import { ensure, is, parseAsync } from '@arki/schema';
 
-import type {
-  CommandContext,
-  JournalDefinitions,
-  LimitOps,
-  RootCommandRunner,
-  WorkflowCommandRunner,
-} from '../api.js';
+import type { CommandContext, JournalDefinitions, LimitOps, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
 import type { CommandFailure } from '../errors.js';
+import type { OwnedEffectContext } from '../internal-context.js';
 import type { JournalTables } from '../pg.js';
-import { storedEventRowSchema } from '../zod.js';
 import type { JobRetention, ResolvedRetention, RetentionAge } from '../retention.js';
 import type {
   DbHandle,
@@ -48,6 +48,7 @@ import type {
   StepHookContext,
   TransactionSource,
 } from '../types.js';
+import type { EventStart } from '../write.js';
 import type {
   AnyResults,
   AnySignals,
@@ -57,29 +58,9 @@ import type {
   WorkflowDef,
   WorkflowNode,
 } from './define.js';
+import type { HeldLimit, KnownLimit, LimitBlock, LimitView } from './limit-types.js';
+import type { PromoteSkip } from './limits.js';
 import type { RunDetail } from './read.js';
-import type { RUN_STATES, SignalStatus, StepPhase } from './states.js';
-import { callbackDefect } from '../callback.js';
-import { debugWorkflow } from '../debug.js';
-import {
-  CommandConflict,
-  CommandInvalid,
-  CommandNotFound,
-  isJournalError,
-  JournalError,
-  WorkflowBusy,
-  WorkflowReadMismatch,
-} from '../errors.js';
-import { givenServices } from '../handlers.js';
-import { createHookPoint } from '../hooks.js';
-import { workflowBatchId, workflowRunId, workflowSignalId } from '../id.js';
-import { createManagedJobOps } from '../outbox.js';
-import type { InternalEffectContext } from '../internal-context.js';
-import { journalOwnedEffect, unwatchedRun } from '../internal-context.js';
-import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retention.js';
-import { isPlainObject, sameValue } from '../storage.js';
-import { defaultEffectRetry } from '../worker.js';
-import { isCheckedRead, resultSchemaOf, taskOf, workflowWith } from './define.js';
 import type { MetadataChange, MetadataOutcome, RunFields, RunOverrides, RunTiming, TagsOutcome } from './run-fields.js';
 import type {
   CancelArgs,
@@ -95,7 +76,33 @@ import type {
   StartOutcome,
   StartSchema,
 } from './run-types.js';
-import { BATCH_LIMIT, changedMetadata, metadataRefusal, newTags, RUN_FIELD_LIMITS } from './run-fields.js';
+import type { RUN_STATES, SignalStatus, StepPhase } from './states.js';
+import { callbackDefect } from '../callback.js';
+import { debugWorkflow } from '../debug.js';
+import {
+  CommandConflict,
+  CommandInvalid,
+  CommandNotFound,
+  isJournalError,
+  JournalError,
+  WorkflowBusy,
+  WorkflowReadMismatch,
+} from '../errors.js';
+import { givenServices, ownedEffectFor } from '../handlers.js';
+import { createHookPoint } from '../hooks.js';
+import { workflowBatchId, workflowRunId, workflowSignalId } from '../id.js';
+import { unwatchedRun } from '../internal-context.js';
+import { createManagedJobOps } from '../outbox.js';
+import { parseAge, resolveRetention, runKeepFor, runKeepUntil } from '../retention.js';
+import { isPlainObject, sameValue } from '../storage.js';
+import { withJournalSpan } from '../telemetry.js';
+import { defaultEffectRetry } from '../worker.js';
+import { storedEventRowSchema } from '../zod.js';
+import { isCheckedRead, resultSchemaOf, taskOf, workflowWith } from './define.js';
+import { LIMIT_BOUNDS, LIMIT_KEY_TTL, workflowLimitName } from './limit-types.js';
+import { createLimitGate, expiredKeys, limitLockId, limitMachine, lockExclusive } from './limits.js';
+import { workflowMachine } from './machine.js';
+import { createWorkflowReads } from './read.js';
 import {
   addedTagsSchema,
   delayAgeSchema,
@@ -105,15 +112,9 @@ import {
   runTimingSchema,
   ttlAgeSchema,
 } from './run-field-schemas.js';
-import type { HeldLimit, KnownLimit, LimitBlock, LimitView } from './limit-types.js';
-import { LIMIT_BOUNDS, LIMIT_KEY_TTL, workflowLimitName } from './limit-types.js';
-import type { PromoteSkip } from './limits.js';
-import { createLimitGate, expiredKeys, limitLockId, limitMachine, lockExclusive } from './limits.js';
-import { workflowMachine } from './machine.js';
-import { createWorkflowReads } from './read.js';
+import { BATCH_LIMIT, changedMetadata, metadataRefusal, newTags, RUN_FIELD_LIMITS } from './run-fields.js';
 import { STEP_PHASES } from './states.js';
 import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
-import { withJournalSpan } from '../telemetry.js';
 
 /** The library-owned effect that runs one node attempt. */
 export const STEP_EFFECT = 'workflow.step';
@@ -129,6 +130,17 @@ export const LIFECYCLE_EFFECT = 'workflow.on';
 const WORKFLOW_ACTOR = 'system:workflow';
 /** The command that moves a run on after a node attempt. Internal: only the step effect runs it. */
 const CHECKPOINT_COMMAND = 'workflow.checkpoint';
+/** The command that runs one attempt of a command node, and moves the run on in the same transaction. Internal. */
+const COMMAND_NODE_COMMAND = 'workflow.commandNode';
+/** The savepoint inside it, around a node's command and all that must hold for its result. Internal. */
+const COMMAND_SAVEPOINT_COMMAND = 'workflow.commandSavepoint';
+const commandNodeSchema = z.object({
+  runId: z.string().min(1),
+  path: z.string().min(1),
+  phase: z.enum(STEP_PHASES),
+  attempt: z.int().positive(),
+  key: z.string().min(1),
+});
 /** The command the limit timer runs to start the queued runs that fit once a key override ran out. Internal. */
 const PROMOTE_COMMAND = 'workflow.promoteQueued';
 const promoteSchema = z.object({ name: z.string().min(1) });
@@ -455,6 +467,8 @@ const nodeCheckpointSchema = z.object({
     z.object({ kind: z.literal('children'), plan: childrenPlanSchema }),
     /** The first node's first try found the run's `ttl` passed: the run ends `expired` if the database agrees. */
     z.object({ kind: z.literal('expired') }),
+    /** A command node found the run compensating before its command ran: the node is dropped, and the undos go on. */
+    z.object({ kind: z.literal('dropped') }),
   ]),
 });
 /** A timer job fired: the wake time of a park, or the deadline of the run. */
@@ -496,21 +510,88 @@ type Verdict =
     }
   | { readonly kind: 'undone'; readonly result: unknown }
   | { readonly kind: 'children'; readonly plan: ChildrenPlan }
-  | {
-      readonly kind: 'failed';
-      /** What the step's error stores: a throw as its `UnexpectedDefect`. */
-      readonly reason: unknown;
-      /** What the retry judges: the error the step threw, as is, or the failure it returned. */
-      readonly retryReason: unknown;
-      readonly retryable: boolean;
-    };
+  | { readonly kind: 'dropped' }
+  | FailedVerdict;
+type FailedVerdict = {
+  readonly kind: 'failed';
+  /** What the step's error stores: a throw as its `UnexpectedDefect`. */
+  readonly reason: unknown;
+  /** What the retry judges: the error the step threw, as is, or the failure it returned. */
+  readonly retryReason: unknown;
+  readonly retryable: boolean;
+};
 
-const failed = (reason: unknown, retryable = true): Verdict => ({
+const failed = (reason: unknown, retryable = true): FailedVerdict => ({
   kind: 'failed',
   reason: isFailure(reason) || isJournalError(reason) ? reason : callbackDefect(reason),
   retryReason: reason,
   retryable,
 });
+
+/**
+ * A command node's failure, as the attempt judges it. A command that threw comes back as `TransactionDefect`: it is
+ * judged as the throw it was, so it is retried. A failure the command returned is final, like a step's.
+ */
+function commandFailed(outcome: Failure): FailedVerdict {
+  if (!TransactionDefect.is(outcome)) return failed(outcome);
+  let thrown: unknown = outcome;
+  while (isFailure<unknown>(thrown) && thrown.cause !== undefined) thrown = thrown.cause;
+  return failed(thrown, !isJournalError(thrown, 'BAD_DEFINITION'));
+}
+
+/** What a failed attempt turns into: the next attempt with the same key, or a dead step. */
+function failureOutcome(
+  node: WorkflowNode,
+  maxAttempts: number | null,
+  verdict: FailedVerdict,
+  attempt: number,
+  key: string,
+) {
+  const error = reasonText(verdict.reason);
+  const own = (node.kind === 'step' || node.kind === 'command' ? node.options.retry : undefined) ?? defaultEffectRetry;
+  // A run's `maxAttempts` only narrows the step's retry: `upTo` counts retries, and the first try is not one.
+  const policy = maxAttempts === null ? own : own.upTo(maxAttempts - 1);
+  const wait = verdict.retryable ? policy.delay(attempt, verdict.retryReason) : undefined;
+  return wait === undefined
+    ? ({ kind: 'dead', error } as const)
+    : ({ kind: 'retry', error, key, at: inMs(wait) } as const);
+}
+
+/**
+ * How a command node stores an accepted failure. The key says it is one, so a success can never be read as a failure
+ * and a failure can never fail the `output` schema. The value is the failure's own envelope (`serialize`).
+ */
+const REFUSED = '~refused';
+const refusedResultSchema = z.strictObject({ [REFUSED]: z.looseObject({ code: z.string().min(1) }) });
+type CommandNode = Extract<WorkflowNode, { readonly kind: 'command' }>;
+
+/** The failure a command node stored, real again, or `undefined` when its `accept` list no longer names it. */
+function revivedRefusal(node: CommandNode, stored: unknown): Failure | undefined {
+  const revived = revive(ensure(stored, refusedResultSchema)[REFUSED], node.accept);
+  return isFailure<unknown>(revived) && node.accept.some(known => known.is(revived)) ? revived : undefined;
+}
+
+/**
+ * `results` as a body reads them: an accepted failure is a real failure again, so `PaymentDeclined.is(results.pay)`
+ * works. The stored JSON stays as it is.
+ */
+function liveResults(def: WorkflowDef, runId: string, stored: AnyResults): AnyResults {
+  const live = { ...stored };
+  for (const node of def.nodes) {
+    if (node.kind !== 'command' || !is(stored[node.name], refusedResultSchema)) continue;
+    const failure = revivedRefusal(node, stored[node.name]);
+    if (failure === undefined) {
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'workflow',
+        runId,
+        `command '${node.name}' stored a failure its accept list does not name`,
+      );
+    }
+    live[node.name] = failure;
+  }
+  return live;
+}
 
 /** Readable text of whatever failed a step: an error, a returned failure, or anything thrown. */
 function reasonText(reason: unknown): string {
@@ -545,12 +626,7 @@ function storable(
   if (json === undefined) return new JournalError('UNSTABLE_SCHEMA', 'workflow', runId, `${what} has no JSON form`);
   const bytes = new TextEncoder().encode(json).length;
   if (bytes > limit) {
-    return new JournalError(
-      'WORKFLOW_LIMIT',
-      'workflow',
-      runId,
-      `${what} is ${bytes} bytes; ${limitName} is ${limit}`,
-    );
+    return new JournalError('WORKFLOW_LIMIT', 'workflow', runId, `${what} is ${bytes} bytes; ${limitName} is ${limit}`);
   }
   const back: unknown = JSON.parse(json);
   if (!sameValue(normal, back)) {
@@ -602,7 +678,9 @@ function remainingUndos(
   let undone = undoneNow;
   const isUndoable = (path: string) =>
     def.nodes.some(
-      node => node.name === path && (node.kind === 'step' || node.kind === 'child' || node.kind === 'map'),
+      node =>
+        node.name === path &&
+        (node.kind === 'step' || node.kind === 'child' || node.kind === 'map' || node.kind === 'command'),
     );
   const see = (path: string, completed: boolean, result: unknown) => {
     const visit = (visits.get(path) ?? 0) + 1;
@@ -648,8 +726,7 @@ const EXPIRED = 'the run expired before its first node started';
  */
 function startTiming(timing: RunTiming, now: Date) {
   const { delay, ttl } = timing;
-  const wanted =
-    delay === undefined ? now : delay instanceof Date ? delay : new Date(now.getTime() + parseAge(delay));
+  const wanted = delay === undefined ? now : delay instanceof Date ? delay : new Date(now.getTime() + parseAge(delay));
   const startAt = wanted.getTime() > now.getTime() ? wanted : null;
   const ttlMs = ttl === undefined ? null : parseAge(ttl);
   const due = startAt ?? now;
@@ -669,7 +746,8 @@ function storedOverrides({ maxAttempts, timeout, priority }: RunOverrides) {
 }
 
 /** The `priority` a run's `NodeScheduled` and `Parked` carry for their jobs: the run's, left out when it has none. */
-const priorityOn = (priority: number | null | undefined) => (priority === null || priority === undefined ? {} : { priority });
+const priorityOn = (priority: number | null | undefined) =>
+  priority === null || priority === undefined ? {} : { priority };
 
 /** A step attempt's time limit in ms: the step's own `timeout`, narrowed by its run's (`start({ timeout })`). */
 function attemptTimeoutMs(own: RetentionAge | undefined, run: number | null): number | undefined {
@@ -682,7 +760,7 @@ type Definitions<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
-> = Pick<JournalDefinitions<Meta, Tx, AppDb>, 'event' | 'entity' | 'projection' | 'command' | 'effect'>;
+> = Pick<JournalDefinitions<Meta, Tx, AppDb>, 'event' | 'entity' | 'projection' | 'command'>;
 
 /** The body of one node attempt, bounded by the step's timeout. A timeout aborts `signal` and fails the attempt. */
 /**
@@ -787,6 +865,13 @@ export function createWorkflows<
   const { workflowRuns, workflowSteps, workflowSignals } = tables;
   const limits = limitMachine<Meta, Tx>(j, tables);
   const limitGate = createLimitGate(tables);
+  /**
+   * What the commands that move a run may write. They share `RunCtx` and the helpers that take it, so a command
+   * declares every event of the run entity: which one it writes depends on the state it finds. A limit verb adds the
+   * limit's events, because a raised limit can promote queued runs.
+   */
+  const runEvents = Object.values(events);
+  const limitVerbEvents = [...runEvents, ...Object.values(limits.events)];
   /** The limits the registered workflows hold, by name. `register` fills it; `journal.limits` knows no other name. */
   const knownLimits = new Map<string, KnownLimit>();
   /** `journal.hooks.step`: they wrap each step body and undo, inside its `journal.step` span. */
@@ -1041,8 +1126,23 @@ export function createWorkflows<
     if (kids.some(kid => waitedFor(kid))) return out;
     for (const item of remainingUndos(def, settled, options.doneNow, options.undoneNow)) {
       const node = def.nodes.find(candidate => candidate.name === item.path);
+      // An accepted failure: the command was refused and rolled back, so it did nothing to undo.
+      if (node?.kind === 'command' && is(item.result, refusedResultSchema)) {
+        out.push(
+          events.NodeSkipped({
+            path: item.path,
+            phase: 'undo',
+            cause: 'no-undo',
+            reason: 'the command was refused, so it did nothing to undo',
+            actorId: null,
+            at,
+          }),
+        );
+        continue;
+      }
       const hasUndo =
-        (node?.kind === 'step' && node.options.undo !== undefined) || (node?.kind === 'child' && node.undo);
+        (node?.kind === 'step' && node.options.undo !== undefined) ||
+        ((node?.kind === 'child' || node?.kind === 'command') && node.undo);
       if (hasUndo) {
         const key = `${row.id}:${item.path}:undo${item.visit === 1 ? '' : `:${item.visit}`}`;
         out.push(
@@ -1078,7 +1178,14 @@ export function createWorkflows<
         continue;
       }
       out.push(
-        events.NodeSkipped({ path: item.path, phase: 'undo', cause: 'no-undo', reason: 'the step declares no undo', actorId: null, at }),
+        events.NodeSkipped({
+          path: item.path,
+          phase: 'undo',
+          cause: 'no-undo',
+          reason: 'the step declares no undo',
+          actorId: null,
+          at,
+        }),
       );
     }
     if (row.cancelledAt !== null || options.cancelling === true) {
@@ -1104,7 +1211,16 @@ export function createWorkflows<
       .where(and(eq(workflowSteps.runId, row.id), eq(workflowSteps.path, row.node), eq(workflowSteps.phase, 'do')));
     if (step === undefined || step.status !== 'scheduled') return none;
     const dropped = {
-      events: [events.NodeSkipped({ path: row.node, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at })],
+      events: [
+        events.NodeSkipped({
+          path: row.node,
+          phase: 'do',
+          cause: 'compensating',
+          reason: COMPENSATING,
+          actorId: null,
+          at,
+        }),
+      ],
       inFlight: false,
     };
     // A parked wait has no work in flight: the job that parked it is only finishing.
@@ -1367,7 +1483,7 @@ export function createWorkflows<
     );
   };
 
-  type RunCtx = Pick<CommandContext<MetaOut, Tx>, 'write' | 'run' | 'accept' | 'tx'>;
+  type RunCtx = Pick<CommandContext<MetaOut, Tx, (typeof runEvents)[number]>, 'write' | 'run' | 'accept' | 'tx'>;
   type Written = { readonly row: Row | null; readonly events: readonly RunEvent[] };
   const ENDS = new Set(['RunCompleted', 'RunFailed', 'RunCancelled', 'RunExpired']);
   const plannedSchema = childrenPlanSchema.extend({ path: z.string().min(1) });
@@ -1693,6 +1809,7 @@ export function createWorkflows<
   const checkpoint = j.command(
     CHECKPOINT_COMMAND,
     checkpointSchema,
+    { writes: runEvents },
     async (input, context): Promise<{ readonly status: 'checkpointed' | 'already' | 'settled' } | CommandFailure> => {
       const { write } = context;
       const before = { parked: false };
@@ -1802,7 +1919,14 @@ export function createWorkflows<
             if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no child node '${path}'`);
             }
-            const dropped = events.NodeSkipped({ path, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at });
+            const dropped = events.NodeSkipped({
+              path,
+              phase: 'do',
+              cause: 'compensating',
+              reason: COMPENSATING,
+              actorId: null,
+              at,
+            });
             // The run began compensating while the children were being worked out: no child is started.
             if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
             if (pastDeadline(row)) {
@@ -1824,7 +1948,14 @@ export function createWorkflows<
             if (node === undefined || (node.kind !== 'waitFor' && node.kind !== 'sleep')) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no wait node '${path}'`);
             }
-            const dropped = events.NodeSkipped({ path, phase: 'do', cause: 'compensating', reason: COMPENSATING, actorId: null, at });
+            const dropped = events.NodeSkipped({
+              path,
+              phase: 'do',
+              cause: 'compensating',
+              reason: COMPENSATING,
+              actorId: null,
+              at,
+            });
             // The run began compensating while this wait was starting: the wait is dropped, not parked.
             if (compensating) return [dropped, ...(await compensate(inside.tx, def, row, at, { cause: null }))];
             if (pastDeadline(row)) {
@@ -1846,6 +1977,13 @@ export function createWorkflows<
                 ...priorityOn(row.priority),
                 at,
               }),
+            ];
+          }
+          case 'dropped': {
+            settled.value = true;
+            return [
+              events.NodeSkipped({ path, phase, cause: 'compensating', reason: COMPENSATING, actorId: null, at }),
+              ...(await compensate(inside.tx, def, row, at, { cause: null })),
             ];
           }
           case 'expired': {
@@ -1958,8 +2096,13 @@ export function createWorkflows<
    * takes, so a start that queues at the same moment either finds the slot free or is seen here.
    */
   const promoteAfterEnd = async (ctx: RunCtx, row: Row): Promise<void | CommandFailure> => {
-    // With no workflow that queues, no run can be queued: an app that never queues pays nothing at a run end.
-    if (![...started.values()].some(def => def.concurrency?.onBusy === 'queue')) return;
+    // With no workflow that queues, no run can be queued: an app that never queues pays nothing at a run end. A
+    // `with-event` start queues too, whatever its `onBusy`, because nothing may refuse the business transaction.
+    if (
+      ![...started.values()].some(def => def.concurrency?.onBusy === 'queue' || def.startOn?.timing === 'with-event')
+    ) {
+      return;
+    }
     const code = codeOf(row, started);
     // A run of a workflow without `concurrency` holds no slot, so its end frees none.
     if (code instanceof JournalError || code.concurrency === undefined) return;
@@ -1982,17 +2125,20 @@ export function createWorkflows<
    * exists never gets here: the write finds its row. When the workflow's own `perKey` is full, `onBusy: 'join'`
    * answers the oldest running run of that key; anything else is `WorkflowBusy`. A child always gets `WorkflowBusy`:
    * the run it would join reports to another parent. A pause offers no join. With `onBusy: 'queue'`, any block (full
-   * or paused, a top run or a child) gives `{ queue }`: the run is created `queued` and waits for a slot.
+   * or paused, a top run or a child) gives `{ queue }`: the run is created `queued` and waits for a slot. So does any
+   * block that would refuse a `with-event` start (`refusal: 'queue'`): that start sits in the business transaction.
    * A limit counts every run that holds it, whatever its scope: an app may cap a key across tenants. What the caller
    * gets back never crosses its scope: it joins only a run of its own scope (else `WorkflowBusy`), and
    * `WorkflowBusy.running` lists only its own scope's runs, since the key comes from input another tenant can share.
    */
+  type AdmissionRefusal = 'refuse' | 'queue';
   const admit = async (
     tx: Tx,
     def: WorkflowDef,
     key: string | null,
     parent: { readonly id: string; readonly path: string } | undefined,
     scope: string | null,
+    refusal: AdmissionRefusal,
   ): Promise<
     { readonly runId: string; readonly created: false } | { readonly queue: LimitBlock } | WorkflowBusy | undefined
   > => {
@@ -2001,6 +2147,7 @@ export function createWorkflows<
     if (def.concurrency?.onBusy === 'queue') return { queue: block };
     const limitName = block.limit.name;
     if (block.reason === 'paused') {
+      if (refusal === 'queue') return { queue: block };
       return WorkflowBusy({
         name: def.name,
         key,
@@ -2022,6 +2169,7 @@ export function createWorkflows<
       });
       return { runId: oldest, created: false };
     }
+    if (refusal === 'queue') return { queue: block };
     const keyed = block.scale === 'perKey' ? ` with concurrency key "${key ?? ''}"` : '';
     return WorkflowBusy({
       name: def.name,
@@ -2041,11 +2189,12 @@ export function createWorkflows<
    * run (`created` is false); another workflow or another input under that id is a refusal. A child run is started by
    * its parent's checkpoint, with `parent` set: it takes the parent's `scope` and tree (`rootId`), and no tags,
    * metadata, delay, ttl or overrides of its own. A delay makes the first node due later; the deadline counts from then.
-   * `batchId` is set by `startBatch`, and `replayOf` with the operator (`by`) by `replay`.
+   * `batchId` is set by `startBatch`, and `replayOf` with the operator (`by`) by `replay`. `refusal` says what a limit
+   * that would refuse does instead (`admit`).
    */
   const startRun = async (
     def: WorkflowDef,
-    { write, tx }: Pick<CommandContext<MetaOut, Tx>, 'write' | 'tx'>,
+    { write, tx }: Pick<RunCtx, 'write' | 'tx'>,
     args: { readonly input: unknown; readonly id?: string | undefined } & RunFields &
       RunTiming &
       RunOverrides & {
@@ -2053,10 +2202,23 @@ export function createWorkflows<
         readonly replayOf?: string;
         readonly by?: ReturnType<typeof operatorOf>;
       },
-    parent?: { readonly id: string; readonly path: string; readonly rootId: string; readonly scope: string | null },
+    how: {
+      readonly parent?: {
+        readonly id: string;
+        readonly path: string;
+        readonly rootId: string;
+        readonly scope: string | null;
+      };
+      readonly refusal?: AdmissionRefusal;
+    } = {},
   ): Promise<
-    { readonly runId: string; readonly created: boolean } | CommandConflict | WorkflowBusy | CommandInvalid | CommandFailure
+    | { readonly runId: string; readonly created: boolean }
+    | CommandConflict
+    | WorkflowBusy
+    | CommandInvalid
+    | CommandFailure
   > => {
+    const { parent, refusal = 'refuse' } = how;
     if (!started.has(`${def.name}@${def.version}`)) {
       throw new JournalError(
         'WORKFLOW_UNKNOWN',
@@ -2103,7 +2265,7 @@ export function createWorkflows<
     const overrides = storedOverrides(parent === undefined ? args : {});
     const written = await write(machine.run, runId, async (row, inside) => {
       if (row !== null) return [];
-      const admitted = await admit(inside.tx, def, concurrencyKey, parent, scope);
+      const admitted = await admit(inside.tx, def, concurrencyKey, parent, scope, refusal);
       if (WorkflowBusy.is(admitted)) return admitted;
       if (admitted !== undefined && 'runId' in admitted) {
         gate.joined = admitted.runId;
@@ -2197,6 +2359,7 @@ export function createWorkflows<
     j.command(
       `${def.name}.start`,
       startSchema(def.input),
+      { writes: runEvents },
       async (args, context): Promise<StartOutcome | CommandFailure> => {
         const outcome = await startRun(def, context, args);
         return isFailure(outcome) ? outcome : { runId: outcome.runId };
@@ -2211,6 +2374,7 @@ export function createWorkflows<
     const startItem = j.command(
       `${def.name}.startBatchItem`,
       batchItemSchema,
+      { writes: runEvents },
       async (args, context): Promise<StartOutcome | CommandFailure> => {
         const outcome = await startRun(def, context, {
           ...args.item,
@@ -2225,6 +2389,7 @@ export function createWorkflows<
     return j.command(
       `${def.name}.startBatch`,
       startBatchSchema(def.input),
+      { writes: [] },
       async (args, context): Promise<StartBatchOutcome | CommandFailure> => {
         const batchId = args.batchId ?? workflowBatchId();
         if (isFailure(batchId)) return batchId;
@@ -2255,11 +2420,16 @@ export function createWorkflows<
   const startChild = j.command(
     START_CHILD_COMMAND,
     startChildSchema,
+    { writes: runEvents },
     async (
       args,
       context,
     ): Promise<
-      { readonly runId: string; readonly created: boolean } | CommandConflict | WorkflowBusy | CommandInvalid | CommandFailure
+      | { readonly runId: string; readonly created: boolean }
+      | CommandConflict
+      | WorkflowBusy
+      | CommandInvalid
+      | CommandFailure
     > => {
       const def = started.get(`${args.def.name}@${args.def.version}`);
       if (def === undefined) {
@@ -2270,12 +2440,12 @@ export function createWorkflows<
           `no registered workflow "${args.def.name}" v${args.def.version}`,
         );
       }
-      return startRun(def, context, { input: args.input, id: args.id }, args.parent);
+      return startRun(def, context, { input: args.input, id: args.id }, { parent: args.parent });
     },
   );
 
   /** What `def.signal(name)` and `journal.workflows.signal` run with. */
-  type DoorContext = Pick<CommandContext<MetaOut, Tx>, 'write' | 'run' | 'accept' | 'tx' | 'meta'>;
+  type DoorContext = RunCtx & Pick<CommandContext<MetaOut, Tx>, 'meta'>;
 
   /**
    * Delivers signal `name` to a run: the body of `def.signal(name)` and of the operator verb `journal.workflows.signal`.
@@ -2375,8 +2545,11 @@ export function createWorkflows<
       if (waiting === undefined || waiting.kind !== 'waitFor') {
         throw new JournalError('BAD_DEFINITION', 'workflow', def.name, `no waitFor node waits for signal '${name}'`);
       }
-      return j.command(`${def.name}.signal.${name}`, signalSchemaFor<Signals[Name]>(), (args, context) =>
-        deliverSignal(context, args, name, def.name, null),
+      return j.command(
+        `${def.name}.signal.${name}`,
+        signalSchemaFor<Signals[Name]>(),
+        { writes: runEvents },
+        (args, context) => deliverSignal(context, args, name, def.name, null),
       );
     };
 
@@ -2432,7 +2605,7 @@ export function createWorkflows<
 
   /** `def.cancel`: stops a run, undoes what it completed, newest first, and ends it `cancelled`. */
   const cancelCommandFor = (def: WorkflowDef) =>
-    j.command(`${def.name}.cancel`, cancelSchema, (args, context) =>
+    j.command(`${def.name}.cancel`, cancelSchema, { writes: runEvents }, (args, context) =>
       cancelRun(context, args, def.name, typeof context.meta['actorId'] === 'string' ? context.meta['actorId'] : null),
     );
 
@@ -2445,7 +2618,7 @@ export function createWorkflows<
    * carries no operator, and its meta is the `workflowMeta`.
    */
   async function changeMetadata(
-    context: DoorContext,
+    context: Pick<CommandContext<MetaOut, Tx, typeof events.MetadataChanged>, 'write'>,
     runId: string,
     change: MetadataChange,
     operator: OperationInput | null,
@@ -2476,7 +2649,7 @@ export function createWorkflows<
    * refused. `operator` as for `changeMetadata`.
    */
   async function addRunTags(
-    context: DoorContext,
+    context: Pick<CommandContext<MetaOut, Tx, typeof events.RunTagged>, 'write'>,
     runId: string,
     tags: readonly string[],
     operator: OperationInput | null,
@@ -2500,11 +2673,14 @@ export function createWorkflows<
   }
 
   /** The command behind `ctx.metadata`. Internal: only a node attempt runs it, on its own run. */
-  const stepMetadata = j.command(STEP_METADATA_COMMAND, stepMetadataSchema, (args, context) =>
-    changeMetadata(context, args.runId, args.change, null),
+  const stepMetadata = j.command(
+    STEP_METADATA_COMMAND,
+    stepMetadataSchema,
+    { writes: [events.MetadataChanged] },
+    (args, context) => changeMetadata(context, args.runId, args.change, null),
   );
   /** The command behind `ctx.tags.add`. Internal, like `stepMetadata`. */
-  const stepTags = j.command(STEP_TAGS_COMMAND, stepTagsSchema, (args, context) =>
+  const stepTags = j.command(STEP_TAGS_COMMAND, stepTagsSchema, { writes: [events.RunTagged] }, (args, context) =>
     addRunTags(context, args.runId, args.tags, null),
   );
 
@@ -2539,10 +2715,164 @@ export function createWorkflows<
     return rows.map(row => ({
       id: row.id,
       node: jobNodeSchema.parse(
-        row.args === null ? {} : (ensure(row.args, storedEventRowSchema, { at: `journal: job ${row.id} args` }).data ?? {}),
+        row.args === null
+          ? {}
+          : (ensure(row.args, storedEventRowSchema, { at: `journal: job ${row.id} args` }).data ?? {}),
       ),
     }));
   };
+  /**
+   * One savepoint around a node's command and all that must hold for its result. A failure it returns, or a throw,
+   * rolls the command back too, so a failed attempt wrote nothing and the next one runs the command once. The result
+   * cannot be checked before the command, so the check needs this savepoint: the command's own closed when it returned.
+   */
+  const inSavepoint = async (
+    context: Pick<RunCtx, 'run' | 'accept'>,
+    body: (inner: Pick<RunCtx, 'run' | 'accept'>) => Promise<Verdict | Failure>,
+  ): Promise<Verdict> => {
+    const savepoint = j.command(COMMAND_SAVEPOINT_COMMAND, z.object({}), { writes: [] }, (_args, inner) => body(inner));
+    const outcome = await context.run(savepoint, {});
+    if (!isFailure(outcome)) return outcome;
+    // eslint-disable-next-line failure/no-blind-accept -- whatever refused the node, its failure transition commits here.
+    context.accept(outcome);
+    return commandFailed(outcome);
+  };
+
+  /** The `do` of a command node, on the locked run. `row.results` are live (`liveResults`). */
+  const doCommand = async (
+    context: Pick<RunCtx, 'run' | 'accept'>,
+    def: WorkflowDef,
+    index: number,
+    node: CommandNode,
+    row: Row,
+    key: string,
+  ): Promise<Verdict> => {
+    // The run began compensating while this job waited: nothing ran yet, so nothing runs.
+    if (row.state === 'compensating') return { kind: 'dropped' };
+    const view = { runId: row.id, key, input: row.input, results: row.results };
+    try {
+      if (node.options.when !== undefined && !node.options.when(view)) {
+        const route = await routeAt(def, index + 1, row, node.name, null);
+        return isFailure(route) ? failed(route, false) : { kind: 'skipped', reason: 'when', route };
+      }
+    } catch (error) {
+      return failed(error);
+    }
+    return inSavepoint(context, async inner => {
+      const outcome = await inner.run(node.command, node.input(view));
+      let stored: unknown;
+      let live: unknown;
+      if (isFailure(outcome)) {
+        if (!node.accept.some(known => known.is(outcome))) return outcome;
+        // The command's savepoint is rolled back and stays so: only this node goes on from the refusal.
+        // eslint-disable-next-line failure/no-blind-accept -- the app's own list, checked with each `is` just above.
+        inner.accept(outcome);
+        const envelope = serialize(outcome, node.accept);
+        if (isFailure(envelope)) return envelope;
+        stored = { [REFUSED]: envelope };
+        live = outcome;
+      } else {
+        const { output } = node.command;
+        const parsed = output === undefined ? null : await parseAsync(output, outcome);
+        if (isFailure(parsed)) return parsed;
+        stored = parsed;
+        live = parsed;
+      }
+      const kept = storable(stored, def.limits.payload, `the result of command '${node.name}'`, row.id);
+      if (kept instanceof JournalError) throw kept;
+      const route = await routeAt(def, index + 1, row, node.name, live);
+      if (isFailure(route)) return route;
+      return { kind: 'completed', result: kept.value, route };
+    });
+  };
+
+  /** The `undo` of a command node, on the locked run. Its `result` is what the node stored, checked by its schema. */
+  const undoCommand = async (
+    context: Pick<RunCtx, 'run' | 'accept' | 'tx'>,
+    def: WorkflowDef,
+    node: CommandNode,
+    row: Row,
+    key: string,
+  ): Promise<Verdict> => {
+    const { undo } = node.options;
+    if (undo === undefined) {
+      throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `node '${node.name}' has no undo to run`);
+    }
+    const settled = await context.tx
+      .select({ type: tables.events.type, data: tables.events.data })
+      .from(tables.events)
+      .where(settledOf(row.id))
+      .orderBy(asc(tables.events.seq));
+    // This undo is not settled yet, so the newest step still to undo is the one it answers.
+    const [done] = remainingUndos(def, settled);
+    if (done === undefined || done.path !== node.name) {
+      throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `no completed step '${node.name}' to undo`);
+    }
+    const { output } = node.command;
+    const result = output === undefined ? done.result : await parseAsync(output, done.result);
+    if (isFailure(result)) return failed(result, false);
+    const view = { runId: row.id, key, input: row.input, results: row.results, result };
+    return inSavepoint(context, async inner => {
+      const outcome = await inner.run(undo.command, undo.input(view));
+      if (isFailure(outcome)) return outcome;
+      const undoOutput = undo.command.output;
+      const parsed = undoOutput === undefined ? null : await parseAsync(undoOutput, outcome);
+      if (isFailure(parsed)) return parsed;
+      const kept = storable(parsed, def.limits.payload, `the undo result of command '${node.name}'`, row.id);
+      if (kept instanceof JournalError) throw kept;
+      return { kind: 'undone', result: kept.value };
+    });
+  };
+
+  /**
+   * One attempt of a command node: one transaction, opened through the job's fence, holding the run's lock, the
+   * command's savepoint and the checkpoint. So the command and the node's move commit together, exactly once: a crash
+   * before the commit leaves neither, and a job that runs again after the commit finds the node settled. A refused
+   * command rolls back its savepoint, and the failure transition commits here all the same. `dead` is the reason when
+   * the node died, for the job to report.
+   */
+  const commandNode = j.command(
+    COMMAND_NODE_COMMAND,
+    commandNodeSchema,
+    { writes: runEvents },
+    async (
+      { runId, path, phase, attempt, key },
+      context,
+    ): Promise<
+      { readonly status: 'checkpointed' | 'already' | 'settled'; readonly dead: unknown } | CommandFailure
+    > => {
+      const open: { row?: Row } = {};
+      // Writes nothing: it takes the run's lock, which stays until the commit, and looks at this attempt under it.
+      const locked = await context.write(run, runId, async (row, inside) => {
+        if (row === null || row.finishedAt !== null) return [];
+        const step = await stepRowOf(inside.tx, runId, path, phase);
+        if (step?.attempt === attempt && (step.status === 'scheduled' || step.status === 'failed')) open.row = row;
+        return [];
+      });
+      if (isFailure(locked)) return locked;
+      if (open.row === undefined) return { status: 'already', dead: undefined };
+      const def = definitionOf(open.row);
+      const index = def.nodes.findIndex(candidate => candidate.name === path);
+      const node = def.nodes[index];
+      if (node?.kind !== 'command') {
+        throw new JournalError('BAD_DEFINITION', 'workflow', runId, `"${def.name}" has no command node '${path}'`);
+      }
+      const row = { ...open.row, results: liveResults(def, runId, open.row.results) };
+      const verdict =
+        phase === 'undo'
+          ? await undoCommand(context, def, node, row, key)
+          : await doCommand(context, def, index, node, row, key);
+      if (verdict.kind === 'failed') {
+        const outcome = failureOutcome(node, row.maxAttempts, verdict, attempt, key);
+        const moved = await context.run(checkpoint, { runId, path, phase, attempt, outcome });
+        if (isFailure(moved)) return moved;
+        return { status: moved.status, dead: outcome.kind === 'dead' ? verdict.reason : undefined };
+      }
+      const moved = await context.run(checkpoint, { runId, path, phase, attempt, outcome: verdict });
+      return isFailure(moved) ? moved : { status: moved.status, dead: undefined };
+    },
+  );
+
   /**
    * `retryStep`: a dead step runs again. A failed `do` or `undo` row gets its next attempt with the same key. A failed
    * child or map node starts its failed children again under new ids (`<id>~2`); the old runs stay as history. A step
@@ -2551,6 +2881,7 @@ export function createWorkflows<
   const retryStep = j.command(
     RETRY_STEP_COMMAND,
     retryStepSchema,
+    { writes: runEvents },
     async (
       args,
       context,
@@ -2664,7 +2995,8 @@ export function createWorkflows<
 
   /**
    * `resolveStep`: an operator gives the result of a failed `do` step, and the run carries on as if the step had
-   * returned it. The result is checked with the step's `output` schema, so a step without one cannot be resolved.
+   * returned it. The result is checked with the step's `output` schema, or a command node's command's, so a node
+   * without one cannot be resolved.
    * It schedules the step once more with the result in the event; the worker routes it and sends the usual
    * completed checkpoint, without running the body.
    * A step that routes with a function cannot be resolved either: the function needs the worker's services.
@@ -2672,6 +3004,7 @@ export function createWorkflows<
   const resolveStep = j.command(
     RESOLVE_STEP_COMMAND,
     resolveStepSchema,
+    { writes: runEvents },
     async (args, context): Promise<{ readonly runId: string } | CommandFailure> => {
       assertOperator(args.op);
       const before = { parked: false };
@@ -2700,8 +3033,8 @@ export function createWorkflows<
         const node = def.nodes[index];
         const notResolvable = (why: string) =>
           new JournalError('STEP_NOT_RESOLVABLE', 'workflow', row.id, `step '${args.path}' ${why}`);
-        if (node?.kind !== 'step') throw notResolvable('is not a step');
-        const { output } = node.options;
+        if (node?.kind !== 'step' && node?.kind !== 'command') throw notResolvable('is not a step');
+        const output = node.kind === 'step' ? node.options.output : node.command.output;
         if (output === undefined) throw notResolvable('declares no output schema to check a result with');
         if (row.state !== 'running') throw notResolvable(`cannot be resolved while the run is ${row.state}`);
         const parsed = await parseAsync(output, args.result);
@@ -2736,6 +3069,7 @@ export function createWorkflows<
   const skipUndo = j.command(
     SKIP_UNDO_COMMAND,
     skipUndoSchema,
+    { writes: runEvents },
     async (args, context): Promise<{ readonly runId: string } | CommandFailure> => {
       assertOperator(args.op);
       const reason = args.op.reason?.trim() ?? '';
@@ -2783,13 +3117,13 @@ export function createWorkflows<
   );
 
   /** `journal.workflows.signal`: the operator's door to `deliverSignal`, for a run of any workflow. */
-  const operatorSignal = j.command(SIGNAL_COMMAND, operatorSignalSchema, (args, context) => {
+  const operatorSignal = j.command(SIGNAL_COMMAND, operatorSignalSchema, { writes: runEvents }, (args, context) => {
     assertOperator(args.op);
     return deliverSignal(context, args, args.name, null, args.op);
   });
 
   /** `journal.workflows.cancel`: the operator's door to `cancelRun`, for a run of any workflow. */
-  const operatorCancel = j.command(CANCEL_COMMAND, operatorCancelSchema, (args, context) => {
+  const operatorCancel = j.command(CANCEL_COMMAND, operatorCancelSchema, { writes: runEvents }, (args, context) => {
     assertOperator(args.op);
     const cancel = {
       runId: args.runId,
@@ -2800,13 +3134,18 @@ export function createWorkflows<
   });
 
   /** `journal.workflows.setMetadata`: the operator's door to `changeMetadata`. `MetadataChanged` carries the operator. */
-  const setMetadata = j.command(SET_METADATA_COMMAND, setMetadataSchema, (args, context) => {
-    assertOperator(args.op);
-    return changeMetadata(context, args.runId, args.change, args.op);
-  });
+  const setMetadata = j.command(
+    SET_METADATA_COMMAND,
+    setMetadataSchema,
+    { writes: [events.MetadataChanged] },
+    (args, context) => {
+      assertOperator(args.op);
+      return changeMetadata(context, args.runId, args.change, args.op);
+    },
+  );
 
   /** `journal.workflows.addTags`: the operator's door to `addRunTags`. `RunTagged` carries the operator. */
-  const addTags = j.command(ADD_TAGS_COMMAND, addTagsSchema, (args, context) => {
+  const addTags = j.command(ADD_TAGS_COMMAND, addTagsSchema, { writes: [events.RunTagged] }, (args, context) => {
     assertOperator(args.op);
     return addRunTags(context, args.runId, args.tags, args.op);
   });
@@ -2819,6 +3158,7 @@ export function createWorkflows<
   const reschedule = j.command(
     RESCHEDULE_COMMAND,
     rescheduleSchema,
+    { writes: runEvents },
     async (args, context): Promise<RescheduleOutcome | CommandFailure> => {
       assertOperator(args.op);
       const now = new Date();
@@ -2916,7 +3256,7 @@ export function createWorkflows<
    * fit start, under the same locks. It returns the limit after it.
    */
   const changeLimit = async (
-    context: RunCtx,
+    context: Pick<CommandContext<MetaOut, Tx, (typeof limitVerbEvents)[number]>, keyof RunCtx>,
     known: KnownLimit,
     op: OperationInput,
     eventsOf: (
@@ -2943,86 +3283,106 @@ export function createWorkflows<
    * `perKey` until `reset`. A workflow without `concurrency` has nothing to override, and a `perKey` needs a start with
    * a key: an override that could not apply is `CommandInvalid`, never kept and ignored.
    */
-  const overrideLimit = j.command(LIMIT_OVERRIDE_COMMAND, limitOverrideSchema, async (args, context) => {
-    const known = limitOf(args.name);
-    if (CommandNotFound.is(known)) return known;
-    if (!known.gated) {
-      return CommandInvalid({
-        detail: `workflow "${known.workflow ?? known.name}" has no concurrency, so only pause and resume apply to "${known.name}"`,
-      });
-    }
-    if (('key' in args || args.perKey !== undefined) && !known.keyed) {
-      return CommandInvalid({
-        detail: `no start that holds "${known.name}" has a concurrency key, so a perKey cannot apply to it`,
-      });
-    }
-    return changeLimit(context, known, args.op, (row, now) => {
-      const at = now.toISOString();
-      if ('key' in args) {
-        const ttl = parseAge(args.ttl ?? LIMIT_KEY_TTL.default);
+  const overrideLimit = j.command(
+    LIMIT_OVERRIDE_COMMAND,
+    limitOverrideSchema,
+    { writes: limitVerbEvents },
+    async (args, context) => {
+      const known = limitOf(args.name);
+      if (CommandNotFound.is(known)) return known;
+      if (!known.gated) {
+        return CommandInvalid({
+          detail: `workflow "${known.workflow ?? known.name}" has no concurrency, so only pause and resume apply to "${known.name}"`,
+        });
+      }
+      if (('key' in args || args.perKey !== undefined) && !known.keyed) {
+        return CommandInvalid({
+          detail: `no start that holds "${known.name}" has a concurrency key, so a perKey cannot apply to it`,
+        });
+      }
+      return changeLimit(context, known, args.op, (row, now) => {
+        const at = now.toISOString();
+        if ('key' in args) {
+          const ttl = parseAge(args.ttl ?? LIMIT_KEY_TTL.default);
+          return [
+            limits.events.LimitKeyOverridden({
+              key: args.key,
+              perKey: args.perKey,
+              until: new Date(now.getTime() + ttl).toISOString(),
+              expired: expiredKeys(row?.keys, now),
+              at,
+              ...operatorOf(args.op),
+            }),
+          ];
+        }
         return [
-          limits.events.LimitKeyOverridden({
-            key: args.key,
-            perKey: args.perKey,
-            until: new Date(now.getTime() + ttl).toISOString(),
-            expired: expiredKeys(row?.keys, now),
+          limits.events.LimitOverridden({
+            ...(args.total === undefined ? {} : { total: args.total }),
+            ...(args.perKey === undefined ? {} : { perKey: args.perKey }),
             at,
             ...operatorOf(args.op),
           }),
         ];
-      }
-      return [
-        limits.events.LimitOverridden({
-          ...(args.total === undefined ? {} : { total: args.total }),
-          ...(args.perKey === undefined ? {} : { perKey: args.perKey }),
-          at,
-          ...operatorOf(args.op),
-        }),
-      ];
-    });
-  });
+      });
+    },
+  );
 
   /** `journal.limits.reset`: the code values again, for one key or (without `key`) the whole limit. The pause stays. */
-  const resetLimit = j.command(LIMIT_RESET_COMMAND, limitResetSchema, async (args, context) => {
-    const known = limitOf(args.name);
-    if (CommandNotFound.is(known)) return known;
-    return changeLimit(context, known, args.op, (row, now) => {
-      // Nothing to reset is no change, so no event.
-      if (row === null || (args.key !== undefined && row.keys[args.key] === undefined)) return [];
-      return [
-        limits.events.LimitReset({
-          ...(args.key === undefined ? {} : { key: args.key }),
-          at: now.toISOString(),
-          ...operatorOf(args.op),
-        }),
-      ];
-    });
-  });
+  const resetLimit = j.command(
+    LIMIT_RESET_COMMAND,
+    limitResetSchema,
+    { writes: limitVerbEvents },
+    async (args, context) => {
+      const known = limitOf(args.name);
+      if (CommandNotFound.is(known)) return known;
+      return changeLimit(context, known, args.op, (row, now) => {
+        // Nothing to reset is no change, so no event.
+        if (row === null || (args.key !== undefined && row.keys[args.key] === undefined)) return [];
+        return [
+          limits.events.LimitReset({
+            ...(args.key === undefined ? {} : { key: args.key }),
+            at: now.toISOString(),
+            ...operatorOf(args.op),
+          }),
+        ];
+      });
+    },
+  );
 
   /** `journal.limits.pause`: no new run holds the limit until `resume`; the runs that hold it go on to their end. */
-  const pauseLimit = j.command(LIMIT_PAUSE_COMMAND, limitNameArgsSchema, async (args, context) => {
-    const known = limitOf(args.name);
-    if (CommandNotFound.is(known)) return known;
-    return changeLimit(context, known, args.op, (row, now) =>
-      row?.paused === true ? [] : [limits.events.LimitPaused({ at: now.toISOString(), ...operatorOf(args.op) })],
-    );
-  });
+  const pauseLimit = j.command(
+    LIMIT_PAUSE_COMMAND,
+    limitNameArgsSchema,
+    { writes: limitVerbEvents },
+    async (args, context) => {
+      const known = limitOf(args.name);
+      if (CommandNotFound.is(known)) return known;
+      return changeLimit(context, known, args.op, (row, now) =>
+        row?.paused === true ? [] : [limits.events.LimitPaused({ at: now.toISOString(), ...operatorOf(args.op) })],
+      );
+    },
+  );
 
   /** `journal.limits.resume`: the limit admits runs again, by its values. */
-  const resumeLimit = j.command(LIMIT_RESUME_COMMAND, limitNameArgsSchema, async (args, context) => {
-    const known = limitOf(args.name);
-    if (CommandNotFound.is(known)) return known;
-    return changeLimit(context, known, args.op, (row, now) =>
-      row?.paused === true ? [limits.events.LimitResumed({ at: now.toISOString(), ...operatorOf(args.op) })] : [],
-    );
-  });
+  const resumeLimit = j.command(
+    LIMIT_RESUME_COMMAND,
+    limitNameArgsSchema,
+    { writes: limitVerbEvents },
+    async (args, context) => {
+      const known = limitOf(args.name);
+      if (CommandNotFound.is(known)) return known;
+      return changeLimit(context, known, args.op, (row, now) =>
+        row?.paused === true ? [limits.events.LimitResumed({ at: now.toISOString(), ...operatorOf(args.op) })] : [],
+      );
+    },
+  );
 
   /**
    * Run by the limit timer when a key's `perKey` override runs out: that may make room with no event of its own, so the
    * queued runs of the limit that now fit start. Each candidate is checked inside its own write, under the same locks
    * a start takes; a run queued after the override ran out was judged without it, so the look needs no lock first.
    */
-  const promoteLimit = j.command(PROMOTE_COMMAND, promoteSchema, async (args, context) => {
+  const promoteLimit = j.command(PROMOTE_COMMAND, promoteSchema, { writes: runEvents }, async (args, context) => {
     const known = knownLimits.get(args.name);
     // A limit no registered workflow holds any more has no queued run this code can check.
     if (known === undefined || !known.gated) return { name: args.name };
@@ -3053,6 +3413,7 @@ export function createWorkflows<
   const replay = j.command(
     REPLAY_COMMAND,
     replaySchema,
+    { writes: runEvents },
     async (args, context): Promise<StartOutcome | CommandNotFound | CommandFailure> => {
       assertOperator(args.op);
       const [row] = await context.tx.select().from(workflowRuns).where(eq(workflowRuns.id, args.runId));
@@ -3100,10 +3461,10 @@ export function createWorkflows<
     const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, args.runId));
     if (row === undefined) throw new JournalError('WORKFLOW_NOT_FOUND', 'workflow', args.runId);
     const node = definitionOf(row).nodes.find(candidate => candidate.name === args.path);
-    if (node?.kind !== 'step') {
+    if (node?.kind !== 'step' && node?.kind !== 'command') {
       throw new JournalError('STEP_NOT_RESOLVABLE', 'workflow', row.id, `step '${args.path}' is not a step`);
     }
-    const { output } = node.options;
+    const output = node.kind === 'step' ? node.options.output : node.command.output;
     if (output === undefined) {
       throw new JournalError(
         'STEP_NOT_RESOLVABLE',
@@ -3130,7 +3491,12 @@ export function createWorkflows<
   ) => {
     const parsed = await parseAsync(schema, stored);
     if (InvalidInput.is(parsed)) {
-      const { message } = new JournalError('WORKFLOW_READ_MISMATCH', 'workflow', runId, `${field}: ${reasonText(parsed)}`);
+      const { message } = new JournalError(
+        'WORKFLOW_READ_MISMATCH',
+        'workflow',
+        runId,
+        `${field}: ${reasonText(parsed)}`,
+      );
       return WorkflowReadMismatch({ runId, field, detail: message }, { cause: parsed });
     }
     if (ValidatorDefect.is(parsed)) return parsed;
@@ -3162,6 +3528,17 @@ export function createWorkflows<
         if (own === undefined || !Object.hasOwn(results, node.name)) continue;
         const field = `results.${node.name}`;
         const stored = results[node.name];
+        // An accepted failure is checked by its own definition's schema, and read as a real failure.
+        if (node.kind === 'command' && is(stored, refusedResultSchema)) {
+          const refusal = revivedRefusal(node, stored);
+          if (refusal === undefined) {
+            const detail = `${field}: a failure the command's accept list does not name`;
+            return WorkflowReadMismatch({ runId, field, detail });
+          }
+          results[node.name] = refusal;
+          checkedFields.add(field);
+          continue;
+        }
         if (stored !== null || !own.nullable) {
           const checked = await checkStored(own.schema, stored, runId, field);
           if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
@@ -3169,7 +3546,10 @@ export function createWorkflows<
         }
         checkedFields.add(field);
       }
-      const read: RunDetail<SchemaOutput<Input>> = { ...detail, run: { ...detail.run, input: input.value, output, results } };
+      const read: RunDetail<SchemaOutput<Input>> = {
+        ...detail,
+        run: { ...detail.run, input: input.value, output, results },
+      };
       if (!isCheckedRead(def, read, checkedFields)) {
         throw new Error(`journal: def.read of "${def.name}" left a schema of the definition unchecked`);
       }
@@ -3190,7 +3570,9 @@ export function createWorkflows<
   const task: JournalDefinitions<Meta, Tx, AppDb>['task'] = (name, options, run) =>
     taskOf(workflow(name, options), options, run);
 
-  type StepEffectContext = InternalEffectContext<AppDb, RootCommandRunner<Meta, Tx>> & Needed<Needs>;
+  type StepEffectContext = OwnedEffectContext<AppDb, RootCommandRunner<Meta, Tx>> & Needed<Needs>;
+  /** Every effect below runs the engine's own commands, so the worker gives it the owned context. */
+  const ownedEffect = ownedEffectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>();
 
   /** How many ancestors a run has: its parent, that one's parent, and so on, counted up to the depth limit. */
   async function ancestorsOf(db: StepEffectContext['db'], row: { readonly parentId: string | null }): Promise<number> {
@@ -3250,6 +3632,13 @@ export function createWorkflows<
       }
     }
   }
+
+  const runExists = async (db: DbHandle, runId: string) => {
+    const rows = await db.select({ id: workflowRuns.id }).from(workflowRuns).where(eq(workflowRuns.id, runId));
+    return rows.length > 0;
+  };
+  const startsNothing = (def: WorkflowDef, runId: string, seq: number) =>
+    debugWorkflow.debug('{name}: run {runId} exists, so event {seq} starts nothing', { name: def.name, runId, seq });
 
   /**
    * Registers the definitions: the step effect that runs their nodes, and the projection that keeps `workflow_steps`.
@@ -3338,13 +3727,13 @@ export function createWorkflows<
     async function routeFrom(
       def: WorkflowDef,
       index: number,
-      node: StepNode,
+      node: StepNode | CommandNode,
       row: Row,
       result: unknown,
       build: (signal: AbortSignal) => ErasedContext,
       signal: AbortSignal,
     ): Promise<Route | AsyncSchemaFailure> {
-      const { next } = node.options;
+      const next = node.kind === 'step' ? node.options.next : undefined;
       const target = typeof next === 'function' ? next({ ...build(signal), result }) : (next ?? 'next');
       let targetIndex = index + 1;
       if (target !== 'next') {
@@ -3371,14 +3760,7 @@ export function createWorkflows<
      * lost fence as a value.
      */
     const runChangesOf = (ctx: StepEffectContext, runId: string): Pick<ErasedContext, 'metadata' | 'tags'> => {
-      const runner = (): RootCommandRunner<Meta, Tx> => {
-        // The worker always sets it for this effect. Only a context built by hand lacks it, and a step runs on a worker.
-        const unwatched = ctx[unwatchedRun];
-        if (unwatched === undefined) {
-          throw new JournalError('BAD_DEFINITION', 'workflow', runId, 'the step context has no unwatched runner');
-        }
-        return unwatched;
-      };
+      const runner = ctx[unwatchedRun];
       const settled = async <Result>(call: () => Promise<Result>) => {
         try {
           return await call();
@@ -3386,7 +3768,7 @@ export function createWorkflows<
           return UnexpectedDefect({ cause: error });
         }
       };
-      const changed = (change: MetadataChange) => settled(() => runner()(stepMetadata, { runId, change }, meta));
+      const changed = (change: MetadataChange) => settled(() => runner(stepMetadata, { runId, change }, meta));
       return {
         metadata: {
           set: patch => changed({ kind: 'set', patch }),
@@ -3395,7 +3777,7 @@ export function createWorkflows<
           remove: key => changed({ kind: 'remove', key }),
         },
         tags: {
-          add: (...tags) => settled(() => runner()(stepTags, { runId, tags }, meta)),
+          add: (...tags) => settled(() => runner(stepTags, { runId, tags }, meta)),
         },
       };
     };
@@ -3483,7 +3865,7 @@ export function createWorkflows<
     async function routeResolved(
       def: WorkflowDef,
       index: number,
-      node: StepNode,
+      node: StepNode | CommandNode,
       row: Row,
       event: NodeScheduledEvent,
       ctx: StepEffectContext,
@@ -3718,15 +4100,44 @@ export function createWorkflows<
       }
     }
 
+    /** A dead step that waits for an operator: the job ends with this failure, and says so in its log. */
+    const stepDead = (runId: string, data: NodeScheduledEvent['data'], reason: unknown) => {
+      debugWorkflow.warn('{runId} {path}: dead after {attempt} attempts, waiting for an operator', {
+        runId,
+        path: data.path,
+        attempt: data.attempt,
+      });
+      return StepDead(
+        { detail: 'A workflow step exhausted its retry policy and needs operator attention.' },
+        { cause: reason },
+      );
+    };
+
+    /**
+     * Runs one attempt of a command node as its one transaction (`commandNode`). A transaction that did not commit left
+     * nothing behind, so a failure here is thrown: the job runs again, and a repeat is safe.
+     */
+    async function attemptCommandNode(row: Row, event: NodeScheduledEvent, ctx: StepEffectContext) {
+      const { data } = event;
+      const args = { runId: row.id, path: data.path, phase: data.phase, attempt: data.attempt, key: data.key };
+      const attempted = await withJournalSpan('journal.step', stepSpan(row, data, data.phase), () =>
+        stepHooks.run(stepHookContext(row, data, data.phase), () => ctx.run(commandNode, args, meta)),
+      );
+      const { status, dead } = orThrow(attempted);
+      debugWorkflow.debug('{runId} {path}: command node {status}', { runId: row.id, path: data.path, status });
+      // Settled: the run compensates (or already was), so no operator is needed and the job ends normally.
+      return dead === undefined || status !== 'checkpointed' ? undefined : stepDead(row.id, data, dead);
+    }
+
     async function runNode(
       event: NodeScheduledEvent,
-      outer: InternalEffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
+      outer: OwnedEffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
       servicesById: ReadonlyMap<string, Services> | undefined,
     ): Promise<unknown> {
       const { data } = event;
       const runId = event.entityId;
-      const [row] = await outer.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
-      if (row === undefined || row.finishedAt !== null) return undefined;
+      const [stored] = await outer.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
+      if (stored === undefined || stored.finishedAt !== null) return undefined;
       const [step] = await outer.db
         .select()
         .from(workflowSteps)
@@ -3737,11 +4148,12 @@ export function createWorkflows<
       if (step === undefined || step.attempt !== data.attempt || step.status === 'done' || step.status === 'skipped') {
         return undefined;
       }
-      const def = codeOf(row, registry);
+      const def = codeOf(stored, registry);
       if (def instanceof JournalError) {
-        warnStranded(row, def);
-        return strandedFailure(row, def);
+        warnStranded(stored, def);
+        return strandedFailure(stored, def);
       }
+      const row = { ...stored, results: liveResults(def, runId, stored.results) };
       // A body's command without a meta records the app's `workflowMeta`; one with a meta records that one.
       const run: WorkflowCommandRunner<Meta, Tx> = (command, input, given, call) =>
         outer.run(command, input, given === undefined ? meta : given, call);
@@ -3769,7 +4181,10 @@ export function createWorkflows<
       }
 
       let verdict: Verdict;
-      if (data.phase === 'undo') {
+      if (node.kind === 'command') {
+        if (data.resolution === undefined) return attemptCommandNode(stored, event, ctx);
+        verdict = await routeResolved(def, index, node, row, event, ctx, data.resolution.result);
+      } else if (data.phase === 'undo') {
         if (node.kind !== 'step' && !(node.kind === 'child' && node.undo)) {
           throw new JournalError('BAD_DEFINITION', 'workflow', runId, `"${row.name}" has no undo for '${data.path}'`);
         }
@@ -3813,33 +4228,12 @@ export function createWorkflows<
           cause: ctx.signal.reason,
         });
       }
-      const error = reasonText(verdict.reason);
-      const own = (node.kind === 'step' ? node.options.retry : undefined) ?? defaultEffectRetry;
-      // A run's `maxAttempts` only narrows the step's retry: `upTo` counts retries, and the first try is not one.
-      const policy = row.maxAttempts === null ? own : own.upTo(row.maxAttempts - 1);
-      const wait = verdict.retryable ? policy.delay(data.attempt, verdict.retryReason) : undefined;
-      if (wait !== undefined) {
-        const checkpointed = await ctx.run(
-          checkpoint,
-          { ...at, outcome: { kind: 'retry', error, key: step.key ?? data.key, at: inMs(wait) } },
-          meta,
-        );
-        if (isFailure(checkpointed)) return checkpointed;
-        return undefined;
-      }
-      const checkpointed = await ctx.run(checkpoint, { ...at, outcome: { kind: 'dead', error } }, meta);
+      const outcome = failureOutcome(node, row.maxAttempts, verdict, data.attempt, step.key ?? data.key);
+      const checkpointed = await ctx.run(checkpoint, { ...at, outcome }, meta);
       if (isFailure(checkpointed)) return checkpointed;
       // Settled: the run compensates (or already was), so no operator is needed and the job ends normally.
-      if (checkpointed.status !== 'checkpointed') return undefined;
-      debugWorkflow.warn('{runId} {path}: dead after {attempt} attempts, waiting for an operator', {
-        runId,
-        path: data.path,
-        attempt: data.attempt,
-      });
-      return StepDead(
-        { detail: 'A workflow step exhausted its retry policy and needs operator attention.' },
-        { cause: verdict.reason },
-      );
+      if (outcome.kind === 'retry' || checkpointed.status !== 'checkpointed') return undefined;
+      return stepDead(runId, data, verdict.reason);
     }
 
     /**
@@ -3849,20 +4243,15 @@ export function createWorkflows<
      */
     const strandedRetry = defaultEffectRetry.while(reason => !isFailure(reason) && !isStrandedError(reason));
 
-    // Marked as the journal's own, so the worker gives its context the unwatched runner (`internal-context.ts`).
-    const stepEffect = <N extends Needs>(needsOf: N, servicesById: ReadonlyMap<string, Services> | undefined) => ({
-      ...j
-        .effect(STEP_EFFECT, machine.run, needsOf, {
-          NodeScheduled: (event, ctx) => runNode(event, ctx, servicesById),
-        })
-        .withSchedule({
-          // A retry is due at the time its event names; a first try is due now.
-          runAt: event => new Date(dueAtOf(event.data)),
-          priority: event => jobPriorityOf(event.data),
-          retry: strandedRetry,
-        }),
-      [journalOwnedEffect]: true as const,
-    });
+    const stepEffect = <N extends Needs>(needsOf: N, servicesById: ReadonlyMap<string, Services> | undefined) =>
+      ownedEffect(STEP_EFFECT, machine.run, needsOf, {
+        NodeScheduled: (event, ctx) => runNode(event, ctx, servicesById),
+      }).withSchedule({
+        // A retry is due at the time its event names; a first try is due now.
+        runAt: event => new Date(dueAtOf(event.data)),
+        priority: event => jobPriorityOf(event.data),
+        retry: strandedRetry,
+      });
     const effect = {
       ...stepEffect(needs, undefined),
       // Each workflow reads the services of its own feature (or the one flat set a static `services` gives).
@@ -3895,8 +4284,11 @@ export function createWorkflows<
      * A park's wake time and a run's deadline. The job is due at the event's time; when it fires, the checkpoint
      * command acts only if the run is still parked on that park (or unfinished, for the deadline).
      */
-    const timer = j
-      .effect(TIMER_EFFECT, machine.run, {
+    const timer = ownedEffect(
+      TIMER_EFFECT,
+      machine.run,
+      {},
+      {
         Parked: async (event, ctx) => {
           const stranded = await refuseStranded(event.entityId, ctx.db);
           if (stranded !== undefined) return stranded;
@@ -3916,49 +4308,70 @@ export function createWorkflows<
           if (stranded !== undefined) return stranded;
           return ctx.run(checkpoint, { runId: event.entityId, fired: { kind: 'ttl' } }, meta);
         },
-      })
-      .withSchedule({
-        // Only a park with a wake time, a run with a deadline and a queued run with a ttl have anything to time.
-        when: event => timerAt(event.data) !== null,
-        runAt: event => timerDueAt(event.data),
-        priority: event => jobPriorityOf(event.data),
-        retry: strandedRetry,
-      });
+      },
+    ).withSchedule({
+      // Only a park with a wake time, a run with a deadline and a queued run with a ttl have anything to time.
+      when: event => timerAt(event.data) !== null,
+      runAt: event => timerDueAt(event.data),
+      priority: event => jobPriorityOf(event.data),
+      retry: strandedRetry,
+    });
 
     /**
      * The effect of a workflow's `startOn`: `def.start` with the app's `workflowMeta`. Its job is written in the
      * transaction that records the event, so the run starts once, even when the command that recorded it is retried.
      * An id that already has a run, whatever its input or version, starts nothing: a later deploy or another input for
-     * the same id ends the job as done, never dead.
+     * the same id ends the job as done, never dead. A `with-event` start queues no job (`eventStartFor` writes its run),
+     * but its effect stays, so jobs queued before the workflow moved to `with-event` still start their runs.
      */
     const startEffectFor = (def: WorkflowDef, startOn: ErasedStartOn) => {
       const start = startCommandFor(def);
-      return j.effect(`${START_EFFECT}:${def.name}`, startOn.entity, {
-        [startOn.event.type]: async (event, ctx) => {
-          const runId = startOn.id(event);
-          const exists = async () => {
-            const rows = await ctx.db.select({ id: workflowRuns.id }).from(workflowRuns).where(eq(workflowRuns.id, runId));
-            return rows.length > 0;
-          };
-          const skip = () =>
-            debugWorkflow.debug('{name}: run {runId} exists, so event {seq} starts nothing', {
-              name: def.name,
-              runId,
-              seq: event.seq,
-            });
-          if (await exists()) return void skip();
-          const outcome = await ctx.run(start, { id: runId, input: startOn.input(event) }, meta);
-          // Another start took the id between the look-up and this one: the run exists, so the job is done. The row
-          // decides, not the refusal: a conflict for an id with no run (a payload over the limit) still fails the job.
-          if (CommandConflict.is(outcome) && (await exists())) {
-            ctx.accept(outcome);
-            return void skip();
-          }
-          return outcome;
+      return ownedEffect(
+        `${START_EFFECT}:${def.name}`,
+        startOn.entity,
+        {},
+        {
+          [startOn.event.type]: async (event, ctx) => {
+            const runId = startOn.id(event);
+            if (await runExists(ctx.db, runId)) return void startsNothing(def, runId, event.seq);
+            const outcome = await ctx.run(start, { id: runId, input: startOn.input(event) }, meta);
+            // Another start took the id between the look-up and this one: the run exists, so the job is done. The row
+            // decides, not the refusal: a conflict for an id with no run (a payload over the limit) still fails the job.
+            if (CommandConflict.is(outcome) && (await runExists(ctx.db, runId))) {
+              ctx.accept(outcome);
+              return void startsNothing(def, runId, event.seq);
+            }
+            return outcome;
+          },
         },
-      });
+      ).withSchedule(startOn.timing === 'with-event' ? { when: () => false } : {});
     };
     const starts = defs.flatMap(def => (def.startOn === undefined ? [] : [startEffectFor(def, def.startOn)]));
+
+    /**
+     * A `with-event` `startOn`: the run, its first node and that node's job are written in the event's transaction, so
+     * they commit or roll back with the event, and no body runs here. The same id rule as `startEffectFor` holds. A
+     * limit never refuses this start (`admit`). A bad `input` refuses the write as its schema failure; what is left (an
+     * input over `limits.payload`) is a bug in the mapping, so it throws, and the write rolls back with it.
+     */
+    const eventStartFor = (def: WorkflowDef, startOn: ErasedStartOn): EventStart<SchemaInput<Meta>, MetaOut, Tx> => ({
+      kind: startOn.entity.kind,
+      type: startOn.event.type,
+      meta,
+      start: async (host, event) => {
+        const runId = startOn.id(event);
+        const args = await parseAsync(startSchema(def.input), { id: runId, input: startOn.input(event) });
+        if (isFailure(args)) return args;
+        const outcome = await startRun(def, host, args, { refusal: 'queue' });
+        if (CommandConflict.is(outcome) && (await runExists(host.tx, runId))) {
+          return void startsNothing(def, runId, event.seq);
+        }
+        return isSchemaFailure(outcome) ? outcome : void orThrow(outcome);
+      },
+    });
+    const eventStarts = defs.flatMap(def =>
+      def.startOn?.timing === 'with-event' ? [eventStartFor(def, def.startOn)] : [],
+    );
 
     /**
      * The hooks of `on` for one run end, from the run's own version: the specific hook, then `complete`. A stranded run
@@ -3969,7 +4382,7 @@ export function createWorkflows<
     async function runLifecycle(
       runId: string,
       ending: RunEnding<unknown>,
-      outer: InternalEffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
+      outer: OwnedEffectContext<AppDb, RootCommandRunner<Meta, Tx>>,
       servicesById: ReadonlyMap<string, Services> | undefined,
     ): Promise<unknown> {
       const [row] = await outer.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
@@ -4029,7 +4442,7 @@ export function createWorkflows<
     }
     /** Bound per workflow, each definition's own services by `name@version`; otherwise the flat set the effect was bound with. */
     const lifecycleEffect = <N extends Needs>(needsOf: N, servicesById?: ReadonlyMap<string, Services>) =>
-      j.effect(LIFECYCLE_EFFECT, machine.run, needsOf, {
+      ownedEffect(LIFECYCLE_EFFECT, machine.run, needsOf, {
         RunCompleted: (event, ctx) =>
           runLifecycle(event.entityId, { state: 'completed', output: event.data.output }, ctx, servicesById),
         RunFailed: (event, ctx) =>
@@ -4070,13 +4483,16 @@ export function createWorkflows<
      * A key's `perKey` override runs out with no event of its own, so each one gets a timer at its `until`: then the
      * queued runs of the limit that now fit start. One replaced or reset before then finds nothing new to start.
      */
-    const limitTimer = j
-      .effect(LIMIT_TIMER_EFFECT, limits.limit, {
+    const limitTimer = ownedEffect(
+      LIMIT_TIMER_EFFECT,
+      limits.limit,
+      {},
+      {
         LimitKeyOverridden: (event, ctx) => ctx.run(promoteLimit, { name: event.entityId }, meta),
-      })
-      .withSchedule({ runAt: event => untilOf(event.data) });
+      },
+    ).withSchedule({ runAt: event => untilOf(event.data) });
 
-    return { effects: [effect, timer, limitTimer, ...starts, ...lifecycle], steps: machine.steps };
+    return { effects: [effect, timer, limitTimer, ...starts, ...lifecycle], steps: machine.steps, eventStarts };
   }
 
   return {

@@ -79,6 +79,7 @@ let holdAt: 'handler' | 'command' = 'handler';
 const noteOrder = j.command(
   'noteOrder',
   z.object({ orderId: z.templateLiteral(['ord_', z.string()]), note: z.string().min(1) }),
+  { writes: [OrderNoted] },
   async (input, { write }) => {
     if (holdAt === 'command' && input.note === 'first') {
       first.started.open();
@@ -88,8 +89,20 @@ const noteOrder = j.command(
   },
 );
 
-const racer = j.effect('racer', order, {
-  OrderPaid: async (event, ctx) => {
+const racer = j.task(
+  'racer',
+  {
+    version: 1,
+    input: z.object({ orderId: z.templateLiteral(['ord_', z.string()]) }),
+    startOn: {
+      entity: order,
+      event: OrderPaid,
+      timing: 'after-commit',
+      id: e => `racer:${e.entityId}`,
+      input: e => ({ orderId: e.entityId }),
+    },
+  },
+  async ({ input, run }) => {
     calls += 1;
     const mine = calls === 1 ? first : second;
     const note = calls === 1 ? 'first' : 'second';
@@ -98,15 +111,15 @@ const racer = j.effect('racer', order, {
       await mine.hold.opened;
     }
     try {
-      orThrow(await ctx.run(noteOrder, { orderId: event.entityId, note }, meta));
+      orThrow(await run(noteOrder, { orderId: input.orderId, note }, meta));
       mine.outcome.push('committed');
     } catch (error) {
       mine.outcome.push(isJournalError(findCause(error, JournalError), 'LEASE_LOST') ? 'LEASE_LOST' : 'other');
       throw error;
     }
   },
-});
-const journal = j.compose({ effects: [racer] });
+);
+const journal = j.compose({ workflows: [racer], workflowMeta: meta });
 
 async function payOrder() {
   const id: `ord_${number}` = `ord_${++next}`;

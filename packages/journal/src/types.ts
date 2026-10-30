@@ -296,10 +296,19 @@ export type EntityIdOf<E> = E extends {
 export type ProjectionHandlers<E, Meta, Tx = DbHandle> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
 };
-/** An effect handler also gets one value for each of the effect's needs `N`, under the need's name. */
-export type EffectHandlers<E, Meta, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {
+/**
+ * An effect handler also gets one value for each of the effect's needs `N`, under the need's name. `Context` is what
+ * else it sees: `EffectContext` for every effect an app writes.
+ */
+export type EffectHandlers<
+  E,
+  Meta,
+  AppDb = RootDb,
+  N extends Needs = NoNeeds,
+  Context extends EffectContext<AppDb> = EffectContext<AppDb>,
+> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<
-    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb, Run> & Needed<N>],
+    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: Context & Needed<N>],
     unknown
   >;
 };
@@ -332,20 +341,16 @@ export type ProjectionOptions = { readonly lane?: 'inline' | 'async' };
 export type AcceptFailure = (failure: Failure) => void;
 
 /**
- * `db` is the root database that was given to `drain` or `worker`: the same object.
- * `run` is `journal.run` on that database. A journal types it as `RootCommandRunner`
- * (in `api.ts`). This file cannot name a command, so the type comes in as `Run`.
- * `accept` marks a refusal a `run` of this attempt returned as handled, so the job can
- * still succeed; see `AcceptFailure`.
+ * What an effect handler sees. `db` is the root database that was given to `drain` or `worker`: the same object.
+ * An effect only reaches out (mail, push, webhooks, outside APIs), so it has no `run`: a command that follows an event
+ * is a `j.task` or a `j.workflow` with `startOn`, which checkpoints each step and can undo it.
  */
-export type EffectContext<AppDb = RootDb, Run = unknown> = {
+export type EffectContext<AppDb = RootDb> = {
   readonly jobId: string;
   /** 1 on the first try of this job, 2 on the next, and so on. The number of the attempt row this worker holds open. */
   readonly attempt: number;
   readonly signal: AbortSignal;
   readonly db: AppDb;
-  readonly run: Run;
-  readonly accept: AcceptFailure;
 };
 
 declare const needType: unique symbol;
@@ -433,7 +438,7 @@ export type EffectSchedule<Meta = unknown> = {
   when?(event: Recorded<string, unknown, Meta>): boolean;
 };
 
-export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {
+export type Effect<Meta = unknown, AppDb = RootDb, N extends Needs = NoNeeds> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
@@ -441,10 +446,10 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
   readonly needs: N;
   readonly schedule: EffectSchedule<Meta>;
   /** The same effect with this schedule. `j.effect('mail', order, handlers).withSchedule({ priority: 5 })`. */
-  withSchedule(schedule: EffectSchedule<Meta>): Effect<Meta, AppDb, Run, N>;
+  withSchedule(schedule: EffectSchedule<Meta>): Effect<Meta, AppDb, N>;
   /** Resolves with what the handler returned. A returned failure (`@arki/failure`) fails the job. */
   readonly run: BivariantFn<
-    [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>],
+    [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb> & Needed<N>],
     Promise<unknown>
   >;
   /**
@@ -453,7 +458,7 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
    *
    * @internal
    */
-  readonly bindPerWorkflow?: (servicesOf: (workflow: string) => Services) => Effect<Meta, AppDb, Run>;
+  readonly bindPerWorkflow?: (servicesOf: (workflow: string) => Services) => Effect<Meta, AppDb>;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };

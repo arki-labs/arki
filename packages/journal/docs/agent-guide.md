@@ -9,7 +9,7 @@ Paths that start with `src/` are files of this package. App files are named from
 1. An entity is a normal row in its own Drizzle table. The table has a string key and a `version` column.
 2. Every change is also one row in `journal_events`. Event rows are never changed or deleted.
 3. One transaction writes the event rows and the entity row together.
-4. A command is the way to write. `j.command` defines one. `journal.run` runs it. `journal.bind` is the door: it fixes the database and the actor once and returns a runner.
+4. A command is the way to write. `j.command` defines one and declares the events it writes. `journal.run` runs it. `journal.bind` is the door: it fixes the database and the actor once and returns a runner.
 5. Inside a command, `write(entity, id, events)` locks the row and calls your `events` function with it. That function checks the rules and returns the new events.
 6. A reducer turns each event into the next row. `.create` builds the first row. `.on` returns a patch.
 7. Lane one is the projection. It runs inside the same transaction. If it throws, the write rolls back.
@@ -69,7 +69,7 @@ Library files: `src/entity.ts` (the builder and reducer types), `src/handlers.ts
 2. Add `.on(Event, reducer)` to the entity chain. The reducer returns only the columns that change.
 3. In a command, return the event from the `events` function.
 4. In the projections file, add a handler under the event's type. It gets `(tx, e)`. Use `tx` for every query.
-5. A new projection must be listed: under `projections` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app.
+5. A new projection must be listed: under `projections` in `journal.root.ts`, or in the feature's `journalProjections(...)` in its `.infra(...)` in a Dot app.
 
 A full projection, `customerStats`, is in the [README example](../README.md#quick-start).
 
@@ -111,20 +111,32 @@ export const orderMail = j.effect(
   },
 );
 
-// An effect that writes runs a command. It needs no closure over the journal.
-export const closeAfterPayment = j.effect('close-after-payment', order, {
-  OrderPaid: (e, { run }) => run(closeOrder, { orderId: e.entityId }, { actorId: 'system' }),
-});
+// An event that must run a command starts a task. An effect only reaches out.
+export const closeAfterPayment = j.task(
+  'close-after-payment',
+  {
+    version: 1,
+    input: z.object({ orderId: z.string() }),
+    startOn: {
+      entity: order,
+      event: OrderPaid,
+      timing: 'after-commit',
+      id: e => `close:${e.entityId}`,
+      input: e => ({ orderId: e.entityId }),
+    },
+  },
+  ({ input, run }) => run(closeOrder, { orderId: input.orderId }, { actorId: 'system' }),
+);
 ```
 
-- The handler gets `(e, { jobId, signal, db, run })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it.
-- An effect that needs nothing has three arguments. An effect that needs a service has four: the third is `{ mailer: need<Mailer>() }`, with `need` from `@arki/journal`. The handler then reads `mailer` from its context, typed. Do not wrap an effect in a function to pass a service in.
-- Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app it is a service of the feature that lists the effect, and the feature declares it in `needs`. A missing service is a compile error. `j.compose` and the feature's boot in a Dot app also throw, and the message names the effect and the need.
+- The handler gets `(e, { jobId, signal, db })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it. An effect has no `run`: that call does not compile. It is a task or a workflow with `startOn`.
+- An effect that needs nothing has three arguments. An effect that needs a service has four: the third is `{ mailer: need<Mailer>() }`, with `need` from `@arki/journal`. The handler then reads `mailer` from its context, typed. Do not wrap an effect in a function to pass a service in. (A Dot reaction is a plain exported value; its types come from the selector in `needsOf`, and the services still come from the feature at boot.)
+- Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app the effect picks it from the feature that lists it: `needsOf((_: Deps) => ['mailer'])` in place of `{ mailer: need<Mailer>() }`. It may pick a need that is not `entrypointOnly`, a private infra service or a domain service. The effect is then a plain exported value, `export const sendReceipt = j.effect(…, needsOf((_: Deps) => ['mailer']), …)`, in a file that imports `Deps` from the feature as a type only. A domain service types its deps from the `.infra()` stage, never from `Deps`: it is part of `Deps`, so TypeScript reports TS7022 on the feature. A missing service is a compile error. `j.compose` and the feature's boot in a Dot app also throw, and the message names the effect and the need.
 - A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws when the effect is defined.
-- `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` is required, and the library never picks an actor. It works the same in a plain app and in a Dot app.
-- If the command throws, nothing of the command is committed and `run` returns `TransactionDefect`. The effect that returns it is dead, because a returned failure is final; one that throws it on is retried by its `retry` or the default (8 tries). If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
+- A task's `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` names the actor; left out, the command records the `workflowMeta` the app gave `compose`. It works the same in a plain app and in a Dot app.
+- If the command throws, nothing of the command is committed and `run` returns `TransactionDefect`. A body that throws it on is tried again by its retry policy; one that returns it fails, because a returned failure is final. If the body fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice with `ctx.key`, or use a `.command` node: exactly once, see [Workflows](#workflows).
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
-- Where it is registered: under `effects` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app. Effect names are unique per journal.
+- Where it is registered: under `effects` in `journal.root.ts`, or in a Dot app in the feature's `.usecases(factories, journalHandlers(core, { effects }))`. It lives in the behaviour file of the command it follows (`usecases/place-order.ts`), not in a special folder. Effect names are unique per journal.
 - Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app, `.entrypoints(journalWorker())` does both.
 - Which process runs the worker: an effect runs in the process that runs the worker. If an effect talks to something that lives in memory (an event emitter, a socket list, a cache), run the worker in the process that holds it. A worker in another process claims the job and the in-memory listeners never hear it. Tests do not catch this, because a test is one process.
 - `wake`: `journal.run(db, ...)` on the root database wakes the worker after its commit. After a transaction of your own, call `journal.wake()` yourself. Other processes find the job by polling.
@@ -143,6 +155,7 @@ import { commandErrors } from '@arki/journal/orpc';
 export const payOrder = j.command(
   'payOrder',
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
+  { writes: [OrderPaid] },
   (input, { write }) =>
     write(order, input.orderId, row => {
       if (!row) return CommandNotFound({ detail: 'Order not found' });
@@ -168,10 +181,11 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
 - A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
 - A rule that rejects the request returns a failure: `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, or the app's own. The handler, `authorize` and an `events` function can return one. The command rolls back exactly as for a throw, and the caller gets the same failure, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler (`if (isFailure(x)) return x;`). Going on to a success returns `TransactionDefect` with an `IGNORED_FAILURE` cause and nothing commits, unless the handler handled the refusal on purpose and called `accept(x)` first. See [Rejected rules](#rejected-rules).
-- A permission check goes in `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
+- `writes` is required. `write` takes only the listed events, and `writes: []` is a command that only runs child commands. A helper that takes `write` names its events: `CommandWrite<Meta, Tx, typeof OrderPaid>`. The list stays on the value: `payOrder.writes`.
+- A permission check goes in `j.command(name, input, { writes, authorize: (input, { tx, meta }) => ... }, handler)`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
 - An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command, and a returned failure answers as an error. A procedure with an output schema, or a contract-first one, uses `orThrowRpc(context.run(cmd, input), errors)` with `errorMap(CommandNotFound, ...)` in the contract. Any other host reads the failure's `status`, or matches it with `CommandNotFound.is(result)` and the like.
 - `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
-- From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
+- From a task or a workflow step, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database. An effect cannot run a command.
 - In the games-platform backend, procedures call `context.runCommand`. `core/context.ts` binds it to the signed-in user. A job or a schedule binds its own runner: `journal.bind(db, { actorId: null })`. Do not call `journal.run` from a procedure there.
 
 ### Schedule a job in the same transaction
@@ -285,6 +299,7 @@ See [Workflows](#workflows): the rules, a five-step task, the traps and the [err
 - **An entity in another store is forwarded.** `j.entity(kind, table, { events: log })` with a log that cannot join the transaction: the write commits a `forward` job, and the worker appends the events after the commit, one stream per entity, in version order. Why: the row is the truth and the log lags. History verbs throw `FORWARD_PENDING` until the job ran, taps are refused, and an effect may run before the log has its event. Check an adapter with `eventLogContract` from `@arki/journal/event-log-contract`.
 - **Changing an entity's `events` is a migration.** Pause the kind's writes, drain its forward jobs, `journal.copyLog(db, entity, { to })`, flip the setting, then `reset` the async projections that read it. Why: a new log starts at version 0 while the row is at N, so the first forward job would wait forever, and a switch back to `'stored'` leaves a gap. The events of another Postgres database come from `postgresEvents` in `@arki/journal/postgres`, with `eventLogTables()` migrated there.
 - **A KurrentDB entity's kind has no `-`, and its events cannot be forgotten.** `kurrentEvents` from `@arki/journal/kurrentdb` names a stream `<kind>-<entityId>`. Why: KurrentDB reads a stream's category up to the first `-`, and it cannot rewrite an event, so `forget` throws `NO_HISTORY`. Event data must be a JSON object, array or string.
+- **A command writes only what it declares.** Why: `writes` is read before boot, so a list that lies misleads everything that reads it. An undeclared event is a type error. A handler that gets past the types fails with `BAD_DEFINITION`, and nothing commits, even when it catches the error. The types do not catch an event that is declared and never written.
 - **Pass the id exactly as it is stored.** Why: the log compares ids as exact strings. A second spelling would split one history in two. The write fails with `ID_MISMATCH`.
 - **A reducer sets every column that a later reducer reads.** Why: database defaults are not in the log, so replay does not see them.
 - **For a new meaning, add a new event type.** Why: `replay` and `repair` use today's reducers on old events.
@@ -316,7 +331,7 @@ This is the only copy of this table. The workflow and job codes have their own t
 | `REPLAY_FAILED`    | A stored event cannot be decoded or applied: its type is not declared, its data or `meta` does not fit the current schema, or no reducer fits it. `replay`, `verify`, `repair` and `rerun` throw it. `drain` records it on the job.                                                                                             | An event type was renamed or removed, or its schema was made stricter, after events were stored.                                                                                                                    | Check the event schema and the reducers against the stored history.                                                                                                                    | `src/history.ts`, `src/fold.ts`                                                 |
 | `UNSTABLE_SCHEMA`  | Event data or `meta` changes, or fails, across JSON storage and a second parse.                                                                                                                                                                                                                                                 | A `Date` or a transform in an event schema or in the `meta` schema.                                                                                                                                                 | Return JSON-compatible data that the schema accepts unchanged.                                                                                                                         | `src/storage.ts`                                                                |
 | `ID_MISMATCH`      | The id is empty, malformed, too long, or spelled differently from the stored key.                                                                                                                                                                                                                                               | An upper-case `uuid`, an empty string, or an id longer than the key column.                                                                                                                                         | Pass the id exactly as stored. A `uuid` must be lower-case and hyphenated.                                                                                                             | `src/storage.ts`, `src/write.ts`                                                |
-| `BAD_DEFINITION`   | A declaration is wrong. It is thrown when the declaring code runs (import time), before any data is touched.                                                                                                                                                                                                                    | A bad event type, entity kind or effect name; a bad key column; `.create` after `.on`; a second reducer for one event; a need named `db`; two effects or projections with one name; a missing service in `compose`. | Fix the declaration the message names. The message text is the detail after the code.                                                                                                  | `src/id.ts`, `src/entity.ts`, `src/handlers.ts`, `src/journal.ts`, `src/dot.ts` |
+| `BAD_DEFINITION`   | A declaration is wrong. It is thrown when the declaring code runs (import time), before any data is touched. A command that writes an event outside its `writes` hits it at run time, and the run rolls back.                                                                                                                                                                                                                    | A bad event type, entity kind or effect name; a bad key column; `.create` after `.on`; a second reducer for one event; a need named `db`; two effects or projections with one name; a missing service in `compose`. | Fix the declaration the message names. The message text is the detail after the code.                                                                                                  | `src/id.ts`, `src/entity.ts`, `src/handlers.ts`, `src/journal.ts`, `src/dot.ts` |
 | `VALUE_MISMATCH`   | The database stored a different value than the reducer produced. The write was rolled back.                                                                                                                                                                                                                                     | A `numeric` value with more decimals than the column keeps, such as `"1.234"` for `numeric(10,2)`.                                                                                                                  | Make the reducer produce the value in the form the column stores.                                                                                                                      | `src/storage.ts`                                                                |
 | `IGNORED_FAILURE`  | A write's `events` or a child command returned a failure, and the command still returned a success. The run throws it and rolls back, so nothing the command did commits.                                                                                                                                                       | A handler that goes on after `await write(...)` or `await run(child, ...)` without checking the result. `Promise.all` over writes or runs, or a result kept in a variable and never checked.                        | Return that failure, or another: `if (isFailure(result)) return result;`. Handled on purpose: call `accept(result)` first. The message names the write or child and the code.          | `src/command.ts`                                                                |
 | `INVALID_ACCEPT`   | `accept(x)` was called with a value it cannot mark as a handled refusal. The message says which case.                                                                                                                                                                                                                           | A value no `write` or `run` of this handler returned (hand-built, a copy, or one only the parent received), a second `accept` for one return, a late call, or a value that is not a failure.                        | Accept the very value `write` or `run` returned, once per return, before the handler returns.                                                                                          | `src/refusals.ts`                                                               |
@@ -341,9 +356,9 @@ A command handler, its `authorize` or an `events` function returns a failure fro
 
 ### Dot boot errors
 
-- `ARKI_JOURNAL_PLUGIN_E001`, a `DotUnitError`: a feature lists a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
+- `ARKI_JOURNAL_PLUGIN_E001`, a `DotUnitError`: a feature lists a `journal` contribution that `journalHandlers` did not make. Declare its reactions with `journalHandlers(core, { effects, taps, workflows })` in `.usecases(...)`, and its projections with `journalProjections(...)` in `.infra(...)`.
 - `journal: duplicate effect name "x" (features "orders" and "billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
-- `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app, and at the boot of the feature that lists the effect in a Dot app. A journal composed with `services: 'worker'` throws it from `worker` or `drain` instead. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
+- `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app, and at the boot of the feature that lists the effect in a Dot app. A journal composed with `services: 'worker'` throws it from `worker` or `drain` instead. Plain app: add `mailer` to `services` in `j.compose`. Dot app: give the feature that lists the effect a need (not `entrypointOnly`), an infra service or a domain service with that name, and pick it with `needsOf`.
 - Job verbs throw a `JournalError` with `JOB_NOT_DEAD`, `JOB_NOT_PENDING`, `JOB_RUNNING`, `JOB_EXISTS` or `BAD_ARGUMENT` (a bad limit, cursor, actor or purge bound).
 - `journal: effect "x" has a need named "db", ...`: thrown by `j.effect`. The names `jobId`, `signal`, `db` and `run` are taken. Give the need another name.
 
@@ -370,7 +385,9 @@ A workflow is a list of steps that survives process death. Each node runs as a `
 | One durable unit of work (send, call, summarize), retried      | `j.task` (a workflow of one step)          |
 | Must survive a restart, or waits hours or days (signal, sleep) | `j.workflow` (this section)                |
 | A loop of steps inside one request or one job, in memory       | `createFlow` from `@arki/ai`. Not durable. |
-| One reaction to one event, after commit                        | `j.effect`                                 |
+| One reaction to one event, after commit, that reaches out      | `j.effect`                                 |
+| An event must run a command                                    | `j.task` or `j.workflow` with `startOn`    |
+| One command in a workflow that must commit exactly once        | `.command` node                            |
 
 ### Rules
 
@@ -394,11 +411,14 @@ A workflow is a list of steps that survives process death. Each node runs as a `
 17. **Narrow one run with `maxAttempts`, `timeout` and `priority` at start, not with a second workflow.** `def.start({ input, maxAttempts: 2, timeout: '5m', priority: 10 })` (also on each `startBatch` item and in `replay` overrides). `maxAttempts` caps the tries of every step of the run, `timeout` each step attempt, and `priority` orders the run's step and timer jobs among due jobs (the scale of an effect's `priority`). They only narrow the step's own `retry` and `timeout`, never loosen them. A child does not inherit them. Bad values are `InvalidInput`.
 18. **Share a cap across workflows with `j.limit`, and change it with `journal.limits`, not with a deploy.** `const uploads = j.limit({ name: 'uploads', total: 3, perKey: 1 })`, then `concurrency: { key, shared: [uploads], onBusy }` in each workflow (at most two shared limits). `limit` (per key, needs `key`) and `total` are the workflow's own limit, `workflow/<name>`. A start needs room in every limit it holds; `join` answers only a full own `limit`. An operator overrides values (`override`, `reset`, one key for up to 30 days, `perKey: 0` blocks a key) and stops new runs with `pause` (running runs finish; works on `workflow/<name>` without `concurrency` too). Each verb is an event on `journal.limit` that names the operator; an unknown name is `CommandNotFound`.
 19. **Wait for a slot with `onBusy: 'queue'`, not with a caller that retries `WorkflowBusy`.** A busy start (any full or paused limit, a top run or a child) creates the run in the state `queued` and returns its `{ runId }`; it schedules no node and holds no slot. When a run that held the limit ends, an operator raises, resets or resumes it, or a key override runs out, the oldest queued runs that now fit start in that same transaction (FIFO per key, at most `LIMIT_BOUNDS.promoteTries` checked per change). A queued run past its `ttl` ends `expired` without running; `cancel` ends it `cancelled` at once; `reschedule` moves its `start_at`. `journal.limits.get` shows `queued` next to `running`.
+20. **An effect runs no command.** Its context has no `run`. An event that must run a command starts a task or a workflow. The system actor stays explicit: `run(cmd, input, { actorId: 'system' })`.
+21. **`startOn.timing` is required.** `'after-commit'` writes a job that starts the run. `'with-event'` writes the run in the event's transaction, so a rollback removes it and a read after the commit finds it. No body runs inline. It never refuses, so `onBusy: 'refuse'` is a type error; a paused limit queues the run.
+22. **A `.command` node is the one exactly-once node.** `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` runs the command as a savepoint inside the checkpoint's transaction. Give the command an `output` schema: the node stores it, and without one the result is `null`. A refused command rolls back and the failure transition commits. `accept` names failures the run goes on from. `undo` runs in compensation, once, in reverse order, and is skipped for an accepted failure.
 
 ### Task: add a workflow
 
 1. Declare it next to its feature: `j.workflow('<area>.<verb>', { version: 1, input, output?, needs? })`, then the nodes, then `.finish()`. Give each step that calls an outside system an `undo` if its work can be undone.
-2. List it in `compose({ workflows, workflowMeta, services })`, or in the feature's `journalHandlers({ workflows })` in a Dot app.
+2. List it in `compose({ workflows, workflowMeta, services })`, or in a Dot app in the feature's `.usecases({}, journalHandlers(core, { workflows }))`, its needs picked with `needsOf((_: Deps) => keys)`.
 3. Start it from a procedure or an effect: `context.run(def.start, { id?, input, scope?, tags?, metadata? })`. Give an `id` from the business key (`refund:<orderId>`) when a retry of the request must not start a second run. Give `scope` the tenant key (an org or user id): children inherit it, and `journal.workflows.runs(db, { scope })` finds the tenant's runs. `tags` (max 10, 1-128 chars) and `metadata` (a JSON object, max 256 KiB) are for finding and describing runs; children do not inherit them. When an event starts it, declare `startOn: { entity, event, id, input }` on the workflow instead of writing the effect: the runner owns it (`workflow.start:<name>`), writes its job in the event's transaction, starts with `workflowMeta`, and starts nothing for an id that already has a run.
 4. Deliver outside events with `def.signal(name)`, and read runs with `def.read(db, runId)`.
 5. Test it with `workflowHarness` from `@arki/journal/testing`: `tick` for timers and deadlines, `crash` for restarts.
@@ -412,7 +432,7 @@ A workflow is a list of steps that survives process death. Each node runs as a `
 - **A transforming input schema makes `def.read` refuse.** The run stores the input schema's output. `def.read` checks the stored value with the same schema. A schema whose output is not a valid input (`z.string().transform(Number)` stores a number, and the string schema refuses it) fails, and `def.read` returns `WorkflowReadMismatch`. Read such runs with `journal.workflows.run`, or keep input schemas free of transforms.
 - **A skipped wait is `null`.** A `waitFor` whose `when` returns false is skipped with cause `when`, does not park, and stores `null`, like a skipped step. A dropped wait (next trap) stores nothing.
 - **A dropped wait has no result.** When a run starts compensating (cancel, deadline, `onDeadStep: 'compensate'`) while parked on a `waitFor` or `sleep`, that node is skipped with cause `compensating`. It leaves no key in `results`. `def.read` types results as optional for this reason: check `'settled' in results` or `results.settled !== undefined`, never assume `null`.
-- **A missing service in a plain `compose`** is a compile error for a workflow step, as for an effect, and `compose` throws `BAD_DEFINITION` naming the workflow and the need. In Dot the feature's `needs` make it a compile error.
+- **A missing service in a plain `compose`** is a compile error for a workflow step, as for an effect, and `compose` throws `BAD_DEFINITION` naming the workflow and the need. In Dot, `needsOf((_: Deps) => keys)` and `journalHandlers(core, …)` make it a compile error.
 - **Only the highest version may declare `startOn`.** When you add v2, move `startOn` from v1 to v2. A lower version with `startOn` makes `compose` throw `BAD_DEFINITION`. A `startOn` whose entity does not record its event throws `BAD_DEFINITION` when the workflow is defined.
 - **`def.start` throws for code it does not know.** A definition that no compose registered throws `WORKFLOW_UNKNOWN`; an older version throws `WORKFLOW_VERSION_RETIRED`. Both are bugs in the app, not refusals, so they are thrown.
 - **`queued` is an unfinished state that holds no slot.** Code that counts the runs that hold a limit must leave `queued` out; code that lists the live states (`running`, `parked`) to stop or cancel a run must take `queued` in. A queued run has no node, no step row and no job but its ttl timer.
@@ -446,25 +466,40 @@ The Foreman module answers its refusals with `ARKI_JOURNAL_E010` to `E017` (`JOU
 
 ## Dot
 
-`@arki/journal/dot` exports the infra unit `journal(...)` (for `.infra()`), the entrypoint unit `journalWorker(...)` (for `.entrypoints()`) and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
+`@arki/journal/dot` exports the infra unit `journal(...)` (for `.infra()`), the only entrypoint `journalWorker(...)` (for `.entrypoints()`), the projections unit `journalProjections(...)` (for a feature's `.infra()`), the application contribution `journalHandlers(core, …)` (for a feature's `.usecases()`) and `needsOf((_: Deps) => keys)`. The code is in `src/dot.ts`.
 
-| Question                   | Plain app                                             | Dot app                                                                                               |
-| -------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Where handlers are listed  | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.                        |
-| Who builds the journal     | Your code.                                            | `journal({ j, workflowMeta? })`, from the mounted features. It publishes `services.journal`.          |
+| Question                   | Plain app                                             | Dot app                                                                                                     |
+| -------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Where handlers are listed  | One `journal.root.ts` calls `j.compose(...)`.         | Each feature: `journalProjections(...)` in `.infra()`, `journalHandlers(core, …)` in `.usecases()`.          |
+| Who builds the journal     | Your code.                                            | `journal({ j, workflowMeta? })`, from the mounted features. It publishes `services.journal`.                |
 | Who runs the worker        | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.entrypoints(journalWorker())`, between `start` and `stop`. A process without it runs no jobs.             |
-| What an effect needs       | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.                       |
-| Where workflows are listed | `j.compose({ workflows, workflowMeta })`.             | `journalHandlers({ workflows })` or `journalWorkflows(core, defs)`; `workflowMeta` on `journal(...)`. |
-
-| Where the door is bound | The request context: `journal.bind(db, { actorId })`. | The gateway's context factory: `services.journal.bind(services.db, { actorId })`. |
+| What an effect needs       | `services` in `j.compose(...)`, once for the app.     | `needsOf((_: Deps) => keys)`: the feature's needs (never `entrypointOnly`), private infra and domain services.      |
+| Where workflows are listed | `j.compose({ workflows, workflowMeta })`.             | `journalHandlers(core, { workflows })`; `workflowMeta` on `journal(...)`.                                   |
+| Where the door is bound    | The request context: `journal.bind(db, { actorId })`. | A procedure: `.use(actorRun(select))`, then `context.run(command, input)`. No command list.                 |
 
 The code for both wirings is in the [README, Dot](../README.md#dot).
 
-The gateway binds the door once per request. Its context factory reads the session and puts `run: services.journal.bind(services.db, { actorId })` on the context. A procedure then calls `context.run(command, input)`. The unit does not bind for you: only the app knows the actor.
+### Where each part lives in a feature
+
+Application code is organised by business behaviour. A behaviour file in `usecases/` holds the decision (the command) and the reactions it owns: `usecases/place-order.ts` exports `placeOrder` and `sendReceipt`.
+
+| Part                                   | Lives in                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| Event schemas, entity state and fold   | `model/`                                                                    |
+| Commands and the reactions they own    | `usecases/<behaviour>.ts`, mounted with `.usecases({}, journalHandlers(…))` |
+| Read-model projections                 | `infra/`, mounted with `journalProjections(...)`                            |
+| Transport                              | `entrypoints/`; a procedure calls `context.run(command, input)`             |
+
+- A reaction that serves several behaviours gets its own business-named file in `usecases/`. A reaction that crosses features belongs to the consuming feature.
+- One file assigns ownership. It never limits who subscribes, and it never implies one transaction.
+- An effect is application code, not an entrypoint: entrypoint → command → event → effect. The outside actor enters once, at the entrypoint. An effect that runs a command names a system actor.
+- `journalHandlers(...)` is never a `context.usecases` member, so a procedure cannot call an effect.
+- A contract-first procedure answers a command with `orThrowCommand(context.run(command, input), errors)` from `@arki/journal/orpc`. The contract lists its business failures only.
+- `dot explain --as journal-flow` prints, per event, the fold, the projections and the reactions, each with its timing, owner, deps and retry policy. `--json` gives one app-wide graph of `nodes` and typed `edges` (`folds`, `projects`, `reacts`, `owned-by`).
 
 An effect runs a command with `ctx.run` in both wirings. The journal hands `run` to the effect when the job runs.
 
-In feature mode the journal is built before the features, from their `journalHandlers` declarations, so a feature can need it. Effects and taps still need the features' booted services. The journal is therefore composed with `services: 'worker'`: a write only queues jobs and never needs those services. `journalWorker()` reads each feature's services from its slice record and passes them to `journal.worker(db, { services })`, per effect and tap.
+In feature mode the journal is built before the features, from their declarations, so a feature can need it. Effects and taps still need the features' booted services. The journal is therefore composed with `services: 'worker'`: a write only queues jobs and never needs those services. `journalHandlers` binds once at the feature's boot, to the feature's usecase-level deps, and checks each need there. `journalWorker()` reads each feature's bound services from its slice record and passes them to `journal.worker(db, { services })`, per effect, tap and workflow.
 
 ## Shared packages
 
@@ -481,6 +516,7 @@ export function billingJournal<
   const issueInvoice = j.command(
     'issueInvoice',
     z.object({ invoiceId: z.string().min(1), amount: z.int().positive() }),
+    { writes: [InvoiceIssued] },
     (input, { write }) => write(invoice, input.invoiceId, () => [InvoiceIssued({ amount: input.amount })]),
   );
   const invoiceMail = j.effect(
@@ -500,6 +536,8 @@ These look odd. Each one is needed.
 - `ownHandler` with `Object.hasOwn` in `src/handlers.ts`: an event type named `toString` must not find a handler on the prototype.
 - `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a worker runs it again on every drain for a journal composed with `services: 'worker'`: it is the one place where a need gets its service and where a missing service is caught.
 - `need<T>()` is the journal's own marker, not Dot's `service<T>()` or a unit handle such as `mailerInfra.provides.mailer`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
+- `needsOf` in `src/dot.ts` takes a selector `(deps: D) => keys`. `D` comes from the caller's annotation, which is `Deps` exported by `feature.ts` from the stage before `.usecases()`. After that call `DepsOf` is the entrypoints' view, with the `entrypointOnly` needs a reaction must never see. `journalHandlers` still takes `UsecaseCore` and checks the picked keys against it.
+- The erasure seams in `needsOf`: the selector only carries the type and its argument is never read, so it is called with `undefined as never`; and `Object.fromEntries` types its keys as `string`, and each value is the empty phantom `need()` makes.
 - `const E` on `compose` (`src/api.ts`) and `journalHandlers` (`src/dot.ts`): without it TypeScript reads `[plainEffect, effectWithNeeds]` as a list of plain effects, and a missing service is no longer a compile error.
 - The module-scoped `WeakMap` in `src/transaction-guard.ts`: two journals on one transaction share its savepoint stack, so they must share this guard.
 - `assertRoundTrips` in `src/storage.ts` uses `JSON.stringify`, not `structuredClone`: it checks what JSON storage does to the value.

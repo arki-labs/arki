@@ -72,6 +72,7 @@ const open = ({ repos }: Deps) => {
   const command = j.command(
     'open',
     z.object({ id: z.templateLiteral(['acc_', z.string()]), balance: z.int().nonnegative(), fail: z.boolean() }),
+    { writes: [Opened] },
     async (input, { write, tx }) => {
       expectTypeOf(tx).toEqualTypeOf<Transaction>();
       orThrow(await write(account, input.id, () => [Opened({ balance: input.balance })]));
@@ -125,7 +126,7 @@ describe('repos() in a journal command', () => {
   it('without initJournal.tx<Transaction>(), tx is the structural DbHandle and does not fit', () => {
     const plain = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
     // Defined, never run: the check is the compiler's.
-    plain.command('peek', z.object({}), (_input, { tx }) => {
+    plain.command('peek', z.object({}), { writes: [] }, (_input, { tx }) => {
       expectTypeOf(tx).not.toExtend<Database>();
     });
   });

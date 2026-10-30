@@ -138,7 +138,7 @@ describe('def.cancel, as types', () => {
 });
 
 describe('ctx.run in a workflow body, as types', () => {
-  const ping = j.command('ping', z.object({ n: z.number() }), () => 'pong');
+  const ping = j.command('ping', z.object({ n: z.number() }), { writes: [] }, () => 'pong');
 
   it("may leave the meta out in a workflow body: the app's workflowMeta is used", () => {
     j.workflow('pinger', { version: 1, input: z.object({}) })
@@ -153,15 +153,6 @@ describe('ctx.run in a workflow body, as types', () => {
       .finish();
   });
 
-  it("still needs the meta in an effect's ctx.run (RootCommandRunner), where no app choice stands in for it", () => {
-    j.effect('pinged', order, {
-      OrderPlaced: (_event, { run }) => {
-        expectTypeOf(run(ping, { n: 1 }, { actorId: 'usr_1' })).resolves.toEqualTypeOf<string | CommandFailure>();
-        // @ts-expect-error an effect names its actor: the meta is required
-        expectTypeOf(run(ping, { n: 1 })).resolves.toEqualTypeOf<string | CommandFailure>();
-      },
-    });
-  });
 });
 
 describe('startOn, as types', () => {
@@ -174,6 +165,7 @@ describe('startOn, as types', () => {
       startOn: {
         entity: order,
         event: OrderPlaced,
+        timing: 'after-commit',
         id: e => {
           expectTypeOf(e.entityId).toEqualTypeOf<OrderId>();
           expectTypeOf(e.data).toEqualTypeOf<{ customerId: string; total: number }>();
@@ -192,6 +184,7 @@ describe('startOn, as types', () => {
       startOn: {
         entity: order,
         event: OrderPlaced,
+        timing: 'after-commit',
         id: e => e.entityId,
         // @ts-expect-error the input schema has `total`, not `totl`
         input: e => ({ orderId: e.entityId, totl: e.data.total }),
@@ -207,6 +200,7 @@ describe('startOn, as types', () => {
         entity: order,
         // @ts-expect-error `order` does not record `Unrelated`
         event: Unrelated,
+        timing: 'after-commit',
         id: () => 'x',
         input: () => ({ orderId: 'x', total: 1 }),
       },

@@ -56,7 +56,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'apps/avocabo/backend/src/features/waitlist/feature.ts',
-          lines: '34-39',
+          lines: '32-37',
           code: "  .needs({\n    db: entrypointOnly(database.provides.db),\n    kv: entrypointOnly(cache.provides.kv),\n    // The app's outbound email client; a test fakes the plugin.\n    mailer: emailClient.provides.emailClient,\n  })",
           imports: [
             { lines: '12', code: "import { defineFeature, entrypointOnly } from '@arki/dot/feature';" },
@@ -87,7 +87,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/dot/docs/diagnostics.md',
-          lines: '218-220',
+          lines: '224-226',
           code: 'at `configure()`:\n\n- `ARKI_DOT_E020` — a provider is mounted after its consumer. The fix',
         },
       },
@@ -160,7 +160,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/src/write.ts',
-          lines: '377-381',
+          lines: '420-424',
           code: '        for (const event of recorded) {\n          for (const projection of projections) {\n            if (projection.types.has(event.type) && projection.entities.some(e => e.kind === entity.kind)) {\n              await projection.run(sp, event);\n            }',
         },
       },
@@ -172,7 +172,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '85-90',
+          lines: '86-91',
           code: "    write(order, input.orderId, row => {\n      if (!row) return CommandNotFound({ detail: 'Order not found' });\n      if (row.status !== 'placed') return CommandConflict({ detail: `Order is already ${row.status}` });\n      return [OrderPaid({ amount: input.amount })]; // [] means: write nothing\n    }),\n);",
           imports: [
             {
@@ -202,7 +202,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '191-194',
+          lines: '206-209',
           code: "import { idempotent } from '@arki/http/idempotency';\nimport { responseCache } from '@arki/journal/http';\n\nidempotent({ cache: responseCache(db, tables), scope, routes: ['POST /orders'], ttl: 86_400_000 });",
         },
       },
@@ -214,8 +214,8 @@ export const insideGroups = [
         new: false,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '409',
-          code: 'An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db, run })`.',
+          lines: '537',
+          code: 'An effect runs after the commit, at least once, from a row in `journal_jobs`. An effect reaches out: a mail, a webhook, a provider. A handler gets the event and a context: `(e, { jobId, signal, db })`.',
         },
       },
       {
@@ -240,7 +240,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '810',
+          lines: '945',
           code: 'A workflow is a list of steps that runs to the end even when the process dies. Each step runs as a job in `journal_jobs`. When a step finishes, its result is saved (a checkpoint) and the next step is scheduled, in one transaction. A run can wait for a signal from outside, or sleep, for hours or days. When it cannot finish, it undoes the steps it did, newest first (compensation). The run is a journal entity (`workflow.run`), so every move is an event in `journal_events`.',
         },
       },
@@ -253,8 +253,8 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
-          lines: '124-129',
-          code: '        startOn: {\n          entity: refund,\n          event: refundsJournal.events.RefundApproved,\n          id: e => refundRunId(e.entityId),\n          input: e => ({ refundId: e.entityId }),\n        },',
+          lines: '124-130',
+          code: '        startOn: {\n          entity: refund,\n          event: refundsJournal.events.RefundApproved,\n          timing: \'after-commit\',\n          id: e => refundRunId(e.entityId),\n          input: e => ({ refundId: e.entityId }),\n        },',
         },
       },
       {
@@ -266,7 +266,7 @@ export const insideGroups = [
         new: false,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
-          lines: '173-177',
+          lines: '174-178',
           code: '            (await provider.refundPayment(paymentId, {\n              refundId: input.refundId,\n              // The same on every try of this step: Stripe answers a repeat with the first refund\n              idempotencyKey: key,\n              amount: fromMinorColumn(amountMinor, currency),',
           imports: [{ lines: '38', code: "import { fromMinorColumn } from '../core/money.js';" }],
         },
@@ -280,7 +280,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/payments/src/refunds/workflow.ts',
-          lines: '201-206',
+          lines: '202-207',
           code: "      .waitFor('settled', {\n        signal: 'stripe.refund.settled',\n        schema: settledSchema,\n        timeout: '3d',\n        // No signal in 3 days: `record` asks Stripe\n        onTimeout: 'continue',",
         },
       },
@@ -292,7 +292,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '262',
+          lines: '390',
           code: '`journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction. An erased form the schema rejects is `BAD_DEFINITION` and nothing changes. A history replay cannot rebuild, such as a legacy row that was never adopted, is `NO_HISTORY` and nothing changes: adopt it first. Running it twice is safe; the first erased time is kept. It returns `{ erased, row }`.',
         },
       },
@@ -305,7 +305,7 @@ export const insideGroups = [
         note: 'No app uses it yet.',
         proof: {
           path: 'packages/journal/src/dot.ts',
-          lines: '612-617',
+          lines: '733-738',
           code: ' * The entrypoint, for `.entrypoints()`: one worker between `start` and `stop`, for the\n * journal that `journal(...)` published. Each effect and tap of a feature gets the\n * services of that feature. A process that serves no worker still writes: its jobs\n * wait for a process that does. With `jobs`, the worker also runs queue rows\n * (`@arki/queue/outbox`) through the runner the source builds at boot.\n */',
         },
       },

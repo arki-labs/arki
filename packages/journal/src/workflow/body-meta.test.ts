@@ -17,8 +17,11 @@ const workflowMeta = { actorId: 'system:workflow' };
 const caller = { actorId: 'usr_caller' };
 const stepActor = { actorId: 'usr_step' };
 
-const place = j.command('test.place', z.object({ n: z.int().positive() }), (input, { write }) =>
-  write(order, orderId(input.n), () => [OrderPlaced({ customerId: 'cus_1', total: 10 })]),
+const place = j.command(
+  'test.place',
+  z.object({ n: z.int().positive() }),
+  { writes: [OrderPlaced] },
+  (input, { write }) => write(order, orderId(input.n), () => [OrderPlaced({ customerId: 'cus_1', total: 10 })]),
 );
 
 /** Places one order from a step: with no meta, or with the step's own when `own` is set. */

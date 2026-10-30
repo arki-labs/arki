@@ -20,8 +20,10 @@ import type {
   TapContext,
   TapHandlers,
 } from './types.js';
+import type { OwnedEffectContext } from './internal-context.js';
 import { JournalError } from './errors.js';
 import { assertStoredName } from './id.js';
+import { journalOwnedEffect } from './internal-context.js';
 
 /** An entity has a `kind`; an array of entities does not. */
 function toList<E extends { readonly kind: string }>(entity: E | readonly E[]): readonly E[] {
@@ -67,12 +69,13 @@ const builtInContext = new Set(['jobId', 'signal', 'db', 'run', 'accept']);
 /** Declare one thing an effect needs: `j.effect('order-mail', order, { mailer: need<Mailer>() }, { ... })`. */
 export const need = <T>(): Need<T> => ({});
 
-function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Needs>(
-  name: string,
-  entity: E | readonly E[],
-  needs: N,
-  on: EffectHandlers<E, Meta, AppDb, Run, N>,
-): Effect<Meta, AppDb, Run, N> {
+function defineEffect<
+  E extends AnyEntity<Meta>,
+  Meta,
+  AppDb,
+  N extends Needs,
+  Context extends EffectContext<AppDb> = EffectContext<AppDb>,
+>(name: string, entity: E | readonly E[], needs: N, on: EffectHandlers<E, Meta, AppDb, N, Context>): Effect<Meta, AppDb, N> {
   assertStoredName('effect name', name);
   for (const key of Object.keys(needs)) {
     if (builtInContext.has(key))
@@ -86,7 +89,7 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
   const handlers: Partial<
     Record<
       string,
-      BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>], unknown>
+      BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb> & Needed<N>], unknown>
     >
   > = on;
   return withSchedule(
@@ -127,10 +130,10 @@ export function checkedPriority(effectName: string, priority: number): number {
 }
 
 /** Attach a schedule to an effect, checked once: a job row must be able to hold it. */
-export function withSchedule<Meta, AppDb, Run, N extends Needs>(
-  effect: Omit<Effect<Meta, AppDb, Run, N>, 'schedule' | 'withSchedule'>,
+export function withSchedule<Meta, AppDb, N extends Needs>(
+  effect: Omit<Effect<Meta, AppDb, N>, 'schedule' | 'withSchedule'>,
   schedule: EffectSchedule<Meta>,
-): Effect<Meta, AppDb, Run, N> {
+): Effect<Meta, AppDb, N> {
   const { priority, delaySeconds = 0 } = schedule;
   if (typeof priority === 'number') checkedPriority(effect.name, priority);
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0)
@@ -155,26 +158,44 @@ export function withSchedule<Meta, AppDb, Run, N extends Needs>(
 }
 
 /** `j.effect` for one journal. Three arguments: the effect needs nothing. Four: the third lists its needs. */
-export function effectFor<Meta, AppDb, Run>() {
+export function effectFor<Meta, AppDb>() {
   function effect<E extends AnyEntity<Meta>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<EffectHandlers<E, Meta, AppDb, Run>>,
-  ): Effect<Meta, AppDb, Run>;
+    on: NoInfer<EffectHandlers<E, Meta, AppDb>>,
+  ): Effect<Meta, AppDb>;
   function effect<E extends AnyEntity<Meta>, N extends Needs>(
     name: string,
     entity: E | readonly E[],
     needs: N,
-    on: NoInfer<EffectHandlers<E, Meta, AppDb, Run, N>>,
-  ): Effect<Meta, AppDb, Run, N>;
+    on: NoInfer<EffectHandlers<E, Meta, AppDb, N>>,
+  ): Effect<Meta, AppDb, N>;
   function effect<E extends AnyEntity<Meta>, N extends Needs>(
     name: string,
     entity: E | readonly E[],
-    ...rest: [on: EffectHandlers<E, Meta, AppDb, Run>] | [needs: N, on: EffectHandlers<E, Meta, AppDb, Run, N>]
+    ...rest: [on: EffectHandlers<E, Meta, AppDb>] | [needs: N, on: EffectHandlers<E, Meta, AppDb, N>]
   ) {
     return rest.length === 1 ? defineEffect(name, entity, {}, rest[0]) : defineEffect(name, entity, rest[0], rest[1]);
   }
   return effect;
+}
+
+/**
+ * `j.effect` for the workflow runner: the handlers run the engine's own commands (a checkpoint, a timer, a start). No
+ * app gets this: the marker tells the worker to add the owned fields to the context (`internal-context.ts`).
+ */
+export function ownedEffectFor<Meta, AppDb, Run>() {
+  return <E extends AnyEntity<Meta>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    needs: N,
+    on: NoInfer<EffectHandlers<E, Meta, AppDb, N, OwnedEffectContext<AppDb, Run>>>,
+  ): Effect<Meta, AppDb, N> => {
+    const declared = defineEffect<E, Meta, AppDb, N, OwnedEffectContext<AppDb, Run>>(name, entity, needs, on);
+    // Marked before `withSchedule` closes over it, so a later `.withSchedule(...)` keeps the marker.
+    const owned = { ...declared, [journalOwnedEffect]: true as const };
+    return withSchedule(owned, declared.schedule);
+  };
 }
 
 function defineTap<E extends AnyEntity<Meta>, Meta, AppDb, N extends Needs>(
@@ -263,10 +284,7 @@ export function bindTap<Meta, AppDb>(tap: Tap<Meta, AppDb, Needs>, services: Ser
  * This is the only place a need meets its value. `j.compose` calls it with the app's
  * `services`; a worker calls it with the services it was given (`HandlerServices`).
  */
-export function bindEffect<Meta, AppDb, Run>(
-  effect: Effect<Meta, AppDb, Run, Needs>,
-  services: Services,
-): Effect<Meta, AppDb, Run> {
+export function bindEffect<Meta, AppDb>(effect: Effect<Meta, AppDb, Needs>, services: Services): Effect<Meta, AppDb> {
   const given = givenServices('effect', effect, services);
   return withSchedule(
     { ...effect, needs: {}, run: (event, ctx) => effect.run(event, { ...given, ...ctx }) },
@@ -278,10 +296,10 @@ export function bindEffect<Meta, AppDb, Run>(
  * Give one effect its services from `from`, which answers per handler ref. An effect with `bindPerWorkflow`
  * (`workflow.step`) is asked once per workflow; any other effect is asked once, as `bindEffect` does.
  */
-export function bindEffectFrom<Meta, AppDb, Run>(
-  effect: Effect<Meta, AppDb, Run, Needs>,
+export function bindEffectFrom<Meta, AppDb>(
+  effect: Effect<Meta, AppDb, Needs>,
   from: (ref: HandlerRef) => Services,
-): Effect<Meta, AppDb, Run> {
+): Effect<Meta, AppDb> {
   return effect.bindPerWorkflow === undefined
     ? bindEffect(effect, from({ kind: 'effect', name: effect.name }))
     : effect.bindPerWorkflow(workflow => from({ kind: 'effect', name: effect.name, workflow }));
@@ -292,13 +310,13 @@ export function bindEffectFrom<Meta, AppDb, Run>(
  * A handler `j.compose` already bound needs nothing, so it gets nothing. Throws on the first
  * missing service, so a worker refuses to start instead of failing job after job.
  */
-export function bindHandlers<Meta, AppDb, Run>(
+export function bindHandlers<Meta, AppDb>(
   handlers: {
-    readonly effects: readonly Effect<Meta, AppDb, Run, Needs>[];
+    readonly effects: readonly Effect<Meta, AppDb, Needs>[];
     readonly taps: readonly Tap<Meta, AppDb, Needs>[];
   },
   services: HandlerServices | undefined,
-): { readonly effects: readonly Effect<Meta, AppDb, Run>[]; readonly taps: readonly Tap<Meta, AppDb>[] } {
+): { readonly effects: readonly Effect<Meta, AppDb>[]; readonly taps: readonly Tap<Meta, AppDb>[] } {
   const of = (kind: 'effect' | 'tap', name: string): Services => services?.({ kind, name }) ?? {};
   return {
     effects: handlers.effects.map(effect => bindEffectFrom(effect, ref => services?.(ref) ?? {})),

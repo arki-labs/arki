@@ -42,6 +42,7 @@ type HandlerContext = { readonly session: Session; readonly journal: AppJournal;
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+  { writes: [OrderPlaced] },
   (input, { write }) => write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
 );
 

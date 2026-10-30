@@ -28,10 +28,12 @@ export const shapeSchema = z
         z
           .object({
             name: z.string().min(1),
-            kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map']),
+            kind: z.enum(['step', 'waitFor', 'sleep', 'child', 'map', 'command']),
             undo: z.boolean(),
             onCancel: z.enum(['cancel', 'detach']).optional(),
             signal: z.string().min(1).optional(),
+            command: z.string().min(1).optional(),
+            undoCommand: z.string().min(1).optional(),
           })
           .readonly(),
       )

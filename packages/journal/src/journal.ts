@@ -75,6 +75,7 @@ import {
 import { defineLimit } from './workflow/limit-types.js';
 import { createWorkflowReads } from './workflow/read.js';
 import { createWorkflows } from './workflow/runner.js';
+import type { EventStart } from './write.js';
 import { createWriter } from './write.js';
 
 /**
@@ -199,21 +200,21 @@ function createInit<
     }
     return defineEntity<K, Tbl, MetaOut, 'id'>(kind, table, 'id', eventStorage);
   }
-  const command: JournalDefinitions<Meta, Tx, AppDb>['command'] = (name, input, handler, options) => {
-    const authorize = options?.authorize;
-    if (authorize === undefined) return { name, input, handler };
+  const command: JournalDefinitions<Meta, Tx, AppDb>['command'] = (name, input, options, handler) => {
+    const { writes, authorize, output } = options;
+    if (authorize === undefined) return { name, input, writes, output, handler };
     // Keeps only a failure, so the command's type holds the failures `authorize` can return.
     const refuse = async (...args: Parameters<typeof authorize>) => {
       const refused = await authorize(...args);
       return isReturnedFailure(refused) ? refused : undefined;
     };
-    return { name, input, handler, authorize: refuse };
+    return { name, input, writes, output, handler, authorize: refuse };
   };
   const projection: JournalDefinitions<Meta, Tx, AppDb>['projection'] = (name, entity, on, opts) =>
     defineProjection(name, entity, on, opts);
-  const effect = effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>();
+  const effect = effectFor<MetaOut, AppDb>();
   const workflows = createWorkflows<Meta, Tx, AppDb>(
-    { event: defineEvent, entity, command, projection, effect },
+    { event: defineEvent, entity, command, projection },
     tables,
     retention,
   );
@@ -249,6 +250,7 @@ function createInit<
       const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       const projections = [...(config.projections ?? []), ...(runner === undefined ? [] : [runner.steps])];
       return createJournal<Meta, Tx, AppDb>(metaSchema, tables, projections, effects, taps, retention, forwardedLogs, {
+        eventStarts: runner?.eventStarts ?? [],
         commands: workflows.operate,
         limits: workflows.limits,
         registry: workflows.started,
@@ -314,13 +316,15 @@ function createJournal<
   tables: JournalTables,
   projections: readonly Projection<SchemaOutput<Meta>, Tx>[],
   /** An effect or a tap may still have needs (`services: 'worker'`): only the worker runs them, with its `services`. */
-  effects: readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
+  effects: readonly Effect<SchemaOutput<Meta>, AppDb, Needs>[],
   taps: readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = [],
   retentionOption?: JobRetention,
   /** Per entity kind, the forwarded log of `j.entity`. Live: an entity defined after compose still counts. */
   forwardedLogs: ReadonlyMap<string, ForwardedLog> = new Map(),
   /** What `journal.workflows` needs: the operator verbs, the registered code, and the meta their events are recorded with. */
   workflowWiring?: {
+    /** The `with-event` `startOn`s: each writes its run in the event's transaction. */
+    readonly eventStarts: readonly EventStart<SchemaInput<Meta>, SchemaOutput<Meta>, Tx>[];
     readonly commands: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['operate'];
     /** The limit reads and the commands of the limit verbs. */
     readonly limits: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['limits'];
@@ -352,7 +356,7 @@ function createJournal<
   }
 
   // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
-  // call, so the worker loop, `run`, a bound runner and an effect's `ctx.run` always use the methods the object holds.
+  // call, so the worker loop, `run`, a bound runner and a workflow step's `ctx.run` always use the methods the object holds.
   const store = createPgStore({ tables, wakeChannel });
   const eventLog = createBuiltInEventLog({ tables });
   const history = createHistory<Meta>({ metaSchema, tables, store, log: eventLog });
@@ -365,6 +369,7 @@ function createJournal<
     projections: inlineProjections,
     asyncProjections,
     effects,
+    eventStarts: workflowWiring?.eventStarts ?? [],
     history,
   });
   const commandHooks = createHookPoint<CommandHookContext<SchemaOutput<Meta>>>('command');
@@ -377,10 +382,10 @@ function createJournal<
     hooks: commandHooks,
     store,
   });
-  // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
+  // The worker's database is also the source of every command the engine's own effects run, so it opens `Tx`.
   type WorkerDb = AppDb & TransactionSource<Tx>;
   /**
-   * An effect whose `ctx.run` returned a failure it did not accept must not report success:
+   * A workflow job whose `ctx.run` returned a failure it did not accept must not report success:
    * the job would count as done though a command said no. Each command already rolled back on
    * its own, so there is nothing left to undo. A success after an unaccepted refusal ends the
    * job with that refusal instead: dead after one try by default, like a returned failure. It

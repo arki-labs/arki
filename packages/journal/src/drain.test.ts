@@ -4,11 +4,10 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { TransactionDefect } from '@arki/db/transaction';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { OrderId } from './test-support.js';
-import { backoff } from './index.js';
+import { backoff, initJournal } from './index.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -447,11 +446,12 @@ describe('effect context', () => {
   });
 });
 
-describe('effect context: run', () => {
+describe('a task context: run', () => {
   const system = { actorId: 'system' };
   const payOrder = j.command(
     'payOrder',
     z.object({ id: z.templateLiteral(['ord_', z.string()]), fail: z.boolean().default(false) }),
+    { writes: [OrderPaid] },
     async (input, { write }) => {
       orThrow(await write(order, input.id, () => [OrderPaid({ amount: 1 })]));
       if (input.fail) throw new Error('refused after the write');
@@ -479,39 +479,55 @@ describe('effect context: run', () => {
     return rows[0];
   };
 
-  // Paying an order is a reaction to placing it; the receipt is a reaction to the payment.
+  // Paying an order follows from placing it, so it is a task; the receipt only reaches out, so it is an effect.
   const receipts: OrderId[] = [];
   const waiting = new Map<OrderId, () => void>();
-  const payOnPlace = j.effect('chain-pay-on-place', order, {
-    OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, system),
-  });
-  const receipt = j.effect('chain-receipt', order, {
-    OrderPaid: e => {
-      receipts.push(e.entityId);
-      waiting.get(e.entityId)?.();
-    },
-  });
-  const chain = j.compose({ effects: [payOnPlace, receipt] });
-
-  it('runs a command on the root database and commits it under the meta the effect passed, so a reaction needs no closure over the journal', async () => {
-    const auto = j.compose({
+  /** A task on `OrderPlaced` that runs `body` with the order's id, in a journal of its own. */
+  const taskOn = (name: string, body: (id: OrderId, run: PayRunner) => Promise<unknown>) => {
+    const own = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+    const task = own.task(
+      name,
+      {
+        version: 1,
+        input: z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+        startOn: {
+          entity: order,
+          event: OrderPlaced,
+          timing: 'after-commit',
+          id: e => `${name}:${e.entityId}`,
+          input: e => ({ id: e.entityId }),
+        },
+      },
+      ({ input, run }) => body(input.id, command => run(payOrder, command, system)),
+    );
+    return own.compose({
+      workflows: [task],
+      workflowMeta: system,
       effects: [
-        j.effect('run-pay-on-place', order, {
-          OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, system),
+        j.effect('chain-receipt', order, {
+          OrderPaid: e => {
+            receipts.push(e.entityId);
+            waiting.get(e.entityId)?.();
+          },
         }),
       ],
     });
+  };
+  type PayRunner = (input: { readonly id: OrderId; readonly fail?: boolean }) => Promise<unknown>;
+  const chain = taskOn('chain-pay-on-place', (id, pay) => pay({ id }));
+
+  it('runs a command on the root database and commits it under the meta the task names, in the chain of the event it follows', async () => {
+    const auto = taskOn('run-pay-on-place', (id, pay) => pay({ id }));
     const id = await place(auto);
-    expect(await auto.drain(db).then(result => orThrow(result))).toBe(1);
+    await auto.drain(db).then(result => orThrow(result));
     expect(await statusOf(id)).toBe('paid');
     const events = await eventsOf(id);
     expect(events.map(event => [event.type, event.meta])).toEqual([
       ['OrderPlaced', meta],
       ['OrderPaid', system],
     ]);
-    // The reaction is stamped with its cause: the event the job was for, and that event's chain.
+    // The event the step's command wrote stays in the chain of the event that started the run.
     const [placed, paid] = events;
-    expect(paid?.causeSeq).toBe(placed?.seq);
     expect(paid?.correlationId).toBe(placed?.correlationId);
     expect(paid?.commandId).toMatch(/^cmd_/);
     expect(placed?.causeSeq).toBeNull();
@@ -519,7 +535,8 @@ describe('effect context: run', () => {
 
   it('queues a job for the command it ran and the next claim runs it, so one reaction can start the next', async () => {
     const id = await place(chain);
-    expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
+    // The start job, then the step job.
+    expect(await chain.drain(db, { batchSize: 2 }).then(result => orThrow(result))).toBe(2);
     // The receipt job was queued by the job this pass ran, so it waits for the next claim.
     expect(receipts).not.toContain(id);
     expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
@@ -528,7 +545,7 @@ describe('effect context: run', () => {
 
   it('claims a job queued during the pass in the same pass, because each job is claimed just before it runs', async () => {
     const id = await place(chain);
-    expect(await chain.drain(db).then(result => orThrow(result))).toBe(2);
+    expect(await chain.drain(db).then(result => orThrow(result))).toBe(3);
     expect(receipts).toContain(id);
   });
 
@@ -544,8 +561,8 @@ describe('effect context: run', () => {
       const done = new Promise<void>(resolve => {
         waiting.set(id, resolve);
       });
-      // This pass runs the paying effect by hand and claims nothing more, so the
-      // receipt job is left for the worker, which hears only the wake.
+      // This pass runs the start job by hand and claims nothing more, so the step job and the
+      // receipt job are left for the worker, which hears only the wakes.
       expect(await chain.drain(db, { batchSize: 1 }).then(result => orThrow(result))).toBe(1);
       await done;
       expect(receipts).toContain(id);
@@ -555,40 +572,30 @@ describe('effect context: run', () => {
     }
   }, 2000);
 
-  it('a command defect ends the job dead and rolls back the command writes', async () => {
-    const failing = j.compose({
-      effects: [
-        j.effect('run-pay-fails', order, {
-          OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId, fail: true }, system),
-        }),
-      ],
-    });
+  it('a command defect in a step ends the job dead and rolls back the command writes', async () => {
+    const failing = taskOn('run-pay-fails', (id, pay) => pay({ id, fail: true }));
     const id = await place(failing);
-    expect(await failing.drain(db).then(result => orThrow(result))).toBe(1);
-    const job = await jobOf('run-pay-fails');
+    await failing.drain(db).then(result => orThrow(result));
+    const job = await jobOf('workflow.step');
     expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: expect.any(Date) });
-    expect(job?.lastError).toContain(TransactionDefect.code);
     expect(await statusOf(id)).toBe('placed');
     const events = await eventsOf(id);
     expect(events.map(event => event.type)).toEqual(['OrderPlaced']);
+    await db.delete(tables.jobs).where(eq(tables.jobs.id, job?.id ?? ''));
   });
 
-  it('a later effect throw keeps the command committed, and the job is retried by the default policy', async () => {
-    const halfDone = j.compose({
-      effects: [
-        j.effect('run-pay-then-fail', order, {
-          OrderPlaced: async (e, { run }) => {
-            orThrow(await run(payOrder, { id: e.entityId }, system));
-            throw new Error('mail down after the payment');
-          },
-        }),
-      ],
+  it('a later throw in a step keeps the command committed, and the step runs again: this is why a command node exists', async () => {
+    const halfDone = taskOn('run-pay-then-fail', async (id, pay) => {
+      orThrow(await pay({ id }));
+      throw new Error('mail down after the payment');
     });
     const id = await place(halfDone);
-    expect(await halfDone.drain(db).then(result => orThrow(result))).toBe(1);
-    const job = await jobOf('run-pay-then-fail');
-    expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
-    expect(job?.lastError).toContain(UnexpectedDefect.code);
+    await halfDone.drain(db).then(result => orThrow(result));
+    const failedSteps = await db
+      .select({ error: tables.workflowSteps.error, attempt: tables.workflowSteps.attempt })
+      .from(tables.workflowSteps)
+      .where(eq(tables.workflowSteps.runId, `run-pay-then-fail:${id}`));
+    expect(failedSteps).toMatchObject([{ attempt: 2 }]);
     expect(await statusOf(id)).toBe('paid');
   });
 });

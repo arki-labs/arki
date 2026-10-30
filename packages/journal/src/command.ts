@@ -18,7 +18,7 @@ import type { Command, CommandContext, RunOptions } from './api.js';
 import type { CommandFailure } from './errors.js';
 import type { HookPointInternal } from './hooks.js';
 import type { PgStore } from './store.js';
-import type { CommandHookContext, DbHandle, Trace, TransactionSource } from './types.js';
+import type { AnyEntity, CommandHookContext, DbHandle, Pending, Trace, TransactionSource } from './types.js';
 import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
 import { CommandConflict, JournalError } from './errors.js';
@@ -50,7 +50,7 @@ export type CommandDeps<
 };
 
 /**
- * Runs first inside a command's transaction and throws to refuse it. An effect's `ctx.run` passes the check that
+ * Runs first inside a command's transaction and throws to refuse it. A workflow body's `ctx.run` passes the check that
  * its attempt is still the job's open attempt. Child commands run inside the same transaction, so only the top one is fenced.
  */
 export type Fence = (tx: DbHandle) => Promise<void>;
@@ -158,6 +158,21 @@ export function createCommandRunner<
           // the command is doomed: it must end with a failure, or an ignored refusal would commit the rest.
           const refusals = trackRefusals('command', command.name, 'write or run');
           const { watch } = refusals;
+          // `write` is the only way a handler writes, so the `writes` list is held there. The entity's own
+          // definition is the one compared: two entities may use one event type. A handler that catches
+          // the error still commits nothing: `handle` throws it again.
+          let undeclared: JournalError | undefined;
+          const requireDeclared = (entity: Pick<AnyEntity, 'kind' | 'events'>, event: Pending): void => {
+            const declaration = entity.events.get(event.type);
+            if (declaration !== undefined && command.writes.includes(declaration)) return;
+            undeclared = new JournalError(
+              'BAD_DEFINITION',
+              'command',
+              command.name,
+              `command "${command.name}" wrote event "${event.type}" of ${entity.kind}, which its writes list does not declare; add the event to writes`,
+            );
+            throw undeclared;
+          };
           /** The handler's result, unless it is a success after a failure it did not accept: then the run throws and rolls back. */
           const handle = async (): Promise<Awaited<R> | CommandFailure> => {
             let value: Awaited<R>;
@@ -166,6 +181,7 @@ export function createCommandRunner<
             } finally {
               refusals.finish();
             }
+            if (undeclared !== undefined) throw undeclared;
             const ignored = refusals.unhandled();
             if (ignored === undefined || isReturnedFailure(value)) return value;
             throw new JournalError(
@@ -182,9 +198,10 @@ export function createCommandRunner<
             correlationId: trace.correlationId,
             write: (entity, id, events, opts) =>
               track(
-                writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs, opts).then(
-                  watch(`the write to ${entity.kind} ${id}`),
-                ),
+                writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs, {
+                  ...opts,
+                  beforeEvent: event => requireDeclared(entity, event),
+                }).then(watch(`the write to ${entity.kind} ${id}`)),
               ),
             run: (child, childInput, childOpts) =>
               track(
@@ -264,8 +281,8 @@ export function createCommandRunner<
     }).catch(error => TransactionDefect({ cause: error }));
 
   /**
-   * `journal.run`: parses `meta` once for the whole command. `cause` is set only by an
-   * effect's `ctx.run`: the event the job was for. Its correlation id carries over unless
+   * `journal.run`: parses `meta` once for the whole command. `cause` is set only by a
+   * workflow body's `ctx.run`: the event the job was for. Its correlation id carries over unless
    * `opts.correlationId` says otherwise; with neither, the run starts a new chain.
    */
   const run = <S extends StandardSchemaV1, R>(

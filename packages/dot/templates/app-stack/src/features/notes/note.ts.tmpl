@@ -36,7 +36,7 @@ export const createNoteInput = z.object({
   body: z.string().trim().max(5000).default(''),
 });
 
-export const createNote = j.command('createNote', createNoteInput, async (input, { write }) => {
+export const createNote = j.command('createNote', createNoteInput, { writes: [NoteCreated] }, async (input, { write }) => {
   const id = noteId.create();
   if (isFailure(id)) return id;
   const written = await write(note, id, () => [NoteCreated({ title: input.title, body: input.body })]);

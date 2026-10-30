@@ -41,14 +41,18 @@ const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: orderIdSchema, fail: z.boolean().default(false) }),
+  { writes: [OrderPlaced] },
   async (input, { write }) => {
     orThrow(await write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
     if (input.fail) throw new Error('refused after the write');
   },
 );
 /** No effect listens to `OrderNoted`, so this command queues no job. */
-const noteOrder = j.command('noteOrder', z.object({ id: orderIdSchema }), (input, { write }) =>
-  write(order, input.id, () => [OrderNoted({ note: 'seen' })]),
+const noteOrder = j.command(
+  'noteOrder',
+  z.object({ id: orderIdSchema }),
+  { writes: [OrderNoted] },
+  (input, { write }) => write(order, input.id, () => [OrderNoted({ note: 'seen' })]),
 );
 
 /** A promise the test opens by hand. */

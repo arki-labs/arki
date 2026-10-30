@@ -1,21 +1,28 @@
 /**
- * What the worker gives only the journal's own workflow step effect: the attempt's fenced command runner without the
- * refusal watch, for `ctx.metadata` and `ctx.tags`. Internal: neither key is exported from any entry point.
+ * What the worker gives only the journal's own effects (the ones the workflow runner builds): the attempt's fenced
+ * command runner, `accept`, and for `ctx.metadata` and `ctx.tags` the same runner without the refusal watch. Internal:
+ * neither key is exported from any entry point.
  *
- * Why symbol keys on a marked effect, and not a field of `EffectContext`: an app effect must never get a way around
- * the refusal guarantee (a success after a refusal it did not accept fails its job). A symbol no app can import keeps
- * the runner out of reach and out of the public type, and the marker on the effect definition lets the worker hand it
- * only to the step effect the workflow runner built. Both survive the object spreads that bind services and
- * schedules, so no cast is needed anywhere.
+ * Why a marked effect, and not fields of `EffectContext`: an app effect only reaches out, so it never runs a command
+ * (D-11). Those commands belong to the engine: a checkpoint, a timer, a start. The marker on the effect definition
+ * lets the worker hand them only to the effects the runner built, and the symbol keeps the unwatched runner out of the
+ * public type. Both survive the object spreads that bind services and schedules, so no cast is needed anywhere.
  */
-import type { EffectContext, RootDb } from './types.js';
+import type { AcceptFailure, EffectContext, RootDb } from './types.js';
 
-/** Marks an effect definition the workflow runner built, so the worker gives it `unwatchedRun`. */
+/** Marks an effect definition the workflow runner built, so the worker gives it `OwnedEffectContext`. */
 export const journalOwnedEffect: unique symbol = Symbol('journal.ownedEffect');
 /** The key of the unwatched runner on the context of a `journalOwnedEffect`. */
 export const unwatchedRun: unique symbol = Symbol('journal.unwatchedRun');
 
-/** An effect context as the worker builds it: an owned effect's has the unwatched runner, any other effect's has not. */
-export type InternalEffectContext<AppDb = RootDb, Run = unknown> = EffectContext<AppDb, Run> & {
-  readonly [unwatchedRun]?: Run;
+/** What only a `journalOwnedEffect` gets on top of `EffectContext`. */
+export type OwnedEffectFields<Run> = {
+  readonly run: Run;
+  readonly accept: AcceptFailure;
+  readonly [unwatchedRun]: Run;
 };
+/** The context of a `journalOwnedEffect`. */
+export type OwnedEffectContext<AppDb = RootDb, Run = unknown> = EffectContext<AppDb> & OwnedEffectFields<Run>;
+/** An effect context as the worker builds it: an owned effect's has the owned fields, any other effect's has not. */
+export type InternalEffectContext<AppDb = RootDb, Run = unknown> = EffectContext<AppDb> &
+  Partial<OwnedEffectFields<Run>>;

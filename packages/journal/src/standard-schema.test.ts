@@ -160,11 +160,16 @@ describe('Standard Schema event and meta schemas', () => {
 
   it('rolls back earlier command writes when an event constructor returns a schema failure', async () => {
     const id = orderId(++next);
-    const command = j.command('stdSchemaRefusal', z.object({}), async (_input, { write }) => {
-      const opened = await write(account, id, () => [Opened({ customerId: 'cus_std' })]);
-      if (isFailure(opened)) return opened;
-      return write(account, id, () => [Paid({ amount: 'invalid' })]);
-    });
+    const command = j.command(
+      'stdSchemaRefusal',
+      z.object({}),
+      { writes: [Opened, Paid] },
+      async (_input, { write }) => {
+        const opened = await write(account, id, () => [Opened({ customerId: 'cus_std' })]);
+        if (isFailure(opened)) return opened;
+        return write(account, id, () => [Paid({ amount: 'invalid' })]);
+      },
+    );
     const result = await journal.run(db, command, {}, meta);
     expect(InvalidInput.is(result)).toBe(true);
     expect(await db.select().from(orders).where(eq(orders.id, id))).toEqual([]);
@@ -182,7 +187,7 @@ describe('Standard Schema event and meta schemas', () => {
         },
       },
     };
-    const command = j.command('stdBrokenCommand', broken, () => {
+    const command = j.command('stdBrokenCommand', broken, { writes: [] }, () => {
       handled = true;
     });
     const result = await journal.run(db, command, 'input', meta);

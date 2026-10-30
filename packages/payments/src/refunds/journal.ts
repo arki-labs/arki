@@ -234,145 +234,166 @@ export function createRefundsJournal<
    * turns: the second counts the first. Without the lock both could read the same total and together
    * refund more than was paid. A refund that is pending, approved, processing or completed holds money.
    */
-  const requestRefund = j.command('requestRefund', requestRefundInputSchema, async (input, { tx, write }) => {
-    const refundId = input.refundId ?? createRefundId();
-    if (isFailure(refundId)) return refundId;
+  const requestRefund = j.command(
+    'requestRefund',
+    requestRefundInputSchema,
+    { writes: [RefundRequestedV2] },
+    async (input, { tx, write }) => {
+      const refundId = input.refundId ?? createRefundId();
+      if (isFailure(refundId)) return refundId;
 
-    const [payment] = await tx
-      .select({ amountMinor: payments.amountMinor, currency: payments.currency })
-      .from(payments)
-      .where(eq(payments.id, input.paymentId))
-      .for('update');
-    if (!payment) {
-      return CommandNotFound({ detail: `Payment ${input.paymentId} not found` });
-    }
-
-    const refundMinor = toMinorColumn(input.refundAmount);
-    let exceedsPayment = false;
-    if (input.refundAmount.currency.code === payment.currency.toUpperCase()) {
-      const [held] = await tx
-        .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
-        .from(tables.refunds)
-        .where(
-          and(
-            eq(tables.refunds.paymentId, input.paymentId),
-            eq(tables.refunds.currency, payment.currency.toUpperCase()),
-            inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
-          ),
-        );
-
-      exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
-    }
-
-    return write(refund, refundId, row => {
-      if (row) {
-        return CommandConflict({ detail: `Refund ${refundId} already exists` });
+      const [payment] = await tx
+        .select({ amountMinor: payments.amountMinor, currency: payments.currency })
+        .from(payments)
+        .where(eq(payments.id, input.paymentId))
+        .for('update');
+      if (!payment) {
+        return CommandNotFound({ detail: `Payment ${input.paymentId} not found` });
       }
 
-      if (!input.refundAmount.hasSameCurrency(input.originalAmount)) {
-        return CommandInvalid({
-          detail: `Refund currency (${input.refundAmount.currency.code}) differs from the original currency (${input.originalAmount.currency.code})`,
-        });
+      const refundMinor = toMinorColumn(input.refundAmount);
+      let exceedsPayment = false;
+      if (input.refundAmount.currency.code === payment.currency.toUpperCase()) {
+        const [held] = await tx
+          .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
+          .from(tables.refunds)
+          .where(
+            and(
+              eq(tables.refunds.paymentId, input.paymentId),
+              eq(tables.refunds.currency, payment.currency.toUpperCase()),
+              inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
+            ),
+          );
+
+        exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
       }
 
-      if (input.refundAmount.gt(input.originalAmount)) {
-        return CommandInvalid({
-          detail: `Refund amount (${input.refundAmount.toString()}) cannot exceed original amount (${input.originalAmount.toString()})`,
-        });
-      }
+      return write(refund, refundId, row => {
+        if (row) {
+          return CommandConflict({ detail: `Refund ${refundId} already exists` });
+        }
 
-      if (!input.refundAmount.isPositive()) {
-        return CommandInvalid({ detail: 'Refund amount must be positive' });
-      }
+        if (!input.refundAmount.hasSameCurrency(input.originalAmount)) {
+          return CommandInvalid({
+            detail: `Refund currency (${input.refundAmount.currency.code}) differs from the original currency (${input.originalAmount.currency.code})`,
+          });
+        }
 
-      if (exceedsPayment) {
-        return CommandConflict({
-          detail: `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
-        });
-      }
+        if (input.refundAmount.gt(input.originalAmount)) {
+          return CommandInvalid({
+            detail: `Refund amount (${input.refundAmount.toString()}) cannot exceed original amount (${input.originalAmount.toString()})`,
+          });
+        }
 
-      return [
-        RefundRequestedV2({
-          paymentId: input.paymentId,
-          originalAmount: input.originalAmount.toJSON(),
-          refundAmount: input.refundAmount.toJSON(),
-          reason: input.reason,
-          customerNote: input.customerNote ?? null,
-          internalNotes: input.internalNotes ?? null,
-          requestedBy: input.requestedBy,
-          metadata: input.metadata ?? null,
-        }),
-      ];
-    });
-  });
+        if (!input.refundAmount.isPositive()) {
+          return CommandInvalid({ detail: 'Refund amount must be positive' });
+        }
 
-  const approveRefund = j.command('approveRefund', approveRefundInputSchema, (input, { write }) =>
-    write(refund, input.refundId, row => {
-      const current = requireRefund(row, input.refundId);
-      if (isFailure(current)) return current;
+        if (exceedsPayment) {
+          return CommandConflict({
+            detail: `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
+          });
+        }
 
-      if (current.status !== 'pending') {
-        return CommandConflict({ detail: `Cannot approve refund with status ${current.status}` });
-      }
-
-      return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
-    }),
+        return [
+          RefundRequestedV2({
+            paymentId: input.paymentId,
+            originalAmount: input.originalAmount.toJSON(),
+            refundAmount: input.refundAmount.toJSON(),
+            reason: input.reason,
+            customerNote: input.customerNote ?? null,
+            internalNotes: input.internalNotes ?? null,
+            requestedBy: input.requestedBy,
+            metadata: input.metadata ?? null,
+          }),
+        ];
+      });
+    },
   );
 
-  const rejectRefund = j.command('rejectRefund', rejectRefundInputSchema, (input, { write }) =>
-    write(refund, input.refundId, row => {
-      const current = requireRefund(row, input.refundId);
-      if (isFailure(current)) return current;
+  const approveRefund = j.command(
+    'approveRefund',
+    approveRefundInputSchema,
+    { writes: [RefundApproved] },
+    (input, { write }) =>
+      write(refund, input.refundId, row => {
+        const current = requireRefund(row, input.refundId);
+        if (isFailure(current)) return current;
 
-      if (current.status !== 'pending') {
-        return CommandConflict({ detail: `Cannot reject refund with status ${current.status}` });
-      }
+        if (current.status !== 'pending') {
+          return CommandConflict({ detail: `Cannot approve refund with status ${current.status}` });
+        }
 
-      return [RefundRejected({ rejectedBy: input.rejectedBy, rejectionReason: input.rejectionReason })];
-    }),
+        return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
+      }),
   );
 
-  const processRefund = j.command('processRefund', processRefundInputSchema, (input, { write }) =>
-    write(refund, input.refundId, row => {
-      const current = requireRefund(row, input.refundId);
-      if (isFailure(current)) return current;
+  const rejectRefund = j.command(
+    'rejectRefund',
+    rejectRefundInputSchema,
+    { writes: [RefundRejected] },
+    (input, { write }) =>
+      write(refund, input.refundId, row => {
+        const current = requireRefund(row, input.refundId);
+        if (isFailure(current)) return current;
 
-      if (current.status !== 'approved') {
-        return CommandConflict({
-          detail: `Cannot process refund with status ${current.status}. Must be approved first.`,
-        });
-      }
+        if (current.status !== 'pending') {
+          return CommandConflict({ detail: `Cannot reject refund with status ${current.status}` });
+        }
 
-      return [RefundProcessed({})];
-    }),
+        return [RefundRejected({ rejectedBy: input.rejectedBy, rejectionReason: input.rejectionReason })];
+      }),
   );
 
-  const completeRefund = j.command('completeRefund', completeRefundInputSchema, (input, { write }) =>
-    write(refund, input.refundId, row => {
-      const current = requireRefund(row, input.refundId);
-      if (isFailure(current)) return current;
+  const processRefund = j.command(
+    'processRefund',
+    processRefundInputSchema,
+    { writes: [RefundProcessed] },
+    (input, { write }) =>
+      write(refund, input.refundId, row => {
+        const current = requireRefund(row, input.refundId);
+        if (isFailure(current)) return current;
 
-      // The provider's webhook and the service both report the same refund: the second changes nothing
-      if (current.status === 'completed' && current.providerRefundId === input.providerRefundId) {
-        return [];
-      }
+        if (current.status !== 'approved') {
+          return CommandConflict({
+            detail: `Cannot process refund with status ${current.status}. Must be approved first.`,
+          });
+        }
 
-      if (current.status !== 'processing') {
-        return CommandConflict({
-          detail: `Cannot complete refund with status ${current.status}. Must be processing first.`,
-        });
-      }
-
-      return [
-        RefundCompleted({
-          providerRefundId: input.providerRefundId,
-          providerResponse: input.providerResponse ?? null,
-        }),
-      ];
-    }),
+        return [RefundProcessed({})];
+      }),
   );
 
-  const failRefund = j.command('failRefund', failRefundInputSchema, (input, { write }) =>
+  const completeRefund = j.command(
+    'completeRefund',
+    completeRefundInputSchema,
+    { writes: [RefundCompleted] },
+    (input, { write }) =>
+      write(refund, input.refundId, row => {
+        const current = requireRefund(row, input.refundId);
+        if (isFailure(current)) return current;
+
+        // The provider's webhook and the service both report the same refund: the second changes nothing
+        if (current.status === 'completed' && current.providerRefundId === input.providerRefundId) {
+          return [];
+        }
+
+        if (current.status !== 'processing') {
+          return CommandConflict({
+            detail: `Cannot complete refund with status ${current.status}. Must be processing first.`,
+          });
+        }
+
+        return [
+          RefundCompleted({
+            providerRefundId: input.providerRefundId,
+            providerResponse: input.providerResponse ?? null,
+          }),
+        ];
+      }),
+  );
+
+  const failRefund = j.command('failRefund', failRefundInputSchema, { writes: [RefundFailed] }, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
       if (isFailure(current)) return current;

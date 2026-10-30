@@ -276,23 +276,28 @@ export function createSubscriptionJournal<
     .on(SubscriptionPastDue, (_row, e) => ({ status: 'past_due', updatedAt: fromDate(e.recordedAt) }));
 
   /** Stores a subscription the provider just created, with the status the provider reported. */
-  const createSubscription = j.command('createSubscription', createSubscriptionInputSchema, (input, { write }) => {
-    const subscriptionId = input.subscriptionId ?? createSubscriptionId();
-    if (isFailure(subscriptionId)) return subscriptionId;
+  const createSubscription = j.command(
+    'createSubscription',
+    createSubscriptionInputSchema,
+    { writes: [SubscriptionCreated] },
+    (input, { write }) => {
+      const subscriptionId = input.subscriptionId ?? createSubscriptionId();
+      if (isFailure(subscriptionId)) return subscriptionId;
 
-    return write(subscription, subscriptionId, row => {
-      if (row) {
-        return CommandConflict({ detail: `Subscription ${subscriptionId} already exists` });
-      }
+      return write(subscription, subscriptionId, row => {
+        if (row) {
+          return CommandConflict({ detail: `Subscription ${subscriptionId} already exists` });
+        }
 
-      return [
-        SubscriptionCreated({
-          providerSubscriptionId: input.providerSubscriptionId,
-          ...snapshotOfDelivery(input, null),
-        }),
-      ];
-    });
-  });
+        return [
+          SubscriptionCreated({
+            providerSubscriptionId: input.providerSubscriptionId,
+            ...snapshotOfDelivery(input, null),
+          }),
+        ];
+      });
+    },
+  );
 
   /**
    * Brings the row in line with what the provider says. The row is found by the
@@ -300,49 +305,59 @@ export function createSubscriptionJournal<
    * subscription is created. A delivery that changes nothing writes no event, so
    * a repeated webhook is safe.
    */
-  const syncSubscription = j.command('syncSubscription', syncSubscriptionInputSchema, async (input, { tx, write }) => {
-    const [existing] = await tx
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(eq(subscriptions.providerSubscriptionId, input.providerSubscriptionId))
-      .limit(1);
-    const subscriptionId = existing?.id ?? createSubscriptionId();
-    if (isFailure(subscriptionId)) return subscriptionId;
+  const syncSubscription = j.command(
+    'syncSubscription',
+    syncSubscriptionInputSchema,
+    { writes: [SubscriptionCreated, SubscriptionSynced] },
+    async (input, { tx, write }) => {
+      const [existing] = await tx
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(eq(subscriptions.providerSubscriptionId, input.providerSubscriptionId))
+        .limit(1);
+      const subscriptionId = existing?.id ?? createSubscriptionId();
+      if (isFailure(subscriptionId)) return subscriptionId;
 
-    return write(subscription, subscriptionId, row => {
-      const next = snapshotOfDelivery(input, row);
+      return write(subscription, subscriptionId, row => {
+        const next = snapshotOfDelivery(input, row);
 
-      if (!row) {
-        return [SubscriptionCreated({ providerSubscriptionId: input.providerSubscriptionId, ...next })];
-      }
+        if (!row) {
+          return [SubscriptionCreated({ providerSubscriptionId: input.providerSubscriptionId, ...next })];
+        }
 
-      return sameJson(snapshotOfRow(row), next) ? [] : [SubscriptionSynced(next)];
-    });
-  });
+        return sameJson(snapshotOfRow(row), next) ? [] : [SubscriptionSynced(next)];
+      });
+    },
+  );
 
   /** Records a cancellation with the status and the `cancelAtPeriodEnd` the provider reported. */
-  const cancelSubscription = j.command('cancelSubscription', cancelSubscriptionInputSchema, (input, { write }) =>
-    write(subscription, input.subscriptionId, row => {
-      const current = requireSubscription(row, input.subscriptionId);
-      if (isFailure(current)) return current;
+  const cancelSubscription = j.command(
+    'cancelSubscription',
+    cancelSubscriptionInputSchema,
+    { writes: [SubscriptionCanceled] },
+    (input, { write }) =>
+      write(subscription, input.subscriptionId, row => {
+        const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
-      if (current.status === 'canceled') {
-        return CommandConflict({ detail: `Subscription ${input.subscriptionId} is already canceled` });
-      }
+        if (current.status === 'canceled') {
+          return CommandConflict({ detail: `Subscription ${input.subscriptionId} is already canceled` });
+        }
 
-      return [
-        SubscriptionCanceled({
-          status: input.status,
-          canceledAt: resolveTime(input.canceledAt, current.canceledAt),
-          cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? current.cancelAtPeriodEnd,
-        }),
-      ];
-    }),
+        return [
+          SubscriptionCanceled({
+            status: input.status,
+            canceledAt: resolveTime(input.canceledAt, current.canceledAt),
+            cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? current.cancelAtPeriodEnd,
+          }),
+        ];
+      }),
   );
 
   const reactivateSubscription = j.command(
     'reactivateSubscription',
     reactivateSubscriptionInputSchema,
+    { writes: [SubscriptionReactivated] },
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
@@ -357,36 +372,45 @@ export function createSubscriptionJournal<
   );
 
   /** A user pauses an active subscription; dunning pauses one that is past due. */
-  const pauseSubscription = j.command('pauseSubscription', pauseSubscriptionInputSchema, (input, { write }) =>
-    write(subscription, input.subscriptionId, row => {
-      const current = requireSubscription(row, input.subscriptionId);
-      if (isFailure(current)) return current;
+  const pauseSubscription = j.command(
+    'pauseSubscription',
+    pauseSubscriptionInputSchema,
+    { writes: [SubscriptionPaused] },
+    (input, { write }) =>
+      write(subscription, input.subscriptionId, row => {
+        const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
-      if (current.status !== 'active' && current.status !== 'past_due') {
-        return CommandConflict({ detail: 'Only active or past due subscriptions can be paused' });
-      }
+        if (current.status !== 'active' && current.status !== 'past_due') {
+          return CommandConflict({ detail: 'Only active or past due subscriptions can be paused' });
+        }
 
-      return [SubscriptionPaused({ status: input.status })];
-    }),
+        return [SubscriptionPaused({ status: input.status })];
+      }),
   );
 
-  const resumeSubscription = j.command('resumeSubscription', resumeSubscriptionInputSchema, (input, { write }) =>
-    write(subscription, input.subscriptionId, row => {
-      const current = requireSubscription(row, input.subscriptionId);
-      if (isFailure(current)) return current;
+  const resumeSubscription = j.command(
+    'resumeSubscription',
+    resumeSubscriptionInputSchema,
+    { writes: [SubscriptionResumed] },
+    (input, { write }) =>
+      write(subscription, input.subscriptionId, row => {
+        const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
-      if (current.status !== 'paused') {
-        return CommandConflict({ detail: 'Only paused subscriptions can be resumed' });
-      }
+        if (current.status !== 'paused') {
+          return CommandConflict({ detail: 'Only paused subscriptions can be resumed' });
+        }
 
-      return [SubscriptionResumed({ status: input.status })];
-    }),
+        return [SubscriptionResumed({ status: input.status })];
+      }),
   );
 
   /** Stores the plan the provider moved the subscription to. The same plan again writes nothing. */
   const changeSubscriptionPlan = j.command(
     'changeSubscriptionPlan',
     changeSubscriptionPlanInputSchema,
+    { writes: [SubscriptionPlanChanged] },
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
@@ -400,6 +424,7 @@ export function createSubscriptionJournal<
   const setSubscriptionCancelAtPeriodEnd = j.command(
     'setSubscriptionCancelAtPeriodEnd',
     setSubscriptionCancelAtPeriodEndInputSchema,
+    { writes: [SubscriptionCancelAtPeriodEndSet] },
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
@@ -419,6 +444,7 @@ export function createSubscriptionJournal<
   const markSubscriptionPastDue = j.command(
     'markSubscriptionPastDue',
     markSubscriptionPastDueInputSchema,
+    { writes: [SubscriptionPastDue] },
     (input, { write }) =>
       write(subscription, input.subscriptionId, row => {
         const current = requireSubscription(row, input.subscriptionId);
@@ -429,17 +455,21 @@ export function createSubscriptionJournal<
   );
 
   /** A payment went through (a retry succeeded, or dunning recovered). Already active: nothing to write. */
-  const activateSubscription = j.command('activateSubscription', activateSubscriptionInputSchema, (input, { write }) =>
-    write(subscription, input.subscriptionId, row => {
-      const current = requireSubscription(row, input.subscriptionId);
-      if (isFailure(current)) return current;
+  const activateSubscription = j.command(
+    'activateSubscription',
+    activateSubscriptionInputSchema,
+    { writes: [SubscriptionActivated] },
+    (input, { write }) =>
+      write(subscription, input.subscriptionId, row => {
+        const current = requireSubscription(row, input.subscriptionId);
+        if (isFailure(current)) return current;
 
-      if (current.status === 'canceled') {
-        return CommandConflict({ detail: `Cannot activate canceled subscription ${input.subscriptionId}` });
-      }
+        if (current.status === 'canceled') {
+          return CommandConflict({ detail: `Cannot activate canceled subscription ${input.subscriptionId}` });
+        }
 
-      return current.status === 'active' ? [] : [SubscriptionActivated({})];
-    }),
+        return current.status === 'active' ? [] : [SubscriptionActivated({})];
+      }),
   );
 
   return {

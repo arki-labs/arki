@@ -124,6 +124,7 @@ export function createRefundWorkflow<
         startOn: {
           entity: refund,
           event: refundsJournal.events.RefundApproved,
+          timing: 'after-commit',
           id: e => refundRunId(e.entityId),
           input: e => ({ refundId: e.entityId }),
         },

@@ -991,7 +991,9 @@ export function workflowsModule<
       for (const step of detail.steps.toReversed()) {
         if (step.phase !== 'do' || step.status !== 'done') continue;
         const node = nodes.find(candidate => candidate.name === step.path);
-        if (node?.kind === 'step') plan.push({ path: step.path, action: node.undo ? 'undo' : 'none' });
+        if (node?.kind === 'step' || node?.kind === 'command') {
+          plan.push({ path: step.path, action: node.undo ? 'undo' : 'none' });
+        }
         if (node?.kind === 'child') {
           plan.push({
             path: step.path,

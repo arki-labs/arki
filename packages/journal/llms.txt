@@ -34,9 +34,10 @@
 ## Rules that bite
 - The door is `journal.bind(db, meta)`: bind once per request or job, then call `run(command, input)`. You give `meta`; the library never picks an actor.
 - A rule that rejects a request returns a failure (`CommandNotFound({ detail })` and the others, or the app's own). The command rolls back exactly as for a throw, and `journal.run` returns it, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler. A command that got one and still returns a success throws `IGNORED_FAILURE` and commits nothing. To handle a refusal on purpose, check it and call `accept(result)` (on the command and the effect context): it lifts only this command's check, once per return of that very value; the refused child stays rolled back. Misuse throws `INVALID_ACCEPT`. A failure is not a `JournalError`. An oRPC app adds `commandErrors()` once, after its own error middleware; it answers a returned failure as an error too.
+- A command declares its events: `j.command(name, input, { writes: [OrderPaid] }, handler)`. `write` takes only those; an undeclared event that gets past the types fails with `BAD_DEFINITION` and nothing commits.
 - Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.
 - `drain` and `worker` take the root database, never a transaction.
-- An effect that needs a service lists it: `j.effect(name, entity, { mailer: need<Mailer>() }, on)`. The handler reads `mailer` from its context. Do not wrap an effect in a function. A plain app gives the services once, in `j.compose({ services })`. In a Dot app the feature that lists the effect declares them in `needs`.
+- An effect that needs a service lists it: `j.effect(name, entity, { mailer: need<Mailer>() }, on)`. The handler reads `mailer` from its context. A plain app gives the services once, in `j.compose({ services })`. In a Dot feature the effect picks them with `needsOf((_: Deps) => ['mailer'])`, as a plain exported value with `import type { Deps }` from the feature, and is mounted with `.usecases({}, journalHandlers(core, { effects }))`.
 - Any running worker can claim any job. Run the worker in the process that holds what its effects talk to (for example an in-memory emitter).
 - A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row. A soft delete is a normal patch.
 - Version 1 means created by the journal. A row that existed before the journal starts at version 2. `adopt` takes a row at any version with no history and makes it version 1; that is also how an entity goes from `events: 'transient'` to `'stored'`.
@@ -46,5 +47,7 @@
 - `kurrentEvents({ client, prefix? })` from `@arki/journal/kurrentdb` keeps events in KurrentDB: one stream per entity (`<kind>-<id>`, no `-` in the kind), `all` over `$all`, no `forget`.
 - Pass ids exactly as they are stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
+- An effect has no `run`. An event that must run a command starts a `j.task` or a `j.workflow` with `startOn`. `startOn.timing` is required: `'after-commit'`, or `'with-event'` (the run is written in the event's transaction; `onBusy: 'refuse'` does not compile).
+- A `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` node commits the command with its checkpoint: exactly once. Its result comes from the command's `output` schema.
 
 > The design spec (`docs/specs/2026-10-09-journal-design.md`) explains intent. `src/api.ts` defines the signatures. When they differ, `src/api.ts` is right.

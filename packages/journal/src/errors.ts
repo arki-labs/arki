@@ -106,7 +106,7 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   },
   BAD_DEFINITION: {
     what: 'a declaration is wrong',
-    next: 'Fix the declaration named in the detail. It is thrown when the module that declares it loads, so no data was touched',
+    next: 'Fix the declaration named in the detail. It is thrown when the module that declares it loads, or by the run of a command that writes an event outside its `writes` list, and either way no data was kept',
   },
   JOB_NOT_DEAD: {
     what: 'the job is not dead',
@@ -188,7 +188,8 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *
  * Not every error the journal lets out is a `JournalError`:
  * - A wrong definition is a `JournalError` with code `BAD_DEFINITION`, thrown when the
- *   declaration runs (a bad name, a bad key column, a duplicate reducer or handler name).
+ *   declaration runs (a bad name, a bad key column, a duplicate reducer or handler name),
+ *   or when a command writes an event its `writes` list does not declare.
  * - A misuse at run time is a plain `Error` whose message starts with `journal:` (two
  *   operations at once on one transaction, `drain` inside a transaction).
  * - A misused `accept` (a value the handler never received, accepted twice, called late,

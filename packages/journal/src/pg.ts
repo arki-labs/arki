@@ -44,7 +44,7 @@ const eventColumns = () => ({
   // Stamped by the library, never by the app. Null on rows written before these columns existed.
   /** The `cmd_` id of the command run that wrote this event. Null for a bare `journal.write`. */
   commandId: varchar('command_id'),
-  /** Inside an effect's `ctx.run`: the seq of the event the job was for. Else null. */
+  /** Inside a workflow body's `ctx.run`: the seq of the event the job was for. Else null. */
   causeSeq: bigint('cause_seq', { mode: 'number' }),
   /** Shared by every event of one chain: inherited from the cause event or the parent run, else new per root run. */
   correlationId: varchar('correlation_id'),

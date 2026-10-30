@@ -199,78 +199,96 @@ export function createPaymentJournal<
       updatedAt: fromDate(e.recordedAt),
     }));
 
-  const initiatePayment = j.command('initiatePayment', initiatePaymentInputSchema, (input, { write }) => {
-    const paymentId = input.paymentId ?? createPaymentId();
-    if (isFailure(paymentId)) return paymentId;
+  const initiatePayment = j.command(
+    'initiatePayment',
+    initiatePaymentInputSchema,
+    { writes: [PaymentInitiatedV2] },
+    (input, { write }) => {
+      const paymentId = input.paymentId ?? createPaymentId();
+      if (isFailure(paymentId)) return paymentId;
 
-    return write(payment, paymentId, row => {
-      if (row) {
-        return CommandConflict({ detail: `Payment ${paymentId} already exists with status ${row.status}` });
-      }
+      return write(payment, paymentId, row => {
+        if (row) {
+          return CommandConflict({ detail: `Payment ${paymentId} already exists with status ${row.status}` });
+        }
 
-      return [
-        PaymentInitiatedV2({
-          subscriptionId: input.subscriptionId ?? null,
-          userId: input.userId,
-          customerId: input.customerId,
-          providerPaymentId: input.providerPaymentId,
-          amount: input.amount.toJSON(),
-          paymentMethod: input.paymentMethod,
-          description: input.description ?? null,
-          metadata: input.metadata ?? null,
-        }),
-      ];
-    });
-  });
+        return [
+          PaymentInitiatedV2({
+            subscriptionId: input.subscriptionId ?? null,
+            userId: input.userId,
+            customerId: input.customerId,
+            providerPaymentId: input.providerPaymentId,
+            amount: input.amount.toJSON(),
+            paymentMethod: input.paymentMethod,
+            description: input.description ?? null,
+            metadata: input.metadata ?? null,
+          }),
+        ];
+      });
+    },
+  );
 
   /**
    * The money was collected. An open payment completes, and so does a `failed`
    * one: the customer retried on the same provider payment and it succeeded.
    */
-  const completePayment = j.command('completePayment', completePaymentInputSchema, (input, { write }) =>
-    write(payment, input.paymentId, row => {
-      const current = requirePayment(row, input.paymentId);
-      if (isFailure(current)) return current;
+  const completePayment = j.command(
+    'completePayment',
+    completePaymentInputSchema,
+    { writes: [PaymentCompleted] },
+    (input, { write }) =>
+      write(payment, input.paymentId, row => {
+        const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
-      if (!isOpen(current.status) && current.status !== 'failed') {
-        return CommandConflict({ detail: `Cannot complete payment with status ${current.status}` });
-      }
+        if (!isOpen(current.status) && current.status !== 'failed') {
+          return CommandConflict({ detail: `Cannot complete payment with status ${current.status}` });
+        }
 
-      return [PaymentCompleted({ receiptUrl: input.receiptUrl ?? null })];
-    }),
+        return [PaymentCompleted({ receiptUrl: input.receiptUrl ?? null })];
+      }),
   );
 
   /** Only an open payment fails. A `succeeded` payment never moves back to `failed`. */
-  const failPayment = j.command('failPayment', failPaymentInputSchema, (input, { write }) =>
-    write(payment, input.paymentId, row => {
-      const current = requirePayment(row, input.paymentId);
-      if (isFailure(current)) return current;
+  const failPayment = j.command(
+    'failPayment',
+    failPaymentInputSchema,
+    { writes: [PaymentFailed] },
+    (input, { write }) =>
+      write(payment, input.paymentId, row => {
+        const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
-      if (!isOpen(current.status)) {
-        return CommandConflict({ detail: `Cannot fail payment with status ${current.status}` });
-      }
+        if (!isOpen(current.status)) {
+          return CommandConflict({ detail: `Cannot fail payment with status ${current.status}` });
+        }
 
-      return [PaymentFailed({ failureReason: input.failureReason })];
-    }),
+        return [PaymentFailed({ failureReason: input.failureReason })];
+      }),
   );
 
-  const cancelPayment = j.command('cancelPayment', cancelPaymentInputSchema, (input, { write }) =>
-    write(payment, input.paymentId, row => {
-      const current = requirePayment(row, input.paymentId);
-      if (isFailure(current)) return current;
+  const cancelPayment = j.command(
+    'cancelPayment',
+    cancelPaymentInputSchema,
+    { writes: [PaymentCanceled] },
+    (input, { write }) =>
+      write(payment, input.paymentId, row => {
+        const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
-      if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled') {
-        return CommandConflict({ detail: `Cannot cancel payment with status ${current.status}` });
-      }
+        if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled') {
+          return CommandConflict({ detail: `Cannot cancel payment with status ${current.status}` });
+        }
 
-      return [PaymentCanceled({})];
-    }),
+        return [PaymentCanceled({})];
+      }),
   );
 
   /** The customer must act before the payment can finish. Repeating it on a payment that already waits writes nothing. */
   const markPaymentRequiresAction = j.command(
     'markPaymentRequiresAction',
     markPaymentRequiresActionInputSchema,
+    { writes: [PaymentRequiresAction] },
     (input, { write }) =>
       write(payment, input.paymentId, row => {
         const current = requirePayment(row, input.paymentId);
@@ -292,37 +310,42 @@ export function createPaymentJournal<
    * The provider refunded part or all of a payment that was collected. The command takes the
    * running total, so a webhook delivered twice, or after a later one, never lowers or doubles it.
    */
-  const recordPaymentRefund = j.command('recordPaymentRefund', recordPaymentRefundInputSchema, (input, { write }) =>
-    write(payment, input.paymentId, row => {
-      const current = requirePayment(row, input.paymentId);
-      if (isFailure(current)) return current;
+  const recordPaymentRefund = j.command(
+    'recordPaymentRefund',
+    recordPaymentRefundInputSchema,
+    { writes: [PaymentRefundRecorded] },
+    (input, { write }) =>
+      write(payment, input.paymentId, row => {
+        const current = requirePayment(row, input.paymentId);
+        if (isFailure(current)) return current;
 
-      if (current.status !== 'succeeded') {
-        return CommandConflict({ detail: `Cannot refund payment with status ${current.status}` });
-      }
-      if (input.refundedAmount.currency.code !== current.currency.toUpperCase()) {
-        return CommandInvalid({
-          detail: `Refund is in ${input.refundedAmount.currency.code}, payment is in ${current.currency}`,
-        });
-      }
+        if (current.status !== 'succeeded') {
+          return CommandConflict({ detail: `Cannot refund payment with status ${current.status}` });
+        }
+        if (input.refundedAmount.currency.code !== current.currency.toUpperCase()) {
+          return CommandInvalid({
+            detail: `Refund is in ${input.refundedAmount.currency.code}, payment is in ${current.currency}`,
+          });
+        }
 
-      const refundedMinor = toMinorColumn(input.refundedAmount);
-      if (refundedMinor > current.amountMinor) {
-        return CommandInvalid({ detail: `Refund of ${refundedMinor} exceeds the payment of ${current.amountMinor}` });
-      }
-      // Not higher than what is recorded: a resent or out-of-order report
-      if (refundedMinor <= current.refundedAmountMinor) {
-        return [];
-      }
+        const refundedMinor = toMinorColumn(input.refundedAmount);
+        if (refundedMinor > current.amountMinor) {
+          return CommandInvalid({ detail: `Refund of ${refundedMinor} exceeds the payment of ${current.amountMinor}` });
+        }
+        // Not higher than what is recorded: a resent or out-of-order report
+        if (refundedMinor <= current.refundedAmountMinor) {
+          return [];
+        }
 
-      return [PaymentRefundRecorded({ refundedAmount: input.refundedAmount.toJSON() })];
-    }),
+        return [PaymentRefundRecorded({ refundedAmount: input.refundedAmount.toJSON() })];
+      }),
   );
 
   /** A dispute opened, or changed status. The same dispute and status again writes nothing. */
   const recordPaymentDispute = j.command(
     'recordPaymentDispute',
     recordPaymentDisputeInputSchema,
+    { writes: [PaymentDisputeRecorded] },
     (input, { write }) =>
       write(payment, input.paymentId, row => {
         const current = requirePayment(row, input.paymentId);

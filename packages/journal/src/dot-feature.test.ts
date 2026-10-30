@@ -1,13 +1,15 @@
 /**
  * The journal inside a `defineFeature` feature: projections in `.infra(...)`
- * (`journalProjections`), effects and taps in `.entrypoints(...)`
- * (`journalEffects`), and `dot explain` edges from event to effect.
+ * (`journalProjections`), effects and taps in `.usecases(...)` as an application
+ * contribution (`journalHandlers(core, …)`, deps picked with `needsOf`), and the
+ * `dot explain --as journal-flow` graph.
  *
  * Why these tests exist: the journal composes BEFORE the features boot, so it
  * must find a feature's handlers in the feature value itself, wherever the
  * layers put them, and fold them into one declaration — or a write runs
- * without its projection, or a job has no owner. And an effect's needs must be checked
- * against the feature where the effect is listed, not at the first job.
+ * without its projection, or a job has no owner. An effect is application code (D-8):
+ * it must get its feature's private services, which entrypoints never see. And its
+ * needs must be checked against the feature where it is listed, not at the first job.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -15,6 +17,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import type { DepsOf } from '@arki/dot/feature';
 import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { infra, rename, service } from '@arki/dot/unit';
@@ -23,10 +26,10 @@ import { orThrow, UnexpectedDefect } from '@arki/failure';
 import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
 import type { JobRunner } from './types.js';
-import { journal, journalEffects, journalProjections, journalWorker } from './dot.js';
-import { need } from './handlers.js';
+import { journal, journalHandlers, journalProjections, journalWorker, needsOf } from './dot.js';
 import { jobId } from './id.js';
-import { project } from './projection.js';
+import { initJournal } from './journal.js';
+import { project, render } from './projection.js';
 import { customerOrderCounts, j, meta, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
 
 const POLL_MS = 20;
@@ -62,6 +65,7 @@ const dbPlugin = () => infra({ name: 'db', provides: { db: () => db } });
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]), customerId: z.string().default('c1') }),
+  { writes: [OrderPlaced] },
   (input, { write }) => write(order, input.id, () => [OrderPlaced({ customerId: input.customerId, total: 1 })]),
 );
 
@@ -85,31 +89,44 @@ const placedCount = async (customerId: string) => {
 
 /** What the effect talks to: a mailer that records who it mailed. */
 type Mailer = { readonly send: (id: OrderId) => void };
-const mail = (name: string) =>
-  j.effect(name, order, { mailer: need<Mailer>() }, { OrderPlaced: (e, { mailer }) => mailer.send(e.entityId) });
+const mailerUnit = (send: Mailer['send']) => infra({ name: 'mailer', provides: { mailer: (): Mailer => ({ send }) } });
 
-/** The chain feature: its mailer is private infra; its projection sits in infra, its effect in entrypoints. */
+/** The chain feature: its mailer is private infra; its projection sits in infra, its effect in usecases. */
 function ordersFeature(sent: OrderId[], done?: (id: OrderId) => void) {
-  const mailer = infra({
-    name: 'mailer',
-    provides: {
-      mailer: (): Mailer => ({
-        send: id => {
-          sent.push(id);
-          done?.(id);
-        },
-      }),
+  const core = defineFeature('orders').infra(
+    mailerUnit(id => {
+      sent.push(id);
+      done?.(id);
+    }),
+    journalProjections(countPlaced('chain-orders-count', 'chain')),
+  );
+  // reactions/order-mail.ts: the reaction is a plain value (`import type { Deps }` in a real app).
+  const orderMail = j.effect(
+    'chain-order-mail',
+    order,
+    needsOf((_: DepsOf<typeof core>) => ['mailer']),
+    {
+      OrderPlaced: (e, { mailer }) => mailer.send(e.entityId),
     },
-  });
-  const core = defineFeature('orders')
-    .infra(mailer, journalProjections(countPlaced('chain-orders-count', 'chain')))
-    .usecases({});
-  // entrypoints/journal.ts: a factory over the core (`import type` in a real app).
-  const orderEffects = (c: typeof core) => journalEffects(c, { effects: [mail('chain-order-mail')] });
-  return core.entrypoints(orderEffects(core));
+  );
+  return core.usecases({}, journalHandlers(core, { effects: [orderMail] })).entrypoints();
 }
 
-describe('journalProjections + journalEffects in a defineFeature feature', () => {
+/** A feature with a mailer, and its effect: what the refusal tests list on a feature that lacks one. */
+export const withMailer = defineFeature('with-mailer').infra(
+  mailerUnit(() => {
+    // Never booted: the refusal tests only list its effect on a feature that lacks a mailer.
+  }),
+);
+const mailOf = (name: string) =>
+  j.effect(
+    name,
+    order,
+    needsOf((_: DepsOf<typeof withMailer>) => ['mailer']),
+    { OrderPlaced: (e, { mailer }) => mailer.send(e.entityId) },
+  );
+
+describe('journalProjections + journalHandlers in a defineFeature feature', () => {
   it('composes the journal from both layers before boot, across features, and runs each part', async () => {
     const sent: OrderId[] = [];
     const delivered = new Map<OrderId, () => void>();
@@ -187,21 +204,23 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
   });
 
   it("checks an effect's needs against the core where it is listed, at compile time", () => {
-    const bare = defineFeature('bare').usecases({});
-    // @ts-expect-error -- `bare` has no `mailer` need, infra service or usecase
-    const refused = () => journalEffects(bare, { effects: [mail('needs-mailer')] });
+    const bare = defineFeature('bare');
+    // @ts-expect-error -- `bare` has no `mailer` need, infra service or domain service
+    const picked = () => needsOf((_: DepsOf<typeof bare>) => ['mailer']);
+    // @ts-expect-error -- `bare` does not give the effect its `mailer`
+    const refused = () => journalHandlers(bare, { effects: [mailOf('needs-mailer')] });
+    expect(picked).toBeTypeOf('function');
     expect(refused).toBeTypeOf('function');
   });
 
   it('fails the feature boot when the types were bypassed and a need is missing', async () => {
-    const bare = defineFeature('bare-runtime').usecases({});
+    const bare = defineFeature('bare-runtime');
     // Erased on purpose: what a caller that skips the types would hand over.
-    const erased: Parameters<typeof journalEffects>[1] = { effects: [mail('bypassed-mailer')] };
-    const entry = journalEffects(bare, erased);
+    const erased: Parameters<typeof journalHandlers>[1] = { effects: [mailOf('bypassed-mailer')] };
     await expect(
       defineApp('bypassed')
         .infra(dbPlugin(), journal({ j }))
-        .features([bare.entrypoints(entry)])
+        .features([bare.usecases({}, journalHandlers(bare, erased)).entrypoints()])
         .boot(),
     ).resolves.toMatchObject({
       code: 'failure.unexpected_defect',
@@ -210,24 +229,117 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
   });
 });
 
-describe('dot explain: event → effect edges', () => {
-  it('draws each effect from the events it handles, read from the manifest alone', () => {
-    const orders = ordersFeature([]);
-    const configured = orThrow(
+describe('dot explain --as journal-flow: the event graph', () => {
+  // Why: nothing in the code connects a command to the effect its event starts. The graph is the one place
+  // a reader sees, per event, what runs in the write and what runs later, who owns it and what it touches.
+  function configuredFlow() {
+    return orThrow(
       defineApp('explain')
         .infra(dbPlugin(), journal({ j }))
-        .features([orders])
+        .features([ordersFeature([])])
         .entrypoints(journalWorker())
         .configure(),
     );
+  }
 
+  it('derives the graph from the declarations before boot: fold, projection, reaction, owner', () => {
+    const configured = configuredFlow();
     expect(configured.manifest.projections).toContainEqual(
       expect.objectContaining({ format: 'journal-flow', module: '@arki/journal/projection', plugin: 'journal' }),
     );
-    expect(project(configured.manifest)).toEqual({
-      format: 'journal-flow',
-      edges: [{ event: 'OrderPlaced', effect: 'chain-order-mail', plugin: 'orders', entities: ['order'] }],
-    });
+    const document = project(configured.manifest);
+    expect(document.format).toBe('journal-flow');
+    expect(document.nodes).toEqual(
+      expect.arrayContaining([
+        { id: 'event:OrderPlaced', kind: 'event', name: 'OrderPlaced' },
+        { id: 'entity:order', kind: 'entity', name: 'order', table: 'orders' },
+        { id: 'projection:chain-orders-count', kind: 'projection', name: 'chain-orders-count', lane: 'inline' },
+        {
+          id: 'effect:chain-order-mail',
+          kind: 'effect',
+          name: 'chain-order-mail',
+          deps: ['mailer'],
+          retry: { policy: 'default', maxRetries: 7 },
+        },
+        { id: 'feature:orders', kind: 'feature', name: 'orders' },
+      ]),
+    );
+    expect(document.edges).toEqual(
+      expect.arrayContaining([
+        { kind: 'folds', from: 'entity:order', to: 'event:OrderPlaced', timing: 'same-transaction' },
+        {
+          kind: 'projects',
+          from: 'projection:chain-orders-count',
+          to: 'event:OrderPlaced',
+          timing: 'same-transaction',
+        },
+        {
+          kind: 'reacts',
+          from: 'effect:chain-order-mail',
+          to: 'event:OrderPlaced',
+          timing: 'after-commit',
+          delivery: 'at-least-once',
+        },
+        { kind: 'owned-by', from: 'effect:chain-order-mail', to: 'feature:orders' },
+        { kind: 'owned-by', from: 'projection:chain-orders-count', to: 'feature:orders' },
+      ]),
+    );
+  });
+
+  it('prints each event with its fold first, then its projections, then its reactions', () => {
+    const text = render(project(configuredFlow().manifest));
+    const placed = text.split('\n\n').find(block => block.startsWith('OrderPlaced'));
+    expect(placed?.split('\n')).toEqual([
+      'OrderPlaced',
+      '  fold order  [same transaction]',
+      '  projection chain-orders-count  [same transaction]  owner orders',
+      '  effect chain-order-mail  [after commit, at least once]  owner orders; deps mailer; retry default, 7 retries',
+    ]);
+  });
+
+  // Why: a reader decides from this graph what a rollback undoes. A with-event run goes with the write, an
+  // after-commit one does not, and the two look the same in the code that records the event.
+  it('draws a with-event start as part of the write, and an after-commit start as a reaction', () => {
+    const flows = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
+    const started = (name: string, timing: 'after-commit' | 'with-event') =>
+      flows.task(
+        name,
+        {
+          version: 1,
+          input: z.object({ id: z.string() }),
+          startOn: { entity: order, event: OrderPlaced, timing, id: e => e.entityId, input: e => ({ id: e.entityId }) },
+        },
+        () => null,
+      );
+    const core = defineFeature('starts');
+    const feature = core
+      .usecases(
+        {},
+        journalHandlers(core, { workflows: [started('with-write', 'with-event'), started('later', 'after-commit')] }),
+      )
+      .entrypoints();
+    const document = project(
+      orThrow(
+        defineApp('starts')
+          .infra(dbPlugin())
+          .infra(journal({ j: flows, workflowMeta: { actorId: 'system:workflow' } }))
+          .features([feature])
+          .entrypoints(journalWorker())
+          .configure(),
+      ).manifest,
+    );
+    expect(document.edges).toEqual(
+      expect.arrayContaining([
+        { kind: 'reacts', from: 'workflow:with-write@1', to: 'event:OrderPlaced', timing: 'same-transaction' },
+        {
+          kind: 'reacts',
+          from: 'workflow:later@1',
+          to: 'event:OrderPlaced',
+          timing: 'after-commit',
+          delivery: 'at-least-once',
+        },
+      ]),
+    );
   });
 });
 
@@ -325,8 +437,16 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
   function reportsFeature(sent: string[]) {
     const us = mailerFor('us', sent);
     const eu = rename(mailerFor('eu', sent), { mailer: 'mailerEu' }, 'mailerEu');
-    const core = defineFeature('reports').needs({ mailer: us.provides.mailer }).usecases({});
-    const reports = core.entrypoints(journalEffects(core, { effects: [mail('send-on-request')] }));
+    const core = defineFeature('reports').needs({ mailer: us.provides.mailer });
+    const sendOnRequest = j.effect(
+      'send-on-request',
+      order,
+      needsOf((_: DepsOf<typeof core>) => ['mailer']),
+      {
+        OrderPlaced: (e, { mailer }) => mailer.send(e.entityId),
+      },
+    );
+    const reports = core.usecases({}, journalHandlers(core, { effects: [sendOnRequest] })).entrypoints();
     return { reports, us, eu };
   }
 
@@ -364,8 +484,16 @@ describe('feature.instance(): effect names, action ids and job dispatch follow t
 
   it('keeps refusing two plain features that share an effect name, but not two instances', async () => {
     const { reports, us, eu } = reportsFeature([]);
-    const rival = defineFeature('rival').needs({ mailer: us.provides.mailer }).usecases({});
-    const clash = rival.entrypoints(journalEffects(rival, { effects: [mail('send-on-request')] }));
+    const rival = defineFeature('rival').needs({ mailer: us.provides.mailer });
+    const rivalSend = j.effect(
+      'send-on-request',
+      order,
+      needsOf((_: DepsOf<typeof rival>) => ['mailer']),
+      {
+        OrderPlaced: (e, { mailer }) => mailer.send(e.entityId),
+      },
+    );
+    const clash = rival.usecases({}, journalHandlers(rival, { effects: [rivalSend] })).entrypoints();
     await expect(
       defineApp('plain-duplicate').infra(dbPlugin(), journal({ j }), us).features([reports, clash]).boot(),
     ).resolves.toMatchObject({

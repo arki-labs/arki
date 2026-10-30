@@ -6,6 +6,8 @@
  * Types are written once, here. `results` grows by one key per node, and a node that can be
  * skipped (`when`) or can time out into `continue` adds `R | null`.
  */
+import { z } from 'zod';
+
 import type { Failure } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
@@ -16,10 +18,14 @@ import type {
   AnyEntity,
   AnyEventDef,
   BivariantFn,
+  EntityDef,
   EntityIdOf,
+  EntityTable,
+  EventsOf,
   Needed,
   Needs,
   NoNeeds,
+  Recorded,
   RecordedOf,
   RootDb,
   ServicesFor,
@@ -32,6 +38,7 @@ import type { WorkflowShape } from './shape.js';
 import { JournalError } from '../errors.js';
 import { parseRunKeep } from '../retention.js';
 import { LIMIT_BOUNDS } from './limit-types.js';
+import { START_TIMINGS } from './states.js';
 
 /** What a node body sees. `results` has one key per earlier node. */
 export type StepContext<Input, Results, N extends Needs = NoNeeds, AppDb = RootDb, Run = unknown> = Needed<N> & {
@@ -81,10 +88,16 @@ export function isCheckedRead<Input, ReadOutput, ReadResults extends AnyResults>
   );
 }
 
+/** What a command node keeps of a command that declares no `output`: nothing, so its result is `null`. */
+const noOutput: StandardSchemaV1<unknown, null> = z.null();
+
 /** The schema a stored node result is checked with, and whether `null` (skipped, or timed out into `continue`) is kept. */
 export function resultSchemaOf(node: WorkflowNode) {
   if (node.kind === 'step' && node.options.output !== undefined) {
     return { schema: node.options.output, nullable: node.options.when !== undefined };
+  }
+  if (node.kind === 'command') {
+    return { schema: node.command.output ?? noOutput, nullable: node.options.when !== undefined };
   }
   if (node.kind === 'waitFor') {
     return { schema: node.schema, nullable: node.onTimeout === 'continue' || node.when !== undefined };
@@ -94,6 +107,38 @@ export function resultSchemaOf(node: WorkflowNode) {
 
 /** A stored body. Bivariant so a body typed for one workflow fits the erased slot without a cast. */
 type Body<Out, Extra extends unknown[] = []> = BivariantFn<[...Extra, ctx: ErasedContext], Out>;
+
+/**
+ * What a command node's `input`, `when` and `undo.input` see. Plain data, no database and no command runner: a command
+ * node's only work is its command. `key` is stable across attempts.
+ */
+export type CommandNodeView<Input, Results> = {
+  readonly runId: string;
+  readonly key: string;
+  readonly input: Input;
+  readonly results: Results;
+};
+type ErasedCommandView = CommandNodeView<unknown, Readonly<Record<string, unknown>>>;
+
+/**
+ * A command as a node keeps it: nothing is known about its input, its result or its journal. `Command` needs the
+ * journal's meta and transaction types, which a definition does not carry, so the slot is structural, and bivariant
+ * (`BivariantFn`) so every command fits it and it fits `run` without a cast.
+ */
+export type ErasedCommand = {
+  readonly name: string;
+  readonly input: StandardSchemaV1;
+  readonly writes: readonly AnyEventDef[];
+  readonly output?: StandardSchemaV1 | undefined;
+  readonly handler: BivariantFn<[input: never, context: never], unknown>;
+};
+/** A failure definition as a node keeps it. Enough for `is`, `serialize` and `revive`. */
+export type ErasedFailureDefinition = {
+  (...args: never[]): Failure;
+  readonly code: string;
+  readonly dataSchema: StandardSchemaV1 | undefined;
+  is(value: unknown): boolean;
+};
 
 export type WorkflowNode =
   | {
@@ -149,6 +194,24 @@ export type WorkflowNode =
       readonly input: BivariantFn<[ctx: ErasedContext, item: unknown, index: number], unknown>;
       readonly wait: 'all' | 'any';
       readonly concurrency?: number;
+    }
+  | {
+      readonly kind: 'command';
+      readonly name: string;
+      readonly undo: boolean;
+      readonly command: ErasedCommand;
+      readonly input: BivariantFn<[view: ErasedCommandView], unknown>;
+      readonly accept: readonly ErasedFailureDefinition[];
+      readonly options: {
+        readonly undo?:
+          | {
+              readonly command: ErasedCommand;
+              readonly input: BivariantFn<[view: ErasedCommandView & { readonly result: unknown }], unknown>;
+            }
+          | undefined;
+        readonly when?: BivariantFn<[view: ErasedCommandView], boolean> | undefined;
+        readonly retry?: Backoff | undefined;
+      };
     };
 
 export type WorkflowLimits = {
@@ -223,19 +286,38 @@ export type WorkflowServices<W extends readonly WorkflowDef[]> = ServicesFor<{
   readonly [K in keyof W]: { readonly needs: NeedsOfDef<W[K]> };
 }>;
 
+/** When `startOn` starts a run. `START_TIMINGS` says what each means. */
+export type StartTiming = (typeof START_TIMINGS)[number];
+
 /**
  * `startOn`: the event of `entity` that starts a run. `id` gives the run id and `input` the run's input, both from the
- * recorded event, typed by the entity's key and the event's data. `id` and `input` are method signatures, so a typed
- * `startOn` fits the erased one a definition keeps; see `BivariantFn`.
+ * recorded event, typed by the entity's key and the event's data. `timing` is required: see `START_TIMINGS`. `id` and
+ * `input` are method signatures, so a typed `startOn` fits the erased one a definition keeps; see `BivariantFn`.
  */
-export type StartOn<Input extends StandardSchemaV1, E, D, MetaOut> = {
+export type StartOn<Input extends StandardSchemaV1, E, D, MetaOut, Timing extends StartTiming = StartTiming> = {
   readonly entity: E;
   readonly event: D;
+  readonly timing: Timing;
   id(event: RecordedOf<D, MetaOut, EntityIdOf<E>>): string;
   input(event: RecordedOf<D, MetaOut, EntityIdOf<E>>): SchemaInput<Input>;
 };
 /** A `startOn` as the runner keeps it: nothing is known about the entity, the event or the input. */
-export type ErasedStartOn = StartOn<StandardSchemaV1, AnyEntity, AnyEventDef, unknown>;
+export type ErasedStartOn = {
+  readonly entity: AnyEntity;
+  readonly event: AnyEventDef;
+  readonly timing: StartTiming;
+  id(event: Recorded<string, unknown, unknown>): string;
+  input(event: Recorded<string, unknown, unknown>): unknown;
+};
+/** The meta an entity's events carry, read from the entity: a standalone `workflow()` has no journal to take it from. */
+type MetaOfEntity<E> = E extends EntityDef<string, EntityTable, AnyEventDef, infer Meta, string> ? Meta : unknown;
+/**
+ * What `onBusy` may say. A `with-event` start runs in the business transaction, so a limit must never refuse it:
+ * `'refuse'` is a type error there. A `join` that finds no run to join, or a paused limit, queues the run instead.
+ */
+type OnBusyFor<Start extends ErasedStartOn> = [Start['timing']] extends ['with-event']
+  ? Exclude<(typeof ON_BUSY)[number], 'refuse'>
+  : (typeof ON_BUSY)[number];
 
 /**
  * How a run ended, as a lifecycle hook sees it: the end state, with the output of a completed run and the error text
@@ -322,7 +404,7 @@ export type WorkflowOptions<
     readonly limit?: number;
     readonly total?: number;
     readonly shared?: readonly LimitDef[];
-    readonly onBusy: (typeof ON_BUSY)[number];
+    readonly onBusy: OnBusyFor<Start>;
   };
   readonly onDeadStep?: 'wait' | 'compensate';
   /** How long the run row stays after it ends, by how it ended. Overrides `retention.workflows` of `initJournal`. */
@@ -330,8 +412,9 @@ export type WorkflowOptions<
   readonly limits?: Partial<WorkflowLimits>;
   readonly needs?: N;
   /**
-   * Starts a run when `entity` records `event`, with the app's `workflowMeta`, at the highest registered version. The
-   * job is written in the event's transaction, so the run starts once. An id that already has a run starts nothing.
+   * Starts a run when `entity` records `event`, with the app's `workflowMeta`, at the highest registered version.
+   * `timing` says when (`START_TIMINGS`). Either way the start commits with the event, so the run starts once, and an
+   * id that already has a run starts nothing.
    */
   readonly startOn?: Start;
   /** What runs when a run ends: `success`, `failure`, `cancel`, `expired`, and `complete` for every end. See `LifecycleHooks`. */
@@ -348,8 +431,13 @@ type Add<Results extends AnyResults, Name extends string, Value> = {
 /** The step name itself, or `never` when an earlier node already uses it. */
 type Fresh<Results extends AnyResults, Name extends string> = Name extends keyof Results ? never : Name;
 /** What a step really produced: the awaited value without a returned `Failure`. */
-type Resolved<Returned> = Exclude<Awaited<Returned>, Failure>;
-type Host = { readonly db: unknown; readonly run: unknown };
+export type Resolved<Returned> = Exclude<Awaited<Returned>, Failure>;
+/**
+ * What a journal gives its bodies. `commandContext` says which commands fit: a command handler must take this context,
+ * so a command of another journal does not fit a command node. A standalone `workflow()` has `never`: any command fits.
+ */
+type Host = { readonly db: unknown; readonly run: unknown; readonly commandContext: unknown };
+type StandaloneHost = { readonly db: RootDb; readonly run: unknown; readonly commandContext: never };
 type OutputOf<Def extends WorkflowDef> = NonNullable<Def['types']>['output'];
 /** `Signals` plus one signal. A name used twice keeps the later schema; `define` refuses two different schemas for one name. */
 type AddSignal<Signals extends AnySignals, Name extends string, Payload extends StandardSchemaV1> = {
@@ -366,6 +454,31 @@ type StepOptions<Context, Result, Earlier extends string> = {
   /** Backward jump only: an earlier node, or `'next'` to carry on. */
   readonly next?: Earlier | 'next' | ((ctx: Context & { readonly result: Result }) => Earlier | 'next');
 };
+
+/** What a command node reads of a command. `Output` is the command's `output` schema, when it declares one. */
+type NodeCommand<S extends StandardSchemaV1, R, Output, Context> = {
+  readonly name: string;
+  readonly input: S;
+  readonly writes: readonly AnyEventDef[];
+  readonly output?: Output;
+  readonly handler: (input: SchemaOutput<S>, context: Context) => R;
+};
+/** The failures a command's handler returns. */
+type RefusalOf<R> = Extract<Awaited<R>, Failure>;
+/** A failure definition whose failure is one that `Refusal` names. Anything else is a type error in `accept`. */
+type AcceptedBy<Refusal> = {
+  (...args: never[]): Refusal;
+  readonly code: string;
+  readonly dataSchema: StandardSchemaV1 | undefined;
+  is(value: unknown): boolean;
+};
+/** What a command node stores: the output of the command's `output` schema, or `null` when it declares none. */
+type StoredResult<Output> = [Output] extends [StandardSchemaV1] ? SchemaOutput<Output> : null;
+/** A command node's result: what it stores, or an accepted failure, and `null` when its `when` can skip it. */
+type CommandResult<Output, Accept extends readonly AcceptedBy<unknown>[], When> = Skippable<
+  StoredResult<Output> | ReturnType<Accept[number]>,
+  When
+>;
 
 export type WorkflowBuilder<
   Input extends StandardSchemaV1,
@@ -474,9 +587,58 @@ export type WorkflowBuilder<
   >;
 
   /**
+   * A node whose body is one command. It runs as a savepoint inside the checkpoint's transaction, so the command's
+   * writes, the checkpoint and the next node's scheduling commit together: once per node, even when the job runs again
+   * after a crash. A refused command rolls back its savepoint, and the node fails like a step that returned the failure
+   * (`retry`, then `onDeadStep`). `accept` names failures the command returns that the run goes on from: the savepoint
+   * stays rolled back and the failure is the node's result. `undo` runs in compensation, the same way, and is skipped
+   * for an accepted failure, because a refused command did nothing. `input`, `when` and `undo.input` see plain data
+   * (`CommandNodeView`). The result is what the command's `output` schema gives, `null` without one.
+   */
+  command<
+    Name extends string,
+    S extends StandardSchemaV1,
+    R,
+    Output extends StandardSchemaV1 | undefined,
+    When extends ((view: CommandNodeView<SchemaOutput<Input>, Results>) => boolean) | undefined,
+    const Accept extends readonly AcceptedBy<RefusalOf<R>>[] = readonly [],
+    UndoS extends StandardSchemaV1 = StandardSchemaV1,
+  >(
+    name: Fresh<Results, Name>,
+    command: NodeCommand<S, R, Output, Where['commandContext']>,
+    input: (view: CommandNodeView<SchemaOutput<Input>, Results>) => SchemaInput<S>,
+    options?: {
+      /** Failures the command returns that the run goes on from. Each joins the node's typed result. */
+      readonly accept?: Accept;
+      /** Runs in compensation, once for each visit that stored a result. */
+      readonly undo?: {
+        readonly command: NodeCommand<UndoS, unknown, StandardSchemaV1 | undefined, Where['commandContext']>;
+        readonly input: (
+          view: CommandNodeView<SchemaOutput<Input>, Results> & { readonly result: StoredResult<Output> },
+        ) => SchemaInput<UndoS>;
+      };
+      /** When it returns false the command does not run and the result is `null`. */
+      readonly when?: When;
+      /** How a refused command is tried again. A returned failure is final unless the backoff's `while` accepts it. */
+      readonly retry?: Backoff;
+    },
+  ): WorkflowBuilder<
+    Input,
+    Add<Results, Name, CommandResult<Output, Accept, When>>,
+    N,
+    Declared,
+    CommandResult<Output, Accept, When>,
+    Where,
+    Ext,
+    Signals,
+    Add<Checked, Name, CommandResult<Output, Accept, When>>
+  >;
+
+  /**
    * Without a function the output is the last node's result. With an `output` schema the function must return that
    * schema's output (or a failure, or a promise of either): a wrong return does not compile. Without a function the
-   * last result must fit the schema, or the function is required.
+   * last result must fit the schema, or the function is required. A last node that can end in an accepted failure needs
+   * the function too, and `finish` throws `BAD_DEFINITION` without it: a run's output is never a failure.
    */
   finish<Returned extends FinishBound<Declared> = Last>(
     ...run: [Last] extends [FinishBound<Declared>]
@@ -640,9 +802,22 @@ function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
       undo: node.undo,
       ...(node.kind === 'child' ? { onCancel: node.onCancel } : {}),
       ...(node.kind === 'waitFor' ? { signal: node.signal } : {}),
+      ...(node.kind === 'command' ? { command: node.command.name } : {}),
+      ...(node.kind === 'command' && node.options.undo !== undefined
+        ? { undoCommand: node.options.undo.command.name }
+        : {}),
     })),
   };
 }
+
+/**
+ * What the shape hash reads of one node. A command node adds its commands' names, so changing a command is a shape
+ * change. Every other kind keeps exactly these three fields: its hash must not move, or running workflows strand.
+ */
+const hashedFields = (entry: WorkflowShape['nodes'][number]) =>
+  entry.kind === 'command'
+    ? [entry.name, entry.kind, entry.undo, entry.command, entry.undoCommand ?? null]
+    : [entry.name, entry.kind, entry.undo];
 
 const isPositiveInt = (value: number) => Number.isInteger(value) && value > 0;
 
@@ -707,7 +882,7 @@ function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
 
 function refuseUndo(workflowName: string, kind: string, name: string, options: object | undefined) {
   if (options !== undefined && 'undo' in options) {
-    refuse(workflowName, `${kind} '${name}' cannot have an undo; only a step or a child can be undone`);
+    refuse(workflowName, `${kind} '${name}' cannot have an undo; only a step, a child or a command can be undone`);
   }
 }
 
@@ -725,12 +900,16 @@ function finishDef<
 ): WorkflowDef<Input, Output, Signals, N, ReadOutput, ReadResults> &
   ApplyExtension<Ext, Signals, ReadOutput, ReadResults> {
   if (state.nodes.length === 0) refuse(state.name, 'a workflow needs at least one node');
+  const last = state.nodes.at(-1);
+  if (finish === undefined && last?.kind === 'command' && last.accept.length > 0) {
+    refuse(state.name, `command '${last.name}' can end in an accepted failure, so finish needs a function: a run's output is never a failure`);
+  }
   const nodes = state.nodes.map(node => Object.freeze(node));
   const shape = shapeOf(nodes);
   const plain: WorkflowDef<Input, Output, Signals, N, ReadOutput, ReadResults> = {
     ...state.header,
     shape: Object.freeze({ nodes: Object.freeze(shape.nodes.map(entry => Object.freeze(entry))) }),
-    shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => [entry.name, entry.kind, entry.undo]))),
+    shapeHash: hashText(JSON.stringify(shape.nodes.map(entry => hashedFields(entry)))),
     nodes: Object.freeze(nodes),
     finish,
   };
@@ -821,6 +1000,18 @@ function makeBuilder<
         }),
       );
     },
+    command: (name, command, input, options) =>
+      makeBuilder(
+        withNode(state, {
+          kind: 'command',
+          name,
+          undo: options?.undo !== undefined,
+          command,
+          input,
+          accept: options?.accept ?? [],
+          options: { undo: options?.undo, when: options?.when, retry: options?.retry },
+        }),
+      ),
     finish: run => finishDef(state, run),
   };
 }
@@ -828,16 +1019,20 @@ function makeBuilder<
 /**
  * Starts a workflow definition. The version and input schema are required; nodes follow.
  * Throws `BAD_DEFINITION`, naming the workflow, for a duplicate node name, a `next` that is not
- * an earlier node, an `undo` on anything but a step or a child, and a workflow with no node.
+ * an earlier node, an `undo` on anything but a step, a child or a command, and a workflow with no node.
+ * `startOn` is typed as in `j.workflow`: the event's meta comes from the entity.
  */
 export function workflow<
   Input extends StandardSchemaV1,
   N extends Needs = NoNeeds,
   Declared extends StandardSchemaV1 | undefined = undefined,
-  Where extends Host = { readonly db: RootDb; readonly run: unknown },
+  Where extends Host = StandaloneHost,
+  E extends AnyEntity = never,
+  D extends EventsOf<E> = never,
+  Timing extends StartTiming = 'after-commit',
 >(
   name: string,
-  options: WorkflowOptions<Input, N, Declared, ErasedStartOn, Where>,
+  options: WorkflowOptions<Input, N, Declared, StartOn<Input, E, D, MetaOfEntity<E>, Timing>, Where>,
 ): WorkflowBuilder<Input, NoResults, N, Declared, never, Where> {
   return workflowWith(name, options, () => ({}));
 }
@@ -895,6 +1090,15 @@ export function workflowWith<
     refuse(
       name,
       `startOn: entity "${startOn.entity.kind}" does not record event "${startOn.event.type}"; pass an event the entity declares`,
+    );
+  }
+  if (startOn !== undefined && !START_TIMINGS.includes(startOn.timing)) {
+    refuse(name, `startOn.timing is required: ${START_TIMINGS.join(' or ')}`);
+  }
+  if (startOn?.timing === 'with-event' && concurrency?.onBusy === 'refuse') {
+    refuse(
+      name,
+      "startOn.timing 'with-event' cannot use concurrency.onBusy 'refuse': a limit must not refuse the business transaction; use 'queue' or 'join'",
     );
   }
   return makeBuilder({

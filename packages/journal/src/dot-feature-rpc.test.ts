@@ -1,7 +1,7 @@
 /**
  * A `defineFeature` feature that writes through the journal, end to end: a contract-first
  * procedure binds the request's actor (`actorRun`), runs a command from the feature's
- * `usecases/` (`context.run(command, input)`), an inline projection in the feature's
+ * `usecases/` (`context.run(command, input)`, answered by `orThrowCommand`), an inline projection in the feature's
  * `.infra(...)` updates in the same transaction, and a read usecase serves the projection.
  *
  * Why these tests exist: this is the shape a Dot app's write path takes, and no single test
@@ -23,16 +23,16 @@ import { defineApp } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { rpc, rpcFor } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
-import { defineFailure, orThrow } from '@arki/failure';
-import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { errorMap } from '@arki/failure/orpc';
 
 import { journal, journalProjections } from './dot.js';
-import { actorRun } from './orpc.js';
+import { actorRun, orThrowCommand } from './orpc.js';
 import { customerOrderCounts, j, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
 
 let db: PgliteDatabase;
 let client: PGlite;
-let next = 11000;
+let next = 11_000;
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -72,10 +72,13 @@ const OrderRefused = defineFailure('orders.refused', { status: 422, message: 'Th
 const placeOrder = j.command(
   'placeOrder',
   z.object({ id: z.templateLiteral(['ord_', z.string()]), customerId: z.string().min(1) }),
-  (input, { write }) =>
-    input.customerId === 'blocked'
-      ? OrderRefused()
-      : write(order, input.id, () => [OrderPlaced({ customerId: input.customerId, total: 1 })]),
+  { writes: [OrderPlaced] },
+  async (input, { write }) => {
+    if (input.customerId === 'blocked') return OrderRefused();
+    const written = await write(order, input.id, () => [OrderPlaced({ customerId: input.customerId, total: 1 })]);
+    // What the client gets back: the order's id, not the journal's write result.
+    return isFailure(written) ? written : { id: input.id };
+  },
 );
 
 /* ---- features/orders/infra/: the read store and the inline projection ---- */
@@ -138,10 +141,8 @@ const rpcImplementer = implement(ordersContract).with(ordersCore);
 /* ---- features/orders/entrypoints/procedures.ts ---- */
 
 const ordersProcedures = (impl: typeof rpcImplementer) => ({
-  place: impl.place.use(asActor).handler(async ({ context, input, errors }) => {
-    const placed = await orThrowRpc(context.run(placeOrder, input), errors);
-    return { id: placed.id };
-  }),
+  // The contract lists the business failure only; the journal's own failures answer through `toORPCError`.
+  place: impl.place.use(asActor).handler(({ context, input, errors }) => orThrowCommand(context.run(placeOrder, input), errors)),
   placedBy: impl.placedBy.handler(async ({ context, input }) => orThrow(await context.usecases.placedBy(input.customerId))),
 });
 

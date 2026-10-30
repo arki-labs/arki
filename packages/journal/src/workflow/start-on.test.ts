@@ -25,6 +25,7 @@ const welcome = j
     startOn: {
       entity: order,
       event: OrderPlaced,
+      timing: 'after-commit',
       id: e => `welcome:${e.entityId}`,
       input: e => ({ orderId: e.entityId, total: e.data.total }),
     },
@@ -36,6 +37,7 @@ const welcome = j
 const place = j.command(
   'test.place',
   z.object({ n: z.int().positive(), dies: z.boolean() }),
+  { writes: [OrderPlaced] },
   async (input, { write }) => {
     const written = await write(order, orderId(input.n), () => [OrderPlaced({ customerId: 'cus_1', total: input.n })]);
     if (input.dies) throw new Error('the command dies after its write');
@@ -107,7 +109,13 @@ describe('startOn', () => {
   it('a startOn on a lower version is refused, because only the highest version starts runs', () => {
     const fresh = initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }) });
     const options = { input: z.object({ orderId: z.string() }) } as const;
-    const startOn = { entity: order, event: OrderPlaced, id: () => 'x', input: () => ({ orderId: 'x' }) } as const;
+    const startOn = {
+      entity: order,
+      event: OrderPlaced,
+      timing: 'after-commit',
+      id: () => 'x',
+      input: () => ({ orderId: 'x' }),
+    } as const;
     const v1 = fresh.workflow('test.versions', { ...options, version: 1, startOn }).step('a', () => 1).finish();
     const v2 = fresh.workflow('test.versions', { ...options, version: 2 }).step('a', () => 1).finish();
     let refused: unknown;

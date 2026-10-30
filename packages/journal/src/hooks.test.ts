@@ -15,11 +15,17 @@ let client: PGlite;
 let next = 0;
 
 const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
-const placeOrder = j.command('placeOrder', z.object({ orderId: orderIdSchema }), (input, { write }) =>
-  write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
+const placeOrder = j.command(
+  'placeOrder',
+  z.object({ orderId: orderIdSchema }),
+  { writes: [OrderPlaced] },
+  (input, { write }) => write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
 );
-const payOrder = j.command('payOrder', z.object({ orderId: orderIdSchema }), (input, { write }) =>
-  write(order, input.orderId, () => [OrderPaid({ amount: 1 })]),
+const payOrder = j.command(
+  'payOrder',
+  z.object({ orderId: orderIdSchema }),
+  { writes: [OrderPaid] },
+  (input, { write }) => write(order, input.orderId, () => [OrderPaid({ amount: 1 })]),
 );
 const rowOf = async (id: OrderId) => {
   const rows = await db.select().from(orders).where(eq(orders.id, id));
@@ -127,10 +133,15 @@ describe('command hooks', () => {
       seen.push([ctx.name, ctx.correlationId]);
       await next();
     });
-    const both = j.command('placeAndPay', z.object({ orderId: orderIdSchema }), async (input, { run }) => {
-      orThrow(await run(placeOrder, input));
-      orThrow(await run(payOrder, input));
-    });
+    const both = j.command(
+      'placeAndPay',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [] },
+      async (input, { run }) => {
+        orThrow(await run(placeOrder, input));
+        orThrow(await run(payOrder, input));
+      },
+    );
     orThrow(await journal.run(db, both, { orderId: orderId(++next) }, meta, { correlationId: 'req_c' }));
     expect(seen).toEqual([
       ['placeAndPay', 'req_c'],

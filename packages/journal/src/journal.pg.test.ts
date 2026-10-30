@@ -499,6 +499,7 @@ let ownedRuns = 0;
 const ownedPlace = j.command(
   'transaction.owned.place',
   z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+  { writes: [OrderPlaced] },
   async (input, { write }) => {
     ownedRuns += 1;
     const written = await write(order, input.id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]);
@@ -533,10 +534,15 @@ describe('direct Journal transaction ownership on PostgreSQL', () => {
   it('returns the original refusal only after PostgreSQL rolls back every write and receipt', async () => {
     const id = orderId(++next);
     const refusal = CommandConflict({ detail: 'refuse after the write' });
-    const refusing = j.command('transaction.owned.refuse', z.object({}), async (_input, { write }) => {
-      orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
-      return refusal;
-    });
+    const refusing = j.command(
+      'transaction.owned.refuse',
+      z.object({}),
+      { writes: [OrderPlaced] },
+      async (_input, { write }) => {
+        orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
+        return refusal;
+      },
+    );
     const result = await journal.run(dbA, refusing, {}, meta, { idempotencyKey: `refused:${id}` });
     expect(result).toBe(refusal);
     expect(await dbA.select().from(orders).where(eq(orders.id, id))).toEqual([]);
@@ -562,10 +568,15 @@ describe('direct Journal transaction ownership on PostgreSQL', () => {
         }
       }),
     );
-    const refusing = j.command('transaction.owned.rollback', z.object({}), async (_input, { write }) => {
-      orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
-      return refusal;
-    });
+    const refusing = j.command(
+      'transaction.owned.rollback',
+      z.object({}),
+      { writes: [OrderPlaced] },
+      async (_input, { write }) => {
+        orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'owned', total: 1 })]));
+        return refusal;
+      },
+    );
     const result = await journal.run(source, refusing, {}, meta);
     expect(TransactionDefect.is(result)).toBe(true);
     if (!TransactionDefect.is(result) || !(result.cause instanceof AggregateError))
@@ -578,7 +589,7 @@ describe('direct Journal transaction ownership on PostgreSQL', () => {
   it('classifies a PostgreSQL statement rejection instead of calling it a callback defect', async () => {
     const id = orderId(++next);
     orThrow(await journal.run(dbA, ownedPlace, { id }, meta));
-    const duplicate = j.command('transaction.owned.duplicate', z.object({}), (_input, { tx }) =>
+    const duplicate = j.command('transaction.owned.duplicate', z.object({}), { writes: [] }, (_input, { tx }) =>
       tx.insert(orders).values({ id, customerId: 'duplicate', total: 1, status: 'placed' }),
     );
     const result = await journal.run(dbA, duplicate, {}, meta);
@@ -597,7 +608,7 @@ describe('direct Journal transaction ownership on PostgreSQL', () => {
     );
     const unavailablePool = new pg.Pool({ host: '127.0.0.1', port, connectionTimeoutMillis: 1000 });
     let calls = 0;
-    const never = j.command('transaction.owned.unavailable', z.object({}), () => {
+    const never = j.command('transaction.owned.unavailable', z.object({}), { writes: [] }, () => {
       calls += 1;
       return 'unexpected';
     });

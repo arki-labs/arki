@@ -140,7 +140,7 @@ describe('async projections', () => {
       orThrow(
         await journal.run(
           db,
-          j.command('placeOne', OrderPlaced.schema, (input, { write }) =>
+          j.command('placeOne', OrderPlaced.schema, { writes: [OrderPlaced] }, (input, { write }) =>
             write(order, orderId(++next), () => [OrderPlaced(input)]),
           ),
           { customerId: customer, total: 1 },

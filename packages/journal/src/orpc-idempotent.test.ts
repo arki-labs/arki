@@ -38,10 +38,10 @@ type Ctx = {
 };
 
 const idInput = z.object({ id: z.templateLiteral(['ord_', z.string()]) });
-const placeOrder = j.command('placeOrder', idInput, (input, { write }) =>
+const placeOrder = j.command('placeOrder', idInput, { writes: [OrderPlaced] }, (input, { write }) =>
   write(order, input.id, () => [OrderPlaced({ customerId: 'c', total: 1 })]).then(() => ({ id: input.id })),
 );
-const payOrder = j.command('payOrder', idInput, (input, { write }) =>
+const payOrder = j.command('payOrder', idInput, { writes: [OrderPaid] }, (input, { write }) =>
   write(order, input.id, () => [OrderPaid({ amount: 1 })]).then(() => ({ id: input.id })),
 );
 

@@ -17,6 +17,7 @@ import type {
   AcceptFailure,
   AnyEntity,
   AnyEventDef,
+  BivariantFn,
   CommandHookContext,
   DbHandle,
   Effect,
@@ -58,7 +59,9 @@ import type {
 import type {
   FinishBound,
   NoResults,
+  Resolved,
   StartOn,
+  StartTiming,
   TaskBody,
   TaskDef,
   TaskOptions,
@@ -105,14 +108,26 @@ export type WriteInput<
 };
 
 /**
- * A command: a name, an input schema and a handler. `j.command` makes one;
- * `journal.run` runs it. `name` and `input` are for the app (an oRPC procedure
- * can reuse or `.pick` the schema). The handler is for `journal.run` only.
+ * A command: a name, an input schema, the events it writes and a handler. `j.command`
+ * makes one; `journal.run` runs it. `name`, `input` and `writes` are for the app (an oRPC
+ * procedure can reuse or `.pick` the schema). The handler is for `journal.run` only.
  */
-export type Command<S extends StandardSchemaV1, R, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle> = {
+export type Command<
+  S extends StandardSchemaV1,
+  R,
+  in MetaOut,
+  in Tx extends TransactionSource<Tx> = DbHandle,
+  out Writes extends readonly AnyEventDef[] = readonly AnyEventDef[],
+  out Output extends StandardSchemaV1 | undefined = StandardSchemaV1 | undefined,
+> = {
   readonly name: string;
   readonly input: S;
-  readonly handler: (input: SchemaOutput<S>, context: CommandContext<MetaOut, Tx>) => R;
+  /** The events this command writes, as declared: readable before boot. A child command's events are its own. */
+  readonly writes: Writes;
+  /** What a workflow's command node stores of the result. See {@link CommandOptions}. */
+  readonly output?: Output;
+  /** Bivariant, so a workflow's command node can keep a command in an erased slot and run it without a cast. */
+  readonly handler: BivariantFn<[input: SchemaOutput<S>, context: CommandContext<MetaOut, Tx, Writes[number]>], R>;
   /** The command's `authorize` option, when it has one. See {@link CommandOptions}. Its failures are part of `R`. */
   // `R` holds the failures `authorize` can return: `j.command` adds them. A value that is not a failure is ignored.
   readonly authorize?: CommandAuthorize<SchemaOutput<S>, MetaOut, Tx, void | R>;
@@ -134,7 +149,22 @@ export type CommandOptions<
   MetaOut,
   Tx extends TransactionSource<Tx> = DbHandle,
   Refused extends void | undefined | Failure = void,
+  Writes extends readonly AnyEventDef[] = readonly AnyEventDef[],
+  Output extends StandardSchemaV1 | undefined = undefined,
 > = {
+  /**
+   * The events the handler may write. Required: `[]` is a command that only runs child commands.
+   * `write` takes nothing else, and an event that gets past the types fails the run with
+   * `BAD_DEFINITION` before it is stored.
+   */
+  readonly writes: Writes;
+  /**
+   * What a workflow's command node stores of the handler's result, as `results.<node>`, checked again by `def.read`.
+   * A persisted outcome needs a runtime schema, and TypeScript cannot make one from a handler's return, so a command
+   * that hands a result to a workflow declares it here. Its output must fit the handler's success and survive JSON.
+   * A command node stores `null` for a command without it. `journal.run` does not use it.
+   */
+  readonly output?: Output;
   /**
    * Put the caller's permission check here, not in the handler. A repeat with an idempotency
    * key does not run the handler, so a check inside it would not run either: the stored result
@@ -148,7 +178,7 @@ export type CommandOptions<
  * needed: the two types refer to each other, and TypeScript cannot measure the
  * variance of such a pair on its own.
  */
-/** Options of one call: `journal.run`, a bound runner, a command's `run`, an effect's `ctx.run`. */
+/** Options of one call: `journal.run`, a bound runner, a command's `run`, a workflow step's `ctx.run`. */
 export type CallOptions = {
   /**
    * Makes the call idempotent. The first run with this key records its result in
@@ -170,11 +200,38 @@ export type RunOptions = CallOptions & {
   readonly keyPerCommand?: boolean;
   /**
    * Seeds the chain's correlation id, for example with the request id. Without it, a run
-   * from an effect continues the cause event's chain, and any other run starts a new one.
+   * from a workflow step continues the cause event's chain, and any other run starts a new one.
    */
   readonly correlationId?: string;
 };
-export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = DbHandle> = {
+/**
+ * The type of `context.write`. `events` returns events of `entity` that the command declares in `writes`.
+ * A helper that takes `write` names what it writes: `CommandWrite<Meta, Tx, typeof OrderPlaced>`, and a
+ * command can pass its own `write` only when it declares at least those events.
+ * This is an alias with `Declared` annotated because TypeScript erases the type parameters when it compares two
+ * instantiations of one function type, and `Declared` sits in a constraint: without the alias nothing compares it.
+ */
+export type CommandWrite<
+  out MetaOut,
+  out Tx extends TransactionSource<Tx> = DbHandle,
+  in Declared extends AnyEventDef = AnyEventDef,
+> = <
+  K extends string,
+  Tbl extends EntityTable,
+  E extends AnyEventDef,
+  Key extends string,
+  Returned extends readonly ((PendingOf<E> & PendingOf<Declared>) | SchemaFailure)[] | Failure,
+>(
+  entity: EntityDef<K, Tbl, E, MetaOut, Key>,
+  id: EntityId<Tbl, Key>,
+  events: NextEvents<Tbl, E, Tx, Returned>,
+  opts?: WriteOptions,
+) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure>;
+export type CommandContext<
+  out MetaOut,
+  out Tx extends TransactionSource<Tx> = DbHandle,
+  in Declared extends AnyEventDef = AnyEventDef,
+> = {
   /** The command's transaction. Use it for reads and for writes outside any entity. */
   readonly tx: Tx;
   /** The parsed metadata every `write` in this command records. */
@@ -187,18 +244,7 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
    * `journal.write` on this command's transaction with this command's metadata. Safe to destructure.
    * A failure `events` returns comes back here: return it from the handler, and the command rolls back.
    */
-  readonly write: <
-    K extends string,
-    Tbl extends EntityTable,
-    E extends AnyEventDef,
-    Key extends string,
-    Returned extends readonly (PendingOf<E> | SchemaFailure)[] | Failure,
-  >(
-    entity: EntityDef<K, Tbl, E, MetaOut, Key>,
-    id: EntityId<Tbl, Key>,
-    events: NextEvents<Tbl, E, Tx, Returned>,
-    opts?: WriteOptions,
-  ) => Promise<WriteResult<Tbl, E, MetaOut, Key> | Extract<Returned, Failure> | SchemaFailure | IdGenerationFailure>;
+  readonly write: CommandWrite<MetaOut, Tx, Declared>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
   readonly run: <S extends StandardSchemaV1, R>(
     command: Command<S, R, MetaOut, Tx>,
@@ -233,7 +279,7 @@ type RootRunnerWith<
   ...metaArgs: MetaArgs
 ) => Promise<Awaited<R> | CommandFailure>;
 /**
- * The type of an effect's `ctx.run`: `journal.run` without `source`. It runs on the
+ * The `ctx.run` of the engine's own effects: `journal.run` without `source`. It runs on the
  * root database the worker or `drain` was given, in its own transaction. `meta`
  * is required, as in `journal.run`: the library never picks an actor, so the caller names it.
  * Only a workflow body's `ctx.run` may leave it out, and then the app chose it: the `workflowMeta` of `compose`.
@@ -257,7 +303,12 @@ type WorkflowHost<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb,
-> = { readonly db: AppDb; readonly run: WorkflowCommandRunner<Meta, Tx> };
+> = {
+  readonly db: AppDb;
+  readonly run: WorkflowCommandRunner<Meta, Tx>;
+  /** The context a command of this journal takes, so a command node takes only those. */
+  readonly commandContext: CommandContext<SchemaOutput<Meta>, Tx>;
+};
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -437,7 +488,7 @@ export type Journal<
   ): Promise<{ readonly events: number } | SchemaFailure>;
   /**
    * Run up to `batchSize` due jobs. Returns how many jobs were claimed. Root database only.
-   * It must open the journal's transaction type: an effect runs commands on it.
+   * It must open the journal's transaction type: a workflow step runs commands on it.
    * Each job is claimed right before it runs, so its lease (`leaseSeconds`, default 60)
    * covers only its own work, and the lease is renewed every half lease while the effect
    * runs. A lost lease aborts the effect's `ctx.signal`.
@@ -636,14 +687,22 @@ export type JournalDefinitions<
    * A command: `input` (any Standard Schema) is parsed async (`parseAsync`) before
    * the handler runs, like the command's `meta`; the handler's
    * `write` and `run` are bound to one transaction and one parsed `meta`.
+   * `options.writes` lists the events the handler writes, and `write` takes nothing else.
+   * `options.output` is what a workflow's command node stores of the result.
    * Needs only `j`, entities and events, never the finished journal.
    */
-  command<S extends StandardSchemaV1, R, Refused extends void | undefined | Failure = void>(
+  command<
+    S extends StandardSchemaV1,
+    R,
+    const Writes extends readonly AnyEventDef[],
+    Refused extends void | undefined | Failure = void,
+    Output extends StandardSchemaV1<unknown, Resolved<R>> | undefined = undefined,
+  >(
     name: string,
     input: S,
-    handler: (input: SchemaOutput<S>, context: CommandContext<SchemaOutput<Meta>, Tx>) => R,
-    options?: CommandOptions<SchemaOutput<S>, SchemaOutput<Meta>, Tx, Refused>,
-  ): Command<S, R | Extract<Refused, Failure>, SchemaOutput<Meta>, Tx>;
+    options: CommandOptions<SchemaOutput<S>, SchemaOutput<Meta>, Tx, Refused, Writes, Output>,
+    handler: (input: SchemaOutput<S>, context: CommandContext<SchemaOutput<Meta>, Tx, Writes[number]>) => R,
+  ): Command<S, R | Extract<Refused, Failure>, SchemaOutput<Meta>, Tx, Writes, Output>;
   /** `on` is `NoInfer` so `E` comes from `entity`; handlers are then contextually typed. */
   projection<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
@@ -654,18 +713,19 @@ export type JournalDefinitions<
   effect<E extends AnyEntity<SchemaOutput<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>>>,
-  ): Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>>;
+    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb>>,
+  ): Effect<SchemaOutput<Meta>, AppDb>;
   /**
    * An effect that needs a service: `needs` is `{ mailer: need<Mailer>() }`, and each
-   * handler then gets `mailer` in its context, next to `jobId`, `signal`, `db` and `run`.
+   * handler then gets `mailer` in its context, next to `jobId`, `attempt`, `signal` and `db`.
+   * An effect has no `run`: a command that follows an event is a `j.task` or a `j.workflow` with `startOn`.
    */
   effect<E extends AnyEntity<SchemaOutput<Meta>>, N extends Needs>(
     name: string,
     entity: E | readonly E[],
     needs: N,
-    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>>,
-  ): Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
+    on: NoInfer<EffectHandlers<E, SchemaOutput<Meta>, AppDb, N>>,
+  ): Effect<SchemaOutput<Meta>, AppDb, N>;
   /**
    * Build the runtime journal from the tables given to `initJournal` and the handlers. `services` holds one
    * value for every need of every listed effect, by name. A need without a value throws here, unless `services` is `'worker'`.
@@ -700,13 +760,14 @@ export type JournalDefinitions<
     Declared extends StandardSchemaV1 | undefined = undefined,
     E extends AnyEntity<SchemaOutput<Meta>> = never,
     D extends EventsOf<E> = never,
+    Timing extends StartTiming = 'after-commit',
   >(
     name: string,
     options: WorkflowOptions<
       Input,
       N,
       Declared,
-      StartOn<Input, E, D, SchemaOutput<Meta>>,
+      StartOn<Input, E, D, SchemaOutput<Meta>, Timing>,
       WorkflowHost<Meta, Tx, AppDb>
     >,
   ): WorkflowBuilder<Input, NoResults, N, Declared, never, WorkflowHost<Meta, Tx, AppDb>, StarterOf<Meta, Tx, Input>>;
@@ -722,20 +783,21 @@ export type JournalDefinitions<
     Declared extends StandardSchemaV1 | undefined = undefined,
     E extends AnyEntity<SchemaOutput<Meta>> = never,
     D extends EventsOf<E> = never,
+    Timing extends StartTiming = 'after-commit',
   >(
     name: string,
     options: TaskOptions<
       Input,
       N,
       Declared,
-      StartOn<Input, E, D, SchemaOutput<Meta>>,
+      StartOn<Input, E, D, SchemaOutput<Meta>, Timing>,
       WorkflowHost<Meta, Tx, AppDb>,
       Returned
     >,
     run: TaskBody<Input, N, WorkflowHost<Meta, Tx, AppDb>, Returned>,
   ): TaskDef<Input, N, Declared, StarterOf<Meta, Tx, Input>, Returned>;
   compose<
-    const E extends readonly Effect<SchemaOutput<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
+    const E extends readonly Effect<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
     const T extends readonly Tap<SchemaOutput<Meta>, AppDb, Needs>[] = readonly [],
     const W extends readonly WorkflowDef[] = readonly [],
   >(

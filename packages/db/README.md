@@ -715,7 +715,7 @@ one the repositories accept:
 
 ```ts skip="a fragment of a journal-backed oRPC procedure; @arki/journal is not a dependency of this package"
 const j = initJournal.tx<Transaction>().create({ tables, meta });
-const deposit = j.command('deposit', input, async (data, { write, tx }) => {
+const deposit = j.command('deposit', input, { writes: [Deposited] }, async (data, { write, tx }) => {
   const limit = await repos.withTx(tx).limits.forAccount(data.accountId); // reads see this command's writes
   return write(account, data.accountId, row => /* events */ []);
 });

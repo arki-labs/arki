@@ -8,10 +8,12 @@ import { call, ORPCError, os } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 
 import { TransactionDefect } from '@arki/db/errors';
+import { defineFailure } from '@arki/failure';
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 
+import type { CommandFailure } from './errors.js';
 import { CommandConflict, CommandForbidden, CommandInvalid, CommandNotFound, JournalError } from './errors.js';
-import { commandErrors, toORPCError } from './orpc.js';
+import { commandErrors, orThrowCommand, toORPCError } from './orpc.js';
 
 const RETRY_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
 
@@ -172,5 +174,55 @@ describe('commandErrors()', () => {
     expect(await answerOf(builder, CommandConflict({ detail: 'Username is already taken' }))).toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
     });
+  });
+});
+
+describe('orThrowCommand(result, errors)', () => {
+  // Why: a contract-first procedure that runs a command lists its business failures. The journal's own
+  // failures (bad input, a lost race, a failed transaction) belong to every command: making each contract
+  // list them would be noise, and leaving them out must still answer the client correctly, never as a 500.
+  const OrderRefused = defineFailure('orders.refused', { status: 422, message: 'This customer cannot order.' });
+  type Ran = { readonly id: string } | ReturnType<typeof OrderRefused> | CommandFailure;
+  const answerFor = (ran: Ran): Promise<unknown> =>
+    call(
+      os.errors(errorMap(OrderRefused)).handler(({ errors }) => orThrowCommand(Promise.resolve(ran), errors)),
+      {},
+    ).catch((error: unknown) => error);
+
+  it("returns the command's value", async () => {
+    expect(await answerFor({ id: 'ord_1' })).toEqual({ id: 'ord_1' });
+  });
+
+  it("throws a business failure the contract lists as the contract's typed error, the failure kept as its cause", async () => {
+    // The cause stays on the server (oRPC never sends it): observers read the failure, as with `orThrowRpc`.
+    expect(await answerFor(OrderRefused())).toMatchObject({
+      code: 'orders.refused',
+      status: 422,
+      defined: true,
+      cause: { code: 'orders.refused' },
+    });
+  });
+
+  it('answers a lost race with the retryable 409 CONFLICT, though the contract does not list it', async () => {
+    const lost = TransactionDefect({ cause: new JournalError('CONFLICT', 'order', 'ord_secret', 'version 3 exists') });
+    const answer = await answerFor(lost);
+    expect(answer).toMatchObject({ code: 'CONFLICT', status: 409, message: RETRY_MESSAGE });
+    expect(JSON.stringify(answer)).not.toContain('ord_secret');
+  });
+
+  it('answers another journal failure with its own code and status, as an undeclared error', async () => {
+    expect(await answerFor(CommandConflict({ detail: 'Order already exists' }))).toMatchObject({
+      code: 'journal.conflict',
+      status: 409,
+      defined: false,
+    });
+  });
+
+  it('refuses at compile time a business failure the contract does not list', () => {
+    const unlisted = os.handler(({ errors }) =>
+      // @ts-expect-error -- `orders.refused` is a business failure, and this contract does not list it
+      orThrowCommand(Promise.resolve<Ran>(OrderRefused()), errors),
+    );
+    expect(unlisted).toBeDefined();
   });
 });

@@ -81,7 +81,7 @@ const scheduledJob = (job: JobRow): ScheduledJob => {
 };
 
 /**
- * The command part of one effect attempt's context, made fresh for each attempt.
+ * The command part of one effect attempt, made fresh for each attempt. Only a journal-owned effect sees it.
  * `run` is the journal's `run`, bound to the root database the drain was given and to the
  * event the job is for. `accept` marks a refusal that `run` returned as handled.
  * `settle` waits for the handler, ends the attempt (a later `accept` throws), and resolves
@@ -95,13 +95,13 @@ export type EffectAttempt<Run> = {
   readonly settle: (handler: Promise<unknown>) => Promise<unknown>;
 };
 
-/** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
+/** What `drain` needs from the journal. `Run` is the type of the `ctx.run` of a journal-owned effect. */
 export type DrainDeps<Meta extends StandardSchemaV1<unknown, Record<string, unknown>>, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
   /** The effect hooks. Frozen by the first drain. */
   readonly hooks: HookPointInternal<EffectHookContext<SchemaOutput<Meta>>>;
   /** As composed: an effect may still have needs. Each drain binds them from its `services`. */
-  readonly effects: readonly Effect<SchemaOutput<Meta>, AppDb, Run, Needs>[];
+  readonly effects: readonly Effect<SchemaOutput<Meta>, AppDb, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes the command part of one attempt's context, for the effect named `effect`. See `EffectAttempt`. */
   readonly attemptOn: (
@@ -255,7 +255,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
   const runEffect = async (
     db: AppDb & RootDb,
     job: JobRow,
-    effect: Effect<SchemaOutput<Meta>, AppDb, Run> | undefined,
+    effect: Effect<SchemaOutput<Meta>, AppDb> | undefined,
     signal: AbortSignal,
   ): Promise<{ readonly outcome: unknown; readonly retryReason: unknown }> => {
     // The check constraint sets both on every effect row; this narrows them once.
@@ -300,9 +300,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
                 attempt: job.attempts,
                 signal,
                 db,
-                run,
-                accept,
-                ...(journalOwnedEffect in effect ? { [unwatchedRun]: runUnwatched } : {}),
+                ...(journalOwnedEffect in effect ? { run, accept, [unwatchedRun]: runUnwatched } : {}),
               };
               return settle(attempt(() => effect.run(event, context), onThrow));
             }),
@@ -405,7 +403,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
     job: JobRow,
     signal: AbortSignal,
     leaseSeconds: number,
-    effectsByName: ReadonlyMap<string, Effect<SchemaOutput<Meta>, AppDb, Run>>,
+    effectsByName: ReadonlyMap<string, Effect<SchemaOutput<Meta>, AppDb>>,
     runner: JobRunner<AppDb> | undefined,
   ): Promise<void> => {
     const effect = job.effect === null ? undefined : effectsByName.get(job.effect);

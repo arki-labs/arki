@@ -1,31 +1,40 @@
 /**
- * `@arki/dot` adapter, in two parts:
+ * `@arki/dot` adapter, in three parts:
  *
  * - `journal(...)` is the infra part, for `.infra()`. It publishes `services.journal`, so
  *   features can write through it. With `{ j }` it composes the journal from the
- *   features' `journalHandlers` declarations. It reads them from the feature values, so it
- *   boots before the features.
- * - `journalWorker(...)` is the entrypoint, for `.entrypoints()`. It runs the effects, taps and
- *   async projections between `start` and `stop`. It gives each effect and tap the services
- *   of the feature that lists it.
+ *   features' declarations. It reads them from the feature values, so it boots before the features.
+ * - `journalHandlers(core, { effects, taps, workflows })` is an application contribution, for
+ *   `.usecases(factories, journalHandlers(core, …))`. An effect is application code (D-8), so it
+ *   sits with the usecases and gets what a usecase gets: the feature's needs (never an
+ *   `entrypointOnly` one), its private infra and its domain services. `needsOf((_: Deps) => ['mailer'])`
+ *   picks them, typed from the feature.
+ * - `journalWorker(...)` is the only entrypoint, for `.entrypoints()`. It runs the effects, taps and
+ *   async projections between `start` and `stop`, each already bound to the services of the
+ *   feature that lists it.
  *
  * The split works because writes never need an effect's services: a write only queues
  * the effect's job. Inline projections run inside the write, and they get only the
  * transaction. So the journal is composed with `services: 'worker'`, and the worker
  * gives the services when it runs a handler.
  *
- * A `defineFeature` feature declares the same handlers by layer, and the journal folds
- * them back into one declaration per feature before anything boots:
+ * Where each part lives in a feature (D-9):
  *
  * - `journalProjections(...)` in `.infra(...)`: projections maintain the feature's read
  *   models, so they sit with its other infra.
- * - `journalEffects(core, { effects, taps })` in `.entrypoints(...)`: effects and taps
- *   are ways the feature is reached (by an event instead of a request).
+ * - `journalHandlers(core, { effects, taps, workflows })` in `.usecases(...)`: the reactions a
+ *   behaviour owns, next to the command that decides it.
  *
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
-import type { AnyDefinedFeature, AnyFeatureCore, DepsOf, EntrypointBinder } from '@arki/dot/feature';
+import type {
+  AnyApplicationContribution,
+  AnyDefinedFeature,
+  AnyFeatureCore,
+  DepsOf,
+  EntrypointBinder,
+} from '@arki/dot/feature';
 import type {
   ActionSource,
   CtxOf,
@@ -36,16 +45,26 @@ import type {
   WireNeeds,
 } from '@arki/dot/unit';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+import { getTableName } from 'drizzle-orm';
 import { entrypoint, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import type { Journal, JournalDefinitions } from './api.js';
 import type {
+  JournalFlowDelivery,
+  JournalFlowEdge,
+  JournalFlowGraph,
+  JournalFlowNode,
+  JournalFlowRetry,
+} from './projection.js';
+import type {
+  AnyEntity,
   DbHandle,
   Effect,
   HandlerServices,
   JobRunner,
   JournalWorker,
+  Need,
   Needs,
   Projection,
   RootDb,
@@ -59,14 +78,15 @@ import type { WorkflowDef, WorkflowServices } from './workflow/define.js';
 import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
-import { givenServices } from './handlers.js';
+import { givenServices, need } from './handlers.js';
+import { defaultEffectRetry } from './worker.js';
 
 export { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 
 export const JOURNAL_PLUGIN_ERROR_CODES = {
   /**
    * A feature supplied an invalid Journal contribution.
-   * @fix Declare the feature slice with journalHandlers, journalEffects, journalWorkflows or journalProjections from @arki/journal/dot.
+   * @fix Declare a feature's reactions with journalHandlers(core, { effects, taps, workflows }) in .usecases(...), and its projections with journalProjections(...) in .infra(...), both from @arki/journal/dot.
    * @verify bun run test -- src/dot-feature.test.ts
    */
   badSlice: 'ARKI_JOURNAL_PLUGIN_E001',
@@ -86,26 +106,13 @@ export type JournalDotAction = {
 /** What one feature hands to the journal, as declared: an effect or a tap may still have needs. */
 export type JournalDeclarations<Meta = unknown, Tx = DbHandle, AppDb = RootDb> = {
   readonly projections: readonly Projection<Meta, Tx>[];
-  readonly effects: readonly Effect<Meta, AppDb, unknown, Needs>[];
+  readonly effects: readonly Effect<Meta, AppDb, Needs>[];
   readonly taps: readonly Tap<Meta, AppDb, Needs>[];
   readonly workflows: readonly WorkflowDef[];
 };
 
-/** What a feature's `journal` slice publishes at boot: its services, for its effects and taps. */
+/** What `journalHandlers(...)` binds to at the feature's boot: the feature's usecase-level services. */
 export type JournalSlicePayload = { readonly services: Services };
-
-/**
- * The feature slice a `journalHandlers(...)` declaration produces.
- * `handlers` is read before the features boot, by `journal({ j })`.
- * `resolve` runs at the feature's boot. `TServices` is what the feature's effects and
- * taps need: the feature must declare it in `needs`.
- */
-export type JournalFeatureSlice<Meta = unknown, Tx = DbHandle, AppDb = RootDb, TServices = unknown> = {
-  readonly key: 'journal';
-  readonly actions: readonly JournalDotAction[];
-  readonly handlers: JournalDeclarations<Meta, Tx, AppDb>;
-  readonly resolve: (services: TServices) => JournalSlicePayload;
-};
 
 /**
  * A name made unique per instance of a feature (`send-on-request` -> `send-on-request#eu`).
@@ -139,70 +146,144 @@ function effectAction(
 
 /** A workflow's manifest action: `<name>@<version>.run`, with the signals its `waitFor` nodes wait for. */
 function workflowAction(def: WorkflowDef): JournalDotAction {
-  const signals = new Set<string>();
-  for (const node of def.nodes) if (node.kind === 'waitFor') signals.add(node.signal);
   return {
     id: `${def.name}@${def.version}.run`,
     binding: 'journal',
     direction: 'in',
     address: def.name,
     metaSchema: JOURNAL_ACTION_META_SCHEMA,
-    meta: { entities: [], events: [], signals: [...signals] },
+    meta: { entities: [], events: [], signals: signalsOf(def) },
   };
 }
 
+/** The signal names a workflow's `waitFor` nodes wait for, each once. */
+function signalsOf(def: WorkflowDef): string[] {
+  const signals = new Set<string>();
+  for (const node of def.nodes) if (node.kind === 'waitFor') signals.add(node.signal);
+  return [...signals];
+}
+
 /**
- * Declare a feature's projections, effects, taps and workflows
- * (`defineFeature('orders')….entrypoints(journalHandlers({ projections, effects }))`).
- * `journal({ j })` reads them from the feature value and composes the journal.
+ * A feature before `.usecases()`: what `needsOf` and `journalHandlers` take. Its `DepsOf` is what a
+ * usecase may ask for. After `.usecases()` the stage's `DepsOf` is what an entrypoint gets (the
+ * `entrypointOnly` needs and the usecases), which a reaction must never see; that stage has no
+ * `usecases` method, so it does not fit here.
+ */
+export type UsecaseCore = AnyFeatureCore & { readonly usecases: (...args: never) => unknown };
+
+/**
+ * The needs record of an effect, tap or workflow in a Dot feature. `select` picks the keys of the
+ * feature's usecase-level deps (its needs, never an `entrypointOnly` one; its private infra; its
+ * domain services), and each one is typed from the feature. It replaces `need<T>()` in a Dot feature:
+ * the type is written once, at the feature, and read here from the selector's parameter annotation.
  *
- * An effect with needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`) gets
- * them from the booted services of this feature, by name, when `journalWorker()` runs it.
- * The feature must declare each one in its own `needs`: the slice's `resolve` does not
- * type-check otherwise, and throws at the feature's boot when the types were bypassed.
- * Two features may use the same need name for two different services.
+ * ```ts
+ * // reactions/send-receipt.ts: `import type { Deps }` only, so there is no import cycle.
+ * import type { Deps } from '../feature';
+ * export const sendReceipt = j.effect('send-receipt', order, needsOf((_: Deps) => ['mailer']), {
+ *   OrderPlaced: (event, { mailer }) => mailer.sendReceipt(event.entityId),
+ * });
+ * ```
  *
- * A workflow's needs (`workflow(name, { needs: { provider: need<P>() } })`) come the same way: each
- * workflow gets the services of the feature that lists it, even when another feature's workflow uses
- * the same need name. A missing one fails the feature's boot. The app's `journal({ j, workflowMeta })` needs the
- * meta the runner records its checkpoints with. A workflow name and version can be listed by one feature only.
+ * `needsOf` calls `select` once and never reads its argument; the feature's value is not needed, so a
+ * reaction module and its feature module can import each other in either order. `D` comes from the
+ * annotation, so callers write no type arguments. A key the feature lacks, or an `entrypointOnly`
+ * one, is a compile error. The selection holds at runtime too: `journalHandlers` checks each key when
+ * the feature boots and fails the boot naming it.
+ */
+export function needsOf<D, const K extends readonly (keyof D & string)[]>(
+  select: (deps: D) => K,
+): { readonly [P in K[number]]: Need<D[P]> } {
+  // Erasure seam: the selector only carries the type `D`, and its parameter is never read, so there
+  // is no value to pass. `undefined as never` satisfies the parameter type for any `D`.
+  const keys = select(undefined as never);
+  // Erasure seam: `Object.fromEntries` types its keys as `string`; they are exactly `keys`, and each
+  // value is the empty phantom `need()` makes, which fits `Need<T>` for every `T`.
+  return Object.fromEntries(keys.map(key => [key, need()])) as { readonly [P in K[number]]: Need<D[P]> };
+}
+
+/**
+ * What `journalHandlers(core, …)` puts in a feature's `.usecases(factories, …)`: an application contribution.
+ * `handlers` is read before the features boot, by `journal({ j })`. `bind` runs at the feature's boot,
+ * with the feature's usecase-level deps, and checks that each handler finds what it needs there.
+ */
+export type JournalHandlers<Meta = unknown, AppDb = RootDb, TServices = unknown> = {
+  readonly kind: 'journal';
+  readonly key: 'journal';
+  readonly handlers: JournalDeclarations<Meta, DbHandle, AppDb>;
+  /** The actions, named after the feature: an instance's effect ids carry its instance (`send#eu.run`). */
+  readonly actionsOf: (feature: string) => readonly JournalDotAction[];
+  readonly bind: (deps: TServices) => JournalSlicePayload;
+};
+
+/** A named compile error when the feature lacks a service its effects, taps or workflows need. */
+type CoversNeeds<TDeps, TNeeded> = [TDeps] extends [TNeeded]
+  ? unknown
+  : {
+      readonly 'JOURNAL: the feature does not give these effects, taps and workflows what they need': Exclude<
+        keyof TNeeded,
+        keyof TDeps
+      >;
+    };
+
+/**
+ * A feature's reactions, for its `.usecases(...)`:
  *
- * Actions: one per effect and one per workflow (`<name>@<version>.run`, its signals in the meta). Projections add none: they run inside the write, not
- * at an app boundary.
+ * ```ts
+ * export const core = defineFeature('orders').needs({ … }).infra(mailer, journalProjections(placedCount));
+ * const logic = core.usecases({}, journalHandlers(core, { effects: [sendReceipt] }));
+ * ```
+ *
+ * Each effect, tap and workflow gets its needs from this feature, by name: a need (never an
+ * `entrypointOnly` one), a private infra service or a domain service. Pick them with `needsOf((_: Deps) => […])`.
+ * A missing one is a compile error here, naming it, and fails the feature's boot for callers that
+ * skip the types. `journalWorker()` runs each handler with these services.
+ *
+ * Actions: one per effect (named after the feature's instance) and one per workflow
+ * (`<name>@<version>.run`, its signals in the meta). A handler name may be listed by one feature
+ * only: a second one fails the boot and names both features.
  */
 export function journalHandlers<
+  C extends UsecaseCore,
   Meta = unknown,
-  Tx = DbHandle,
   AppDb = RootDb,
-  const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
+  const E extends readonly Effect<Meta, AppDb, Needs>[] = readonly [],
   const T extends readonly Tap<Meta, AppDb, Needs>[] = readonly [],
   const W extends readonly WorkflowDef[] = readonly [],
->(handlers: {
-  readonly projections?: readonly Projection<Meta, Tx>[];
-  readonly effects?: E;
-  readonly taps?: T;
-  readonly workflows?: W;
-}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>> {
-  const { projections = [], effects = [], taps = [], workflows = [] } = handlers;
+>(
+  _core: C,
+  handlers: { readonly effects?: E; readonly taps?: T; readonly workflows?: W } & CoversNeeds<
+    DepsOf<C>,
+    ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>
+  >,
+): JournalHandlers<Meta, AppDb, ServicesFor<E> & ServicesFor<T> & WorkflowServices<W>> {
+  // `_core` is a type witness; the feature hands its own deps to `bind` when it boots.
+  const effects: readonly Effect<Meta, AppDb, Needs>[] = handlers.effects ?? [];
+  const taps: readonly Tap<Meta, AppDb, Needs>[] = handlers.taps ?? [];
+  const workflows: readonly WorkflowDef[] = handlers.workflows ?? [];
   return {
+    kind: 'journal',
     key: 'journal',
-    actions: [...effects.map(effect => effectAction(effect)), ...workflows.map(workflowAction)],
-    handlers: { projections, effects, taps, workflows },
-    resolve: resolveServices(effects, taps, workflows),
+    handlers: { projections: [], effects, taps, workflows },
+    actionsOf: feature => [
+      ...effects.map(effect => effectAction(effect, qualifyBy(feature))),
+      ...workflows.map(def => workflowAction(def)),
+    ],
+    bind: bindServices(effects, taps, workflows),
   };
 }
 
 const isServices = (value: unknown): value is Services => typeof value === 'object' && value !== null;
 
-/** The slice's boot step: hand the feature's services over, after checking each handler finds its own. */
-function resolveServices(
+/** The contribution's boot step: hand the feature's deps over, after checking each handler finds its own. */
+function bindServices(
   effects: readonly { readonly name: string; readonly needs: Needs }[],
   taps: readonly { readonly name: string; readonly needs: Needs }[],
   workflows: readonly WorkflowDef[],
-): (services: unknown) => JournalSlicePayload {
-  // The kernel hands the feature's services over untyped, so they are read by name here.
-  return services => {
-    const given = isServices(services) ? services : {};
+): (deps: unknown) => JournalSlicePayload {
+  // The kernel hands the feature's deps over untyped, so they are read by name here.
+  return deps => {
+    const given = isServices(deps) ? deps : {};
     // Checked at the feature's boot, so a missing service never waits for the first job.
     for (const effect of effects) givenServices('effect', effect, given);
     for (const tap of taps) givenServices('tap', tap, given);
@@ -239,92 +320,6 @@ export function journalProjections<Meta = unknown, Tx = DbHandle>(...projections
     kind: JOURNAL_PROJECTIONS_KIND,
     handlers: { projections, effects: [], taps: [], workflows: [] },
   } as const);
-}
-
-/** What `journalEffects(core, …)` puts in a feature's `.entrypoints(...)`. Same slice as `journalHandlers`, plus its `kind`. */
-export type JournalEffectsEntrypoint<Meta = unknown, AppDb = RootDb, TServices = unknown> = JournalFeatureSlice<
-  Meta,
-  DbHandle,
-  AppDb,
-  TServices
-> & {
-  readonly kind: 'journal';
-  /** The effects' actions, named after the feature: an instance's ids carry its instance (`send#eu.run`). */
-  readonly actionsOf: (feature: string) => readonly JournalDotAction[];
-};
-
-/** A named compile error when the feature lacks a service its effects or taps need. */
-type CoversNeeds<TDeps, TNeeded> = [TDeps] extends [TNeeded]
-  ? unknown
-  : {
-      readonly 'JOURNAL: the feature does not give these effects and taps what they need': Exclude<
-        keyof TNeeded,
-        keyof TDeps
-      >;
-    };
-
-/**
- * A `defineFeature` feature's effects and taps, for its `.entrypoints(...)`:
- *
- * ```ts
- * // entrypoints/journal.ts — `import type { core }` only
- * export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail] });
- * ```
- *
- * An effect's needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`)
- * come from the feature, by name: a need alias, an infra service or `usecases`.
- * A missing one is a compile error here, naming it, and fails the feature's
- * boot for callers that skip the types. `journalWorker()` hands them over
- * when it runs the handler. Each effect is one manifest action whose meta
- * lists its events — what `dot explain --as journal-flow` draws.
- */
-export function journalEffects<
-  C extends AnyFeatureCore,
-  Meta = unknown,
-  AppDb = RootDb,
-  const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
-  const T extends readonly Tap<Meta, AppDb, Needs>[] = readonly [],
->(
-  _core: C,
-  handlers: { readonly effects?: E; readonly taps?: T } & CoversNeeds<DepsOf<C>, ServicesFor<E> & ServicesFor<T>>,
-): JournalEffectsEntrypoint<Meta, AppDb, ServicesFor<E> & ServicesFor<T>> {
-  // `_core` is a type witness; the feature hands its own services to `resolve` when it boots.
-  const effects: readonly Effect<Meta, AppDb, unknown, Needs>[] = handlers.effects ?? [];
-  const taps: readonly Tap<Meta, AppDb, Needs>[] = handlers.taps ?? [];
-  return {
-    kind: 'journal',
-    key: 'journal',
-    actions: [],
-    actionsOf: feature => effects.map(effect => effectAction(effect, qualifyBy(feature))),
-    handlers: { projections: [], effects, taps, workflows: [] },
-    resolve: resolveServices(effects, taps, []),
-  };
-}
-
-/**
- * A `defineFeature` feature's workflows, for its `.entrypoints(...)`, like `journalEffects`:
- *
- * ```ts
- * export const orderWorkflows = (c: typeof core) => journalWorkflows(c, [refundOrder]);
- * ```
- *
- * Each workflow's needs (`workflow(name, { needs: { provider: need<P>() } })`) come from the feature, by
- * name, and a workflow's steps get this feature's services. A missing one is a compile error, and fails the feature's boot for callers that skip the types; the types
- * checks them against the feature's own needs. A feature has one `journal`
- * entrypoint, so a feature with both effects and workflows lists the workflows with `journalHandlers` instead.
- */
-export function journalWorkflows<C extends AnyFeatureCore, const W extends readonly WorkflowDef[]>(
-  _core: C,
-  workflows: W & CoversNeeds<DepsOf<C>, WorkflowServices<W>>,
-): JournalEffectsEntrypoint<unknown, RootDb, WorkflowServices<W>> {
-  return {
-    kind: 'journal',
-    key: 'journal',
-    actions: [],
-    actionsOf: () => workflows.map(workflowAction),
-    handlers: { projections: [], effects: [], taps: [], workflows },
-    resolve: resolveServices([], [], workflows),
-  };
 }
 
 /** Direct mode: the app composed the journal itself. */
@@ -406,7 +401,7 @@ function badSlice(feature: AnyDefinedFeature, what: string): DotUnitError {
     code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
     message: `[journal] feature "${feature.name}" has a \`journal\` slice whose ${what}.`,
     remediation:
-      'Declare handlers with journalHandlers({ projections, effects, taps, workflows }), journalEffects(core, { effects, taps }), journalWorkflows(core, defs) or journalProjections(...) from @arki/journal/dot.',
+      'Declare reactions with journalHandlers(core, { effects, taps, workflows }) in .usecases(...), and projections with journalProjections(...) in .infra(...), from @arki/journal/dot.',
     docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/journal/docs/agent-guide.md#dot-boot-errors',
   });
 }
@@ -437,20 +432,113 @@ function isProjectionsUnit(unit: object): unit is { readonly handlers: unknown }
 }
 
 /**
- * Everything one feature hands the journal, wherever it was declared: the
- * `journal` slice (`journalHandlers` or `journalEffects` in `.entrypoints`)
- * and any `journalProjections` unit in the feature's `.infra`. Read from the
- * feature value, so it works before anything boots.
+ * Everything one feature hands the journal, wherever it was declared: its
+ * `journal` contribution (`journalHandlers` in `.usecases`) and any
+ * `journalProjections` unit in its `.infra`. Read from the feature value, so it
+ * works before anything boots.
  * Only the feature's OWN units: the app mounts every nested child as its own
  * node, so reading a parent's `plugins()` (which lists the children's units
  * too) would register each child projection twice.
  */
 function declaredBy(feature: AnyDefinedFeature): readonly unknown[] {
   const declared: unknown[] = [];
-  const slice = feature.entrypoints.find(item => item.key === 'journal');
-  if (slice !== undefined) declared.push('handlers' in slice ? slice.handlers : undefined);
+  const contribution = feature.contributions.find(item => item.key === 'journal');
+  if (contribution !== undefined) declared.push(handlersOf(contribution));
   for (const unit of ownUnits(feature)) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
   return declared;
+}
+
+/** A contribution's static `handlers`, read untyped: `isJournalDeclarations` checks them. */
+const handlersOf = (contribution: AnyApplicationContribution): unknown =>
+  'handlers' in contribution ? contribution.handlers : undefined;
+
+/** An effect's retry policy, as the graph shows it: JSON has no `Infinity`, so no limit is `null`. */
+function retryOf(effect: Effect<unknown, RootDb, Needs>): JournalFlowRetry {
+  const retry = effect.schedule.retry ?? defaultEffectRetry;
+  return {
+    policy: effect.schedule.retry === undefined ? 'default' : 'custom',
+    maxRetries: Number.isFinite(retry.maxRetries) ? retry.maxRetries : null,
+  };
+}
+
+/**
+ * The app's event graph for `dot explain --as journal-flow`, from the features' declarations alone:
+ * each entity and the events it folds, each projection and the events it reads, each effect, tap and
+ * workflow and the events it reacts to, and the feature that owns each handler. Nothing runs and
+ * nothing is collected at runtime. A declaration the boot would refuse is left out: the boot names it.
+ */
+function journalFlow(features: readonly AnyDefinedFeature[]): JournalFlowGraph {
+  const nodes = new Map<string, JournalFlowNode>();
+  const edges = new Map<string, JournalFlowEdge>();
+  const node = (added: JournalFlowNode): string => {
+    if (!nodes.has(added.id)) nodes.set(added.id, added);
+    return added.id;
+  };
+  const edge = (added: JournalFlowEdge): void => void edges.set(`${added.kind} ${added.from} ${added.to}`, added);
+  const eventNode = (type: string): string => node({ id: `event:${type}`, kind: 'event', name: type });
+  const entityNode = (entity: AnyEntity): void => {
+    const id = node({ id: `entity:${entity.kind}`, kind: 'entity', name: entity.kind, table: getTableName(entity.table) });
+    for (const type of entity.events.keys()) eventNode(type);
+    // The fold runs in the write itself: the entity row and the event commit together.
+    for (const type of entity.reducers.keys()) edge({ kind: 'folds', from: id, to: eventNode(type), timing: 'same-transaction' });
+  };
+  const reacts = (from: string, types: Iterable<string>, delivery: JournalFlowDelivery): void => {
+    for (const type of types) edge({ kind: 'reacts', from, to: eventNode(type), timing: 'after-commit', delivery });
+  };
+  /** A `with-event` workflow: the run is written in the event's transaction, so it needs no delivery word. */
+  const startsWith = (from: string, type: string): void =>
+    edge({ kind: 'reacts', from, to: eventNode(type), timing: 'same-transaction' });
+  for (const feature of features) {
+    const qualify = qualifyBy(feature.name);
+    for (const declared of declaredBy(feature)) {
+      if (!isJournalDeclarations(declared)) continue;
+      const owner = node({ id: `feature:${feature.name}`, kind: 'feature', name: feature.name });
+      const owned = (id: string): void => edge({ kind: 'owned-by', from: id, to: owner });
+      for (const projection of declared.projections) {
+        for (const entity of projection.entities) entityNode(entity);
+        const id = node({ id: `projection:${projection.name}`, kind: 'projection', name: projection.name, lane: projection.lane });
+        for (const type of projection.types)
+          edge(
+            projection.lane === 'inline'
+              ? { kind: 'projects', from: id, to: eventNode(type), timing: 'same-transaction' }
+              : { kind: 'projects', from: id, to: eventNode(type), timing: 'after-commit', delivery: 'exactly-once' },
+          );
+        owned(id);
+      }
+      for (const effect of declared.effects) {
+        for (const entity of effect.entities) entityNode(entity);
+        const name = qualify(effect.name);
+        const id = node({ id: `effect:${name}`, kind: 'effect', name, deps: Object.keys(effect.needs), retry: retryOf(effect) });
+        reacts(id, effect.types, 'at-least-once');
+        owned(id);
+      }
+      for (const tap of declared.taps) {
+        for (const entity of tap.entities) entityNode(entity);
+        const name = qualify(tap.name);
+        const id = node({ id: `tap:${name}`, kind: 'tap', name, deps: Object.keys(tap.needs) });
+        // A tap is lossy: a listener that is not running misses the event.
+        reacts(id, tap.types, 'at-most-once');
+        owned(id);
+      }
+      for (const def of declared.workflows) {
+        const id = node({
+          id: `workflow:${def.name}@${def.version}`,
+          kind: 'workflow',
+          name: def.name,
+          version: def.version,
+          deps: Object.keys(def.needs),
+          signals: signalsOf(def),
+        });
+        if (def.startOn !== undefined) {
+          entityNode(def.startOn.entity);
+          if (def.startOn.timing === 'with-event') startsWith(id, def.startOn.event.type);
+          else reacts(id, [def.startOn.event.type], 'at-least-once');
+        }
+        owned(id);
+      }
+    }
+  }
+  return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
 /**
@@ -463,7 +551,7 @@ function readDeclarations(features: readonly AnyDefinedFeature[]): {
   readonly owners: ReadonlyMap<string, AnyDefinedFeature>;
 } {
   const projections: Projection[] = [];
-  const effects: Effect<unknown, RootDb, unknown, Needs>[] = [];
+  const effects: Effect<unknown, RootDb, Needs>[] = [];
   const taps: Tap<unknown, RootDb, Needs>[] = [];
   const workflows: WorkflowDef[] = [];
   const owners = new Map<string, AnyDefinedFeature>();
@@ -506,12 +594,20 @@ function journalNeeds<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() 
   return { db: service<AppDb & RootDb & TransactionSource<Tx>>() };
 }
 
-/** The journal unit's manifest entries, in both modes. */
-function registerJournal(ctx: DotConfigureContext): void {
+/**
+ * The journal unit's manifest entries, in both modes. `flow` is the graph `dot explain --as journal-flow`
+ * prints: in feature mode it is derived from the features' declarations; a journal the app composed
+ * itself has no feature to read it from.
+ */
+function registerJournal(ctx: DotConfigureContext, flow?: JournalFlowGraph): void {
   ctx.registerService('journal', 'custom');
   ctx.declareProvides('journal');
-  // `dot explain --as journal-flow`: which event starts which effect, from the effects' action meta.
-  ctx.registerProjection({ format: 'journal-flow', binding: 'journal', module: '@arki/journal/projection' });
+  ctx.registerProjection({
+    format: 'journal-flow',
+    binding: 'journal',
+    module: '@arki/journal/projection',
+    ...(flow === undefined ? {} : { meta: flow }),
+  });
 }
 
 function journalPlugin<
@@ -538,7 +634,7 @@ function journalFromFeatures<
     name: 'journal',
     needs: journalNeeds<Tx, AppDb>(),
     configure(ctx) {
-      registerJournal(ctx);
+      registerJournal(ctx, journalFlow(ctx.$features));
     },
     provides: {
       journal: ({ $features }) =>
@@ -629,7 +725,7 @@ export type JobsSource<TNeeds extends NeedsShape> = {
 function sliceServices(ctx: object, feature: AnyDefinedFeature): Services {
   const payload = sliceOf(ctx, feature).journal;
   if (typeof payload !== 'object' || payload === null || !('services' in payload) || !isServices(payload.services))
-    throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers or journalEffects');
+    throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers');
   return payload.services;
 }
 

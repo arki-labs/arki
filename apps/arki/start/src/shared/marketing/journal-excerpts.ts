@@ -84,6 +84,7 @@ export const PAY_ORDER = {
         'export const payOrder = j.command(',
         "  'payOrder',",
         '  z.object({ orderId: orderIdSchema, amount: z.int().positive() }),',
+        '  { writes: [OrderPaid] },',
         '  (input, { write }) =>',
         '    write(order, input.orderId, row => {',
         "      if (!row) return CommandNotFound({ detail: 'Order not found' });",
@@ -96,7 +97,7 @@ export const PAY_ORDER = {
     {
       id: 'effect',
       path: README_FILE,
-      from: 106,
+      from: 107,
       lines: [
         'export const orderMail = j.effect(',
         "  'order-mail',",
@@ -108,7 +109,7 @@ export const PAY_ORDER = {
     {
       id: 'send',
       path: README_FILE,
-      from: 111,
+      from: 112,
       lines: [
         '    OrderPaid: (e, { jobId, mailer }) =>',
         "      mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),",
@@ -117,7 +118,7 @@ export const PAY_ORDER = {
     {
       id: 'effect-end',
       path: README_FILE,
-      from: 113,
+      from: 114,
       lines: ['  },', ');'],
     },
   ],
@@ -137,13 +138,13 @@ export const WRITE_ORDER = {
     {
       id: 'store',
       path: WRITE_FILE,
-      from: 154,
+      from: 187,
       lines: ['        const storage = deps.store.bind(sp);'],
     },
     {
       id: 'event',
       path: WRITE_FILE,
-      from: 314,
+      from: 348,
       lines: [
         '          await route.log.bind(sp).append({',
         '            kind: entity.kind,',
@@ -155,7 +156,7 @@ export const WRITE_ORDER = {
     {
       id: 'row',
       path: WRITE_FILE,
-      from: 368,
+      from: 402,
       lines: [
         '          const updated = await storage.rows.update(entity, id, { ...next, version: finalVersion }, stored);',
       ],
@@ -163,7 +164,7 @@ export const WRITE_ORDER = {
     {
       id: 'projection',
       path: WRITE_FILE,
-      from: 386,
+      from: 420,
       lines: [
         '        for (const event of recorded) {',
         '          for (const projection of projections) {',
@@ -174,7 +175,7 @@ export const WRITE_ORDER = {
     {
       id: 'job',
       path: WRITE_FILE,
-      from: 434,
+      from: 493,
       lines: ['        await storage.jobs.enqueue(jobs);'],
     },
   ],
@@ -253,26 +254,26 @@ export const REFUND_STEPS = {
     {
       id: 'imports',
       path: README_FILE,
-      from: 977,
+      from: 982,
       imports: true,
       lines: ["import { z } from 'zod';"],
     },
     {
       id: 'hold',
       path: README_FILE,
-      from: 1004,
+      from: 1021,
       lines: ["  .step('hold', ({ input, payments }) => payments.hold(input.paymentId, input.amount), {"],
     },
     {
       id: 'undo',
       path: README_FILE,
-      from: 1005,
+      from: 1022,
       lines: ['    undo: ({ result, payments }) => payments.release(result.holdId),'],
     },
     {
       id: 'hold-end',
       path: README_FILE,
-      from: 1006,
+      from: 1023,
       lines: [
         '  })',
         '  // `key` is the same on every try of this step: the provider dedupes on it. `output` checks the stored result, so',
@@ -282,7 +283,7 @@ export const REFUND_STEPS = {
     {
       id: 'payBack',
       path: README_FILE,
-      from: 1009,
+      from: 1026,
       lines: [
         "  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, input.amount, key), {",
         '    output: z.object({ refundId: z.string() }),',
@@ -292,7 +293,7 @@ export const REFUND_STEPS = {
     {
       id: 'wait',
       path: README_FILE,
-      from: 1012,
+      from: 1029,
       lines: [
         "  // The run parks here until the provider's webhook sends the signal.",
         "  .waitFor('settled', { signal: 'provider.refund.settled', schema: Settled, timeout: '3d' })",
@@ -305,17 +306,17 @@ export const REFUND_STEPS = {
 export const JOURNAL_VERBS = [
   {
     path: README_FILE,
-    line: 477,
+    line: 482,
     text: 'Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`',
   },
   {
     path: README_FILE,
-    line: 373,
+    line: 378,
     text: '`journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction.',
   },
   {
     path: README_FILE,
-    line: 371,
+    line: 376,
     text: "An event that can hold personal data declares its erased form: `j.event('MessageSent', schema, { erased: data => ({ ...data, content: '' }) })`.",
   },
 ] as const satisfies readonly SourceQuote[];
@@ -334,7 +335,7 @@ export const JOURNAL_PROOFS = {
   },
   receiptReplay: {
     path: 'packages/journal/src/command.test.ts',
-    line: 593,
+    line: 624,
     text: 'a repeat with the same key and input returns the first result without running the handler again',
   },
   verifyRepair: {

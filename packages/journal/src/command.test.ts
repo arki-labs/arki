@@ -63,6 +63,7 @@ const accountIdSchema = z.templateLiteral(['acc_', z.string()]);
 const placeOrder = j.command(
   'placeOrder',
   z.object({ orderId: orderIdSchema, customerId: z.string().min(1), total: z.int().positive() }),
+  { writes: [OrderPlaced] },
   (input, { write }) =>
     write(order, input.orderId, row =>
       row ? [] : [OrderPlaced({ customerId: input.customerId, total: input.total })],
@@ -72,6 +73,7 @@ const placeOrder = j.command(
 const payOrder = j.command(
   'payOrder',
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
+  { writes: [OrderPaid] },
   (input, { write }) =>
     write(order, input.orderId, (row, { tx }) => {
       expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
@@ -83,17 +85,22 @@ const payOrder = j.command(
 );
 
 /** The bound callback reads related rows through `tx` and sees the locked row. */
-const inspectOrder = j.command('inspectOrder', z.object({ orderId: orderIdSchema }), (input, { write }) =>
-  write(order, input.orderId, async (row, { tx }) => {
-    const same = await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, input.orderId));
-    return row === null ? [] : [OrderNoted({ note: `row v${row.version}, tx saw ${same.length}` })];
-  }),
+const inspectOrder = j.command(
+  'inspectOrder',
+  z.object({ orderId: orderIdSchema }),
+  { writes: [OrderNoted] },
+  (input, { write }) =>
+    write(order, input.orderId, async (row, { tx }) => {
+      const same = await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, input.orderId));
+      return row === null ? [] : [OrderNoted({ note: `row v${row.version}, tx saw ${same.length}` })];
+    }),
 );
 
 /** Two entities in one command. The second write fails on purpose when `nick` is 'boom'. */
 const openBoth = j.command(
   'openBoth',
   z.object({ orderId: orderIdSchema, accountId: accountIdSchema, nick: z.string().min(1) }),
+  { writes: [OrderPlaced, ProfileOpened] },
   async (input, { write }) => {
     orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'both', total: 1 })]));
     return write(profile, input.accountId, () => {
@@ -104,13 +111,18 @@ const openBoth = j.command(
 );
 
 /** No entity: a plain query through `tx`, returning a number. */
-const countOrders = j.command('countOrders', z.object({ customerId: z.string() }), async (input, { tx }) => {
-  const rows = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(orders)
-    .where(eq(orders.customerId, input.customerId));
-  return rows[0]?.n ?? 0;
-});
+const countOrders = j.command(
+  'countOrders',
+  z.object({ customerId: z.string() }),
+  { writes: [] },
+  async (input, { tx }) => {
+    const rows = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(eq(orders.customerId, input.customerId));
+    return rows[0]?.n ?? 0;
+  },
+);
 
 /**
  * A child that notes the parent's order, then places and pays a second order
@@ -120,6 +132,7 @@ const countOrders = j.command('countOrders', z.object({ customerId: z.string() }
 const noteOrder = j.command(
   'noteOrder',
   z.object({ orderId: orderIdSchema, childOrderId: orderIdSchema, note: z.string().min(1) }),
+  { writes: [OrderNoted, OrderPlaced, OrderPaid] },
   async (input, { write }) => {
     orThrow(await write(order, input.orderId, () => [OrderNoted({ note: input.note })]));
     orThrow(
@@ -141,6 +154,7 @@ const placeThenNote = j.command(
     note: z.string().min(1),
     catchChild: z.boolean(),
   }),
+  { writes: [OrderPlaced] },
   async (input, { write, run, accept }) => {
     orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'nested', total: 1 })]));
     const child = await run(noteOrder, { orderId: input.orderId, childOrderId: input.childOrderId, note: input.note });
@@ -157,6 +171,7 @@ const placeThenNote = j.command(
 const placeViaChildren = j.command(
   'placeViaChildren',
   z.object({ orderId: orderIdSchema, childOrderId: orderIdSchema }),
+  { writes: [] },
   (input, { run }) => run(placeThenNote, { ...input, note: 'deep', catchChild: false }),
 );
 
@@ -166,28 +181,28 @@ const placeBoth = (a: OrderId, b: OrderId, run: HandlerArgs<typeof placeOrder>[1
   run(placeOrder, { orderId: b, customerId: 'pair', total: 1 }),
 ];
 /** Two children started without awaiting each in turn. */
-const twoAtOnce = j.command('twoAtOnce', twoIds, async (input, { run }) => {
+const twoAtOnce = j.command('twoAtOnce', twoIds, { writes: [] }, async (input, { run }) => {
   const results = await Promise.all(placeBoth(input.a, input.b, run));
   for (const result of results) orThrow(result);
 });
 const placePair = () => [OrderPlaced({ customerId: 'pair', total: 1 })];
 /** Two writes started without awaiting each in turn. */
-const twoWritesAtOnce = j.command('twoWritesAtOnce', twoIds, async (input, { write }) => {
+const twoWritesAtOnce = j.command('twoWritesAtOnce', twoIds, { writes: [OrderPlaced] }, async (input, { write }) => {
   const results = await Promise.all([write(order, input.a, placePair), write(order, input.b, placePair)]);
   for (const result of results) orThrow(result);
 });
 /** Starts a write, does not await it, and throws. The write is still running when the handler leaves. */
-const throwsWithWriteRunning = j.command('throwsWithWriteRunning', twoIds, (input, { write }) => {
+const throwsWithWriteRunning = j.command('throwsWithWriteRunning', twoIds, { writes: [OrderPlaced] }, (input, { write }) => {
   void write(order, input.a, placePair).then(result => orThrow(result));
   throw new Error('handler boom');
 });
 /** Starts a write, does not await it, and returns. */
-const returnsWithWriteRunning = j.command('returnsWithWriteRunning', twoIds, (input, { write }) => {
+const returnsWithWriteRunning = j.command('returnsWithWriteRunning', twoIds, { writes: [OrderPlaced] }, (input, { write }) => {
   void write(order, input.a, placePair).then(result => orThrow(result));
   return Promise.resolve();
 });
 /** The same two children, awaited one at a time. */
-const twoInTurn = j.command('twoInTurn', twoIds, async (input, { run }) => {
+const twoInTurn = j.command('twoInTurn', twoIds, { writes: [] }, async (input, { run }) => {
   orThrow(await run(placeOrder, { orderId: input.a, customerId: 'pair', total: 1 }));
   orThrow(await run(placeOrder, { orderId: input.b, customerId: 'pair', total: 1 }));
 });
@@ -195,7 +210,7 @@ const twoInTurn = j.command('twoInTurn', twoIds, async (input, { run }) => {
 // --- Types ------------------------------------------------------------------
 // The handler's input is the schema output; `run` takes the schema input.
 type HandlerArgs<C> = C extends { readonly handler: (...args: infer Args) => unknown } ? Args : never;
-const dated = j.command('dated', z.object({ at: z.string().transform(s => new Date(s)) }), input => {
+const dated = j.command('dated', z.object({ at: z.string().transform(s => new Date(s)) }), { writes: [] }, input => {
   expectTypeOf(input.at).toEqualTypeOf<Date>();
   return input.at.getTime();
 });
@@ -211,7 +226,7 @@ expectTypeOf<HandlerArgs<typeof placeOrder>[1]['meta']>().toEqualTypeOf<{ actorI
 
 const foreignEvents = () => [ProfileOpened({ nick: 'a' })];
 const otherJ = initJournal({ tables, meta: z.object({ tenant: z.string() }) });
-const foreignCommand = otherJ.command('foreign', z.object({}), () => 1);
+const foreignCommand = otherJ.command('foreign', z.object({}), { writes: [] }, () => 1);
 function typeChecks(): void {
   void journal.run(db, dated, { at: '2026-01-01' }, meta).then(result => orThrow(result));
   // @ts-expect-error `run` takes the schema input, not the output.
@@ -222,15 +237,19 @@ function typeChecks(): void {
   void journal.run(db, countOrders, { customerId: 'c' }, { actorId: 1 }).then(result => orThrow(result));
   // @ts-expect-error a command defined for another meta schema cannot run on this journal.
   void journal.run(db, foreignCommand, {}, meta).then(result => orThrow(result));
-  void j.command('nested', z.object({}), (_input, { run }) =>
+  void j.command('nested', z.object({}), { writes: [] }, (_input, { run }) =>
     run(placeOrder, { orderId: 'ord_1', customerId: 'c', total: 1 }),
   );
-  // @ts-expect-error the child's input is checked too.
-  void j.command('nested-bad', z.object({}), (_input, { run }) => run(placeOrder, { orderId: 'ord_1' }));
-  // @ts-expect-error an event the entity does not declare.
-  void j.command('bad-event', z.object({}), (_input, { write }) => write(order, orderId(1), foreignEvents));
+  void j.command('nested-bad', z.object({}), { writes: [] }, (_input, { run }) =>
+    // @ts-expect-error the child's input is checked too.
+    run(placeOrder, { orderId: 'ord_1' }),
+  );
+  void j.command('bad-event', z.object({}), { writes: [ProfileOpened] }, (_input, { write }) =>
+    // @ts-expect-error an event the entity does not declare, even with `writes` naming it.
+    write(order, orderId(1), foreignEvents),
+  );
   // @ts-expect-error the id must be the entity's key type.
-  void j.command('bad-id', z.object({}), (_input, { write }) => write(order, accountId(1), () => []));
+  void j.command('bad-id', z.object({}), { writes: [] }, (_input, { write }) => write(order, accountId(1), () => []));
 }
 void typeChecks;
 
@@ -297,11 +316,16 @@ describe('journal.run', () => {
         }),
       }),
     });
-    const twice = loud.command('twice', z.object({ orderId: orderIdSchema }), async (input, { write, meta }) => {
-      orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'twice', total: 1 })]));
-      orThrow(await write(order, input.orderId, () => [OrderPaid({ amount: 1 })]));
-      return meta;
-    });
+    const twice = loud.command(
+      'twice',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [OrderPlaced, OrderPaid] },
+      async (input, { write, meta }) => {
+        orThrow(await write(order, input.orderId, () => [OrderPlaced({ customerId: 'twice', total: 1 })]));
+        orThrow(await write(order, input.orderId, () => [OrderPaid({ amount: 1 })]));
+        return meta;
+      },
+    );
     const id = orderId(++next);
     const seen = await loud.compose({}).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
     expect(parses).toBe(1);
@@ -556,6 +580,7 @@ describe('expectedVersion from a command', () => {
     const noteAt = j.command(
       'noteAt',
       z.object({ orderId: orderIdSchema, version: z.int(), note: z.string() }),
+      { writes: [OrderNoted] },
       (input, { write }) =>
         write(order, input.orderId, () => [OrderNoted({ note: input.note })], { expectedVersion: input.version }),
     );
@@ -577,28 +602,39 @@ const receiptOf = async (key: string) => {
 const justNote = j.command(
   'justNote',
   z.object({ orderId: orderIdSchema, note: z.string().min(1) }),
+  { writes: [OrderNoted] },
   async (input, { write }) => {
     const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: input.note })]));
     return { version: row?.version ?? 0 };
   },
 );
-const placePlain = j.command('placePlain', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
-  const { row } = orThrow(
-    await write(order, input.orderId, row => (row ? [] : [OrderPlaced({ customerId: 'c', total: 1 })])),
-  );
-  return { version: row?.version ?? 0 };
-});
+const placePlain = j.command(
+  'placePlain',
+  z.object({ orderId: orderIdSchema }),
+  { writes: [OrderPlaced] },
+  async (input, { write }) => {
+    const { row } = orThrow(
+      await write(order, input.orderId, row => (row ? [] : [OrderPlaced({ customerId: 'c', total: 1 })])),
+    );
+    return { version: row?.version ?? 0 };
+  },
+);
 
 describe('idempotency receipts', () => {
   it('a repeat with the same key and input returns the first result without running the handler again', async () => {
     // Why: a webhook is delivered at least once. The second delivery must answer like the first
     // and write nothing, even after other writes changed the entity in between.
     let runs = 0;
-    const settle = j.command('settle', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
-      runs += 1;
-      const { row } = orThrow(await write(order, input.orderId, row => (row ? [OrderPaid({ amount: 1 })] : [])));
-      return { paidVersion: row?.version ?? 0 };
-    });
+    const settle = j.command(
+      'settle',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [OrderPaid] },
+      async (input, { write }) => {
+        runs += 1;
+        const { row } = orThrow(await write(order, input.orderId, row => (row ? [OrderPaid({ amount: 1 })] : [])));
+        return { paidVersion: row?.version ?? 0 };
+      },
+    );
     const id = orderId(++next);
     orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
     const key = `stripe:evt_${next}`;
@@ -629,10 +665,15 @@ describe('idempotency receipts', () => {
       code: CommandConflict.code,
     });
     // A Date does not survive JSON, so the replay could not return what the first call returned.
-    const datedResult = j.command('datedResult', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
-      orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'dated' })]));
-      return { at: new Date() };
-    });
+    const datedResult = j.command(
+      'datedResult',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [OrderNoted] },
+      async (input, { write }) => {
+        orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'dated' })]));
+        return { at: new Date() };
+      },
+    );
     const unstable = `k_unstable_${next}`;
     await expect(
       journal.run(db, datedResult, { orderId: id }, meta, { idempotencyKey: unstable }),
@@ -649,7 +690,7 @@ describe('idempotency receipts', () => {
       seen.push(ctx.idempotencyKey);
       await next();
     });
-    const nothing = j.command('nothing', z.object({}), () => {
+    const nothing = j.command('nothing', z.object({}), { writes: [] }, () => {
       /* returns nothing */
     });
     const key = `k_nothing_${next}`;
@@ -658,7 +699,7 @@ describe('idempotency receipts', () => {
     expect(seen).toEqual([key, key]);
     expect(await receiptOf(key)).toMatchObject({ result: {} });
 
-    const nested = j.command('nestedKey', z.object({}), (_input, { run }) =>
+    const nested = j.command('nestedKey', z.object({}), { writes: [] }, (_input, { run }) =>
       run(nothing, {}, { idempotencyKey: `k_nested_${next}` }),
     );
     await expect(hooked.run(db, nested, {}, meta, { idempotencyKey: `k_nested_${next}` })).resolves.toMatchObject({ code: TransactionDefect.code, cause: { message: expect.stringContaining('has not finished') } });
@@ -688,16 +729,17 @@ describe('authorize', () => {
     const approve = j.command(
       'approveOrder',
       z.object({ orderId: orderIdSchema }),
-      async (input, { write }) => {
-        runs += 1;
-        const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]));
-        return { version: row?.version ?? 0 };
-      },
       {
+        writes: [OrderNoted],
         authorize: (_input, { meta: who }) => {
           checked.push(who.actorId);
           return allowed.has(who.actorId) ? undefined : CommandForbidden({ detail: 'Not allowed to approve' });
         },
+      },
+      async (input, { write }) => {
+        runs += 1;
+        const { row } = orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]));
+        return { version: row?.version ?? 0 };
       },
     );
     const id = orderId(++next);
@@ -731,17 +773,21 @@ describe('authorize', () => {
     const guarded = j.command(
       'guardedNote',
       z.object({ orderId: orderIdSchema }),
+      {
+        writes: [OrderNoted],
+        authorize: (_input, { meta: who }) =>
+          who.actorId === 'usr_test' ? undefined : CommandForbidden({ detail: 'Only the test actor' }),
+      },
       async (input, { write }) => {
         runs += 1;
         orThrow(await write(order, input.orderId, () => [OrderNoted({ note: 'guarded' })]));
       },
-      {
-        authorize: (_input, { meta: who }) =>
-          who.actorId === 'usr_test' ? undefined : CommandForbidden({ detail: 'Only the test actor' }),
-      },
     );
-    const parent = j.command('parentOfGuarded', z.object({ orderId: orderIdSchema }), (input, { run }) =>
-      run(guarded, input),
+    const parent = j.command(
+      'parentOfGuarded',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [] },
+      (input, { run }) => run(guarded, input),
     );
     const id = orderId(++next);
     orThrow(await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta));
@@ -776,14 +822,19 @@ describe('trace', () => {
 
   it('a child run gets its own command id and inherits the chain; the context exposes both', async () => {
     const seen: { commandId: string; correlationId: string }[] = [];
-    const outer = j.command('traceOuter', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
+    const outer = j.command('traceOuter', z.object({ orderId: orderIdSchema }), { writes: [] }, async (input, ctx) => {
       seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
       orThrow(await ctx.run(inner, input));
     });
-    const inner = j.command('traceInner', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
-      seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
-      orThrow(await ctx.write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
-    });
+    const inner = j.command(
+      'traceInner',
+      z.object({ orderId: orderIdSchema }),
+      { writes: [OrderPlaced] },
+      async (input, ctx) => {
+        seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
+        orThrow(await ctx.write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
+      },
+    );
     const id = orderId(++next);
     orThrow(await journal.run(db, outer, { orderId: id }, meta, { correlationId: 'req_123' }));
     const [placed] = await stamps(id);

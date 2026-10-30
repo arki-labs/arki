@@ -32,18 +32,19 @@ describe('owned callback defects', () => {
       const command = j.command(
         `defect.${boundary}`,
         z.object({}),
-        async (_input, { write }) => {
-          orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
-          if (boundary === 'events') return write(order, id, fail);
-          if (boundary === 'handler') fail();
-          return { done: true };
-        },
         {
+          writes: [OrderPlaced],
           authorize: async (_input, { tx }) => {
             if (boundary !== 'authorize') return;
             await tx.insert(orders).values({ id, customerId: 'c', total: 1, status: 'placed' });
             fail();
           },
+        },
+        async (_input, { write }) => {
+          orThrow(await write(order, id, () => [OrderPlaced({ customerId: 'c', total: 1 })]));
+          if (boundary === 'events') return write(order, id, fail);
+          if (boundary === 'handler') fail();
+          return { done: true };
         },
       );
       const key = `callback:${boundary}`;
@@ -68,7 +69,7 @@ describe('owned hook defects', () => {
       throw defect;
     });
     const id = orderId(8010);
-    const command = j.command('hook.defect', z.object({}), async (_input, { write }) => {
+    const command = j.command('hook.defect', z.object({}), { writes: [OrderPlaced] }, async (_input, { write }) => {
       const written = await write(order, id, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
       if (isFailure(written)) return written;
       return { version: written.row?.version };
@@ -95,7 +96,7 @@ describe('owned hook defects', () => {
       throw new Error('private effect hook detail');
     });
     const id = orderId(8011);
-    const command = j.command('hook.effect.place', z.object({}), (_input, { write }) =>
+    const command = j.command('hook.effect.place', z.object({}), { writes: [OrderPlaced] }, (_input, { write }) =>
       write(order, id, () => [OrderPlaced({ customerId: 'c', total: 1 })]),
     );
     orThrow(await hooked.run(db, command, {}, meta));
@@ -279,7 +280,7 @@ describe('a step retry rule judges what the step body did', () => {
 it('runtime metadata invariants are typed before any handler or transaction work', async () => {
   const init = initJournal({ tables, meta: z.object({ actorId: z.string().transform(value => value + '!') }) });
   let calls = 0;
-  const command = init.command('metadata.unstable', z.object({}), () => {
+  const command = init.command('metadata.unstable', z.object({}), { writes: [] }, () => {
     calls += 1;
     return 'unreachable';
   });

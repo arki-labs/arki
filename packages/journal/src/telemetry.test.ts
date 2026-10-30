@@ -24,10 +24,10 @@ const SECRET = 'never-collect-this';
 
 const Declined = defineFailure('test.telemetry_declined', { status: 409, data: z.object({ reason: z.string() }) });
 
-const approve = j.command('test.telemetry.approve', z.object({ note: z.string() }), () =>
+const approve = j.command('test.telemetry.approve', z.object({ note: z.string() }), { writes: [] }, () =>
   Promise.resolve({ approved: true }),
 );
-const decline = j.command('test.telemetry.decline', z.object({ note: z.string() }), ({ note }) =>
+const decline = j.command('test.telemetry.decline', z.object({ note: z.string() }), { writes: [] }, ({ note }) =>
   Promise.resolve(Declined({ reason: note })),
 );
 

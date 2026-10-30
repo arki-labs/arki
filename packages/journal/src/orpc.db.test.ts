@@ -58,6 +58,11 @@ const revoked = new Set<string>();
 const deposit = j.command(
   'deposit',
   z.object({ id: accountIdSchema, amount: z.int().positive() }),
+  {
+    writes: [Deposited, Opened], // A replay is authorized like a first run: a receipt proves the command ran, not that this caller may see it.
+    authorize: (_input, { meta }) =>
+      revoked.has(meta.actorId) ? CommandForbidden({ detail: 'Not allowed to deposit' }) : undefined,
+  },
   async (input, { write }) => {
     runs += 1;
     const { row } = orThrow(
@@ -66,11 +71,6 @@ const deposit = j.command(
       ),
     );
     return { balance: row?.balance ?? 0 };
-  },
-  {
-    // A replay is authorized like a first run: a receipt proves the command ran, not that this caller may see it.
-    authorize: (_input, { meta }) =>
-      revoked.has(meta.actorId) ? CommandForbidden({ detail: 'Not allowed to deposit' }) : undefined,
   },
 );
 
@@ -214,7 +214,10 @@ describe('ambiguous commit: recovered by the receipt, never by a blind retry', (
       { context: alice },
     ).catch((error_: unknown) => error_);
     expect(error).toMatchObject({ code: TransactionCommitUncertain.code, status: 503, defined: true });
-    expect(error).toMatchObject({ cause: undefined });
+    // Observers on the server read the failure from `cause`; the client gets the JSON, which never carries it.
+    expect(error).toMatchObject({ cause: { code: TransactionCommitUncertain.code } });
+    expect(JSON.stringify(error)).toContain(TransactionCommitUncertain.code);
+    expect(JSON.stringify(error)).not.toContain('cause');
     expect(runs).toBe(1);
 
     // The client repeats the same logical action with the same key.
