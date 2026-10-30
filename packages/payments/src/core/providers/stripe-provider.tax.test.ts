@@ -14,6 +14,7 @@ import { money, UnknownCurrency } from '@arki/money';
 import type { Customer } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
+import { TaxAddressIncomplete } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
@@ -185,6 +186,37 @@ describe('createTaxTransaction', () => {
     expect(requests[0]?.form).toMatchObject({ mode: 'partial', flat_amount: '-600' });
   });
 
+  it('returns money.provider_amount for a partial refund total Stripe cannot take, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const reversal = await stripe.createTaxTransaction({
+      reference: 'refund_negative',
+      type: 'refund',
+      currency: 'USD',
+      originalTransactionId: 'tax_txn_1',
+      lineItems: [{ amount: money('-6.00', 'USD'), reference: 'plan' }],
+    });
+
+    expect(reversal).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns payments.tax_address_incomplete for a sale whose address has no country, before calling Stripe', async () => {
+    // The package's customerDetails input schema allows an address without a country
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const sale = await stripe.createTaxTransaction({
+      reference: 'order_no_country',
+      type: 'sale',
+      currency: 'USD',
+      lineItems: [{ amount: money('6.00', 'USD'), reference: 'plan' }],
+      customerDetails: { address: { city: 'Springfield' } },
+    });
+
+    expect(TaxAddressIncomplete.is(sale)).toBe(true);
+    expect(requests).toHaveLength(0);
+  });
+
   it('refuses a refund that does not say which sale it reverses, before calling Stripe', async () => {
     const { stripe, requests } = provider(() => ({ body: {} }));
 
@@ -208,6 +240,36 @@ describe('createTaxTransaction', () => {
         lineItems: [{ amount: money('1.00', 'USD'), reference: 'plan' }],
       }),
     ).rejects.toMatchObject({ name: 'PaymentProviderError', code: 'invalid_request' });
+  });
+});
+
+describe('calculateTax', () => {
+  it('returns payments.tax_address_incomplete for an address with no country, before calling Stripe', async () => {
+    // Without a country no jurisdiction can be found: a guess would charge the wrong tax
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const quote = await stripe.calculateTax({
+      customerId: customer.id,
+      currency: 'USD',
+      lineItems: [{ amount: money('6.00', 'USD'), reference: 'plan' }],
+      customerDetails: { address: { postalCode: '94105' } },
+    });
+
+    expect(quote).toMatchObject({ code: 'payments.tax_address_incomplete' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('returns money.provider_amount for a line amount Stripe cannot take, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const quote = await stripe.calculateTax({
+      customerId: customer.id,
+      currency: 'KWD',
+      lineItems: [{ amount: money('6.000', 'KWD'), reference: 'plan' }],
+    });
+
+    expect(quote).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toHaveLength(0);
   });
 });
 

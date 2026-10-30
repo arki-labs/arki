@@ -292,10 +292,17 @@ export function createRefundWorkflow<
         if (isFailure(row)) return row;
 
         // A late failure alerts support only: the customer was never told the refund completed
-        if (results.record.errorMessage === null) {
-          await notifications.sendRefundStatusUpdate?.(row, 'completed');
-        } else {
-          await notifications.sendRefundFailureAlert?.(row, new Error(results.record.errorMessage));
+        const sent =
+          results.record.errorMessage === null
+            ? await notifications.sendRefundStatusUpdate?.(row, 'completed')
+            : await notifications.sendRefundFailureAlert?.(row, new Error(results.record.errorMessage));
+        // The refund is done either way: a notification that did not go out is logged, not retried
+        if (isFailure(sent)) {
+          logger.warn('Refund {refundId} notification was not sent: {code}', {
+            refundId: row.id,
+            code: sent.code,
+            failure: sent,
+          });
         }
 
         return null;

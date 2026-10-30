@@ -30,6 +30,7 @@ import { CommandNotFound, isJournalError } from '@arki/journal';
 
 import type { PaymentId } from '../core/types.js';
 import type { AppDb, AppTx } from '../test-support.js';
+import type { RefundCurrencyMismatch } from './failures.js';
 import type { RefundWrites } from './journal.js';
 import type { RefundId } from './primitives.js';
 import { createPaymentId } from '../core/primitives.js';
@@ -114,7 +115,7 @@ async function rowOf(refundId: RefundId) {
 }
 
 /** The code of a refusal: a rule of a command said no. */
-type RefusalCode = (CommandNotFound | CommandConflict | CommandInvalid)['code'];
+type RefusalCode = (CommandNotFound | CommandConflict | CommandInvalid | FailureOf<typeof RefundCurrencyMismatch>)['code'];
 
 /** The command must return the failure with this code and message, and must leave the journal and the row alone. */
 async function expectRejected(
@@ -136,16 +137,16 @@ async function expectRejected(
   }
 }
 
-/** A payment of 100 USD. At most one refund of a payment is pending at a time, so each test gets its own. */
+/** A payment, 100 USD unless said. At most one refund of a payment is pending at a time, so each test gets its own. */
 let paymentCounter = 0;
-async function freshPayment(): Promise<PaymentId> {
+async function freshPayment(amount = usd('100')): Promise<PaymentId> {
   paymentCounter += 1;
   const id = orThrow(createPaymentId());
   await orThrow(
     journal.run(
       db,
       typed.core.commands.initiatePayment,
-      { paymentId: id, userId, customerId, providerPaymentId: `pi_refunds_${paymentCounter}`, amount: usd('100') },
+      { paymentId: id, userId, customerId, providerPaymentId: `pi_refunds_${paymentCounter}`, amount },
       meta,
     ),
   );
@@ -240,15 +241,25 @@ describe('requestRefund', () => {
     );
   });
 
-  it('rejects a refund in another currency than the original: 25 EUR is not a part of 100 USD', async () => {
+  it('rejects a refund in another currency than the payment: 25 EUR is not a part of 100 USD', async () => {
+    // The same rule and failure as `RefundService`, for a writer that runs the command itself
     await expectRejected(
       () => journal.run(db, commands.requestRefund, request({ refundAmount: { amount: '25', currency: 'EUR' } }), meta),
+      'payments.refund_currency_mismatch',
+      `Refund currency EUR differs from the payment currency USD for payment ${paymentId}`,
+    );
+  });
+
+  it('rejects a refund in another currency than the original it names', async () => {
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, request({ originalAmount: { amount: '100', currency: 'EUR' } }), meta),
       'journal.invalid',
-      'Refund currency (EUR) differs from the original currency (USD)',
+      'Refund currency (USD) differs from the original currency (EUR)',
     );
   });
 
   it('stores a JPY refund in yen, never multiplied or divided by 100', async () => {
+    paymentId = await freshPayment({ amount: '5000', currency: 'JPY' });
     const refundId = orThrow(createRefundId());
 
     await orThrow(
@@ -274,6 +285,7 @@ describe('requestRefund', () => {
   });
 
   it('stores a KWD refund to the fils: three decimals, which a two-decimal column used to cut', async () => {
+    paymentId = await freshPayment(kwd('10.000'));
     const refundId = orThrow(createRefundId());
 
     await orThrow(
@@ -317,7 +329,7 @@ describe('a refund recorded before minor units (`RefundRequested`)', () => {
     });
 
     // The typed journal writes inside the app's own transaction
-    await db.transaction(tx => journal.write(tx, entities.refund, refundId, { meta, events: () => [old] }));
+    orThrow(await db.transaction(tx => journal.write(tx, entities.refund, refundId, { meta, events: () => [old] })));
 
     expect(await rowOf(refundId)).toMatchObject({
       originalAmountMinor: originalMinor,

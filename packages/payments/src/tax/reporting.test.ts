@@ -21,6 +21,7 @@ import { createCustomerId } from '../core/primitives.js';
 import { PaymentRepository } from '../core/repository.js';
 import { runnerOn } from '../service-test-support.js';
 import { adminId, core, customerId, openDb, schema, typed, userId } from '../test-support.js';
+import { StoredTaxInvalid } from './failures.js';
 import { createTaxReportingService } from './reporting.js';
 import { createTaxRepositories } from './repository.js';
 import { createTaxTables } from './tables.js';
@@ -195,7 +196,13 @@ describe('getCustomerTaxSummary', () => {
       metadata: { taxAmount: 'about 2 dollars' },
     });
 
-    await expect(reporting.getCustomerTaxSummary(otherCustomerId, thisYear)).rejects.toThrow(broken);
+    const refused = await reporting.getCustomerTaxSummary(otherCustomerId, thisYear);
+    expect(StoredTaxInvalid.is(refused) && refused.data).toEqual({
+      paymentId: broken,
+      problem: 'not_money',
+      paymentCurrency: 'USD',
+      taxCurrency: null,
+    });
   });
 
   it('refuses recorded tax in another currency than the payment', async () => {
@@ -205,7 +212,12 @@ describe('getCustomerTaxSummary', () => {
       metadata: { taxAmount: { amount: '3', currency: 'EUR' } },
     });
 
-    await expect(reporting.getCustomerTaxSummary(otherCustomerId, thisYear)).rejects.toThrow(/records tax in EUR/);
-    expect(mismatched).toBeDefined();
+    const refused = await reporting.getCustomerTaxSummary(otherCustomerId, thisYear);
+    expect(StoredTaxInvalid.is(refused) && refused.data).toEqual({
+      paymentId: mismatched,
+      problem: 'other_currency',
+      paymentCurrency: 'USD',
+      taxCurrency: 'EUR',
+    });
   });
 });

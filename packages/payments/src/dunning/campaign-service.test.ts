@@ -20,6 +20,8 @@ import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
 import { updateDunningCampaignInputSchema } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
+import { DunningCampaignNotFound, DunningCampaignWithoutSteps } from './failures.js';
+import { createDunningCampaignId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
 import { core, customerId, planId, schema, userId, users } from '../test-support.js';
@@ -378,13 +380,58 @@ async function newPayment(
   return id;
 }
 
+describe('executeCampaign refusals', () => {
+  // A router passes any campaign id it is given: each refusal is a code the caller branches on, and writes nothing
+  async function executionCount(campaignId: DunningCampaignId) {
+    const rows = await db
+      .select()
+      .from(tables.dunningExecutions)
+      .where(eq(tables.dunningExecutions.campaignId, campaignId));
+    return rows.length;
+  }
+
+  it('an unknown campaign id returns payments.dunning_campaign_not_found', async () => {
+    const unknown = orThrow(createDunningCampaignId());
+
+    const refused = await service.executeCampaign({ campaignId: unknown, dryRun: false }, 'usr_admin');
+
+    expect(DunningCampaignNotFound.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ code: 'payments.dunning_campaign_not_found', data: { campaignId: unknown } });
+  });
+
+  it('a draft campaign returns payments.dunning_campaign_not_active and schedules nothing', async () => {
+    const campaignId = await createdCampaign('Refused: draft', 'draft');
+
+    const refused = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+
+    expect(refused).toMatchObject({
+      code: 'payments.dunning_campaign_not_active',
+      data: { campaignId, status: 'draft' },
+    });
+    expect(await executionCount(campaignId)).toBe(0);
+  });
+
+  it('an active campaign with no active step returns payments.dunning_campaign_without_steps', async () => {
+    const campaignId = await createdCampaign('Refused: no steps');
+    await db
+      .update(tables.dunningTemplates)
+      .set({ isActive: false })
+      .where(eq(tables.dunningTemplates.campaignId, campaignId));
+
+    const refused = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+
+    expect(DunningCampaignWithoutSteps.is(refused)).toBe(true);
+    expect(await executionCount(campaignId)).toBe(0);
+  });
+});
+
 describe('executeCampaign finds eligible customers in a named schema', () => {
   it('payment_failure: a customer whose payment failed and who has not paid since gets the campaign', async () => {
     const buyer = await newCustomer('failed');
     await newPayment(buyer, 'failed', sub(now(), { hours: 24 }));
     const campaignId = await createdCampaign('Eligible: failed payment');
 
-    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+    const executions = orThrow(await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin'));
 
     expect(executions.map(row => row.customerId)).toEqual([buyer.id]);
     expect(executions[0]?.triggerData).toMatchObject({ failure_reasons: ['card_declined'] });
@@ -398,9 +445,11 @@ describe('executeCampaign finds eligible customers in a named schema', () => {
     await newPayment(excluded, 'failed', sub(now(), { hours: 24 }));
     const campaignId = await createdCampaign('Eligible: paid and excluded');
 
-    const executions = await service.executeCampaign(
-      { campaignId, dryRun: false, customFilters: { excludeCustomerIds: [excluded.id], testMode: false } },
-      'usr_admin',
+    const executions = orThrow(
+      await service.executeCampaign(
+        { campaignId, dryRun: false, customFilters: { excludeCustomerIds: [excluded.id], testMode: false } },
+        'usr_admin',
+      ),
     );
 
     expect(executions.map(row => row.customerId)).not.toContain(paid.id);
@@ -420,7 +469,7 @@ describe('executeCampaign finds eligible customers in a named schema', () => {
       conditions: { paymentFailureCount: 3 },
     });
 
-    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+    const executions = orThrow(await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin'));
 
     expect(executions.map(row => row.customerId)).toEqual([repeated.id]);
     expect(executions[0]?.paymentId).toBe(latest);
@@ -438,9 +487,11 @@ describe('executeCampaign finds eligible customers in a named schema', () => {
       conditions: { subscriptionStatus: ['past_due'] },
     });
 
-    const executions = await service.executeCampaign(
-      { campaignId, dryRun: false, customFilters: { customerIds: [buyer.id], testMode: false } },
-      'usr_admin',
+    const executions = orThrow(
+      await service.executeCampaign(
+        { campaignId, dryRun: false, customFilters: { customerIds: [buyer.id], testMode: false } },
+        'usr_admin',
+      ),
     );
 
     expect(executions.map(row => [row.customerId, row.subscriptionId])).toEqual([[buyer.id, subscriptionId]]);
@@ -459,7 +510,7 @@ describe('executeCampaign finds eligible customers in a named schema', () => {
       conditions: { trialEndingDays: 3 },
     });
 
-    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+    const executions = orThrow(await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin'));
 
     expect(executions.map(row => row.subscriptionId)).toContain(subscriptionId);
   });

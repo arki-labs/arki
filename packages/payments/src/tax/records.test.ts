@@ -17,9 +17,11 @@ import { money } from '@arki/money';
 
 import type { Customer } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
+import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
 import { customerId, openDb, schema } from '../test-support.js';
+import { TaxCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { createTaxRepositories } from './repository.js';
 import { TaxService } from './service.js';
 import { createTaxTables } from './tables.js';
@@ -179,29 +181,62 @@ describe('getCustomerTaxSummary', () => {
   });
 
   it('refuses a refund of a sale that was never recorded, so it cannot reverse a stranger', async () => {
-    await expect(
-      service.createTaxTransaction({
-        reference: 'refund_x',
-        type: 'refund',
-        customerId,
-        lineItems,
-        currency: 'EUR',
-        breakdown: [germany],
-        originalReference: 'pay_unknown',
-      }),
-    ).rejects.toThrow(/never recorded/);
+    const refund = { reference: 'refund_x', type: 'refund' as const, customerId, lineItems, currency: 'EUR', breakdown: [germany] };
+
+    const unknown = await service.createTaxTransaction({ ...refund, originalReference: 'pay_unknown' });
+    expect(TaxRefundSaleNotFound.is(unknown) && unknown.data).toEqual({ reference: 'refund_x', originalReference: 'pay_unknown' });
+
+    const unnamed = await service.createTaxTransaction(refund);
+    expect(TaxRefundSaleNotFound.is(unnamed) && unnamed.data).toEqual({ reference: 'refund_x', originalReference: null });
+  });
+
+  it('refuses a sale for a customer the provider cannot find, and asks Stripe nothing', async () => {
+    const http = createFakeStripeHttp(() => ({ body: {} }));
+    const provider = new StripeProvider(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      {
+        references: {
+          findCustomerById: () => Promise.resolve(null),
+          findPlanById: () => Promise.resolve(null),
+          findSubscriptionById: () => Promise.resolve(null),
+          findPaymentById: () => Promise.resolve(null),
+        },
+        httpClient: http.client,
+        maxNetworkRetries: 0,
+      },
+    );
+    const strangers = new TaxService(provider, createTaxRepositories(drizzle({ client }), tax));
+
+    const refused = await strangers.createTaxTransaction({
+      reference: 'pay_stranger',
+      type: 'sale',
+      customerId: otherCustomer,
+      lineItems,
+      currency: 'EUR',
+      breakdown: [germany],
+    });
+
+    expect(ReferenceNotFound.is(refused) && refused.data).toMatchObject({ kind: 'customer', id: otherCustomer });
+    expect(http.requests).toEqual([]);
   });
 
   it('refuses tax in another currency than the transaction, so a wrong total is never stored', async () => {
-    await expect(
-      service.createTaxTransaction({
-        reference: 'pay_mixed',
-        type: 'sale',
-        customerId,
-        lineItems,
-        currency: 'EUR',
-        breakdown: [{ ...germany, amount: money('19', 'USD') }],
-      }),
-    ).rejects.toThrow(/USD/);
+    const before = requests.length;
+    const refused = await service.createTaxTransaction({
+      reference: 'pay_mixed',
+      type: 'sale',
+      customerId,
+      lineItems,
+      currency: 'EUR',
+      breakdown: [{ ...germany, amount: money('19', 'USD') }],
+    });
+
+    expect(TaxCurrencyMismatch.is(refused) && refused.data).toEqual({
+      reference: 'pay_mixed',
+      jurisdiction: germany.jurisdiction,
+      taxCurrency: 'USD',
+      transactionCurrency: 'EUR',
+    });
+    expect(requests).toHaveLength(before);
   });
 });

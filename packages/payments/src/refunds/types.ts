@@ -55,7 +55,7 @@ export type RefundMetrics = {
  * A mistake in how the refund API is used, thrown. Expected refusals, such as a refund above what
  * was paid, are returned as failures instead (see `./failures.ts`).
  */
-export type RefundErrorCode = 'REASON_REQUIRED' | 'PROCESSING_FAILED';
+export type RefundErrorCode = 'PROCESSING_FAILED';
 
 export class RefundError extends Error {
   constructor(

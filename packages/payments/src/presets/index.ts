@@ -17,5 +17,14 @@ export type {
   SubscriptionBillingConfig,
 } from './subscription.js';
 
+export {
+  PriceNotConfigured,
+  SubscriptionWithoutItems,
+  UnknownProviderCustomer,
+  UnknownSubscriptionStatus,
+} from './failures.js';
+/** `handleWebhook` returns it for a bad signature: answer it with HTTP 400. */
+export { InvalidWebhookSignature } from '../core/providers/provider-error.js';
+
 export { projectRevenueCatEvent, revenueCatWebhookSchema, verifyRevenueCatAuth } from './revenuecat.js';
 export type { RevenueCatEvent, RevenueCatWebhook } from './revenuecat.js';

@@ -33,7 +33,7 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 
 ### Convert currencies
 
-1. Build rates with `ratesFrom({ base, rates })` from `@arki/money/exchange`.
+1. Read a fetched rate table with `parseRates({ base, rates })` from `@arki/money/exchange`; it returns a failure for a bad entry. Use `ratesFrom` only for a table in your own code (it throws).
 2. Make a converter with `createConverter(rates, { inverse?, via? })`.
 3. Call `convert(money, 'GBP', { rounding })`. It rounds once.
 
@@ -52,7 +52,7 @@ const parts = gross.allocate([1, 1, 1]); // adds back to 23.79
 - `money(0.1 + 0.2, 'EUR')` throws. A number is read as written. Use strings.
 - `price.times('1.19')` throws `RoundingNecessaryError`. Pass a mode.
 - `Currency.of('ZZZ')` throws `UnknownCurrencyError`. For a code from outside use `Currency.parse(code)`, which returns `UnknownCurrency`.
-- Parsers return, builders throw. `Money.parse`, `Money.fromJSON`, `parseMoney`, `fromStripeAmount` and `fromProviderUnits` return a failure; never pass outside text to `money()` or `Money.of`.
+- Parsers return, builders throw. `Money.parse`, `Money.fromJSON`, `RationalMoney.fromJSON`, `parseMoney`, `parseRates`, `fromStripeAmount` and `fromProviderUnits` return a failure; never pass outside text to `money()` or `Money.of`.
 - Two values read from data can hold different currencies: `a.plus(b)` then throws `CurrencyMismatchError`. Compare `a.currency.code` first.
 - Do not mutate a `Money`. It is not frozen.
 - Convert in one step. Converting in two rounded steps drifts by a cent.

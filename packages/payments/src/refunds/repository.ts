@@ -46,7 +46,7 @@ export class RefundRepository {
       .from(this.refunds)
       .where(eq(this.refunds.id, refundId))
       .limit(1);
-    return (refund as Refund | undefined) ?? null;
+    return refund ?? null;
   }
 
   /** The refund the provider knows by `providerRefundId`: the link between a webhook and our row. */
@@ -64,7 +64,7 @@ export class RefundRepository {
       .select()
       .from(this.refunds)
       .where(eq(this.refunds.paymentId, paymentId))
-      .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
+      .orderBy(desc(this.refunds.createdAt));
   }
 
   async findByStatus(status: RefundStatus): Promise<Refund[]> {
@@ -72,7 +72,7 @@ export class RefundRepository {
       .select()
       .from(this.refunds)
       .where(eq(this.refunds.status, status))
-      .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
+      .orderBy(desc(this.refunds.createdAt));
   }
 
   async findPending(): Promise<Refund[]> {
@@ -84,7 +84,7 @@ export class RefundRepository {
       .select()
       .from(this.refunds)
       .where(eq(this.refunds.requestedBy, userId))
-      .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
+      .orderBy(desc(this.refunds.createdAt));
   }
 
   /** Completed refunds of a payment, in the payment's currency. */
@@ -129,17 +129,19 @@ export class RefundRepository {
         ? this.db.select().from(this.refunds).where(and(...conditions))
         : this.db.select().from(this.refunds);
 
-    const allRefunds = (await baseQuery) as Refund[];
+    const allRefunds = await baseQuery;
 
+    const byStatus: Record<string, number> = {};
+    const byReason: Record<string, number> = {};
     const metrics = {
       totalCount: allRefunds.length,
       totalAmount: MoneyBag.empty().plus(...allRefunds.map(refund => refundAmountOf(refund))),
-      byStatus: {} as Record<string, number>,
-      byReason: {} as Record<string, number>,
+      byStatus,
+      byReason,
     };
 
     for (const refund of allRefunds) {
-      const status = refund.status as string;
+      const status = String(refund.status);
       metrics.byStatus[status] = (metrics.byStatus[status] || 0) + 1;
       metrics.byReason[refund.reason] = (metrics.byReason[refund.reason] || 0) + 1;
     }
@@ -212,7 +214,7 @@ export class RefundRepository {
       .select()
       .from(this.refunds)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
+      .orderBy(desc(this.refunds.createdAt));
   }
 }
 

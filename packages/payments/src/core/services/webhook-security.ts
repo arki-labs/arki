@@ -41,17 +41,26 @@ function stripeFailure(code: string): string {
   }
 }
 
+/** How often, at most, deliveries older than twice the replay window are pruned from the replay set. */
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * Checks a webhook delivery's source address, timestamp, replay and signature.
+ *
+ * Limit: the replay set is in this process's memory only. It is empty after a restart and not shared
+ * between instances, so it only catches a copy that reaches the same process within the window. The
+ * webhook handler's database claim (`claimWebhookEvent`) is what keeps an event from running twice.
+ *
+ * It starts no timer: old entries are pruned during `validateWebhook`, at most once an hour, so the
+ * service never keeps a process alive and needs no closing.
+ */
 export class WebhookSecurityService {
   private processedEvents = new Map<string, Instant>();
   private readonly config: WebhookSecurityConfig;
+  private lastCleanupAt: Instant = now();
 
   constructor(config: WebhookSecurityConfig) {
     this.config = config;
-
-    // Clean up old processed events every hour
-    setInterval(() => {
-      this.cleanupOldEvents();
-    }, 60 * 60 * 1000);
   }
 
   async validateWebhook(
@@ -87,6 +96,7 @@ export class WebhookSecurityService {
       }
 
       // 3. Replay attack prevention
+      this.cleanupIfDue();
       const eventId = this.generateEventId(payload, signature, timestamp);
       if (this.isEventProcessed(eventId)) {
         return {
@@ -166,7 +176,7 @@ export class WebhookSecurityService {
       if (!network || !prefixLength) {
         return false;
       }
-      const mask = (0xff_ff_ff_ff << (32 - Number.parseInt(prefixLength, 10))) >>> 0;
+      const mask = (0xFF_FF_FF_FF << (32 - Number.parseInt(prefixLength, 10))) >>> 0;
 
       const ipInt = this.ipToInt(ip);
       const networkInt = this.ipToInt(network);
@@ -220,7 +230,14 @@ export class WebhookSecurityService {
     this.processedEvents.set(eventId, now());
   }
 
+  private cleanupIfDue(): void {
+    if (isBefore(this.lastCleanupAt, sub(now(), { milliseconds: CLEANUP_INTERVAL_MS }))) {
+      this.cleanupOldEvents();
+    }
+  }
+
   private cleanupOldEvents(): void {
+    this.lastCleanupAt = now();
     const cutoffTime = sub(now(), { seconds: this.config.replayWindowSeconds * 2 });
 
     for (const [eventId, processedAt] of this.processedEvents) {

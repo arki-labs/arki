@@ -40,11 +40,17 @@ import {
   eventTypesOf,
   openDb,
   planId,
-  rejectionOf,
   typed,
   userId,
 } from '../test-support.js';
-import { projectRevenueCatEvent, verifyRevenueCatAuth } from './revenuecat.js';
+import { InvalidWebhookSignature } from '../core/providers/provider-error.js';
+import {
+  PriceNotConfigured,
+  SubscriptionWithoutItems,
+  UnknownProviderCustomer,
+  UnknownSubscriptionStatus,
+} from './failures.js';
+import { projectRevenueCatEvent, revenueCatWebhookSchema, verifyRevenueCatAuth } from './revenuecat.js';
 import { createSubscriptionBilling, getEntitlement } from './subscription.js';
 
 const { customers, subscriptions } = core;
@@ -79,15 +85,15 @@ function rowsOf(providerSubscriptionId: string) {
   return db.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, providerSubscriptionId));
 }
 
-/** A delivery the preset must refuse: it throws, and no event or row is written. */
+/** A delivery the preset must refuse: it returns a failure, and no event or row is written. */
 async function expectRefused(delivery: Promise<unknown>, providerSubscriptionId: string) {
   const before = await countEvents(db);
 
-  const error = await rejectionOf(delivery);
+  const failure = await delivery;
 
   expect(await countEvents(db)).toBe(before);
   expect(await rowsOf(providerSubscriptionId)).toHaveLength(0);
-  return error;
+  return failure;
 }
 
 describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
@@ -280,65 +286,78 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
   });
 
   it('a subscription of a Stripe customer we do not know is rejected and nothing is written', async () => {
-    const before = await countEvents(db);
-
-    const error = await rejectionOf(
+    // Inventing an owner would hand Pro to nobody, or to the wrong user.
+    const failure = await expectRefused(
       deliver('customer.subscription.created', 'sub_orphan', { customer: 'cus_unknown' }),
+      'sub_orphan',
     );
 
-    expect(error).toBeInstanceOf(Error);
-    expect(await countEvents(db)).toBe(before);
-    const rows = await db.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, 'sub_orphan'));
-    expect(rows).toHaveLength(0);
+    expect(UnknownProviderCustomer.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: 'payments.unknown_provider_customer', data: { providerCustomerId: 'cus_unknown' } });
   });
 
   it('a delivery signed with another secret is rejected and nothing is written', async () => {
     // Anyone can POST to the webhook URL; only Stripe knows the secret.
     const payload = subscriptionEvent('customer.subscription.created', 'sub_forged');
 
-    const error = await expectRefused(billing.handleWebhook(payload, sign(payload, 'whsec_someone_else')), 'sub_forged');
+    const failure = await expectRefused(billing.handleWebhook(payload, sign(payload, 'whsec_someone_else')), 'sub_forged');
 
-    expect(error).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+    expect(InvalidWebhookSignature.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: 'payments.invalid_signature' });
+    expect(InvalidWebhookSignature.is(failure) && failure.cause).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
   });
 
   it('a body changed after Stripe signed it is rejected and nothing is written', async () => {
     const signed = subscriptionEvent('customer.subscription.created', 'sub_tampered');
     const tampered = subscriptionEvent('customer.subscription.created', 'sub_tampered', { status: 'active' });
 
-    const error = await expectRefused(billing.handleWebhook(tampered, sign(signed)), 'sub_tampered');
+    const failure = await expectRefused(billing.handleWebhook(tampered, sign(signed)), 'sub_tampered');
 
-    expect(error).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+    expect(failure).toMatchObject({ code: 'payments.invalid_signature' });
+  });
+
+  it('a delivery with no signature header is rejected and nothing is written', async () => {
+    const payload = subscriptionEvent('customer.subscription.created', 'sub_unsigned');
+
+    const failure = await expectRefused(billing.handleWebhook(payload, ''), 'sub_unsigned');
+
+    expect(failure).toMatchObject({ code: 'payments.invalid_signature' });
   });
 
   it('a price the app does not sell is rejected by name and nothing is written', async () => {
     // Granting Pro for an unknown price would hand out a plan nobody configured.
-    const error = await expectRefused(
+    const failure = await expectRefused(
       deliver('customer.subscription.created', 'sub_other_price', {
         items: { data: [{ current_period_start: JAN_1, current_period_end: FEB_1, price: { id: 'price_elsewhere' } }] },
       }),
       'sub_other_price',
     );
 
-    expect(error).toBeInstanceOf(Error);
-    expect(String(error)).toContain('"price_elsewhere" is not a configured plan');
+    expect(PriceNotConfigured.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: 'payments.price_not_configured', data: { priceId: 'price_elsewhere' } });
   });
 
-  it('a subscription whose first line item has no price is rejected and nothing is written', async () => {
-    const error = await expectRefused(
+  it('a subscription with no items has no price or period, so it is rejected and nothing is written', async () => {
+    const failure = await expectRefused(
       deliver('customer.subscription.created', 'sub_no_price', { items: { data: [] } }),
       'sub_no_price',
     );
 
-    expect(String(error)).toContain('first line item has no price');
+    expect(SubscriptionWithoutItems.is(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      code: 'payments.subscription_without_items',
+      data: { providerSubscriptionId: 'sub_no_price' },
+    });
   });
 
   it('a status Stripe adds later is rejected loudly instead of being guessed', async () => {
-    const error = await expectRefused(
+    const failure = await expectRefused(
       deliver('customer.subscription.created', 'sub_new_status', { status: 'on_vacation' }),
       'sub_new_status',
     );
 
-    expect(String(error)).toContain('unmapped Stripe subscription status: "on_vacation"');
+    expect(UnknownSubscriptionStatus.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: 'payments.unknown_subscription_status', data: { status: 'on_vacation' } });
   });
 
   it('a signed event that is not a subscription change is acknowledged as not handled and writes nothing', async () => {
@@ -358,6 +377,20 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
 
   it('a user with no subscription rows is on the free tier', async () => {
     expect(await billing.getEntitlement(adminId)).toEqual({ tier: 'free' });
+  });
+
+  it('a checkout for a price the app does not sell is refused before any customer or Stripe request', async () => {
+    // The price id often comes from the client: selling an unconfigured price would grant no plan.
+    const findCustomer = vi.spyOn(provider, 'createCustomer');
+    try {
+      const failure = await billing.createCheckoutSession({ userId, email: 'a@example.com', priceId: 'price_elsewhere' });
+
+      expect(PriceNotConfigured.is(failure)).toBe(true);
+      expect(failure).toMatchObject({ code: 'payments.price_not_configured', data: { priceId: 'price_elsewhere' } });
+      expect(findCustomer).not.toHaveBeenCalled();
+    } finally {
+      findCustomer.mockRestore();
+    }
   });
 });
 
@@ -421,6 +454,48 @@ describe('getEntitlement', () => {
     const active = subscription('active');
 
     expect(await entitlementOf(canceled, active)).toMatchObject({ tier: 'pro', status: 'active' });
+  });
+});
+
+/** A RevenueCat webhook body for a renewal of the test user, with `event` fields on top. */
+function body(event: Record<string, unknown>) {
+  return { event: { type: 'RENEWAL', app_user_id: userId, ...event } };
+}
+
+describe('revenueCatWebhookSchema', () => {
+  it.each([
+    ['a time past year 9999', { purchased_at_ms: 1e300 }],
+    ['a fraction of a millisecond', { purchased_at_ms: 1.5 }],
+    ['a negative time', { expiration_at_ms: -1 }],
+    ['an expiration past year 9999', { expiration_at_ms: 9e15 }],
+  ])('refuses %s, which fromMillis would throw on', (_label, times) => {
+    expect(revenueCatWebhookSchema.safeParse(body(times)).success).toBe(false);
+  });
+
+  it('keeps times in year 9999, and the projector stores them without throwing', async () => {
+    expect(revenueCatWebhookSchema.safeParse(body({ purchased_at_ms: 253_402_300_799_999 })).success).toBe(true);
+    // Mid-year: Postgres prints the very last millisecond as year 10000 in a time zone east of UTC
+    const midYear = Date.UTC(9999, 5, 1);
+    const parsed = revenueCatWebhookSchema.parse(
+      body({ original_transaction_id: 'rc_year_9999', purchased_at_ms: midYear, expiration_at_ms: midYear }),
+    );
+
+    const result = await projectRevenueCatEvent({ writes, event: parsed.event, customer: { id: customerId, userId }, planId });
+
+    expect(result).toEqual({ handled: true });
+    const row = await rowOf('rc_year_9999');
+    expect(toDate(row.currentPeriodEnd).getUTCFullYear()).toBe(9999);
+  });
+
+  it('returns the journal refusal, never a throw, when the 100-year stand-in end passes year 9999', async () => {
+    const parsed = revenueCatWebhookSchema.parse(
+      body({ original_transaction_id: 'rc_past_9999', purchased_at_ms: 253_402_300_799_999, expiration_at_ms: null }),
+    );
+
+    const result = await projectRevenueCatEvent({ writes, event: parsed.event, customer: { id: customerId, userId }, planId });
+
+    expect(result).toMatchObject({ code: 'schema.invalid_input' });
+    expect(await rowsOf('rc_past_9999')).toEqual([]);
   });
 });
 
@@ -657,9 +732,20 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
 
 
 describe('preset failure types', () => {
-  it('preserves exactly the sync command failures at every webhook boundary', () => {
-    expectTypeOf<FailureOf<typeof projectStripeSubscription>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
-    expectTypeOf<FailureOf<SubscriptionBilling['handleWebhook']>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
+  it('preserves exactly the sync command failures at every webhook boundary, next to what the event cannot map', () => {
+    type Unmappable =
+      | FailureOf<typeof UnknownProviderCustomer>
+      | FailureOf<typeof SubscriptionWithoutItems>
+      | FailureOf<typeof UnknownSubscriptionStatus>;
+    expectTypeOf<FailureOf<typeof projectStripeSubscription>>().toEqualTypeOf<
+      FailureOf<CoreWrites['syncSubscription']> | Unmappable
+    >();
+    expectTypeOf<FailureOf<SubscriptionBilling['handleWebhook']>>().toEqualTypeOf<
+      | FailureOf<CoreWrites['syncSubscription']>
+      | Unmappable
+      | FailureOf<typeof InvalidWebhookSignature>
+      | FailureOf<typeof PriceNotConfigured>
+    >();
     expectTypeOf<FailureOf<typeof projectRevenueCatEvent>>().toEqualTypeOf<FailureOf<CoreWrites['syncSubscription']>>();
   });
 });

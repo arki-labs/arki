@@ -111,6 +111,19 @@ export const ProviderAmount = /* @__PURE__ */ defineFailure('money.provider_amou
   remediation: "Check the provider's amount and currency. Do not round it to make it fit.",
 });
 
+/**
+ * A rate read from a feed is not usable: it is zero or negative, or a rate from a currency
+ * to itself is not 1. Thrown builders raise `ExchangeRateError` for the same fault.
+ *
+ * @fix Check the feed. A rate is how many units of the quote currency one unit of the base buys, always above 0.
+ * @verify cd packages/money && bun run vitest run src/exchange.test.ts
+ */
+export const InvalidExchangeRate = /* @__PURE__ */ defineFailure('money.invalid_rate', {
+  status: 400,
+  message: 'The exchange rate is not positive, or a rate from a currency to itself is not 1.',
+  remediation: 'Check the rate feed. Every rate must be above 0, and a currency to itself must be 1.',
+});
+
 /** Every failure a `parse*` door of this package can return. */
 export const MONEY_FAILURES = [
   InvalidMoneyText,
@@ -121,6 +134,7 @@ export const MONEY_FAILURES = [
   InputTooLarge,
   UnsupportedLocale,
   ProviderAmount,
+  InvalidExchangeRate,
 ] as const;
 
 /** The code of every failure in {@link MONEY_FAILURES}, derived from the definitions. */

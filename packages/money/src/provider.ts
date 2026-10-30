@@ -17,8 +17,8 @@ import type { CurrencyLike } from './currency.js';
 import type { Units } from './internal/units.js';
 import { Currency } from './currency.js';
 import { ProviderAmountError } from './errors.js';
-import { isMoneyFailure, ProviderAmount } from './failures.js';
-import { isExactAtScale, MAX_SCALE, quantize, toUnits } from './internal/units.js';
+import { InputTooLarge, isMoneyFailure, ProviderAmount } from './failures.js';
+import { isExactAtScale, MAX_SCALE, pow10, productExceedsDigits, quantize, toUnits } from './internal/units.js';
 import { Money } from './money.js';
 
 export type ProviderUnitRule = {
@@ -73,5 +73,7 @@ export function fromProviderUnits<const C extends string>(
   const raw = toUnits(units);
   if (isMoneyFailure(raw)) return raw;
   if (!isOnStep(raw, rule) || !isExactAtScale(raw, rule.scale, target.scale)) return ProviderAmount();
+  // Moving to a currency with more decimals multiplies; a near-limit bigint would pass the digit cap there.
+  if (target.scale > rule.scale && productExceedsDigits(raw, pow10(target.scale - rule.scale))) return InputTooLarge();
   return Money.create(quantize(raw, rule.scale, target.scale), target.scale, target);
 }

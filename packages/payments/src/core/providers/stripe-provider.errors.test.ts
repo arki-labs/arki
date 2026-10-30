@@ -6,6 +6,7 @@
  * A caller decides what to do from `code` and `retryable`. A raw Stripe error would hide both,
  * so the methods that once let it through are pinned here.
  */
+import Stripe from 'stripe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
@@ -14,7 +15,7 @@ import { money, UnknownCurrency } from '@arki/money';
 
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createCustomerId } from '../primitives.js';
-import { PaymentProviderError } from './provider-error.js';
+import { InvalidWebhookSignature, PaymentProviderError } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
@@ -118,6 +119,57 @@ describe('validateWebhook', () => {
     const result = await stripe.validateWebhook('not json', 't=1,v1=bad', '1', '127.0.0.1');
 
     expect(result.isValid).toBe(false);
+  });
+});
+
+/** The `Stripe-Signature` header Stripe would send for `payload`, signed with `secret`. */
+function sign(payload: string, secret: string) {
+  return new Stripe('sk_test_fake').webhooks.generateTestHeaderString({ payload, secret });
+}
+
+/** A body of one event of `type` and its signature with the provider's webhook secret. */
+function signed(type: string) {
+  const payload = JSON.stringify({ id: 'evt_2', object: 'event', type, data: { object: { id: 'in_1' } } });
+  return [payload, sign(payload, 'whsec_fake')] as const;
+}
+
+describe('constructWebhookEvent', () => {
+  const payload = JSON.stringify({ id: 'evt_1', object: 'event', type: 'invoice.paid', data: { object: {} } });
+
+  it('returns payments.invalid_signature for a body signed with another secret, with the Stripe error as cause', () => {
+    // Anyone can POST to a webhook URL: a forged delivery is an answer for the route (HTTP 400), not a crash
+    const { stripe } = provider(invalid);
+
+    const event = stripe.constructWebhookEvent(payload, sign(payload, 'whsec_someone_else'));
+
+    expect(InvalidWebhookSignature.is(event)).toBe(true);
+    expect(InvalidWebhookSignature.is(event) && event.cause).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+  });
+
+  it('returns the typed Stripe event for a body signed with the webhook secret', () => {
+    const { stripe } = provider(invalid);
+
+    const event = stripe.constructWebhookEvent(payload, sign(payload, 'whsec_fake'));
+
+    expect(event).toMatchObject({ id: 'evt_1', type: 'invoice.paid' });
+  });
+});
+
+describe('validateWebhook event type', () => {
+  it('maps a modeled Stripe event type to ours and copies the object', async () => {
+    const { stripe } = provider(invalid);
+
+    const result = await stripe.validateWebhook(...signed('invoice.payment_succeeded'), '1', '127.0.0.1');
+
+    expect(result).toEqual({ isValid: true, provider: 'stripe', eventType: 'invoice.paid', data: { id: 'in_1' } });
+  });
+
+  it('gives no event type for one we do not model, instead of passing a Stripe name off as ours', async () => {
+    const { stripe } = provider(invalid);
+
+    const result = await stripe.validateWebhook(...signed('issuing_card.created'), '1', '127.0.0.1');
+
+    expect(result).toMatchObject({ isValid: true, eventType: undefined });
   });
 });
 

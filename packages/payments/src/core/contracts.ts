@@ -239,11 +239,16 @@ export const paymentIntentResponseSchema = z.object({
   paymentIntentId: z.string(),
 });
 
+/**
+ * What a webhook route answers with a 2xx. `processed`: the event ran now. `queued`: it runs after the
+ * answer (`enableAsync`). `duplicate`: it already ran. `ignored`: an event type the handler does not
+ * handle. `refused`: a webhook failure whose `retryable` is false, by its `code`; the provider stops resending.
+ * A retryable outcome is never a 2xx: the route answers non-2xx, so the provider resends.
+ */
 export const webhookProcessingResultSchema = z.object({
-  success: z.boolean(),
+  status: z.enum(['processed', 'queued', 'duplicate', 'ignored', 'refused']),
   webhookId: webhookIdSchema.optional(),
-  error: z.string().optional(),
-  retryable: z.boolean().optional(),
+  code: z.string().optional(),
 });
 
 export const healthCheckSchema = z.object({

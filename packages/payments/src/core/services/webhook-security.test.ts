@@ -23,8 +23,6 @@ const stripe = new Stripe('sk_test_fake');
 let service: WebhookSecurityService;
 
 beforeEach(() => {
-  // The constructor starts an hourly cleanup interval; keep it from outliving the test.
-  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   service = new WebhookSecurityService({ allowedIps: [ALLOWED_IP], replayWindowSeconds: 300, maxRetries: 3 });
 });
 
@@ -201,6 +199,35 @@ describe('WebhookSecurityService: Stripe signatures', () => {
 
     expect(result.isValid).toBe(false);
     expect(result.error).toContain('unauthorized IP');
+  });
+});
+
+describe('WebhookSecurityService: replay set lifetime', () => {
+  it('starts no timer, so a process that built one can still exit', () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    new WebhookSecurityService({ allowedIps: [ALLOWED_IP], replayWindowSeconds: 300, maxRetries: 3 });
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it('prunes deliveries older than twice the window during a later validation, at most hourly', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T10:00:00Z'));
+    service = new WebhookSecurityService({ allowedIps: [ALLOWED_IP], replayWindowSeconds: 300, maxRetries: 3 });
+
+    const first = eventPayload('customer.subscription.created');
+    expect(await validateStripe(first, sign(first))).toMatchObject({ isValid: true });
+    expect(service.getProcessedEventCount()).toBe(1);
+
+    // Two hours later the first delivery is past twice the window and the hourly cleanup is due.
+    vi.setSystemTime(new Date('2026-10-30T12:00:00Z'));
+    const second = eventPayload('customer.subscription.updated');
+    expect(await validateStripe(second, sign(second))).toMatchObject({ isValid: true });
+    expect(service.getProcessedEventCount()).toBe(1);
   });
 });
 

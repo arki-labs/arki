@@ -1,35 +1,17 @@
 import type { Instant } from '@arki/date';
 import { fromDate, isAfter, isBefore, now, toDate, toMillis } from '@arki/date';
+import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 import { max, Money } from '@arki/money';
 import { formatMoney } from '@arki/money/format';
 
 import type { PaymentRepository } from '../repository.js';
 import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview } from '../types.js';
+import { EffectiveDateOutsidePeriod, PlanCurrencyMismatch, PlanInactive } from '../failures.js';
 import { planPrice } from '../money.js';
+import { ReferenceNotFound } from '../providers/provider-error.js';
 
-type PlanLike = Partial<Plan> & Pick<Plan, 'id' | 'name' | 'priceMinor' | 'interval' | 'intervalCount' | 'isActive'>;
-type SubscriptionLike = Partial<Subscription> &
-  Pick<Subscription, 'id' | 'currentPeriodStart' | 'currentPeriodEnd' | 'status'>;
-
-// Utility functions to convert between database and domain types
-function convertPlanToDomain(dbPlan: PlanLike): Plan {
-  return {
-    ...dbPlan,
-    description: dbPlan.description ?? '',
-    trialPeriodDays: dbPlan.trialPeriodDays ?? null,
-    metadata: dbPlan.metadata ?? null,
-  } as Plan;
-}
-
-function convertSubscriptionToDomain(dbSubscription: SubscriptionLike): Subscription {
-  return {
-    ...dbSubscription,
-    trialStart: dbSubscription.trialStart ?? null,
-    trialEnd: dbSubscription.trialEnd ?? null,
-    canceledAt: dbSubscription.canceledAt ?? null,
-    metadata: dbSubscription.metadata ?? null,
-  } as Subscription;
-}
+const logger = getLogger('arki:payments:proration');
 
 export type ProrationCalculation = {
   currentPlan: Plan;
@@ -48,7 +30,7 @@ type RemainingTime = {
   totalPeriodMs: number;
 };
 
-/** All in the plans' currency. Plans in two currencies throw `CurrencyMismatchError`. */
+/** All in the plans' currency. Plans in two currencies are refused with `PlanCurrencyMismatch`. */
 export type ProrationCosts = {
   unusedCredit: Money;
   newPlanProrated: Money;
@@ -62,33 +44,42 @@ export type ProrationOptions = {
   previewOnly?: boolean;
 };
 
+/** A change charged and credited for the time left, starting now. */
+const DEFAULT_PRORATION: ProrationOptions = { prorationBehavior: 'create_prorations' };
+
 /** The reads the service makes. A `PaymentRepository` fits. */
 type ProrationReads = Pick<PaymentRepository, 'findSubscriptionById' | 'findPlanById'>;
 
 export class ProrationService {
   constructor(private readonly paymentRepository: ProrationReads) {}
 
-  async calculateProration(
-    subscriptionId: SubscriptionId,
-    newPlanId: PlanId,
-    options: ProrationOptions,
-  ): Promise<ProrationCalculation> {
-    const dbSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
-    if (!dbSubscription || !dbSubscription.plan) {
-      throw new Error('Subscription not found or missing plan');
+  /**
+   * What moving the subscription to `newPlanId` at `options.effectiveDate` (default now) credits and
+   * charges. Returns the calculation, or a failure: `ReferenceNotFound` (subscription or plan),
+   * `PlanInactive`, `PlanCurrencyMismatch`, or `EffectiveDateOutsidePeriod`.
+   */
+  async calculateProration(subscriptionId: SubscriptionId, newPlanId: PlanId, options: ProrationOptions) {
+    const subscriptionWithPlan = await this.paymentRepository.findSubscriptionById(subscriptionId);
+    if (!subscriptionWithPlan) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
+
+    const newPlan = await this.paymentRepository.findPlanById(newPlanId);
+    if (!newPlan) return ReferenceNotFound({ kind: 'plan', id: newPlanId, missing: 'row' });
+    if (!newPlan.isActive) return PlanInactive({ planId: newPlanId });
+
+    const { plan: currentPlan, ...subscription } = subscriptionWithPlan;
+    if (currentPlan.currency !== newPlan.currency) {
+      return PlanCurrencyMismatch({
+        currentPlanId: currentPlan.id,
+        newPlanId,
+        currentCurrency: currentPlan.currency,
+        newCurrency: newPlan.currency,
+      });
     }
 
-    const dbNewPlan = await this.paymentRepository.findPlanById(newPlanId);
-    if (!dbNewPlan || !dbNewPlan.isActive) {
-      throw new Error('New plan not found or inactive');
-    }
-
-    const currentPlan = convertPlanToDomain(dbSubscription.plan);
-    const newPlan = convertPlanToDomain(dbNewPlan);
-    const subscription = convertSubscriptionToDomain(dbSubscription);
     const effectiveDate = options.effectiveDate || now();
 
     const remainingTime = this.calculateRemainingTime(subscription, effectiveDate);
+    if (isFailure(remainingTime)) return remainingTime;
 
     const costs = this.calculateProrationCosts(
       currentPlan,
@@ -97,7 +88,7 @@ export class ProrationService {
       options.prorationBehavior,
     );
 
-    return {
+    const calculation: ProrationCalculation = {
       currentPlan,
       newPlan,
       subscription,
@@ -105,14 +96,17 @@ export class ProrationService {
       costs,
       effectiveDate,
     };
+    return calculation;
   }
 
+  /** The preview of a move to `newPlanId`, or a failure of `calculateProration`. */
   async previewSubscriptionChange(
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
-    options: ProrationOptions = { prorationBehavior: 'create_prorations' },
-  ): Promise<SubscriptionPreview> {
+    options: ProrationOptions = DEFAULT_PRORATION,
+  ) {
     const proration = await this.calculateProration(subscriptionId, newPlanId, options);
+    if (isFailure(proration)) return proration;
 
     const nextBillingDate = this.calculateNextBillingDate(
       proration.subscription,
@@ -121,7 +115,7 @@ export class ProrationService {
       proration.effectiveDate,
     );
 
-    return {
+    const preview: SubscriptionPreview = {
       planId: newPlanId,
       proration: {
         immediateTotal: proration.costs.immediateCharge.toJSON(),
@@ -131,52 +125,50 @@ export class ProrationService {
       trialEnd: proration.subscription.trialEnd ?? undefined,
       nextBillingDate,
     };
+    return preview;
   }
 
+  /**
+   * A preview per plan. A plan whose preview is refused (inactive, another currency, unknown) is
+   * left out and logged at WARN with its failure code.
+   */
   async previewMultiplePlanChanges(
     subscriptionId: SubscriptionId,
     planIds: PlanId[],
-    options: ProrationOptions = { prorationBehavior: 'create_prorations' },
+    options: ProrationOptions = DEFAULT_PRORATION,
   ): Promise<Record<string, SubscriptionPreview>> {
     const previews: Record<string, SubscriptionPreview> = {};
 
     for (const planId of planIds) {
-      try {
-        previews[planId] = await this.previewSubscriptionChange(subscriptionId, planId, options);
-      } catch (error) {
-        console.warn(`Failed to preview plan ${planId}:`, error);
+      const preview = await this.previewSubscriptionChange(subscriptionId, planId, options);
+      if (isFailure(preview)) {
+        logger.warn('No preview of plan {planId} for subscription {subscriptionId}: {code}', {
+          planId,
+          subscriptionId,
+          code: preview.code,
+          failure: preview,
+        });
+        continue;
       }
+      previews[planId] = preview;
     }
 
     return previews;
   }
 
-  async getOptimalChangeTimings(
-    subscriptionId: SubscriptionId,
-    newPlanId: PlanId,
-  ): Promise<{
-    immediate: ProrationCalculation;
-    nextBillingCycle: ProrationCalculation;
-    recommendations: {
-      bestOption: 'immediate' | 'next_cycle';
-      reason: string;
-      savings?: Money;
-    };
-  }> {
+  /** Whether to change now or at the next billing cycle, or a failure of `calculateProration`. */
+  async getOptimalChangeTimings(subscriptionId: SubscriptionId, newPlanId: PlanId) {
     const immediate = await this.calculateProration(subscriptionId, newPlanId, {
       prorationBehavior: 'create_prorations',
       effectiveDate: now(),
     });
-
-    const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
-    if (!subscription) {
-      throw new Error('Subscription not found');
-    }
+    if (isFailure(immediate)) return immediate;
 
     const nextBillingCycle = await this.calculateProration(subscriptionId, newPlanId, {
       prorationBehavior: 'none',
-      effectiveDate: subscription.currentPeriodEnd,
+      effectiveDate: immediate.subscription.currentPeriodEnd,
     });
+    if (isFailure(nextBillingCycle)) return nextBillingCycle;
 
     let bestOption: 'immediate' | 'next_cycle' = 'immediate';
     let reason = 'Immediate change provides better value';
@@ -200,28 +192,32 @@ export class ProrationService {
       savings = immediateCost.minus(nextCycleCost);
     }
 
-    return {
-      immediate,
-      nextBillingCycle,
-      recommendations: {
-        bestOption,
-        reason,
-        savings,
-      },
+    const recommendations: { bestOption: 'immediate' | 'next_cycle'; reason: string; savings?: Money } = {
+      bestOption,
+      reason,
+      savings,
     };
+    return { immediate, nextBillingCycle, recommendations };
   }
 
-  private calculateRemainingTime(subscription: Subscription, effectiveDate: Instant): RemainingTime {
+  /** What is left of the period at `effectiveDate`, or `EffectiveDateOutsidePeriod`. */
+  private calculateRemainingTime(subscription: Subscription, effectiveDate: Instant) {
     const currentPeriodStart = subscription.currentPeriodStart;
     const currentPeriodEnd = subscription.currentPeriodEnd;
     const effective = effectiveDate;
 
-    if (isBefore(effective, currentPeriodStart)) {
-      throw new Error('Effective date cannot be before current period start');
-    }
-
-    if (isAfter(effective, currentPeriodEnd)) {
-      throw new Error('Effective date cannot be after current period end');
+    // An empty stored period (start == end) has no time to split, so no date is inside it
+    if (
+      !isBefore(currentPeriodStart, currentPeriodEnd) ||
+      isBefore(effective, currentPeriodStart) ||
+      isAfter(effective, currentPeriodEnd)
+    ) {
+      return EffectiveDateOutsidePeriod({
+        subscriptionId: subscription.id,
+        effectiveDate: effective.toString(),
+        periodStart: currentPeriodStart.toString(),
+        periodEnd: currentPeriodEnd.toString(),
+      });
     }
 
     const totalPeriodMs = toMillis(currentPeriodEnd) - toMillis(currentPeriodStart);
@@ -230,7 +226,13 @@ export class ProrationService {
     const days = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
     const percentage = (remainingMs / totalPeriodMs) * 100;
 
-    return { days, percentage: Math.round(percentage * 100) / 100, remainingMs, totalPeriodMs };
+    const remaining: RemainingTime = {
+      days,
+      percentage: Math.round(percentage * 100) / 100,
+      remainingMs,
+      totalPeriodMs,
+    };
+    return remaining;
   }
 
   /**
@@ -257,7 +259,7 @@ export class ProrationService {
   ): ProrationCosts {
     const currentPrice = planPrice(currentPlan);
     const newPrice = planPrice(newPlan);
-    // Plans in two currencies throw CurrencyMismatchError where a credit meets a charge
+    // `calculateProration` refused plans in two currencies, so a credit always meets a charge in one currency
     const zero = Money.zero(newPrice.currency);
     const currentPlanProrated = this.remainingShare(currentPrice, remainingTime);
     const newPlanProrated = this.remainingShare(newPrice, remainingTime);
@@ -319,22 +321,10 @@ export class ProrationService {
     return subscription.currentPeriodEnd;
   }
 
-  async generateProrationSummary(
-    subscriptionId: SubscriptionId,
-    newPlanId: PlanId,
-    options: ProrationOptions,
-  ): Promise<{
-    title: string;
-    description: string;
-    breakdown: {
-      label: string;
-      amount: Money;
-      description?: string;
-    }[];
-    totalChange: Money;
-    effectiveDate: string;
-  }> {
+  /** A plain-language summary of a move to `newPlanId`, or a failure of `calculateProration`. */
+  async generateProrationSummary(subscriptionId: SubscriptionId, newPlanId: PlanId, options: ProrationOptions) {
     const proration = await this.calculateProration(subscriptionId, newPlanId, options);
+    if (isFailure(proration)) return proration;
     const newPrice = planPrice(proration.newPlan);
 
     const isUpgrade = newPrice.gt(planPrice(proration.currentPlan));

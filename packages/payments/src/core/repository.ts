@@ -35,6 +35,8 @@ import type {
   WebhookEventType,
   WebhookId,
 } from './types.js';
+import { CustomerConflict, WebhookEventNotFound } from './failures.js';
+import { ReferenceNotFound } from './providers/provider-error.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
 
 /**
@@ -170,7 +172,7 @@ export class PaymentRepository {
     if (!row) {
       throw new Error('Failed to create plan');
     }
-    return row as Plan;
+    return row;
   }
 
   async findPlanById(id: PlanId): Promise<Plan | null> {
@@ -208,7 +210,8 @@ export class PaymentRepository {
     });
   }
 
-  async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan> {
+  /** The updated plan, or `ReferenceNotFound` when no plan has this id. */
+  async updatePlan(id: PlanId, data: UpdatePlan) {
     const result = await this.db
       .update(this.plans)
       .set({ ...data, updatedAt: now() })
@@ -216,12 +219,13 @@ export class PaymentRepository {
       .returning();
     const row = result[0];
     if (!row) {
-      throw new Error('Failed to update plan or plan not found');
+      return ReferenceNotFound({ kind: 'plan', id, missing: 'row' });
     }
-    return row as Plan;
+    return row;
   }
 
-  async deactivatePlan(id: PlanId): Promise<Plan> {
+  /** The deactivated plan, or `ReferenceNotFound` when no plan has this id. */
+  async deactivatePlan(id: PlanId) {
     const result = await this.db
       .update(this.plans)
       .set({ isActive: false, updatedAt: now() })
@@ -229,9 +233,9 @@ export class PaymentRepository {
       .returning();
     const row = result[0];
     if (!row) {
-      throw new Error('Failed to deactivate plan or plan not found');
+      return ReferenceNotFound({ kind: 'plan', id, missing: 'row' });
     }
-    return row as Plan;
+    return row;
   }
 
   async getPlan(id: PlanId): Promise<Plan | null> {
@@ -243,9 +247,9 @@ export class PaymentRepository {
    * A user has one customer, and a provider customer is one row. Two checkouts that race to
    * create the same customer both succeed: the second gets the row the first wrote. A customer
    * that clashes with a different one (another provider id for the user, or the provider id
-   * of another user) is an error, not a silent pick of either row.
+   * of another user) is returned as `CustomerConflict`, never a silent pick of either row.
    */
-  async createCustomer(data: NewCustomer): Promise<Customer> {
+  async createCustomer(data: NewCustomer) {
     const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
     if (created) {
       return created;
@@ -256,11 +260,11 @@ export class PaymentRepository {
       return existing;
     }
 
-    throw new Error(
-      existing
-        ? `User ${data.userId} already has customer ${existing.id} with provider customer ${existing.providerCustomerId}`
-        : `Provider customer ${data.providerCustomerId} already belongs to another user`,
-    );
+    return CustomerConflict({
+      userId: data.userId,
+      providerCustomerId: data.providerCustomerId,
+      existingCustomerId: existing?.id ?? null,
+    });
   }
 
   async findCustomerById(id: CustomerId): Promise<Customer | null> {
@@ -283,7 +287,8 @@ export class PaymentRepository {
     return customer ?? null;
   }
 
-  async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer> {
+  /** The updated customer, or `ReferenceNotFound` when no customer has this id. */
+  async updateCustomer(id: CustomerId, data: UpdateCustomer) {
     const result = await this.db
       .update(this.customers)
       .set({ ...data, updatedAt: now() })
@@ -291,9 +296,9 @@ export class PaymentRepository {
       .returning();
     const row = result[0];
     if (!row) {
-      throw new Error('Failed to update customer or customer not found');
+      return ReferenceNotFound({ kind: 'customer', id, missing: 'row' });
     }
-    return row as Customer;
+    return row;
   }
 
   async deleteCustomer(id: CustomerId): Promise<void> {
@@ -307,8 +312,7 @@ export class PaymentRepository {
       with: { plan: true, customer: true },
     });
     if (!subscription) return null;
-    const row = subscription as Subscription & { plan?: Plan; customer?: Customer };
-    return { ...row, plan: row.plan as Plan, customer: row.customer };
+    return { ...subscription, plan: subscription.plan as Plan, customer: subscription.customer };
   }
 
   async findSubscriptionsByUserId(userId: UserId): Promise<Subscription[]> {
@@ -342,8 +346,7 @@ export class PaymentRepository {
       with: { plan: true, customer: true },
     });
     if (!subscription) return null;
-    const row = subscription as Subscription & { plan?: Plan; customer?: Customer };
-    return { ...row, plan: row.plan as Plan, customer: row.customer };
+    return { ...subscription, plan: subscription.plan as Plan, customer: subscription.customer };
   }
 
   async findSubscriptionByProviderSubscriptionId(
@@ -472,11 +475,11 @@ export class PaymentRepository {
     if (!row) {
       throw new Error('Failed to create webhook event');
     }
-    return row as WebhookEvent;
+    return row;
   }
 
   /** Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`. */
-  async claimWebhookEvent(data: NewWebhookEvent): Promise<{ event: WebhookEvent; created: boolean }> {
+  async claimWebhookEvent(data: NewWebhookEvent) {
     return claimWebhookEvent(this.db, this.webhookEvents, data);
   }
 
@@ -515,7 +518,8 @@ export class PaymentRepository {
     });
   }
 
-  async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent): Promise<WebhookEvent> {
+  /** The updated event, or `WebhookEventNotFound` when no event has this id. */
+  async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent) {
     const result = await this.db
       .update(this.webhookEvents)
       .set({ ...data, updatedAt: now() })
@@ -523,12 +527,13 @@ export class PaymentRepository {
       .returning();
     const row = result[0];
     if (!row) {
-      throw new Error('Failed to update webhook event or webhook event not found');
+      return WebhookEventNotFound({ webhookId: id });
     }
-    return row as WebhookEvent;
+    return row;
   }
 
-  async markWebhookEventAsProcessed(id: WebhookId): Promise<WebhookEvent> {
+  /** The processed event, or `WebhookEventNotFound` when no event has this id. */
+  async markWebhookEventAsProcessed(id: WebhookId) {
     const result = await this.db
       .update(this.webhookEvents)
       .set({
@@ -540,15 +545,16 @@ export class PaymentRepository {
       .returning();
     const row = result[0];
     if (!row) {
-      throw new Error('Failed to mark webhook event as processed or webhook event not found');
+      return WebhookEventNotFound({ webhookId: id });
     }
-    return row as WebhookEvent;
+    return row;
   }
 
-  async incrementWebhookEventAttempts(id: WebhookId, errorMessage?: string): Promise<WebhookEvent> {
+  /** The event with one more attempt, or `WebhookEventNotFound` when no event has this id. */
+  async incrementWebhookEventAttempts(id: WebhookId, errorMessage?: string) {
     const currentEvent = await this.findWebhookEventById(id);
     if (!currentEvent) {
-      throw new Error('Webhook event not found');
+      return WebhookEventNotFound({ webhookId: id });
     }
 
     const result = await this.db
@@ -562,10 +568,11 @@ export class PaymentRepository {
       .where(eq(this.webhookEvents.id, id))
       .returning();
     const row = result[0];
+    // The row was read above: an update that matches nothing means it was deleted in between
     if (!row) {
-      throw new Error('Failed to increment webhook event attempts');
+      return WebhookEventNotFound({ webhookId: id });
     }
-    return row as WebhookEvent;
+    return row;
   }
 
   // Analytics and reporting methods
@@ -592,7 +599,8 @@ export class PaymentRepository {
 
     return this.q.payments.findMany({
       where: createdAt ? { createdAt } : undefined,
-      with: { subscription: true },
+      // The plan is loaded too: `getSubscriptionAnalytics` splits revenue by its interval.
+      with: { subscription: { with: { plan: true } } },
     });
   }
 

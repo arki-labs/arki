@@ -1,8 +1,11 @@
 import type { Instant } from '@arki/date';
 import { isSameOrAfter, isSameOrBefore, now, sub, toMillis } from '@arki/date';
+import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
+
+const logger = getLogger('arki:payments:webhook');
 
 export type WebhookMetrics = {
   totalEvents: number;
@@ -115,7 +118,7 @@ export class WebhookAnalyticsService {
       // Get recent errors (last 10)
       const recentErrors = events
         .filter(e => e.errorMessage)
-        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+        .toSorted((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
         .slice(0, 10)
         .map(event => ({
           webhookId: event.id,
@@ -138,7 +141,7 @@ export class WebhookAnalyticsService {
       };
 
     } catch (error) {
-      console.error('Error getting webhook metrics:', error);
+      logger.error('Reading webhook metrics failed: {error}', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -227,7 +230,7 @@ export class WebhookAnalyticsService {
     const processingTimes = events
       .filter(e => e.processed && e.processedAt && e.createdAt)
       .map(e => toMillis(e.processedAt!) - toMillis(e.createdAt))
-      .sort((a, b) => a - b);
+      .toSorted((a, b) => a - b);
 
     const averageProcessingTime = processingTimes.length > 0
       ? processingTimes.reduce((sum, time) => sum + time, 0) / processingTimes.length
@@ -313,14 +316,15 @@ export class WebhookAnalyticsService {
     // Limit number of stored alerts
     if (this.alerts.size > this.alertThresholds.maxAlerts) {
       const oldestAlert = [...this.alerts.entries()]
-        .sort(([, a], [, b]) => toMillis(a.triggeredAt) - toMillis(b.triggeredAt))[0];
+        .toSorted(([, a], [, b]) => toMillis(a.triggeredAt) - toMillis(b.triggeredAt))[0];
 
       if (oldestAlert) {
         this.alerts.delete(oldestAlert[0]);
       }
     }
 
-    console.warn(`Webhook Alert [${severity.toUpperCase()}]: ${message}`, data);
+    // `data` is not logged: an alert's data may hold event details. Read it from `getActiveAlerts`.
+    logger.warn('Webhook alert {type} [{severity}]: {message}', { type, severity, message });
   }
 
   /**
@@ -340,7 +344,7 @@ export class WebhookAnalyticsService {
   getActiveAlerts(): WebhookAlert[] {
     return [...this.alerts.values()]
       .filter(alert => !alert.resolved)
-      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
+      .toSorted((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
   }
 
   /**
@@ -348,7 +352,7 @@ export class WebhookAnalyticsService {
    */
   getAllAlerts(): WebhookAlert[] {
     return [...this.alerts.values()]
-      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
+      .toSorted((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
   }
 
   /**
@@ -377,7 +381,7 @@ export class WebhookAnalyticsService {
     const activeAlerts = this.getActiveAlerts();
     const recentAlerts = [...this.alerts.values()]
       .filter(alert => isSameOrAfter(alert.triggeredAt, actualStartDate))
-      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
+      .toSorted((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
 
     // Combine recommendations from health check and performance analysis
     const recommendations = [

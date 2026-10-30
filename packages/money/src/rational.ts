@@ -12,12 +12,13 @@
  */
 
 import type { Rational } from '@arki/math/rational';
-import { InvalidArgumentError } from '@arki/math/errors';
 import { ratio } from '@arki/math/rational';
 
-import type { Currency, CurrencyLike } from './currency.js';
+import type { CurrencyLike } from './currency.js';
 import type { Amount, FactorInput, MoneyJSON, MoneyOptions } from './money.js';
-import { assertSameCurrency, requireCurrency, toCurrency } from './currency.js';
+import { assertSameCurrency, Currency, toCurrency } from './currency.js';
+import { InputTooLarge, InvalidMoneyShape, InvalidMoneyText, isMoneyFailure } from './failures.js';
+import { MAX_INPUT_LENGTH, parseDecimal, pow10 } from './internal/units.js';
 import { Money, toFraction } from './money.js';
 
 const BRAND = Symbol('RationalMoney');
@@ -32,6 +33,22 @@ function fraction(value: FactorInput): Rational {
 
 function toRationalAmount(value: ExactMoney): Rational {
   return value instanceof RationalMoney ? value.amount : ratio(BigInt(value.units), 10n ** BigInt(value.scale));
+}
+
+const RATIO_TEXT = /^([+-]?\d+)\/(\d+)$/;
+
+/** `'1/3'`, `'-7/2'` or plain decimal text (`'5'`, `'19.99'`) as an exact fraction, or a failure. */
+function readRatio(text: string) {
+  if (text.length > MAX_INPUT_LENGTH) return InputTooLarge();
+  const match = RATIO_TEXT.exec(text);
+  if (match === null) {
+    const parsed = parseDecimal(text);
+    if (isMoneyFailure(parsed)) return parsed;
+    return ratio(BigInt(parsed.coefficient), BigInt(pow10(parsed.fraction)));
+  }
+  const denominator = BigInt(match[2] ?? '');
+  if (denominator === 0n) return InvalidMoneyText();
+  return ratio(BigInt(match[1] ?? ''), denominator);
 }
 
 function refuseCoercion(): never {
@@ -71,16 +88,22 @@ export class RationalMoney<C extends string = string> {
     return new RationalMoney(ratio(0), toCurrency(currency), BRAND);
   }
 
-  /** Reads `{ amount: '1/3', currency: 'EUR' }`, as written by `toJSON`. */
-  static fromJSON(value: unknown, currencies?: readonly Currency[]): RationalMoney {
+  /**
+   * Reads `{ amount: '1/3', currency: 'EUR' }`, as written by `toJSON`: a door for outside values,
+   * like `Money.fromJSON`. Returns `InvalidMoneyShape`, `UnknownCurrency`, `InvalidMoneyText` (also
+   * for a zero denominator) or `InputTooLarge` (text over 1000 characters) instead of throwing.
+   */
+  static fromJSON(value: unknown, currencies?: readonly Currency[]) {
     if (typeof value !== 'object' || value === null || !('amount' in value) || !('currency' in value)) {
-      throw new InvalidArgumentError('Expected { amount: string, currency: string }');
+      return InvalidMoneyShape();
     }
-    const { amount, currency } = value;
-    if (typeof amount !== 'string' || typeof currency !== 'string') {
-      throw new InvalidArgumentError('Expected { amount: string, currency: string }');
-    }
-    return RationalMoney.of(amount, requireCurrency(currency, currencies));
+    const { amount, currency: code } = value;
+    if (typeof amount !== 'string' || typeof code !== 'string') return InvalidMoneyShape();
+    const currency = Currency.parse(code, currencies);
+    if (isMoneyFailure(currency)) return currency;
+    const exact = readRatio(amount);
+    if (isMoneyFailure(exact)) return exact;
+    return new RationalMoney(exact, currency, BRAND);
   }
 
   /** @internal */

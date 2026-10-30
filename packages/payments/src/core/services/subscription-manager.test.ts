@@ -21,8 +21,9 @@ import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
 import type { Subscription, SubscriptionId } from '../types.js';
 import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
-import { core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
-import { createPlanId } from '../primitives.js';
+import { adminId, core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
+import { PlanInactive, SubscriptionAlreadyActive, SubscriptionInvalidState } from '../failures.js';
+import { createPlanId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from '../providers/provider-error.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
@@ -73,15 +74,15 @@ function managerWith(report: (current: Subscription) => Subscription) {
   return new SubscriptionManager(providerReporting(report), reads, writes);
 }
 
-/** The call must fail with this message, must not reach the provider, and must leave the journal and the row alone. */
-async function expectRefused(attempt: () => Promise<unknown>, message: string, subscriptionId: SubscriptionId) {
+/** The call must return this failure, must not reach the provider, and must leave the journal and the row alone. */
+async function expectRefused(attempt: () => Promise<unknown>, refusal: object, subscriptionId: SubscriptionId) {
   const eventsBefore = await countEvents(db);
   const rowBefore = await subscriptionRow(db, subscriptionId);
   const callsBefore = providerCalls;
 
-  const error = await rejectionOf(attempt());
+  const result = await attempt();
 
-  expect(error).toMatchObject({ message });
+  expect(result).toMatchObject(refusal);
   expect(providerCalls).toBe(callsBefore);
   expect(await countEvents(db)).toBe(eventsBefore);
   expect(await subscriptionRow(db, subscriptionId)).toEqual(rowBefore);
@@ -127,7 +128,7 @@ describe('cancelSubscription', () => {
 
     await expectRefused(
       () => manager.cancelSubscription(id),
-      'Failed to cancel subscription: Subscription is already canceled',
+      { code: 'payments.subscription_invalid_state', data: { status: 'canceled', action: 'cancel' } },
       id,
     );
   });
@@ -197,7 +198,7 @@ describe('setCancelAtPeriodEnd', () => {
 
     await expectRefused(
       () => manager.setCancelAtPeriodEnd(id, true),
-      'Failed to set cancel at period end: Subscription is already canceled',
+      { code: 'payments.subscription_invalid_state', data: { status: 'canceled', action: 'set_cancel_at_period_end' } },
       id,
     );
   });
@@ -221,7 +222,7 @@ describe('reactivateSubscription', () => {
 
     await expectRefused(
       () => manager.reactivateSubscription(id),
-      'Failed to reactivate subscription: Only canceled or past due subscriptions can be reactivated',
+      { code: 'payments.subscription_invalid_state', data: { status: 'active', action: 'reactivate' } },
       id,
     );
   });
@@ -252,7 +253,7 @@ describe('pauseSubscription and resumeSubscription', () => {
 
     await expectRefused(
       () => manager.pauseSubscription(id),
-      'Failed to pause subscription: Only active subscriptions can be paused',
+      { code: 'payments.subscription_invalid_state', data: { status: 'paused', action: 'pause' } },
       id,
     );
   });
@@ -263,7 +264,7 @@ describe('pauseSubscription and resumeSubscription', () => {
 
     await expectRefused(
       () => manager.resumeSubscription(id),
-      'Failed to resume subscription: Only paused subscriptions can be resumed',
+      { code: 'payments.subscription_invalid_state', data: { status: 'active', action: 'resume' } },
       id,
     );
   });
@@ -282,7 +283,7 @@ describe('syncSubscriptionWithProvider', () => {
     expect(await eventTypesOf(db, 'subscription', id)).toEqual(['SubscriptionCreated', 'SubscriptionSynced']);
 
     const eventsBefore = await countEvents(db);
-    await manager.syncSubscriptionWithProvider(id);
+    await orThrow(manager.syncSubscriptionWithProvider(id));
 
     expect(await countEvents(db)).toBe(eventsBefore);
   });
@@ -379,5 +380,117 @@ describe('a failure the provider returns is handed back, and nothing is written'
     );
 
     expect(ReferenceNotFound.is(await manager.previewSubscriptionChange(id, premium))).toBe(true);
+  });
+});
+
+/** A refusal the manager decides itself is returned with its code before the provider is asked. */
+describe('the manager returns its own refusals as failures', () => {
+  it('updateSubscription refuses a subscription that is not active, and a plan that is not offered', async () => {
+    const paused = await seedSubscription(writes, 'paused');
+    const manager = managerWith(current => current);
+
+    await expectRefused(
+      () => manager.updateSubscription(paused.id, planId),
+      {
+        code: 'payments.subscription_invalid_state',
+        data: { subscriptionId: paused.id, status: 'paused', action: 'update' },
+      },
+      paused.id,
+    );
+
+    const active = await seedSubscription(writes, 'active');
+    const retired = orThrow(createPlanId());
+    await db.insert(core.plans).values({ id: retired, name: 'Retired', priceMinor: 500, isActive: false });
+
+    await expectRefused(
+      () => manager.updateSubscription(active.id, retired),
+      { code: 'payments.plan_inactive', data: { planId: retired } },
+      active.id,
+    );
+    expect(PlanInactive.is(await manager.previewSubscriptionChange(active.id, retired))).toBe(true);
+  });
+
+  it('an unknown subscription is ReferenceNotFound for every change, and nothing reaches the provider', async () => {
+    const unknown = orThrow(createSubscriptionId());
+    const manager = managerWith(current => current);
+    const callsBefore = providerCalls;
+
+    for (const result of [
+      await manager.updateSubscription(unknown, planId),
+      await manager.setCancelAtPeriodEnd(unknown, true),
+      await manager.cancelSubscription(unknown),
+      await manager.reactivateSubscription(unknown),
+      await manager.pauseSubscription(unknown),
+      await manager.resumeSubscription(unknown),
+      await manager.previewSubscriptionChange(unknown, planId),
+      await manager.syncSubscriptionWithProvider(unknown),
+    ]) {
+      expect(result).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'subscription', id: unknown, missing: 'row' },
+      });
+    }
+    expect(providerCalls).toBe(callsBefore);
+  });
+
+  it('syncSubscriptionWithProvider returns ReferenceNotFound with missing provider_id when the provider has no such subscription', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const eventsBefore = await countEvents(db);
+    const manager = new SubscriptionManager(
+      { ...providerReporting(current => current), getSubscription: () => Promise.resolve(null) },
+      reads,
+      writes,
+    );
+
+    expect(await manager.syncSubscriptionWithProvider(id)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'subscription', id, missing: 'provider_id' },
+    });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('createSubscription refuses a user with no customer, an unknown or retired plan, and a second active subscription', async () => {
+    const manager = managerWith(current => current);
+    const retired = orThrow(createPlanId());
+    await db.insert(core.plans).values({ id: retired, name: 'Retired too', priceMinor: 500, isActive: false });
+    const { userId, id: activeId } = await seedSubscription(writes, 'active');
+
+    expect(await manager.createSubscription(adminId, planId)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: adminId, missing: 'row' },
+    });
+    expect(await manager.createSubscription(userId, orThrow(createPlanId()))).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'plan', missing: 'row' },
+    });
+    expect(PlanInactive.is(await manager.createSubscription(userId, retired))).toBe(true);
+
+    const second = await new SubscriptionManager(
+      providerReporting(current => current),
+      {
+        ...reads,
+        findActiveSubscriptionByUserId: id =>
+          reads.findSubscriptionById(activeId).then(row => (row?.userId === id ? row : null)),
+      },
+      writes,
+    ).createSubscription(userId, planId);
+
+    expect(SubscriptionAlreadyActive.is(second)).toBe(true);
+    expect(second).toMatchObject({ data: { userId, subscriptionId: activeId } });
+  });
+
+  it('a provider that throws is not rewrapped: the caller gets the same error', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const outage = new Error('provider is down');
+    const manager = new SubscriptionManager(
+      { ...providerReporting(current => current), cancelSubscription: () => Promise.reject(outage) },
+      reads,
+      writes,
+    );
+
+    expect(await rejectionOf(manager.cancelSubscription(id))).toBe(outage);
+
+    const canceled = await seedSubscription(writes, 'canceled');
+    expect(SubscriptionInvalidState.is(await manager.pauseSubscription(canceled.id))).toBe(true);
   });
 });

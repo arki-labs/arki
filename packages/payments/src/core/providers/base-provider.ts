@@ -21,12 +21,17 @@ import type {
   SubscriptionStatus,
   WebhookValidationResult,
 } from '../types.js';
-import type { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './provider-error.js';
+import type { CardDeclined, IdempotencyConflict, PaymentMethodRequired, ReferenceNotFound } from './provider-error.js';
 
 type Declined = FailureOf<typeof CardDeclined>;
 type Conflict = FailureOf<typeof IdempotencyConflict>;
 type NotFound = FailureOf<typeof ReferenceNotFound>;
-/** An amount in a provider answer that `@arki/money` refuses: an unknown currency, or units off the provider's rule. */
+type NoPaymentMethod = FailureOf<typeof PaymentMethodRequired>;
+/**
+ * An amount `@arki/money` refuses at the provider boundary: in a provider answer, an unknown currency or units
+ * off the provider's rule; in a request, an amount the provider cannot take (`money.provider_amount`: negative,
+ * a currency it has no rule for, a fraction it lacks; `money.out_of_range`: past 2^53 units).
+ */
 type BadAmount = MoneyFailure;
 
 export type PaymentProviderConfig = {
@@ -89,7 +94,7 @@ export abstract class BasePaymentProvider {
     intervalCount?: number;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
-  }): Promise<Result<Plan, IdGenerationFailure>>;
+  }): Promise<Result<Plan, IdGenerationFailure | BadAmount>>;
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
   abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | BadAmount>>;
@@ -169,6 +174,7 @@ export abstract class BasePaymentProvider {
 
   abstract cancelPayment(paymentId: PaymentId): Promise<Result<Payment, NotFound | BadAmount>>;
 
+  /** `amount` must be in the payment's currency: another currency throws (`RefundService` checks it first). */
   abstract refundPayment(
     paymentId: PaymentId,
     params: {
@@ -181,7 +187,7 @@ export abstract class BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<ProviderRefundResult, NotFound | Conflict>>;
+  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | BadAmount>>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {
@@ -225,7 +231,7 @@ export abstract class BasePaymentProvider {
     amount: Money;
     paymentMethodId?: string;
     /**
-     * True: charge now without the customer present. Needs `paymentMethodId`.
+     * True: charge now without the customer present. Needs `paymentMethodId`; without one, `PaymentMethodRequired` is returned.
      * False: the customer finishes the payment in the client with the returned secret.
      */
     automatic: boolean;
@@ -236,7 +242,7 @@ export abstract class BasePaymentProvider {
         clientSecret: string;
         paymentIntentId: string;
       },
-      Declined | Conflict | NotFound
+      Declined | Conflict | NotFound | NoPaymentMethod | BadAmount
     >
   >;
 

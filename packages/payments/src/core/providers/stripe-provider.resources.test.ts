@@ -10,10 +10,11 @@ import { assert, describe, expect, it } from 'vitest';
 
 import { fromUnix, now } from '@arki/date';
 import { isFailure, orThrow } from '@arki/failure';
-import { money, UnknownCurrency } from '@arki/money';
+import { money, ProviderAmountError, UnknownCurrency } from '@arki/money';
 
 import type { Customer, Payment, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
+import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
@@ -655,5 +656,58 @@ describe('payment methods', () => {
       path: '/v1/customers/cus_alice',
       form: { 'invoice_settings[default_payment_method]': 'pm_9' },
     });
+  });
+});
+
+describe('amounts Stripe cannot take are returned before any request', () => {
+  // Stripe's per-currency rules decide these, and a caller cannot check them from the Money type
+  it('createPlan returns money.provider_amount for a currency Stripe has no rule for, and creates no product', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const plan = await stripe.createPlan({ name: 'Pro', tier: 'pro', amount: money('5.000', 'KWD'), interval: 'monthly' });
+
+    expect(plan).toMatchObject({ code: 'money.provider_amount' });
+    // A product made before the price failed would be left behind in Stripe
+    expect(requests).toEqual([]);
+  });
+
+  it('createPayment returns money.provider_amount for a negative amount, and keeps the money error as its cause', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const payment = await stripe.createPayment({
+      customerId: customer.id,
+      amount: money('-1.00', 'USD'),
+      paymentMethodId: 'pm_1',
+    });
+
+    expect(payment).toMatchObject({ code: 'money.provider_amount' });
+    expect(isFailure(payment) && payment.cause).toBeInstanceOf(ProviderAmountError);
+    expect(requests).toEqual([]);
+  });
+
+  it('createPaymentIntent returns money.out_of_range for an amount past 2^53 of Stripe units', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const intent = await stripe.createPaymentIntent({
+      customerId: customer.id,
+      amount: money('100000000000000000', 'USD'),
+      automatic: false,
+    });
+
+    expect(intent).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toEqual([]);
+  });
+
+  it('refundPayment returns money.provider_amount for a negative amount, and refunds nothing', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const refund = await stripe.refundPayment(paymentRow.id, {
+      refundId: orThrow(createRefundId()),
+      idempotencyKey: 'refund-negative',
+      amount: money('-5.00', 'USD'),
+    });
+
+    expect(refund).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toEqual([]);
   });
 });

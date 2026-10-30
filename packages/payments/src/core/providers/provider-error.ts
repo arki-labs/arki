@@ -52,6 +52,47 @@ export const ReferenceNotFound = defineFailure('payments.reference_not_found', {
 });
 
 /**
+ * A webhook delivery's signature does not match the body and the webhook secret: it was not sent
+ * by the provider, the body changed after signing, the signature header is missing or malformed, or
+ * the signature timestamp is outside the tolerance. Returned by `StripeProvider.constructWebhookEvent`.
+ *
+ * @fix Answer the delivery with HTTP 400. Check the webhook secret, and pass the raw request body, not re-serialized JSON.
+ * @verify bun run test -- src/core/providers src/presets
+ */
+export const InvalidWebhookSignature = /* @__PURE__ */ defineFailure('payments.invalid_signature', {
+  status: 400,
+  message: 'The webhook signature does not match the body and the webhook secret',
+  remediation:
+    'Answer with HTTP 400. Check the webhook secret, and verify the raw request body, not re-serialized JSON.',
+});
+
+/**
+ * An automatic payment (`automatic: true`, charged with the customer absent) was asked for without
+ * a `paymentMethodId`. Returned by `createPaymentIntent` before any provider request.
+ *
+ * @fix Pass the saved payment method to charge, or use `automatic: false` and let the customer finish in the client.
+ * @verify bun run test -- src/core/providers
+ */
+export const PaymentMethodRequired = /* @__PURE__ */ defineFailure('payments.payment_method_required', {
+  status: 400,
+  message: 'An automatic payment needs a payment method id',
+  remediation: 'Pass the saved payment method to charge, or use automatic: false so the customer finishes the payment.',
+});
+
+/**
+ * A customer address given for a tax calculation has no country, so no tax jurisdiction can be found.
+ * Returned by `calculateTax` and `createTaxTransaction` before any provider request.
+ *
+ * @fix Ask for the customer's country, or leave the address out to use the one the provider holds.
+ * @verify bun run test -- src/core/providers
+ */
+export const TaxAddressIncomplete = /* @__PURE__ */ defineFailure('payments.tax_address_incomplete', {
+  status: 400,
+  message: 'A customer address for tax needs a country',
+  remediation: "Ask for the customer's country, or leave the address out to use the one the provider holds.",
+});
+
+/**
  * Why a payment provider call failed, when it is a fault the caller cannot branch on. Expected
  * answers (`CardDeclined`, `IdempotencyConflict`, `ReferenceNotFound`) are returned instead.
  *

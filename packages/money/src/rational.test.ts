@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
 import { ratio } from '@arki/math/rational';
 
 import { MoneyBag } from './bag.js';
+import { InputTooLarge, InvalidMoneyShape, InvalidMoneyText, UnknownCurrency } from './failures.js';
 import { createConverter, ratesFrom } from './exchange.js';
 import {
   CurrencyMismatchError,
   DivisionByZeroError,
   ExchangeRateError,
-  InvalidArgumentError,
   money,
   RoundingNecessaryError,
 } from './index.js';
@@ -52,10 +53,25 @@ describe('RationalMoney', () => {
     const third = RationalMoney.of('1/3', 'EUR');
     expect(JSON.stringify(third)).toBe('{"amount":"1/3","currency":"EUR"}');
     const sent = JSON.stringify(third);
-    expect(RationalMoney.fromJSON(JSON.parse(sent)).eq(third)).toBe(true);
-    expect(() => RationalMoney.fromJSON({ amount: 1, currency: 'EUR' })).toThrow(InvalidArgumentError);
+    expect(orThrow(RationalMoney.fromJSON(JSON.parse(sent))).eq(third)).toBe(true);
     expect(() => +third).toThrow(TypeError);
     expect(isRationalMoney(third)).toBe(true);
+  });
+
+  // fromJSON reads stored or sent values, so bad input is an expected outcome the caller branches on.
+  it('returns a failure for JSON it cannot read, never throws', () => {
+    expect(InvalidMoneyShape.is(RationalMoney.fromJSON(null))).toBe(true);
+    expect(InvalidMoneyShape.is(RationalMoney.fromJSON({ amount: 1, currency: 'EUR' }))).toBe(true);
+    expect(InvalidMoneyText.is(RationalMoney.fromJSON({ amount: 'x', currency: 'EUR' }))).toBe(true);
+    expect(InvalidMoneyText.is(RationalMoney.fromJSON({ amount: '1/0', currency: 'EUR' }))).toBe(true);
+    expect(UnknownCurrency.is(RationalMoney.fromJSON({ amount: '1/3', currency: 'ZZZ' }))).toBe(true);
+    expect(InputTooLarge.is(RationalMoney.fromJSON({ amount: `1/${'3'.repeat(1001)}`, currency: 'EUR' }))).toBe(
+      true,
+    );
+    const read = RationalMoney.fromJSON({ amount: '-7/2', currency: 'EUR' });
+    expect(read instanceof RationalMoney && read.toString()).toBe('-7/2 EUR');
+    const decimal = RationalMoney.fromJSON({ amount: '19.99', currency: 'EUR' });
+    expect(decimal instanceof RationalMoney && decimal.toString()).toBe('1999/100 EUR');
   });
 });
 

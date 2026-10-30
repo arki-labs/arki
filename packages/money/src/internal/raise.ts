@@ -13,7 +13,7 @@ import {
 } from '@arki/math/errors';
 
 import type { MoneyFailure } from '../failures.js';
-import { ProviderAmountError } from '../errors.js';
+import { ExchangeRateError, ProviderAmountError } from '../errors.js';
 import { isMoneyFailure } from '../failures.js';
 
 /** The thrown error a builder raises for a failure. */
@@ -42,6 +42,9 @@ export function failureToError(failure: MoneyFailure): Error {
     }
     case 'money.provider_amount': {
       return new ProviderAmountError(message);
+    }
+    case 'money.invalid_rate': {
+      return new ExchangeRateError(message);
     }
   }
 }

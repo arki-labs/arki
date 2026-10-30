@@ -6,10 +6,14 @@ import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
+import { isFailure } from '@arki/failure';
+import { ensure } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
+import { customerIdSchema, paymentIdSchema, subscriptionIdSchema } from '../../core/primitives.js';
+import { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type {
   CreateDunningCampaignInput,
   ExecuteCampaignInput,
@@ -24,7 +28,6 @@ import type { DunningTables } from '../tables.js';
 import type {
   CampaignExecutionFilters,
   CustomerData,
-  CustomerQueryRow,
   DunningCampaign,
   DunningDashboardStats,
   DunningExecution,
@@ -36,6 +39,7 @@ import type {
 import type { CommunicationOrchestrationService } from './communication-service.js';
 import { fromMinorColumn, toMinorColumn } from '../../core/money.js';
 import { analyticsRowId, DEFAULT_ANALYTICS_CURRENCY } from '../analytics-money.js';
+import { DunningCampaignNotActive, DunningCampaignNotFound, DunningCampaignWithoutSteps } from '../failures.js';
 import {
   createDunningCampaignRepository,
   createDunningExecutionRepository,
@@ -50,7 +54,7 @@ type EligibleCustomer = {
   triggerData?: Record<string, unknown>;
 };
 
-const logger = getLogger('dunning.campaign');
+const logger = getLogger('arki:payments:dunning');
 
 /** Narrows a cross-domain query to (or away from) the customers a caller named. */
 function customerFilters(column: SQL, filters?: CampaignExecutionFilters): SQL[] {
@@ -59,6 +63,29 @@ function customerFilters(column: SQL, filters?: CampaignExecutionFilters): SQL[]
   if (filters?.excludeCustomerIds?.length) conditions.push(sql`${column} NOT IN ${valueList(filters.excludeCustomerIds)}`);
 
   return conditions;
+}
+
+/**
+ * The rows the eligibility queries select (`customer_id`, `subscription_id`, `payment_id`, `trigger_data`).
+ * They are our own query's columns, so a row that does not match is a bug and `ensure` throws.
+ */
+const eligibleRowsSchema = z.array(
+  z.object({
+    customer_id: customerIdSchema,
+    subscription_id: subscriptionIdSchema.nullish(),
+    payment_id: paymentIdSchema.nullish(),
+    trigger_data: z.record(z.string(), z.unknown()),
+  }),
+);
+
+/** The eligible customers of one eligibility query's rows. */
+function eligibleCustomers(rows: unknown): EligibleCustomer[] {
+  return ensure(rows, eligibleRowsSchema).map(row => ({
+    id: row.customer_id,
+    subscriptionId: row.subscription_id ?? undefined,
+    paymentId: row.payment_id ?? undefined,
+    triggerData: row.trigger_data,
+  }));
 }
 
 /** The payment row `checkAndStopOnPaymentSuccess` reads; node-postgres sends `bigint` as text. */
@@ -233,22 +260,25 @@ export class DunningCampaignService {
   }
 
   /**
-   * Execute a campaign manually or through automation
+   * Execute a campaign manually or through automation: one scheduled execution per active step for
+   * each eligible customer. An unknown campaign returns `DunningCampaignNotFound`, a campaign that is
+   * not active `DunningCampaignNotActive`, one with no active step `DunningCampaignWithoutSteps`;
+   * each writes nothing.
    */
-  async executeCampaign(input: ExecuteCampaignInput, _executedBy: string): Promise<DunningExecution[]> {
+  async executeCampaign(input: ExecuteCampaignInput, _executedBy: string) {
     const campaign = await this.campaignRepo.findById(input.campaignId);
     if (!campaign) {
-      throw new Error(`Campaign ${input.campaignId} not found`);
+      return DunningCampaignNotFound({ campaignId: input.campaignId });
     }
 
     if (campaign.status !== 'active') {
-      throw new Error(`Campaign ${input.campaignId} is not active`);
+      return DunningCampaignNotActive({ campaignId: input.campaignId, status: campaign.status });
     }
 
     // Get campaign templates
     const templates = await this.templateRepo.findActiveTemplates(input.campaignId);
     if (templates.length === 0) {
-      throw new Error(`No active templates found for campaign ${input.campaignId}`);
+      return DunningCampaignWithoutSteps({ campaignId: input.campaignId });
     }
 
     // Find eligible customers based on campaign trigger conditions
@@ -401,13 +431,7 @@ export class DunningCampaignService {
       LIMIT 1000
     `);
 
-    const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map(row => ({
-      id: row.customer_id as CustomerId,
-      subscriptionId: row.subscription_id as SubscriptionId,
-      paymentId: row.payment_id as PaymentId,
-      triggerData: row.trigger_data,
-    }));
+    return eligibleCustomers(result.rows);
   }
 
   private async findCustomersWithSubscriptionStatus(
@@ -440,13 +464,7 @@ export class DunningCampaignService {
       LIMIT 1000
     `);
 
-    const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map(row => ({
-      id: row.customer_id as CustomerId,
-      subscriptionId: row.subscription_id as SubscriptionId,
-      paymentId: row.payment_id as PaymentId,
-      triggerData: row.trigger_data,
-    }));
+    return eligibleCustomers(result.rows);
   }
 
   private async findCustomersWithEndingTrials(
@@ -484,13 +502,7 @@ export class DunningCampaignService {
       LIMIT 1000
     `);
 
-    const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map(row => ({
-      id: row.customer_id as CustomerId,
-      subscriptionId: row.subscription_id as SubscriptionId,
-      paymentId: row.payment_id as PaymentId,
-      triggerData: row.trigger_data,
-    }));
+    return eligibleCustomers(result.rows);
   }
 
   /**
@@ -529,8 +541,10 @@ export class DunningCampaignService {
     const campaign = await this.campaignRepo.findById(execution.campaignId);
     const template = execution.templateId ? await this.templateRepo.findById(execution.templateId) : null;
 
+    // The campaign or its step was deleted after the execution was scheduled: record it, nothing to send
     if (!campaign || !template) {
-      throw new Error('Campaign or template not found');
+      await this.executionRepo.updateStatus(execution.id, 'failed', undefined, 'Campaign or template not found');
+      return;
     }
 
     // Check business hours and allowed days if configured
@@ -591,7 +605,13 @@ export class DunningCampaignService {
         .limit(1);
 
       if (!row) {
-        throw new Error(`Customer ${execution.customerId} not found`);
+        const missing = ReferenceNotFound({ kind: 'customer', id: execution.customerId, missing: 'row' });
+        return {
+          customersProcessed: 1,
+          communicationsSent: 0,
+          errors: [{ customerId: execution.customerId, error: missing.message, timestamp: now() }],
+          performance: { processingTime: Date.now() - startTime, successRate: 0 },
+        };
       }
 
       const customer: CustomerData = {
@@ -636,7 +656,13 @@ export class DunningCampaignService {
         customer_name: customer.name || 'Customer',
         customer_email: customer.email || '',
         campaign_name: campaign.name,
-        ...(execution.triggerData as Record<string, string>),
+        // Trigger data is stored JSON: text stays as it is, any other value is written as its JSON
+        ...Object.fromEntries(
+          Object.entries(execution.triggerData).map(([key, value]) => [
+            key,
+            typeof value === 'string' ? value : JSON.stringify(value),
+          ]),
+        ),
       };
 
       // Send communication using the correct service interface
@@ -653,8 +679,8 @@ export class DunningCampaignService {
         communicationsSent: 1,
       });
 
-      // Check if communication was sent successfully
-      const wasSuccessful = communicationResult.status === 'sent' || communicationResult.status === 'pending';
+      // A provider refusal, a timeout or a channel with no provider is returned, and recorded on the communication
+      const wasSuccessful = !isFailure(communicationResult);
 
       return {
         customersProcessed: 1,
@@ -664,7 +690,7 @@ export class DunningCampaignService {
           : [
               {
                 customerId: execution.customerId,
-                error: communicationResult.failureReason || 'Communication failed',
+                error: communicationResult.message,
                 timestamp: now(),
               },
             ],

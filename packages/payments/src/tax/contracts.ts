@@ -130,6 +130,26 @@ export const getJurisdictionHierarchyInputSchema = z.object({
 });
 
 // Tax exemption
+const exemptionTargetIssue = {
+  path: ['customerId'],
+  message: 'An exemption needs a customer, a product code or a jurisdiction: with none it would exempt every sale',
+};
+
+/**
+ * What an exemption covers. It must name a customer, a product code or a jurisdiction: with none it
+ * would exempt every sale. `TaxExemptionRepository.createExemption` checks every new row with it.
+ */
+export const exemptionTargetSchema = z
+  .object({
+    customerId: z.string().nullish(),
+    productCode: z.string().nullish(),
+    jurisdictionId: z.string().nullish(),
+  })
+  .refine(
+    target => Boolean(target.customerId) || Boolean(target.productCode) || Boolean(target.jurisdictionId),
+    exemptionTargetIssue,
+  );
+
 export const createExemptionSchema = z
   .object({
   type: exemptionTypeSchema,
@@ -152,11 +172,7 @@ export const createExemptionSchema = z
     )
     .optional(),
   })
-  .refine(
-    exemption =>
-      exemption.customerId !== undefined || exemption.productCode !== undefined || exemption.jurisdictionId !== undefined,
-    { path: ['customerId'], message: 'An exemption needs a customer, a product code or a jurisdiction: with none it would exempt every sale' },
-  )
+  .refine(exemption => exemptionTargetSchema.safeParse(exemption).success, exemptionTargetIssue)
   .refine(exemption => exemption.validTo === undefined || !isBefore(exemption.validTo, exemption.validFrom), {
     path: ['validTo'],
     message: 'validTo must not be before validFrom',

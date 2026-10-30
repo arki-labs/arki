@@ -36,6 +36,7 @@ describe('money failures', () => {
       | 'money.input_too_large'
       | 'money.unsupported_locale'
       | 'money.provider_amount'
+      | 'money.invalid_rate'
     >();
     expect(new Set(MONEY_FAILURES.map(definition => definition.code)).size).toBe(MONEY_FAILURES.length);
     // Each one tells the caller what to do, so a client can show it.

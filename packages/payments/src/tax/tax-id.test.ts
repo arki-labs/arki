@@ -60,4 +60,12 @@ describe('checkTaxIdFormat', () => {
     expect(checkTaxIdFormat({ type: 'br_cnpj', country: 'BR', value: '12.345.678/0001-95' }).format).toBe('unknown');
     expect(checkTaxIdFormat({ type: 'eu_vat', country: 'US', value: 'US123' }).format).toBe('unknown');
   });
+
+  // The type and country are text a user typed: a name of an Object.prototype member must not crash the check
+  it('says unknown, without throwing, for a type or country named like an object member', () => {
+    expect(checkTaxIdFormat({ type: 'constructor', country: 'CO', value: '1' }).format).toBe('unknown');
+    expect(checkTaxIdFormat({ type: '__proto__', country: '__', value: '1' }).format).toBe('unknown');
+    expect(checkTaxIdFormat({ type: 'eu_vat', country: '__proto__', value: '1' }).format).toBe('unknown');
+    expect(checkTaxIdFormat({ type: 'eu_vat', country: 'constructor', value: '1' }).format).toBe('unknown');
+  });
 });

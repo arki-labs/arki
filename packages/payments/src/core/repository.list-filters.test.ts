@@ -174,3 +174,14 @@ describe('findPayments', () => {
     expect(rows6.map(row => row.id)).toEqual([payment.id]);
   });
 });
+
+describe('getPaymentStats', () => {
+  it("loads the plan of each payment's subscription, which the recurring revenue split by interval reads", async () => {
+    const subscription = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, subscription.id);
+
+    const stats = await repo.getPaymentStats();
+    const row = stats.find(stat => stat.id === payment.id);
+    expect(row?.subscription?.plan?.id).toBe(subscription.planId);
+  });
+});

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
 
-import { ProviderAmount } from './failures.js';
-import { Currency, money, NumericRangeError, ProviderAmountError } from './index.js';
+import { InputTooLarge, ProviderAmount } from './failures.js';
+import { Currency, Money, money, NumericRangeError, ProviderAmountError } from './index.js';
 import { fromProviderUnits, toProviderUnits } from './provider.js';
 import { fromStripeAmount, stripeRule, toStripe, toStripeAmount } from './stripe.js';
 
@@ -52,5 +52,15 @@ describe('provider units', () => {
     expect(ProviderAmount.is(fromProviderUnits(15_001, 'EUR', { scale: 4 }))).toBe(true);
     expect(() => toProviderUnits(money(1, 'EUR'), { scale: 2, step: 3 })).toThrow(ProviderAmountError);
     expect(() => toProviderUnits(money('100000000000000', 'EUR'), { scale: 4 })).toThrow(NumericRangeError);
+  });
+});
+
+// A provider payload is outside input: a near-limit bigint must come back as a failure, not a ResourceLimitError.
+describe('provider amounts near the digit limit', () => {
+  it('returns InputTooLarge when moving to the currency scale would pass the digit cap', () => {
+    const huge = 16n ** 8304n + 1n;
+    expect(InputTooLarge.is(fromStripeAmount(huge, 'MGA'))).toBe(true);
+    expect(InputTooLarge.is(fromProviderUnits(huge, 'USD', { scale: 0 }))).toBe(true);
+    expect(fromProviderUnits(huge, 'USD', { scale: 2 })).toBeInstanceOf(Money);
   });
 });

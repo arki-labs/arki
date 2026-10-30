@@ -41,6 +41,8 @@ import type { RefundsTables } from './tables.js';
 import { writtenRow } from '../core/journal/support.js';
 import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money.js';
 import { paymentIdSchema } from '../core/primitives.js';
+import { refundRejectionReasonSchema } from './contracts.js';
+import { RefundCurrencyMismatch } from './failures.js';
 import { createRefundId, refundIdSchema, refundReasonValues } from './primitives.js';
 
 type RefundRow = RefundsTables['refunds']['$inferSelect'];
@@ -73,7 +75,7 @@ export const rejectRefundInputSchema = z.object({
   refundId: refundIdSchema,
   rejectedBy: userIdSchema,
   /** The customer-facing why. A blank reason says nothing, so it is turned down. */
-  rejectionReason: z.string().trim().min(1),
+  rejectionReason: refundRejectionReasonSchema,
 });
 
 export const processRefundInputSchema = z.object({ refundId: refundIdSchema });
@@ -252,23 +254,28 @@ export function createRefundsJournal<
       if (!payment) {
         return CommandNotFound({ detail: `Payment ${input.paymentId} not found` });
       }
+      // The same rule as `RefundService`: a refund pays back the payment's own money
+      const paymentCurrency = payment.currency.toUpperCase();
+      if (input.refundAmount.currency.code !== paymentCurrency) {
+        return RefundCurrencyMismatch({
+          paymentId: input.paymentId,
+          refundCurrency: input.refundAmount.currency.code,
+          paymentCurrency,
+        });
+      }
 
       const refundMinor = toMinorColumn(input.refundAmount);
-      let exceedsPayment = false;
-      if (input.refundAmount.currency.code === payment.currency.toUpperCase()) {
-        const [held] = await tx
-          .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
-          .from(tables.refunds)
-          .where(
-            and(
-              eq(tables.refunds.paymentId, input.paymentId),
-              eq(tables.refunds.currency, payment.currency.toUpperCase()),
-              inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
-            ),
-          );
-
-        exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
-      }
+      const [held] = await tx
+        .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
+        .from(tables.refunds)
+        .where(
+          and(
+            eq(tables.refunds.paymentId, input.paymentId),
+            eq(tables.refunds.currency, paymentCurrency),
+            inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
+          ),
+        );
+      const exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
 
       return write(refund, refundId, row => {
         if (row) {

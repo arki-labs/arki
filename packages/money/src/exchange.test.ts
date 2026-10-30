@@ -3,8 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { ratio } from '@arki/math/rational';
 
 import { toRational } from './exact.js';
-import { convert, createConverter, exchangeRate, ratesFrom } from './exchange.js';
-import { CurrencyMismatchError, ExchangeRateError, Money, money, RoundingNecessaryError } from './index.js';
+import { convert, createConverter, exchangeRate, parseRates, ratesFrom } from './exchange.js';
+import { AmountOutOfRange, InvalidExchangeRate, InvalidMoneyText, UnknownCurrency } from './failures.js';
+import {
+  CurrencyMismatchError,
+  ExchangeRateError,
+  InvalidArgumentError,
+  Money,
+  money,
+  RoundingNecessaryError,
+  UnknownCurrencyError,
+} from './index.js';
 
 const ecb = ratesFrom({ base: 'EUR', rates: { USD: '1.0832', GBP: '0.8571', JPY: '161.25' } });
 
@@ -95,5 +104,40 @@ describe('Converter', () => {
     const converter = createConverter(ecb, { inverse: true, via: 'EUR' });
     expect(converter.rate('GBP', 'JPY').toString()).toBe('GBP/JPY 537500/2857');
     expect(Money.of(money(1, 'GBP'), 'GBP').currency.code).toBe('GBP');
+  });
+});
+
+// A rate table usually comes from a feed, so one bad entry is an expected outcome, not a crash.
+describe('parseRates', () => {
+  it('reads a feed into exact rates', () => {
+    const rates = parseRates({ base: 'EUR', rates: { USD: '1.0832', JPY: 161.25 } });
+    expect(Array.isArray(rates) && rates.map(rate => rate.toString())).toEqual(['EUR/USD 1.0832', 'EUR/JPY 161.25']);
+  });
+
+  it('returns a failure for a bad code or value instead of throwing', () => {
+    expect(UnknownCurrency.is(parseRates({ base: 'EUR', rates: { XYZ: '1.5' } }))).toBe(true);
+    expect(UnknownCurrency.is(parseRates({ base: 'ZZZ', rates: { USD: '1.5' } }))).toBe(true);
+    expect(InvalidMoneyText.is(parseRates({ base: 'EUR', rates: { USD: 'n/a' } }))).toBe(true);
+    expect(AmountOutOfRange.is(parseRates({ base: 'EUR', rates: { USD: Number.NaN } }))).toBe(true);
+    expect(InvalidExchangeRate.is(parseRates({ base: 'EUR', rates: { USD: '0' } }))).toBe(true);
+    expect(InvalidExchangeRate.is(parseRates({ base: 'EUR', rates: { USD: '-1.2' } }))).toBe(true);
+    expect(InvalidExchangeRate.is(parseRates({ base: 'EUR', rates: { EUR: '2' } }))).toBe(true);
+  });
+
+  it('keeps ratesFrom as the throwing builder for tables in your own code', () => {
+    expect(() => ratesFrom({ base: 'EUR', rates: { USD: '0' } })).toThrow(ExchangeRateError);
+    expect(() => ratesFrom({ base: 'EUR', rates: { XYZ: '1' } })).toThrow(UnknownCurrencyError);
+  });
+});
+
+// A scale is checked before pow10 runs: a huge scale would otherwise build a giant bigint and crash with a RangeError.
+describe('conversion scale', () => {
+  it('refuses a scale outside 0 to 100 in every conversion path', () => {
+    const rate = exchangeRate('EUR', 'USD', '1.0832');
+    const converter = createConverter(ecb);
+    expect(() => convert(money(1, 'EUR'), rate, { scale: 1e10 })).toThrow(InvalidArgumentError);
+    expect(() => converter.convert(money(1, 'EUR'), 'USD', { scale: 1e10 })).toThrow(InvalidArgumentError);
+    expect(() => converter.convert(money(1, 'EUR'), 'EUR', { scale: 1e10 })).toThrow(InvalidArgumentError);
+    expect(() => convert(money(1, 'EUR'), rate, { scale: -1 })).toThrow(InvalidArgumentError);
   });
 });

@@ -30,8 +30,8 @@ import {
   subscriptionRow,
   unexpectedCall,
 } from '../../service-test-support.js';
-import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support.js';
-import { createPaymentId } from '../primitives.js';
+import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
+import { createPaymentId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { DunningService } from './dunning-service.js';
 
@@ -125,16 +125,39 @@ describe('handlePaymentFailure', () => {
     expect(await eventTypesOf(db, 'subscription', id)).toEqual(eventsBefore);
   });
 
-  it('an unknown payment starts nothing: it throws and writes no event', async () => {
+  it('an unknown payment starts nothing: it returns ReferenceNotFound and writes no event', async () => {
     const service = dunningWith(ruleDoing('email'));
     const { id } = await seedSubscription(writes, 'active');
+    const paymentId = orThrow(createPaymentId());
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(service.handlePaymentFailure(orThrow(createPaymentId()), id));
+    const result = await service.handlePaymentFailure(paymentId, id);
 
-    expect(error).toMatchObject({ message: 'Payment or subscription not found' });
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'payment', id: paymentId, missing: 'row' },
+    });
+    expect(service.getPendingEventsForSubscription(id)).toEqual([]);
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
+  });
+
+  it('an unknown subscription starts nothing: it returns ReferenceNotFound and writes no event', async () => {
+    const service = dunningWith(ruleDoing('email'));
+    const { id } = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, id);
+    const unknown = orThrow(createSubscriptionId());
+    const eventsBefore = await countEvents(db);
+
+    const result = await service.handlePaymentFailure(payment.id, unknown);
+
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'subscription', id: unknown, missing: 'row' },
+    });
+    expect(service.getPendingEventsForSubscription(unknown)).toEqual([]);
+    expect(await countEvents(db)).toBe(eventsBefore);
   });
 });
 
@@ -231,6 +254,24 @@ describe('processDunningEvents', () => {
       'SubscriptionPastDue',
       'SubscriptionCanceled',
     ]);
+  });
+});
+
+describe('a dunning step that throws', () => {
+  it('stays scheduled for the next run instead of counting as done', async () => {
+    const outage = new Error('provider is down');
+    const service = new DunningService(
+      { ...providerWhereRetryEnds('succeeded'), pauseSubscription: () => Promise.reject(outage) },
+      reads,
+      writes,
+      { rules: [ruleDoing('pause_subscription')] },
+    );
+    const subscriptionId = await failedPaymentOn(service);
+
+    await service.processDunningEvents();
+
+    expect(service.getPendingEventsForSubscription(subscriptionId)).toHaveLength(1);
+    expect(await subscriptionRow(db, subscriptionId)).toMatchObject({ status: 'past_due' });
   });
 });
 

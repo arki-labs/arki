@@ -76,6 +76,11 @@
       "import": "./dist/core/derived-schemas.js",
       "default": "./dist/core/derived-schemas.js"
     },
+    "./core/failures": {
+      "types": "./dist/core/failures.d.ts",
+      "import": "./dist/core/failures.js",
+      "default": "./dist/core/failures.js"
+    },
     "./core/index": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js",
@@ -431,6 +436,7 @@
     "@arki/log": "workspace:*",
     "@arki/money": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "stripe": "catalog:",
@@ -442,6 +448,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "drizzle-kit": "catalog:drizzle",
     "typescript": "catalog:",

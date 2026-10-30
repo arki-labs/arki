@@ -189,7 +189,7 @@ async function recordOld(amount: number, currency: string): Promise<PaymentId> {
     description: null,
     metadata: null,
   });
-  await journal.write(db, entities.payment, paymentId, { meta, events: () => [old] });
+  orThrow(await journal.write(db, entities.payment, paymentId, { meta, events: () => [old] }));
 
   return paymentId;
 }

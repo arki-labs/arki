@@ -13,7 +13,7 @@ Never pass a float. Build amounts from strings and pass a rounding mode to every
 - `@arki/money/exact`: Bridges to `@arki/math`'s exact types, for multi-step math that should round only once at the end:. `toDecimal`, `toRational`.
 - `@arki/money/format`: Localized display through `Intl.NumberFormat`. `createMoneyFormatter`, `formatMoney`, `formatMoneyToParts`; types `FormatOptions`, `MoneyFormatter`.
 - `@arki/money/parse`: Strict parsing of money typed by people: `'1.234,56 €'` in German, `'$1,234.56'` in English, `'₹1,23,456.78'` in Indian English. `createMoneyParser`, `parseMoney`; types `MoneyParser`, `ParseOptions`, `ParseSymbols`.
-- `@arki/money/exchange`: Currency conversion with exact rates. `Converter`, `ExchangeRate`, `convert`, `createConverter`, `exchangeRate`, `ratesFrom`; types `ConverterOptions`, `RateTable`.
+- `@arki/money/exchange`: Currency conversion with exact rates. `Converter`, `ExchangeRate`, `convert`, `createConverter`, `exchangeRate`, `parseRates`, `ratesFrom`; types `ConverterOptions`, `RateTable`.
 - `@arki/money/provider`: Payment providers count amounts in their own units, which are not always ISO's. `fromProviderUnits`, `toProviderUnits`; types `ProviderUnitRule`.
 - `@arki/money/stripe`: Stripe amounts. `STRIPE_RULES_VERSION`, `fromStripeAmount`, `stripeRule`, `toStripe`, `toStripeAmount`; types `StripeOperation`.
 - `@arki/money/rational`: Exact in-between money. `RationalMoney`, `isRationalMoney`; types `ExactMoney`.
@@ -41,7 +41,7 @@ Never pass a float. Build amounts from strings and pass a rounding mode to every
 ## Rules that bite
 
 - There is no default rounding; an inexact step throws `RoundingNecessaryError`.
-- Parsers return, builders throw: `Money.parse`, `Money.fromJSON`, `Currency.parse`, `parseMoney`, `fromStripeAmount` and `fromProviderUnits` return a `money.*` failure; `money()`, `Money.of` and `Currency.of` throw.
+- Parsers return, builders throw: `Money.parse`, `Money.fromJSON`, `RationalMoney.fromJSON`, `Currency.parse`, `parseMoney`, `parseRates`, `fromStripeAmount` and `fromProviderUnits` return a `money.*` failure; `money()`, `Money.of` and `Currency.of` throw.
 - Units are a `number` while safe and a `bigint` beyond 2^53. Both are exact.
 - `Money<'EUR'>` and `Money<'USD'>` never mix; convert first.
 - Currency decimals come from the shipped table, never from `Intl`.

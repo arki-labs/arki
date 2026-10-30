@@ -1,17 +1,16 @@
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
-import type { FailureOf, Result } from '@arki/failure';
-import { isFailure } from '@arki/failure';
+import type { Failure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import type { MoneyFailure } from '@arki/money';
 import { Money, sum } from '@arki/money';
 
-import type { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 import type { TaxExemptionId } from './primitives.js';
 import type { TaxExemptionRepository, TaxJurisdictionRepository, TaxRecordRepository } from './repository.js';
 import type { TaxJurisdiction } from './types.js';
+import { TaxCurrencyMismatch, TaxRefundSaleNotFound } from './failures.js';
 import { checkTaxIdFormat } from './tax-id.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
@@ -23,7 +22,7 @@ export type TaxServiceReads = {
 
 const logger = getLogger('arki:payments:tax');
 
-type TaxBreakdownLine = Exclude<Awaited<ReturnType<StripeProvider['calculateTax']>>, MoneyFailure>['taxBreakdown'][number];
+type TaxBreakdownLine = Exclude<Awaited<ReturnType<StripeProvider['calculateTax']>>, Failure>['taxBreakdown'][number];
 
 /** How Stripe names the level of each jurisdiction type of ours. */
 const STRIPE_LEVEL: Record<TaxJurisdiction['type'], string> = {
@@ -146,10 +145,8 @@ export class TaxService {
     private readonly stripeProvider: StripeProvider,
     private readonly reads: TaxServiceReads,
   ) {
-    // Verify that Stripe provider supports tax features
-    if (!stripeProvider.features.taxCalculation) {
-      throw new Error('Tax service requires a provider with tax calculation capabilities');
-    }
+    // A provider without tax is a configuration fault: `FailureError` (`invariant`) when the service is built
+    invariant(stripeProvider.features.taxCalculation, 'Tax service requires a provider with tax calculation capabilities');
   }
 
   /**
@@ -166,7 +163,7 @@ export class TaxService {
    * A Stripe amount that `@arki/money` refuses (an unknown currency, units off Stripe's rule) is returned as a
    * `MoneyFailure`, so a sale is never priced with a wrong tax.
    */
-  async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult | MoneyFailure> {
+  async calculateTax(input: TaxCalculationInput) {
     const currency = input.currency.toUpperCase();
     // An exemption "for a customer" must name the customer; same for the other two types
     const applicable = await this.reads.exemptions.findApplicableExemptions(input.customerId);
@@ -261,7 +258,7 @@ export class TaxService {
       }));
     }
 
-    return {
+    const calculated: TaxCalculationResult = {
       subtotal,
       taxAmount,
       total: subtotal.plus(taxAmount),
@@ -276,6 +273,7 @@ export class TaxService {
         .map(taxId => taxId.value),
       appliedExemptionIds: [...applied],
     };
+    return calculated;
   }
 
   /**
@@ -308,7 +306,7 @@ export class TaxService {
     occurredAt?: Instant;
     /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
     originalReference?: string;
-  }): Promise<Result<TaxTransaction, FailureOf<typeof ReferenceNotFound> | MoneyFailure>> {
+  }) {
     const currency = params.currency.toUpperCase();
     const taxCode = params.lineItems[0]?.taxCode;
 
@@ -316,9 +314,12 @@ export class TaxService {
     const grouped = new Map<string, { jurisdiction: string; rate: number; amounts: Money[] }>();
     for (const line of params.breakdown) {
       if (line.amount.currency.code !== currency) {
-        throw new Error(
-          `Tax for ${line.jurisdiction} is in ${line.amount.currency.code}, but the transaction ${params.reference} is in ${currency}`,
-        );
+        return TaxCurrencyMismatch({
+          reference: params.reference,
+          jurisdiction: line.jurisdiction,
+          taxCurrency: line.amount.currency.code,
+          transactionCurrency: currency,
+        });
       }
       const key = `${line.jurisdiction}\u0000${line.rate}`;
       const entry = grouped.get(key) ?? { jurisdiction: line.jurisdiction, rate: line.rate, amounts: [] };
@@ -336,7 +337,7 @@ export class TaxService {
     if (first) {
       logger.debug('Tax transaction {reference} was already recorded', { reference: params.reference });
 
-      return {
+      const recorded: TaxTransaction = {
         id: first.providerTransactionId ?? first.id,
         reference: params.reference,
         type: params.type,
@@ -358,17 +359,18 @@ export class TaxService {
         })),
         taxCode,
       };
+      return recorded;
     }
 
     let originalTransactionId: string | undefined;
     if (params.type === 'refund') {
       if (params.originalReference === undefined) {
-        throw new Error(`Refund ${params.reference} needs originalReference: the reference of the sale it reverses`);
+        return TaxRefundSaleNotFound({ reference: params.reference, originalReference: null });
       }
       const original = await this.reads.records.findByReference('sale', params.originalReference);
       originalTransactionId = original.find(record => record.providerTransactionId !== null)?.providerTransactionId ?? undefined;
       if (originalTransactionId === undefined) {
-        throw new Error(`Refund ${params.reference} reverses sale ${params.originalReference}, which was never recorded`);
+        return TaxRefundSaleNotFound({ reference: params.reference, originalReference: params.originalReference });
       }
     }
 
@@ -417,7 +419,7 @@ export class TaxService {
       })),
     );
 
-    return {
+    const created: TaxTransaction = {
       id: transaction.id,
       reference: params.reference,
       type: params.type,
@@ -430,6 +432,7 @@ export class TaxService {
       breakdown: lines.map(line => ({ jurisdiction: line.jurisdiction, taxAmount: line.taxAmount })),
       taxCode,
     };
+    return created;
   }
 
   /**
@@ -451,7 +454,7 @@ export class TaxService {
     planInterval: 'monthly' | 'yearly' | 'weekly' | 'daily';
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
-  }): Promise<TaxCalculationResult | MoneyFailure> {
+  }) {
     return this.calculateTax({
       customerId: params.customerId,
       lineItems: [{
@@ -475,7 +478,7 @@ export class TaxService {
     description: string;
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
-  }): Promise<TaxCalculationResult | MoneyFailure> {
+  }) {
     return this.calculateTax({
       customerId: params.customerId,
       lineItems: [{

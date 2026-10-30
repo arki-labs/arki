@@ -278,13 +278,6 @@ export type CampaignQueryRow = {
   updated_at: Instant;
 };
 
-export type CustomerQueryRow = {
-  customer_id: string;
-  subscription_id?: string;
-  payment_id?: string;
-  trigger_data: Record<string, unknown>;
-};
-
 export type SegmentCondition = {
   field: string;
   operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'not_in';

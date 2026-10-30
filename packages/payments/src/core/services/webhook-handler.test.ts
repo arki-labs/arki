@@ -21,19 +21,13 @@ import { afterAll, assert, beforeAll, beforeEach, describe, expect, it, vi } fro
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { add, fromUnix, now, sub } from '@arki/date';
-import { isFailure, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { UnknownCurrency } from '@arki/money';
-import { initJournal } from '@arki/journal';
+import { CommandConflict, initJournal } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../../test-support.js';
 import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
-import type {
-  WebhookEventStore,
-  WebhookProcessingResult,
-  WebhookRefunds,
-  WebhookValidator,
-  WebhookWrites,
-} from './webhook-handler.js';
+import type { WebhookEventStore, WebhookRefunds, WebhookValidator, WebhookWrites } from './webhook-handler.js';
 import type { WebhookValidationOptions } from './webhook-security.js';
 import { createRefundsJournal } from '../../refunds/journal.js';
 import { createRefundWorkflow } from '../../refunds/workflow.js';
@@ -53,7 +47,16 @@ import {
 } from '../../test-support.js';
 import { createWebhookId } from '../primitives.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from '../webhook-claims.js';
-import { WebhookHandler } from './webhook-handler.js';
+import {
+  isWebhookFailure,
+  WebhookClaimConflict,
+  WebhookHandler,
+  WebhookInProgress,
+  WebhookPayloadInvalid,
+  WebhookRejected,
+  WebhookRetriesExhausted,
+  WebhookTargetNotFound,
+} from './webhook-handler.js';
 
 const { payments, subscriptions, webhookEvents } = core;
 
@@ -172,6 +175,7 @@ function failingOnce(run: number): Promise<void> {
   return run === 1 ? Promise.reject(new Error('downstream unavailable')) : Promise.resolve();
 }
 
+/** What `processWebhook` answered: a result the route sends as 2xx, or a failure. A fault rejects. */
 async function deliver(handler: WebhookHandler, eventId: string) {
   const result = await handler.processWebhook(
     'stripe',
@@ -181,9 +185,11 @@ async function deliver(handler: WebhookHandler, eventId: string) {
     '203.0.113.7',
     'whsec_test',
   );
-  assert(!isFailure(result), 'webhook scenarios require working entropy');
+  assert(!RandomSourceUnavailable.is(result), 'webhook scenarios require working entropy');
   return result;
 }
+
+type Delivered = Awaited<ReturnType<typeof deliver>>;
 
 async function rowFor(eventId: string): Promise<WebhookEvent> {
   return only(
@@ -194,7 +200,7 @@ async function rowFor(eventId: string): Promise<WebhookEvent> {
 
 /** Store a row as an earlier attempt left it. */
 async function seedRow(eventId: string, row: { lastAttemptAt: WebhookEvent['lastAttemptAt']; errorMessage?: string }) {
-  const { event } = await claimWebhookEvent(db, webhookEvents, {
+  const { event } = orThrow(await claimWebhookEvent(db, webhookEvents, {
     id: orThrow(createWebhookId()),
     provider: 'stripe',
     eventType: 'subscription.created',
@@ -204,17 +210,23 @@ async function seedRow(eventId: string, row: { lastAttemptAt: WebhookEvent['last
     attempts: 1,
     sourceIp: '203.0.113.7',
     ...row,
-  });
+  }));
   return event;
 }
 
-const ran = { success: true };
-const busy = { success: false, retryable: true, error: 'Event is being processed' };
-const done = { success: true, error: 'Event already processed' };
+const ran = { status: 'processed' };
+/** Not run by this copy, and retryable: the route answers non-2xx, so the provider resends. */
+const busy = { code: 'payments.webhook_in_progress', data: { retryable: true } };
+const done = { status: 'duplicate' };
+
+/** This delivery ran the event now. */
+function ranNow(result: Delivered): boolean {
+  return !isFailure(result) && result.status === 'processed';
+}
 
 /** A copy that lost a race either waits for a resend or sees the winner's result. */
-function isBusyOrDone(result: WebhookProcessingResult): boolean {
-  return result.error === busy.error ? result.retryable === true : result.success && result.error === done.error;
+function isBusyOrDone(result: Delivered): boolean {
+  return WebhookInProgress.is(result) || (!isFailure(result) && result.status === 'duplicate');
 }
 
 describe('WebhookHandler: one run at a time', () => {
@@ -228,7 +240,7 @@ describe('WebhookHandler: one run at a time', () => {
     ]);
 
     expect(counter.runs).toBe(1);
-    const winners = results.filter((r) => r.success && r.error === undefined);
+    const winners = results.filter((r) => ranNow(r));
     expect(winners).toHaveLength(1);
     expect(results.filter((r) => r !== winners[0]).every((r) => isBusyOrDone(r))).toBe(true);
     expect(await rowFor('evt_concurrent')).toMatchObject({ processed: true, attempts: 1 });
@@ -275,6 +287,7 @@ describe('WebhookHandler: one run at a time', () => {
     const first = await deliver(handler, 'evt_after_success');
     const resend = await deliver(handler, 'evt_after_success');
 
+    assert(!isFailure(first));
     expect(first).toMatchObject(ran);
     expect(resend).toMatchObject({ ...done, webhookId: first.webhookId });
     expect(counter.runs).toBe(1);
@@ -282,10 +295,11 @@ describe('WebhookHandler: one run at a time', () => {
 });
 
 describe('WebhookHandler: no lost events', () => {
-  it('answers a failure as retryable, and the resend runs the event again', async () => {
+  it('rethrows a fault after recording it, and the resend runs the event again', async () => {
     const { handler, counter } = countingHandler({}, failingOnce);
 
-    expect(await deliver(handler, 'evt_fail_then_resend')).toMatchObject({ success: false, retryable: true });
+    // A throw reaches the route as a non-2xx answer, so the provider resends.
+    await expect(deliver(handler, 'evt_fail_then_resend')).rejects.toThrow('downstream unavailable');
     expect(await rowFor('evt_fail_then_resend')).toMatchObject({
       processed: false,
       errorMessage: 'downstream unavailable',
@@ -307,12 +321,12 @@ describe('WebhookHandler: no lost events', () => {
 
   it('lets only one of two copies take over a failed event', async () => {
     const { handler, counter } = countingHandler({}, failingOnce);
-    await deliver(handler, 'evt_fail_then_two');
+    await expect(deliver(handler, 'evt_fail_then_two')).rejects.toThrow('downstream unavailable');
 
     const results = await Promise.all([deliver(handler, 'evt_fail_then_two'), deliver(handler, 'evt_fail_then_two')]);
 
     expect(counter.runs).toBe(2);
-    expect(results.filter((r) => r.success && r.error === undefined)).toHaveLength(1);
+    expect(results.filter((r) => ranNow(r))).toHaveLength(1);
     expect(results.filter((r) => isBusyOrDone(r))).toHaveLength(1);
     expect(await rowFor('evt_fail_then_two')).toMatchObject({ processed: true, attempts: 2 });
   });
@@ -336,13 +350,12 @@ describe('WebhookHandler: no lost events', () => {
     const { handler, counter } = countingHandler({ maxRetries: 3 }, () => Promise.reject(new Error('always')));
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      expect(await deliver(handler, 'evt_capped')).toMatchObject({ success: false, retryable: true });
+      await expect(deliver(handler, 'evt_capped')).rejects.toThrow('always');
     }
-    expect(await deliver(handler, 'evt_capped')).toMatchObject({
-      success: false,
-      retryable: false,
-      error: 'Max retry attempts exceeded',
-    });
+    const given = await deliver(handler, 'evt_capped');
+    // Not retryable: the route answers 2xx with the code, and the provider stops resending.
+    expect(WebhookRetriesExhausted.is(given)).toBe(true);
+    expect(given).toMatchObject({ code: 'payments.webhook_retries_exhausted', data: { attempts: 3, retryable: false } });
     expect(counter.runs).toBe(3);
   });
 });
@@ -361,7 +374,7 @@ describe('WebhookHandler.retryFailedWebhooks', () => {
       }
     });
 
-    await deliver(handler, 'evt_retry_job');
+    await expect(deliver(handler, 'evt_retry_job')).rejects.toThrow('downstream unavailable');
     expect(counter.runs).toBe(1);
 
     const retrying = handler.retryFailedWebhooks();
@@ -383,7 +396,7 @@ describe('WebhookHandler before the claim', () => {
 
     const result = await deliver(handler, 'evt_unhandled');
 
-    expect(result).toEqual({ success: true, error: 'Unhandled event type: customer.subscription.created' });
+    expect(result).toEqual({ status: 'ignored' });
     expect(counter.runs).toBe(0);
     expect(await db.select().from(webhookEvents)).toHaveLength(0);
   });
@@ -395,7 +408,11 @@ describe('WebhookHandler before the claim', () => {
 
     const result = await deliver(handler, 'evt_invalid');
 
-    expect(result).toEqual({ success: false, error: 'Invalid webhook signature', retryable: false });
+    expect(WebhookRejected.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'payments.webhook_rejected',
+      data: { reason: 'Invalid webhook signature', retryable: false },
+    });
     expect(counter.runs).toBe(0);
     expect(await db.select().from(webhookEvents)).toHaveLength(0);
   });
@@ -404,8 +421,8 @@ describe('WebhookHandler before the claim', () => {
     const skipping = countingHandler({ skipIpValidation: true });
     const checking = countingHandler();
 
-    await deliver(skipping.handler, 'evt_skip_ip');
-    await deliver(checking.handler, 'evt_check_ip');
+    expect(await deliver(skipping.handler, 'evt_skip_ip')).toMatchObject(ran);
+    expect(await deliver(checking.handler, 'evt_check_ip')).toMatchObject(ran);
 
     expect(skipping.calls).toEqual([{ skipIpValidation: true }]);
     expect(checking.calls).toEqual([{ skipIpValidation: false }]);
@@ -481,7 +498,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     const object = stripeSubscription(seeded.providerSubscriptionId, { status: 'past_due' });
     const handler = stateHandler('subscription.updated', object);
 
-    expect(await deliver(handler, freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(handler, freshEventId())).toMatchObject(ran);
 
     const row = await subscriptionRowOf(seeded.providerSubscriptionId);
     expect(row).toMatchObject({ status: 'past_due', userId: seeded.userId, planId: seeded.planId });
@@ -492,7 +509,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     // The same state again, under a new event id: nothing changed, so nothing is written.
     const eventsBefore = await countEvents(db);
-    expect(await deliver(handler, freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(handler, freshEventId())).toMatchObject(ran);
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -503,9 +520,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       canceled_at: 1_760_500_000,
     });
 
-    expect(await deliver(stateHandler('subscription.canceled', object), freshEventId())).toMatchObject({
-      success: true,
-    });
+    expect(await deliver(stateHandler('subscription.canceled', object), freshEventId())).toMatchObject(ran);
 
     const row = await subscriptionRowOf(seeded.providerSubscriptionId);
     expect(row?.status).toBe('canceled');
@@ -520,10 +535,17 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     const result = await deliver(stateHandler('subscription.created', stripeSubscription('psub_unknown')), eventId);
 
-    expect(result).toMatchObject({ success: false, retryable: true });
+    // Retryable on purpose: Stripe can send the event before the app's own insert of the row commits.
+    expect(WebhookTargetNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({
+      code: 'payments.webhook_target_not_found',
+      data: { kind: 'subscription', providerId: 'psub_unknown', retryable: true },
+    });
     const stored = await rowFor(eventId);
     expect(stored.processed).toBe(false);
-    expect(stored.errorMessage).toContain('No local subscription');
+    expect(stored.errorMessage).toBe(
+      'payments.webhook_target_not_found: No local subscription for provider subscription psub_unknown',
+    );
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await subscriptionRowOf('psub_unknown')).toBeUndefined();
   });
@@ -536,7 +558,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       freshEventId(),
     );
 
-    expect(result).toMatchObject({ success: true });
+    expect(result).toMatchObject(ran);
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
   });
@@ -547,7 +569,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       last_payment_error: { message: 'Your card was declined.', code: 'card_declined' },
     });
 
-    expect(await deliver(stateHandler('payment.failed', object), freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(stateHandler('payment.failed', object), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({
       status: 'failed',
@@ -561,9 +583,9 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
     const charge = stripeCharge(seeded.providerPaymentId, { amount_refunded: 1000, currency: 'usd' });
 
-    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject(ran);
     // Stripe sends the whole total again on a resend: nothing changes
-    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: true, refundedAmountMinor: 1000 });
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
@@ -582,7 +604,10 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       eventId,
     );
 
-    expect(result).toMatchObject({ success: false, retryable: true });
+    // The journal's refused write is returned (AGENTS.md law 9), not thrown: the route answers it non-2xx.
+    expect(CommandConflict.is(result)).toBe(true);
+    expect(isWebhookFailure(result)).toBe(false);
+    expect(await rowFor(eventId)).toMatchObject({ processed: false, errorMessage: 'journal.conflict: Cannot refund payment with status pending' });
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: false, refundedAmountMinor: 0 });
   });
 
@@ -591,15 +616,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     await orThrow(writesOn(db).completePayment({ paymentId: seeded.id }));
     const charge = stripeCharge(seeded.providerPaymentId, { amount_refunded: 1000, currency: 'zzz' });
 
-    // `deliver` asserts the answer is not a failure; this test is about the failure
-    const result = await stateHandler('payment.refunded', charge).processWebhook(
-      'stripe',
-      JSON.stringify({ id: freshEventId(), type: 'customer.subscription.created' }),
-      't=0,v1=stub',
-      '0',
-      '203.0.113.7',
-      'whsec_test',
-    );
+    const result = await deliver(stateHandler('payment.refunded', charge), freshEventId());
 
     expect(UnknownCurrency.is(result)).toBe(true);
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: false, refundedAmountMinor: 0 });
@@ -616,7 +633,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       freshEventId(),
     );
 
-    expect(result).toMatchObject({ success: true });
+    expect(result).toMatchObject(ran);
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -713,9 +730,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
       expect(
         await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
-      ).toMatchObject({
-        success: true,
-      });
+      ).toMatchObject(ran);
 
       // `kept`: the run has not reached its wait yet, and takes the signal when it does
       expect(signalled).toEqual(['kept']);
@@ -732,13 +747,10 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       const eventId = freshEventId();
 
       // The signal was stored, then the answer was lost: Stripe resends the same event
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).toMatchObject({
-        success: false,
-        retryable: true,
-      });
-      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).toMatchObject({
-        success: true,
-      });
+      await expect(deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).rejects.toThrow(
+        'connection lost after the signal was stored',
+      );
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refunds), eventId)).toMatchObject(ran);
 
       // The run holds one signal: the resend changed nothing
       expect(signalled).toEqual(['kept', 'duplicate']);
@@ -750,9 +762,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
       expect(
         await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
-      ).toMatchObject({
-        success: true,
-      });
+      ).toMatchObject(ran);
 
       expect(signalled).toEqual([]);
     });
@@ -766,9 +776,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
       expect(
         await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId()),
-      ).toMatchObject({
-        success: true,
-      });
+      ).toMatchObject(ran);
 
       expect(signalled).toEqual(['no-run']);
     });
@@ -779,9 +787,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
       expect(
         await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId()),
-      ).toMatchObject({
-        success: true,
-      });
+      ).toMatchObject(ran);
 
       expect(signalled).toEqual(['kept']);
     });
@@ -793,9 +799,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
         const object = { id: `re_${status}`, object: 'refund', status, metadata: { refundId: refund.id } };
         expect(
           await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId()),
-        ).toMatchObject({
-          success: true,
-        });
+        ).toMatchObject(ran);
       }
 
       expect(signalled).toEqual([]);
@@ -813,9 +817,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       reason: 'fraudulent',
     };
 
-    expect(await deliver(stateHandler('payment.dispute_created', dispute), freshEventId())).toMatchObject({
-      success: true,
-    });
+    expect(await deliver(stateHandler('payment.dispute_created', dispute), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({
       disputeId: 'dp_webhook_1',
@@ -827,7 +829,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
   it('payment.requires_action marks a pending payment as waiting for the customer', async () => {
     const seeded = await seedPayment(writesOn(db), null);
 
-    await deliver(stateHandler('payment.requires_action', stripeIntent(seeded.providerPaymentId)), freshEventId());
+    expect(await deliver(stateHandler('payment.requires_action', stripeIntent(seeded.providerPaymentId)), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'requires_action' });
     const paymentEvents = await eventTypesOf(db, 'payment', seeded.id);
@@ -838,8 +840,8 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     const seeded = await seedPayment(writesOn(db), null);
     const object = stripeIntent(seeded.providerPaymentId);
 
-    await deliver(stateHandler('payment.requires_action', object), freshEventId());
-    await deliver(stateHandler('payment.succeeded', object), freshEventId());
+    expect(await deliver(stateHandler('payment.requires_action', object), freshEventId())).toMatchObject(ran);
+    expect(await deliver(stateHandler('payment.succeeded', object), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
@@ -853,8 +855,8 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     const seeded = await seedPayment(writesOn(db), null);
     const object = stripeIntent(seeded.providerPaymentId);
 
-    await deliver(stateHandler('payment.failed', object), freshEventId());
-    expect(await deliver(stateHandler('payment.succeeded', object), freshEventId())).toMatchObject({ success: true });
+    expect(await deliver(stateHandler('payment.failed', object), freshEventId())).toMatchObject(ran);
+    expect(await deliver(stateHandler('payment.succeeded', object), freshEventId())).toMatchObject(ran);
 
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
@@ -872,8 +874,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     const result = await deliver(stateHandler('payment.failed', stripeIntent(seeded.providerPaymentId)), eventId);
 
-    expect(result).toMatchObject({ success: true });
-    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject(ran);
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await rowFor(eventId)).toMatchObject({ processed: true });
@@ -885,9 +886,13 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     const result = await deliver(stateHandler('payment.succeeded', { object: 'payment_intent' }), eventId);
 
-    expect(result).toMatchObject({ success: false });
+    // Final: a resend carries the same body, so the route answers 2xx and Stripe stops.
+    assert(WebhookPayloadInvalid.is(result));
+    expect(result.data.retryable).toBe(false);
+    expect(InvalidInput.is(result.cause)).toBe(true);
     const stored = await rowFor(eventId);
-    expect(stored.errorMessage).toMatch(/Invalid webhook payload:/);
+    expect(stored.processed).toBe(false);
+    expect(stored.errorMessage).toMatch(/^payments\.webhook_payload_invalid: Invalid webhook payload:/);
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -895,9 +900,7 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     const eventId = freshEventId();
     const eventsBefore = await countEvents(db);
 
-    expect(await deliver(stateHandler('invoice.paid', { id: 'in_1', object: 'invoice' }), eventId)).toMatchObject({
-      success: true,
-    });
+    expect(await deliver(stateHandler('invoice.paid', { id: 'in_1', object: 'invoice' }), eventId)).toMatchObject(ran);
 
     expect(await rowFor(eventId)).toMatchObject({ processed: true });
     expect(await countEvents(db)).toBe(eventsBefore);
@@ -906,10 +909,10 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
   it('a resend of a processed payment event does not run again (the claim)', async () => {
     const seeded = await seedPayment(writesOn(db), null);
     const handler = stateHandler('payment.succeeded', stripeIntent(seeded.providerPaymentId));
-    expect(await deliver(handler, 'evt_dup')).toMatchObject({ success: true });
+    expect(await deliver(handler, 'evt_dup')).toMatchObject(ran);
     const eventsBefore = await countEvents(db);
 
-    expect(await deliver(handler, 'evt_dup')).toMatchObject({ success: true, error: 'Event already processed' });
+    expect(await deliver(handler, 'evt_dup')).toMatchObject(done);
 
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
@@ -928,18 +931,104 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     };
     const handler = stateHandler('payment.succeeded', stripeIntent(seeded.providerPaymentId), crashingOnce);
 
-    expect(await deliver(handler, 'evt_crash')).toMatchObject({ success: false, retryable: true });
+    await expect(deliver(handler, 'evt_crash')).rejects.toThrow('connection lost');
     expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
     const eventsBefore = await countEvents(db);
 
-    expect(await deliver(handler, 'evt_crash')).toMatchObject({ success: true });
+    expect(await deliver(handler, 'evt_crash')).toMatchObject(ran);
 
     expect(await rowFor('evt_crash')).toMatchObject({ attempts: 2, processed: true });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
   });
+
+  it('payment.succeeded for a payment the app does not know is retryable: the insert may not have committed yet', async () => {
+    const eventId = freshEventId();
+
+    const result = await deliver(stateHandler('payment.succeeded', stripeIntent('pi_not_yet_here')), eventId);
+
+    expect(result).toMatchObject({
+      code: 'payments.webhook_target_not_found',
+      data: { kind: 'payment', providerId: 'pi_not_yet_here', retryable: true },
+    });
+    expect(await rowFor(eventId)).toMatchObject({
+      processed: false,
+      errorMessage: 'payments.webhook_target_not_found: No local payment for provider payment pi_not_yet_here',
+    });
+  });
+
+  it.each([
+    ['payment.dispute_created', { id: 'dp_unknown', object: 'dispute', payment_intent: 'pi_dispute_unknown', status: 'needs_response' }],
+    ['payment.refunded', stripeCharge('pi_dispute_unknown', { amount_refunded: 100 })],
+  ] as const)('%s for a payment the app does not know returns the retryable not-found failure', async (type, object) => {
+    const result = await deliver(stateHandler(type, object), freshEventId());
+
+    expect(result).toMatchObject({
+      code: 'payments.webhook_target_not_found',
+      data: { kind: 'payment', providerId: 'pi_dispute_unknown', retryable: true },
+    });
+  });
+
+  it.each([
+    ['subscription.updated', stripeSubscription('psub_no_items', { items: { data: [] } })],
+    ['subscription.updated', stripeSubscription('psub_far', { canceled_at: 9_000_000_000_000 })],
+    ['payment.refunded', { id: 'ch_bad', object: 'charge', amount_refunded: -1, currency: 'usd' }],
+    ['refund.updated', { object: 'refund' }],
+    ['payment.dispute_created', { id: 'dp_bad', object: 'dispute' }],
+  ] as const)('%s with a body its schema refuses is a final payload failure, never a throw', async (type, object) => {
+    const eventId = freshEventId();
+    const eventsBefore = await countEvents(db);
+
+    const result = await deliver(stateHandler(type, object), eventId);
+
+    assert(WebhookPayloadInvalid.is(result));
+    expect(result.data.retryable).toBe(false);
+    expect(InvalidInput.is(result.cause)).toBe(true);
+    expect(await rowFor(eventId)).toMatchObject({ processed: false });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
 });
 
+describe('WebhookHandler: the event envelope', () => {
+  it.each([
+    ['not JSON', 'not json'],
+    ['no id', JSON.stringify({ type: 'customer.subscription.created' })],
+    ['an empty type', JSON.stringify({ id: 'evt_empty_type', type: '' })],
+  ])('a body with %s is a final payload failure and stores nothing', async (_what, body) => {
+    const { handler, counter } = countingHandler();
+
+    const result = await handler.processWebhook('stripe', body, 't=0,v1=stub', '0', '203.0.113.7', 'whsec_test');
+
+    expect(result).toMatchObject({ code: 'payments.webhook_payload_invalid', data: { retryable: false } });
+    expect(counter.runs).toBe(0);
+    expect(await db.select().from(webhookEvents)).toHaveLength(0);
+  });
+});
+
+describe('claimWebhookEvent', () => {
+  it('returns the retryable claim conflict when the insert conflicts but no row holds the event id', async () => {
+    const held = await seedRow('evt_holder', { lastAttemptAt: now() });
+
+    // The same webhook id (primary key) for another provider event: the insert does nothing, and the
+    // lookup by provider event id finds no row.
+    const claim = await claimWebhookEvent(db, webhookEvents, {
+      id: held.id,
+      provider: 'stripe',
+      eventType: 'subscription.created',
+      providerEventId: 'evt_collides',
+      data: {},
+      processed: false,
+      attempts: 1,
+      sourceIp: '203.0.113.7',
+    });
+
+    expect(WebhookClaimConflict.is(claim)).toBe(true);
+    expect(claim).toMatchObject({
+      code: 'payments.webhook_claim_conflict',
+      data: { providerEventId: 'evt_collides', retryable: true },
+    });
+  });
+});
 
 describe('webhook ID failure', () => {
   it('returns the canonical refusal before claiming or processing a provider event', async () => {

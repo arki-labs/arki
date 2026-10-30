@@ -5,6 +5,8 @@ import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizz
 
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
+import { isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
 import type { TaxTables } from './tables.js';
@@ -20,6 +22,8 @@ import type {
   TaxJurisdiction,
   TaxRecord,
 } from './types.js';
+import { exemptionTargetSchema } from './contracts.js';
+import { TaxReferenceNotFound } from './failures.js';
 
 /**
  * Structural database type for the tax repositories. The tax repositories
@@ -54,7 +58,7 @@ export class TaxConfigurationRepository {
     if (!result[0]) {
       throw new Error('Failed to create tax configuration');
     }
-    return result[0] as TaxConfig;
+    return result[0];
   }
 
   async findConfigurationById(id: TaxConfigId): Promise<TaxConfig | null> {
@@ -63,7 +67,7 @@ export class TaxConfigurationRepository {
       .from(this.taxConfigurations)
       .where(eq(this.taxConfigurations.id, id))
       .limit(1);
-    return (results[0] as TaxConfig | undefined) ?? null;
+    return results[0] ?? null;
   }
 
   async findDefaultConfiguration(): Promise<TaxConfig | null> {
@@ -74,7 +78,7 @@ export class TaxConfigurationRepository {
         and(eq(this.taxConfigurations.isDefault, true), eq(this.taxConfigurations.status, 'active')),
       )
       .limit(1);
-    return (results[0] as TaxConfig | undefined) ?? null;
+    return results[0] ?? null;
   }
 
   async findActiveConfigurations(): Promise<TaxConfig[]> {
@@ -82,39 +86,39 @@ export class TaxConfigurationRepository {
       .select()
       .from(this.taxConfigurations)
       .where(eq(this.taxConfigurations.status, 'active'))
-      .orderBy(desc(this.taxConfigurations.isDefault), this.taxConfigurations.name) as Promise<TaxConfig[]>;
+      .orderBy(desc(this.taxConfigurations.isDefault), this.taxConfigurations.name);
   }
 
-  async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration): Promise<TaxConfig> {
-    const result = await this.db
+  /** The updated row, or `TaxReferenceNotFound` when no configuration has `id`. */
+  async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration) {
+    const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ ...data, updatedAt: now() })
       .where(eq(this.taxConfigurations.id, id))
       .returning();
-    if (!result[0]) {
-      throw new Error('Failed to update tax configuration or configuration not found');
-    }
-    return result[0] as TaxConfig;
+    return updated ?? TaxReferenceNotFound({ kind: 'configuration', id });
   }
 
-  async setDefaultConfiguration(id: TaxConfigId): Promise<TaxConfig> {
-    // First, remove default flag from all configurations
-    await this.db
-      .update(this.taxConfigurations)
-      .set({ isDefault: false, updatedAt: now() })
-      .where(eq(this.taxConfigurations.isDefault, true));
-
-    // Then set the new default
-    const result = await this.db
+  /**
+   * Makes `id` the one default configuration. An unknown `id` returns `TaxReferenceNotFound` and
+   * leaves the current default as it is: the new default is set before the old one is cleared.
+   */
+  async setDefaultConfiguration(id: TaxConfigId) {
+    const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ isDefault: true, updatedAt: now() })
       .where(eq(this.taxConfigurations.id, id))
       .returning();
-
-    if (!result[0]) {
-      throw new Error('Failed to set default tax configuration');
+    if (!updated) {
+      return TaxReferenceNotFound({ kind: 'configuration', id });
     }
-    return result[0] as TaxConfig;
+
+    await this.db
+      .update(this.taxConfigurations)
+      .set({ isDefault: false, updatedAt: now() })
+      .where(and(eq(this.taxConfigurations.isDefault, true), ne(this.taxConfigurations.id, id)));
+
+    return updated;
   }
 
   async deleteConfiguration(id: TaxConfigId): Promise<void> {
@@ -140,7 +144,7 @@ export class TaxJurisdictionRepository {
     if (!result || !Array.isArray(result) || !result[0]) {
       throw new Error('Failed to create tax jurisdiction');
     }
-    return result[0] as TaxJurisdiction;
+    return result[0];
   }
 
   async findJurisdictionById(id: TaxJurisdictionId): Promise<TaxJurisdiction | null> {
@@ -149,7 +153,7 @@ export class TaxJurisdictionRepository {
       .from(this.taxJurisdictions)
       .where(eq(this.taxJurisdictions.id, id))
       .limit(1);
-    return (results[0] as TaxJurisdiction | undefined) ?? null;
+    return results[0] ?? null;
   }
 
   async findJurisdictionByCode(code: string, countryCode: string): Promise<TaxJurisdiction | null> {
@@ -163,7 +167,7 @@ export class TaxJurisdictionRepository {
         ),
       )
       .limit(1);
-    return (results[0] as TaxJurisdiction | undefined) ?? null;
+    return results[0] ?? null;
   }
 
   async findJurisdictionsByCountry(countryCode: string): Promise<TaxJurisdiction[]> {
@@ -176,7 +180,7 @@ export class TaxJurisdictionRepository {
           eq(this.taxJurisdictions.isActive, true),
         ),
       )
-      .orderBy(this.taxJurisdictions.type, this.taxJurisdictions.name) as Promise<TaxJurisdiction[]>;
+      .orderBy(this.taxJurisdictions.type, this.taxJurisdictions.name);
   }
 
   async findActiveJurisdictions(): Promise<TaxJurisdiction[]> {
@@ -188,7 +192,7 @@ export class TaxJurisdictionRepository {
         this.taxJurisdictions.countryCode,
         this.taxJurisdictions.type,
         this.taxJurisdictions.name,
-      ) as Promise<TaxJurisdiction[]>;
+      );
   }
 
   async findJurisdictionHierarchy(id: TaxJurisdictionId): Promise<TaxJurisdiction[]> {
@@ -197,14 +201,15 @@ export class TaxJurisdictionRepository {
     if (!jurisdiction) return [];
 
     const hierarchy: TaxJurisdiction[] = [jurisdiction];
+    // `parentId` is stored data an update can point anywhere: a chain that comes back to itself stops there
+    const seen = new Set<TaxJurisdictionId>([jurisdiction.id]);
 
     // Walk up the parent chain
-    let current: TaxJurisdiction | null = jurisdiction;
-    const parentIdKey = 'parentId';
-    while (current && parentIdKey in current && current[parentIdKey]) {
-      const parentId = current[parentIdKey];
-      const parent = await this.findJurisdictionById(parentId);
+    let current: TaxJurisdiction = jurisdiction;
+    while (current.parentId !== null && !seen.has(current.parentId)) {
+      const parent = await this.findJurisdictionById(current.parentId);
       if (!parent) break;
+      seen.add(parent.id);
       hierarchy.unshift(parent); // Add to beginning
       current = parent;
     }
@@ -212,19 +217,14 @@ export class TaxJurisdictionRepository {
     return hierarchy;
   }
 
-  async updateJurisdiction(
-    id: TaxJurisdictionId,
-    data: UpdateTaxJurisdiction,
-  ): Promise<TaxJurisdiction> {
-    const result = await this.db
+  /** The updated row, or `TaxReferenceNotFound` when no jurisdiction has `id`. */
+  async updateJurisdiction(id: TaxJurisdictionId, data: UpdateTaxJurisdiction) {
+    const [updated] = await this.db
       .update(this.taxJurisdictions)
       .set({ ...data, updatedAt: now() })
       .where(eq(this.taxJurisdictions.id, id))
       .returning();
-    if (!result[0]) {
-      throw new Error('Failed to update tax jurisdiction or jurisdiction not found');
-    }
-    return result[0] as TaxJurisdiction;
+    return updated ?? TaxReferenceNotFound({ kind: 'jurisdiction', id });
   }
 
   async deleteJurisdiction(id: TaxJurisdictionId): Promise<void> {
@@ -245,15 +245,19 @@ export class TaxExemptionRepository {
     this.taxExemptions = tables.taxExemptions;
   }
 
-  async createExemption(data: NewTaxExemption): Promise<TaxExemption> {
-    if (!data.customerId && !data.productCode && !data.jurisdictionId) {
-      throw new Error('A tax exemption needs a customer, a product code or a jurisdiction');
-    }
-    const result = await this.db.insert(this.taxExemptions).values(data).returning();
-    if (!result[0]) {
+  /**
+   * The new row. One that names no customer, product code or jurisdiction would exempt every sale:
+   * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written.
+   */
+  async createExemption(data: NewTaxExemption) {
+    const target = parse(exemptionTargetSchema, data);
+    if (isFailure(target)) return target;
+
+    const [created] = await this.db.insert(this.taxExemptions).values(data).returning();
+    if (!created) {
       throw new Error('Failed to create tax exemption');
     }
-    return result[0] as TaxExemption;
+    return created;
   }
 
   async findExemptionById(id: TaxExemptionId): Promise<TaxExemption | null> {
@@ -262,7 +266,7 @@ export class TaxExemptionRepository {
       .from(this.taxExemptions)
       .where(eq(this.taxExemptions.id, id))
       .limit(1);
-    return (results[0] as TaxExemption | undefined) ?? null;
+    return results[0] ?? null;
   }
 
   async findCustomerExemptions(customerId: string): Promise<TaxExemption[]> {
@@ -278,7 +282,7 @@ export class TaxExemptionRepository {
           sql`(${this.taxExemptions.validTo} IS NULL OR ${this.taxExemptions.validTo} > NOW())`,
         ),
       )
-      .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;
+      .orderBy(this.taxExemptions.validFrom);
   }
 
   /**
@@ -349,7 +353,7 @@ export class TaxExemptionRepository {
           sql`(${this.taxExemptions.validTo} IS NULL OR ${this.taxExemptions.validTo} > NOW())`,
         ),
       )
-      .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;
+      .orderBy(this.taxExemptions.validFrom);
   }
 
   async findJurisdictionExemptions(jurisdictionId: TaxJurisdictionId): Promise<TaxExemption[]> {
@@ -364,7 +368,7 @@ export class TaxExemptionRepository {
           sql`(${this.taxExemptions.validTo} IS NULL OR ${this.taxExemptions.validTo} > NOW())`,
         ),
       )
-      .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;
+      .orderBy(this.taxExemptions.validFrom);
   }
 
   async findExpiringExemptions(days = 30): Promise<TaxExemption[]> {
@@ -383,23 +387,22 @@ export class TaxExemptionRepository {
           sql`${this.taxExemptions.validTo} > NOW()`,
         ),
       )
-      .orderBy(this.taxExemptions.validTo) as Promise<TaxExemption[]>;
+      .orderBy(this.taxExemptions.validTo);
   }
 
-  async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption): Promise<TaxExemption> {
-    const result = await this.db
+  /** The updated row, or `TaxReferenceNotFound` when no exemption has `id`. */
+  async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption) {
+    const [updated] = await this.db
       .update(this.taxExemptions)
       .set({ ...data, updatedAt: now() })
       .where(eq(this.taxExemptions.id, id))
       .returning();
-    if (!result[0]) {
-      throw new Error('Failed to update tax exemption or exemption not found');
-    }
-    return result[0] as TaxExemption;
+    return updated ?? TaxReferenceNotFound({ kind: 'exemption', id });
   }
 
-  async approveExemption(id: TaxExemptionId, approvedBy: string): Promise<TaxExemption> {
-    const result = await this.db
+  /** The approved row, or `TaxReferenceNotFound` when no exemption has `id`. */
+  async approveExemption(id: TaxExemptionId, approvedBy: string) {
+    const [approved] = await this.db
       .update(this.taxExemptions)
       .set({
         status: 'active',
@@ -409,22 +412,17 @@ export class TaxExemptionRepository {
       })
       .where(eq(this.taxExemptions.id, id))
       .returning();
-    if (!result[0]) {
-      throw new Error('Failed to approve tax exemption');
-    }
-    return result[0] as TaxExemption;
+    return approved ?? TaxReferenceNotFound({ kind: 'exemption', id });
   }
 
-  async revokeExemption(id: TaxExemptionId): Promise<TaxExemption> {
-    const result = await this.db
+  /** The revoked row, or `TaxReferenceNotFound` when no exemption has `id`. */
+  async revokeExemption(id: TaxExemptionId) {
+    const [revoked] = await this.db
       .update(this.taxExemptions)
       .set({ status: 'revoked', updatedAt: now() })
       .where(eq(this.taxExemptions.id, id))
       .returning();
-    if (!result[0]) {
-      throw new Error('Failed to revoke tax exemption');
-    }
-    return result[0] as TaxExemption;
+    return revoked ?? TaxReferenceNotFound({ kind: 'exemption', id });
   }
 
   async deleteExemption(id: TaxExemptionId): Promise<void> {

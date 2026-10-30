@@ -112,14 +112,14 @@ describe('compliance report and export from stored data', () => {
     await repos.records.recordMany([
       { reference: 'o1', type: 'sale', jurisdiction: 'Germany', rate: '19', taxAmountMinor: 1900, currency: 'EUR', customerId, paymentId: taxed },
     ]);
-    await repos.exemptions.createExemption({
+    orThrow(await repos.exemptions.createExemption({
       type: 'customer',
       status: 'active',
       customerId: otherCustomerId,
       exemptionCode: 'NONPROFIT',
       reason: 'Charity, "registered"',
       validFrom: instant('2020-01-01T00:00:00Z'),
-    });
+    }));
   });
 
   it('adds up real payments and tax: sales, tax collected, exempt sales, counts and categories', async () => {
@@ -245,13 +245,13 @@ describe('compliance status and deadlines', () => {
     const compliance = await reporting.validateComplianceStatus();
     expect(compliance.status).toBe('warning');
 
-    await repos.configurations.updateConfiguration(pending.id, {
+    orThrow(await repos.configurations.updateConfiguration(pending.id, {
       businessDetails: {
         businessName: 'Acme',
         address: { line1: 'x', city: 'x', state: 'x', country: 'US', postalCode: '1' },
         registrations: [{ country: 'DE', type: 'vat', number: 'DE123456789', status: 'active' }],
       },
-    });
+    }));
     expect(await reporting.validateComplianceStatus()).toEqual({ status: 'compliant', issues: [] });
   });
 
@@ -265,4 +265,19 @@ describe('compliance status and deadlines', () => {
     const next = await reporting.getUpcomingDeadlines(instant('2033-11-01T00:00:00Z'));
     expect(next[0]?.deadline.toString()).toBe('2034-01-31T23:59:59.999Z');
   });
+
+  // The frequency is free text in the jurisdiction row: an Object.prototype name once made the loop run forever
+  it('skips a jurisdiction whose filing frequency is named like an object member', async () => {
+    await repos.jurisdictions.createJurisdiction({
+      name: 'Germany (odd row)',
+      code: 'DE-X',
+      type: 'country',
+      countryCode: 'DE',
+      registrationRequired: true,
+      filingFrequency: 'constructor',
+    });
+
+    const deadlines = await reporting.getUpcomingDeadlines(instant('2033-10-14T00:00:00Z'));
+    expect(deadlines.map(deadline => deadline.jurisdiction)).toEqual(['Germany']);
+  }, 10_000);
 });

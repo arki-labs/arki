@@ -25,7 +25,7 @@ import {
   TransactionRejected,
   TransactionUnavailable,
 } from '@arki/db/errors';
-import { isFailure, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { JournalError } from '@arki/journal';
 import { money } from '@arki/money';
 
@@ -37,19 +37,11 @@ import type { RefundReason } from './primitives.js';
 import type { RefundAutoApproveLimits } from './service.js';
 import { createPaymentId } from '../core/primitives.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
-import {
-  adminId,
-  countEvents,
-  eventTypesOf,
-  openDb,
-  refundsTables,
-  rejectionOf,
-  typed,
-  userId,
-} from '../test-support.js';
+import { adminId, countEvents, eventTypesOf, openDb, refundsTables, typed, userId } from '../test-support.js';
 import {
   DuplicatePendingRefund,
   RefundAmountExceeded,
+  RefundCurrencyMismatch,
   RefundInvalidState,
   RefundNotFound,
   RefundWindowExceeded,
@@ -227,16 +219,18 @@ describe('requestRefund', () => {
     const payment = await seedPayment(coreWrites, null, '50', 'EUR');
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(
-      serviceWith().requestRefund({
-        paymentId: payment.id,
-        amount: money(40, 'USD'),
-        reason: 'customer_request',
-        requestedBy: userId,
-      }),
-    );
+    const refused = await serviceWith().requestRefund({
+      paymentId: payment.id,
+      amount: money(40, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
 
-    expect(error).toMatchObject({ message: 'Refund currency USD differs from the payment currency EUR' });
+    expect(RefundCurrencyMismatch.is(refused) && refused.data).toEqual({
+      paymentId: payment.id,
+      refundCurrency: 'USD',
+      paymentCurrency: 'EUR',
+    });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 });
@@ -287,8 +281,8 @@ describe('auto-approval limits per currency', () => {
   );
 
   it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
-    expect(() => serviceWith({ USD: '10.001' })).toThrow();
-    expect(() => serviceWith({ NOPE: '10' })).toThrow();
+    expect(() => serviceWith({ USD: '10.001' })).toThrow(expect.objectContaining({ code: 'ARKI_SCHEMA_E004' }));
+    expect(() => serviceWith({ NOPE: '10' })).toThrow(expect.objectContaining({ code: 'ARKI_SCHEMA_E004' }));
   });
 });
 
@@ -385,9 +379,9 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     const pending = await pendingRefund(service);
     const eventsBefore = await countEvents(db);
 
-    const error = await rejectionOf(service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason }));
+    const refused = await service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason });
 
-    expect(error).toMatchObject({ name: 'RefundError', code: 'REASON_REQUIRED' });
+    expect(InvalidInput.is(refused)).toBe(true);
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await refundRow(db, pending.id)).toMatchObject({ status: 'pending', rejectionReason: null });
   });

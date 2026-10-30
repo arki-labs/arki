@@ -7,17 +7,20 @@
  * fake HTTP layer.
  */
 import type { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { InvalidInput, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
 import { customerId, openDb, schema } from '../test-support.js';
 import { createExemptionSchema, createJurisdictionSchema } from './contracts.js';
+import { TaxReferenceNotFound } from './failures.js';
+import { createTaxConfigId, createTaxExemptionId, createTaxJurisdictionId } from './primitives.js';
 import { createTaxRepositories } from './repository.js';
 import { jurisdictionOwnsLine, TaxService } from './service.js';
 import { createTaxTables } from './tables.js';
@@ -73,7 +76,13 @@ const sale = {
 const past = instant('2020-01-01T00:00:00Z');
 
 beforeAll(async () => {
-  const opened = await openDb({ ...tax.enums, taxJurisdictions: tax.taxJurisdictions, taxExemptions: tax.taxExemptions, taxRecords: tax.taxRecords });
+  const opened = await openDb({
+    ...tax.enums,
+    taxConfigurations: tax.taxConfigurations,
+    taxJurisdictions: tax.taxJurisdictions,
+    taxExemptions: tax.taxExemptions,
+    taxRecords: tax.taxRecords,
+  });
   client = opened.client;
   db = drizzle({ client });
   repos = createTaxRepositories(db, tax);
@@ -85,18 +94,18 @@ afterAll(async () => {
 
 describe('a new exemption', () => {
   it('waits for review, and only approving makes it active', async () => {
-    const created = await repos.exemptions.createExemption({
+    const created = orThrow(await repos.exemptions.createExemption({
       type: 'customer',
       customerId: 'cus_review',
       exemptionCode: 'NONPROFIT',
       reason: 'Registered charity',
       validFrom: past,
-    });
+    }));
 
     expect(created.status).toBe('pending_review');
     expect(await repos.exemptions.findApplicableExemptions('cus_review')).toEqual([]);
 
-    await repos.exemptions.approveExemption(created.id, 'usr_admin');
+    orThrow(await repos.exemptions.approveExemption(created.id, 'usr_admin'));
 
     const applicable = await repos.exemptions.findApplicableExemptions('cus_review');
     expect(applicable.map(e => e.id)).toEqual([created.id]);
@@ -115,6 +124,57 @@ describe('a new exemption', () => {
     expect(createExemptionSchema.safeParse(input).success).toBe(false);
     expect(createExemptionSchema.safeParse({ ...input, validTo: input.validFrom }).success).toBe(true);
     await expect(repos.exemptions.createExemption(input)).rejects.toThrow();
+  });
+});
+
+describe('an id with no row', () => {
+  // An admin route passes the id it was given; a stale or mistyped one must come back as a failure the route can answer with 404
+  it('is refused as TaxReferenceNotFound by every update, and nothing is written', async () => {
+    const exemptionId = orThrow(createTaxExemptionId());
+    for (const refused of [
+      await repos.exemptions.updateExemption(exemptionId, { reason: 'x' }),
+      await repos.exemptions.approveExemption(exemptionId, 'usr_admin'),
+      await repos.exemptions.revokeExemption(exemptionId),
+    ]) {
+      expect(TaxReferenceNotFound.is(refused) && refused.data).toEqual({ kind: 'exemption', id: exemptionId });
+    }
+
+    const jurisdictionId = orThrow(createTaxJurisdictionId());
+    const jurisdiction = await repos.jurisdictions.updateJurisdiction(jurisdictionId, { name: 'x' });
+    expect(TaxReferenceNotFound.is(jurisdiction) && jurisdiction.data).toEqual({ kind: 'jurisdiction', id: jurisdictionId });
+
+    const configId = orThrow(createTaxConfigId());
+    const config = await repos.configurations.updateConfiguration(configId, { name: 'x' });
+    expect(TaxReferenceNotFound.is(config) && config.data).toEqual({ kind: 'configuration', id: configId });
+  });
+
+  it('as the new default configuration, keeps the current default', async () => {
+    const current = await repos.configurations.createConfiguration({ name: 'Current default', isDefault: true });
+
+    const refused = await repos.configurations.setDefaultConfiguration(orThrow(createTaxConfigId()));
+
+    expect(TaxReferenceNotFound.is(refused)).toBe(true);
+    const kept = await repos.configurations.findDefaultConfiguration();
+    expect(kept?.id).toBe(current.id);
+  });
+});
+
+describe('a jurisdiction hierarchy', () => {
+  // `parentId` can be updated to point anywhere, so a stored chain may loop; reading it must still end
+  it('stops where a parent chain comes back to itself', async () => {
+    const country = await repos.jurisdictions.createJurisdiction({ name: 'Loopland', code: 'LP', type: 'country', countryCode: 'LP' });
+    const state = await repos.jurisdictions.createJurisdiction({
+      name: 'Loop State',
+      code: 'LS',
+      type: 'state',
+      countryCode: 'LP',
+      parentId: country.id,
+    });
+    orThrow(await repos.jurisdictions.updateJurisdiction(country.id, { parentId: state.id }));
+
+    const hierarchy = await repos.jurisdictions.findJurisdictionHierarchy(state.id);
+
+    expect(hierarchy.map(jurisdiction => jurisdiction.id)).toEqual([country.id, state.id]);
   });
 });
 
@@ -163,19 +223,19 @@ describe('calculateTax with exemptions', () => {
   });
 
   it('charges no tax to a customer with an approved exemption, and does not ask Stripe', async () => {
-    const exemption = await repos.exemptions.createExemption({
+    const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'customer',
       customerId,
       exemptionCode: 'NONPROFIT',
       reason: 'Registered charity',
       validFrom: past,
-    });
+    }));
     const { service, requests } = serviceWithStripe();
 
     const pending = orThrow(await service.calculateTax(sale));
     expect(pending.taxAmount.toDecimalString()).toBe('19.00');
 
-    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    orThrow(await repos.exemptions.approveExemption(exemption.id, 'usr_admin'));
     const result = orThrow(await service.calculateTax(sale));
 
     expect(result.taxAmount.toDecimalString()).toBe('0.00');
@@ -185,7 +245,7 @@ describe('calculateTax with exemptions', () => {
     expect(result.appliedExemptionIds).toEqual([exemption.id]);
     expect(requests).toHaveLength(1);
 
-    await repos.exemptions.revokeExemption(exemption.id);
+    orThrow(await repos.exemptions.revokeExemption(exemption.id));
     const taxed = orThrow(await service.calculateTax(sale));
     expect(taxed.taxAmount.toDecimalString()).toBe('19.00');
   });
@@ -193,21 +253,23 @@ describe('calculateTax with exemptions', () => {
   it('never lets a global exemption with no product exempt anyone: it cannot even be created', async () => {
     const global = { type: 'customer' as const, exemptionCode: 'ALL', reason: 'oops', validFrom: past };
 
-    await expect(repos.exemptions.createExemption(global)).rejects.toThrow(/needs a customer/);
+    const refused = await repos.exemptions.createExemption(global);
+    expect(InvalidInput.is(refused) && refused.data.issues[0]?.message).toMatch(/needs a customer/);
+    expect(await db.select().from(tax.taxExemptions).where(eq(tax.taxExemptions.exemptionCode, 'ALL'))).toEqual([]);
     expect(createExemptionSchema.safeParse(global).success).toBe(false);
     // The table refuses it too, for a writer that skips the repository
     await expect(db.insert(tax.taxExemptions).values({ ...global, status: 'active' })).rejects.toThrow();
   });
 
   it('exempts the customer who owns a blanket exemption, and not another customer', async () => {
-    const exemption = await repos.exemptions.createExemption({
+    const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'customer',
       customerId: 'cust_owner',
       exemptionCode: 'NONPROFIT',
       reason: 'Registered charity',
       validFrom: past,
-    });
-    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    }));
+    orThrow(await repos.exemptions.approveExemption(exemption.id, 'usr_admin'));
     const { service } = serviceWithStripe();
 
     const owner = orThrow(await service.calculateTax({ ...sale, customerId: 'cust_owner' }));
@@ -219,14 +281,14 @@ describe('calculateTax with exemptions', () => {
   });
 
   it('exempts only the lines of the exempt product', async () => {
-    const exemption = await repos.exemptions.createExemption({
+    const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'product',
       productCode: 'txcd_10501000',
       exemptionCode: 'BOOKS',
       reason: 'Zero-rated',
       validFrom: past,
-    });
-    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    }));
+    orThrow(await repos.exemptions.approveExemption(exemption.id, 'usr_admin'));
     const { service } = serviceWithStripe();
 
     const result = orThrow(await service.calculateTax({
@@ -251,15 +313,15 @@ describe('calculateTax with exemptions', () => {
       type: 'country',
       countryCode: 'DE',
     });
-    const exemption = await repos.exemptions.createExemption({
+    const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'jurisdiction',
       jurisdictionId: germany.id,
       customerId,
       exemptionCode: 'DE-EXEMPT',
       reason: 'Reverse charge',
       validFrom: past,
-    });
-    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    }));
+    orThrow(await repos.exemptions.approveExemption(exemption.id, 'usr_admin'));
     const { service } = serviceWithStripe();
 
     const result = orThrow(await service.calculateTax({
@@ -280,15 +342,15 @@ describe('calculateTax with exemptions', () => {
       type: 'country',
       countryCode: 'GE',
     });
-    const exemption = await repos.exemptions.createExemption({
+    const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'jurisdiction',
       jurisdictionId: georgia.id,
       customerId: 'cust_georgia',
       exemptionCode: 'GE-EXEMPT',
       reason: 'Diplomatic',
       validFrom: past,
-    });
-    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    }));
+    orThrow(await repos.exemptions.approveExemption(exemption.id, 'usr_admin'));
     const usState = { display_name: 'Georgia', level: 'state', country: 'US', state: 'GA' };
     const country = { display_name: 'Georgia', level: 'country', country: 'GE', state: null };
     const lines = [{ amount: money('100', 'EUR'), description: 'Pro', reference: 'line_1', taxCode: 'txcd_other' }];

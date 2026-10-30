@@ -48,38 +48,39 @@ On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and fo
 
 ## Public imports
 
-| Import                                        | Contents                                                                       |
-| --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `@arki/money`                                 | `Money`, `money`, `Currency`, `factor`, `sum`, `average`, `min`, `max`, errors |
-| `@arki/money/currency`                        | `Currency` alone                                                               |
-| `@arki/money/format`                          | `formatMoney`, `formatMoneyToParts`, `createMoneyFormatter`                    |
-| `@arki/money/exact`                           | `toDecimal`, `toRational` bridges to `@arki/math`                              |
-| `@arki/money/errors`                          | Error classes                                                                  |
-| `@arki/money/parse`                           | `parseMoney`, `createMoneyParser`                                              |
-| `@arki/money/exchange`                        | `exchangeRate`, `ratesFrom`, `convert`, `createConverter`, `Converter`         |
-| `@arki/money/provider`                        | `toProviderUnits`, `fromProviderUnits`                                         |
-| `@arki/money/rational`                        | `RationalMoney`, `isRationalMoney`                                             |
-| `@arki/money/bag`                             | `MoneyBag`                                                                     |
-| `@arki/money/zod`                             | `moneySchema`, `anyMoneySchema`, `moneyInputSchema`, `currencyCodeSchema`      |
-| `@arki/money/drizzle/pg`, `/mysql`, `/sqlite` | `moneyMinor`, `moneyDecimal`, `moneyJson`                                      |
-| `@arki/money/stripe`                          | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                 |
+| Import                                        | Contents                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `@arki/money`                                 | `Money`, `money`, `Currency`, `factor`, `sum`, `average`, `min`, `max`, errors       |
+| `@arki/money/currency`                        | `Currency` alone                                                                     |
+| `@arki/money/format`                          | `formatMoney`, `formatMoneyToParts`, `createMoneyFormatter`                          |
+| `@arki/money/exact`                           | `toDecimal`, `toRational` bridges to `@arki/math`                                    |
+| `@arki/money/errors`                          | Error classes                                                                        |
+| `@arki/money/parse`                           | `parseMoney`, `createMoneyParser`                                                    |
+| `@arki/money/exchange`                        | `exchangeRate`, `ratesFrom`, `parseRates`, `convert`, `createConverter`, `Converter` |
+| `@arki/money/provider`                        | `toProviderUnits`, `fromProviderUnits`                                               |
+| `@arki/money/rational`                        | `RationalMoney`, `isRationalMoney`                                                   |
+| `@arki/money/bag`                             | `MoneyBag`                                                                           |
+| `@arki/money/zod`                             | `moneySchema`, `anyMoneySchema`, `moneyInputSchema`, `currencyCodeSchema`            |
+| `@arki/money/drizzle/pg`, `/mysql`, `/sqlite` | `moneyMinor`, `moneyDecimal`, `moneyJson`                                            |
+| `@arki/money/stripe`                          | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                       |
 
 ## Failure behaviour
 
 Parsers return, builders throw. No call returns `NaN` or a rounded guess.
 
-Values from outside (typed text, JSON, provider payloads) go through a door that returns the value or an `@arki/failure` value: `Money.parse`, `Money.fromJSON`, `Currency.parse`, `Currency.parseNumeric`, `parseMoney`, `createMoneyParser`, `fromProviderUnits` and `fromStripeAmount`. Each failure is listed once in `MONEY_FAILURES`; check with `isMoneyFailure(result)` or `InvalidMoneyText.is(result)`, and match on `code`. Failures carry no input text, so they are safe to log or send.
+Values from outside (typed text, JSON, provider payloads) go through a door that returns the value or an `@arki/failure` value: `Money.parse`, `Money.fromJSON`, `RationalMoney.fromJSON`, `Currency.parse`, `Currency.parseNumeric`, `parseMoney`, `createMoneyParser`, `parseRates`, `fromProviderUnits` and `fromStripeAmount`. Each failure is listed once in `MONEY_FAILURES`; check with `isMoneyFailure(result)` or `InvalidMoneyText.is(result)`, and match on `code`. Failures carry no input text, so they are safe to log or send.
 
-| Code                       | Failure             | Status | What to do                                                  |
-| -------------------------- | ------------------- | ------ | ----------------------------------------------------------- |
-| `money.invalid_text`       | `InvalidMoneyText`  | 400    | Show the expected format, such as `19.99 EUR`; do not guess |
-| `money.invalid_shape`      | `InvalidMoneyShape` | 400    | Send `{ amount, currency }` as strings                      |
-| `money.unknown_currency`   | `UnknownCurrency`   | 400    | Use an ISO 4217 code, or pass your custom currencies        |
-| `money.rounding_necessary` | `RoundingNecessary` | 400    | Ask for fewer decimals, or pass a rounding mode             |
-| `money.out_of_range`       | `AmountOutOfRange`  | 400    | Send minor units past 2^53 as a string or bigint            |
-| `money.input_too_large`    | `InputTooLarge`     | 413    | Refuse the input; real amounts are far shorter              |
-| `money.unsupported_locale` | `UnsupportedLocale` | 400    | Pass a valid BCP 47 tag, or `symbols`                       |
-| `money.provider_amount`    | `ProviderAmount`    | 422    | Check the provider amount; never round it to fit            |
+| Code                       | Failure               | Status | What to do                                                  |
+| -------------------------- | --------------------- | ------ | ----------------------------------------------------------- |
+| `money.invalid_text`       | `InvalidMoneyText`    | 400    | Show the expected format, such as `19.99 EUR`; do not guess |
+| `money.invalid_shape`      | `InvalidMoneyShape`   | 400    | Send `{ amount, currency }` as strings                      |
+| `money.unknown_currency`   | `UnknownCurrency`     | 400    | Use an ISO 4217 code, or pass your custom currencies        |
+| `money.rounding_necessary` | `RoundingNecessary`   | 400    | Ask for fewer decimals, or pass a rounding mode             |
+| `money.out_of_range`       | `AmountOutOfRange`    | 400    | Send minor units past 2^53 as a string or bigint            |
+| `money.input_too_large`    | `InputTooLarge`       | 413    | Refuse the input; real amounts are far shorter              |
+| `money.unsupported_locale` | `UnsupportedLocale`   | 400    | Pass a valid BCP 47 tag, or `symbols`                       |
+| `money.provider_amount`    | `ProviderAmount`      | 422    | Check the provider amount; never round it to fit            |
+| `money.invalid_rate`       | `InvalidExchangeRate` | 400    | Check the rate feed; every rate is above 0                  |
 
 Builders and arithmetic (`money`, `Money.of`, `Money.fromMinor`, `Currency.of`, `times`, `dividedBy`, `plus`) throw, because their input is your code's. Never pass outside text to a builder.
 
@@ -244,7 +245,7 @@ fx.rate('USD', 'GBP').toString(); // 'USD/GBP 8571/10832'
 convert(money(100, 'EUR'), exchangeRate('EUR', 'USD', '1.0832')); // 108.32 USD
 ```
 
-Rates are exact fractions, never floats, so inverse and cross rates add no error. A conversion rounds once, at the end; converting in two rounded steps above would give 976.86. Reversed rates (`inverse`) and routing through a base currency (`via`) are opt-in, because a bid rate reversed is not an ask rate. There is no network code: fetch rates from wherever you trust and pass them in.
+Rates are exact fractions, never floats, so inverse and cross rates add no error. A conversion rounds once, at the end; converting in two rounded steps above would give 976.86. Reversed rates (`inverse`) and routing through a base currency (`via`) are opt-in, because a bid rate reversed is not an ask rate. There is no network code: fetch rates from wherever you trust and pass them in. Read a fetched table with `parseRates`, which returns `UnknownCurrency`, `InvalidMoneyText` or `InvalidExchangeRate` for a bad entry; `ratesFrom` is the throwing builder for a table written in your code.
 
 ## Payment providers
 
@@ -334,6 +335,7 @@ Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 
 `bun run size` bundles each entry point as an app would (minified, gzipped, `@arki/math` included) and fails past its budget. The core (`Money`, `Currency` with the full ISO table, errors) is 6.3 KB. Parsing adds 0.9 KB, conversion 0.6 KB, Stripe 0.1 KB, and `RationalMoney` 3.2 KB (the exact `Rational` type from `@arki/math`).
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 Speed of `@arki/money` against dinero.js v1 and currency.js, the two money libraries most projects use, with big.js as a plain decimal baseline.
@@ -342,78 +344,78 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 ### add
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money | 11.4 ns | fastest |
-| @arki/money (bigint, > 2^53) | 163.5 ns | 14.37× |
-| dinero.js v1 | 2.89 µs | 254.24× |
-| currency.js | 1.79 µs | 157.39× |
-| big.js | 753.7 ns | 66.22× |
+| Library                      | Time / op | vs fastest |
+| ---------------------------- | --------: | ---------: |
+| @arki/money                  |   11.4 ns |    fastest |
+| @arki/money (bigint, > 2^53) |  163.5 ns |     14.37× |
+| dinero.js v1                 |   2.89 µs |    254.24× |
+| currency.js                  |   1.79 µs |    157.39× |
+| big.js                       |  753.7 ns |     66.22× |
 
 ### multiply by 1.0825 and round half-even
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money (prepared factor) | 98.2 ns | fastest |
-| @arki/money (string factor) | 469.4 ns | 4.78× |
-| dinero.js v1 | 6.10 µs | 62.18× |
-| currency.js (half-up only) | 2.19 µs | 22.34× |
-| big.js | 943.6 ns | 9.61× |
+| Library                       | Time / op | vs fastest |
+| ----------------------------- | --------: | ---------: |
+| @arki/money (prepared factor) |   98.2 ns |    fastest |
+| @arki/money (string factor)   |  469.4 ns |      4.78× |
+| dinero.js v1                  |   6.10 µs |     62.18× |
+| currency.js (half-up only)    |   2.19 µs |     22.34× |
+| big.js                        |  943.6 ns |      9.61× |
 
 ### allocate 100 into [1, 1, 1]
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money | 869.6 ns | 4.25× |
-| @arki/money split(3) | 204.6 ns | fastest |
-| dinero.js v1 | 11.14 µs | 54.45× |
-| currency.js distribute(3) | 6.41 µs | 31.31× |
+| Library                   | Time / op | vs fastest |
+| ------------------------- | --------: | ---------: |
+| @arki/money               |  869.6 ns |      4.25× |
+| @arki/money split(3)      |  204.6 ns |    fastest |
+| dinero.js v1              |  11.14 µs |     54.45× |
+| currency.js distribute(3) |   6.41 µs |     31.31× |
 
 ### compare
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money | 33.7 ns | fastest |
-| dinero.js v1 (lessThan) | 46.2 ns | 1.37× |
-| big.js | 220.4 ns | 6.54× |
+| Library                 | Time / op | vs fastest |
+| ----------------------- | --------: | ---------: |
+| @arki/money             |   33.7 ns |    fastest |
+| dinero.js v1 (lessThan) |   46.2 ns |      1.37× |
+| big.js                  |  220.4 ns |      6.54× |
 
 ### construct from a string
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money | 367.3 ns | 4.18× |
-| @arki/money fromMinor | 87.9 ns | fastest |
-| dinero.js v1 (minor units only) | 1.74 µs | 19.84× |
-| currency.js | 2.37 µs | 27.01× |
+| Library                         | Time / op | vs fastest |
+| ------------------------------- | --------: | ---------: |
+| @arki/money                     |  367.3 ns |      4.18× |
+| @arki/money fromMinor           |   87.9 ns |    fastest |
+| dinero.js v1 (minor units only) |   1.74 µs |     19.84× |
+| currency.js                     |   2.37 µs |     27.01× |
 
 ### sum of 1000
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money sum() | 8.71 µs | fastest |
-| @arki/money reduce(plus) | 34.65 µs | 3.98× |
+| Library                  | Time / op | vs fastest |
+| ------------------------ | --------: | ---------: |
+| @arki/money sum()        |   8.71 µs |    fastest |
+| @arki/money reduce(plus) |  34.65 µs |      3.98× |
 
 ### convert and round once
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money direct EUR→USD | 1.23 µs | fastest |
-| @arki/money cross USD→GBP via EUR | 2.08 µs | 1.70× |
+| Library                           | Time / op | vs fastest |
+| --------------------------------- | --------: | ---------: |
+| @arki/money direct EUR→USD        |   1.23 µs |    fastest |
+| @arki/money cross USD→GBP via EUR |   2.08 µs |      1.70× |
 
 ### parse and payment units
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money parse de-DE (bound parser) | 10.86 µs | 20.04× |
-| @arki/money toStripeAmount | 542.0 ns | fastest |
+| Library                                | Time / op | vs fastest |
+| -------------------------------------- | --------: | ---------: |
+| @arki/money parse de-DE (bound parser) |  10.86 µs |     20.04× |
+| @arki/money toStripeAmount             |  542.0 ns |    fastest |
 
 ### format en-US
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/money | 1.44 µs | fastest |
-| dinero.js v1 | 37.99 µs | 26.43× |
-| currency.js | 1.54 µs | 1.07× |
+| Library      | Time / op | vs fastest |
+| ------------ | --------: | ---------: |
+| @arki/money  |   1.44 µs |    fastest |
+| dinero.js v1 |  37.99 µs |     26.43× |
+| currency.js  |   1.54 µs |      1.07× |
 
 Read the rows with the contracts in mind:
 

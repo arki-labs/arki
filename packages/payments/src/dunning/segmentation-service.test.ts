@@ -22,6 +22,8 @@ import { fromMinorColumn } from '../core/money.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
 import { core, planId, schema, users } from '../test-support.js';
+import { CustomerSegmentNotFound } from './failures.js';
+import { createCustomerSegmentId } from './primitives.js';
 import { CustomerSegmentationService } from './services/segmentation-service.js';
 import { createDunningTables } from './tables.js';
 
@@ -137,7 +139,8 @@ describe('segment criteria', () => {
     const good = orThrow(await service.createSegment({ name: 'Good', type: 'custom', criteria: {}, autoUpdate: false, updateFrequency: 24 }, 'usr_admin'));
     const updated = await service.updateSegment(good.id, { criteria: bad });
     expect(UnknownCurrency.is(updated)).toBe(true);
-    expect((await service.getSegment(good.id))?.criteria).toEqual({});
+    const stored = await service.getSegment(good.id);
+    expect(stored?.criteria).toEqual({});
   });
 
   it('a segment stored with a range money refuses makes every method that reads it return the failure', async () => {
@@ -163,6 +166,42 @@ describe('segment criteria', () => {
       expect(UnknownCurrency.is(await service.updateCustomerRiskProfile(buyer.id))).toBe(true);
     } finally {
       await db.delete(tables.customerSegments).where(eq(tables.customerSegments.id, stored.id));
+    }
+  });
+
+  it('an unknown segment id returns payments.customer_segment_not_found from the count and the listing', async () => {
+    // A router passes any segment id it is given: an id with no row is an answer, not a crash
+    const unknown = orThrow(createCustomerSegmentId());
+
+    const counted = await service.updateSegmentCustomerCount(unknown);
+    const listed = await service.getCustomersInSegment(unknown);
+
+    expect(CustomerSegmentNotFound.is(counted)).toBe(true);
+    expect(listed).toMatchObject({ code: 'payments.customer_segment_not_found', data: { segmentId: unknown } });
+  });
+
+  it('getCustomerSegments finds a segment for every matching customer, not only the first row the criteria return', async () => {
+    // Two customers match an open segment; each must be told it belongs, whichever one the database lists first
+    const [open] = await db
+      .insert(tables.customerSegments)
+      .values({
+        name: 'Everyone',
+        type: 'custom',
+        criteria: {},
+        autoUpdate: false,
+        updateFrequency: 24,
+        createdBy: 'usr_admin',
+      })
+      .returning();
+    if (!open) throw new Error('the segment was not stored');
+    const first = await newCustomer('segmentfirst');
+    const second = await newCustomer('segmentsecond');
+
+    try {
+      expect(orThrow(await service.getCustomerSegments(first.id))).toContain(open.id);
+      expect(orThrow(await service.getCustomerSegments(second.id))).toContain(open.id);
+    } finally {
+      await db.delete(tables.customerSegments).where(eq(tables.customerSegments.id, open.id));
     }
   });
 
@@ -206,6 +245,18 @@ describe('customer history', () => {
     expect(payments).toMatchObject({ totalPayments: 1, successfulPayments: 1, failedPayments: 0 });
     expect(subscriptions).toMatchObject({ totalSubscriptions: 0, activeSubscriptions: 0 });
     expect(typeof engagement.score).toBe('number');
+  });
+
+  it('a customer with no payment in the last 30 days still gets a risk profile, with no division by zero', async () => {
+    // The engagement success rate divides by the payment count; a new customer has none yet
+    const buyer = await newCustomer('nopayments');
+
+    const profile = orThrow(await service.updateCustomerRiskProfile(buyer.id));
+    const engagement = await service['getCustomerEngagementMetrics'](buyer.id);
+
+    expect(profile.customerId).toBe(buyer.id);
+    expect(profile.paymentHistory).toMatchObject({ totalPayments: 0 });
+    expect(engagement.score).toBe(0);
   });
 
   it('averages in one currency, the one with most payments, and names it, never mixing currencies', async () => {

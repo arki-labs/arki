@@ -17,7 +17,7 @@ import type { Customer, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
-import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './provider-error.js';
+import { CardDeclined, IdempotencyConflict, PaymentMethodRequired, ReferenceNotFound } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
@@ -380,12 +380,13 @@ describe('createPaymentIntent', () => {
     });
   });
 
-  it('refuses an automatic payment without a payment method', async () => {
+  it('returns payments.payment_method_required for an automatic payment without a payment method', async () => {
+    // The package's own input schema lets this through: `automatic` defaults to true and the method is optional
     const { stripe, requests } = provider(() => ({ body: {} }));
 
-    await expect(
-      stripe.createPaymentIntent({ customerId: customer.id, amount: money('5', 'USD'), automatic: true }),
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    const intent = await stripe.createPaymentIntent({ customerId: customer.id, amount: money('5', 'USD'), automatic: true });
+
+    expect(PaymentMethodRequired.is(intent)).toBe(true);
     expect(requests).toHaveLength(0);
   });
 });

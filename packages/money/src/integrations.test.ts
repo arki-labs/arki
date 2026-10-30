@@ -1,11 +1,18 @@
 import { PGlite } from '@electric-sql/pglite';
 import { pgTable, serial } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
+import type { z } from 'zod';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { moneyDecimal, moneyJson, moneyMinor } from './drizzle/pg.js';
 import { Currency, CurrencyMismatchError, Money, money, RoundingNecessaryError } from './index.js';
 import { anyMoneySchema, currencyCodeSchema, moneyInputSchema, moneySchema } from './zod.js';
+
+/** The money failure code a custom Zod issue carries in `params.code`. */
+function codeOf(error: z.ZodError | undefined): unknown {
+  const issue = error?.issues[0];
+  return issue?.code === 'custom' ? issue.params?.['code'] : undefined;
+}
 
 describe('zod', () => {
   it('turns JSON into typed Money and reports problems as issues', () => {
@@ -36,8 +43,6 @@ describe('zod', () => {
   });
 
   it('keeps the money failure code on the Zod issue, so a client can match it', () => {
-    const codeOf = (error: { issues: readonly { params?: Record<string, unknown> }[] } | undefined) =>
-      error?.issues[0]?.params?.['code'];
     expect(codeOf(moneySchema('EUR').safeParse({ amount: '1.005', currency: 'EUR' }).error)).toBe(
       'money.rounding_necessary',
     );

@@ -72,14 +72,15 @@ export function checkTaxIdFormat(taxId: TaxIdInput): TaxIdFormat {
   const value = taxId.value.trim().toUpperCase();
 
   if (type === 'eu_vat') {
-    const body = euVatBody[country];
+    // Own keys only: a country such as `__proto__` must not find Object.prototype members
+    const body = Object.hasOwn(euVatBody, country) ? euVatBody[country] : undefined;
     if (!body) return { format: 'unknown' };
-    const prefix = euVatPrefix[country] ?? country;
+    const prefix = (Object.hasOwn(euVatPrefix, country) ? euVatPrefix[country] : undefined) ?? country;
 
     return { format: value.startsWith(prefix) && body.test(value.slice(prefix.length)) ? 'valid' : 'invalid' };
   }
 
-  const pattern = typePatterns[type];
+  const pattern = Object.hasOwn(typePatterns, type) ? typePatterns[type] : undefined;
   if (!pattern) return { format: 'unknown' };
   // `us_ein` is a US number: filed under another country it is wrong, whatever its shape
   if (type.slice(0, 2).toUpperCase() !== country) return { format: 'invalid' };

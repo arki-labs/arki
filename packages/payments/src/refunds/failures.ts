@@ -1,7 +1,7 @@
 /**
  * The expected ways a refund request or decision is refused, each defined once. `RefundService`
- * returns them, it never throws them: a correct caller must branch on them. Bad input (an empty
- * rejection reason, a refund in another currency) and provider faults are still thrown.
+ * returns them, it never throws them: a correct caller must branch on them. A blank rejection reason
+ * is returned as the schema's `InvalidInput`. Provider faults are still thrown.
  */
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
@@ -83,4 +83,19 @@ export const RefundWindowExceeded = defineFailure('payments.refund_window_exceed
   data: z.object({ paymentId: z.string() }),
   message: 'Refund window exceeded for payment {paymentId}',
   remediation: 'Refund it outside this workflow, or not at all.',
+});
+
+/**
+ * The refund is in another currency than the payment. A refund pays back the payment's own money,
+ * so it must be in the payment's currency. Nothing was written.
+ *
+ * @fix Ask for the refund in `paymentCurrency`.
+ * @verify bun run test -- src/refunds
+ */
+export const RefundCurrencyMismatch = /* @__PURE__ */ defineFailure('payments.refund_currency_mismatch', {
+  status: 422,
+  data: z.object({ paymentId: z.string(), refundCurrency: z.string(), paymentCurrency: z.string() }),
+  message:
+    'Refund currency {refundCurrency} differs from the payment currency {paymentCurrency} for payment {paymentId}',
+  remediation: 'Ask for the refund in the payment currency.',
 });

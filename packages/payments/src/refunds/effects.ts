@@ -18,7 +18,9 @@ import { eq } from 'drizzle-orm';
 
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { StandardSchemaV1 } from '@arki/schema';
+import { isFailure } from '@arki/failure';
 import { need } from '@arki/journal';
+import { getLogger } from '@arki/log';
 
 import type { NotificationService } from '../core/notifications/service.js';
 import type { createRefundsJournal } from './journal.js';
@@ -42,7 +44,14 @@ export function createRefundEffects<
           return;
         }
 
-        await notifications.sendRefundApprovalRequest?.(row);
+        const sent = await notifications.sendRefundApprovalRequest?.(row);
+        if (isFailure(sent)) {
+          getLogger('arki:payments').warn('Refund {refundId} approval request was not sent: {code}', {
+            refundId: row.id,
+            code: sent.code,
+            failure: sent,
+          });
+        }
       },
     },
   );

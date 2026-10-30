@@ -50,6 +50,11 @@ export function exceedsDigits(value: bigint): boolean {
   return hexDigits(value) > MAX_HEX_DIGITS;
 }
 
+/** Whether `a × b` could pass {@link MAX_DIGITS}, the same test `mulUnits` throws `ResourceLimitError` on. */
+export function productExceedsDigits(a: Units, b: Units): boolean {
+  return hexDigits(BigInt(a)) + hexDigits(BigInt(b)) > MAX_HEX_DIGITS + 1;
+}
+
 /** Returns the value, or throws `ResourceLimitError` past {@link MAX_DIGITS} digits. */
 function limitDigits(value: bigint): bigint {
   if (exceedsDigits(value)) throw tooManyDigits();

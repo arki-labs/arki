@@ -13,7 +13,7 @@ import { orThrow } from '@arki/failure';
 import { money, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId } from '../core/primitives.js';
-import { PaymentProviderError } from '../core/providers/provider-error.js';
+import { PaymentProviderError, TaxAddressIncomplete } from '../core/providers/provider-error.js';
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
 import { TaxService } from './service.js';
@@ -78,6 +78,15 @@ describe('calculateTax', () => {
     expect(UnknownCurrency.is(await tax.calculateTax(input))).toBe(true);
   });
 
+  it('returns TaxAddressIncomplete for an address with no country, and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateTax({ ...input, customerDetails: { address: { postalCode: '10115' } } });
+
+    expect(TaxAddressIncomplete.is(refused)).toBe(true);
+    expect(requests).toEqual([]);
+  });
+
   it('rejects when Stripe Tax is down, so a sale is not priced with zero tax', async () => {
     const { tax } = serviceAnswering(500, { error: { type: 'api_error', message: 'Stripe Tax is down' } });
 
@@ -93,5 +102,38 @@ describe('calculateTax', () => {
     });
 
     await expect(tax.calculateTax(input)).rejects.toMatchObject({ code: 'invalid_request', retryable: false });
+  });
+});
+
+describe('calculateSubscriptionTax and calculateOneTimeTax', () => {
+  // Both only build a one-line calculation: the checkout must still see the refusal, never a tax figure
+  const noCountry = { address: { postalCode: '10115' } };
+
+  it('calculateSubscriptionTax returns TaxAddressIncomplete for an address with no country, and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateSubscriptionTax({
+      customerId: input.customerId,
+      planAmount: money('29.99', 'USD'),
+      planInterval: 'monthly',
+      customerDetails: noCountry,
+    });
+
+    expect(TaxAddressIncomplete.is(refused)).toBe(true);
+    expect(requests).toEqual([]);
+  });
+
+  it('calculateOneTimeTax returns TaxAddressIncomplete for an address with no country, and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateOneTimeTax({
+      customerId: input.customerId,
+      amount: money('5', 'USD'),
+      description: 'Tip',
+      customerDetails: noCountry,
+    });
+
+    expect(TaxAddressIncomplete.is(refused)).toBe(true);
+    expect(requests).toEqual([]);
   });
 });

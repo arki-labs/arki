@@ -4,14 +4,18 @@
  */
 
 import { PGlite } from '@electric-sql/pglite';
+import { pushSchema } from 'drizzle-kit/api-postgres';
+import { defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { add, now } from '@arki/date';
 import { orThrow } from '@arki/failure';
 import { money, UnknownCurrency } from '@arki/money';
 
-import { createCustomerId, createPaymentId } from '../core/primitives.js';
-import { core, schema } from '../test-support.js';
+import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
+import { userIdFactory } from '../core/user-id.js';
+import { core, schema, users } from '../test-support.js';
 import { createDunningCampaignId } from './primitives.js';
 import { DunningIntegrationService } from './services/integration-service.js';
 import { createDunningTables } from './tables.js';
@@ -75,5 +79,86 @@ describe('evaluateCampaignConditions: the stored spend range', () => {
     expect(service['evaluateCampaignConditions'](inside, event)).toBe(true);
     expect(service['evaluateCampaignConditions'](above, event)).toBe(false);
     expect(service['evaluateCampaignConditions'](otherCurrency, event)).toBe(false);
+  });
+});
+
+describe('the event handlers return the money failure of a stored segment range', () => {
+  // Every handler reads the customer's segments first; a segment whose spend range money refuses
+  // must come back as that failure from the handler itself, not as a crash or a silent skip
+  const relations = defineRelations({ ...dunning, customers: core.customers, payments: core.payments }, () => ({}));
+  const client = new PGlite('memory://');
+  const db = drizzle({ client, relations });
+  const handlers = new DunningIntegrationService(
+    db,
+    { customers: core.customers, payments: core.payments, subscriptions: core.subscriptions, plans: core.plans },
+    dunning,
+    { systemUserId: 'usr_system' },
+  );
+  const customerId = orThrow(createCustomerId());
+  const subscriptionId = orThrow(createSubscriptionId());
+
+  beforeAll(async () => {
+    const { apply } = await pushSchema(
+      {
+        schema,
+        users,
+        ...core.enums,
+        plans: core.plans,
+        customers: core.customers,
+        subscriptions: core.subscriptions,
+        payments: core.payments,
+        ...dunning.enums,
+        dunningCampaigns: dunning.dunningCampaigns,
+        dunningCampaignAnalytics: dunning.dunningCampaignAnalytics,
+        dunningTemplates: dunning.dunningTemplates,
+        dunningExecutions: dunning.dunningExecutions,
+        dunningCommunications: dunning.dunningCommunications,
+        customerSegments: dunning.customerSegments,
+        customerRiskProfiles: dunning.customerRiskProfiles,
+      },
+      db,
+    );
+    await apply();
+    const owner = orThrow(userIdFactory.create());
+    await db.insert(users).values({ id: owner });
+    await db
+      .insert(core.customers)
+      .values({ id: customerId, userId: owner, providerCustomerId: 'cus_handlers', email: 'handlers@example.com' });
+    await db.insert(dunning.customerSegments).values({
+      name: 'Stored bad range',
+      type: 'custom',
+      criteria: { totalSpent: { min: { amount: '10', currency: 'ZZZ' } } },
+      autoUpdate: false,
+      updateFrequency: 24,
+      createdBy: 'usr_admin',
+    });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it('handlePaymentFailure, handlePaymentSuccess, handleTrialEnding and handleSubscriptionStatusChange', async () => {
+    const paymentId = orThrow(createPaymentId());
+
+    const failed = await handlers.handlePaymentFailure({ ...event, paymentId, customerId });
+    const succeeded = await handlers.handlePaymentSuccess({ paymentId, customerId, amount: money('50', 'EUR') });
+    const trial = await handlers.handleTrialEnding({
+      subscriptionId,
+      customerId,
+      trialEndDate: add(now(), { hours: 72 }),
+      daysUntilEnd: 3,
+    });
+    const changed = await handlers.handleSubscriptionStatusChange({
+      subscriptionId,
+      customerId,
+      oldStatus: 'active',
+      newStatus: 'past_due',
+    });
+
+    expect(UnknownCurrency.is(failed)).toBe(true);
+    expect(UnknownCurrency.is(succeeded)).toBe(true);
+    expect(UnknownCurrency.is(trial)).toBe(true);
+    expect(changed).toMatchObject({ code: 'money.unknown_currency' });
   });
 });

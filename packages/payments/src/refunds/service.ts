@@ -9,6 +9,7 @@ import { isJournalError } from '@arki/journal';
 import { getLogger } from '@arki/log';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
+import { ensure, parse } from '@arki/schema';
 
 import type { NotificationService } from '../core/notifications/service.js';
 import type { PaymentRepository } from '../core/repository.js';
@@ -19,9 +20,11 @@ import type { RefundRepository, RefundsDatabase } from './repository.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
 import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
+import { refundRejectionReasonSchema } from './contracts.js';
 import {
   DuplicatePendingRefund,
   RefundAmountExceeded,
+  RefundCurrencyMismatch,
   RefundInvalidState,
   RefundNotFound,
   RefundWindowExceeded,
@@ -29,7 +32,6 @@ import {
 } from './failures.js';
 import { createRefundRepository, refundAmountOf } from './repository.js';
 import { pendingRefundIndexName } from './tables.js';
-import { RefundError } from './types.js';
 
 /** Logs ids only, never refund data. */
 const logger = getLogger('arki:payments');
@@ -135,9 +137,10 @@ export class RefundService {
   ) {
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
     this.systemUserId = config.systemUserId;
-    this.autoApproveLimits = refundAutoApproveLimitsSchema.parse(
-      config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS,
-    );
+    // A bad limit is a configuration fault: `AssertError` (`ARKI_SCHEMA_E004`) when the service is built
+    this.autoApproveLimits = ensure(config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS, refundAutoApproveLimitsSchema, {
+      at: 'refunds.autoApproveLimits',
+    });
   }
 
   async requestRefund(data: RefundRequestData) {
@@ -181,10 +184,10 @@ export class RefundService {
     return approvedRefund;
   }
 
+  /** A blank `reason` is refused with the schema's `InvalidInput` before anything is read or written. */
   async rejectRefund(data: RefundRejectionData) {
-    if (data.reason.trim() === '') {
-      throw new RefundError('A rejection needs a reason', 'REASON_REQUIRED');
-    }
+    const reason = parse(refundRejectionReasonSchema, data.reason);
+    if (isFailure(reason)) return reason;
 
     const pending = await this.requirePending(data.refundId);
     if (isFailure(pending)) return pending;
@@ -192,7 +195,7 @@ export class RefundService {
     const rejectedRefund = await this.writes.rejectRefund({
       refundId: data.refundId,
       rejectedBy: data.rejectedBy,
-      rejectionReason: data.reason,
+      rejectionReason: reason,
     });
     if (isFailure(rejectedRefund)) return rejectedRefund;
 
@@ -226,9 +229,11 @@ export class RefundService {
 
     const paid = paymentAmount(payment);
     if (!amount.hasSameCurrency(paid)) {
-      throw new Error(
-        `Refund currency ${amount.currency.code} differs from the payment currency ${paid.currency.code}`,
-      );
+      return RefundCurrencyMismatch({
+        paymentId,
+        refundCurrency: amount.currency.code,
+        paymentCurrency: paid.currency.code,
+      });
     }
 
     if (payment.createdAt && Date.now() - toMillis(payment.createdAt) > this.refundWindow) {
@@ -273,7 +278,15 @@ export class RefundService {
   private async notifyCustomer(refund: Refund, event: 'rejected'): Promise<void> {
     if (this.notificationService?.sendRefundStatusUpdate) {
       try {
-        await this.notificationService.sendRefundStatusUpdate(refund, event);
+        const sent = await this.notificationService.sendRefundStatusUpdate(refund, event);
+        if (isFailure(sent)) {
+          logger.warn('Refund {event} mail for {refundId} was not sent: {code}', {
+            refundId: refund.id,
+            event,
+            code: sent.code,
+            failure: sent,
+          });
+        }
       } catch (error) {
         logger.error('Refund {event} mail for {refundId} was not sent: {error}', {
           refundId: refund.id,

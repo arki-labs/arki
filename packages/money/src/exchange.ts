@@ -20,8 +20,9 @@ import type { Units } from './internal/units.js';
 import type { Amount, MoneyOptions } from './money.js';
 import { assertSameCurrency, Currency, toCurrency } from './currency.js';
 import { ExchangeRateError } from './errors.js';
-import { divExact, gcdUnits, mulDiv, mulUnits, pow10, quantize } from './internal/units.js';
-import { Money, toFraction } from './money.js';
+import { InvalidExchangeRate, isMoneyFailure } from './failures.js';
+import { divExact, gcdUnits, mulDiv, mulUnits, parseDecimal, parseNumber, pow10, quantize } from './internal/units.js';
+import { checkScale, Money, toFraction } from './money.js';
 
 const BRAND = Symbol('ExchangeRate');
 
@@ -145,7 +146,43 @@ export type RateTable = {
   currencies?: readonly Currency[];
 };
 
-/** `ratesFrom({ base: 'EUR', rates: { USD: '1.0832' } })` → `[EUR/USD 1.0832]`. */
+/**
+ * Reads a rate table from a feed (ECB, a bank, a JSON file): the door for outside values.
+ * Returns the rates, or the first failure: `UnknownCurrency` for a base or quote code outside
+ * ISO 4217 and `table.currencies`, `InvalidMoneyText`, `AmountOutOfRange` or `InputTooLarge` for
+ * a value that is not a plain number, `InvalidExchangeRate` for a value of 0 or less (or a
+ * currency to itself that is not 1). It never throws for text or numbers in the table.
+ */
+export function parseRates(table: RateTable) {
+  const base = table.base instanceof Currency ? table.base : Currency.parse(table.base, table.currencies);
+  if (isMoneyFailure(base)) return base;
+  const rates: ExchangeRate[] = [];
+  for (const [code, value] of Object.entries(table.rates)) {
+    const quote = Currency.parse(code, table.currencies);
+    if (isMoneyFailure(quote)) return quote;
+    const fraction = readRate(value);
+    if (isMoneyFailure(fraction)) return fraction;
+    const [numerator, denominator] = fraction;
+    if (!(numerator > 0) || (base.eq(quote) && numerator !== denominator)) return InvalidExchangeRate();
+    rates.push(ExchangeRate.create(base, quote, numerator, denominator));
+  }
+  return rates;
+}
+
+/** A feed value as an exact fraction. Text and numbers are read as outside values; other `Amount`s are the caller's own. */
+function readRate(value: Amount) {
+  if (typeof value !== 'string' && typeof value !== 'number') return toFraction(value);
+  const parsed = typeof value === 'string' ? parseDecimal(value) : parseNumber(value);
+  if (isMoneyFailure(parsed)) return parsed;
+  const fraction: [numerator: Units, denominator: Units] = [parsed.coefficient, pow10(parsed.fraction)];
+  return fraction;
+}
+
+/**
+ * `ratesFrom({ base: 'EUR', rates: { USD: '1.0832' } })` → `[EUR/USD 1.0832]`, for a table written in
+ * your own code. Throws `UnknownCurrencyError`, `NumberFormatError` or `ExchangeRateError` for a
+ * bad entry. Read a feed with {@link parseRates} instead.
+ */
 export function ratesFrom(table: RateTable): ExchangeRate[] {
   const base = toCurrency(table.base);
   return Object.entries(table.rates).map(([code, value]) => {
@@ -157,7 +194,8 @@ export function ratesFrom(table: RateTable): ExchangeRate[] {
 /**
  * Converts with one rate. The rate's base must be the amount's currency. The
  * exact result is rounded once to the target scale (the quote currency's,
- * or `options.scale`); an inexact result needs `options.rounding`.
+ * or `options.scale`); an inexact result needs `options.rounding`. A scale
+ * outside 0 to 100 throws `InvalidArgumentError` before any arithmetic.
  */
 export function convert<B extends string, Q extends string>(
   amount: Money<B>,
@@ -165,7 +203,7 @@ export function convert<B extends string, Q extends string>(
   options?: MoneyOptions,
 ): Money<Q> {
   assertSameCurrency(amount.currency, rate.base);
-  const scale = options?.scale ?? rate.quote.scale;
+  const scale = options?.scale === undefined ? rate.quote.scale : checkScale(options.scale);
   return Money.fromMinor(convertUnits(amount, rate, scale, options), rate.quote, scale);
 }
 
@@ -231,14 +269,17 @@ export class Converter {
     }
   }
 
-  /** Converts and rounds once. Same-currency conversion needs no rate and only changes the scale. */
+  /**
+   * Converts and rounds once. Same-currency conversion needs no rate and only changes the scale.
+   * A scale outside 0 to 100 throws `InvalidArgumentError` before any arithmetic.
+   */
   convert<const T extends string>(amount: Money, to: CurrencyLike<T>, options?: MoneyOptions): Money<T> {
     const target = toCurrency(to);
+    // Checked before any arithmetic: `pow10` of a huge scale would build a giant bigint first.
+    const scale = options?.scale === undefined ? target.scale : checkScale(options.scale);
     if (amount.currency.eq(target)) {
-      const scale = options?.scale ?? target.scale;
       return Money.fromMinor(quantize(amount.units, amount.scale, scale, options?.rounding), target, scale);
     }
-    const scale = options?.scale ?? target.scale;
     return Money.fromMinor(convertUnits(amount, this.resolve(amount.currency, target), scale, options), target, scale);
   }
 

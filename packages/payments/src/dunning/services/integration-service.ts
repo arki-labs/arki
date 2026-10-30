@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm';
 
-import type { UserId } from '../../core/user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import { getLogger } from '@arki/log';
@@ -19,7 +18,7 @@ import type {
   DunningExecution as DunningExecutionRow,
 } from '../types.js';
 import type { CommunicationOrchestrationConfig } from './communication-service.js';
-import { type DunningDatabase } from '../repository.js';
+import type { DunningDatabase } from '../repository.js';
 import { createDunningCampaignService } from './campaign-service.js';
 import { createCommunicationOrchestrationService } from './communication-service.js';
 import { createCustomerSegmentationService } from './segmentation-service.js';
@@ -43,8 +42,8 @@ export type DunningTriggerEvent = {
  * Handles event-driven triggers and coordinates between payment retry and dunning
  */
 export type DunningIntegrationConfig = {
-  /** User ID used to attribute system-driven executions (e.g. dunning created automatically). */
-  systemUserId: UserId | string;
+  /** User ID (any text, usually a `usr_...` id) used to attribute system-driven executions. */
+  systemUserId: string;
   /** Channel-provider config forwarded to `createCommunicationOrchestrationService`. */
   communication?: CommunicationOrchestrationConfig;
 };
@@ -66,7 +65,7 @@ export class DunningIntegrationService {
   private campaignService;
   private communicationService;
   private segmentationService;
-  private readonly systemUserId: UserId | string;
+  private readonly systemUserId: string;
   private readonly dunningExecutions: DunningTables['dunningExecutions'];
 
   constructor(
@@ -131,7 +130,14 @@ export class DunningIntegrationService {
 
     // First, let the payment retry service handle technical retries (if available)
     if (this.paymentRetryService) {
-      await this.paymentRetryService.scheduleRetries(event.paymentId, event.failureReason);
+      const scheduled = await this.paymentRetryService.scheduleRetries(event.paymentId, event.failureReason);
+      if (isFailure(scheduled)) {
+        logger.warn('No payment retries scheduled for {paymentId}: {code}', {
+          paymentId: event.paymentId,
+          code: scheduled.code,
+          failure: scheduled,
+        });
+      }
     }
 
     // Update customer risk profile with payment failure
@@ -285,7 +291,7 @@ export class DunningIntegrationService {
       triggerData?: Record<string, unknown>;
     },
   ): Promise<void> {
-    await this.campaignService.executeCampaign(
+    const executions = await this.campaignService.executeCampaign(
       {
         campaignId,
         dryRun: false,
@@ -296,6 +302,10 @@ export class DunningIntegrationService {
       },
       this.systemUserId, // System user for automated executions
     );
+    // The campaign was deleted, paused or emptied since it was listed as active: skip it, the others still run
+    if (isFailure(executions)) {
+      logger.warn('Campaign {campaignId} was not executed: {code}', { campaignId, code: executions.code });
+    }
   }
 
   /**

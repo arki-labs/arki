@@ -13,6 +13,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { add } from '@arki/date';
 import { orThrow } from '@arki/failure';
 
 import type { AppDb } from '../../test-support.js';
@@ -21,7 +22,9 @@ import type { PaymentStatus, SubscriptionStatus } from '../types.js';
 import type { RetryStrategy } from './payment-retry-service.js';
 import { coreReads, runnerOn, seedPayment, seedSubscription, subscriptionRow } from '../../service-test-support.js';
 import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
-import { CardDeclined } from '../providers/provider-error.js';
+import { PaymentWithoutSubscription } from '../failures.js';
+import { createPaymentId } from '../primitives.js';
+import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { PaymentRetryService } from './payment-retry-service.js';
 
 type Provider = ConstructorParameters<typeof PaymentRetryService>[0];
@@ -67,7 +70,7 @@ async function retryOn(status: SubscriptionStatus, retryStatus: PaymentStatus) {
   const payment = await seedPayment(writes, subscription.id);
   const service = new PaymentRetryService(providerWhereRetryEnds(retryStatus), reads, writes, [oneRetryNow]);
 
-  await service.scheduleRetries(payment.id, 'card_declined');
+  await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
   const eventsBefore = await countEvents(db);
   await service.processRetries();
 
@@ -143,7 +146,7 @@ describe('a retry the card declines', () => {
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id);
     const service = new PaymentRetryService(declining, reads, writes, [strategy]);
-    await service.scheduleRetries(payment.id, 'card_declined');
+    await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
     const eventsBefore = await countEvents(db);
 
     await service.processRetries();
@@ -169,5 +172,55 @@ describe('a retry the card declines', () => {
     expect(attempts.map(attempt => attempt.status)).toEqual(['failed', 'pending']);
     expect(eventsWritten).toBe(0);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'active' });
+  });
+});
+
+/** A retry schedule is refused, with nothing scheduled, when there is nothing to retry or no subscription to keep. */
+describe('scheduleRetries refusals', () => {
+  it('returns ReferenceNotFound for an unknown payment', async () => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const paymentId = orThrow(createPaymentId());
+
+    const result = await service.scheduleRetries(paymentId, 'card_declined');
+
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(result).toMatchObject({ code: 'payments.reference_not_found', data: { kind: 'payment', id: paymentId } });
+    expect(service.getRetryAttempts(paymentId)).toEqual([]);
+  });
+
+  it('returns PaymentWithoutSubscription for a one-off payment', async () => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const payment = await seedPayment(writes, null);
+
+    const result = await service.scheduleRetries(payment.id, 'card_declined');
+
+    expect(PaymentWithoutSubscription.is(result)).toBe(true);
+    expect(result).toMatchObject({ code: 'payments.payment_without_subscription', data: { paymentId: payment.id } });
+    expect(service.getRetryAttempts(payment.id)).toEqual([]);
+  });
+
+  it('picks the strategy by the stored subscription status: a paused subscription gets no retries', async () => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const subscription = await seedSubscription(writes, 'paused');
+    const payment = await seedPayment(writes, subscription.id);
+
+    expect(await service.scheduleRetries(payment.id, 'card_declined')).toEqual([]);
+  });
+});
+
+describe('getRetryAnalytics', () => {
+  it('counts only the attempts created inside the window, comparing instants without throwing', async () => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('failed'), reads, writes, [oneRetryNow]);
+    const subscription = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, subscription.id);
+    await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
+    const created = service.getRetryAttempts(payment.id)[0]?.createdAt;
+    if (!created) throw new Error('no attempt was scheduled');
+
+    const inside = await service.getRetryAnalytics(created, created);
+    const after = await service.getRetryAnalytics(add(created, { minutes: 1 }));
+
+    expect(inside.totalRetryAttempts).toBe(1);
+    expect(after.totalRetryAttempts).toBe(0);
   });
 });

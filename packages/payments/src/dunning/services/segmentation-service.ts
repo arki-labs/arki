@@ -21,10 +21,11 @@ import type {
   SegmentCriteria,
 } from '../types.js';
 import { toMinorColumn } from '../../core/money.js';
+import { CustomerSegmentNotFound } from '../failures.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
 import { valueList } from '../sql-list.js';
 
-const logger = getLogger('dunning.segmentation');
+const logger = getLogger('arki:payments:dunning');
 
 /** The customer columns a segment listing returns. */
 export type SegmentCustomer = Pick<Customer, 'id' | 'userId' | 'email' | 'name' | 'createdAt'>;
@@ -73,7 +74,7 @@ export class CustomerSegmentationService {
    * returns its `MoneyFailure` and nothing is written. After a good write, the count can only fail with a
    * database error, which throws (this service holds no transaction, so the saved row stays).
    */
-  async createSegment(input: CreateCustomerSegmentInput, createdBy: string): Promise<CustomerSegment | MoneyFailure> {
+  async createSegment(input: CreateCustomerSegmentInput, createdBy: string) {
     const valid = this.buildSegmentConditions(input.criteria);
     if (isFailure(valid)) return valid;
 
@@ -101,10 +102,7 @@ export class CustomerSegmentationService {
    * Update an existing segment. As in `createSegment`, new criteria with a spend range that is not valid
    * money return their `MoneyFailure` before anything is written.
    */
-  async updateSegment(
-    segmentId: CustomerSegmentId,
-    input: UpdateCustomerSegmentInput,
-  ): Promise<CustomerSegment | MoneyFailure | null> {
+  async updateSegment(segmentId: CustomerSegmentId, input: UpdateCustomerSegmentInput) {
     if (input.criteria) {
       const valid = this.buildSegmentConditions(input.criteria);
       if (isFailure(valid)) return valid;
@@ -132,7 +130,7 @@ export class CustomerSegmentationService {
    */
   async getSegment(segmentId: CustomerSegmentId): Promise<CustomerSegment | null> {
     const dbSegment = await this.segmentRepo.findById(segmentId);
-    return dbSegment ? dbSegment : null;
+    return dbSegment ?? null;
   }
 
   /**
@@ -151,18 +149,20 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Calculate and update customer count for a segment
+   * Calculate and update customer count for a segment, and return the new count. An unknown segment returns
+   * `CustomerSegmentNotFound`; a stored spend range that is not valid money returns its `MoneyFailure`.
    */
-  async updateSegmentCustomerCount(segmentId: CustomerSegmentId): Promise<void | MoneyFailure> {
+  async updateSegmentCustomerCount(segmentId: CustomerSegmentId) {
     const dbSegment = await this.segmentRepo.findById(segmentId);
     if (!dbSegment) {
-      throw new Error(`Segment ${segmentId} not found`);
+      return CustomerSegmentNotFound({ segmentId });
     }
 
     const segment = dbSegment;
     const customerCount = await this.calculateSegmentCustomerCount(segment.criteria);
     if (isFailure(customerCount)) return customerCount;
     await this.segmentRepo.updateCustomerCount(segmentId, customerCount);
+    return customerCount;
   }
 
   /**
@@ -184,12 +184,12 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Get customers matching segment criteria
+   * Get customers matching segment criteria. An unknown segment returns `CustomerSegmentNotFound`.
    */
-  async getCustomersInSegment(segmentId: CustomerSegmentId, limit = 100): Promise<SegmentCustomer[] | MoneyFailure> {
+  async getCustomersInSegment(segmentId: CustomerSegmentId, limit = 100) {
     const dbSegment = await this.segmentRepo.findById(segmentId);
     if (!dbSegment) {
-      throw new Error(`Segment ${segmentId} not found`);
+      return CustomerSegmentNotFound({ segmentId });
     }
 
     const segment = dbSegment;
@@ -732,11 +732,11 @@ export class CustomerSegmentationService {
     // (ties go to the first code alphabetically), and `currency` says which one it is.
     const main = rows.toSorted((a, b) => b.totalPayments - a.totalPayments || a.currency.localeCompare(b.currency))[0];
     const latest = (dates: (Instant | null)[]) =>
-      dates.filter((date): date is Instant => date !== null).sort((a, b) => toMillis(b) - toMillis(a))[0];
+      dates.filter((date): date is Instant => date !== null).toSorted((a, b) => toMillis(b) - toMillis(a))[0];
     const earliest = rows
       .map(row => row.firstPaymentDate)
       .filter((date): date is Instant => date !== null)
-      .sort((a, b) => toMillis(a) - toMillis(b))[0];
+      .toSorted((a, b) => toMillis(a) - toMillis(b))[0];
     const lastFailure = latest(rows.map(row => row.lastFailureDate));
     const streakStart = lastFailure ?? earliest;
 
@@ -808,7 +808,8 @@ export class CustomerSegmentationService {
       .select({
         paymentCount: sql<number>`COUNT(*)`.mapWith(Number),
         lastPaymentDate: sql`MAX(created_at)`.mapWith(this.payments.createdAt),
-        successRate: sql<number>`ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / COUNT(*)), 2)`.mapWith(Number),
+        // NULLIF: a customer with no payment in the window has COUNT(*) = 0, which Postgres refuses to divide by
+        successRate: sql<number>`COALESCE(ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0)), 2), 0)`.mapWith(Number),
       })
       .from(this.payments)
       .where(
@@ -855,7 +856,7 @@ export class CustomerSegmentationService {
     // Recency contributes 30% to engagement score
     const mostRecentActivity = [paymentActivity.lastPaymentDate, subEngagement.lastSubscriptionUpdate]
       .filter((date): date is Instant => date !== null)
-      .sort((a, b) => toMillis(b) - toMillis(a))[0];
+      .toSorted((a, b) => toMillis(b) - toMillis(a))[0];
 
     if (mostRecentActivity) {
       const daysSinceLastActivity = (current.getTime() - toMillis(mostRecentActivity)) / (1000 * 60 * 60 * 24);
@@ -906,7 +907,7 @@ export class CustomerSegmentationService {
     // The repository expects the domain model structure
     const profileData = {
       customerId,
-      segmentIds: segmentIds as CustomerSegmentId[],
+      segmentIds,
       riskScore,
       paymentHistory,
       subscriptionHistory,
@@ -925,7 +926,7 @@ export class CustomerSegmentationService {
   /**
    * Get segments that a customer belongs to
    */
-  async getCustomerSegments(customerId: CustomerId): Promise<string[] | MoneyFailure> {
+  async getCustomerSegments(customerId: CustomerId): Promise<CustomerSegmentId[] | MoneyFailure> {
     const customerQuery = this.db.query as unknown as {
       customers: { findFirst: (config: { where: { id: CustomerId } }) => Promise<Customer | undefined> };
     };
@@ -945,12 +946,18 @@ export class CustomerSegmentationService {
 
     const segments = dbSegments;
 
-    const matchingSegments = [];
+    const matchingSegments: CustomerSegmentId[] = [];
 
     for (const segment of segments) {
-      const matchingCustomers = await this.getCustomersMatchingCriteria(segment.criteria, 1);
-      if (isFailure(matchingCustomers)) return matchingCustomers;
-      if (matchingCustomers.some(c => c.id === customerId)) {
+      const conditions = this.buildSegmentConditions(segment.criteria);
+      if (isFailure(conditions)) return conditions;
+      // The criteria narrowed to this one customer: a match is this customer, never another one listed first
+      const [match] = await this.db
+        .select({ id: this.customers.id })
+        .from(this.customers)
+        .where(and(eq(this.customers.id, customerId), ...conditions))
+        .limit(1);
+      if (match) {
         matchingSegments.push(segment.id);
       }
     }
@@ -1058,7 +1065,7 @@ export class CustomerSegmentationService {
       try {
         const counted = await this.updateSegmentCustomerCount(segment.id);
         if (isFailure(counted)) {
-          logger.error('Segment {segmentId} has a spend range that is not valid money: {code}', {
+          logger.error('Segment {segmentId} could not be counted: {code}', {
             segmentId: segment.id,
             code: counted.code,
           });
@@ -1077,7 +1084,7 @@ export class CustomerSegmentationService {
    */
   async getCustomerRiskProfile(customerId: CustomerId): Promise<CustomerRiskProfile | null> {
     const dbProfile = await this.riskProfileRepo.findByCustomerId(customerId);
-    return dbProfile ? dbProfile : null;
+    return dbProfile ?? null;
   }
 
   /**

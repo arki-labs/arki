@@ -15,7 +15,15 @@ import { instant } from '@arki/date';
 import { orThrow } from '@arki/failure';
 
 import type { CoreWrites } from './core/journal.js';
-import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from './core/types.js';
+import type {
+  CustomerId,
+  Payment,
+  PaymentId,
+  PlanId,
+  Subscription,
+  SubscriptionId,
+  SubscriptionStatus,
+} from './core/types.js';
 import type { RefundId } from './refunds/primitives.js';
 import type { AppDb } from './test-support.js';
 import { core, customerId, meta, planId, refundsTables, typed, userId } from './test-support.js';
@@ -52,6 +60,11 @@ export function coreReads(db: AppDb) {
     },
     async findCustomerByUserId(ownerId: UserId) {
       const [customer] = await db.select().from(customers).where(eq(customers.userId, ownerId));
+
+      return customer ?? null;
+    },
+    async findCustomerById(id: CustomerId) {
+      const [customer] = await db.select().from(customers).where(eq(customers.id, id));
 
       return customer ?? null;
     },
