@@ -48,10 +48,20 @@ async function open(runner: ExplainRunner): Promise<string> {
   return started.url;
 }
 
+async function statusOf(url: string, init?: RequestInit): Promise<number> {
+  const response = await fetch(url, init);
+  return response.status;
+}
+
+async function textOf(url: string): Promise<string> {
+  const response = await fetch(url);
+  return response.text();
+}
+
 describe('the dev console', () => {
   it('lists each page once, from the projections that registered a console title', async () => {
     const base = await open(stub().runner);
-    const html = await (await fetch(base)).text();
+    const html = await textOf(base);
     expect(html.match(/href="\/page\/event-map"/g)?.length).toBe(2); // the menu bar and the list
     expect(html).toContain('Event map');
     expect(html).not.toContain('openapi');
@@ -71,8 +81,8 @@ describe('the dev console', () => {
   it('answers 404 for a format that registered no page, without asking explain for it', async () => {
     const { runner, calls } = stub();
     const base = await open(runner);
-    expect((await fetch(`${base}page/openapi`)).status).toBe(404);
-    expect((await fetch(`${base}page/..%2Fetc`)).status).toBe(404);
+    expect(await statusOf(`${base}page/openapi`)).toBe(404);
+    expect(await statusOf(`${base}page/..%2Fetc`)).toBe(404);
     expect(calls.some(args => args.includes('openapi'))).toBe(false);
   });
 
@@ -86,8 +96,8 @@ describe('the dev console', () => {
 
   it('answers 404 for a malformed escape in the path, and keeps serving', async () => {
     const base = await open(stub().runner);
-    expect((await fetch(`${base}page/%E0%A4%A`)).status).toBe(404);
-    expect((await fetch(base)).status).toBe(200);
+    expect(await statusOf(`${base}page/%E0%A4%A`)).toBe(404);
+    expect(await statusOf(base)).toBe(200);
   });
 
   it('answers 500 when a page fails to render, and keeps serving the next request', async () => {
@@ -99,7 +109,7 @@ describe('the dev console', () => {
     expect(response.status).toBe(500);
     expect(await response.text()).toContain('&lt;boom&gt;');
     failing = false;
-    expect((await fetch(base)).status).toBe(200);
+    expect(await statusOf(base)).toBe(200);
   });
 
   // WHY: a page on another site can point its own domain at 127.0.0.1 (DNS rebinding) and read the console, which
@@ -124,7 +134,7 @@ describe('the dev console', () => {
 
   it('answers only GET', async () => {
     const base = await open(stub().runner);
-    expect((await fetch(base, { method: 'POST' })).status).toBe(405);
+    expect(await statusOf(base, { method: 'POST' })).toBe(405);
   });
 
   it('returns a message, not a throw, when the port is taken', async () => {
