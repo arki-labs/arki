@@ -21,14 +21,3 @@ Removed environment variables (read nowhere in `@arki/ai` now): `EMBEDDING_PROVI
 Removed dependencies of `@arki/ai`: `@ai-sdk/amazon-bedrock`, `@ai-sdk/cohere`, and the optional peers `voyageai`, `@mixedbread-ai/sdk`, `@huggingface/transformers`.
 
 `fromArkiEmbedder(embedder)` turns an `@arki/embeddings` embedder into the embedder the `@arki/testing/ai` judge and `similarTo` take. A failure becomes a thrown `Error`. It lives in `@arki/embeddings/testing`, so the two packages depend one way only (embeddings → testing).
-
-Migration ledger (files that used the old embedding API, and the slice that moved each):
-
-- tolstoyco, slice 0: `apps/tolstoyco/backend/src/features/ai/rag/index-content.ts`, `apps/tolstoyco/backend/src/features/ai/rag/retriever.ts`.
-- text-bible search, slice 0: `fleet/text-bible/src/search/passage-search.ts`.
-- everseek, slices 1 and 5: `apps/everseek/backend/src/features/ai/services/semantic-bible-search.ts`, `src/features/bible/procedures/index-embeddings.ts`, `src/features/bible/procedures/explain-passage.ts`, `src/features/bible/lib/explain-semantic-cache.ts`, `src/features/bible/spikes/cag-evaluation/hybrid.ts`, `src/features/bible/__tests__/retrieval-infra.smoke.test.ts`, `src/scripts/seed-embeddings.ts`, `src/env.ts`.
-- loonyjobs, slices 1 and 4: `apps/loonyjobs/backend/src/features/embeddings/{provider.ts,index.ts,jobs/index.ts,worker.ts,repository.ts}`, `src/schema/job-embeddings.ts`, `__tests__/embeddings.test.ts`, and the migrations in `apps/loonyjobs/backend/migrations/`.
-- avocabo, slice 2: `apps/avocabo/backend/src/features/vector-index/infra/vectors.ts`, `features.ts`, the `feature.ts` of vector-index, vector-sync, semantic-search, highlights, content-deduplication, ai-copilot, auto-clustering, library and account, `vector-sync/infra/{reconciler.ts,reconcile-deps.ts}`, `semantic-search/usecases/{search-index-service.ts,index-new-items.ts,search.ts}`, `highlights/usecases/{create.ts,get-related.ts,highlight-processing.ts,search.ts}`, `content-deduplication/infra/embedder.ts`, `content-deduplication/usecases/{dedupe-ready-items.ts,similarity-search.ts}`, `ai-copilot/usecases/{rag-retrieval-service.ts,reactive-handler.ts,stream-answer.ts}`, `auto-clustering/usecases/{assign-new-items.ts,batch-recluster-service.ts,cluster-assignment-service.ts}`, and their 12 `__tests__` files. The last file moved, `apps/avocabo/backend/src/infra/vectors/__tests__/embedder.test.ts`, now pins the old runtime's choices as fixed values.
-- text-bible original languages, slice 3: `fleet/text-bible/package.json`, `fleet/text-bible/src/original-languages/embeddings/generator.ts`, `fleet/text-bible/src/original-languages/api/index.ts`.
-- `@arki/testing/ai`, slice 9: `packages/testing/src/ai/{index.ts,judge.ts,ai.test.ts}`.
-- Root catalog `ai` (`@huggingface/transformers`): slice 3.

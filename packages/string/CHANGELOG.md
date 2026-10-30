@@ -1,11 +1,5 @@
 # @arki/string
 
-## Unreleased
-
-- Breaking: remove the `tryFromBase64` compatibility alias; use `fromBase64`. Remove obsolete E002/E003 from `STRING_ERROR_CODES` and `StringErrorCode`; encoding outcomes remain `InvalidUtf8` and `InvalidBase64`. Static misuse retains E001/E004.
-
-- Breaking: interpolation returns `MissingValue` instead of throwing for absent runtime values. Rename `missing: 'throw'` to `missing: 'fail'` and narrow fluent results before chaining. The retired E005 diagnostic is removed; malformed syntax remains E004. See [the upgrade guide](docs/upgrades/0.3.0-to-0.4.0.md).
-
 ## 0.4.0
 
 ### Minor Changes
@@ -14,9 +8,9 @@
 
   Upgrade guidance and package examples cover result narrowing. No demo impact: no demo interpolation caller was found in the source audit.
 
-- dbc6ee5: Remove `tryFromBase64`; use `fromBase64` with the same options and exact returned failures. Remove obsolete E002/E003 codec diagnostics from `STRING_ERROR_CODES` and its inferred `StringErrorCode`; E001/E004 static misuse remains. Upgrade guidance and Hyphenate's caller are migrated.
+- dbc6ee5: Remove `tryFromBase64`; use `fromBase64` with the same options and exact returned failures. Remove obsolete E002/E003 codec diagnostics from `STRING_ERROR_CODES` and its inferred `StringErrorCode`; E001/E004 static misuse remains. Upgrade guidance is in the package docs.
 
-  no demo impact: no demo imports the removed exports; the Hyphenate app import is updated with unchanged decoding behavior.
+  No demo impact: no demo imports the removed exports.
 
 ### Patch Changes
 
