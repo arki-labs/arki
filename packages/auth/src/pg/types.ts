@@ -10,6 +10,8 @@ import type { KV } from '@arki/kv';
 import type { Mailer, MailTemplate } from '@arki/mail';
 import type { AuthLinkData, AuthLinkInput, magicLink } from '@arki/mail/templates/auth';
 
+import type { SIGN_IN_FAILURE_REASONS } from '../boundary-failures.js';
+
 import type {
   AuthDefinition,
   AuthMethod,
@@ -222,7 +224,7 @@ export type SessionEvents<UId extends string, SId extends string, S> = {
 };
 
 /** Why a sign-in failed. Never the email, never the body. */
-export type SignInFailure = 'credentials' | 'unverified' | 'rateLimited' | 'unknown';
+export type SignInFailure = (typeof SIGN_IN_FAILURE_REASONS)[number];
 
 /**
  * Plain functions called after the fact. They never change the response; a throwing observer is

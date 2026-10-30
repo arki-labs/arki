@@ -74,13 +74,16 @@ describe('createE2EHandler', () => {
     const handler = createE2EHandler({ auth: harness.auth, enabled: true, defaultEmail: 'e2e@notes.test' });
     const response = await call(handler, JSON.stringify({ email: 'ceo@company.com' }));
     expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ version: 1, code: 'auth.forbidden' });
     expect(response.headers.get('set-cookie')).toBeNull();
   });
 
   it('refuses malformed bodies', async () => {
     const handler = createE2EHandler({ auth: harness.auth, enabled: true, defaultEmail: 'e2e@notes.test' });
     for (const body of ['not json', '[]', JSON.stringify({ email: 42 }), JSON.stringify({ email: '' })]) {
-      await expect(call(handler, body)).resolves.toHaveProperty('status', 400);
+      const response = await call(handler, body);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ version: 1, code: 'schema.invalid_input' });
     }
   });
 

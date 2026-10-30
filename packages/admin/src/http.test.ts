@@ -8,7 +8,9 @@ import { buildEngine, toOpenApi } from '@arki/http';
 
 import type { FleetSnapshot } from './contract';
 import { FLEET_ENDPOINT_PATH } from './contract';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures';
 import { fleetRoutes, fleetSnapshotRoute } from './http';
+import { fetchFleetSnapshot } from './server';
 
 const TOKEN = 'fleet-secret';
 const URL_ = `https://novelette.test${FLEET_ENDPOINT_PATH}`;
@@ -39,20 +41,22 @@ describe('fleet snapshot route', () => {
     expect(await res.json()).toEqual(snapshot);
   });
 
-  it('keeps the handler error formats: 401 without a token, 502 when the provider throws, 500 on a bad snapshot', async () => {
+  // WHY: the fleet token opens the endpoint to Foreman, not to the app's internals. A provider error
+  // ("db down at db-7") or a schema problem must reach the log, never the caller.
+  it('answers 401 without a token, 502 when the provider throws and 500 on a bad snapshot, with no internal text', async () => {
     const unauthorized = await ask(() => snapshot);
     expect(unauthorized.status).toBe(401);
     expect(await unauthorized.json()).toEqual({ error: 'unauthorized' });
 
     const failed = await ask(() => {
-      throw new Error('db down');
+      throw new Error('db down at db-7');
     }, `Bearer ${TOKEN}`);
     expect(failed.status).toBe(502);
-    expect(await failed.json()).toEqual({ error: 'snapshot_failed', detail: 'db down' });
+    expect(await failed.json()).toEqual({ error: 'snapshot_failed' });
 
     const invalid = await ask(() => ({ ...snapshot, generatedAt: '' }), `Bearer ${TOKEN}`);
     expect(invalid.status).toBe(500);
-    expect(await invalid.json()).toMatchObject({ error: 'invalid_snapshot' });
+    expect(await invalid.json()).toEqual({ error: 'invalid_snapshot' });
   });
 
   it('documents the snapshot payload and marks the route raw', () => {
@@ -64,5 +68,37 @@ describe('fleet snapshot route', () => {
     expect(operation?.['responses']).toMatchObject({
       '200': { content: { 'application/json': { schema: { type: 'object', required: expect.arrayContaining(['info']) as string[] } } } },
     });
+  });
+});
+
+describe('fetchFleetSnapshot returns typed failures and never throws', () => {
+  const entry = { id: 'novelette', brand: 'Novelette', domain: 'novelette.test', baseUrl: 'https://novelette.test', token: 't' };
+  const answering = (response: () => Response | Promise<Response>) => ({ fetch: () => Promise.resolve().then(response) });
+
+  it('a snapshot that matches the contract is returned', async () => {
+    const result = await fetchFleetSnapshot(entry, answering(() => Response.json(snapshot)));
+    expect(result).toMatchObject({ id: 'novelette', ok: true });
+  });
+
+  it.each([
+    [401, AdminUnauthenticated.code],
+    [403, AdminUnauthenticated.code],
+    [500, AdminUnreachable.code],
+  ])('HTTP %i is %s', async (status, code) => {
+    const result = await fetchFleetSnapshot(entry, answering(() => new Response('internal text', { status })));
+    expect(result).toMatchObject({ ok: false, failure: { code } });
+  });
+
+  it('a body outside the contract is AdminInvalidOutput', async () => {
+    const result = await fetchFleetSnapshot(entry, answering(() => Response.json({ nope: true })));
+    expect(result).toMatchObject({ ok: false, failure: { code: AdminInvalidOutput.code } });
+  });
+
+  it('a network error is AdminUnreachable with the error as its private cause, not its message', async () => {
+    const result = await fetchFleetSnapshot(entry, {
+      fetch: () => Promise.reject(new Error('connect ECONNREFUSED 10.0.0.7:443')),
+    });
+    expect(result).toMatchObject({ ok: false, failure: { code: AdminUnreachable.code } });
+    expect(JSON.stringify(result)).not.toContain('10.0.0.7');
   });
 });

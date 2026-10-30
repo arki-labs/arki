@@ -328,7 +328,7 @@ if (await verifyPassword({ hash, password: 'wrong' })) throw new Error('should n
 
 `workspaces: { teams: true }` turns on organizations and teams. The tables come from `createWorkspaceTables` in `@arki/auth/pg/workspaces`. `principal.workspace` holds the selected organization and team. It is a selection, not proof of membership: re-check membership before you trust it. The client from `createAuthClient` adds the organization API itself; do not pass `organizationClient()`.
 
-The scoping kernel in `@arki/auth/pg/workspaces` builds read filters (`workspaceReadFilter`), checks writes (`resolveWriteScope`) and moves rows between scopes (`reassignScope`, which checks the row's current scope first). Register each scoped table once with `registerWorkspaceResource`.
+The scoping kernel in `@arki/auth/pg/workspaces` builds read filters (`workspaceReadFilter`), checks writes (`resolveWriteScope`) and moves rows between scopes (`reassignScope`, which checks the row's current scope first). A refused write returns `AccessDenied` (403) and a move of a row the actor cannot see returns `ResourceMissing` (404); neither throws, and the reason goes to the DEBUG log (`DEBUG=arki:auth`). `WorkspaceScopeError` is kept for bugs in the caller: an illegal scope shape, an unregistered table, a team scope on a resource without a team column. Register each scoped table once with `registerWorkspaceResource`.
 
 ## Testing
 

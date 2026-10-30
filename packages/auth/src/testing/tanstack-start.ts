@@ -6,6 +6,9 @@
  * made by `auth.testing`, which itself refuses in production, so a deployed backend cannot mint
  * sessions even if the route is mounted by mistake.
  */
+import { InvalidInput, serialize } from '@arki/failure';
+
+import { AccessDenied, ResourceMissing } from '../boundary-failures.js';
 import { isAuthError } from '../errors.js';
 import { log } from '../log.js';
 
@@ -55,17 +58,22 @@ async function emailOf(request: Request, defaultEmail: string): Promise<string |
   return typeof email === 'string' && email !== '' ? email : undefined;
 }
 
+/** The one failure envelope (`{ version, code, data? }`) at the failure's own status; the cause stays private. */
+function refusal(failure: ReturnType<typeof InvalidInput> | ReturnType<typeof AccessDenied> | ReturnType<typeof ResourceMissing>) {
+  return Response.json(serialize(failure, [InvalidInput, AccessDenied, ResourceMissing]), { status: failure.status });
+}
+
 export function createE2EHandler(options: CreateE2EHandlerOptions) {
   const { auth, enabled = false, defaultEmail, allowEmail = isReservedTestAddress, password } = options;
   return async ({ request }: { readonly request: Request }): Promise<Response> => {
     if (!enabled) return new Response(null, { status: 404 });
     const email = await emailOf(request, defaultEmail);
     if (email === undefined) {
-      return Response.json({ error: 'The body must be empty or { "email": string }.' }, { status: 400 });
+      return refusal(InvalidInput({ issues: [{ message: 'The body must be empty or { "email": string }.' }] }));
     }
     if (!allowEmail(email)) {
       log.warn('Refused an e2e session for an address outside the test addresses');
-      return Response.json({ error: 'This address cannot be used for test sessions.' }, { status: 403 });
+      return refusal(AccessDenied());
     }
     try {
       const { headers } = await auth.testing.signIn({ email }, password === undefined ? {} : { password });
@@ -75,7 +83,7 @@ export function createE2EHandler(options: CreateE2EHandlerOptions) {
         { status: 200, headers: { 'set-cookie': `${cookie}; Path=/; HttpOnly; SameSite=Lax` } },
       );
     } catch (error) {
-      if (isAuthError(error)) return Response.json({ code: error.code }, { status: 404 });
+      if (isAuthError(error)) return refusal(ResourceMissing({ cause: error }));
       throw error;
     }
   };

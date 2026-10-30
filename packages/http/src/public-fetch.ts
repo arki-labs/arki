@@ -1,9 +1,26 @@
 import type { fetch as undiciFetch } from 'undici/index.js';
 import ipaddr from 'ipaddr.js';
 
-import { UnsafeUrlError } from './error.js';
+import { isFailure } from '@arki/failure';
 
-export { UnsafeUrlError } from './error.js';
+import {
+  NetworkFailure,
+  RedirectLimit,
+  RequestCancelled,
+  RequestTimeout,
+  ResponseTooLarge,
+  UnsafeUrl,
+} from './failures.js';
+
+export {
+  NetworkFailure,
+  PUBLIC_FETCH_FAILURES,
+  RedirectLimit,
+  RequestCancelled,
+  RequestTimeout,
+  ResponseTooLarge,
+  UnsafeUrl,
+} from './failures.js';
 
 /**
  * The two network calls a public fetch makes. Production uses the system
@@ -66,22 +83,22 @@ export function isPublicAddress(address: string) {
 /**
  * The URL must be http(s) at a public address. `user:pass@` is refused unless
  * `allowCredentials` is set (private feeds use it; `safeFetchBytes` then sends
- * it as a Basic `Authorization` header). A refusal throws {@link UnsafeUrlError}, whose message
+ * it as a Basic `Authorization` header). A refusal returns {@link UnsafeUrl}, whose message
  * never carries the URL itself.
  */
-export function validatePublicURL(value: string, options: { allowCredentials?: boolean } = {}) {
+export function validatePublicURL(value: string, options: { allowCredentials?: boolean } = {}): URL | ReturnType<typeof UnsafeUrl> {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new UnsafeUrlError('Invalid URL.');
+    return UnsafeUrl({ reason: 'invalid_url' });
   }
   const hasCredentials = url.username !== '' || url.password !== '';
   if (!['http:', 'https:'].includes(url.protocol) || (hasCredentials && !options.allowCredentials))
-    throw new UnsafeUrlError('Only public HTTP feeds are supported.');
-  const host = url.hostname.replace(/^\[|\]$/g, '');
+    return UnsafeUrl({ reason: 'scheme_or_credentials' });
+  const host = url.hostname.replaceAll(/^\[|\]$/g, '');
   if (ipaddr.isValid(host) && !isPublicAddress(host) && !isAllowedHost(url))
-    throw new UnsafeUrlError('Private network addresses are not allowed.');
+    return UnsafeUrl({ reason: 'private_address' });
   return url;
 }
 
@@ -113,10 +130,44 @@ function untilAborted(signal: AbortSignal): Promise<never> {
 /**
  * The guard itself, shared by {@link safeFetchBytes} and {@link publicFetch}: every hop resolves
  * the host, refuses any private answer, pins the connection to the checked address, and follows a
- * redirect only to another public URL; each refusal throws {@link UnsafeUrlError}. The body is
+ * redirect only to another public URL; each refusal returns {@link UnsafeUrl}. The body is
  * read here, under `maxBytes`, because the pinned connection is closed before this returns.
+ * Network, DNS and abort errors are outside outcomes: they return {@link NetworkFailure},
+ * {@link RequestTimeout} or {@link RequestCancelled}, with the original error as the cause.
  */
-async function fetchPinned(request: PinnedRequest) {
+async function fetchPinned(request: PinnedRequest): Promise<PublicFetchResult | PublicFetchFailure> {
+  try {
+    return await fetchPinnedHops(request);
+  } catch (error) {
+    const { signal } = request;
+    // The deadline and the caller's abort name themselves, whether the signal or the transport raised them.
+    const name = signal?.aborted === true && signal.reason instanceof Error ? signal.reason.name : errorName(error);
+    if (name === 'TimeoutError') return RequestTimeout({ cause: error });
+    if (name === 'AbortError' || signal?.aborted === true) return RequestCancelled({ cause: error });
+    return NetworkFailure({ cause: error });
+  }
+}
+
+const errorName = (error: unknown): string => (error instanceof Error ? error.name : '');
+
+/** A completed public fetch: the whole body, the final status and headers, and the final URL. */
+export type PublicFetchResult = {
+  readonly bytes: Uint8Array;
+  readonly status: number;
+  readonly headers: Headers;
+  readonly url: string;
+};
+
+/** Every outcome of a public fetch except success. */
+export type PublicFetchFailure =
+  | ReturnType<typeof UnsafeUrl>
+  | ReturnType<typeof RedirectLimit>
+  | ReturnType<typeof ResponseTooLarge>
+  | ReturnType<typeof NetworkFailure>
+  | ReturnType<typeof RequestTimeout>
+  | ReturnType<typeof RequestCancelled>;
+
+async function fetchPinnedHops(request: PinnedRequest): Promise<PublicFetchResult | PublicFetchFailure> {
   const { transport, signal, maxBytes } = request;
   let { url, method, headers, body } = request;
   // Explicit package entry avoids Bun's undici shim, which drops dispatcher options.
@@ -128,7 +179,7 @@ async function fetchPinned(request: PinnedRequest) {
       : Promise.race([transport.lookup(host), untilAborted(signal)]));
     const [address] = addresses;
     if (address === undefined || (!addresses.every(a => isPublicAddress(a.address)) && !isAllowedHost(url)))
-      throw new UnsafeUrlError('Private network addresses are not allowed.');
+      return UnsafeUrl({ reason: 'private_address' });
     // Resolve once and pin the connection; a second DNS answer must never select a private address.
     const agent = new Agent({
       connect: {
@@ -148,8 +199,9 @@ async function fetchPinned(request: PinnedRequest) {
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         const location = response.headers.get('location');
-        if (!location || hop === 5) throw new Error('Feed redirect limit exceeded.');
+        if (!location || hop === 5) return RedirectLimit();
         const next = validatePublicURL(new URL(location, url).href);
+        if (isFailure(next)) return next;
         if (next.origin !== url.origin) headers = {};
         // Like a browser: 301/302/303 turn a POST into a GET and drop its body; 307/308 replay it.
         if ([301, 302, 303].includes(response.status) && method !== 'GET' && method !== 'HEAD') {
@@ -164,7 +216,7 @@ async function fetchPinned(request: PinnedRequest) {
       for await (const chunk of response.body ?? []) {
         size += chunk.length;
         if (size > maxBytes) {
-          throw new Error('Response size limit exceeded.');
+          return ResponseTooLarge();
         }
         chunks.push(chunk);
       }
@@ -184,9 +236,14 @@ async function fetchPinned(request: PinnedRequest) {
       await agent.destroy();
     }
   }
-  throw new Error('Feed redirect limit exceeded.');
+  return RedirectLimit();
 }
 
+/**
+ * Fetch `value` through the guard and return the whole body, or a failure from
+ * {@link PublicFetchFailure}: a refused URL, too many redirects, a body over `maxBytes`, a network
+ * error, a timeout or a cancellation. It never throws for those outcomes.
+ */
 export async function safeFetchBytes(
   value: string,
   options: {
@@ -200,7 +257,9 @@ export async function safeFetchBytes(
     transport?: PublicFetchTransport;
   } = {},
 ) {
-  let url = validatePublicURL(value, { allowCredentials: options.allowCredentials });
+  const checked = validatePublicURL(value, { allowCredentials: options.allowCredentials });
+  if (isFailure(checked)) return checked;
+  let url = checked;
   let headers = options.headers ?? {};
   if (url.username !== '' || url.password !== '') {
     // The header travels with the other headers: a cross-origin redirect drops it.
@@ -232,7 +291,13 @@ const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 /**
  * A `fetch` that reaches public addresses only, for server code that calls URLs it does not fully
  * control: `createClient(contracts, { baseUrl, fetch: publicFetch() })`. Each hop is resolved,
- * checked and pinned, as in {@link safeFetchBytes}; a private address or a redirect to one rejects.
+ * checked and pinned, as in {@link safeFetchBytes}; a private address or a redirect to one is refused.
+ *
+ * A `fetch` must return a `Response` or reject, so a refusal rejects the way `fetch` does for a
+ * network error: with a `TypeError` whose `cause` is the failure ({@link UnsafeUrl},
+ * {@link RedirectLimit}, {@link ResponseTooLarge}, {@link NetworkFailure} or {@link RequestTimeout}).
+ * `createClient` turns it into a returned `NetworkFailure`; find the reason with `findCause`.
+ * A caller abort rejects with the signal's reason, as `fetch` does.
  *
  * The response is buffered (at most `maxBytes`, default 10 MB) before it is returned, so a
  * streaming body arrives whole. Every request, body included, must finish within `timeoutMs`
@@ -245,15 +310,23 @@ export function publicFetch(options: { maxBytes?: number; timeoutMs?: number; tr
       init.body === undefined || init.body === null || typeof init.body === 'string'
         ? (init.body ?? undefined)
         : new Uint8Array(await new Response(init.body).arrayBuffer());
-    const result = await fetchPinned({
-      url: validatePublicURL(input),
-      method: init.method ?? 'GET',
-      headers: Object.fromEntries(new Headers(init.headers)),
-      body,
-      signal: withTimeout(init.signal ?? undefined, options.timeoutMs ?? 30_000),
-      maxBytes: options.maxBytes ?? 10_000_000,
-      transport: options.transport ?? systemTransport,
-    });
+    const url = validatePublicURL(input);
+    const signal = withTimeout(init.signal ?? undefined, options.timeoutMs ?? 30_000);
+    const result = isFailure(url)
+      ? url
+      : await fetchPinned({
+          url,
+          method: init.method ?? 'GET',
+          headers: Object.fromEntries(new Headers(init.headers)),
+          body,
+          signal,
+          maxBytes: options.maxBytes ?? 10_000_000,
+          transport: options.transport ?? systemTransport,
+        });
+    if (isFailure(result)) {
+      if (RequestCancelled.is(result)) throw signal.reason;
+      throw new TypeError(result.message, { cause: result });
+    }
     return new Response(NULL_BODY_STATUSES.has(result.status) ? null : result.bytes, {
       status: result.status,
       headers: result.headers,

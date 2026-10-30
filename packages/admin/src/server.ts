@@ -12,9 +12,14 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 
+import { getLogger } from '@arki/log';
+
 import type { FetchLike } from './client';
 import type { FleetSnapshot } from './contract';
 import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures';
+
+const logger = getLogger('arki:admin:fleet');
 
 /** Constant-time string compare. Returns false fast on length mismatch. */
 function safeEqual(a: string, b: string): boolean {
@@ -42,7 +47,10 @@ export type CreateFleetHandlerOptions = {
    * rejected, so a misconfigured app never leaks data.
    */
   token: string | undefined;
-  /** Computes the snapshot. Thrown errors become a 502 (app reachable, snapshot failed). */
+  /**
+   * Computes the snapshot. A thrown error becomes `502 { error: "snapshot_failed" }` and a snapshot
+   * outside the contract `500 { error: "invalid_snapshot" }`. The cause goes to the app's log only.
+   */
   snapshot: FleetSnapshotProvider;
 };
 
@@ -69,15 +77,19 @@ export function createFleetHandler(options: CreateFleetHandlerOptions) {
     try {
       snapshot = await options.snapshot();
     } catch (error) {
-      return Response.json(
-        { error: 'snapshot_failed', detail: error instanceof Error ? error.message : 'unknown' },
-        { status: 502 },
-      );
+      // The caller holds the fleet token, not the app's secrets: the cause stays in the log.
+      logger.error('Fleet snapshot provider failed: {error}', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return Response.json({ error: 'snapshot_failed' }, { status: 502 });
     }
 
     const parsed = fleetSnapshotSchema.safeParse(snapshot);
     if (!parsed.success) {
-      return Response.json({ error: 'invalid_snapshot', issues: parsed.error.flatten() }, { status: 500 });
+      logger.error('Fleet snapshot is outside the contract: {issues}', {
+        issues: parsed.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; '),
+      });
+      return Response.json({ error: 'invalid_snapshot' }, { status: 500 });
     }
 
     return Response.json(parsed.data);
@@ -96,9 +108,22 @@ export type FleetRegistryEntry = {
   token: string;
 };
 
-/** Result of one federated fetch — a discriminated union so callers handle failure explicitly. */
+/**
+ * Result of one federated fetch — a discriminated union so callers handle failure explicitly.
+ * `failure` is {@link AdminUnauthenticated} (the app refused the token, HTTP 401 or 403),
+ * {@link AdminUnreachable} (no answer, a redirect, or another bad status) or
+ * {@link AdminInvalidOutput} (the body is outside the fleet contract).
+ */
 export type FleetFetchResult =
-  { id: string; ok: true; snapshot: FleetSnapshot } | { id: string; ok: false; error: string };
+  | { id: string; ok: true; snapshot: FleetSnapshot }
+  | {
+      id: string;
+      ok: false;
+      failure:
+        | ReturnType<typeof AdminUnauthenticated>
+        | ReturnType<typeof AdminUnreachable>
+        | ReturnType<typeof AdminInvalidOutput>;
+    };
 
 export type FetchFleetSnapshotOptions = {
   /** Override the global fetch (tests, or a wrapper that guards requests). */
@@ -109,7 +134,7 @@ export type FetchFleetSnapshotOptions = {
 
 /**
  * Fetch and validate one app's snapshot. Never throws — a network error, bad
- * status, or contract mismatch all resolve to `{ ok: false, error }` so a single
+ * status, or contract mismatch all resolve to `{ ok: false, failure }` so a single
  * unreachable app cannot break the whole fleet view.
  */
 export async function fetchFleetSnapshot(
@@ -127,21 +152,41 @@ export async function fetchFleetSnapshot(
     });
 
     if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
-      return { id: entry.id, ok: false, error: `redirect (HTTP ${String(response.status)}) not followed` };
+      return {
+        id: entry.id,
+        ok: false,
+        failure: AdminUnreachable({ detail: `redirect (HTTP ${String(response.status)}) not followed` }),
+      };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return {
+        id: entry.id,
+        ok: false,
+        failure: AdminUnauthenticated({ detail: `HTTP ${String(response.status)}` }),
+      };
     }
     if (!response.ok) {
-      return { id: entry.id, ok: false, error: `HTTP ${response.status}` };
+      return { id: entry.id, ok: false, failure: AdminUnreachable({ detail: `HTTP ${String(response.status)}` }) };
     }
 
     const json: unknown = await response.json();
     const parsed = fleetSnapshotSchema.safeParse(json);
     if (!parsed.success) {
-      return { id: entry.id, ok: false, error: 'response did not match fleet contract' };
+      return {
+        id: entry.id,
+        ok: false,
+        failure: AdminInvalidOutput({ detail: 'response did not match fleet contract' }),
+      };
     }
 
     return { id: entry.id, ok: true, snapshot: parsed.data };
   } catch (error) {
-    return { id: entry.id, ok: false, error: error instanceof Error ? error.message : 'request failed' };
+    // A network error, a timeout or an unreadable body: the app did not answer usably.
+    return {
+      id: entry.id,
+      ok: false,
+      failure: AdminUnreachable({ detail: 'the app did not answer the fleet request' }, { cause: error }),
+    };
   }
 }
 

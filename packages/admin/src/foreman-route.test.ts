@@ -6,6 +6,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 
 import type { ForemanEnv } from './env';
 import type { ForemanStore } from './foreman-route';
@@ -129,7 +130,7 @@ describe('T(foreman-route) createForemanRoute', () => {
       health,
       context: () => ({}),
     }));
-    const manifest = await clientFor(request => route(request)).manifest();
+    const manifest = orThrow(await clientFor(request => route(request)).manifest());
     expect(manifest.app).toEqual({ id: APP_ID, environment: 'prod', version: '2.0.0', commit: 'abc1234' });
     expect(manifest.modules.map(module => module.id)).toEqual(['core.health', 'core.manifest', 'core.receipts']);
   });

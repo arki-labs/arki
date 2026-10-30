@@ -70,7 +70,6 @@ export {
   HttpError,
   orThrowHttp,
   toErrorResponse,
-  UnsafeUrlError,
 } from './error.js';
 export type { HttpErrorEnvelope } from './error.js';
 

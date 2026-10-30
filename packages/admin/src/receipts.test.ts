@@ -11,11 +11,12 @@ import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, orThrow } from '@arki/failure';
 
 import type { PermitClaim } from './client';
 import type { ForemanEnv } from './env';
 import type { Permit } from './module';
+import { AdminModuleRefused, AdminUnreachable } from './failures';
 import type { ReceiptStore } from './receipts';
 import { createForemanClient, generateForemanKeyPair } from './client';
 import { withCoreModules } from './core';
@@ -23,16 +24,14 @@ import { createForemanHandler } from './dispatcher';
 import { foremanEnvShape } from './env';
 import {
   ADMIN_ERROR_CODES,
-  AdminError,
   defineAction,
   defineModule,
   defineRead,
   describeModule,
-  isModuleError,
   moduleError,
 } from './module';
 import { kvReceiptStore, RECEIPT_WINDOW_SECONDS, receiptAnswerSchema } from './receipts';
-import { memoryKv } from './test-support';
+import { memoryKv, refusal } from './test-support';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
@@ -192,14 +191,13 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
   return error.code;
 }
 
-async function adminErrorOf(promise: Promise<unknown>): Promise<AdminError> {
-  const error: unknown = await promise.then(
-    () => null,
-    (error_: unknown) => error_,
-  );
-  if (!(error instanceof AdminError)) throw new Error(`expected an AdminError, got ${String(error)}`);
-  return error;
-}
+const adminErrorOf = refusal;
+
+/** What the client returns for a module's own refusal: the module's code and HTTP status travel as data. */
+const refusedBy = (code: string, httpStatus: number) => ({
+  code: AdminModuleRefused.code,
+  data: { code, httpStatus },
+});
 
 describe('T(admin-receipts) the dispatcher records every execute', () => {
   it('supervises thrown failures before recording or replaying an execution receipt', async () => {
@@ -207,8 +205,8 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
     const first = await execute('exe_thrown_failure').catch((error: unknown) => error);
     const second = await execute('exe_thrown_failure').catch((error: unknown) => error);
     const receipt = await receiptOf('exe_thrown_failure');
-    expect(first).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
-    expect(second).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
+    expect(first).toMatchObject(refusedBy('failure.unexpected_defect', 500));
+    expect(second).toMatchObject(refusedBy('failure.unexpected_defect', 500));
     expect(receipt).toMatchObject({ status: 'failed', error: { code: 'failure.unexpected_defect', status: 500 } });
     expect(runs).toHaveLength(1);
     for (const secret of [Undeclared.code, 'private undeclared data', 'secret-remediation-sentinel']) {
@@ -225,7 +223,7 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
           ? client.read('queue.probe', {}, ['queue:read'])
           : client.preview('queue.retryJob', { jobId: 'job_1' }, ['queue:write']);
       const error = await request.catch((error_: unknown) => error_);
-      expect(error).toMatchObject({ code: 'failure.unexpected_defect', status: 500 });
+      expect(error).toMatchObject(refusedBy('failure.unexpected_defect', 500));
       expect(runs).toHaveLength(0);
       for (const secret of [Undeclared.code, 'private undeclared data', 'secret-remediation-sentinel']) {
         expect(JSON.stringify(error)).not.toContain(secret);
@@ -240,8 +238,8 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
       const second = await execute('exe_returned_failure').catch((error: unknown) => error);
       const expected =
         behaviour === 'refused' ? Refused.code : behaviour === 'defect' ? Defect.code : 'failure.unexpected_defect';
-      expect(first).toMatchObject({ code: expected });
-      expect(second).toMatchObject({ code: expected });
+      expect(first).toMatchObject({ code: AdminModuleRefused.code, data: { code: expected } });
+      expect(second).toMatchObject({ code: AdminModuleRefused.code, data: { code: expected } });
       expect(runs).toHaveLength(1);
       const receipt = await receiptOf('exe_returned_failure');
       expect(receipt).toMatchObject({
@@ -268,13 +266,14 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
       },
     };
     const { execute } = setup({ receipts: slow, onResponse: () => order.push('response') });
-    await execute('exe_order');
+    orThrow(await execute('exe_order'));
     expect(order).toEqual(['settled:applied', 'response']);
   });
 
   it('a lost answer is settled by core.receipts.get: applied, with the result and its hash', async () => {
     const { execute, receiptOf, runs } = setup({ loseExecuteAnswers: true });
-    await expect(execute('exe_lost')).rejects.toThrow();
+    // The answer never arrives, so the client cannot know the outcome: it returns AdminUnreachable.
+    expect(await execute('exe_lost')).toMatchObject({ code: AdminUnreachable.code });
     const receipt = await receiptOf('exe_lost');
     expect(receipt).toMatchObject({
       status: 'applied',
@@ -338,7 +337,7 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
   // pinned revision would be told it applied, though that request never ran.
   it('the same execution id with other input or another revision is refused (E010), not answered as applied', async () => {
     const { client, execute, runs } = setup();
-    await execute('exe_input');
+    orThrow(await execute('exe_input'));
     const otherJob = client.execute(
       'queue.retryJob',
       { jobId: 'job_2' },
@@ -378,7 +377,7 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
 
   it('the same execution id on another action is refused (E010) and nothing runs', async () => {
     const { execute, runs } = setup();
-    await execute('exe_bound', 'queue.retryJob');
+    orThrow(await execute('exe_bound', 'queue.retryJob'));
     expect(await codeOf(execute('exe_bound', 'queue.dropJob'))).toBe(ADMIN_ERROR_CODES.staleApproval);
     expect(runs.map(run => run.actionId)).toEqual(['queue.retryJob']);
   });
@@ -387,19 +386,18 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
 describe('T(admin-receipts) a module declares its own errors', () => {
   it('an action that throws a ModuleError answers its own status and code over the signed protocol, and a repeat answers the same', async () => {
     const { execute, receiptOf } = setup({ behaviour: 'moduleError' });
-    const error: unknown = await execute('exe_mod').then(
-      () => null,
-      (error_: unknown) => error_,
-    );
-    expect(isModuleError(error)).toBe(true);
-    expect(error).toMatchObject({ code: 'ARKI_TEST_E001', status: 409, remediation: 'Preview again.' });
+    const error = await execute('exe_mod');
+    expect(error).toMatchObject({
+      code: AdminModuleRefused.code,
+      data: { code: 'ARKI_TEST_E001', httpStatus: 409, remediation: 'Preview again.' },
+    });
     expect(await receiptOf('exe_mod')).toMatchObject({
       status: 'failed',
       error: { code: 'ARKI_TEST_E001', status: 409 },
     });
-    expect(await execute('exe_mod').catch((error_: unknown) => error_)).toMatchObject({
-      code: 'ARKI_TEST_E001',
-      status: 409,
+    expect(await execute('exe_mod')).toMatchObject({
+      code: AdminModuleRefused.code,
+      data: { code: 'ARKI_TEST_E001', httpStatus: 409 },
     });
   });
 
@@ -486,7 +484,7 @@ describe('T(admin-receipts) the KV store', () => {
 
   it('still holds an applied receipt a day after the window, so a late reconcile is not misread', async () => {
     const { execute, receiptOf, clock } = setup();
-    await execute('exe_late');
+    orThrow(await execute('exe_late'));
     clock.advance(24 * 60 * 60 * 1000);
     expect(await receiptOf('exe_late')).toMatchObject({ status: 'applied' });
   });

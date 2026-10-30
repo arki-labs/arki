@@ -11,13 +11,14 @@ import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import type { KV } from '@arki/kv';
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 
 import type { CreateForemanClientOptions, PermitClaim } from './client';
 import type { CreateForemanHandlerOptions, NonceStore } from './dispatcher';
 import type { AdminErrorCode, JsonValue, Permit } from './module';
 import { createForemanClient, generateForemanKeyPair, signRequest } from './client';
 import { createForemanHandler } from './dispatcher';
-import { ADMIN_ERROR_CODES, AdminError, defineAction, defineModule, defineRead, describeModule } from './module';
+import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module';
 import {
   errorBodySchema,
   FOREMAN_HEADERS,
@@ -29,7 +30,7 @@ import {
   utf8,
 } from './protocol';
 import { kvReceiptStore } from './receipts';
-import { memoryKv } from './test-support';
+import { memoryKv, refusal } from './test-support';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
@@ -193,15 +194,10 @@ async function errorCode(response: Response): Promise<string> {
   return errorBodySchema.parse(await response.json()).error.code;
 }
 
-async function expectAdminError(promise: Promise<unknown>, code: AdminErrorCode): Promise<AdminError> {
-  const error: unknown = await promise.then(
-    () => null,
-    (error_: unknown) => error_,
-  );
-  expect(error).toBeInstanceOf(AdminError);
-  if (!(error instanceof AdminError)) throw new Error('expected an AdminError');
-  expect(error.code).toBe(code);
-  return error;
+async function expectAdminError(promise: Promise<unknown>, code: AdminErrorCode) {
+  const refused = await refusal(promise);
+  expect(refused.code).toBe(code);
+  return refused;
 }
 
 describe('T(admin-protocol) happy paths', () => {
@@ -225,7 +221,7 @@ describe('T(admin-protocol) happy paths', () => {
   });
 
   it('negotiates protocol 2 and gets a manifest that names this target and its writes mode', async () => {
-    const negotiated = await setup().client.negotiate();
+    const negotiated = orThrow(await setup().client.negotiate());
     expect(negotiated.protocol).toBe(2);
     if (negotiated.protocol !== 2) return;
     expect(negotiated.manifest.app).toEqual({ id: 'novelette', version: '1.2.3', environment: 'prod' });
@@ -382,7 +378,7 @@ describe('T(admin-protocol) app-side rejections', () => {
     );
     expect(executed).toEqual([]);
     await expect(client.read('queue.failedJobs', {}, ['queue:read'])).resolves.toHaveLength(1);
-    const manifest = await client.manifest();
+    const manifest = orThrow(await client.manifest());
     expect(manifest.readiness.writes).toBe('off');
   });
 
@@ -479,10 +475,10 @@ describe('T(admin-protocol) negotiation and configuration', () => {
 
   it('a read-only client cannot execute', async () => {
     const { client } = setup({ client: { executeKey: undefined } });
-    await expectAdminError(
+    // No execute key is a bug in the caller's setup, not an outcome of the target: it throws.
+    await expect(
       client.execute('queue.retryJob', { jobId: 'job_1' }, { scopes: ['queue:write'], permit: permitClaim() }),
-      ADMIN_ERROR_CODES.invalidConfig,
-    );
+    ).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.invalidConfig });
   });
 
   it('refuses a dispatcher whose read key is also an execute key', () => {

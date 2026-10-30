@@ -2,7 +2,11 @@ import type { SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
+import { isFailure } from '@arki/failure';
+
 import type { RowScope, Scope, WorkspaceContext, WorkspaceRole } from '../../workspaces.js';
+import { AccessDenied, ResourceMissing } from '../../boundary-failures.js';
+import { log } from '../../log.js';
 import { roleAtLeast, scopeLevel, WorkspaceScopeError } from '../../workspaces.js';
 
 /**
@@ -113,16 +117,22 @@ export function workspaceReadFilter(config: WorkspaceResourceConfig, ctx: Worksp
 
 /**
  * Validate a write at `target` scope and return the scope columns to persist
- * (D-WS-005/007/009). Throws {@link WorkspaceScopeError} when the actor lacks
- * rights at the target scope. This is the single gate for every shared create
- * and every scope move.
+ * (D-WS-005/007/009). Returns {@link AccessDenied} (403) when the actor lacks
+ * rights at the target scope; the reason goes to the DEBUG log, never to the caller.
+ * A scope of an illegal shape, or a resource without a team column asked for a team
+ * scope, is a bug in the caller and still throws {@link WorkspaceScopeError}.
+ * This is the single gate for every shared create and every scope move.
  *
  * - personal: always allowed (the row's `user_id` is the actor).
  * - org-wide: requires `target.org === activeOrg` AND role ≥ `shareRole`.
  * - team:     requires the resource has a team column, `target.org === activeOrg`,
  *             AND the actor is a member of `target.team`.
  */
-export function resolveWriteScope(config: WorkspaceResourceConfig, target: Scope, ctx: WorkspaceContext): Scope {
+export function resolveWriteScope(
+  config: WorkspaceResourceConfig,
+  target: Scope,
+  ctx: WorkspaceContext,
+): Scope | ReturnType<typeof AccessDenied> {
   const level = scopeLevel(target);
 
   if (level === 'personal') {
@@ -130,15 +140,13 @@ export function resolveWriteScope(config: WorkspaceResourceConfig, target: Scope
   }
 
   if (target.organizationId !== ctx.activeOrganizationId) {
-    throw new WorkspaceScopeError(
-      'Cannot write into an organization other than the active one. Switch workspace first.',
-    );
+    return denied('write into an organization other than the active one', ctx);
   }
 
   if (level === 'org') {
     const min = config.shareRole ?? 'member';
     if (!roleAtLeast(ctx.role, min)) {
-      throw new WorkspaceScopeError(`Creating an org-wide row requires the "${min}" role or higher.`);
+      return denied(`org-wide write needs the "${min}" role or higher`, ctx);
     }
     return { organizationId: target.organizationId, teamId: null };
   }
@@ -148,9 +156,15 @@ export function resolveWriteScope(config: WorkspaceResourceConfig, target: Scope
     throw new WorkspaceScopeError('This resource is not team-scopable (no team column registered).');
   }
   if (target.teamId === null || !ctx.memberTeamIds.includes(target.teamId)) {
-    throw new WorkspaceScopeError('Cannot write into a team you are not a member of.');
+    return denied('write into a team the actor is not a member of', ctx);
   }
   return { organizationId: target.organizationId, teamId: target.teamId };
+}
+
+/** The refusal of a write: a generic 403 for the caller, the reason in the DEBUG log. */
+function denied(reason: string, ctx: WorkspaceContext) {
+  log.debug('workspace write refused: {reason}', { reason, userId: ctx.userId });
+  return AccessDenied();
 }
 
 /**
@@ -175,7 +189,9 @@ export function canSeeRow(config: WorkspaceResourceConfig, row: RowScope, ctx: W
 }
 
 /**
- * Move an existing row to `target` scope (D-WS-009). Validates rights at the
+ * Move an existing row to `target` scope (D-WS-009). Returns {@link ResourceMissing} when the
+ * actor cannot see the row where it is now (a hidden row looks exactly like a missing one) and
+ * {@link AccessDenied} when the actor may not write at `target`. Validates rights at the
  * target via {@link resolveWriteScope}, applies the caller's typed update with
  * the resolved scope, then runs the registered `onReassign` cascade — all
  * intended to run inside one transaction the caller controls.
@@ -197,13 +213,15 @@ export async function reassignScope(opts: {
   ctx: WorkspaceContext;
   current: RowScope;
   applyUpdate: (resolved: Scope) => Promise<void>;
-}): Promise<Scope> {
+}): Promise<Scope | ReturnType<typeof AccessDenied> | ReturnType<typeof ResourceMissing>> {
   // `current` is typed as required; the runtime check also refuses a missing value from untyped callers.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!opts.current || !canSeeRow(opts.config, opts.current, opts.ctx)) {
-    throw new WorkspaceScopeError('Cannot move a row you cannot see in its current scope.');
+    log.debug('workspace move refused: the row is not visible in its current scope', { userId: opts.ctx.userId });
+    return ResourceMissing();
   }
   const resolved = resolveWriteScope(opts.config, opts.target, opts.ctx);
+  if (isFailure(resolved)) return resolved;
   await opts.applyUpdate(resolved);
   await opts.config.onReassign?.(opts.ctx, opts.rowId, resolved);
   return resolved;

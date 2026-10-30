@@ -1,37 +1,40 @@
-import type { CoolifyClient } from './client';
+import { isFailure } from '@arki/failure';
+
+import type { CoolifyClient, CoolifyFailure } from './client';
 import type { CoolifySignal } from './signals';
 import type { CoolifyHint } from './webhook';
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { AdminUnknownCapability } from '../../failures';
 import { applicationSignal, deploymentSignal, serverSignal } from './signals';
 
 /**
  * Turn a hint into signals by asking the Coolify API. The webhook's own content is never
  * copied into a signal. A resource the API does not know, or one that looks fine, gives `[]`.
- * Other failures (token rejected, timeout, schema drift) are thrown so the caller can retry.
+ * Other failures (token rejected, timeout, schema drift) are returned so the caller can retry.
  */
 export async function confirmHint(
   client: Pick<CoolifyClient, 'getDeployment' | 'getApplication' | 'getServer'>,
   hint: CoolifyHint,
-): Promise<CoolifySignal[]> {
-  try {
-    switch (hint.kind) {
-      case 'deployment': {
-        return [deploymentSignal(await client.getDeployment(hint.resourceUuid), hint.receivedAt)];
-      }
-      case 'application': {
-        return orNone(applicationSignal(await client.getApplication(hint.resourceUuid), hint.receivedAt));
-      }
-      case 'server': {
-        return orNone(serverSignal(await client.getServer(hint.resourceUuid), hint.receivedAt));
-      }
-      case 'unknown': {
-        return [];
-      }
+): Promise<CoolifySignal[] | CoolifyFailure> {
+  switch (hint.kind) {
+    case 'deployment': {
+      const deployment = await client.getDeployment(hint.resourceUuid);
+      return isGone(deployment) ? [] : isFailure(deployment) ? deployment : [deploymentSignal(deployment, hint.receivedAt)];
     }
-  } catch (error) {
-    if (error instanceof AdminError && error.code === ADMIN_ERROR_CODES.unknownCapability) return [];
-    throw error;
+    case 'application': {
+      const application = await client.getApplication(hint.resourceUuid);
+      return isGone(application) ? [] : isFailure(application) ? application : orNone(applicationSignal(application, hint.receivedAt));
+    }
+    case 'server': {
+      const server = await client.getServer(hint.resourceUuid);
+      return isGone(server) ? [] : isFailure(server) ? server : orNone(serverSignal(server, hint.receivedAt));
+    }
+    case 'unknown': {
+      return [];
+    }
   }
 }
+
+/** A resource the API does not know is not an error: there is nothing to signal. */
+const isGone = (value: unknown): boolean => AdminUnknownCapability.is(value);
 
 const orNone = (s: CoolifySignal | null): CoolifySignal[] => (s === null ? [] : [s]);

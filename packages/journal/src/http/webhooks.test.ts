@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
-import { UnsafeUrlError } from '@arki/http/public-fetch';
+import { UnsafeUrl } from '@arki/http/public-fetch';
 import { standardWebhooks, WebhookCryptoUnavailable } from '@arki/http/webhooks';
 import * as webhookSchemes from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
@@ -245,7 +245,7 @@ describe('delivery', () => {
 
   it('a refused URL is dead on its first try: publicFetch refuses it the same way every time', async () => {
     // The host turned private after subscribe (a DNS change); three retries would all be refused too.
-    const webhooks = sender(() => Promise.reject(new UnsafeUrlError('Private network addresses are not allowed.')), {
+    const webhooks = sender(() => Promise.reject(new TypeError('refused', { cause: UnsafeUrl({ reason: 'private_address' }) })), {
       retry: backoff.constant(0).upTo(3),
     });
     const { id } = orThrow(

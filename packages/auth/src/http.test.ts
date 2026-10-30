@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { serialize } from '@arki/failure';
+import { isFailure, serialize } from '@arki/failure';
 import { buildEngine, route, routes, step } from '@arki/http';
 import { createClient } from '@arki/http/client';
 
@@ -169,6 +169,7 @@ describe('resolvePrincipal on the error a principal source throws', () => {
     const outage = new AuthError(AUTH_ERROR_CODES.storeUnavailable, 'pg host db-7 refused');
     const failure = await failWith(outage);
     expect(failure).toMatchObject({ code: 'auth.unavailable', status: 503 });
+    if (!isFailure(failure)) throw new Error('expected a failure');
     expect(JSON.stringify(serialize(failure, AUTH_FAILURES))).not.toContain('db-7');
   });
 

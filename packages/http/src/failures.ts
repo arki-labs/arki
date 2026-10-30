@@ -1,6 +1,8 @@
 /** Canonical client-owned outcomes; route-owned failures stay on each contract. */
 import { CircuitOpen, BulkheadRejected } from '@arki/resilience';
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
+import { z } from 'zod';
+
 import { defineFailure, InvalidInput, REVIVAL_FAILURES } from '@arki/failure';
 
 /** Framework request setup can refuse before a route handler or step runs. */
@@ -142,6 +144,53 @@ export const IdempotencyHashUnavailable = defineFailure('http.idempotency_hash_u
   message: 'Secure request hashing is unavailable.',
   remediation: 'Provide Web Crypto SHA-256 before retrying the same request and key.',
 });
+
+/** Why the guard refused a URL. */
+export const UNSAFE_URL_REASONS = ['invalid_url', 'scheme_or_credentials', 'private_address'] as const;
+const UNSAFE_URL_MESSAGES = {
+  invalid_url: 'Invalid URL.',
+  scheme_or_credentials: 'Only public HTTP feeds are supported.',
+  private_address: 'Private network addresses are not allowed.',
+} as const satisfies Record<(typeof UNSAFE_URL_REASONS)[number], string>;
+
+/** `@arki/http/public-fetch` refused a URL: a bad scheme, refused credentials, or a private, loopback or link-local address (also after DNS or a redirect). The message never carries the URL.
+ * @fix Call only public `http` or `https` hosts. Do not follow redirects to internal addresses. A refused URL is refused every time: do not retry it.
+ * @verify bun run test -- src/tests/public-fetch.test.ts
+ */
+export const UnsafeUrl = /* @__PURE__ */ defineFailure('http.unsafe_url', {
+  status: 400,
+  data: z.object({ reason: z.enum(UNSAFE_URL_REASONS) }),
+  message: data => UNSAFE_URL_MESSAGES[data.reason],
+  remediation:
+    'Use an http(s) URL whose host resolves only to public addresses; private, loopback and link-local targets, and redirects to them, are refused.',
+});
+/** A public fetch followed more redirects than it allows (five).
+ * @fix Fetch the final URL directly, or fix the redirect loop at the server.
+ * @verify bun run test -- src/tests/public-fetch.test.ts
+ */
+export const RedirectLimit = /* @__PURE__ */ defineFailure('http.redirect_limit', {
+  status: 502,
+  message: 'The server redirected too many times.',
+  remediation: 'Fetch the final URL directly or fix the redirect loop.',
+});
+/** A public fetch response body was larger than `maxBytes`.
+ * @fix Raise `maxBytes` or fetch a smaller resource.
+ * @verify bun run test -- src/tests/public-fetch.test.ts
+ */
+export const ResponseTooLarge = /* @__PURE__ */ defineFailure('http.response_too_large', {
+  status: 502,
+  message: 'The response is larger than the size limit.',
+  remediation: 'Raise maxBytes or fetch a smaller resource.',
+});
+/** Every outcome of a public fetch except success. */
+export const PUBLIC_FETCH_FAILURES = [
+  UnsafeUrl,
+  RedirectLimit,
+  ResponseTooLarge,
+  NetworkFailure,
+  RequestTimeout,
+  RequestCancelled,
+] as const;
 
 export const RESPONSE_CACHE_BEGIN_FAILURES = [IdempotencyClaimUnconfirmed, IdempotencyReplayInvalid] as const;
 export const RESPONSE_CACHE_FINISH_FAILURES = [IdempotencyWriteUnconfirmed, IdempotencyOwnershipLost] as const;

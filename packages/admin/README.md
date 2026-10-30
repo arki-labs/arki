@@ -254,3 +254,9 @@ The dispatcher answers a `ModuleError` with the module's own status and code, an
 ## Support
 
 Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
+
+## Failures
+
+The signed client (`createForemanClient`), the Coolify clients, `fetchFleetSnapshot` and `parseWebhookHint` return `@arki/failure` failures for expected outcomes; they do not throw. Match on `failure.code`: `admin.unauthenticated`, `admin.scope_denied`, `admin.writes_disabled`, `admin.stale_approval`, `admin.unknown_capability`, `admin.receipts_unavailable`, `admin.execution_in_progress`, `admin.invalid_request`, `admin.protocol_unsupported`, `admin.target_mismatch`, `admin.unreachable`, `admin.invalid_output`, `admin.handler_failed`, and `admin.module_refused` (an error a module declared; its own code and HTTP status are in `data`). All are exported from `@arki/admin/module`. On the wire the protocol keeps its stable `ARKI_ADMIN_E0NN` code; `wireCodeOf(failure.code)` gives it. `AdminError` is thrown only for bugs: invalid keys or configuration, a client without an execute key, invalid scopes.
+
+`createFleetHandler` answers a provider error as `502 { "error": "snapshot_failed" }` and a snapshot outside the contract as `500 { "error": "invalid_snapshot" }`. The cause goes to the log (`DEBUG=arki:admin:fleet`), never to the caller.

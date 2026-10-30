@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import type { FeatureSlice } from '@arki/dot/feature';
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { defineFeature } from '@arki/dot/feature';
 import { buildEngine } from '@arki/http';
 
@@ -22,9 +23,9 @@ import { createForemanClient, generateForemanKeyPair } from './client';
 import { foreman } from './dot';
 import { foremanConfigFromEnv } from './env';
 import { createForemanHandlerFromEnv } from './foreman-app';
-import { ADMIN_ERROR_CODES, AdminError, defineAction, defineModule, defineRead, describeModule } from './module';
+import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module';
 import { kvReceiptStore } from './receipts';
-import { memoryKv } from './test-support';
+import { memoryKv, refusal } from './test-support';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 
@@ -153,19 +154,21 @@ async function observe(mount: Mount): Promise<Record<string, JsonValue>> {
   const client = clientFor(mount);
   const scopes = ['core:read', 'queue:*'];
   return {
-    manifest: await client.manifest(),
-    viaRead: await client.read('core.manifest.get', {}, scopes),
-    status: await client.read('core.health.status', {}, scopes),
-    checks: await client.read('core.health.checks', {}, scopes),
-    failed: await client.read('queue.failedJobs', { limit: 5 }, scopes),
-    preview: await client.preview('queue.retryJob', { jobId: 'job_9' }, scopes),
-    executed: await client.execute(
-      'queue.retryJob',
-      { jobId: 'job_9' },
-      {
-        scopes,
-        permit: { executionId: 'exe_1', expectedRevision: 'rev_3', approvedBy: 'usr_alex', schemaHash: retryHash },
-      },
+    manifest: orThrow(await client.manifest()),
+    viaRead: orThrow(await client.read('core.manifest.get', {}, scopes)),
+    status: orThrow(await client.read('core.health.status', {}, scopes)),
+    checks: orThrow(await client.read('core.health.checks', {}, scopes)),
+    failed: orThrow(await client.read('queue.failedJobs', { limit: 5 }, scopes)),
+    preview: orThrow(await client.preview('queue.retryJob', { jobId: 'job_9' }, scopes)),
+    executed: orThrow(
+      await client.execute(
+        'queue.retryJob',
+        { jobId: 'job_9' },
+        {
+          scopes,
+          permit: { executionId: 'exe_1', expectedRevision: 'rev_3', approvedBy: 'usr_alex', schemaHash: retryHash },
+        },
+      ),
     ),
   };
 }
@@ -182,7 +185,7 @@ describe('T(admin-modules): one module set, two attachments', () => {
   it('describes core.health, core.manifest, core.receipts (a store is given) and the app modules, in that order', async () => {
     const [plain] = mounts();
     if (plain === undefined) throw new Error('expected a mount');
-    const manifest = await clientFor(plain).manifest();
+    const manifest = orThrow(await clientFor(plain).manifest());
     expect(manifest.modules.map(module => module.id)).toEqual([
       'core.health',
       'core.manifest',
@@ -210,14 +213,8 @@ describe('T(admin-modules): one module set, two attachments', () => {
 
   it('rejects a read signed without the core:read scope on both attachments', async () => {
     for (const mount of mounts()) {
-      const error = await clientFor(mount)
-        .read('core.health.status', {}, ['queue:read'])
-        .then(
-          () => null,
-          (error_: unknown) => error_,
-        );
-      expect(error, mount.name).toBeInstanceOf(AdminError);
-      expect(error instanceof AdminError ? error.code : '', mount.name).toBe(ADMIN_ERROR_CODES.scopeDenied);
+      const error = await refusal(clientFor(mount).read('core.health.status', {}, ['queue:read']));
+      expect(error.code, mount.name).toBe(ADMIN_ERROR_CODES.scopeDenied);
     }
   });
 });

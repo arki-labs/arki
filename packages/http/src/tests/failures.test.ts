@@ -6,7 +6,7 @@
  * lists the failures once, and both ends take their types from that list.
  */
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import {
@@ -24,7 +24,8 @@ import { routes } from '../bundle.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
-import { HTTP_ERROR_CODES } from '../error.js';
+import { describeInternalError, HTTP_ERROR_CODES } from '../error.js';
+import { IdempotencyReleaseUnconfirmed, RESPONSE_CACHE_ABANDON_FAILURES } from '../failures.js';
 
 const BASE = 'http://test.local';
 
@@ -196,5 +197,46 @@ describe('the client', () => {
       code: InvalidEnvelope.code,
       data: { reason: 'invalid_data' },
     });
+  });
+});
+
+// WHY: a handler bug must never put its text on the wire of an app that forgot NODE_ENV or runs
+// under "test" or "staging". Only an explicit NODE_ENV=development shows the message.
+describe('the 500 envelope of an unexpected error', () => {
+  const original = process.env.NODE_ENV;
+  afterEach(() => {
+    if (original === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = original;
+  });
+
+  it.each([undefined, 'production', 'staging', 'test'])('hides the message under NODE_ENV=%s', async mode => {
+    if (mode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = mode;
+    const broken = route.get('/broken', { id: 'broken', output: z.object({}) });
+    const engine = buildEngine([
+      routes().bind(broken, () => {
+        throw new Error('password=hunter2 at db.internal');
+      }),
+    ]);
+    const response = await engine.fetch(new Request(`${BASE}/broken`));
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain('hunter2');
+  });
+
+  it('shows the message under NODE_ENV=development only', async () => {
+    process.env.NODE_ENV = 'development';
+    expect(describeInternalError(new Error('boom'))).toBe('boom');
+  });
+});
+
+// WHY: the middleware never abandons a reservation itself; ResponseCache adapters
+// (`@arki/kv/redis/idempotency`, `@arki/journal/http`) return this failure from `abandon`.
+// The port must keep naming it, so an adapter cannot invent an unlisted failure.
+describe('the abandon outcome of the ResponseCache port', () => {
+  it('lists IdempotencyReleaseUnconfirmed as the only abandon failure', () => {
+    expect(RESPONSE_CACHE_ABANDON_FAILURES.map(failure => failure.code)).toEqual([
+      IdempotencyReleaseUnconfirmed.code,
+    ]);
+    expect(IdempotencyReleaseUnconfirmed().status).toBe(503);
   });
 });

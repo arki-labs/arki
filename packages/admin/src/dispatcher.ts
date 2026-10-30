@@ -35,7 +35,22 @@ import type { AdminErrorCode } from './errors';
 import type { AnyAction, AnyRead, ForemanModule, Permit } from './module';
 import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol';
 import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts';
-import { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors';
+import type { AdminFailure } from './failures';
+import { ADMIN_ERROR_CODES, AdminError, isModuleError } from './errors';
+import {
+  adminFailureOfWire,
+  AdminInvalidRequest,
+  AdminModuleRefused,
+  AdminProtocolUnsupported,
+  AdminReceiptsUnavailable,
+  AdminScopeDenied,
+  AdminStaleApproval,
+  AdminExecutionInProgress,
+  AdminUnauthenticated,
+  AdminUnknownCapability,
+  AdminWritesDisabled,
+  wireCodeOf,
+} from './failures';
 import { canonicalJson, jsonValueSchema, sha256 } from './json';
 import { describeModule } from './module';
 import {
@@ -231,90 +246,90 @@ export function createForemanHandler<TCtx>(
     request: Request,
     url: URL,
     use: KeyUse,
-  ): Promise<{ envelope: Envelope; body: Uint8Array }> {
+  ): Promise<{ envelope: Envelope; body: Uint8Array } | AdminFailure> {
     const envelopeBytes = fromBase64Url(request.headers.get(FOREMAN_HEADERS.envelope) ?? '');
     const signature = fromBase64Url(request.headers.get(FOREMAN_HEADERS.signature) ?? '');
     if (!envelopeBytes?.length || !signature?.length)
-      throw unauthenticated('missing or malformed signature headers', url);
+      return unauthenticated('missing or malformed signature headers', url);
 
     const { read, execute } = await keys();
     const ring = use === 'execute' ? execute : read;
     if (!(await verifyEnvelope(ring, signature, envelopeBytes))) {
-      throw unauthenticated(`signature does not verify under the ${use} key ring`, url);
+      return unauthenticated(`signature does not verify under the ${use} key ring`, url);
     }
 
     const raw = parseJsonBytes(envelopeBytes);
     const version = z.object({ v: z.number() }).safeParse(raw);
     if (version.success && version.data.v !== FOREMAN_PROTOCOL_VERSION) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.protocolUnsupported,
-        `This app speaks Foreman protocol ${String(FOREMAN_PROTOCOL_VERSION)}, not ${String(version.data.v)}.`,
-        `Send protocol ${String(FOREMAN_PROTOCOL_VERSION)} envelopes, or protocol 1 to /api/fleet.`,
-      );
+      return AdminProtocolUnsupported({
+        detail: `This app speaks Foreman protocol ${String(FOREMAN_PROTOCOL_VERSION)}, not ${String(version.data.v)}.`,
+      });
     }
     const parsed = envelopeSchema.safeParse(raw);
-    if (!parsed.success) throw unauthenticated('envelope does not match the schema', url);
+    if (!parsed.success) return unauthenticated('envelope does not match the schema', url);
     const envelope = parsed.data;
 
-    if (envelope.use !== use) throw unauthenticated(`envelope use "${envelope.use}" on a ${use} route`, url);
-    if (envelope.aud !== config.identity.aud) throw unauthenticated(`wrong audience "${envelope.aud}"`, url);
+    if (envelope.use !== use) return unauthenticated(`envelope use "${envelope.use}" on a ${use} route`, url);
+    if (envelope.aud !== config.identity.aud) return unauthenticated(`wrong audience "${envelope.aud}"`, url);
     if (envelope.method !== request.method || envelope.path !== url.pathname + url.search) {
-      throw unauthenticated('signed method or path differs from the request', url);
+      return unauthenticated('signed method or path differs from the request', url);
     }
     if (Math.abs(clock.now().getTime() - envelope.iat * 1000) > MAX_CLOCK_SKEW_MS) {
-      throw unauthenticated('iat outside the 60 s clock-skew window', url);
+      return unauthenticated('iat outside the 60 s clock-skew window', url);
     }
 
     const body = new Uint8Array(await request.arrayBuffer());
-    if ((await sha256(body)) !== envelope.bodySha256) throw unauthenticated('body hash mismatch', url);
+    if ((await sha256(body)) !== envelope.bodySha256) return unauthenticated('body hash mismatch', url);
 
     const fresh = await options.nonces.setIfNotExists(
       `arki:admin:nonce:${envelope.aud}:${envelope.nonce}`,
       envelope.iat,
       NONCE_TTL_SECONDS,
     );
-    if (!fresh) throw unauthenticated('replayed nonce', url);
+    if (!fresh) return unauthenticated('replayed nonce', url);
 
     return { envelope, body };
   }
 
   async function dispatch(request: Request, url: URL, route: Route): Promise<unknown> {
-    const { envelope, body } = await authenticate(request, url, route.kind === 'execute' ? 'execute' : 'read');
+    const authenticated = await authenticate(request, url, route.kind === 'execute' ? 'execute' : 'read');
+    if (isFailure(authenticated)) return authenticated;
+    const { envelope, body } = authenticated;
     if (route.kind === 'manifest') {
       const { manifest } = await described();
       return manifest;
     }
 
     if (route.kind === 'execute' && config.writes === 'off') {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.writesDisabled,
-        'This app runs with FOREMAN_WRITES=off, so it refuses every execute.',
-        'Set FOREMAN_WRITES=on on the app when writes should be allowed again.',
-      );
+      return AdminWritesDisabled({ detail: 'This app runs with FOREMAN_WRITES=off, so it refuses every execute.' });
     }
 
     if (route.kind === 'read') {
       const read = registry.reads.get(route.id);
-      if (read === undefined) throw unknownCapability(url);
-      requireScope(envelope, read.permission);
-      return read.run(parseInput(body), await options.context(request));
+      if (read === undefined) return unknownCapability(url);
+      const denied = requireScope(envelope, read.permission);
+      if (denied !== undefined) return denied;
+      const readInput = parseInput(body);
+      if (isFailure(readInput)) return readInput;
+      return read.run(readInput.input, await options.context(request));
     }
 
     const action = registry.actions.get(route.id);
-    if (action === undefined) throw unknownCapability(url);
-    requireScope(envelope, action.permission);
-    if (route.kind === 'preview') return action.runPreview(parseInput(body), await options.context(request));
+    if (action === undefined) return unknownCapability(url);
+    const denied = requireScope(envelope, action.permission);
+    if (denied !== undefined) return denied;
+    const actionInput = parseInput(body);
+    if (isFailure(actionInput)) return actionInput;
+    if (route.kind === 'preview') return action.runPreview(actionInput.input, await options.context(request));
 
     // `authenticate` already matched `use` to the route; this narrows the type to reach `permit`.
-    if (envelope.use !== 'execute') throw unauthenticated('execute route without an execute envelope', url);
+    if (envelope.use !== 'execute') return unauthenticated('execute route without an execute envelope', url);
     const { permit: claim } = envelope;
     const { actionHashes } = await described();
     if (actionHashes.get(action.id) !== claim.schemaHash) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.staleApproval,
-        `The approval pinned a different contract for "${action.id}" than this app runs now.`,
-        'Preview and approve again against the current manifest.',
-      );
+      return AdminStaleApproval({
+        detail: `The approval pinned a different contract for "${action.id}" than this app runs now.`,
+      });
     }
     const permit: Permit = {
       executionId: claim.executionId,
@@ -323,11 +338,7 @@ export function createForemanHandler<TCtx>(
     };
     // Fail closed: no execute runs without a receipt Foreman can read back.
     if (receipts === undefined) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.receiptsUnavailable,
-        'This app has no receipt store, so it refuses every execute.',
-        'Pass `receipts` (kvReceiptStore or journalReceiptStore) to the Foreman handler.',
-      );
+      return AdminReceiptsUnavailable({ detail: 'This app has no receipt store, so it refuses every execute.' });
     }
     // Everything signed that names the operation; `iat`, `nonce` and `scopes` change per attempt.
     const requestHash = await sha256(
@@ -341,7 +352,7 @@ export function createForemanHandler<TCtx>(
         }),
       ),
     );
-    return executeOnce(receipts, action, parseInput(body), await options.context(request), permit, requestHash, url);
+    return executeOnce(receipts, action, actionInput.input, await options.context(request), permit, requestHash, url);
   }
 
   /** Run an action at most once per execution id, and settle its receipt before answering. */
@@ -366,10 +377,8 @@ export function createForemanHandler<TCtx>(
     try {
       claim = await store.claim(pending);
     } catch (error) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.receiptsUnavailable,
-        'The receipt store could not take the claim, so the action did not run.',
-        "Check the receipt store's backing service (KV or database), then propose the action again.",
+      return AdminReceiptsUnavailable(
+        { detail: 'The receipt store could not take the claim, so the action did not run.' },
         { cause: error },
       );
     }
@@ -441,31 +450,31 @@ export function createForemanHandler<TCtx>(
     const otherRequest =
       receipt?.requestHash === undefined ? receipt?.actionId !== actionId : receipt.requestHash !== requestHash;
     if (receipt !== undefined && otherRequest) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.staleApproval,
-        `Execution ${executionId} belongs to another request: a different action, input or approval.`,
-        'An execution id runs one action once. Propose and approve this action again.',
-      );
+      return AdminStaleApproval({
+        detail: `Execution ${executionId} belongs to another request: a different action, input or approval.`,
+      });
     }
     switch (receipt?.status) {
       case 'applied': {
         return receipt.result;
       }
       case 'failed': {
-        const again = 'This execution already ran and failed. Propose and approve it again.';
-        const adminCode = Object.values(ADMIN_ERROR_CODES).find(code => code === receipt.error.code);
-        if (adminCode === undefined) {
-          throw moduleError(receipt.error.code, receipt.error.status ?? 400, receipt.error.message, again);
-        }
-        throw new AdminError(adminCode, receipt.error.message, again);
+        // The stored code is a wire code: a protocol code comes back as its failure, any other is the module's own.
+        return (
+          adminFailureOfWire(receipt.error.code, receipt.error.message) ??
+          AdminModuleRefused({
+            code: receipt.error.code,
+            httpStatus: receipt.error.status ?? 400,
+            detail: receipt.error.message,
+            remediation: 'This execution already ran and failed. Propose and approve it again.',
+          })
+        );
       }
       case 'pending':
       case undefined: {
-        throw new AdminError(
-          ADMIN_ERROR_CODES.executionInProgress,
-          `Execution ${executionId} is still running, or stopped before it recorded an outcome.`,
-          'Do not send it again. Read core.receipts.get for its outcome.',
-        );
+        return AdminExecutionInProgress({
+          detail: `Execution ${executionId} is still running, or stopped before it recorded an outcome.`,
+        });
       }
     }
   }
@@ -475,7 +484,7 @@ export function createForemanHandler<TCtx>(
     const nonce = claimedNonce(request.headers.get(FOREMAN_HEADERS.envelope));
     try {
       const route = matchRoute(url.pathname, request.method, basePath);
-      if (route === undefined) throw unknownCapability(url);
+      if (route === undefined) return await respond(...errorResponse(unknownCapability(url), url), nonce);
       const data = await dispatch(request, url, route);
       if (isFailure(data)) return respond(...errorResponse(data, url), nonce);
       return await respond(200, { data }, nonce);
@@ -523,27 +532,18 @@ async function settle(store: ReceiptStore, receipt: SettledReceipt, url: URL): P
   }
 }
 
-function requireScope(envelope: Envelope, permission: string): void {
-  if (!envelope.scopes.some(scope => scopeCovers(scope, permission))) {
-    throw new AdminError(
-      ADMIN_ERROR_CODES.scopeDenied,
-      `The signed scopes do not cover "${permission}".`,
-      `Sign the request with a scope that covers "${permission}".`,
-    );
-  }
+function requireScope(envelope: Envelope, permission: string): AdminFailure | undefined {
+  if (envelope.scopes.some(scope => scopeCovers(scope, permission))) return undefined;
+  return AdminScopeDenied({ detail: `The signed scopes do not cover "${permission}".` });
 }
 
 /** The `input` of a `{"input": ...}` JSON body. */
-function parseInput(body: Uint8Array): unknown {
+function parseInput(body: Uint8Array): { input: unknown } | AdminFailure {
   const parsed = requestBodySchema.safeParse(parseJsonBytes(body));
   if (!parsed.success) {
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidInput,
-      'The request body must be JSON of the form {"input": ...}.',
-      'Send the input wrapped in {"input": ...}.',
-    );
+    return AdminInvalidRequest({ detail: 'The request body must be JSON of the form {"input": ...}.' });
   }
-  return parsed.data.input;
+  return { input: parsed.data.input };
 }
 
 function ringOf(ring: PublicKeyRing): string[] {
@@ -590,28 +590,29 @@ function claimedNonce(header: string | null): string {
   return result.success ? result.data.nonce : '';
 }
 
-function unauthenticated(reason: string, url: URL): AdminError {
+function unauthenticated(reason: string, url: URL) {
   logger.warn('Foreman request rejected on {path}: {reason}', { path: url.pathname, reason });
-  return new AdminError(
-    ADMIN_ERROR_CODES.unauthenticated,
-    'The request failed authentication.',
-    'Check the Foreman key pair, the target audience and both clocks; the app log names the failed check.',
-  );
+  return AdminUnauthenticated({ detail: 'The request failed authentication.' });
 }
 
-function unknownCapability(url: URL): AdminError {
-  return new AdminError(
-    ADMIN_ERROR_CODES.unknownCapability,
-    `Nothing at ${url.pathname}.`,
-    "Use a read or action id from the app's manifest.",
-  );
+function unknownCapability(url: URL) {
+  return AdminUnknownCapability({ detail: `Nothing at ${url.pathname}.` });
 }
 
 /** The code and message a failure shows on the wire. 5xx messages never carry the app's internal message. */
 function publicError(error: unknown): { code: string; message: string; status?: number } {
+  if (AdminModuleRefused.is(error)) {
+    const { code, httpStatus, detail } = error.data;
+    return {
+      code,
+      message: httpStatus >= 500 ? 'The app failed to handle the request.' : detail,
+      status: httpStatus,
+    };
+  }
   if (isFailure(error)) {
     return {
-      code: error.code,
+      // A protocol failure travels under its stable ARKI_ADMIN_E0NN code; any other failure under its own.
+      code: wireCodeOf(error.code) ?? error.code,
       message: error.status >= 500 ? 'The app failed to handle the request.' : error.message,
       status: error.status,
     };
@@ -644,6 +645,9 @@ function publicError(error: unknown): { code: string; message: string; status?: 
 /** Status and wire body for a failure. 5xx bodies never carry the app's internal message. */
 function errorResponse(error: unknown, url: URL): [number, ErrorBody] {
   const { code, message } = publicError(error);
+  if (AdminModuleRefused.is(error)) {
+    return [error.data.httpStatus, { error: { code, message, remediation: error.data.remediation } }];
+  }
   if (isFailure(error)) {
     return [
       error.status,

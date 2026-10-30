@@ -10,6 +10,7 @@ import {
 } from './kernel.js';
 import type { WorkspaceContext } from '../../workspaces.js';
 import type { WorkspaceResourceConfig } from './kernel.js';
+import { AccessDenied, ResourceMissing } from '../../boundary-failures.js';
 import { WorkspaceScopeError } from '../../workspaces.js';
 
 // A team-scopable resource (id + actor + nullable org + nullable team).
@@ -84,15 +85,17 @@ describe('resolveWriteScope — the shared-write gate', () => {
   });
 
   it('blocks a member from creating an org-wide row (shareRole = admin)', () => {
-    expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: null }, memberCtx),
-    ).toThrow(WorkspaceScopeError);
+    expect(resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: null }, memberCtx)).toMatchObject({
+      code: AccessDenied.code,
+      status: 403,
+    });
   });
 
   it('blocks writing into an organization other than the active one', () => {
-    expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'organization_2', teamId: null }, adminCtx),
-    ).toThrow(/active one/i);
+    expect(resolveWriteScope(sourceConfig, { organizationId: 'organization_2', teamId: null }, adminCtx)).toMatchObject({
+      code: AccessDenied.code,
+      status: 403,
+    });
   });
 
   it('lets a team member create a team-scoped row', () => {
@@ -102,21 +105,22 @@ describe('resolveWriteScope — the shared-write gate', () => {
   });
 
   it('blocks a non-member from writing into a team', () => {
-    expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: 'team_b' }, memberCtx),
-    ).toThrow(/not a member/i);
+    expect(resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: 'team_b' }, memberCtx)).toMatchObject({
+      code: AccessDenied.code,
+    });
   });
 
+  // A kernel bug, not a refusal of the actor: it still throws.
   it('rejects a team write on an org-only resource', () => {
     expect(() =>
       resolveWriteScope(orgOnlyConfig, { organizationId: 'organization_1', teamId: 'team_a' }, adminCtx),
-    ).toThrow(/not team-scopable/i);
+    ).toThrow(WorkspaceScopeError);
   });
 
   it('rejects the illegal team-without-org scope shape', () => {
     expect(() =>
       resolveWriteScope(sourceConfig, { organizationId: null, teamId: 'team_a' }, adminCtx),
-    ).toThrow(/organization id/i);
+    ).toThrow(WorkspaceScopeError);
   });
 });
 
@@ -164,18 +168,17 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
     });
   });
 
-  it('throws before touching the db when the move is not permitted', async () => {
+  it('returns AccessDenied before touching the db when the move is not permitted', async () => {
     const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
-    await expect(
-      reassignScope({
-        config: sourceConfig,
-        rowId: 'src_1',
-        current: { userId: 'u2', organizationId: null, teamId: null },
-        target: { organizationId: 'organization_1', teamId: null }, // org-wide
-        ctx: memberCtx, // member < admin shareRole
-        applyUpdate,
-      }),
-    ).rejects.toThrow(WorkspaceScopeError);
+    const outcome = await reassignScope({
+      config: sourceConfig,
+      rowId: 'src_1',
+      current: { userId: 'u2', organizationId: null, teamId: null },
+      target: { organizationId: 'organization_1', teamId: null }, // org-wide
+      ctx: memberCtx, // member < admin shareRole
+      applyUpdate,
+    });
+    expect(outcome).toMatchObject({ code: AccessDenied.code, status: 403 });
     expect(applyUpdate).not.toHaveBeenCalled();
   });
 
@@ -188,38 +191,37 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
     ['a row in another organization', { userId: 'u9', organizationId: 'organization_2', teamId: null }],
   ] as const)('refuses to move %s, before touching the db', async (_label, current) => {
     const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
-    await expect(
-      reassignScope({
-        config: sourceConfig,
-        rowId: 'src_1',
-        current,
-        target: { organizationId: 'organization_1', teamId: 'team_a' }, // a scope memberCtx may write
-        ctx: memberCtx,
-        applyUpdate,
-      }),
-    ).rejects.toThrow(WorkspaceScopeError);
+    const outcome = await reassignScope({
+      config: sourceConfig,
+      rowId: 'src_1',
+      current,
+      target: { organizationId: 'organization_1', teamId: 'team_a' }, // a scope memberCtx may write
+      ctx: memberCtx,
+      applyUpdate,
+    });
+    // A hidden row looks exactly like a missing one: 404, not 403.
+    expect(outcome).toMatchObject({ code: ResourceMissing.code, status: 404 });
     expect(applyUpdate).not.toHaveBeenCalled();
   });
 
   // Fail closed: a caller that forgets to load the row's current scope must not skip the visibility check.
   it('refuses a move when the current scope is missing', async () => {
     const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
-    await expect(
-      // @ts-expect-error -- `current` is required; this models an untyped caller that omits it.
-      reassignScope({
-        config: sourceConfig,
-        rowId: 'src_1',
-        target: { organizationId: 'organization_1', teamId: 'team_a' },
-        ctx: memberCtx,
-        applyUpdate,
-      }),
-    ).rejects.toThrow(WorkspaceScopeError);
+    const outcome = await // @ts-expect-error -- `current` is required; this models an untyped caller that omits it.
+    reassignScope({
+      config: sourceConfig,
+      rowId: 'src_1',
+      target: { organizationId: 'organization_1', teamId: 'team_a' },
+      ctx: memberCtx,
+      applyUpdate,
+    });
+    expect(outcome).toMatchObject({ code: ResourceMissing.code });
     expect(applyUpdate).not.toHaveBeenCalled();
   });
 
   it('moves a row the actor can see in its current scope', async () => {
     const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
-    await reassignScope({
+    const moved = await reassignScope({
       config: sourceConfig,
       rowId: 'src_1',
       current: { userId: 'u2', organizationId: null, teamId: null },
@@ -227,6 +229,7 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
       ctx: memberCtx,
       applyUpdate,
     });
+    expect(moved).toEqual({ organizationId: 'organization_1', teamId: 'team_a' });
     expect(applyUpdate).toHaveBeenCalledOnce();
   });
 });

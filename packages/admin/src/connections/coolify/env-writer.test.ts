@@ -7,7 +7,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { isFailure, orThrow } from '@arki/failure';
+
+import { AdminInvalidOutput, AdminInvalidRequest, AdminProtocolUnsupported } from '../../failures';
 import { COOLIFY_RUNTIME_PROBE_KEY, createCoolifyEnvWriter } from './index';
 
 const BASE = 'https://coolify.example.invalid';
@@ -131,7 +133,7 @@ describe('coolify env writer', () => {
   // A production identity key must not ride along into PR previews, unhidden.
   it('leaves no preview copy of a written key, and no probe at all', async () => {
     const { writer, rows } = fakeCoolify('current');
-    await writer.write(APP, entries);
+    orThrow(await writer.write(APP, entries));
     expect(rows.map(row => `${row.key}${row.is_preview ? ' (preview)' : ''}`)).toEqual([
       'FOREMAN_APP_ID',
       'FOREMAN_APP_KEY',
@@ -141,66 +143,59 @@ describe('coolify env writer', () => {
 
   it('removes preview copies left by an earlier write, leaving production variables', async () => {
     const { writer, rows } = fakeCoolify('current');
-    await writer.write(APP, entries);
+    orThrow(await writer.write(APP, entries));
     const appKey = rows.find(row => row.key === 'FOREMAN_APP_KEY');
     if (appKey === undefined) throw new Error('no FOREMAN_APP_KEY row');
     rows.push({ ...appKey, uuid: 'env-old-preview', is_preview: true, is_shown_once: false });
-    await writer.removePreviewCopies(APP, ['FOREMAN_APP_KEY', COOLIFY_RUNTIME_PROBE_KEY]);
+    expect(await writer.removePreviewCopies(APP, ['FOREMAN_APP_KEY', COOLIFY_RUNTIME_PROBE_KEY])).toBeUndefined();
     expect(rows.filter(row => row.is_preview)).toEqual([]);
     expect(rows.map(row => row.key)).toEqual(['FOREMAN_APP_ID', 'FOREMAN_APP_KEY']);
   });
 
   it('sends no real value to a Coolify that would store it build-time', async () => {
     const { writer, requests } = fakeCoolify('ignores-buildtime-flag');
-    const error = await writer.write(APP, entries).catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(AdminError);
-    expect((error as AdminError).code).toBe(ADMIN_ERROR_CODES.protocolUnsupported);
+    expect(await writer.write(APP, entries)).toMatchObject({ code: AdminProtocolUnsupported.code });
     expect(requests.some(request => request.body.includes(PRIVATE_KEY))).toBe(false);
   });
 
   it('fails, naming only the key, when a stored flag comes back wrong', async () => {
     const { writer } = fakeCoolify('buildtime-for-app-key');
-    const error = await writer.write(APP, entries).catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(AdminError);
-    expect((error as AdminError).message).toMatch(/FOREMAN_APP_KEY as runtime-only/);
-    expect((error as AdminError).message).not.toContain('FOREMAN_APP_ID');
+    const error = await writer.write(APP, entries);
+    expect(error).toMatchObject({ code: AdminInvalidOutput.code });
+    expect(isFailure(error) ? error.message : '').toMatch(/FOREMAN_APP_KEY as runtime-only/);
+    expect(isFailure(error) ? error.message : '').not.toContain('FOREMAN_APP_ID');
   });
 
   it('keeps every value out of errors and logs, even when Coolify quotes it back in a 422', async () => {
     const spy = vi.spyOn(console, 'log').mockReturnValue();
     const failures = await Promise.all([
-      fakeCoolify('refuses')
-        .writer.write(APP, entries)
-        .catch((error: unknown) => error),
-      fakeCoolify('buildtime-for-app-key')
-        .writer.write(APP, entries)
-        .catch((error: unknown) => error),
+      fakeCoolify('refuses').writer.write(APP, entries),
+      fakeCoolify('buildtime-for-app-key').writer.write(APP, entries),
       createCoolifyEnvWriter({
         baseUrl: BASE,
         token: 'write-token',
         fetch: () => Promise.reject(new Error(`boom ${PRIVATE_KEY}`)),
-      })
-        .write(APP, entries)
-        .catch((error: unknown) => error),
+      }).write(APP, entries),
     ]);
     for (const failure of failures) {
-      expect(failure).toBeInstanceOf(AdminError);
-      const error = failure as AdminError;
+      expect(isFailure(failure)).toBe(true);
       expect(
-        `${error.message} ${error.remediation} ${String(error.stack)} ${JSON.stringify(error.cause ?? null)}`,
+        isFailure(failure)
+          ? `${failure.message} ${String(failure.remediation)} ${JSON.stringify(failure.cause ?? null)}`
+          : '',
       ).not.toContain('super-secret');
     }
-    expect((failures[0] as AdminError).code).toBe(ADMIN_ERROR_CODES.invalidInput);
+    expect(failures[0]).toMatchObject({ code: AdminInvalidRequest.code });
     expect(JSON.stringify(spy.mock.calls)).not.toContain('super-secret');
     spy.mockRestore();
   });
 
   it('refuses bad entries before calling Coolify', async () => {
     const { writer, requests } = fakeCoolify('current');
-    await expect(writer.write(APP, [{ key: 'lower-case', value: 'x', secret: false }])).rejects.toMatchObject({
-      code: ADMIN_ERROR_CODES.invalidInput,
+    expect(await writer.write(APP, [{ key: 'lower-case', value: 'x', secret: false }])).toMatchObject({
+      code: AdminInvalidRequest.code,
     });
-    await expect(writer.write(APP, [])).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.invalidInput });
+    expect(await writer.write(APP, [])).toMatchObject({ code: AdminInvalidRequest.code });
     expect(requests).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 
+import { isFailure } from '@arki/failure';
 import type { Icon } from '@arki/icons/phosphor';
 import {
   AppleLogo,
@@ -22,6 +23,7 @@ import { Input } from '@arki/ui/input';
 import { Label } from '@arki/ui/label';
 
 import type { AuthDefinition, SocialMethod } from '../definition.js';
+import { SignInRefused } from '../boundary-failures.js';
 import { authCapabilities } from './capabilities.js';
 
 /**
@@ -42,15 +44,18 @@ import { authCapabilities } from './capabilities.js';
 /** Async actions the form delegates to (wired per-app to the auth client). */
 export type SignInHandlers = {
   /** Send a magic sign-in link to `email`. Resolves on send. */
-  onMagicLink: (email: string) => Promise<void>;
+  onMagicLink: (email: string) => Promise<void | SignInRefusal>;
   /**
    * Sign in with email + password. On success the handler is responsible for
    * navigating (it typically never resolves because the page redirects).
    */
-  onPasswordSignIn: (email: string, password: string) => Promise<void>;
+  onPasswordSignIn: (email: string, password: string) => Promise<void | SignInRefusal>;
   /** Start an OAuth flow. The browser is redirected to the provider. */
-  onSocialSignIn: (provider: SocialMethod) => Promise<void> | void;
+  onSocialSignIn: (provider: SocialMethod) => Promise<void | SignInRefusal> | void;
 };
+
+/** A refused sign-in, returned by a handler. The form shows the text for its `data.reason`. */
+export type SignInRefusal = ReturnType<typeof SignInRefused>;
 
 export type SignInLocalization = {
   title: string;
@@ -85,6 +90,12 @@ export type SignInLocalization = {
   /** Action that returns to the form to edit the email. */
   changeEmailAction: string;
   genericError: string;
+  /** Shown when the email or password is wrong. */
+  credentialsError: string;
+  /** Shown when the account's email is not verified yet. */
+  unverifiedError: string;
+  /** Shown when too many attempts were made. */
+  rateLimitedError: string;
 };
 
 const DEFAULT_LOCALIZATION: SignInLocalization = {
@@ -111,6 +122,9 @@ const DEFAULT_LOCALIZATION: SignInLocalization = {
   changeEmailPrompt: 'Wrong email?',
   changeEmailAction: 'Change it',
   genericError: 'Something went wrong. Please try again.',
+  credentialsError: 'Check your details and try again.',
+  unverifiedError: 'Verify your email address first. Check your inbox for the link.',
+  rateLimitedError: 'Too many attempts. Wait a moment and try again.',
 };
 
 const SOCIAL_PROVIDERS: Record<SocialMethod, { label: string; Icon: Icon }> = {
@@ -200,6 +214,17 @@ export function SignInForm({
     return err instanceof Error && err.message ? err.message : l.genericError;
   }
 
+  /** The text for a refusal a handler returned: by its reason, never the server's own words. */
+  function refusalMessage(refusal: SignInRefusal): string {
+    const messages = {
+      credentials: l.credentialsError,
+      unverified: l.unverifiedError,
+      rateLimited: l.rateLimitedError,
+      unknown: l.genericError,
+    } as const satisfies Record<SignInRefusal['data']['reason'], string>;
+    return messages[refusal.data.reason];
+  }
+
   // Tick the resend cooldown down while the "check your inbox" state is shown.
   useEffect(() => {
     if (status !== 'sent' || resent || resendIn <= 0) return;
@@ -235,11 +260,20 @@ export function SignInForm({
     try {
       setStatus('submitting');
       if (mode === 'password' && canPassword) {
-        await handlers.onPasswordSignIn(trimmedEmail, password);
+        const refused = await handlers.onPasswordSignIn(trimmedEmail, password);
+        if (isFailure(refused)) {
+          setError(refusalMessage(refused));
+          setStatus('idle');
+        }
         // On success the handler navigates away; keep the button busy.
         return;
       }
-      await handlers.onMagicLink(trimmedEmail);
+      const refused = await handlers.onMagicLink(trimmedEmail);
+      if (isFailure(refused)) {
+        setError(refusalMessage(refused));
+        setStatus('idle');
+        return;
+      }
       setResent(false);
       setResendIn(RESEND_COOLDOWN_SECONDS);
       setStatus('sent');
@@ -255,7 +289,12 @@ export function SignInForm({
     try {
       setStatus('social');
       setSocialPending(provider);
-      await handlers.onSocialSignIn(provider);
+      const refused = await handlers.onSocialSignIn(provider);
+      if (isFailure(refused)) {
+        setError(refusalMessage(refused));
+        setStatus('idle');
+        setSocialPending(null);
+      }
     } catch (error_) {
       setError(resolveErrorMessage(error_));
       setStatus('idle');
@@ -273,7 +312,11 @@ export function SignInForm({
 
   async function handleResend() {
     try {
-      await handlers.onMagicLink(email.trim());
+      const refused = await handlers.onMagicLink(email.trim());
+      if (isFailure(refused)) {
+        setError(refusalMessage(refused));
+        return;
+      }
       setResent(true);
     } catch (error_) {
       setError(resolveErrorMessage(error_));
@@ -505,8 +548,11 @@ export function SignInForm({
 /* Auth-client adapter                                                        */
 /* -------------------------------------------------------------------------- */
 
-/** Minimal shape of a better-auth call result the adapter inspects. */
-type AuthClientResult = { error?: { message?: string | null } | null };
+/**
+ * Minimal shape of a better-auth call result the adapter inspects. `status` is the HTTP status
+ * and `code` better-auth's error code (`EMAIL_NOT_VERIFIED`); the server's `message` is not read.
+ */
+type AuthClientResult = { error?: { status?: number | null; code?: string | null } | null };
 
 /**
  * Structural subset of a better-auth client the adapter needs. Methods use
@@ -533,10 +579,17 @@ export type SignInHandlerOptions = {
   onSignedIn?: () => void;
 };
 
-function assertOk(result: AuthClientResult) {
-  if (result.error) {
-    throw new Error(result.error.message ?? 'Authentication failed.');
-  }
+/** The reason a better-auth error means, from its HTTP status and code (the same map as the server's `failureOf`). */
+function refusalReason(error: NonNullable<AuthClientResult['error']>): SignInRefusal['data']['reason'] {
+  if (error.status === 429) return 'rateLimited';
+  if (error.status === 401) return 'credentials';
+  if (error.status === 403 && error.code === 'EMAIL_NOT_VERIFIED') return 'unverified';
+  return 'unknown';
+}
+
+/** `undefined` when the call succeeded, else the refusal for its error. */
+function refusalOf(result: AuthClientResult): SignInRefusal | undefined {
+  return result.error ? SignInRefused({ reason: refusalReason(result.error) }) : undefined;
 }
 
 /**
@@ -552,14 +605,15 @@ export function createSignInHandlers(
   return {
     onMagicLink: async email => {
       if (authClient.signIn.magicLink === undefined) throw new Error('Magic-link sign-in is not enabled.');
-      assertOk(await authClient.signIn.magicLink({ email, callbackURL: redirectTo }));
+      return refusalOf(await authClient.signIn.magicLink({ email, callbackURL: redirectTo }));
     },
     onPasswordSignIn: async (email, password) => {
-      assertOk(await authClient.signIn.email({ email, password, callbackURL: redirectTo }));
-      signedIn();
+      const refused = refusalOf(await authClient.signIn.email({ email, password, callbackURL: redirectTo }));
+      if (refused === undefined) signedIn();
+      return refused;
     },
     onSocialSignIn: async provider => {
-      assertOk(await authClient.signIn.social({ provider, callbackURL: redirectTo }));
+      return refusalOf(await authClient.signIn.social({ provider, callbackURL: redirectTo }));
     },
   };
 }

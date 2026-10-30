@@ -10,6 +10,7 @@ export type {
   SignInFormSource,
   SignInHandlerOptions,
   SignInHandlers,
+  SignInRefusal,
   SignInLocalization,
 } from './sign-in-form.js';
 export { createAuthClient } from './client.js';

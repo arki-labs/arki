@@ -3,6 +3,9 @@
  * clock. It has the `@arki/kv` `KV` methods the nonce and receipt stores use.
  */
 import type { Clock } from '@arki/clock';
+import { isFailure } from '@arki/failure';
+
+import { wireCodeOf } from './failures';
 
 type Entry = { value: unknown; expiresAt: number | undefined };
 
@@ -31,4 +34,14 @@ export function memoryKv(clock: Clock) {
       return Promise.resolve(true);
     },
   };
+}
+
+/**
+ * Awaits a call that must come back refused. Answers the failure, its message, and the stable
+ * `ARKI_ADMIN_E0NN` code it travelled under on the wire (the failure's own code for any other failure).
+ */
+export async function refusal(promise: Promise<unknown>) {
+  const result = await promise;
+  if (!isFailure(result)) throw new Error(`expected a refusal, got ${JSON.stringify(result)}`);
+  return { failure: result, code: wireCodeOf(result.code) ?? result.code, message: result.message };
 }

@@ -57,6 +57,21 @@ export const AuthenticationUnavailable = defineFailure('auth.unavailable', {
   message: 'Authentication is temporarily unavailable.',
 });
 
+/** Why a sign-in was refused. The one list behind the `SignInFailure` type and the failure data. */
+export const SIGN_IN_FAILURE_REASONS = ['credentials', 'unverified', 'rateLimited', 'unknown'] as const;
+
+/**
+ * A sign-in was refused: wrong credentials, an unverified email, or too many attempts. The reason
+ * is the only detail; the server's own text never reaches the form.
+ * @fix Show the reason to the person signing in: check the credentials, verify the email, or wait.
+ * @verify bun run test -- src/react/sign-in-form.test.tsx
+ */
+export const SignInRefused = /* @__PURE__ */ defineFailure('auth.sign_in_refused', {
+  status: 401,
+  data: z.object({ reason: z.enum(SIGN_IN_FAILURE_REASONS) }),
+  message: 'Sign-in was refused.',
+});
+
 /** Definitions for route.failures, errorMap and client revival. */
 export const AUTH_FAILURES = [
   AuthenticationRequired,

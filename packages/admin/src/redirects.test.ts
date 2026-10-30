@@ -6,7 +6,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { createForemanClient, generateForemanKeyPair } from './client';
-import { ADMIN_ERROR_CODES, AdminError } from './module';
+import { refusal } from './test-support';
+import { ADMIN_ERROR_CODES } from './module';
 import { fetchFleetSnapshot } from './server';
 
 const INTERNAL = 'http://169.254.169.254/latest/meta-data';
@@ -35,12 +36,7 @@ describe('T(admin-redirects)', () => {
       readKey: readPair.privateKey,
       fetch: fetchImpl,
     });
-    const error: unknown = await client.manifest().then(
-      () => null,
-      (error_: unknown) => error_,
-    );
-    expect(error).toBeInstanceOf(AdminError);
-    if (!(error instanceof AdminError)) return;
+    const error = await refusal(client.manifest());
     expect(error.code).toBe(ADMIN_ERROR_CODES.unreachable);
     expect(error.message).toMatch(/redirect/);
     expect(requested.some(url => url.startsWith(INTERNAL))).toBe(false);

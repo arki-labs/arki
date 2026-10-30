@@ -46,6 +46,8 @@ export {
   ResourceMissing,
   AuthenticationRateLimited,
   AuthenticationUnavailable,
+  SIGN_IN_FAILURE_REASONS,
+  SignInRefused,
   resolvePrincipal,
   requirePrincipal,
   checkPrincipal,

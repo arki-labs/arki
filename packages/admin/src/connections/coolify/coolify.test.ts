@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { isFailure, orThrow } from '@arki/failure';
+
+import { AdminError } from '../../errors';
+import {
+  AdminInvalidOutput,
+  AdminInvalidRequest,
+  AdminUnauthenticated,
+  AdminUnknownCapability,
+  AdminUnreachable,
+} from '../../failures';
 import {
   APP_UUID,
   applications,
@@ -55,11 +64,11 @@ const fullRoutes: Routes = {
 describe('coolify-conformance: fixture replay', () => {
   it('reads applications, deployments, servers and the version, GET only, with the bearer token', async () => {
     const { client, calls } = clientFor(fullRoutes);
-    const apps = await client.listApplications();
-    const app = await client.getApplication(APP_UUID);
-    const deploys = await client.listDeployments(APP_UUID, { take: 5 });
-    const list = await client.listServers();
-    const one = await client.getServer(SERVER_UUID);
+    const apps = orThrow(await client.listApplications());
+    const app = orThrow(await client.getApplication(APP_UUID));
+    const deploys = orThrow(await client.listDeployments(APP_UUID, { take: 5 }));
+    const list = orThrow(await client.listServers());
+    const one = orThrow(await client.getServer(SERVER_UUID));
     expect(apps[0]?.uuid).toBe(APP_UUID);
     expect(app.name).toBe('example-web');
     expect(deploys[0]?.deployment_uuid).toBe(DEPLOY_UUID);
@@ -73,9 +82,9 @@ describe('coolify-conformance: fixture replay', () => {
   // Discovery groups apps by project and finds their source: the API joins app -> environment -> project by id.
   it("names an application's project and build paths from the project and environment reads", async () => {
     const { client, calls } = clientFor(fullRoutes);
-    const [app] = await client.listApplications();
-    const [project] = await client.listProjects();
-    const projectEnvironments = project === undefined ? [] : await client.listEnvironments(project.uuid);
+    const [app] = orThrow(await client.listApplications());
+    const [project] = orThrow(await client.listProjects());
+    const projectEnvironments = project === undefined ? [] : orThrow(await client.listEnvironments(project.uuid));
     const [environment] = projectEnvironments;
     expect(environment?.id).toBe(app?.environment_id);
     expect(project?.name).toBe('Example');
@@ -89,28 +98,27 @@ describe('coolify-conformance: fixture replay', () => {
       [`/api/v1/deployments/applications/${APP_UUID}`]: { body: [deployment] },
       '/api/v1/version': { body: '5.1.0', text: true },
     });
-    expect(await client.listDeployments(APP_UUID)).toHaveLength(1);
-    const probe = await client.probeVersion();
+    expect(orThrow(await client.listDeployments(APP_UUID))).toHaveLength(1);
+    const probe = orThrow(await client.probeVersion());
     expect(probe.supported).toBe(false);
   });
 });
 
 describe('coolify-conformance: schema drift', () => {
-  it('a missing required field is a coded invalidOutput error naming the field, not the value', async () => {
+  it('a missing required field is a returned invalid-output failure naming the field, not the value', async () => {
     const { client } = clientFor({ '/api/v1/applications': { body: [{ name: 'no-uuid', secretish: 'leak-me' }] } });
-    const error = await client.listApplications().catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(AdminError);
-    expect(error).toMatchObject({ code: ADMIN_ERROR_CODES.invalidOutput });
-    expect(String((error as Error).message)).toContain('0.uuid');
-    expect(String((error as Error).message)).not.toContain('leak-me');
+    const error = await client.listApplications();
+    expect(error).toMatchObject({ code: AdminInvalidOutput.code });
+    expect(isFailure(error) ? error.message : '').toContain('0.uuid');
+    expect(isFailure(error) ? error.message : '').not.toContain('leak-me');
   });
 
-  it('maps 401, 404 and server errors to codes', async () => {
+  it('returns 401, 404 and server errors as failures', async () => {
     const { client } = clientFor({ '/api/v1/servers': { status: 401, body: { message: 'Unauthenticated.' } } });
-    await expect(client.listServers()).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.unauthenticated });
-    await expect(client.getServer('nope')).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.unknownCapability });
+    expect(await client.listServers()).toMatchObject({ code: AdminUnauthenticated.code });
+    expect(await client.getServer('nope')).toMatchObject({ code: AdminUnknownCapability.code });
     const bad = clientFor({ '/api/v1/applications': { status: 500, body: {} } });
-    await expect(bad.client.listApplications()).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.unreachable });
+    expect(await bad.client.listApplications()).toMatchObject({ code: AdminUnreachable.code });
   });
 
   it('rejects bad options at construction', () => {
@@ -124,21 +132,25 @@ describe('coolify-conformance: webhooks are hints', () => {
 
   it('a spoofed webhook for a resource the API does not know yields no signal', async () => {
     const { client } = clientFor(fullRoutes);
-    const hint = parseWebhookHint({ event: 'deployment_failed', deployment_uuid: 'forged0000uuid' }, now);
+    const hint = orThrow(parseWebhookHint({ event: 'deployment_failed', deployment_uuid: 'forged0000uuid' }, now));
     expect(hint).toMatchObject({ kind: 'deployment', resourceUuid: 'forged0000uuid', receivedAt: now });
     expect(await confirmHint(client, hint)).toEqual([]);
   });
 
   it('a webhook claiming a failure for a healthy resource produces no signal', async () => {
     const { client } = clientFor(fullRoutes);
-    const hint = parseWebhookHint({ event: 'server_unreachable', server_uuid: SERVER_UUID, message: 'FAKE' }, now);
+    const hint = orThrow(
+      parseWebhookHint({ event: 'server_unreachable', server_uuid: SERVER_UUID, message: 'FAKE' }, now),
+    );
     expect(await confirmHint(client, hint)).toEqual([]);
   });
 
   it('a confirmed webhook becomes a signal built from API data, not webhook text', async () => {
     const { client } = clientFor(fullRoutes);
-    const hint = parseWebhookHint({ event: 'deployment_failed', deployment_uuid: DEPLOY_UUID, message: 'LIES' }, now);
-    const [signal, ...rest] = await confirmHint(client, hint);
+    const hint = orThrow(
+      parseWebhookHint({ event: 'deployment_failed', deployment_uuid: DEPLOY_UUID, message: 'LIES' }, now),
+    );
+    const [signal, ...rest] = orThrow(await confirmHint(client, hint));
     expect(rest).toEqual([]);
     expect(signal).toMatchObject({
       source: 'coolify',
@@ -153,20 +165,19 @@ describe('coolify-conformance: webhooks are hints', () => {
 
   it('confirms an unreachable server from the API', async () => {
     const { client } = clientFor({ [`/api/v1/servers/${SERVER_UUID}`]: { body: unreachableServer } });
-    const [signal] = await confirmHint(client, parseWebhookHint({ server_uuid: SERVER_UUID }, now));
+    const [signal] = orThrow(await confirmHint(client, orThrow(parseWebhookHint({ server_uuid: SERVER_UUID }, now))));
     expect(signal).toMatchObject({ kind: 'server.unreachable', severity: 'critical' });
   });
 
-  it('rethrows a rejected token instead of hiding it', async () => {
+  it('returns a rejected token instead of hiding it', async () => {
     const { client } = clientFor({ [`/api/v1/deployments/${DEPLOY_UUID}`]: { status: 403, body: {} } });
-    await expect(confirmHint(client, parseWebhookHint({ deployment_uuid: DEPLOY_UUID }, now))).rejects.toMatchObject({
-      code: ADMIN_ERROR_CODES.unauthenticated,
-    });
+    const hint = orThrow(parseWebhookHint({ deployment_uuid: DEPLOY_UUID }, now));
+    expect(await confirmHint(client, hint)).toMatchObject({ code: AdminUnauthenticated.code });
   });
 
   it('refuses bodies that name no resource; verifies the optional secret in constant time', () => {
-    expect(() => parseWebhookHint({ event: 'x' }, now)).toThrow(AdminError);
-    expect(() => parseWebhookHint('nope', now)).toThrow(AdminError);
+    expect(parseWebhookHint({ event: 'x' }, now)).toMatchObject({ code: AdminInvalidRequest.code });
+    expect(parseWebhookHint('nope', now)).toMatchObject({ code: AdminInvalidRequest.code });
     expect(verifyWebhookSecret('s3cret', 's3cret')).toBe(true);
     expect(verifyWebhookSecret('s3creT', 's3cret')).toBe(false);
     expect(verifyWebhookSecret(null, 's3cret')).toBe(false);
@@ -185,16 +196,15 @@ describe('coolify-conformance: the token never leaks', () => {
     const denied = clientFor({ '/api/v1/servers': { status: 401, body: {} } });
     const drift = clientFor({ '/api/v1/applications': { body: [{}] } });
     const errors = await Promise.all([
-      throwing.listServers().catch((error: unknown) => error),
-      denied.client.listServers().catch((error: unknown) => error),
-      drift.client.listApplications().catch((error: unknown) => error),
+      throwing.listServers(),
+      denied.client.listServers(),
+      drift.client.listApplications(),
     ]);
     for (const e of errors) {
-      expect(e).toBeInstanceOf(AdminError);
-      const err = e as AdminError;
-      expect(
-        `${err.message} ${err.remediation} ${String(err.stack)} ${JSON.stringify(err.cause ?? null)}`,
-      ).not.toContain('super-secret');
+      expect(isFailure(e)).toBe(true);
+      expect(isFailure(e) ? `${e.message} ${String(e.remediation)} ${JSON.stringify(e.cause ?? null)}` : '').not.toContain(
+        'super-secret',
+      );
     }
     expect(JSON.stringify(spy.mock.calls)).not.toContain('super-secret');
     spy.mockRestore();

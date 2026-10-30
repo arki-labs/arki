@@ -4,9 +4,13 @@
  * {@link createForemanClient} signs each call with the read or execute key and
  * checks every response's proof against the target's enrolled identity key:
  * the proof must be signed by that key, name the expected `aud`, echo this
- * request's nonce, and match the status and body bytes. Anything else is
- * `ARKI_ADMIN_E012` — the client never trusts a response it cannot tie to the
- * target it meant to call.
+ * request's nonce, and match the status and body bytes. Anything else is the
+ * returned {@link AdminTargetMismatch} failure — the client never trusts a response it
+ * cannot tie to the target it meant to call.
+ *
+ * Every call returns the value or an {@link AdminFailure}: the target refused, could not be
+ * reached, or answered outside the contract. Only a bug in the caller's code throws
+ * ({@link AdminError}: a bad configuration, invalid scopes, no execute key).
  *
  * Give the execute key only to the process that executes approved actions;
  * create read-only clients (no `executeKey`) everywhere else.
@@ -18,10 +22,20 @@
 import type { Clock } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 
 import type { JsonValue } from './json';
 import type { ForemanManifest, KeyUse, PermitClaim } from './protocol';
-import { ADMIN_ERROR_CODES, AdminError, moduleError } from './errors';
+import type { AdminFailure } from './failures';
+import { ADMIN_ERROR_CODES, AdminError } from './errors';
+import {
+  adminFailureOfWire,
+  AdminInvalidOutput,
+  AdminModuleRefused,
+  AdminProtocolUnsupported,
+  AdminTargetMismatch,
+  AdminUnreachable,
+} from './failures';
 import { sha256 } from './json';
 import {
   audienceSchema,
@@ -108,20 +122,23 @@ export type CreateForemanClientOptions = {
 /** Result of {@link ForemanClient.negotiate}. */
 export type Negotiated = { protocol: 1 } | { protocol: 2; manifest: ForemanManifest };
 
+/** Why a client call did not return its value. */
+export type ForemanClientFailure = AdminFailure;
+
 /** What an execute call needs besides the input. */
 export type ExecuteOptions = { scopes: readonly string[]; permit: PermitClaim };
 
 export type ForemanClient = {
   /** Ask the target for its manifest; report protocol 1 only when the target allows it and has no protocol-2 route. */
-  negotiate(): Promise<Negotiated>;
+  negotiate(): Promise<Negotiated | ForemanClientFailure>;
   /** The target's manifest. Requires protocol 2. */
-  manifest(): Promise<ForemanManifest>;
+  manifest(): Promise<ForemanManifest | ForemanClientFailure>;
   /** Run a read. `scopes` are the operator's signed scopes for this call. */
-  read(id: string, input: JsonValue, scopes: readonly string[]): Promise<JsonValue>;
+  read(id: string, input: JsonValue, scopes: readonly string[]): Promise<JsonValue | ForemanClientFailure>;
   /** Run an action's preview (read key). */
-  preview(id: string, input: JsonValue, scopes: readonly string[]): Promise<JsonValue>;
+  preview(id: string, input: JsonValue, scopes: readonly string[]): Promise<JsonValue | ForemanClientFailure>;
   /** Run an approved action (execute key). */
-  execute(id: string, input: JsonValue, options: ExecuteOptions): Promise<JsonValue>;
+  execute(id: string, input: JsonValue, options: ExecuteOptions): Promise<JsonValue | ForemanClientFailure>;
 };
 
 const optionsSchema = z.object({
@@ -241,7 +258,7 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
     path: string,
     payload: { input: JsonValue } | undefined,
     scopes: readonly string[],
-  ): Promise<Sent> {
+  ): Promise<Sent | AdminFailure> {
     const parsedScopes = scopesSchema.safeParse(scopes);
     if (!parsedScopes.success) {
       throw new AdminError(
@@ -270,26 +287,21 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
         redirect: 'manual',
       });
       if (isRedirect(response)) {
-        throw new AdminError(
-          ADMIN_ERROR_CODES.unreachable,
-          `${target.aud} answered with a redirect (HTTP ${String(response.status)}); Foreman does not follow redirects.`,
-          'Enroll the final base URL of the target; a redirect is never followed.',
-        );
+        return AdminUnreachable({
+          detail: `${target.aud} answered with a redirect (HTTP ${String(response.status)}); Foreman does not follow redirects. Enroll the final base URL of the target.`,
+        });
       }
       return { response, bytes: new Uint8Array(await response.arrayBuffer()), nonce: signed.nonce };
     } catch (error) {
-      if (error instanceof AdminError) throw error;
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unreachable,
-        `Could not reach ${target.aud} at ${target.baseUrl}.`,
-        'Treat the outcome as unknown; check the target is up and reachable from Foreman.',
+      return AdminUnreachable(
+        { detail: `Could not reach ${target.aud} at ${target.baseUrl}.` },
         { cause: error },
       );
     }
   }
 
   /** Check the response proof; return the status and parsed body only when it proves the target. */
-  async function verified({ response, bytes, nonce }: Sent): Promise<{ status: number; body: unknown }> {
+  async function verified({ response, bytes, nonce }: Sent): Promise<{ status: number; body: unknown } | AdminFailure> {
     const proofBytes = fromBase64Url(response.headers.get(FOREMAN_HEADERS.proof) ?? '');
     const signature = fromBase64Url(response.headers.get(FOREMAN_HEADERS.proofSignature) ?? '');
     const appKey = await (appKeyPromise ??= importPublicKey(target.appKey));
@@ -306,17 +318,13 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
       proof.data.status === response.status &&
       proof.data.bodySha256 === (await sha256(bytes));
     if (!matches) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.targetMismatch,
-        `The response did not prove it came from ${target.aud}.`,
-        "Check the target's base URL and the identity key recorded at enrollment; do not act on this response.",
-      );
+      return AdminTargetMismatch({ detail: `The response did not prove it came from ${target.aud}.` });
     }
     return { status: response.status, body: parseJsonBytes(bytes) };
   }
 
-  /** The `data` of a verified success, or the app's coded error rethrown. */
-  function unwrap(result: { status: number; body: unknown }): JsonValue {
+  /** The `data` of a verified success, or the app's coded error as a failure. */
+  function unwrap(result: { status: number; body: unknown }): JsonValue | AdminFailure {
     if (result.status >= 200 && result.status < 300) {
       const success = successBodySchema.safeParse(result.body);
       if (success.success) return success.data.data;
@@ -325,44 +333,60 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
       if (failure.success) {
         const { code, message, remediation } = failure.data.error;
         const text = `${target.aud} answered HTTP ${String(result.status)}: ${message}`;
-        const adminCode = Object.values(ADMIN_ERROR_CODES).find(known => known === code);
-        if (adminCode !== undefined) throw new AdminError(adminCode, text, remediation);
-        // A module's own code: keep it, with the status the app answered.
-        throw moduleError(code, result.status, text, remediation);
+        // A module's own code is kept, with the status the app answered.
+        return (
+          adminFailureOfWire(code, text) ??
+          AdminModuleRefused({ code, httpStatus: result.status, detail: text, remediation })
+        );
       }
     }
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidOutput,
-      `${target.aud} answered HTTP ${String(result.status)} with a body outside protocol ${String(FOREMAN_PROTOCOL_VERSION)}.`,
-      'Upgrade the app to a matching @arki/admin version.',
-    );
+    return AdminInvalidOutput({
+      detail: `${target.aud} answered HTTP ${String(result.status)} with a body outside protocol ${String(FOREMAN_PROTOCOL_VERSION)}.`,
+    });
   }
 
-  async function negotiate(): Promise<Negotiated> {
+  /** Sign, send, verify the proof and unwrap one call. */
+  async function call(
+    use: Call,
+    method: 'GET' | 'POST',
+    path: string,
+    payload: { input: JsonValue } | undefined,
+    scopes: readonly string[],
+  ): Promise<JsonValue | AdminFailure> {
+    const sent = await send(use, method, path, payload, scopes);
+    if (isFailure(sent)) return sent;
+    const checked = await verified(sent);
+    if (isFailure(checked)) return checked;
+    return unwrap(checked);
+  }
+
+  async function negotiate(): Promise<Negotiated | AdminFailure> {
     const sent = await send({ use: 'read' }, 'GET', foremanPaths.manifest(basePath), undefined, []);
+    if (isFailure(sent)) return sent;
     // A target without the protocol-2 dispatcher answers a bare 404: no proof header at all.
     if (sent.response.status === 404 && !sent.response.headers.has(FOREMAN_HEADERS.proof)) {
       if (target.allowProtocol1 === true) return { protocol: 1 };
-      throw new AdminError(
-        ADMIN_ERROR_CODES.protocolUnsupported,
-        `${target.aud} has no protocol ${String(FOREMAN_PROTOCOL_VERSION)} route.`,
-        'Mount createForemanHandler on the app, or allow protocol 1 for this target while it migrates.',
-      );
+      return AdminProtocolUnsupported({
+        detail: `${target.aud} has no protocol ${String(FOREMAN_PROTOCOL_VERSION)} route.`,
+      });
     }
-    const manifest = foremanManifestSchema.safeParse(unwrap(await verified(sent)));
+    const checked = await verified(sent);
+    if (isFailure(checked)) return checked;
+    const data = unwrap(checked);
+    if (isFailure(data)) return data;
+    const manifest = foremanManifestSchema.safeParse(data);
     if (!manifest.success) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.invalidOutput,
-        `${target.aud} sent a manifest outside protocol ${String(FOREMAN_PROTOCOL_VERSION)}:\n${z.prettifyError(manifest.error)}`,
-        'Upgrade the app to a matching @arki/admin version.',
+      return AdminInvalidOutput(
+        {
+          detail: `${target.aud} sent a manifest outside protocol ${String(FOREMAN_PROTOCOL_VERSION)}:\n${z.prettifyError(manifest.error)}`,
+        },
+        { cause: manifest.error },
       );
     }
     if (manifest.data.app.id !== appId || manifest.data.app.environment !== environment) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.targetMismatch,
-        `The manifest names ${manifest.data.app.id}:${manifest.data.app.environment}, not ${target.aud}.`,
-        "Check the app's FOREMAN audience and the target's enrollment.",
-      );
+      return AdminTargetMismatch({
+        detail: `The manifest names ${manifest.data.app.id}:${manifest.data.app.environment}, not ${target.aud}.`,
+      });
     }
     return { protocol: 2, manifest: manifest.data };
   }
@@ -371,27 +395,16 @@ export function createForemanClient(options: CreateForemanClientOptions): Forema
     negotiate,
     async manifest() {
       const negotiated = await negotiate();
+      if (isFailure(negotiated)) return negotiated;
       if (negotiated.protocol !== FOREMAN_PROTOCOL_VERSION) {
-        throw new AdminError(
-          ADMIN_ERROR_CODES.protocolUnsupported,
-          `${target.aud} speaks only protocol 1.`,
-          'Use fetchFleetSnapshot from @arki/admin/server for this target.',
-        );
+        return AdminProtocolUnsupported({ detail: `${target.aud} speaks only protocol 1.` });
       }
       return negotiated.manifest;
     },
-    async read(id, input, scopes) {
-      return unwrap(
-        await verified(await send({ use: 'read' }, 'POST', foremanPaths.read(id, basePath), { input }, scopes)),
-      );
-    },
-    async preview(id, input, scopes) {
-      const path = foremanPaths.preview(id, basePath);
-      return unwrap(await verified(await send({ use: 'read' }, 'POST', path, { input }, scopes)));
-    },
-    async execute(id, input, { scopes, permit }) {
-      const path = foremanPaths.execute(id, basePath);
-      return unwrap(await verified(await send({ use: 'execute', permit }, 'POST', path, { input }, scopes)));
-    },
+    read: (id, input, scopes) => call({ use: 'read' }, 'POST', foremanPaths.read(id, basePath), { input }, scopes),
+    preview: (id, input, scopes) =>
+      call({ use: 'read' }, 'POST', foremanPaths.preview(id, basePath), { input }, scopes),
+    execute: (id, input, { scopes, permit }) =>
+      call({ use: 'execute', permit }, 'POST', foremanPaths.execute(id, basePath), { input }, scopes),
   };
 }

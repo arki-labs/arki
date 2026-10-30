@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { AdminInvalidRequest } from '../../failures';
 import { timingSafeEqual } from './constant-time';
 
 /** What a webhook claims to be about. It is a claim, never a fact. */
@@ -44,17 +44,14 @@ export function verifyWebhookSecret(provided: string | null | undefined, expecte
 }
 
 /**
- * Turn a webhook body into a hint. Throws a coded error when the body names no resource.
+ * Turn a webhook body into a hint. Returns {@link AdminInvalidRequest} when the body is not an object or
+ * names no resource: ignore that delivery.
  * Nothing in the result is trusted: it only says where to look.
  */
-export function parseWebhookHint(body: unknown, receivedAt: Date): CoolifyHint {
+export function parseWebhookHint(body: unknown, receivedAt: Date): CoolifyHint | ReturnType<typeof AdminInvalidRequest> {
   const parsed = payloadSchema.safeParse(body);
   if (!parsed.success) {
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidInput,
-      'The Coolify webhook body is not a JSON object.',
-      'Ignore this delivery.',
-    );
+    return AdminInvalidRequest({ detail: 'The Coolify webhook body is not a JSON object. Ignore this delivery.' });
   }
   const p = parsed.data;
   const label = `${p.event ?? ''} ${p.title ?? ''}`;
@@ -67,9 +64,5 @@ export function parseWebhookHint(body: unknown, receivedAt: Date): CoolifyHint {
   for (const [kind, uuid] of candidates) {
     if (uuid !== undefined && uuidShape.test(uuid)) return { kind, resourceUuid: uuid, receivedAt };
   }
-  throw new AdminError(
-    ADMIN_ERROR_CODES.invalidInput,
-    'The Coolify webhook body names no resource uuid.',
-    'Ignore this delivery.',
-  );
+  return AdminInvalidRequest({ detail: 'The Coolify webhook body names no resource uuid. Ignore this delivery.' });
 }

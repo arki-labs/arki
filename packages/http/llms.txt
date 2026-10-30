@@ -14,7 +14,7 @@ Match errors on `error.code`, never on the message. Output is only as narrow as 
 - `@arki/http/idempotency`: Idempotency keys for HTTP: `idempotent(...)` is an `HttpMiddleware` that runs a request once per key and answers a repeat with the stored response. `IDEMPOTENCY_FAILURES`, `IdempotencyClaimUnconfirmed`, `IdempotencyHashUnavailable`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `IdempotencyOwnershipLost`, `IdempotencyReleaseUnconfirmed`, `IdempotencyReplayInvalid`, `IdempotencyRequestTooLarge`, `IdempotencyRequestUnreadable`, `IdempotencyResponseUnavailable`; and 12 more.
 - `@arki/http/webhooks`: Signed webhooks in: check that a request comes from the sender who holds the secret. `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `WEBHOOK_FAILURES`, `WEBHOOK_SIGN_FAILURES`, `WEBHOOK_VERIFY_FAILURES`, `WebhookBodyTooLarge`, `WebhookBodyUnreadable`, `WebhookCryptoUnavailable`, `WebhookMalformed`, `WebhookSignatureMismatch`, `WebhookStale`; and 18 more.
 - `@arki/http/context`: Ambient request context — the last resort. `registerEngineContext`, `requestContext`, `runWithRequestContext`.
-- `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `UnsafeUrlError`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`, `systemTransport`, `validatePublicURL`; types `PublicFetchTransport`.
+- `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `PUBLIC_FETCH_FAILURES`, `RedirectLimit`, `ResponseTooLarge`, `UnsafeUrl`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`, `systemTransport`, `validatePublicURL`; types `PublicFetchFailure`, `PublicFetchResult`, `PublicFetchTransport`.
 <!-- llms:end -->
 
 ## Start here

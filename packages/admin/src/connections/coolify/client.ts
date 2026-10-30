@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
 
+import { isFailure } from '@arki/failure';
+
 import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnknownCapability, AdminUnreachable } from '../../failures';
 import {
   coolifyApplicationListSchema,
   coolifyApplicationSchema,
@@ -67,7 +70,18 @@ function parseVersion(raw: string): CoolifyVersionProbe {
   return { version, major, supported: major === COOLIFY_SUPPORTED_MAJOR };
 }
 
-/** Read-only Coolify client. Every method is a GET. */
+/** What a Coolify call can return instead of its value. The token and the response body are never in a message. */
+export type CoolifyFailure =
+  | ReturnType<typeof AdminUnreachable>
+  | ReturnType<typeof AdminUnauthenticated>
+  | ReturnType<typeof AdminUnknownCapability>
+  | ReturnType<typeof AdminInvalidOutput>;
+
+/**
+ * Read-only Coolify client. Every method is a GET. A call returns its value or a {@link CoolifyFailure}:
+ * unreachable (network, timeout, a bad status), unauthenticated (token rejected), unknown capability
+ * (404) or invalid output (a body that is not the expected JSON). Only invalid options throw.
+ */
 export function createCoolifyClient(options: CoolifyClientOptions) {
   const parsed = coolifyOptionsSchema.safeParse(options);
   if (!parsed.success) {
@@ -83,7 +97,7 @@ export function createCoolifyClient(options: CoolifyClientOptions) {
   const { token } = parsed.data;
   const doFetch = options.fetch;
 
-  async function getText(path: string): Promise<string> {
+  async function getText(path: string): Promise<string | CoolifyFailure> {
     let response: Response;
     try {
       response = await doFetch(`${apiBase}${path}`, {
@@ -94,58 +108,39 @@ export function createCoolifyClient(options: CoolifyClientOptions) {
     } catch {
       // The underlying error is dropped on purpose: it may echo request headers.
       logger.debug('coolify GET {path} failed before a response', { path });
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unreachable,
-        `Coolify did not answer GET ${path} (network error or timeout).`,
-        'Check the Coolify URL and that the instance is up.',
-      );
+      return AdminUnreachable({ detail: `Coolify did not answer GET ${path} (network error or timeout).` });
     }
     logger.debug('coolify GET {path} -> {status}', { path, status: response.status });
     if (response.status === 401 || response.status === 403) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unauthenticated,
-        `Coolify rejected the token for GET ${path} (HTTP ${response.status}).`,
-        'Create a read-only API token in Coolify and pass it again.',
-      );
+      return AdminUnauthenticated({
+        detail: `Coolify rejected the token for GET ${path} (HTTP ${response.status}). Create a read-only API token and pass it again.`,
+      });
     }
     if (response.status === 404) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unknownCapability,
-        `Coolify has no resource at GET ${path}.`,
-        'The resource was deleted, or the Coolify version lacks this endpoint.',
-      );
+      return AdminUnknownCapability({ detail: `Coolify has no resource at GET ${path}.` });
     }
     if (!response.ok) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unreachable,
-        `Coolify answered GET ${path} with HTTP ${response.status}.`,
-        'Retry later; check the Coolify instance health.',
-      );
+      return AdminUnreachable({ detail: `Coolify answered GET ${path} with HTTP ${response.status}.` });
     }
     return response.text();
   }
 
-  async function get<S extends z.ZodType>(path: string, schema: S): Promise<z.output<S>> {
+  async function get<S extends z.ZodType>(path: string, schema: S): Promise<z.output<S> | CoolifyFailure> {
     const text = await getText(path);
+    if (isFailure(text)) return text;
     let body: unknown;
     try {
       body = JSON.parse(text);
     } catch {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.invalidOutput,
-        `Coolify returned a non-JSON body for GET ${path}.`,
-        'The Coolify API may have changed; check the installed version.',
-      );
+      return AdminInvalidOutput({ detail: `Coolify returned a non-JSON body for GET ${path}.` });
     }
     const result = schema.safeParse(body);
     if (!result.success) {
       // Paths only: never echo values from the body.
       const paths = result.error.issues.map(issue => issue.path.join('.') || '(root)').join(', ');
-      throw new AdminError(
-        ADMIN_ERROR_CODES.invalidOutput,
-        `Coolify response for GET ${path} does not match the expected shape (fields: ${paths}).`,
-        'The Coolify API may have changed; check the installed version.',
-      );
+      return AdminInvalidOutput({
+        detail: `Coolify response for GET ${path} does not match the expected shape (fields: ${paths}).`,
+      });
     }
     return result.data;
   }
@@ -167,7 +162,10 @@ export function createCoolifyClient(options: CoolifyClientOptions) {
     listEnvironments: (projectUuid: string) =>
       get(`/projects/${segment(projectUuid)}/environments`, coolifyEnvironmentListSchema),
     /** Installed-version probe, so Foreman can warn on an unsupported Coolify. */
-    probeVersion: async (): Promise<CoolifyVersionProbe> => parseVersion(await getText('/version')),
+    probeVersion: async (): Promise<CoolifyVersionProbe | CoolifyFailure> => {
+      const text = await getText('/version');
+      return isFailure(text) ? text : parseVersion(text);
+    },
   };
 }
 

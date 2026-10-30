@@ -53,6 +53,26 @@ import { jsonObjectSchema, schemaHash } from './json';
 export type { AdminErrorCode } from './errors';
 export { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors';
 export type { ModuleError } from './errors';
+export type { AdminFailure } from './failures';
+export {
+  ADMIN_FAILURES,
+  AdminExecutionInProgress,
+  AdminHandlerFailed,
+  AdminInvalidOutput,
+  AdminInvalidRequest,
+  AdminModuleRefused,
+  AdminProtocolUnsupported,
+  AdminReceiptsUnavailable,
+  AdminScopeDenied,
+  AdminStaleApproval,
+  AdminTargetMismatch,
+  AdminUnauthenticated,
+  AdminUnknownCapability,
+  AdminUnreachable,
+  AdminWritesDisabled,
+  adminFailureOfWire,
+  wireCodeOf,
+} from './failures';
 export type { JsonObject, JsonValue } from './json';
 export { canonicalJson, jsonObjectSchema, jsonValueSchema, schemaHash } from './json';
 

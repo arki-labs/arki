@@ -616,12 +616,16 @@ const partner = createClient(partnerRoutes, {
   checked address, and follows a redirect only to another public URL. It
   buffers the body (at most `maxBytes`, default 10 MB), so a streaming answer
   arrives whole.
-- **`UnsafeUrlError`** is what the guard throws when it refuses a URL: not
+- **`UnsafeUrl`** is the failure the guard returns when it refuses a URL: not
   http(s), not a URL, or a private, loopback or link-local address, whether
   typed, in the DNS answer, or behind a redirect. No request reached that
   address, and the same URL is refused every time, so do not retry it.
-  `safeFetchBytes` and `validatePublicURL` throw it too. A network failure
-  still throws what the network throws.
+  `safeFetchBytes` and `validatePublicURL` return it. `safeFetchBytes` also
+  returns `RedirectLimit`, `ResponseTooLarge`, `NetworkFailure`,
+  `RequestTimeout` and `RequestCancelled`; it does not throw for them. A
+  `fetch` can only resolve or reject, so `publicFetch()` rejects with a
+  `TypeError` whose `cause` is the failure (`createClient` returns it as
+  `NetworkFailure`); a caller abort rejects with the signal's reason.
 
 ## Without DOT
 
@@ -680,7 +684,7 @@ Rules:
 
 - Match on `error.code`, never on the message.
 - Schema validation failures answer 400 with `schema.invalid_input` and public issues in `data`.
-- A handler that throws something else answers 500 with `ARKI_HTTP_E500`. In production the message is redacted.
+- A handler that throws something else answers 500 with `ARKI_HTTP_E500`. The message is redacted unless `NODE_ENV=development`.
 - Boot and shutdown problems (`E0NN`) do not reach the wire. They surface in `app.diagnostics`.
 - `listen` and `stop` reject with a coded error you can catch.
 
@@ -717,7 +721,6 @@ Stable API — match on codes, never parse messages.
 | `http.idempotency_hash_unavailable` | runtime has no Web Crypto SHA-256 (503); no cache acquisition or handler execution |
 | `http.idempotency_key_required` / `http.idempotency_key_reused` / `http.idempotency_in_progress` | idempotency: key missing (400), key reused (422), still running (409 with `Retry-After: 1`); replaces legacy E410/E411/E412 wire codes |
 | `ARKI_HTTP_E413` | request body larger than the route allows (413) |
-| `ARKI_HTTP_E430` | `@arki/http/public-fetch` refused a URL: a private, loopback or link-local address, a bad scheme, or a redirect to one (thrown as `UnsafeUrlError`, never sent on the wire) |
 | `ARKI_HTTP_E420` / `E421` / `E422` | legacy diagnostic constants; migrated webhook operations return the canonical failures below |
 | `http.webhook_malformed` / `http.webhook_signature_mismatch` / `http.webhook_stale` | malformed headers/time, invalid signature, authenticated time outside the window (401) |
 | `http.webhook_body_unreadable` / `http.webhook_body_too_large` | request bytes unreadable (400) or above the configured cap (413) |
@@ -729,7 +732,7 @@ Stable API — match on codes, never parse messages.
 `E0NN` codes surface through the DOT lifecycle into `app.diagnostics`;
 `E4xx`/`E5xx` codes surface on the wire in the error envelope (`E510` and
 `E511` answer 500). Unexpected
-error messages are redacted when `NODE_ENV=production`.
+error messages are redacted unless `NODE_ENV=development`.
 
 ## Limits
 

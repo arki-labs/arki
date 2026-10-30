@@ -22,7 +22,7 @@
  *
  * Secrets are sealed at rest with AES-GCM under `encryptionKey`, bound to their subscription id.
  * Delivery goes through `publicFetch()` by default, so a subscriber URL cannot reach a private
- * address, at subscribe time or after a DNS change. A refused URL (`UnsafeUrlError`) is dead at
+ * address, at subscribe time or after a DNS change. A refused URL (`UnsafeUrl`, the cause of the error `publicFetch` rejects with) is dead at
  * once: it is refused the same way on every try, so retrying it only fills `webhook_attempts`.
  */
 import type { PgSchema, PgTableFn } from 'drizzle-orm/pg-core';
@@ -33,8 +33,8 @@ import { z } from 'zod';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Backoff } from '@arki/resilience';
 import { defineId } from '@arki/contracts';
-import { isFailure } from '@arki/failure';
-import { publicFetch, UnsafeUrlError, validatePublicURL } from '@arki/http/public-fetch';
+import { findCause, isFailure } from '@arki/failure';
+import { publicFetch, UnsafeUrl, validatePublicURL } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 
@@ -252,7 +252,7 @@ export function webhookSender(options: WebhookSenderOptions) {
   const retry = options.retry ?? backoff.exponential({ base: 5000, max: 3_600_000, jitter: 0.25 }).upTo(10);
   /** The wait before the next try, or `undefined` for dead. A refused URL is dead whatever `retry` says. */
   const nextDelay = (attempt: number, error: unknown) =>
-    error instanceof UnsafeUrlError ? undefined : retry.delay(attempt, error);
+    findCause(error, UnsafeUrl) === undefined ? retry.delay(attempt, error) : undefined;
   const disableAfter = options.disableAfter ?? 5;
   const maxPayloadBytes = options.maxPayloadBytes ?? 1_048_576;
   // The journal's wake channel: every journal worker of this table hears it.
@@ -437,10 +437,9 @@ export function webhookSender(options: WebhookSenderOptions) {
       if (new URL(url).protocol !== 'https:') {
         throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, 'subscribe: the URL must use https');
       }
-      try {
-        validatePublicURL(url);
-      } catch (error) {
-        throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `subscribe: ${errorText(error)}`, { cause: error });
+      const checked = validatePublicURL(url);
+      if (isFailure(checked)) {
+        throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `subscribe: ${checked.message}`, { cause: checked });
       }
       const id = subscriptionId.create();
       if (isFailure(id)) return id;

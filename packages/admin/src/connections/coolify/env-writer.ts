@@ -3,7 +3,17 @@ import { z } from 'zod';
 import { getLogger } from '@arki/log';
 
 import type { CoolifyClientOptions } from './client';
+import { isFailure } from '@arki/failure';
+
 import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import {
+  AdminInvalidOutput,
+  AdminInvalidRequest,
+  AdminProtocolUnsupported,
+  AdminUnauthenticated,
+  AdminUnknownCapability,
+  AdminUnreachable,
+} from '../../failures';
 import { coolifyOptionsSchema } from './client';
 
 /**
@@ -59,8 +69,21 @@ const listedEnvsSchema = z.array(z.object({ uuid: z.string().min(1), key: z.stri
 const runtimeOnly = (row: StoredFlags | undefined) =>
   row !== undefined && row.is_runtime && !row.is_buildtime && !row.is_preview;
 
+/** What a Coolify write call can return instead of its value. The token and response bodies are never in a message. */
+export type CoolifyEnvFailure =
+  | ReturnType<typeof AdminUnreachable>
+  | ReturnType<typeof AdminUnauthenticated>
+  | ReturnType<typeof AdminUnknownCapability>
+  | ReturnType<typeof AdminInvalidRequest>
+  | ReturnType<typeof AdminInvalidOutput>
+  | ReturnType<typeof AdminProtocolUnsupported>;
+
 /** Parses an answer with a strict schema; on a mismatch, names the request, never the body. */
-function answerOf<S extends z.ZodType>(text: string, schema: S, request: string): z.output<S> {
+function answerOf<S extends z.ZodType>(
+  text: string,
+  schema: S,
+  request: string,
+): z.output<S> | ReturnType<typeof AdminInvalidOutput> {
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -69,11 +92,9 @@ function answerOf<S extends z.ZodType>(text: string, schema: S, request: string)
   }
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    throw new AdminError(
-      ADMIN_ERROR_CODES.invalidOutput,
-      `Coolify's answer to ${request} does not have the expected shape.`,
-      'Check the variables in Coolify by hand: each must have "Build variable" off. The Coolify API may have changed.',
-    );
+    return AdminInvalidOutput({
+      detail: `Coolify's answer to ${request} does not have the expected shape. Check the variables in Coolify by hand: each must have "Build variable" off.`,
+    });
   }
   return parsed.data;
 }
@@ -94,7 +115,11 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
   const { token } = parsed.data;
   const doFetch = options.fetch;
 
-  async function send(method: 'GET' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<string> {
+  async function send(
+    method: 'GET' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<string | CoolifyEnvFailure> {
     let response: Response;
     try {
       response = await doFetch(`${apiBase}${path}`, {
@@ -106,41 +131,23 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
     } catch {
       // The underlying error is dropped on purpose: it may echo request headers or the body.
       logger.debug('coolify {method} {path} failed before a response', { method, path });
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unreachable,
-        `Coolify did not answer ${method} ${path} (network error or timeout).`,
-        'Check the Coolify URL and that the instance is up.',
-      );
+      return AdminUnreachable({ detail: `Coolify did not answer ${method} ${path} (network error or timeout).` });
     }
     logger.debug('coolify {method} {path} -> {status}', { method, path, status: response.status });
     if (response.status === 401 || response.status === 403) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unauthenticated,
-        `Coolify rejected the token for ${method} ${path} (HTTP ${response.status}).`,
-        'Use an API token with the write ability for this team.',
-      );
+      return AdminUnauthenticated({
+        detail: `Coolify rejected the token for ${method} ${path} (HTTP ${response.status}). Use an API token with the write ability for this team.`,
+      });
     }
     if (response.status === 404) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unknownCapability,
-        `Coolify has no resource at ${method} ${path}.`,
-        'Check the application uuid, or that this Coolify version has the endpoint.',
-      );
+      return AdminUnknownCapability({ detail: `Coolify has no resource at ${method} ${path}.` });
     }
     if (response.status === 400 || response.status === 422) {
       // Coolify's validation errors can quote the submitted values, so only the status is kept.
-      throw new AdminError(
-        ADMIN_ERROR_CODES.invalidInput,
-        `Coolify refused ${method} ${path} (HTTP ${response.status}).`,
-        'Check the variable names and that every value is non-empty.',
-      );
+      return AdminInvalidRequest({ detail: `Coolify refused ${method} ${path} (HTTP ${response.status}).` });
     }
     if (!response.ok) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.unreachable,
-        `Coolify answered ${method} ${path} with HTTP ${response.status}.`,
-        'Retry later; check the Coolify instance health.',
-      );
+      return AdminUnreachable({ detail: `Coolify answered ${method} ${path} with HTTP ${response.status}.` });
     }
     return response.text();
   }
@@ -160,6 +167,7 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
         is_shown_once: entry.secret,
       })),
     });
+    if (isFailure(text)) return text;
     return answerOf(text, storedFlagsSchema, `PATCH ${path}`);
   }
 
@@ -167,77 +175,90 @@ export function createCoolifyEnvWriter(options: CoolifyClientOptions) {
   async function deleteEnvs(
     applicationUuid: string,
     pick: (env: z.output<typeof listedEnvsSchema>[number]) => boolean,
-  ) {
+  ): Promise<undefined | CoolifyEnvFailure> {
     const path = `/applications/${segment(applicationUuid)}/envs`;
-    const listed = answerOf(await send('GET', path), listedEnvsSchema, `GET ${path}`);
-    for (const env of listed.filter(entry => pick(entry))) await send('DELETE', `${path}/${segment(env.uuid)}`);
+    const text = await send('GET', path);
+    if (isFailure(text)) return text;
+    const listed = answerOf(text, listedEnvsSchema, `GET ${path}`);
+    if (isFailure(listed)) return listed;
+    for (const env of listed.filter(entry => pick(entry))) {
+      const deleted = await send('DELETE', `${path}/${segment(env.uuid)}`);
+      if (isFailure(deleted)) return deleted;
+    }
+    return undefined;
   }
 
   /** Deletes the preview copies of `keys`, which Coolify makes for every new variable. */
   async function removePreviewCopies(applicationUuid: string, keys: readonly string[]) {
     const wanted = new Set(keys);
-    await deleteEnvs(applicationUuid, env => env.is_preview && wanted.has(env.key));
+    return deleteEnvs(applicationUuid, env => env.is_preview && wanted.has(env.key));
   }
 
   /** Stores a harmless probe, checks Coolify kept it runtime-only, and deletes it. */
-  async function probe(applicationUuid: string) {
+  async function probe(applicationUuid: string): Promise<undefined | CoolifyEnvFailure> {
     const stored = await upsert(applicationUuid, [
       { key: COOLIFY_RUNTIME_PROBE_KEY, value: 'runtime-only', secret: false },
     ]);
+    if (isFailure(stored)) return stored;
     const row = stored.find(entry => entry.key === COOLIFY_RUNTIME_PROBE_KEY);
-    // Both copies: the probe and the preview copy Coolify made of it.
-    await deleteEnvs(applicationUuid, env => env.key === COOLIFY_RUNTIME_PROBE_KEY).catch(() => {
+    // Both copies: the probe and the preview copy Coolify made of it. A failed cleanup is logged, not returned.
+    const cleaned = await deleteEnvs(applicationUuid, env => env.key === COOLIFY_RUNTIME_PROBE_KEY);
+    if (isFailure(cleaned)) {
       logger.debug('coolify probe {key} was not deleted from {app}', {
         key: COOLIFY_RUNTIME_PROBE_KEY,
         app: applicationUuid,
       });
-    });
-    if (!runtimeOnly(row)) {
-      throw new AdminError(
-        ADMIN_ERROR_CODES.protocolUnsupported,
-        'This Coolify did not keep a variable runtime-only (the probe came back build-time, preview or missing). No real value was written.',
-        'Upgrade Coolify to a version whose API takes is_buildtime, or set the variables by hand with "Build variable" off.',
-      );
     }
+    if (!runtimeOnly(row)) {
+      return AdminProtocolUnsupported({
+        detail:
+          'This Coolify did not keep a variable runtime-only (the probe came back build-time, preview or missing). No real value was written. Upgrade Coolify to a version whose API takes is_buildtime, or set the variables by hand with "Build variable" off.',
+      });
+    }
+    return undefined;
   }
 
   return {
     /**
      * Writes `entries` to one application, runtime-only. Probes first, so a Coolify that would
-     * store them build-time gets no real value. Throws when any stored flag comes back wrong.
+     * store them build-time gets no real value. Returns a {@link CoolifyEnvFailure} when Coolify
+     * cannot be reached or refuses, or when any stored flag comes back wrong.
      * Then deletes the preview copies Coolify made of them. A changed variable takes effect
      * on the application's next deploy.
      */
-    async write(applicationUuid: string, entries: readonly CoolifyEnvEntry[]): Promise<{ keys: string[] }> {
+    async write(
+      applicationUuid: string,
+      entries: readonly CoolifyEnvEntry[],
+    ): Promise<{ keys: string[] } | CoolifyEnvFailure> {
       const checked = z.array(coolifyEnvEntrySchema).min(1).safeParse(entries);
       if (!checked.success) {
         const paths = checked.error.issues.map(issue => issue.path.join('.') || '(root)').join(', ');
-        throw new AdminError(
-          ADMIN_ERROR_CODES.invalidInput,
-          `Coolify env entries are invalid (fields: ${paths}).`,
-          'Pass at least one entry, each with an UPPER_SNAKE_CASE key and a non-empty value.',
-        );
+        return AdminInvalidRequest({
+          detail: `Coolify env entries are invalid (fields: ${paths}). Pass at least one entry, each with an UPPER_SNAKE_CASE key and a non-empty value.`,
+        });
       }
-      await probe(applicationUuid);
+      const probed = await probe(applicationUuid);
+      if (probed !== undefined) return probed;
       const stored = await upsert(applicationUuid, checked.data);
+      if (isFailure(stored)) return stored;
       const wrong = checked.data
         .map(entry => entry.key)
         .filter(key => !runtimeOnly(stored.find(row => row.key === key)));
       if (wrong.length > 0) {
-        throw new AdminError(
-          ADMIN_ERROR_CODES.invalidOutput,
-          `Coolify did not confirm ${wrong.join(', ')} as runtime-only.`,
-          'In Coolify, turn "Build variable" off for these keys before the next deploy.',
-        );
+        return AdminInvalidOutput({
+          detail: `Coolify did not confirm ${wrong.join(', ')} as runtime-only. In Coolify, turn "Build variable" off for these keys before the next deploy.`,
+        });
       }
       const keys = checked.data.map(entry => entry.key);
-      await removePreviewCopies(applicationUuid, keys);
+      const removed = await removePreviewCopies(applicationUuid, keys);
+      if (removed !== undefined) return removed;
       return { keys };
     },
 
     /**
      * Deletes the preview copies of `keys` on one application, leaving the production variables.
-     * For variables written before the writer removed them itself.
+     * For variables written before the writer removed them itself. Returns a {@link CoolifyEnvFailure}
+     * when Coolify cannot be reached or refuses.
      */
     removePreviewCopies,
   };
