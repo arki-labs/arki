@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
 
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
-import { InvalidOutput, ModelUnavailable } from '../failures.js';
+import { Cancelled, InvalidOutput, ModelUnavailable } from '../failures.js';
 import { EMBEDDINGGEMMA_2_INSTRUCTION } from '../instructions.js';
 import { countTokens } from '../tokens.js';
 import { createTransformersModel } from './index.js';
@@ -17,7 +17,8 @@ const mock = vi.hoisted(() => {
     loads: number;
     disposals: number;
     fail: Error | undefined;
-  } = { dims: 6, output: 'pooled', loads: 0, disposals: 0, fail: undefined };
+    runError: Error | undefined;
+  } = { dims: 6, output: 'pooled', loads: 0, disposals: 0, fail: undefined, runError: undefined };
   return state;
 });
 
@@ -35,6 +36,7 @@ vi.mock('@huggingface/transformers', () => {
   const model = Object.assign(
     (encoding: { attention_mask: { dims: [number, number] } }) => {
       const [rows, tokens] = encoding.attention_mask.dims;
+      if (mock.runError) return Promise.reject(mock.runError);
       if (mock.output === 'broken') return Promise.resolve({ logits: [] });
       if (mock.output === 'hidden') {
         // Token t of every row is the vector [t + 1, 0, …]: the masked mean is easy to predict.
@@ -72,7 +74,7 @@ let cacheDir = 0;
 const fresh = () => ({ cacheDir: `cache-${++cacheDir}` });
 
 beforeEach(() => {
-  Object.assign(mock, { dims: 6, output: 'pooled', loads: 0, disposals: 0, fail: undefined });
+  Object.assign(mock, { dims: 6, output: 'pooled', loads: 0, disposals: 0, fail: undefined, runError: undefined });
 });
 
 describe('createTransformersModel', () => {
@@ -174,5 +176,26 @@ describe('createTransformersModel', () => {
     if (isFailure(model)) throw new Error(model.message);
     mock.output = 'broken';
     expect(InvalidOutput.is(await model.embedTexts({ texts: ['a'] }))).toBe(true);
+  });
+
+  // An out-of-memory or session fault is not a malformed answer, and must not read as one.
+  it('a runtime fault while embedding is a defect, not InvalidOutput', async () => {
+    const model = await createTransformersModel(fresh());
+    if (isFailure(model)) throw new Error(model.message);
+    mock.runError = new Error('out of memory');
+    const result = await model.embedTexts({ texts: ['a'] });
+    expect(UnexpectedDefect.is(result)).toBe(true);
+    expect(InvalidOutput.is(result)).toBe(false);
+  });
+
+  it('honours an abort signal before the model runs and when the runtime fails after the abort', async () => {
+    const model = await createTransformersModel(fresh());
+    if (isFailure(model)) throw new Error(model.message);
+    expect(Cancelled.is(await model.embedTexts({ texts: ['a'], signal: AbortSignal.abort() }))).toBe(true);
+    const controller = new AbortController();
+    mock.runError = new Error('stopped');
+    const pending = model.embedTexts({ texts: ['a'], signal: controller.signal });
+    controller.abort();
+    expect(Cancelled.is(await pending)).toBe(true);
   });
 });

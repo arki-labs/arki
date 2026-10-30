@@ -4,13 +4,12 @@
  * No idempotency header is sent, as Unosend documents none.
  */
 import { isFailure } from '@arki/failure';
-import { is, recordSchema } from '@arki/schema';
 
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
-import { fieldOf, stringOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
+import { codeText, readAnswer, unosendRefusalSchema, unosendSentSchema } from './answers.js';
 import { postJson } from './post-json.js';
 
 const UNOSEND_EMAILS_URL = 'https://www.unosend.com/api/v1/emails';
@@ -23,15 +22,17 @@ export type UnosendOptions = {
   readonly quotaPerMonth?: number;
   /** For tests. Default `globalThis.fetch`. */
   readonly fetch?: FetchFn;
+  /** Longest wait for the service to answer, in milliseconds. Default 30 000. */
+  readonly timeoutMs?: number;
 };
 
 /** The error text and code, top level (`{ message, code }`) or nested (`{ error: { message, code } }`). */
 function errorDetail(body: unknown): { message?: string; providerCode?: string } {
-  const nested = fieldOf(body, 'error');
-  const source = is(nested, recordSchema) ? nested : body;
-  const message = stringOf(fieldOf(source, 'message')) ?? stringOf(nested);
-  const code = fieldOf(source, 'code');
-  const providerCode = typeof code === 'string' || typeof code === 'number' ? String(code) : undefined;
+  const refusal = readAnswer(unosendRefusalSchema, body);
+  const nested = refusal?.error;
+  const source = typeof nested === 'object' ? nested : refusal;
+  const message = source?.message ?? (typeof nested === 'string' ? nested : undefined);
+  const providerCode = codeText(source?.code);
   return {
     ...(message === undefined ? {} : { message }),
     ...(providerCode === undefined ? {} : { providerCode }),
@@ -70,15 +71,17 @@ export function unosend(options: UnosendOptions): MailTransport {
           ...(message.headers === undefined ? {} : { headers: message.headers }),
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       if (isFailure(answer)) return logged(id, answer);
-      const { status, body } = answer;
-      if (status >= 400) return logged(id, rejection(id, status, errorDetail(body)));
-      if (status < 200 || status >= 300 || typeof body !== 'object' || body === null) {
+      const { status, body, retryAfterMs } = answer;
+      if (status >= 400) return logged(id, rejection(id, status, { ...errorDetail(body), retryAfterMs }));
+      const sent = readAnswer(unosendSentSchema, body);
+      if (status < 200 || status >= 300 || sent === undefined) {
         return logged(id, badResponse(id, status, 'expected a JSON object'));
       }
       return logged(id, {
-        id: stringOf(fieldOf(body, 'id')) ?? stringOf(fieldOf(fieldOf(body, 'data'), 'id')) ?? null,
+        id: sent.id ?? sent.data?.id ?? null,
         transport: id,
         status: 'accepted',
         recipients: everyRecipient(message, 'accepted'),

@@ -19,9 +19,17 @@ import { backoff } from '@arki/resilience';
 
 import type { MailMessage, MailTransport, SentMail, TransportFailure } from '../types.js';
 import { MAIL_ERROR_CODES } from '../errors.js';
-import { MailInvalidInput, MailQuotaExhausted, MailRejected, MailUncertain } from '../failures.js';
+import {
+  MailInvalidInput,
+  MailInvalidMessage,
+  MailQuotaExhausted,
+  MailRejected,
+  MailTooLarge,
+  MailUncertain,
+} from '../failures.js';
 import { mailer } from '../mailer.js';
 import { defineTemplate } from '../template.js';
+import { MAIL_JOB } from './args.js';
 import { mailOutbox } from './index.js';
 import { mailQueueAssertions } from './testing.js';
 
@@ -221,12 +229,38 @@ describe('what is accepted into the queue', () => {
     expect(await queue().queued()).toEqual([]);
   });
 
-  it('an oversized mail throws E010 before the insert', async () => {
+  it('an oversized mail is a returned MailTooLarge before the insert', async () => {
     const outbox = outboxWith(provider('ok').transport, 200);
-    const write = db.transaction(tx =>
+    const result = await db.transaction(tx =>
       outbox.enqueue(tx, magicLink, { url: `https://app.dev/${'x'.repeat(300)}` }, { to }),
     );
-    await expect(write).rejects.toMatchObject({ code: MAIL_ERROR_CODES.badQueuedData });
+    expect(MailTooLarge.is(result)).toBe(true);
+    expect(result).toMatchObject({ data: { maxBytes: 200 } });
+    expect(await queue().queued()).toEqual([]);
+  });
+
+  it('a recipient that cannot be mailed is a returned MailInvalidMessage and queues nothing', async () => {
+    const outbox = outboxWith(provider('ok').transport);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to: ' ' }),
+    );
+    expect(MailInvalidMessage.is(result)).toBe(true);
+    expect(await queue().queued()).toEqual([]);
+  });
+
+  // The service said how long to wait; asking again sooner only burns a try.
+  it('waits at least as long as the service asked in Retry-After before the next try', async () => {
+    const asked = MailRejected({ transport: 'fake', retryable: true, upstreamStatus: 429, retryAfterMs: 90_000 });
+    const outbox = outboxWith(provider(asked).transport);
+    const job = await enqueued(outbox);
+    const stored = await db.select().from(tables.jobs);
+    const row = stored.find(candidate => candidate.id === job.jobId);
+    if (row === undefined) throw new Error('the queued job is missing');
+    const scheduled = { id: row.id, name: MAIL_JOB, args: row.args, attempt: 1 };
+    const thrown = await outbox.runner
+      .run(scheduled, { db, signal: new AbortController().signal })
+      .catch((error: unknown) => error);
+    expect(outbox.runner.retryDelay(scheduled, thrown)).toBeGreaterThanOrEqual(90_000);
   });
 
   it('a queued mail has exactly one recipient: per-recipient results need their own jobs', async () => {

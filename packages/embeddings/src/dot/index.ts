@@ -21,7 +21,7 @@ export type EmbeddingsPluginOptions = {
   /**
    * A model record, an `Embedder`, or a function returning one of them or a failure. The function
    * runs once, at boot: read the app's env there and build the model with its provider's
-   * `createXModel` (a `ConfigurationFailure` for a missing key turns embeddings off, not the app).
+   * `createXModel`. A failure it returns (a `ConfigurationFailure` for a missing key) stops the boot.
    */
   readonly model: EmbeddingModel | Embedder | (() => EmbeddingModel | Embedder | EmbedFailure);
   /** `true`: `withCache` over a `memoryCacheStore()`; a store: `withCache` over it. Default `false`. */
@@ -52,7 +52,7 @@ function baseEmbedder(options: EmbeddingsPluginOptions): Embedder | EmbedFailure
 
 /** The base embedder with resilience inside and the cache outside, so a hit never waits on a retry. */
 function build(input: EmbeddingsPluginOptions): Embedder | EmbedFailure {
-  // A bad option is a configuration that does not build: the app boots with `embedder` null (see `embeddings`).
+  // A bad option is a configuration that does not build: the boot returns the failure (see `embeddings`).
   const options = parseOptions(embeddingsPluginOptionsSchema, input, 'embeddings plugin');
   if (isFailure(options)) return options;
   const base = baseEmbedder(options);
@@ -66,8 +66,9 @@ function build(input: EmbeddingsPluginOptions): Embedder | EmbedFailure {
 
 /**
  * Publish `embedder`: the app's one `Embedder`, built once at boot. A configuration that does not
- * build (a missing key, a size the model refuses) is logged once at `warn` and
- * `embedder` is `null`, so the app boots and features that embed degrade instead of failing it.
+ * build (a bad option, a missing key, a size the model refuses) stops the boot: `boot()` returns
+ * that failure, a `ConfigurationFailure` for configuration faults. An app never runs with embeddings
+ * silently off. An app that can run without embeddings must not mount this unit.
  *
  * @example
  * const embedding = embeddings({
@@ -75,20 +76,21 @@ function build(input: EmbeddingsPluginOptions): Embedder | EmbedFailure {
  *   cache: true,
  * });
  * defineApp('reader').infra(embedding);
- * // in a feature: needs: { embedder: embedding.provides.embedder } → Embedder | null
+ * // in a feature: needs: { embedder: embedding.provides.embedder } → Embedder
  */
 export function embeddings(options: EmbeddingsPluginOptions) {
   return infra({
     name: 'embeddings',
     provides: {
-      embedder: (): Embedder | null => {
+      embedder: (): Embedder | EmbedFailure => {
         const built = build(options);
-        if (!isEmbedFailure(built)) return built;
-        getLogger('arki:embeddings').warn('embeddings are off, embedder is null: {code} {reason}', {
-          code: built.code,
-          reason: built.message,
-        });
-        return null;
+        if (isEmbedFailure(built)) {
+          getLogger('arki:embeddings').error('embeddings could not start: {code} {reason}', {
+            code: built.code,
+            reason: built.message,
+          });
+        }
+        return built;
       },
     },
   });

@@ -119,11 +119,21 @@ export function transportContract(harness: TransportHarness): void {
       expect(harness.lastIdempotencyKey?.()).toBe('job_123');
     });
 
-    it('passes the abort signal to the request', async () => {
+    // The request runs under the caller's signal joined with a timeout, so aborting the caller's must abort the request.
+    it('aborts the request when the caller aborts', async () => {
       harness.succeed();
       const controller = new AbortController();
       await orThrow(harness.create().send(message, { signal: controller.signal }));
-      expect(harness.lastSignal()).toBe(controller.signal);
+      const requestSignal = harness.lastSignal();
+      expect(requestSignal?.aborted).toBe(false);
+      controller.abort();
+      expect(requestSignal?.aborted).toBe(true);
+    });
+
+    it('runs every request under a signal, so it cannot wait forever', async () => {
+      harness.succeed();
+      await orThrow(harness.create().send(message, {}));
+      expect(harness.lastSignal()).toBeInstanceOf(AbortSignal);
     });
   });
 }

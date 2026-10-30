@@ -2,6 +2,8 @@
  * Where `failover` counts sends per transport per month. A quota is advisory: two replicas can
  * read the same count and both send. Atomic reservations are a later step (MAIL-QUOTAS).
  */
+import { z } from 'zod';
+
 import { log } from './log.js';
 
 export type QuotaStore = {
@@ -36,7 +38,12 @@ export type KVLike = {
   set(key: string, value: number, ttlSeconds?: number): Promise<boolean>;
 };
 
-const countOf = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+/** A stored count. Anything else (a missing key, a corrupt value) reads as 0. */
+const countSchema = z.number().nonnegative();
+const countOf = (value: unknown): number => {
+  const parsed = countSchema.safeParse(value);
+  return parsed.success ? parsed.data : 0;
+};
 
 /** Counters expire after 60 days, well past a month's end. */
 const COUNTER_TTL_SECONDS = 60 * 24 * 60 * 60;

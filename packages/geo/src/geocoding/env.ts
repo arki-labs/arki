@@ -1,12 +1,14 @@
 import { defineEnv } from '@arki/env/core';
 import { z } from 'zod';
 
+import { GEOCODING_PROVIDERS } from './types';
+
 export const geocodingEnv = defineEnv({
   name: '@arki/geo',
   server: {
     // Primary provider configuration
     GEOCODING_PROVIDER: z
-      .enum(['google', 'mapbox', 'nominatim', 'locationiq', 'here', 'opencage', 'geocodio'])
+      .enum(GEOCODING_PROVIDERS)
       .default('nominatim'),
     GEOCODING_FALLBACK_PROVIDERS: z.string().default('nominatim'),
 

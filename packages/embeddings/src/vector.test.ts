@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { isFailure } from '@arki/failure';
 
 import { stubModel, echoTexts } from './tests/stub-model.js';
-import { norm, truncate } from './vector.js';
+import { cosine, norm, truncate } from './vector.js';
 
 const matryoshka = stubModel(echoTexts, { dimensions: 4, matryoshka: [4, 2] });
 
@@ -28,5 +28,17 @@ describe('truncate', () => {
     const raw = truncate(Float32Array.of(3, 4, 5, 6), 2, stubModel(echoTexts, { normalized: false }));
     if (isFailure(raw)) throw new Error(raw.message);
     expect([...raw]).toEqual([3, 4]);
+  });
+});
+
+describe('cosine', () => {
+  // A prefix score of vectors from two different spaces looks plausible and is wrong; refusing is the only honest answer.
+  it('refuses vectors of different lengths instead of scoring a prefix', () => {
+    expect(() => cosine(Float32Array.of(1, 0, 0), Float32Array.of(1, 0))).toThrow(/one length/);
+  });
+
+  it('scores vectors of one length', () => {
+    expect(cosine(Float32Array.of(1, 0), Float32Array.of(0, 1))).toBe(0);
+    expect(cosine(Float32Array.of(1, 2), Float32Array.of(1, 2))).toBe(1);
   });
 });

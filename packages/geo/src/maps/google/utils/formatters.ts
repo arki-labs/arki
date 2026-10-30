@@ -58,7 +58,7 @@ export function parseCoordinates(coordString: string): Coordinates | null {
   const lat = Number.parseFloat(parts[0]!);
   const lng = Number.parseFloat(parts[1]!);
 
-  if (isNaN(lat) || isNaN(lng)) return null;
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
   if (lat < -90 || lat > 90) return null;
   if (lng < -180 || lng > 180) return null;
 

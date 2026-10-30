@@ -15,7 +15,7 @@ import {
   UnsupportedInput,
 } from '../failures.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type VoyageRerankerOptions = {
@@ -90,7 +90,7 @@ export function createVoyageReranker(input: VoyageRerankerOptions): Reranker | C
         headers: { 'content-type': 'application/json', authorization: `Bearer ${options.apiKey}` },
         // Voyage cuts by default; only the caller's choice cuts here.
         body: JSON.stringify({ model: id, query, documents, truncation: truncate === true }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -113,6 +113,8 @@ export function createVoyageReranker(input: VoyageRerankerOptions): Reranker | C
         const count = Math.ceil((query.length + (lengths[index] ?? 0)) / CHARS_PER_TOKEN);
         return InputTooLong({ index, tokens: { basis: 'estimated', count }, max: maxInputTokens });
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `voyage answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

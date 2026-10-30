@@ -7,7 +7,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { DbHandle, JournalTables } from '@arki/journal';
 import { is, recordSchema } from '@arki/schema';
 
-import { isMailMessage, MAIL_JOB } from './args.js';
+import { MAIL_JOB, mailMessageSchema } from './args.js';
 
 export type QueuedMail = {
   readonly jobId: string;
@@ -35,9 +35,8 @@ export function mailQueueAssertions(db: DbHandle, tables: Pick<JournalTables, 'j
       .where(and(eq(jobs.jobName, MAIL_JOB), dead ? isNotNull(jobs.deadAt) : isNull(jobs.deadAt)))
       .orderBy(jobs.id);
     return rows.flatMap(row => {
-      const message: unknown =
-        is(row.args, recordSchema) ? row.args['message'] : undefined;
-      if (!isMailMessage(message)) return [];
+      const message: unknown = is(row.args, recordSchema) ? row.args['message'] : undefined;
+      if (!is(message, mailMessageSchema)) return [];
       if (template !== undefined && message.template !== template.name) return [];
       return [
         {

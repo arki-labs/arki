@@ -10,7 +10,7 @@ import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { functionSchema, instructionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { EMBEDDINGGEMMA_INSTRUCTION, NO_INSTRUCTION, NOMIC_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { countTokens } from '../tokens.js';
 
@@ -166,7 +166,7 @@ export function createOllamaModel(input: OllamaModelOptions = {}) {
     digestRequest ??= (async () => {
       digestMiss = 'unreachable';
       try {
-        const response = await send(`${baseURL}/api/tags`, { method: 'GET', ...(signal ? { signal } : {}) });
+        const response = await send(`${baseURL}/api/tags`, { method: 'GET', signal: requestSignal(signal) });
         const body: unknown = response.ok ? await response.json() : undefined;
         // The server answered its model list, so a missing entry means the model is not pulled.
         if (response.ok) digestMiss = 'not-pulled';
@@ -199,7 +199,7 @@ export function createOllamaModel(input: OllamaModelOptions = {}) {
           ...(options.keepAlive === undefined ? {} : { keep_alive: options.keepAlive }),
           ...(dimensions === undefined ? {} : { dimensions }),
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -208,6 +208,9 @@ export function createOllamaModel(input: OllamaModelOptions = {}) {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'not-pulled' });
+      if (response.status === 401 || response.status === 403) {
+        return ConfigurationFailure({ message: `ollama refused the credentials (${response.status}); check the proxy in front of it` });
+      }
       if (response.status === 429) {
         const wait = retryAfterMs(name => response.headers.get(name));
         return RateLimited(wait === undefined ? {} : { retryAfterMs: wait });
@@ -215,6 +218,8 @@ export function createOllamaModel(input: OllamaModelOptions = {}) {
       if (response.status === 400 && TOO_LONG.test(text)) {
         return inputTooLong(model, texts);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `ollama answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

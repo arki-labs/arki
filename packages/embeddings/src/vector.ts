@@ -1,3 +1,5 @@
+import { invariant } from '@arki/failure';
+
 import type { EmbeddingModel } from './types.js';
 import { UnsupportedInput } from './failures.js';
 
@@ -14,17 +16,18 @@ export function norm(vector: Iterable<number>): number {
 }
 
 /**
- * Cosine similarity, for tests and rescoring, not search. Two zero vectors answer 0.
+ * Cosine similarity, for tests and rescoring, not search. Two zero vectors answer 0. Vectors of
+ * different lengths come from different spaces and score nothing, so that is a caller bug and throws.
  *
  * @example
  * cosine(Float32Array.of(1, 0), Float32Array.of(0, 1)); // 0
  */
 export function cosine(a: Float32Array, b: Float32Array): number {
+  invariant(a.length === b.length, () => `cosine needs vectors of one length, got ${a.length} and ${b.length}`);
   let dot = 0;
   let aa = 0;
   let bb = 0;
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
+  for (let index = 0; index < a.length; index++) {
     const x = a[index] ?? 0;
     const y = b[index] ?? 0;
     dot += x * y;

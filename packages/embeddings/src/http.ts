@@ -12,3 +12,16 @@ export function retryAfterMs(read: (name: string) => string | null | undefined):
   const date = Date.parse(header);
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
+
+/** The longest a single provider request may take, in milliseconds. The same bound `withResilience` puts on an attempt. */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
+/**
+ * The signal a provider request runs under: the caller's `signal` (when given) plus a timeout. A timeout
+ * does not abort the caller's signal, so the model reports it as `ModelUnavailable { reason: 'unreachable' }`
+ * and a caller's abort stays `Cancelled`.
+ */
+export function requestSignal(signal: AbortSignal | undefined, timeoutMs = REQUEST_TIMEOUT_MS): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+}

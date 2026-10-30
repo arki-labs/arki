@@ -12,7 +12,7 @@ import { isFailure } from '@arki/failure';
 import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
 
@@ -100,7 +100,7 @@ export function createOpenAIModel(input: OpenAIModelOptions) {
         // Retries belong to withResilience, where each attempt is charged once.
         maxRetries: 0,
         ...(dimensions === undefined ? {} : { providerOptions: { openai: { dimensions } } }),
-        ...(signal ? { abortSignal: signal } : {}),
+        abortSignal: requestSignal(signal),
       });
       const tokens = result.usage.tokens;
       return {
@@ -125,6 +125,8 @@ export function createOpenAIModel(input: OpenAIModelOptions) {
       if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
         return inputTooLong(model, texts);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `openai answered ${status}: ${error.message.slice(0, 200)}` });
     }
   };

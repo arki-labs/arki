@@ -9,8 +9,12 @@
 
 import { useEffect } from 'react';
 
+import { getLogger } from '@arki/log';
+
 import type { Coordinates } from '../../types';
 import { useApiIsLoaded } from '../../hooks';
+
+const log = getLogger('arki:geo');
 
 export type StreetViewCheckerProps = {
   /**
@@ -52,13 +56,19 @@ export function StreetViewChecker({ location, onAvailabilityChange, radius = 50 
     if (apiIsLoaded && typeof google !== 'undefined' && google.maps?.StreetViewService) {
       const streetViewService = new google.maps.StreetViewService();
 
-      streetViewService.getPanorama(
+      void streetViewService.getPanorama(
         {
           location,
           radius,
         },
         (_data, status) => {
-          const available = status === google.maps.StreetViewStatus.OK;
+          // The status values are the strings 'OK', 'ZERO_RESULTS' and 'UNKNOWN_ERROR'.
+          const code: string = status;
+          const available = code === 'OK';
+          if (!available && code !== 'ZERO_RESULTS') {
+            // ZERO_RESULTS means no Street View here; any other status is a lookup fault, not an answer.
+            log.warn('Street View lookup failed with status {status}', { status });
+          }
           onAvailabilityChange(available);
         },
       );

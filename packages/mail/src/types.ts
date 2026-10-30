@@ -4,7 +4,7 @@
  */
 import type { FailureOf, Result } from '@arki/failure';
 
-import type { MailQuotaExhausted, MailRejected, MailUncertain } from './failures.js';
+import type { MailInvalidMessage, MailQuotaExhausted, MailRejected, MailUncertain } from './failures.js';
 import type { renderTemplate } from './template.js';
 
 export type Awaitable<T> = T | Promise<T>;
@@ -65,8 +65,11 @@ export type SentMail = {
 export type TransportFailure =
   FailureOf<typeof MailRejected> | FailureOf<typeof MailUncertain> | FailureOf<typeof MailQuotaExhausted>;
 
-/** What a send returns in place of a sent mail: a transport failure, or input the template refused. */
-export type SendFailure = TransportFailure | FailureOf<typeof renderTemplate>;
+/** What `sendRaw` returns in place of a sent mail: a transport failure, or a message that cannot be sent as written. */
+export type SendRawFailure = TransportFailure | FailureOf<typeof MailInvalidMessage>;
+
+/** What a send returns in place of a sent mail: a transport failure, a bad message, or input the template refused. */
+export type SendFailure = SendRawFailure | FailureOf<typeof renderTemplate>;
 
 /** Sends one mail through one service. */
 export type MailTransport = {

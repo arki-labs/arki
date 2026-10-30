@@ -107,8 +107,8 @@ describe('public types of the root entry', () => {
     expectTypeOf<KV>().toMatchTypeOf<Parameters<typeof kvCacheStore>[0]>();
   });
 
-  it('the Dot unit publishes Embedder | null, so a feature must handle an app with no model', () => {
-    expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder | null>();
+  it('the Dot unit publishes Embedder: a configuration that does not build stops the boot instead of publishing null', () => {
+    expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder>();
   });
 
   it('embedStream yields one { item, result } per source item, the result a value or an EmbedFailure', () => {

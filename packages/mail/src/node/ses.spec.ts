@@ -54,7 +54,11 @@ describe('ses', () => {
     sdk.send.mockResolvedValue({ MessageId: 'ses-1' });
     const controller = new AbortController();
     await orThrow(ses({ region: 'eu-west-1' }).send(message, { signal: controller.signal }));
-    expect(sdk.send.mock.calls[0]?.[1]).toEqual({ abortSignal: controller.signal });
+    // The SDK gets the caller's signal joined with the timeout: aborting the caller's aborts the request.
+    const sent = sdk.send.mock.calls[0]?.[1] as { abortSignal: AbortSignal } | undefined;
+    expect(sent?.abortSignal.aborted).toBe(false);
+    controller.abort();
+    expect(sent?.abortSignal.aborted).toBe(true);
   });
 
   it('an abort (no HTTP status) is uncertain: SES may have taken the mail', async () => {

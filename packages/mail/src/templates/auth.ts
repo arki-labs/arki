@@ -6,14 +6,13 @@
  * @example
  * await mail.send(magicLink, { appName: 'Acme', url }, { to: user.email });
  */
+import { z } from 'zod';
+
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { MailTemplate } from '../template.js';
-import { fieldOf } from '../narrow.js';
 import { defineTemplate } from '../template.js';
 import { isHttpUrl, layout } from './layout.js';
-
-type Issue = StandardSchemaV1.Issue;
 
 export type AuthLinkInput = { readonly appName: string; readonly url: string; readonly expiresInMinutes?: number };
 export type AuthLinkData = { readonly appName: string; readonly url: string; readonly expiresInMinutes: number };
@@ -22,63 +21,37 @@ export type SignInCodeInput = { readonly appName: string; readonly code: string 
 const LINE_BREAK = /[\r\n]/;
 
 /** A non-empty, single-line string field. The app name goes into the subject, where a line break is refused. */
-function readLine(value: unknown, key: string, issues: Issue[]): string | undefined {
-  const field = fieldOf(value, key);
-  if (typeof field === 'string' && field.trim() !== '' && !LINE_BREAK.test(field)) return field;
-  issues.push({ message: `${key} must be a non-empty, single-line string`, path: [key] });
-  return undefined;
-}
+const lineField = (key: string) => {
+  const message = `${key} must be a non-empty, single-line string`;
+  return z
+    .string({ error: message })
+    .refine(value => value.trim() !== '' && !LINE_BREAK.test(value), { error: message });
+};
 
-function readHttpUrl(value: unknown, key: string, issues: Issue[]): string | undefined {
-  const field = fieldOf(value, key);
-  if (typeof field === 'string' && isHttpUrl(field)) return field;
-  issues.push({ message: `${key} must be an absolute http(s) URL`, path: [key] });
-  return undefined;
-}
-
-function readMinutes(value: unknown, key: string, fallback: number, issues: Issue[]): number | undefined {
-  const field = fieldOf(value, key);
-  if (field === undefined) return fallback;
-  if (typeof field === 'number' && Number.isInteger(field) && field > 0) return field;
-  issues.push({ message: `${key} must be a positive whole number`, path: [key] });
-  return undefined;
-}
-
-const notAnObject = { issues: [{ message: 'expected an object' }] };
+const urlField = z
+  .string({ error: 'url must be an absolute http(s) URL' })
+  .refine(isHttpUrl, { error: 'url must be an absolute http(s) URL' });
 
 /** The input schema of a link mail; `expiresInMinutes` defaults to `defaultMinutes`. */
 function linkInput(defaultMinutes: number): StandardSchemaV1<AuthLinkInput, AuthLinkData> {
-  return {
-    '~standard': {
-      version: 1,
-      vendor: 'arki-mail',
-      validate: value => {
-        if (typeof value !== 'object' || value === null) return notAnObject;
-        const issues: Issue[] = [];
-        const appName = readLine(value, 'appName', issues);
-        const url = readHttpUrl(value, 'url', issues);
-        const expiresInMinutes = readMinutes(value, 'expiresInMinutes', defaultMinutes, issues);
-        if (appName === undefined || url === undefined || expiresInMinutes === undefined) return { issues };
-        return { value: { appName, url, expiresInMinutes } };
-      },
+  return z.object(
+    {
+      appName: lineField('appName'),
+      url: urlField,
+      expiresInMinutes: z
+        .number({ error: 'expiresInMinutes must be a positive whole number' })
+        .int({ error: 'expiresInMinutes must be a positive whole number' })
+        .positive({ error: 'expiresInMinutes must be a positive whole number' })
+        .default(defaultMinutes),
     },
-  };
+    { error: 'expected an object' },
+  );
 }
 
-const signInCodeInput: StandardSchemaV1<SignInCodeInput, SignInCodeInput> = {
-  '~standard': {
-    version: 1,
-    vendor: 'arki-mail',
-    validate: value => {
-      if (typeof value !== 'object' || value === null) return notAnObject;
-      const issues: Issue[] = [];
-      const appName = readLine(value, 'appName', issues);
-      const code = readLine(value, 'code', issues);
-      if (appName === undefined || code === undefined) return { issues };
-      return { value: { appName, code } };
-    },
-  },
-};
+const signInCodeInput: StandardSchemaV1<SignInCodeInput, SignInCodeInput> = z.object(
+  { appName: lineField('appName'), code: lineField('code') },
+  { error: 'expected an object' },
+);
 
 /** `90` → `90 minutes`, `120` → `2 hours`, `60` → `1 hour`. */
 function duration(minutes: number): string {

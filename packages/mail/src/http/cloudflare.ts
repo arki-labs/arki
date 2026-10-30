@@ -15,8 +15,8 @@ import type { MailTransport, RecipientOutcome } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { MailRejected } from '../failures.js';
 import { listOf } from '../message.js';
-import { fieldOf, stringOf, stringsOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
+import { cloudflareAnswerSchema, codeText, readAnswer } from './answers.js';
 import { postJson } from './post-json.js';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -32,30 +32,34 @@ export type CloudflareOptions = {
   readonly quotaPerMonth?: number;
   /** For tests. Default `globalThis.fetch`. */
   readonly fetch?: FetchFn;
+  /** Longest wait for the service to answer, in milliseconds. Default 30 000. */
+  readonly timeoutMs?: number;
 };
 
 /** The first entry of Cloudflare's `errors` array: `{ code, message }`. */
-function firstError(body: unknown): { message?: string; providerCode?: string } {
-  const errors = fieldOf(body, 'errors');
-  const first: unknown = Array.isArray(errors) ? errors[0] : undefined;
-  const message = stringOf(fieldOf(first, 'message'));
-  const code = fieldOf(first, 'code');
-  const providerCode = typeof code === 'string' || typeof code === 'number' ? String(code) : undefined;
+function firstError(answer: CloudflareAnswer | undefined): { message?: string; providerCode?: string } {
+  const first = answer?.errors?.[0];
+  const providerCode = codeText(first?.code);
   return {
-    ...(message === undefined ? {} : { message }),
+    ...(first?.message === undefined ? {} : { message: first.message }),
     ...(providerCode === undefined ? {} : { providerCode }),
   };
 }
 
+type CloudflareAnswer = NonNullable<ReturnType<typeof readCloudflareAnswer>>;
+type CloudflareResult = NonNullable<CloudflareAnswer['result']>;
+
+const readCloudflareAnswer = (body: unknown) => readAnswer(cloudflareAnswerSchema, body);
+
 /** Per-recipient outcomes from `result`. A missing list is an empty one. */
-function outcomesOf(result: object): readonly RecipientOutcome[] {
-  const list = (key: string, status: RecipientOutcome['status']): RecipientOutcome[] =>
-    (stringsOf(fieldOf(result, key)) ?? []).map(address => ({ address, status }));
+function outcomesOf(result: CloudflareResult): readonly RecipientOutcome[] {
+  const list = (addresses: readonly string[] | undefined, status: RecipientOutcome['status']): RecipientOutcome[] =>
+    (addresses ?? []).map(address => ({ address, status }));
   return [
-    ...list('delivered', 'accepted'),
-    ...list('queued', 'accepted'),
-    ...list('permanent_bounces', 'rejected'),
-    ...list('suppressed_recipients', 'suppressed'),
+    ...list(result.delivered, 'accepted'),
+    ...list(result.queued, 'accepted'),
+    ...list(result.permanent_bounces, 'rejected'),
+    ...list(result.suppressed_recipients, 'suppressed'),
   ];
 }
 
@@ -95,17 +99,19 @@ export function cloudflare(options: CloudflareOptions): MailTransport {
           ...(message.headers === undefined ? {} : { headers: message.headers }),
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       if (isFailure(answer)) return logged(id, answer);
-      const { status, body } = answer;
-      if (status >= 400 || fieldOf(body, 'success') === false) {
-        return logged(id, rejection(id, status, firstError(body)));
+      const { status, body, retryAfterMs } = answer;
+      const envelope = readCloudflareAnswer(body);
+      if (status >= 400 || envelope?.success === false) {
+        return logged(id, rejection(id, status, { ...firstError(envelope), retryAfterMs }));
       }
-      const result = fieldOf(body, 'result');
-      if (status < 200 || status >= 300 || typeof result !== 'object' || result === null) {
+      const result = envelope?.result;
+      if (status < 200 || status >= 300 || result === undefined) {
         return logged(id, badResponse(id, status, 'expected a JSON object with a `result` object'));
       }
-      const messageId = stringOf(fieldOf(result, 'message_id')) ?? null;
+      const messageId = result.message_id ?? null;
       const outcomes = outcomesOf(result);
       if (outcomes.length === 0) {
         // Accepted, but Cloudflare said nothing per recipient: report each as unknown.

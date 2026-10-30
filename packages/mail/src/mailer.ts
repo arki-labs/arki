@@ -18,11 +18,13 @@ import type {
   RenderContext,
   SendFailure,
   SendOptions,
+  SendRawFailure,
   SentMail,
   TransportFailure,
 } from './types.js';
 import { invalidConfig, isMailError } from './errors.js';
 import { failover } from './failover.js';
+import type { MailInvalidMessage } from './failures.js';
 import { MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
 import { checkMessage, listOf, redirect } from './message.js';
@@ -44,7 +46,7 @@ export type RawMail = Omit<MailMessage, 'from'> & { readonly from?: Address };
 export type Mailer = {
   /**
    * Validates `input` with the template's schema, renders, and sends. Returns the sent mail or a
-   * failure; throws `MailError` (`ARKI_MAIL_E002`) for a message that cannot be sent as written.
+   * failure, including `MailInvalidMessage` for a message that cannot be sent as written.
    */
   send<S extends StandardSchemaV1>(
     template: MailTemplate<S>,
@@ -55,16 +57,17 @@ export type Mailer = {
   sendRaw(
     message: RawMail,
     options?: Pick<SendOptions, 'idempotencyKey' | 'signal'>,
-  ): Promise<Result<SentMail, TransportFailure>>;
+  ): Promise<Result<SentMail, SendRawFailure>>;
   /**
    * Renders, addresses and checks a mail without sending it: the sender is resolved and the
-   * message validated. `@arki/mail/pg` stores the result to send later.
+   * message validated (`MailInvalidMessage` when it cannot be sent as written). `@arki/mail/pg`
+   * stores the result to send later.
    */
   compose<S extends StandardSchemaV1>(
     template: MailTemplate<S>,
     input: NoInfer<SchemaInput<S>>,
     options: Omit<SendOptions, 'signal' | 'idempotencyKey'>,
-  ): Promise<Result<MailMessage, FailureOf<typeof renderTemplate>>>;
+  ): Promise<Result<MailMessage, FailureOf<typeof renderTemplate> | FailureOf<typeof MailInvalidMessage>>>;
   /** Renders without sending: previews and content tests. */
   render<S extends StandardSchemaV1>(
     template: MailTemplate<S>,
@@ -106,8 +109,9 @@ export function mailer(options: MailerOptions): Mailer {
   const deliver = async (
     message: MailMessage,
     sendOptions: Pick<SendOptions, 'idempotencyKey' | 'signal'>,
-  ): Promise<Result<SentMail, TransportFailure>> => {
-    checkMessage(message);
+  ): Promise<Result<SentMail, SendRawFailure>> => {
+    const invalid = checkMessage(message);
+    if (invalid !== undefined) return fail(invalid, message.template);
     const outgoing = redirectTo === undefined ? message : redirect(message, redirectTo);
     await emit({ type: 'sending', transport: transport.id, template: message.template });
     let result: Result<SentMail, TransportFailure>;
@@ -137,8 +141,7 @@ export function mailer(options: MailerOptions): Mailer {
       replyTo: sendOptions.replyTo ?? template.defaults?.replyTo,
       template: template.name,
     };
-    checkMessage(message);
-    return message;
+    return checkMessage(message) ?? message;
   };
 
   return {

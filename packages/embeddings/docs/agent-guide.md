@@ -97,7 +97,7 @@ The key covers the space, purpose, size, dtype, truncation choice, namespace and
 
 ### Give a Dot app its embedder
 
-`embeddings({ model, cache: true })` from `@arki/embeddings/dot` publishes `embedder: Embedder | null`. A configuration that does not resolve logs once at `warn` and publishes `null`: handle `null` in every feature that embeds. Size a vector index from the same space (`vectorIndex({ space })` in `@arki/ai/dot`).
+`embeddings({ model, cache: true })` from `@arki/embeddings/dot` publishes `embedder: Embedder`. A configuration that does not resolve (a bad option, a missing key) stops the boot: `boot()` returns the `ConfigurationFailure` and the plugin logs it at `error`. An app that can run without embeddings must not mount the plugin. Size a vector index from the same space (`vectorIndex({ space })` in `@arki/ai/dot`).
 
 ### Embed a corpus as a stream
 
@@ -196,6 +196,6 @@ dot doctor --json | jq '.data'
 ```
 
 - `dot explain --json` shows the `embeddings` unit and the `embedder` it provides.
-- `dot doctor --json` shows whether the app boots with the `embeddings` unit, and lists any issue. A model that did not build does not stop the boot: `embedder` is `null`, and the log has the warning `embeddings are off, embedder is null`.
+- `dot doctor --json` shows whether the app boots with the `embeddings` unit, and lists any issue. A model that did not build stops the boot with a `ConfigurationFailure`, and the log has the error `embeddings could not start`.
 
 The resilience middleware preserves returned `UnexpectedDefect` identity, including a defective retry clock. Final callback/policy throws become private defects; they are not relabelled as model outages. Timeout/circuit/capacity refusals map to ModelUnavailable; policy/clock cancellation maps to Cancelled.

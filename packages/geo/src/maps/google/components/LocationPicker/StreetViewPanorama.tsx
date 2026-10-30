@@ -68,7 +68,7 @@ export function StreetViewPanorama({
 
   useEffect(() => {
     if (typeof google !== 'undefined' && google.maps?.StreetViewPanorama) {
-      const container = document.getElementById(containerId);
+      const container = document.querySelector<HTMLElement>(`#${CSS.escape(containerId)}`);
 
       if (container) {
         new google.maps.StreetViewPanorama(container, {

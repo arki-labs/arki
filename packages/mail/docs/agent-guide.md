@@ -85,7 +85,7 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 
 ## Rules that bite
 
-- `send`, `sendRaw`, `compose` and `render` return failures; they do not throw them. Misuse throws `MailError`: bad configuration (`E001`), a message that cannot be sent as written (`E002`), a field the transport cannot carry (`E005`).
+- `send`, `sendRaw`, `compose` and `render` return failures; they do not throw them. A message that cannot be sent as written (typed recipient, line break) is the returned `MailInvalidMessage`. Misuse throws `MailError`: bad configuration (`E001`), a queued mail without exactly one `to` (`E002`), a field the transport cannot carry (`E005`).
 - Retry only `MailUncertain`, or `MailRejected` with `data.retryable`. After `MailUncertain` never send through a second provider: the first may already be delivering it.
 - `text` is required on every template and every raw mail.
 - All transports over quota means nothing is sent (`MailQuotaExhausted`). There is no silent overrun.
@@ -102,8 +102,10 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 | -------------------- | ---------------------- | ------ | ---------------------------------------------------------- | ------------------------- |
 | `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. Carries `issues`. | no                        |
 | `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing sent.               | no                        |
-| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail.                              | when `data.retryable`     |
-| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent.           | yes, never on another one |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data.retryAfterMs` is its `Retry-After`. | when `data.retryable`     |
+| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. `data.reason`: `cancelled`, `timeout`, `network`, `unreadable`. | yes, never on another one |
+| `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written.                     | no                        |
+| `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`.                          | no                        |
 | `MailExpired`        | `mail.expired`         | 410    | A queued mail expired before it was sent.                  | no                        |
 
 ### Errors (thrown)
@@ -111,10 +113,10 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 | Code             | Meaning                                                 |
 | ---------------- | ------------------------------------------------------- |
 | `ARKI_MAIL_E001` | Bad configuration, or a transport SDK that cannot load. |
-| `ARKI_MAIL_E002` | Bad message: no recipient, line break, reserved header. |
+| `ARKI_MAIL_E002` | A queued mail without exactly one `to` recipient.       |
 | `ARKI_MAIL_E005` | The transport cannot carry a field. Nothing sent.       |
 | `ARKI_MAIL_E009` | `enqueue` got the root database.                        |
-| `ARKI_MAIL_E010` | Queued mail too large, or a stored row unreadable.      |
+| `ARKI_MAIL_E010` | A stored queue row is unreadable.                       |
 
 ## Verify
 

@@ -13,10 +13,11 @@ export const MAIL_ERROR_CODES = {
    */
   invalidConfig: 'ARKI_MAIL_E001',
   /**
-   * No recipient, a line break in a header or address, a reserved header.
+   * A queued mail needs exactly one `to` recipient and no cc or bcc. (A message that cannot be
+   * sent as written is the returned failure `MailInvalidMessage`, not this code.)
    *
-   * @fix Give at least one recipient. Remove line breaks and reserved headers from the message.
-   * @verify bun run test -- src/message.spec.ts
+   * @fix Queue one mail per recipient, with the recipient in `to` only.
+   * @verify bun run test -- src/pg
    */
   invalidMessage: 'ARKI_MAIL_E002',
   /**
@@ -34,9 +35,10 @@ export const MAIL_ERROR_CODES = {
    */
   needsTransaction: 'ARKI_MAIL_E009',
   /**
-   * Queued input is not plain JSON, or too large.
+   * A queue row does not hold a readable mail (a row edited by hand, or written by an older version).
+   * (A mail over `maxBytes` is the returned failure `MailTooLarge`.)
    *
-   * @fix Send plain JSON data under `maxBytes` (256 KiB). Put large files elsewhere and link them.
+   * @fix Dead-letter the row and queue the mail again.
    * @verify bun run test -- src/pg
    */
   badQueuedData: 'ARKI_MAIL_E010',

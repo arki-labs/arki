@@ -1,47 +1,50 @@
 /** The stored shape of a queued mail, and reading it back without trusting it. */
-import type { ScheduledJob } from '@arki/journal';
-import { is, recordSchema } from '@arki/schema';
+import { z } from 'zod';
 
-import type { MailMessage } from '../types.js';
+import type { ScheduledJob } from '@arki/journal';
+import { is } from '@arki/schema';
+
 import { MAIL_ERROR_CODES, MailError } from '../errors.js';
 
 /** The queue row's job name. The version is part of the stored shape. */
 export const MAIL_JOB = 'mail.deliver.v1';
 
+const addressesSchema = z.union([z.string(), z.array(z.string()).readonly()]);
+const stringRecordSchema = z.record(z.string(), z.string()).readonly();
+
+/**
+ * A stored message, checked field by field: the row may predate a deploy or be edited by hand.
+ * `args.test-d.ts` locks its output to `MailMessage`.
+ */
+export const mailMessageSchema = z
+  .object({
+    from: z.string(),
+    subject: z.string(),
+    text: z.string(),
+    to: addressesSchema,
+    html: z.string().exactOptional(),
+    cc: addressesSchema.exactOptional(),
+    bcc: addressesSchema.exactOptional(),
+    replyTo: addressesSchema.exactOptional(),
+    headers: stringRecordSchema.exactOptional(),
+    tags: stringRecordSchema.exactOptional(),
+    template: z.string().exactOptional(),
+  })
+  .readonly();
+
 /** What a queue row holds. */
-export type QueuedArgs = { readonly version: 1; readonly message: MailMessage; readonly expiresAt?: string };
+export const queuedArgsSchema = z
+  .object({
+    version: z.literal(1),
+    message: mailMessageSchema,
+    expiresAt: z.string().exactOptional(),
+  })
+  .readonly();
 
-const isAddresses = (value: unknown): boolean =>
-  typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'));
-const isStringRecord = (value: unknown): value is Record<string, string> =>
-  is(value, recordSchema) && Object.values(value).every(item => typeof item === 'string');
-const optional = (value: unknown, check: (value: unknown) => boolean): boolean => value === undefined || check(value);
-const isString = (value: unknown): boolean => typeof value === 'string';
-
-/** A stored message, checked field by field: the row may predate a deploy or be edited by hand. */
-export function isMailMessage(value: unknown): value is MailMessage {
-  return (
-    is(value, recordSchema) &&
-    isString(value.from) &&
-    isString(value.subject) &&
-    isString(value.text) &&
-    isAddresses(value.to) &&
-    optional(value.html, isString) &&
-    optional(value.cc, isAddresses) &&
-    optional(value.bcc, isAddresses) &&
-    optional(value.replyTo, isAddresses) &&
-    optional(value.headers, isStringRecord) &&
-    optional(value.tags, isStringRecord) &&
-    optional(value.template, isString)
-  );
-}
+export type QueuedArgs = z.output<typeof queuedArgsSchema>;
 
 /** The row's args, or a permanent failure: a row that cannot be read will never send. */
 export function queuedArgs(job: ScheduledJob): QueuedArgs {
-  const args = job.args;
-  if (is(args, recordSchema) && args.version === 1 && isMailMessage(args.message) && optional(args.expiresAt, isString)) {
-    const expiresAt = typeof args.expiresAt === 'string' ? args.expiresAt : undefined;
-    return { version: 1, message: args.message, ...(expiresAt === undefined ? {} : { expiresAt }) };
-  }
+  if (is(job.args, queuedArgsSchema)) return job.args;
   throw new MailError(MAIL_ERROR_CODES.badQueuedData, `Queued mail ${job.id} does not hold a ${MAIL_JOB} message.`);
 }

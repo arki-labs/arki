@@ -1,11 +1,10 @@
-import { InvalidCoordinatesError } from './errors';
+import { InvalidCoordinates } from './failures';
 import type { Coordinates } from './types';
 
 /**
- * Validate if coordinates are within valid ranges
+ * Check whether coordinates are finite and within range
  * @param coords - Coordinates to validate
  * @returns true if valid
- * @throws InvalidCoordinatesError if invalid
  */
 export function isValidCoordinates(coords: Coordinates): boolean {
   if (typeof coords !== 'object' || coords === null) {
@@ -32,49 +31,58 @@ export function isValidCoordinates(coords: Coordinates): boolean {
 }
 
 /**
- * Validate coordinates and throw if invalid
+ * Validate coordinates
  * @param coords - Coordinates to validate
- * @throws InvalidCoordinatesError if invalid
+ * @returns the same coordinates, or `InvalidCoordinates` when out of range or not finite
  */
-export function validateCoordinates(coords: Coordinates): void {
-  if (!isValidCoordinates(coords)) {
-    throw new InvalidCoordinatesError(
-      `Invalid coordinates: lat=${coords.lat}, lng=${coords.lng}. ` +
-        'Latitude must be between -90 and 90, longitude between -180 and 180.',
-    );
-  }
+export function validateCoordinates(coords: Coordinates): Coordinates | InvalidCoordinates {
+  if (isValidCoordinates(coords)) return coords;
+  return InvalidCoordinates({
+    reason:
+      `lat=${coords.lat}, lng=${coords.lng}. ` +
+      'Latitude must be between -90 and 90, longitude between -180 and 180.',
+  });
 }
 
 /**
- * Normalize longitude to -180 to 180 range
+ * Normalize longitude to the -180 to 180 range by wrapping around the globe.
+ * Runs in constant time for any finite input.
  * @param lng - Longitude to normalize
- * @returns Normalized longitude
+ * @returns Normalized longitude, or `InvalidCoordinates` when `lng` is not a finite number
  */
-export function normalizeLongitude(lng: number): number {
-  while (lng > 180) lng -= 360;
-  while (lng < -180) lng += 360;
-  return lng;
+export function normalizeLongitude(lng: number): number | InvalidCoordinates {
+  if (!Number.isFinite(lng)) {
+    return InvalidCoordinates({ reason: `longitude ${lng} is not a finite number.` });
+  }
+  if (lng >= -180 && lng <= 180) return lng;
+  const wrapped = ((((lng + 180) % 360) + 360) % 360) - 180;
+  // 180 and -180 are the same meridian; keep +180 for +180 + k * 360.
+  return wrapped === -180 && lng > 0 ? 180 : wrapped;
 }
 
 /**
  * Normalize latitude to -90 to 90 range (clamped)
  * @param lat - Latitude to normalize
- * @returns Normalized latitude
+ * @returns Normalized latitude, or `InvalidCoordinates` when `lat` is not a finite number
  */
-export function normalizeLatitude(lat: number): number {
+export function normalizeLatitude(lat: number): number | InvalidCoordinates {
+  if (!Number.isFinite(lat)) {
+    return InvalidCoordinates({ reason: `latitude ${lat} is not a finite number.` });
+  }
   return Math.max(-90, Math.min(90, lat));
 }
 
 /**
  * Normalize coordinates to valid ranges
  * @param coords - Coordinates to normalize
- * @returns Normalized coordinates
+ * @returns Normalized coordinates, or `InvalidCoordinates` when a value is not finite
  */
-export function normalizeCoordinates(coords: Coordinates): Coordinates {
-  return {
-    lat: normalizeLatitude(coords.lat),
-    lng: normalizeLongitude(coords.lng),
-  };
+export function normalizeCoordinates(coords: Coordinates): Coordinates | InvalidCoordinates {
+  const lat = normalizeLatitude(coords.lat);
+  if (InvalidCoordinates.is(lat)) return lat;
+  const lng = normalizeLongitude(coords.lng);
+  if (InvalidCoordinates.is(lng)) return lng;
+  return { lat, lng };
 }
 
 /**
@@ -110,6 +118,8 @@ export function formatCoordinatesDMS(coords: Coordinates): string {
   return `${lat} ${lng}`;
 }
 
+const DECIMAL_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
 /**
  * Parse coordinates from a string
  * Supports formats:
@@ -117,26 +127,26 @@ export function formatCoordinatesDMS(coords: Coordinates): string {
  * - "40.7128,-74.0060"
  * - "40.7128 -74.0060"
  * @param str - String to parse
- * @returns Parsed coordinates
- * @throws InvalidCoordinatesError if string cannot be parsed
+ * @returns Parsed coordinates, or `InvalidCoordinates` when the text is not two plain decimal numbers in range
  */
-export function parseCoordinates(str: string): Coordinates {
+export function parseCoordinates(str: string): Coordinates | InvalidCoordinates {
   const cleaned = str.trim().replaceAll(/[,\s]+/g, ' ');
   const parts = cleaned.split(' ');
+  const [latText, lngText] = parts;
 
-  if (parts.length !== 2) {
-    throw new InvalidCoordinatesError(
-      `Cannot parse coordinates from string: "${str}". Expected format: "lat, lng"`,
-    );
+  if (
+    parts.length !== 2 ||
+    latText === undefined ||
+    lngText === undefined ||
+    !DECIMAL_NUMBER.test(latText) ||
+    !DECIMAL_NUMBER.test(lngText)
+  ) {
+    return InvalidCoordinates({
+      reason: `cannot parse "${str}". Expected format: "lat, lng" with plain decimal numbers.`,
+    });
   }
 
-  const lat = Number.parseFloat(parts[0]!);
-  const lng = Number.parseFloat(parts[1]!);
-
-  const coords = { lat, lng };
-  validateCoordinates(coords);
-
-  return coords;
+  return validateCoordinates({ lat: Number(latText), lng: Number(lngText) });
 }
 
 /**

@@ -58,6 +58,8 @@ export const MailRejected = defineFailure('mail.rejected', {
     providerCode: z.string().optional(),
     /** What the service said. */
     detail: z.string().optional(),
+    /** How long the service asked to wait before another try (`Retry-After`), in milliseconds. */
+    retryAfterMs: z.number().optional(),
   }),
   message: ({ transport, upstreamStatus, detail }) =>
     `${transport} refused the mail${upstreamStatus === undefined ? '' : ` (HTTP ${upstreamStatus})`}${
@@ -81,6 +83,11 @@ export const MailUncertain = defineFailure('mail.uncertain', {
     detail: z.string(),
     /** The HTTP status of an answer that could not be read. */
     upstreamStatus: z.number().optional(),
+    /**
+     * Why there is no answer: `cancelled` (the caller aborted), `timeout` (the service did not answer in time),
+     * `network` (the request failed in transit), `unreadable` (the answer could not be read).
+     */
+    reason: z.enum(['cancelled', 'timeout', 'network', 'unreadable']).optional(),
   }),
   message: '{transport}: {detail}. The mail may have been sent.',
   remediation: 'Send it again later with the same idempotency key; the service may already have taken it.',
@@ -97,4 +104,32 @@ export const MailExpired = defineFailure('mail.expired', {
   data: z.object({ expiresAt: z.string() }),
   message: 'The mail expired at {expiresAt} before it could be sent.',
   remediation: 'Queue a new mail, such as a fresh sign-in link.',
+});
+
+/**
+ * The message cannot be sent as written: no recipient, an empty address, a line break in an address,
+ * the subject or a header (header injection), or a header the message owns. Nothing was sent.
+ * Recipients are usually typed by a user, so this is an expected outcome, not a bug.
+ *
+ * @fix Show the user what is wrong with the address, or remove the line break or reserved header. The same message fails again.
+ * @verify bun run test -- src/message.spec.ts
+ */
+export const MailInvalidMessage = defineFailure('mail.invalid_message', {
+  status: 422,
+  data: z.object({ problem: z.string() }),
+  message: 'The mail cannot be sent as written: {problem}',
+  remediation: 'Fix the address, subject or header named in the message. The same message fails again.',
+});
+
+/**
+ * The rendered message is larger than the outbox allows (`maxBytes`). Nothing was queued.
+ *
+ * @fix Shorten the content, or raise `maxBytes`. Put large files elsewhere and link them.
+ * @verify bun run test -- src/pg
+ */
+export const MailTooLarge = defineFailure('mail.too_large', {
+  status: 413,
+  data: z.object({ bytes: z.number(), maxBytes: z.number() }),
+  message: 'The queued mail is {bytes} bytes; the limit is {maxBytes}.',
+  remediation: 'Shorten the content, or raise `maxBytes`. Put large files elsewhere and link them.',
 });

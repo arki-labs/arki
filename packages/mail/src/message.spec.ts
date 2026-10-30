@@ -6,24 +6,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MailMessage } from './types.js';
-import { MAIL_ERROR_CODES } from './errors.js';
+import { MailInvalidMessage } from './failures.js';
 import { checkMessage, redirect } from './message.js';
 
 const base: MailMessage = { from: 'App <hi@app.dev>', to: 'ada@example.com', subject: 'Hi', text: 'Hello' };
 
-/** What `run` threw, or `undefined`. */
-function thrownBy(run: () => void): unknown {
-  try {
-    run();
-    return undefined;
-  } catch (error) {
-    return error;
-  }
-}
-
 describe('checkMessage', () => {
   it('accepts a complete message', () => {
-    expect(thrownBy(() => checkMessage(base))).toBeUndefined();
+    expect(checkMessage(base)).toBeUndefined();
   });
 
   it.each([
@@ -33,12 +23,15 @@ describe('checkMessage', () => {
     ['a line break in a header value', { ...base, headers: { 'X-Ref': 'a\r\nBcc: victim@example.com' } }],
     ['a reserved header', { ...base, headers: { Bcc: 'victim@example.com' } }],
     ['an empty address', { ...base, cc: [''] }],
-  ])('refuses %s by throwing E002: the calling code must fix it, no retry can', (_case, message) => {
-    expect(thrownBy(() => checkMessage(message))).toMatchObject({ code: MAIL_ERROR_CODES.invalidMessage });
+    // Recipients are usually typed by a user, so a bad one is an outcome to show, never a crash.
+  ])('refuses %s with a returned MailInvalidMessage, and never throws', (_case, message) => {
+    const refused = checkMessage(message);
+    expect(MailInvalidMessage.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ code: 'mail.invalid_message', status: 422 });
   });
 
   it('accepts a message with only a Bcc recipient', () => {
-    expect(thrownBy(() => checkMessage({ ...base, to: [], bcc: 'ops@app.dev' }))).toBeUndefined();
+    expect(checkMessage({ ...base, to: [], bcc: 'ops@app.dev' })).toBeUndefined();
   });
 });
 

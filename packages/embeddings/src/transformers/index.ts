@@ -7,7 +7,7 @@ import type * as Transformers from '@huggingface/transformers';
 import type { DataType, DeviceType, ProgressCallback } from '@huggingface/transformers';
 import { z } from 'zod';
 
-import { invariant, isFailure } from '@arki/failure';
+import { invariant, isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import type { SchemaWithJson } from '@arki/schema';
 
@@ -113,10 +113,13 @@ type Loaded = {
   readonly maxInputTokens: number;
   readonly loadMs: number;
   readonly countTokens: (text: string) => number;
-  readonly run: (texts: readonly string[]) => Promise<Rows | ReturnType<typeof InvalidOutput>>;
+  readonly run: (texts: readonly string[], signal?: AbortSignal) => Promise<Rows | RunFailure>;
   readonly dispose: () => Promise<unknown>;
 };
-type LoadFailure = ReturnType<typeof ModelUnavailable> | ReturnType<typeof InvalidOutput>;
+type LoadFailure = ReturnType<typeof ModelUnavailable> | RunFailure;
+/** Why a batch gave no vectors: a malformed answer, a cancel, or the runtime itself failing. */
+type RunFailure = ReturnType<typeof InvalidOutput> | ReturnType<typeof Cancelled> | ReturnType<typeof UnexpectedDefect>;
+
 type Shared = { readonly load: Promise<Loaded | LoadFailure>; refs: number; loadReported: boolean };
 
 /** Loads in flight or done, by id, revision, dtype, device and cache dir: concurrent creates share one. */
@@ -179,11 +182,14 @@ async function load(
   const stated = maxLengthSchema.safeParse(tokenizer.model_max_length);
   const limit = maxInputTokens ?? (stated.success ? stated.data : DEFAULT_MAX_INPUT_TOKENS);
 
-  const run = async (texts: readonly string[]): Promise<Rows | ReturnType<typeof InvalidOutput>> => {
+  const run = async (texts: readonly string[], signal?: AbortSignal): Promise<Rows | RunFailure> => {
+    // The runtime cannot be interrupted once a batch starts, so the signal is honoured before it and after it.
+    if (signal?.aborted) return Cancelled();
     try {
       // Over-long inputs were refused before this call unless the caller asked to truncate.
       const encoding = tokenizer([...texts], { padding: true, truncation: true, max_length: limit });
       const output: unknown = await model(encoding);
+      if (signal?.aborted) return Cancelled();
       const parsed = outputSchema.safeParse(output);
       const mask = encodingSchema.safeParse(encoding);
       if (!parsed.success || !mask.success) {
@@ -202,7 +208,13 @@ async function load(
         tokens: Number(tokens),
       };
     } catch (error) {
-      return InvalidOutput({ reason: `transformers.js failed: ${error instanceof Error ? error.message : 'unknown'}` });
+      if (signal?.aborted) return Cancelled();
+      // The model produced no answer at all (out of memory, a failed session): a defect, not a malformed answer.
+      log.warn('transformers.js failed on {model}: {error}', {
+        model: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return UnexpectedDefect({ cause: error });
     }
   };
 
@@ -265,7 +277,7 @@ export async function createTransformersModel(input: TransformersModelOptions = 
   const embedTexts = async ({ texts, dimensions: requested, signal }: NativeRequest) => {
     invariant(!disposed, `transformers model ${id} was used after dispose()`);
     if (signal?.aborted) return Cancelled();
-    const rows = await loaded.run(texts);
+    const rows = await loaded.run(texts, signal);
     // Inference cannot be interrupted; a call aborted meanwhile is still cancelled.
     if (signal?.aborted) return Cancelled();
     if (isFailure(rows)) return rows;

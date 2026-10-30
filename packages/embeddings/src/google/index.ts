@@ -15,7 +15,7 @@ import type { EmbeddingModel, Instruction, NativeInput, NativeInputsRequest, Nat
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { GEMINI_EMBEDDING_2_INSTRUCTION, NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
 import { l2Normalize } from '../vector.js';
@@ -180,7 +180,7 @@ export function createGoogleModel(input: GoogleModelOptions) {
         // Retries belong to withResilience, where each attempt is charged once.
         maxRetries: 0,
         ...(Object.keys(google).length === 0 ? {} : { providerOptions: { google } }),
-        ...(signal ? { abortSignal: signal } : {}),
+        abortSignal: requestSignal(signal),
       });
       // The SDK reports no usage for Google, so the count is NaN here.
       const tokens = result.usage.tokens;
@@ -208,6 +208,8 @@ export function createGoogleModel(input: GoogleModelOptions) {
       if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
         return inputTooLong(model, texts);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `google answered ${status}: ${error.message.slice(0, 200)}` });
     }
   };
@@ -237,7 +239,7 @@ export function createGoogleModel(input: GoogleModelOptions) {
             ...(dimensions === undefined ? {} : { outputDimensionality: dimensions }),
           })),
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -254,6 +256,8 @@ export function createGoogleModel(input: GoogleModelOptions) {
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (response.status === 400 && TOO_LONG.test(text)) return inputTooLong(model, texts);
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `google answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

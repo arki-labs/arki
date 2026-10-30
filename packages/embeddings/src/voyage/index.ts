@@ -10,7 +10,7 @@ import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, NativeInput, NativeInputsRequest, NativeRequest, Purpose, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { toBase64 } from '../base64.js';
 
@@ -168,7 +168,7 @@ export function createVoyageModel(input: VoyageModelOptions) {
           ...(dimensions === undefined ? {} : { output_dimension: dimensions }),
           ...(quantization === undefined ? {} : { output_dtype: OUTPUT_DTYPE[quantization] }),
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -185,6 +185,8 @@ export function createVoyageModel(input: VoyageModelOptions) {
       }
       if (response.status === 404) return ModelUnavailable({ model: id, reason: 'unknown-model' });
       if (response.status === 400 && TOO_LONG.test(text)) return inputTooLong(model, texts);
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `voyage answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

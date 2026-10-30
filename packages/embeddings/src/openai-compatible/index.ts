@@ -11,7 +11,7 @@ import type { FetchLike } from '../http.js';
 import type { EmbeddingModel, Instruction, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { functionSchema, instructionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 
 // A compatible server's 400 wording is undocumented, so this pattern stays loose: a miss turns InputTooLong (which a caller can
@@ -137,7 +137,7 @@ export function createOpenAICompatibleModel(input: OpenAICompatibleModelOptions)
           input: truncate ? texts.map(text => truncateByEstimate(text, maxInputTokens)) : texts,
           ...(requested === undefined ? {} : { dimensions: requested }),
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -156,6 +156,8 @@ export function createOpenAICompatibleModel(input: OpenAICompatibleModelOptions)
       if (response.status === 400 && TOO_LONG.test(text)) {
         return inputTooLong(model, texts);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `${label} answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

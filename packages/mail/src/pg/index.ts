@@ -27,7 +27,8 @@ import type { MailTemplate, renderTemplate } from '../template.js';
 import type { SendOptions } from '../types.js';
 import type { QueuedArgs } from './args.js';
 import { isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
-import { MailExpired, MailRejected, MailUncertain } from '../failures.js';
+import type { MailInvalidMessage } from '../failures.js';
+import { MailExpired, MailRejected, MailTooLarge, MailUncertain } from '../failures.js';
 import { listOf } from '../message.js';
 import { MAIL_JOB, queuedArgs } from './args.js';
 
@@ -58,9 +59,10 @@ export type EnqueueOptions = Omit<SendOptions, 'signal'> & {
 export type MailOutbox = {
   /**
    * Queues one mail inside `tx`. Returns `MailInvalidInput` when the template's schema refuses
-   * the input; nothing is queued. Throws {@link MailError}: `E009` for the root database, `E002`
-   * unless there is exactly one `to` recipient, `E010` when too large. The same `idempotencyKey`
-   * while a job is still queued returns that job (`deduped: true`).
+   * the input, `MailInvalidMessage` when the message cannot be sent as written (an empty address,
+   * a line break), and `MailTooLarge` when it is over `maxBytes`; nothing is queued. Throws
+   * {@link MailError}: `E009` for the root database, `E002` unless there is exactly one `to`
+   * recipient. The same `idempotencyKey` while a job is still queued returns that job (`deduped: true`).
    */
   enqueue<S extends StandardSchemaV1>(
     tx: MailTx,
@@ -68,7 +70,11 @@ export type MailOutbox = {
     input: NoInfer<SchemaInput<S>>,
     options: EnqueueOptions,
   ): Promise<
-    { readonly jobId: string; readonly deduped: boolean } | FailureOf<typeof renderTemplate> | FailureOf<typeof jobId>
+    | { readonly jobId: string; readonly deduped: boolean }
+    | FailureOf<typeof renderTemplate>
+    | FailureOf<typeof MailInvalidMessage>
+    | FailureOf<typeof MailTooLarge>
+    | FailureOf<typeof jobId>
   >;
   /** Runs queued mail: pass it to `journal.worker(db, { jobs })`, or combine it with `combineRunners`. */
   readonly runner: JobRunner;
@@ -122,12 +128,7 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
       ...(enqueueOptions.expiresAt === undefined ? {} : { expiresAt: enqueueOptions.expiresAt.toISOString() }),
     };
     const bytes = new TextEncoder().encode(JSON.stringify(args)).byteLength;
-    if (bytes > maxBytes) {
-      throw new MailError(
-        MAIL_ERROR_CODES.badQueuedData,
-        `The queued mail is ${bytes} bytes; the limit is ${maxBytes}.`,
-      );
-    }
+    if (bytes > maxBytes) return MailTooLarge({ bytes, maxBytes });
 
     const dedupeKey = enqueueOptions.idempotencyKey ?? null;
     const id = jobId();
@@ -165,7 +166,11 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
     // Misuse and a failure no retry can fix are dead now; anything else waits for the next try.
     retryDelay: (job, error) => {
       const dead = isMailError(error) || (error instanceof QueuedSendFailed && !worthRetrying(error.failure));
-      return dead ? undefined : retry.delay(job.attempt, error);
+      const wait = dead ? undefined : retry.delay(job.attempt, error);
+      // A service that said how long to wait (Retry-After) is not asked again sooner.
+      const asked =
+        error instanceof QueuedSendFailed && MailRejected.is(error.failure) ? error.failure.data.retryAfterMs : undefined;
+      return wait === undefined || asked === undefined ? wait : Math.max(wait, asked);
     },
   };
 

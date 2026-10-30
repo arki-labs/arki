@@ -1,3 +1,5 @@
+import { InvalidCoordinates } from './failures';
+import { parseCoordinates } from './coordinates';
 import type { Coordinates } from './types';
 
 /**
@@ -59,7 +61,7 @@ export function decimalToDMS(decimal: number): {
  * - {lat, lng}
  * - {lat, lon}
  * @param coords - Coordinates in any common format
- * @returns Standardized coordinates {lat, lng}
+ * @returns Standardized coordinates {lat, lng}, or `InvalidCoordinates` when a value is missing
  */
 export function toStandardCoordinates(coords: {
   lat?: number;
@@ -67,14 +69,14 @@ export function toStandardCoordinates(coords: {
   lon?: number;
   latitude?: number;
   longitude?: number;
-}): Coordinates {
+}): Coordinates | InvalidCoordinates {
   const lat = coords.lat ?? coords.latitude;
   const lng = coords.lng ?? coords.lon ?? coords.longitude;
 
   if (lat === undefined || lng === undefined) {
-    throw new Error(
-      'Invalid coordinates format. Expected object with lat/lng, latitude/longitude, or lat/lon properties.',
-    );
+    return InvalidCoordinates({
+      reason: 'missing a value. Expected an object with lat/lng, latitude/longitude, or lat/lon properties.',
+    });
   }
 
   return { lat, lng };
@@ -121,16 +123,11 @@ export function coordinatesToUrl(coords: Coordinates): string {
 /**
  * Parse coordinates from URL parameter
  * @param urlParam - URL parameter string like "40.7128,-74.006"
- * @returns Parsed coordinates
+ * @returns Parsed coordinates, or `InvalidCoordinates` when the text is not "lat,lng" in range
  */
-export function coordinatesFromUrl(urlParam: string): Coordinates {
-  const [latStr, lngStr] = urlParam.split(',');
-  const lat = Number.parseFloat(latStr!);
-  const lng = Number.parseFloat(lngStr!);
-
-  if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    throw new TypeError(`Invalid URL coordinate format: ${urlParam}`);
+export function coordinatesFromUrl(urlParam: string): Coordinates | InvalidCoordinates {
+  if (urlParam.split(',').length !== 2) {
+    return InvalidCoordinates({ reason: `invalid URL coordinate format: ${urlParam}` });
   }
-
-  return { lat, lng };
+  return parseCoordinates(urlParam);
 }

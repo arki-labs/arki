@@ -10,7 +10,7 @@ import { orThrow } from '@arki/failure';
 
 import type { MailEvent, MailMessage, MailTransport } from './types.js';
 import { MAIL_ERROR_CODES, MailError } from './errors.js';
-import { MailInvalidInput, MailQuotaExhausted, MailUncertain } from './failures.js';
+import { MailInvalidInput, MailInvalidMessage, MailQuotaExhausted, MailUncertain } from './failures.js';
 import { logTransport } from './log-transport.js';
 import { mailer } from './mailer.js';
 import { defineTemplate } from './template.js';
@@ -78,14 +78,27 @@ describe('an unsent mail is a returned failure; misuse throws', () => {
     expect(result).toMatchObject({ data: { transport: 'flaky' } });
   });
 
-  it('a message with no recipient is a bug in the calling code, so it throws E002 before any transport', async () => {
+  it('a message with no recipient is a returned MailInvalidMessage before any transport', async () => {
     const { transport, send } = recording();
     const mail = mailer({ transport, from: 'hi@app.dev' });
-    await expect(mail.sendRaw({ to: [], subject: 's', text: 't' })).rejects.toMatchObject({
-      code: MAIL_ERROR_CODES.invalidMessage,
-    });
+    const refused = await mail.sendRaw({ to: [], subject: 's', text: 't' });
+    expect(MailInvalidMessage.is(refused)).toBe(true);
     expect(send).not.toHaveBeenCalled();
   });
+
+  // A recipient is usually text a user typed; an empty or line-broken one must not crash the request.
+  it.each(['', '  ', 'ada@example.com\nBcc: victim@example.com'])(
+    'a typed recipient %j is a returned MailInvalidMessage from send, not a throw',
+    async typed => {
+      const { transport, send } = recording();
+      const events: MailEvent[] = [];
+      const mail = mailer({ transport, from: 'hi@app.dev', onEvent: event => void events.push(event) });
+      const refused = await mail.send(note, { body: 'x' }, { to: typed });
+      expect(MailInvalidMessage.is(refused)).toBe(true);
+      expect(send).not.toHaveBeenCalled();
+      expect(events.map(event => event.type)).toEqual(['failed']);
+    },
+  );
 
   it('a field the transport cannot carry is misuse: its MailError reaches the caller, not an uncertain send', async () => {
     const transport: MailTransport = {

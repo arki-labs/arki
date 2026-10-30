@@ -18,7 +18,7 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
@@ -140,7 +140,7 @@ function protocolReranker(wire: Wire): Reranker {
           documents,
           ...(wire.maxTokensPerDoc === undefined ? {} : { max_tokens_per_doc: wire.maxTokensPerDoc }),
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: wire.id, reason: 'unreachable' });
@@ -164,6 +164,8 @@ function protocolReranker(wire: Wire): Reranker {
       ) {
         return longestTooLong(query, documents, wire.maxInputTokens);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: wire.id, reason: 'unreachable' });
       return InvalidOutput({ reason: `${name} answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

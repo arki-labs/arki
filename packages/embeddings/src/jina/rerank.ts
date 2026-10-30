@@ -15,7 +15,7 @@ import {
   UnsupportedInput,
 } from '../failures.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type JinaRerankerOptions = {
@@ -89,7 +89,7 @@ export function createJinaReranker(input: JinaRerankerOptions): Reranker | Confi
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${options.apiKey}` },
         body: JSON.stringify({ model: id, query, documents, return_documents: false }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -111,6 +111,8 @@ export function createJinaReranker(input: JinaRerankerOptions): Reranker | Confi
         const count = Math.ceil((query.length + (lengths[index] ?? 0)) / CHARS_PER_TOKEN);
         return InputTooLong({ index, tokens: { basis: 'estimated', count }, max: maxInputTokens });
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `jina answered ${response.status}: ${text.slice(0, 200)}` });
     }
 

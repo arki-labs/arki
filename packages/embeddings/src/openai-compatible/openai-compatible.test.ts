@@ -6,7 +6,7 @@ import { isFailure, orThrow } from '@arki/failure';
 import type { FetchLike } from '../http.js';
 import { embedMany } from '../embed.js';
 import { createEmbedder } from '../embedder.js';
-import { InputTooLong, InvalidOutput, RateLimited } from '../failures.js';
+import { InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import { NO_INSTRUCTION, QWEN3_INSTRUCTION } from '../instructions.js';
 import { createOpenAICompatibleModel } from './index.js';
 
@@ -94,6 +94,15 @@ describe('./openai-compatible', () => {
     const batch = await embedMany(embedder, ['a']);
     expect(RateLimited.is(batch)).toBe(true);
     if (RateLimited.is(batch)) expect(batch.data.retryAfterMs).toBe(3000);
+  });
+
+  // withResilience retries only an unreachable ModelUnavailable; a 5xx must not read as a malformed answer.
+  it.each([500, 502, 503])('maps a %s server fault to an unreachable ModelUnavailable', async status => {
+    const { embedder } = nebius(() => Promise.resolve(new Response('upstream down', { status })));
+    const batch = await embedMany(embedder, ['a']);
+    expect(ModelUnavailable.is(batch)).toBe(true);
+    expect(InvalidOutput.is(batch)).toBe(false);
+    if (ModelUnavailable.is(batch)) expect(batch.data.reason).toBe('unreachable');
   });
 
   it('usage absent is unknown', async () => {

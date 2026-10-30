@@ -8,8 +8,8 @@ import { isFailure } from '@arki/failure';
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
-import { fieldOf, stringOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection } from '../transport-failures.js';
+import { readAnswer, resendRefusalSchema, resendSentSchema } from './answers.js';
 import { postJson } from './post-json.js';
 
 const RESEND_EMAILS_URL = 'https://api.resend.com/emails';
@@ -23,6 +23,8 @@ export type ResendOptions = {
   readonly quotaPerMonth?: number;
   /** For tests. Default `globalThis.fetch`. */
   readonly fetch?: FetchFn;
+  /** Longest wait for Resend to answer, in milliseconds. Default 30 000. */
+  readonly timeoutMs?: number;
 };
 
 /**
@@ -60,23 +62,27 @@ export function resend(options: ResendOptions): MailTransport {
             : { tags: Object.entries(message.tags).map(([name, value]) => ({ name, value })) }),
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       if (isFailure(answer)) return logged(id, answer);
-      const { status, body } = answer;
+      const { status, body, retryAfterMs } = answer;
       if (status >= 400) {
+        const refusal = readAnswer(resendRefusalSchema, body);
         return logged(
           id,
           rejection(id, status, {
-            message: stringOf(fieldOf(body, 'message')),
-            providerCode: stringOf(fieldOf(body, 'name')),
+            message: refusal?.message,
+            providerCode: refusal?.name,
+            retryAfterMs,
           }),
         );
       }
-      if (status < 200 || status >= 300 || typeof body !== 'object' || body === null) {
+      const sent = readAnswer(resendSentSchema, body);
+      if (status < 200 || status >= 300 || sent === undefined) {
         return logged(id, badResponse(id, status, 'expected a JSON object'));
       }
       return logged(id, {
-        id: stringOf(fieldOf(body, 'id')) ?? null,
+        id: sent.id ?? null,
         transport: id,
         status: 'accepted',
         recipients: everyRecipient(message, 'accepted'),

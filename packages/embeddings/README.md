@@ -165,7 +165,7 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 
 ## Dot plugin
 
-`embeddings({ model, cache?, resilience? })` from `@arki/embeddings/dot` publishes `embedder` (`Embedder | null`), built once at boot. `model` is a model record, an `Embedder`, or a function returning one of them or a failure; the function runs at boot, so read your env there. `cache: true` adds `withCache` over a `memoryCacheStore()`, or pass a store; `resilience: true` adds `withResilience`, or pass a policy. The cache sits outside the retries. A model that does not build (a missing key returned as `ConfigurationFailure`) is logged once at `warn` and `embedder` is `null`, so the app boots and features degrade.
+`embeddings({ model, cache?, resilience? })` from `@arki/embeddings/dot` publishes `embedder` (`Embedder`), built once at boot. `model` is a model record, an `Embedder`, or a function returning one of them or a failure; the function runs at boot, so read your env there. `cache: true` adds `withCache` over a `memoryCacheStore()`, or pass a store; `resilience: true` adds `withResilience`, or pass a policy. The cache sits outside the retries. A model that does not build (a missing key returned as `ConfigurationFailure`, or a bad option) stops the boot: `boot()` returns the failure and the plugin logs it at `error`. An app that can run without embeddings must not mount the plugin.
 
 `withMiddleware(embedder, ...middleware)` wraps `embed` with your own `EmbedMiddleware` functions. The first one is outermost: it sees the call first and the result last.
 

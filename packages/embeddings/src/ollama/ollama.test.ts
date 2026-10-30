@@ -100,6 +100,29 @@ describe('./ollama', () => {
     expect(isFailure(result) && result.data).toEqual({ retryAfterMs: 2000 });
   });
 
+  // withResilience retries only an unreachable ModelUnavailable, so a server fault must be that, not InvalidOutput.
+  it('maps a 5xx to an unreachable ModelUnavailable, which withResilience can retry', async () => {
+    const stub = stubFetch(() => new Response('overloaded', { status: 503 }));
+    const result = await embedMany(ollama(stub.fetch).embedder, ['a']);
+    expect(isFailure(result) && result.code).toBe('embeddings.model_unavailable');
+    expect(isFailure(result) && result.data).toEqual({ model: 'qwen3-embedding:0.6b', reason: 'unreachable' });
+  });
+
+  // A proxied Ollama answers 401/403 for a bad credential; that is configuration, not a bad model answer.
+  it.each([401, 403])('maps %s from a proxy in front of Ollama to a ConfigurationFailure', async status => {
+    const stub = stubFetch(() => new Response('denied', { status }));
+    const result = await embedMany(ollama(stub.fetch).embedder, ['a']);
+    expect(isFailure(result) && result.code).toBe('embeddings.configuration');
+  });
+
+  it('runs the embed request under a signal even when the caller passes none, so it cannot hang forever', async () => {
+    const stub = stubFetch(recorded);
+    const embedded = await embedMany(ollama(stub.fetch).embedder, ['a']);
+    expect(isFailure(embedded)).toBe(false);
+    const embedCall = stub.fetch.mock.calls.find(([url]) => url.endsWith('/api/embed'));
+    expect(embedCall?.[1].signal).toBeInstanceOf(AbortSignal);
+  });
+
   // Ollama counts the tokens it really evaluated; that number beats any estimate for budgets.
   it('reports prompt_eval_count as reported tokens', async () => {
     const stub = stubFetch(recorded);

@@ -12,7 +12,7 @@ import type { EmbeddingModel, NativeRequest, TokenCount } from '../types.js';
 import { Cancelled, ConfigurationFailure, InputTooLong, InvalidOutput, ModelUnavailable, RateLimited } from '../failures.js';
 import type { FetchLike } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { countTokens, truncateByEstimate } from '../tokens.js';
 
@@ -120,7 +120,7 @@ export function createMistralModel(input: MistralModelOptions) {
         values: truncate ? texts.map(text => truncateByEstimate(text, facts.maxInputTokens)) : [...texts],
         // Retries belong to withResilience, where each attempt is charged once.
         maxRetries: 0,
-        ...(signal ? { abortSignal: signal } : {}),
+        abortSignal: requestSignal(signal),
       });
       const tokens = result.usage.tokens;
       return {
@@ -145,6 +145,8 @@ export function createMistralModel(input: MistralModelOptions) {
       if (status === 400 && TOO_LONG.test(`${error.message} ${error.responseBody ?? ''}`)) {
         return inputTooLong(model, texts);
       }
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `mistral answered ${status}: ${error.message.slice(0, 200)}` });
     }
   };

@@ -18,7 +18,7 @@ import { listOf } from './message.js';
 export function rejection(
   transport: string,
   status: number,
-  detail: { readonly message?: string; readonly providerCode?: string } = {},
+  detail: { readonly message?: string; readonly providerCode?: string; readonly retryAfterMs?: number } = {},
 ) {
   return MailRejected({
     transport,
@@ -26,20 +26,56 @@ export function rejection(
     upstreamStatus: status,
     ...(detail.message === undefined || detail.message === '' ? {} : { detail: detail.message }),
     ...(detail.providerCode === undefined ? {} : { providerCode: detail.providerCode }),
+    ...(detail.retryAfterMs === undefined ? {} : { retryAfterMs: detail.retryAfterMs }),
   });
 }
 
-/** The request failed in transit, timed out or was aborted. The service may have taken the mail. */
-export function uncertain(transport: string, error: unknown) {
+/** The longest a request may wait for the service, in milliseconds, when the transport sets no `timeoutMs`. */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * The signal one request runs under: the caller's `signal` joined with a timeout. After a failure,
+ * `reason()` says which of them ended it, so a caller's cancel is not reported as an outage.
+ */
+export function requestSignal(caller: AbortSignal | undefined, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return {
+    signal: caller === undefined ? timeout : AbortSignal.any([caller, timeout]),
+    reason: (): 'cancelled' | 'timeout' | 'network' => {
+      if (caller?.aborted === true) return 'cancelled';
+      return timeout.aborted ? 'timeout' : 'network';
+    },
+  };
+}
+
+/** Milliseconds to wait from a `Retry-After` header (whole seconds or an HTTP date), or `undefined`. */
+export function retryAfterMs(header: string | null | undefined): number | undefined {
+  if (header === null || header === undefined) return undefined;
+  const seconds = Number(header);
+  if (header.trim() !== '' && Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+/**
+ * The request failed in transit, timed out or was aborted (`reason` says which). The service may
+ * have taken the mail.
+ */
+export function uncertain(transport: string, error: unknown, reason: 'cancelled' | 'timeout' | 'network') {
   return MailUncertain(
-    { transport, detail: `no answer from the service (${errorField(error).message})` },
+    { transport, detail: `no answer from the service (${errorField(error).message})`, reason },
     { cause: error },
   );
 }
 
 /** The service answered with success, but the answer could not be read. It may have taken the mail. */
 export function badResponse(transport: string, status: number, problem: string) {
-  return MailUncertain({ transport, detail: `unreadable answer (HTTP ${status}): ${problem}`, upstreamStatus: status });
+  return MailUncertain({
+    transport,
+    detail: `unreadable answer (HTTP ${status}): ${problem}`,
+    upstreamStatus: status,
+    reason: 'unreadable',
+  });
 }
 
 /** A field this transport cannot carry. Thrown before any request, so nothing was sent. */

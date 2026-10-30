@@ -2,12 +2,13 @@
 
 import { useCallback, useState } from 'react';
 
-import {
-  isValidCoordinates,
-  normalizeCoordinates,
-  validateCoordinates,
-} from '../../core/coordinates';
+import { getLogger } from '@arki/log';
+
+import { normalizeCoordinates, validateCoordinates } from '../../core/coordinates';
+import { InvalidCoordinates } from '../../core/failures';
 import type { Coordinates } from '../../core/types';
+
+const log = getLogger('arki:geo');
 
 export type UseCoordinatesReturn = {
   coordinates: Coordinates | null;
@@ -15,12 +16,15 @@ export type UseCoordinatesReturn = {
   updateLatitude: (lat: number) => void;
   updateLongitude: (lng: number) => void;
   isValid: boolean;
+  /** Why the last change was refused, or null when the last change was accepted. The previous value is kept. */
+  error: InvalidCoordinates | null;
   normalize: () => void;
   clear: () => void;
 }
 
 /**
- * Hook to manage coordinate state with validation
+ * Hook to manage coordinate state with validation.
+ * A refused change keeps the old coordinates and sets `error`.
  * @param initialCoordinates - Initial coordinates
  * @returns Coordinate state and update functions
  */
@@ -30,55 +34,48 @@ export function useCoordinates(
   const [coordinates, setCoordinatesState] = useState<Coordinates | null>(
     initialCoordinates,
   );
+  const [error, setError] = useState<InvalidCoordinates | null>(null);
 
-  const setCoordinates = useCallback((coords: Coordinates) => {
-    try {
-      validateCoordinates(coords);
-      setCoordinatesState(coords);
-    } catch (error) {
-      console.error('Invalid coordinates:', error);
+  const accept = useCallback((candidate: Coordinates) => {
+    const checked = validateCoordinates(candidate);
+    if (InvalidCoordinates.is(checked)) {
+      log.warn('Refused coordinates: {reason}', { reason: checked.data.reason });
+      setError(checked);
+      return;
     }
+    setError(null);
+    setCoordinatesState(checked);
   }, []);
 
+  const setCoordinates = useCallback((coords: Coordinates) => accept(coords), [accept]);
+
   const updateLatitude = useCallback(
-    (lat: number) => {
-      if (coordinates) {
-        const updated = { ...coordinates, lat };
-        if (isValidCoordinates(updated)) {
-          setCoordinatesState(updated);
-        }
-      } else {
-        setCoordinatesState({ lat, lng: 0 });
-      }
-    },
-    [coordinates],
+    (lat: number) => accept({ lat, lng: coordinates?.lng ?? 0 }),
+    [accept, coordinates],
   );
 
   const updateLongitude = useCallback(
-    (lng: number) => {
-      if (coordinates) {
-        const updated = { ...coordinates, lng };
-        if (isValidCoordinates(updated)) {
-          setCoordinatesState(updated);
-        }
-      } else {
-        setCoordinatesState({ lat: 0, lng });
-      }
-    },
-    [coordinates],
+    (lng: number) => accept({ lat: coordinates?.lat ?? 0, lng }),
+    [accept, coordinates],
   );
 
   const normalize = useCallback(() => {
-    if (coordinates) {
-      setCoordinatesState(normalizeCoordinates(coordinates));
+    if (!coordinates) return;
+    const normalized = normalizeCoordinates(coordinates);
+    if (InvalidCoordinates.is(normalized)) {
+      setError(normalized);
+      return;
     }
+    setError(null);
+    setCoordinatesState(normalized);
   }, [coordinates]);
 
   const clear = useCallback(() => {
+    setError(null);
     setCoordinatesState(null);
   }, []);
 
-  const isValid = coordinates ? isValidCoordinates(coordinates) : false;
+  const isValid = coordinates ? !InvalidCoordinates.is(validateCoordinates(coordinates)) : false;
 
   return {
     coordinates,
@@ -86,6 +83,7 @@ export function useCoordinates(
     updateLatitude,
     updateLongitude,
     isValid,
+    error,
     normalize,
     clear,
   };

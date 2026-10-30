@@ -14,8 +14,8 @@ import type { MailTransport } from '../types.js';
 import { MAIL_ERROR_CODES, MailError } from '../errors.js';
 import { errorField } from '../log.js';
 import { listOf } from '../message.js';
-import { fieldOf, stringOf } from '../narrow.js';
-import { everyRecipient, logged, rejection, uncertain } from '../transport-failures.js';
+import { readAnswer, sesErrorSchema, sesResponseHeadersSchema } from '../http/answers.js';
+import { everyRecipient, logged, rejection, requestSignal, retryAfterMs, uncertain } from '../transport-failures.js';
 
 export type SesOptions = {
   /** Default `'ses'`. */
@@ -32,6 +32,8 @@ export type SesOptions = {
   readonly configurationSetName?: string;
   /** Monthly budget for `failover`. */
   readonly quotaPerMonth?: number;
+  /** Longest wait for SES to answer, in milliseconds. Default 30 000. */
+  readonly timeoutMs?: number;
 };
 
 // SES's documented charset name. SES expects this exact spelling, not Node's `utf8`.
@@ -52,16 +54,25 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
 
 /**
  * An SDK error with an HTTP status came from SES. Without one, the request never got an answer
- * (network failure, timeout, abort), and SES may have taken the mail.
+ * (network failure, timeout, abort), and SES may have taken the mail. `reason` says which ended it.
+ * A throttled answer (429) carries the `Retry-After` header the SDK keeps in `$response`, when present.
  */
-function sdkFailure(transport: string, error: unknown) {
-  const status = fieldOf(fieldOf(error, '$metadata'), 'httpStatusCode');
-  if (typeof status !== 'number') return uncertain(transport, error);
-  const providerCode = stringOf(fieldOf(error, 'name'));
+function sdkFailure(transport: string, error: unknown, reason: () => 'cancelled' | 'timeout' | 'network') {
+  const read = readAnswer(sesErrorSchema, error);
+  const status = read?.$metadata?.httpStatusCode;
+  if (status === undefined) return uncertain(transport, error, reason());
+  const providerCode = read?.name;
   return rejection(transport, status, {
     message: errorField(error).message,
     ...(providerCode === undefined ? {} : { providerCode }),
+    ...(retryAfter(error) === undefined ? {} : { retryAfterMs: retryAfter(error) }),
   });
+}
+
+/** `Retry-After` from the raw HTTP response the SDK attaches to a service error, when it kept one. */
+function retryAfter(error: unknown): number | undefined {
+  const headers = readAnswer(sesResponseHeadersSchema, error)?.$response?.headers;
+  return retryAfterMs(headers?.['retry-after']);
 }
 
 /**
@@ -121,11 +132,9 @@ export function ses(options: SesOptions): MailTransport {
         },
         ...(options.configurationSetName === undefined ? {} : { ConfigurationSetName: options.configurationSetName }),
       });
+      const attempt = requestSignal(sendOptions.signal, options.timeoutMs);
       try {
-        const response = await sdk.client.send(
-          command,
-          sendOptions.signal === undefined ? {} : { abortSignal: sendOptions.signal },
-        );
+        const response = await sdk.client.send(command, { abortSignal: attempt.signal });
         return logged(id, {
           id: response.MessageId ?? null,
           transport: id,
@@ -133,7 +142,7 @@ export function ses(options: SesOptions): MailTransport {
           recipients: everyRecipient(message, 'accepted'),
         });
       } catch (error) {
-        return logged(id, sdkFailure(id, error));
+        return logged(id, sdkFailure(id, error, attempt.reason));
       }
     },
   };

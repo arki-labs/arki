@@ -9,8 +9,8 @@ import { isFailure } from '@arki/failure';
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
-import { fieldOf, stringOf } from '../narrow.js';
 import { badResponse, everyRecipient, logged, rejection } from '../transport-failures.js';
+import { mailpitRefusalSchema, mailpitSentSchema, readAnswer } from './answers.js';
 import { postJson } from './post-json.js';
 
 export type MailpitOptions = {
@@ -20,6 +20,8 @@ export type MailpitOptions = {
   readonly baseUrl: string;
   /** For tests. Default `globalThis.fetch`. */
   readonly fetch?: FetchFn;
+  /** Longest wait for Mailpit to answer, in milliseconds. Default 30 000. */
+  readonly timeoutMs?: number;
 };
 
 /** `Name <a@b.dev>` or `a@b.dev`, as Mailpit wants it: `{ Email, Name? }`. */
@@ -68,17 +70,22 @@ export function mailpit(options: MailpitOptions): MailTransport {
             : { Tags: Object.entries(message.tags).map(([name, value]) => `${name}-${value}`) }),
         },
         ...(sendOptions.signal === undefined ? {} : { signal: sendOptions.signal }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       if (isFailure(answer)) return logged(id, answer);
-      const { status, body } = answer;
+      const { status, body, retryAfterMs } = answer;
       if (status >= 400) {
-        return logged(id, rejection(id, status, { message: stringOf(fieldOf(body, 'Error')) }));
+        return logged(
+          id,
+          rejection(id, status, { message: readAnswer(mailpitRefusalSchema, body)?.Error, retryAfterMs }),
+        );
       }
-      if (status < 200 || status >= 300 || typeof body !== 'object' || body === null) {
+      const sent = readAnswer(mailpitSentSchema, body);
+      if (status < 200 || status >= 300 || sent === undefined) {
         return logged(id, badResponse(id, status, 'expected a JSON object'));
       }
       return logged(id, {
-        id: stringOf(fieldOf(body, 'ID')) ?? null,
+        id: sent.ID ?? null,
         transport: id,
         status: 'accepted',
         recipients: everyRecipient(message, 'accepted'),

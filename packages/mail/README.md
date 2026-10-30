@@ -36,7 +36,7 @@ if (isFailure(sent)) console.error(sent.code, sent.message);
 else console.info(sent.id);
 ```
 
-`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](https://www.npmjs.com/package/@arki/failure): `MailInvalidInput`, `MailQuotaExhausted`, `MailRejected`, `MailUncertain` or canonical `ValidatorDefect` (see [Failure behaviour](#failure-behaviour)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. Misuse throws `MailError`: an empty sender, a line break in a header, a field the transport cannot carry.
+`send` never throws for a mail that was not sent. It returns the `SentMail` itself, or a failure value from [`@arki/failure`](https://www.npmjs.com/package/@arki/failure): `MailInvalidInput`, `MailInvalidMessage`, `MailQuotaExhausted`, `MailRejected`, `MailUncertain` or canonical `ValidatorDefect` (see [Failure behaviour](#failure-behaviour)). `MailRejected` means the service surely did not take the mail, and its `data.retryable` says whether trying later can help. `MailUncertain` means it may have taken it anyway. `MailInvalidMessage` means the message cannot be sent as written (no recipient, an empty address, a line break in an address, the subject or a header, a reserved header): show it to the user, nothing was sent. Misuse throws `MailError`: an empty sender in the config, a field the transport cannot carry.
 
 The sender comes from the call, then the template's `defaults.from`, then the mailer's `from`.
 
@@ -82,8 +82,10 @@ A template validator that throws or rejects returns canonical `schema.validator_
 | -------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------- |
 | `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.            |
 | `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                 |
-| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`. |
-| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`.   |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`, `retryAfterMs` (its `Retry-After`). |
+| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`, `reason` (`cancelled`, `timeout`, `network`, `unreadable`). |
+| `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written. `data`: `problem`. Nothing was sent.       |
+| `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`. `data`: `bytes`, `maxBytes`. Nothing was queued. |
 | `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.      |
 
 A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
@@ -91,10 +93,10 @@ A mistake in how the package is used is thrown as `MailError`, with a stable `co
 | Code             | Name               | When                                                                   |
 | ---------------- | ------------------ | ---------------------------------------------------------------------- |
 | `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender, no SES SDK. |
-| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header.  |
+| `ARKI_MAIL_E002` | `invalidMessage`   | A queued mail without exactly one `to` recipient.                      |
 | `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Thrown before any request.         |
 | `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database.                                       |
-| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.            |
+| `ARKI_MAIL_E010` | `badQueuedData`    | A stored queue row cannot be read.                                     |
 
 Handle the failures by what you know about delivery:
 
@@ -191,11 +193,11 @@ How a service's answer maps:
 | -------------------------------- | --------------------------------------------- | ------------------------------ |
 | 429 or 5xx                       | `MailRejected`, `data.retryable: true`        | no                             |
 | any other 4xx                    | `MailRejected`, `data.retryable: false`       | no                             |
-| network failure, timeout, abort  | `MailUncertain`                               | yes                            |
+| network failure, timeout, abort  | `MailUncertain`, with `data.reason` (`network`, `timeout`, `cancelled`) | yes                  |
 | 2xx that cannot be read          | `MailUncertain`, with `data.upstreamStatus`   | yes                            |
 | a field the service cannot carry | throws `MailError` `E005`, before any request | no                             |
 
-`MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, and what it said as `data.detail`.
+`MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, what it said as `data.detail`, and its `Retry-After` as `data.retryAfterMs`; the outbox waits at least that long before the next try. Every HTTP transport and `ses` take `timeoutMs` (default 30 000); a request that runs out of time is `MailUncertain` with `data.reason: 'timeout'`.
 
 A message id is the provider's, or `null` when it gives none. It is never made up.
 
@@ -253,7 +255,7 @@ await journal.worker(db, { jobs: outbox.runner });
 - `expiresAt` stops a stale mail: past it, the job is dead with `MailExpired` and nothing is sent. Use it for sign-in links.
 - A queued mail has exactly one `to` recipient and no Cc or Bcc.
 - `retry` sets the waits (default 5 s doubling to 1 h, 5 tries). Only `MailUncertain` and a `MailRejected` with `data.retryable` are tried again; any other failure is dead on its first try.
-- `enqueue` returns `MailInvalidInput` for bad input, and queues nothing; your code decides whether the write still commits. It throws `MailError`: `E009` for the root database instead of a transaction, `E002` unless there is exactly one `to` recipient, `E010` when the message is over `maxBytes` (256 KiB).
+- `enqueue` returns `MailInvalidInput` for bad input, and queues nothing; your code decides whether the write still commits. It also returns `MailInvalidMessage` for a message that cannot be sent as written and `MailTooLarge` when the message is over `maxBytes` (256 KiB). It throws `MailError`: `E009` for the root database instead of a transaction, `E002` unless there is exactly one `to` recipient.
 
 ## Dot
 

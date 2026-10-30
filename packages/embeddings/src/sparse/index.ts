@@ -24,7 +24,7 @@ import {
   SpaceMismatch,
   UnsupportedInput,
 } from '../failures.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
 import { objectSchema, functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { isSameSpace, spaceId } from '../space.js';
@@ -225,7 +225,7 @@ export function createSparseModel(input: SparseModelOptions): SparseEmbedder | C
         },
         // Sent either way: a server started with `--auto-truncate` would otherwise cut silently.
         body: JSON.stringify({ inputs: texts, truncate: onTooLong === 'truncate' }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -255,6 +255,8 @@ export function createSparseModel(input: SparseModelOptions): SparseEmbedder | C
         return inputTooLong(texts, maxInputTokens);
       }
       if (/batch size/.test(message)) return UnsupportedInput({ index: -1, part: 'batch' });
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `sparse server answered ${response.status}: ${message.slice(0, 200)}` });
     }
 

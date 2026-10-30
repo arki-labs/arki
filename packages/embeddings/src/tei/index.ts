@@ -19,7 +19,7 @@ import {
   UnsupportedInput,
 } from '../failures.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs } from '../http.js';
+import { retryAfterMs, requestSignal } from '../http.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type TeiRerankerOptions = {
@@ -102,7 +102,7 @@ export function createTeiReranker(input: TeiRerankerOptions): Reranker | Configu
           raw_scores: false,
           return_text: false,
         }),
-        ...(signal ? { signal } : {}),
+        signal: requestSignal(signal),
       });
     } catch {
       return signal?.aborted ? Cancelled() : ModelUnavailable({ model: id, reason: 'unreachable' });
@@ -135,6 +135,8 @@ export function createTeiReranker(input: TeiRerankerOptions): Reranker | Configu
         return InputTooLong({ index, tokens: { basis: 'estimated', count }, max: maxInputTokens });
       }
       if (response.status === 413 || /batch size/.test(message)) return UnsupportedInput({ index: -1, part: 'batch' });
+      // A server fault is worth another try: it is the same unreachable failure a dropped connection is.
+      if (response.status >= 500) return ModelUnavailable({ model: id, reason: 'unreachable' });
       return InvalidOutput({ reason: `tei server answered ${response.status}: ${message.slice(0, 200)}` });
     }
 

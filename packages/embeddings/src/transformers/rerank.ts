@@ -7,7 +7,7 @@ import type * as Transformers from '@huggingface/transformers';
 import type { DataType, DeviceType, ProgressCallback } from '@huggingface/transformers';
 import { z } from 'zod';
 
-import { invariant, isFailure } from '@arki/failure';
+import { invariant, isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import type { SchemaWithJson } from '@arki/schema';
 import { assert } from '@arki/schema';
@@ -104,7 +104,11 @@ type Scorer = (
   truncate: boolean,
   signal?: AbortSignal,
 ) => Promise<
-  readonly number[] | ReturnType<typeof InvalidOutput> | ReturnType<typeof InputTooLong> | ReturnType<typeof Cancelled>
+  | readonly number[]
+  | ReturnType<typeof InvalidOutput>
+  | ReturnType<typeof InputTooLong>
+  | ReturnType<typeof Cancelled>
+  | ReturnType<typeof UnexpectedDefect>
 >;
 
 /**
@@ -206,7 +210,8 @@ export async function createTransformersReranker(
       }
       return Array.from(output.data.logits.data, logit => sigmoid(logit));
     } catch (error) {
-      return InvalidOutput({ reason: `transformers.js failed: ${error instanceof Error ? error.message : 'unknown'}` });
+      // The runtime failed before answering (out of memory, a failed session): a defect, not a malformed answer.
+      return UnexpectedDefect({ cause: error });
     }
   };
 
@@ -237,9 +242,7 @@ export async function createTransformersReranker(
         // exp(yes) / (exp(yes) + exp(no)), written so a large logit cannot overflow.
         scores.push(sigmoid(yesLogit - noLogit));
       } catch (error) {
-        return InvalidOutput({
-          reason: `transformers.js failed: ${error instanceof Error ? error.message : 'unknown'}`,
-        });
+        return signal?.aborted ? Cancelled() : UnexpectedDefect({ cause: error });
       }
     }
     return scores;

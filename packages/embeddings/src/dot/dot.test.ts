@@ -19,46 +19,48 @@ describe('embeddings()', () => {
         .boot(),
     );
 
-    const embedder = app.services.embedder;
+    const { embedder } = app.services;
     expect(embedder?.space).toMatchObject({ provider: 'fake', dimensions: 8 });
-    const first = await embedder?.embed(['a'], {});
-    const second = await embedder?.embed(['a'], {});
+    const first = await embedder.embed(['a'], {});
+    const second = await embedder.embed(['a'], {});
     expect(first).toMatchObject({ usage: { cacheHits: 0 } });
     expect(second).toMatchObject({ usage: { cacheHits: 1 } });
   });
 
-  // A missing key must turn embeddings off, not stop the app from booting.
-  it('a model that does not build provides null and logs once', async () => {
+  // A missing key is a configuration fault: the boot returns it, the app never runs with embeddings silently off.
+  it('a model that does not build stops the boot with the ConfigurationFailure and logs it once', async () => {
     using log = fakeLog();
-    const app = await orThrow(
-      defineApp('emb-none')
-        .infra(embeddings({ model: () => ConfigurationFailure({ message: 'OLLAMA_BASE_URL is not set' }) }))
-        .boot(),
-    );
 
-    expect(app.services.embedder).toBeNull();
-    const warnings = log.records.filter(
-      record => record.category === 'arki:embeddings' && record.template.startsWith('embeddings are off'),
+    const booted = await defineApp('emb-none')
+      .infra(embeddings({ model: () => ConfigurationFailure({ message: 'OLLAMA_BASE_URL is not set' }) }))
+      .boot();
+
+    expect(ConfigurationFailure.is(booted)).toBe(true);
+    expect(booted).toMatchObject({ data: { message: 'OLLAMA_BASE_URL is not set' } });
+    const errors = log.records.filter(
+      record => record.category === 'arki:embeddings' && record.template.startsWith('embeddings could not start'),
     );
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.fields).toMatchObject({ code: 'embeddings.configuration' });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.fields).toMatchObject({ code: 'embeddings.configuration' });
   });
 
-  it('takes a factory, and a failure from it is the same null', async () => {
+  it('a bad option stops the boot with a ConfigurationFailure too', async () => {
     using _log = fakeLog();
+
+    // @ts-expect-error: a number is not a model
+    const booted = await defineApp('emb-bad-option').infra(embeddings({ model: 42 })).boot();
+
+    expect(ConfigurationFailure.is(booted)).toBe(true);
+  });
+
+  it('takes a factory that builds a model', async () => {
     const built = await orThrow(
       defineApp('emb-factory')
         .infra(embeddings({ model: () => fakeEmbedder({ dimensions: 4 }) }))
         .boot(),
     );
-    const refused = await orThrow(
-      defineApp('emb-refused')
-        .infra(embeddings({ model: () => ConfigurationFailure({ message: 'no key' }) }))
-        .boot(),
-    );
 
-    expect(built.services.embedder?.space.dimensions).toBe(4);
-    expect(refused.services.embedder).toBeNull();
+    expect(built.services.embedder.space.dimensions).toBe(4);
   });
 
   // The app reads its env inside the function, so defining the plugin at import never touches it.
@@ -75,10 +77,10 @@ describe('embeddings()', () => {
     const app = await orThrow(defineApp('emb-boot').infra(plugin).boot());
 
     expect(builds).toBe(1);
-    expect(app.services.embedder?.space).toMatchObject({ provider: 'fake', dimensions: 4 });
+    expect(app.services.embedder.space).toMatchObject({ provider: 'fake', dimensions: 4 });
   });
 
-  it('publishes Embedder | null, so a feature must handle the unconfigured app', () => {
-    expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder | null>();
+  it('publishes Embedder: an unconfigured app fails to boot rather than getting null', () => {
+    expectTypeOf<Provided<ReturnType<typeof embeddings>['provides']['embedder']>>().toEqualTypeOf<Embedder>();
   });
 });

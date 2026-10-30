@@ -8,7 +8,10 @@
  */
 
 import type { ReactNode } from 'react';
+import { getLogger } from '@arki/log';
 import { APIProvider } from '@vis.gl/react-google-maps';
+
+const log = getLogger('arki:geo');
 
 export type GoogleMapsProviderProps = {
   /**
@@ -76,7 +79,7 @@ export function GoogleMapsProvider({
   // Validate API key
   if (!apiKey) {
     const error = new Error('Google Maps API key is required');
-    console.error(error);
+    log.warn('Google Maps API key is missing');
     onLoadError?.(error);
 
     return (
@@ -94,10 +97,12 @@ export function GoogleMapsProvider({
       language={language}
       region={region}
       onLoad={() => {
-        console.log('Google Maps API loaded successfully');
+        log.debug('Google Maps API loaded');
       }}
       onError={error => {
-        console.error('Google Maps API failed to load:', error);
+        log.warn('Google Maps API failed to load: {message}', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         onLoadError?.(error instanceof Error ? error : new Error(String(error)));
       }}
     >
