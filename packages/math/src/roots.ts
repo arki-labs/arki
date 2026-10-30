@@ -50,16 +50,19 @@
  *   naming the point;
  * - no convergence within `maxIterations`, or a Newton step that cannot make
  *   progress (zero derivative, overflow, a local minimum of `|f|` that is not a
- *   root), throws `RootConvergenceError`, a `ConvergenceError` whose `best`
- *   field holds the last iterate and its error estimate.
+ *   root), returns `NotConverged` (`math.not_converged`): valid input that
+ *   does not settle is a result, not a bug. Its `cause` is a
+ *   `RootConvergenceError` whose `best` field holds the last iterate, its error
+ *   estimate and the iterations spent.
  *
  * A sign change across a pole looks exactly like a root to every bracketed
  * method: `findRoot(x => Math.tan(x), [1, 2])` converges to `π/2`, where `tan`
  * is unbounded. Check `|f(root)|` when `f` may be discontinuous.
  */
 
+import type { NotConvergedFailure } from './errors.js';
 import type { RealFunction } from './internal/calculus.js';
-import { ConvergenceError, InvalidArgumentError, MathError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, MathError, orNotConverged } from './errors.js';
 import { assertFunction, call, readBounds, readCount, readTolerance } from './internal/calculus.js';
 import { assertFinite } from './number.js';
 
@@ -99,7 +102,7 @@ export class RootConvergenceError extends ConvergenceError {
   readonly best: RootResult;
 
   constructor(message: string, best: RootResult) {
-    super(message);
+    super(message, best.iterations);
     this.best = best;
   }
 }
@@ -152,7 +155,15 @@ function signChangeBracket(f: RealFunction, bracket: unknown, name: string): Bra
  * @example
  * findRoot(x => x ** 3 - 2 * x - 5, [2, 3]).root; // 2.0945514815423265 (Wallis's cubic)
  */
-export function findRoot(f: RealFunction, bracket: readonly [number, number], options?: RootOptions): RootResult {
+export function findRoot(
+  f: RealFunction,
+  bracket: readonly [number, number],
+  options?: RootOptions,
+): RootResult | NotConvergedFailure {
+  return orNotConverged(() => findRootOrThrow(f, bracket, options));
+}
+
+function findRootOrThrow(f: RealFunction, bracket: readonly [number, number], options?: RootOptions): RootResult {
   assertFunction(f, 'f');
   const settings = readSettings(options);
   const { a, b, fa, fb } = signChangeBracket(f, bracket, 'bracket');
@@ -248,7 +259,15 @@ function brent(
  * `ceil(log2(w / t))` steps; `errorEstimate` bounds the distance to a sign
  * change.
  */
-export function bisect(f: RealFunction, bracket: readonly [number, number], options?: RootOptions): RootResult {
+export function bisect(
+  f: RealFunction,
+  bracket: readonly [number, number],
+  options?: RootOptions,
+): RootResult | NotConvergedFailure {
+  return orNotConverged(() => bisectOrThrow(f, bracket, options));
+}
+
+function bisectOrThrow(f: RealFunction, bracket: readonly [number, number], options?: RootOptions): RootResult {
   assertFunction(f, 'f');
   const settings = readSettings(options);
   const ends = signChangeBracket(f, bracket, 'bracket');
@@ -295,7 +314,16 @@ const MAX_HALVINGS = 60;
  * @example
  * newton(x => x * x - 2, x => 2 * x, 1).root; // 1.4142135623730951
  */
-export function newton(f: RealFunction, df: RealFunction, x0: number, options?: NewtonOptions): RootResult {
+export function newton(
+  f: RealFunction,
+  df: RealFunction,
+  x0: number,
+  options?: NewtonOptions,
+): RootResult | NotConvergedFailure {
+  return orNotConverged(() => newtonOrThrow(f, df, x0, options));
+}
+
+function newtonOrThrow(f: RealFunction, df: RealFunction, x0: number, options?: NewtonOptions): RootResult {
   assertFunction(f, 'f');
   assertFunction(df, 'df');
   assertFinite(x0, 'x0');
@@ -427,6 +455,14 @@ export function findRoots(
   f: RealFunction,
   interval: readonly [number, number],
   options?: FindRootsOptions,
+): RootResult[] | NotConvergedFailure {
+  return orNotConverged(() => findRootsOrThrow(f, interval, options));
+}
+
+function findRootsOrThrow(
+  f: RealFunction,
+  interval: readonly [number, number],
+  options?: FindRootsOptions,
 ): RootResult[] {
   assertFunction(f, 'f');
   const settings = readSettings(options);
@@ -448,7 +484,8 @@ export function findRoots(
       roots.push(result(xs[i]!, 0, 0, 0));
     } else if (i < samples && !Number.isNaN(y)) {
       const yNext = ys[i + 1]!;
-      if (yNext !== 0 && !Number.isNaN(yNext) && y > 0 !== yNext > 0) roots.push(brent(f, xs[i]!, xs[i + 1]!, y, yNext, settings, 0));
+      if (yNext !== 0 && !Number.isNaN(yNext) && y > 0 !== yNext > 0)
+        roots.push(brent(f, xs[i]!, xs[i + 1]!, y, yNext, settings, 0));
     }
   }
   return roots;

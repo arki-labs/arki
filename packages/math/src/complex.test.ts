@@ -8,6 +8,7 @@ import {
   NumberFormatError,
   NumberOutOfRange,
   NumericRangeError,
+  ResourceLimitError,
 } from './errors.js';
 
 const close = (actual: Complex, expected: Complex | number, tolerance = 1e-14): void => {
@@ -532,5 +533,13 @@ describe('immutability without freezing', () => {
     expect(complex(z.toJSON()).eq(z)).toBe(true);
     expect(Object.keys(z)).toEqual(['re', 'im']);
     expect(Object.fromEntries(Object.entries(z))).toEqual({ re: 3, im: -4 });
+  });
+});
+
+describe('nthRoots size', () => {
+  it('refuses n past 1,000,000 with ResourceLimitError instead of allocating a billion objects', () => {
+    expect(() => complex(1, 1).nthRoots(1e9)).toThrow(ResourceLimitError);
+    expect(() => complex(0, 0).nthRoots(1e9)).toThrow(ResourceLimitError);
+    expect(complex(1, 0).nthRoots(1000)).toHaveLength(1000);
   });
 });

@@ -13,8 +13,7 @@ import { orThrow } from '@arki/failure';
 import { Rational } from '@arki/math/rational';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
-import { factor, polynomialIn } from './polynomial.js';
-import { fastest } from './test-support.js';
+import { factor, fastest, polynomialIn } from './test-support.js';
 
 function text(coefficients: readonly string[]): string {
   return coefficients.map((c, k) => `(${c})*x^${k}`).join(' + ');

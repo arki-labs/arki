@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { Complex } from './complex.js';
 import { complex } from './complex.js';
-import { InvalidArgumentError, NumericRangeError } from './errors.js';
+import {
+  ConvergenceError,
+  InvalidArgumentError,
+  NotConverged,
+  NumericRangeError,
+  ResourceLimitError,
+} from './errors.js';
 import {
   addPolynomials,
   cubicRoots,
@@ -191,13 +199,13 @@ describe('cubicRoots', () => {
 
 describe('polynomialRoots', () => {
   it('returns every root of x⁴ - 1 sorted, with real roots exactly real', () => {
-    const roots = polynomialRoots([1, 0, 0, 0, -1]);
+    const roots = orThrow(polynomialRoots([1, 0, 0, 0, -1]));
     expect(roots.map(z => z.toString())).toEqual(['-1', '-i', 'i', '1']);
     expect(roots[0]!.isReal()).toBe(true);
   });
 
   it('finds the fifth roots of unity', () => {
-    const roots = polynomialRoots([1, 0, 0, 0, 0, -1]);
+    const roots = orThrow(polynomialRoots([1, 0, 0, 0, 0, -1]));
     const expected = complex(1)
       .nthRoots(5)
       .toSorted((x, y) => x.re - y.re || x.im - y.im);
@@ -205,20 +213,20 @@ describe('polynomialRoots', () => {
   });
 
   it('separates the clustered roots of Wilkinson-style (x-1)…(x-10)', () => {
-    const roots = polynomialRoots(fromRoots([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+    const roots = orThrow(polynomialRoots(fromRoots([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])));
     for (const [k, root] of roots.entries()) closeTo(root, complex(k + 1), 1e-9);
   });
 
   it('factors out zero roots exactly and delegates low degrees to the closed forms', () => {
-    expect(polynomialRoots([1, -2, 0, 0, 0]).map(z => z.toString())).toEqual(['0', '0', '0', '2']);
-    expect(polynomialRoots([2, -1]).map(z => z.toString())).toEqual(['0.5']);
-    expect(polynomialRoots([1, -6, 11, -6]).map(z => z.toString())).toEqual(['1', '2', '3']);
-    expect(polynomialRoots([1, 2, 5]).map(z => z.toString())).toEqual(['-1 - 2i', '-1 + 2i']);
+    expect(orThrow(polynomialRoots([1, -2, 0, 0, 0])).map(z => z.toString())).toEqual(['0', '0', '0', '2']);
+    expect(orThrow(polynomialRoots([2, -1])).map(z => z.toString())).toEqual(['0.5']);
+    expect(orThrow(polynomialRoots([1, -6, 11, -6])).map(z => z.toString())).toEqual(['1', '2', '3']);
+    expect(orThrow(polynomialRoots([1, 2, 5])).map(z => z.toString())).toEqual(['-1 - 2i', '-1 + 2i']);
   });
 
   it('degrades a multiple root to about 16/m digits, as conditioning dictates', () => {
     // (x-1)⁴: a coefficient change of ε moves the roots by ε^(1/4) ≈ 1e-4.
-    for (const root of polynomialRoots([1, -4, 6, -4, 1])) closeTo(root, complex(1), 1e-3);
+    for (const root of orThrow(polynomialRoots([1, -4, 6, -4, 1]))) closeTo(root, complex(1), 1e-3);
   });
 
   it('agrees with Vieta on random high-degree polynomials', () => {
@@ -230,7 +238,7 @@ describe('polynomialRoots', () => {
     for (let trial = 0; trial < 50; trial++) {
       const degree = 4 + (trial % 9);
       const coefficients = Array.from({ length: degree + 1 }, () => next() * 10);
-      const roots = polynomialRoots(coefficients);
+      const roots = orThrow(polynomialRoots(coefficients));
       expect(roots).toHaveLength(degree);
       // Σ roots = -a1/a0 and ∏ roots = (-1)^n·an/a0.
       let sum = complex(0);
@@ -245,7 +253,30 @@ describe('polynomialRoots', () => {
   });
 
   it('has no roots for a constant and refuses the zero polynomial', () => {
-    expect(polynomialRoots([0, 3])).toEqual([]);
-    expect(() => polynomialRoots([0, 0])).toThrow(InvalidArgumentError);
+    expect(orThrow(polynomialRoots([0, 3]))).toEqual([]);
+    expect(() => orThrow(polynomialRoots([0, 0]))).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('polynomialRoots limits and failures', () => {
+  it('refuses a degree past 500 with ResourceLimitError instead of running for a minute', () => {
+    const start = Date.now();
+    expect(() => polynomialRoots(Array.from({ length: 3000 }, (_, k) => (k === 0 ? 1 : 0.5)))).toThrow(
+      ResourceLimitError,
+    );
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('returns NotConverged, with the iteration count in the cause, for valid coefficients it cannot settle', () => {
+    const roots = polynomialRoots([1e300, 1e-300, 1e300, 1, 1]);
+    expect(NotConverged.is(roots) && roots.cause).toBeInstanceOf(ConvergenceError);
+    expect(NotConverged.is(roots) && roots.cause instanceof ConvergenceError && roots.cause.iterations).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('cubicRoots and polynomialRoots throw NumericRangeError, not InvalidArgumentError, when a root overflows', () => {
+    expect(() => cubicRoots(1e-300, 1, 1, 1)).toThrow(NumericRangeError);
+    expect(() => polynomialRoots([1e-320, 1, 1])).toThrow(NumericRangeError);
   });
 });

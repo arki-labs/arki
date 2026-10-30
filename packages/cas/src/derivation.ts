@@ -16,10 +16,12 @@ import type { Expr, Node } from '@arki/expr';
 
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
 import type { DerivativeRule, Order, RawStep } from './differentiate.js';
+import type { CasTextFailure } from './failures.js';
 import type { Normal, SimplifyRule } from './normal.js';
 import { lostConditions } from './conditions.js';
 import { differentiateOrders, FUNCTIONS, nonzeroConditions, treeSize } from './differentiate.js';
 import { exprOf } from './emit.js';
+import { atTextDoor } from './failures.js';
 import { normalize, Readable, RULES } from './normal.js';
 
 export type { DerivativeRule } from './differentiate.js';
@@ -305,7 +307,17 @@ function simplification(order: Order, normal: Normal, run: ReturnType<typeof dif
  * differentiates; `stepNodes` bounds the printed size of all steps and is
  * checked before any step is printed.
  */
-export function derivation(input: CasInput, variable: string, options: DerivationOptions = {}): Derivation {
+export function derivation(input: Expr, variable: string, options?: DerivationOptions): Derivation;
+export function derivation(input: CasInput, variable: string, options?: DerivationOptions): Derivation | CasTextFailure;
+export function derivation(
+  input: CasInput,
+  variable: string,
+  options: DerivationOptions = {},
+): Derivation | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => derivationOrThrow(input, variable, options));
+}
+
+function derivationOrThrow(input: CasInput, variable: string, options: DerivationOptions): Derivation {
   const run = differentiateOrders(input, variable, { ...options, simplify: true }, true);
   const drafts: Draft[] = [];
   for (const [i, order] of run.orders.entries()) {
@@ -393,3 +405,4 @@ function materialize(top: Draft, run: ReturnType<typeof differentiateOrders>): D
 }
 
 export type { CasInput, CasOptions, CasResult, Condition } from './core.js';
+export type { CasTextFailure } from './failures.js';

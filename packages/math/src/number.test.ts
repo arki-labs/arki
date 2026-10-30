@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { decimal } from './decimal.js';
-import { InvalidArgumentError, NumberFormatError, NumericRangeError, ResourceLimitError } from './errors.js';
+import {
+  InvalidArgumentError,
+  InvalidNumber,
+  NumberOutOfRange,
+  NumericRangeError,
+  ResourceLimitError,
+} from './errors.js';
 import { roundExact, roundToExact } from './internal/round.js';
 import {
   approxEqual,
@@ -510,9 +516,36 @@ describe('significantDigits', () => {
     expect(significantDigits(decimal('1200'))).toBe(2);
   });
 
-  it('rejects text that is not a plain number', () => {
+  it('returns InvalidNumber for text that is not a plain number, since the text comes from outside', () => {
     for (const text of ['', '.', 'abc', '1,200', '1 2', 'NaN', '1e', '--1']) {
-      expect(() => significantDigits(text)).toThrow(NumberFormatError);
+      expect(InvalidNumber.is(significantDigits(text))).toBe(true);
     }
+  });
+
+  it('returns NumberOutOfRange past the digit limit instead of scanning unbounded text', () => {
+    expect(NumberOutOfRange.is(significantDigits('1'.repeat(10_001)))).toBe(true);
+  });
+
+  it('ends at once on 200,000 zeros: trailing and leading zero scans are linear, not quadratic', () => {
+    const start = Date.now();
+    // Past the digit limit, so it is refused before any scan; the long text still has to be tested for its shape.
+    expect(NumberOutOfRange.is(significantDigits(`1${'0'.repeat(200_000)}1`))).toBe(true);
+    expect(NumberOutOfRange.is(significantDigits(`${'0'.repeat(200_000)}1`))).toBe(true);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('counts a run of zeros at the digit limit in linear time', () => {
+    const start = Date.now();
+    expect(significantDigits(`1${'0'.repeat(9000)}1`)).toBe(9002);
+    expect(significantDigits(`1${'0'.repeat(9000)}`)).toBe(1);
+    expect(significantDigits(`0.${'0'.repeat(9000)}1`)).toBe(1);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+});
+
+describe('rounding past the largest float', () => {
+  it('round and roundTo throw NumericRangeError instead of returning Infinity', () => {
+    expect(() => round(Number.MAX_VALUE, -308, 'up')).toThrow(NumericRangeError);
+    expect(() => roundTo(Number.MAX_VALUE, 1e308, 'up')).toThrow(NumericRangeError);
   });
 });

@@ -11,8 +11,8 @@ import { orThrow } from '@arki/failure';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
 import { CasLimitError } from './core.js';
-import { exactRoots, factor, polynomialIn } from './polynomial.js';
-import { fastest } from './test-support.js';
+import { exactRoots } from './polynomial.js';
+import { factor, fastest, polynomialIn } from './test-support.js';
 
 function shown(input: string, options = {}): string {
   const f = factor(input, 'x', options);

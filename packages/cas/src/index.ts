@@ -22,6 +22,8 @@ export type {
   Relation,
 } from './core.js';
 export { CasError, CasLimitError, DEFAULT_LIMITS } from './core.js';
+export type { CasTextFailure } from './failures.js';
+export { CAS_TEXT_FAILURES, NoCasValue, OverCasBudget, UnsupportedText } from './failures.js';
 
 const RELATION = { nonzero: '\\neq 0', positive: '> 0', nonnegative: '\\geq 0', negative: '< 0' } as const;
 

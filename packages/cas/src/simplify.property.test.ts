@@ -24,7 +24,7 @@ import { orThrow } from '@arki/failure';
 import { DivisionByZeroError, InvalidArgumentError, MathError, RoundingNecessaryError } from '@arki/math/errors';
 
 import type { Condition } from './index.js';
-import { simplify } from './simplify.js';
+import { simplify } from './test-support.js';
 
 type Outcome = Rational | 'undefined' | 'inexact';
 

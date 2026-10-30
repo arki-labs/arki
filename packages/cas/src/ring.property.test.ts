@@ -21,7 +21,7 @@ import { compile } from '@arki/expr/rational';
 import { orThrow } from '@arki/failure';
 import { DivisionByZeroError } from '@arki/math/errors';
 
-import { expand, polynomialIn, rationalize } from './polynomial.js';
+import { expand, polynomialIn, rationalize } from './test-support.js';
 
 const leaf = fc.oneof(
   fc.constantFrom('x', 'y', 'pi', 'e'),

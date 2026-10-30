@@ -12,12 +12,16 @@ import { CasError, CasLimitError, conditionToLatex } from '../dist/index.js';
 import { collect, exactRoots, expand, factor, gcd, polynomialIn, rationalize } from '../dist/polynomial.js';
 import { simplify } from '../dist/simplify.js';
 
+// A string the verb cannot work with comes back as a failure whose `cause` is the error; an Expr input throws it.
+const reason = error =>
+  error instanceof CasError ? error.code : error instanceof CasLimitError ? error.budget : 'other';
+
 const code = run => {
   try {
-    run();
-    return 'none';
+    const out = run();
+    return out?.cause instanceof Error ? reason(out.cause) : 'none';
   } catch (error) {
-    return error instanceof CasError ? error.code : error instanceof CasLimitError ? error.budget : 'other';
+    return reason(error);
   }
 };
 
@@ -58,6 +62,7 @@ const checks = [
   ['degree budget', code(() => expand('(x + 1)^10000')), 'degree'],
   ['256-deep input', expand(deep).result.source, 'x'],
   ['simplify cancel', simplified('x/x'), '1 | x \\neq 0'],
+  ['text that does not parse', expand('x +').code, 'expr.invalid_text'],
   ['simplify exp-ln', simplified('exp(ln(x))'), 'x | x > 0'],
   ['simplify assumed', simplified('sqrt(x^2)', { assume: { x: 'nonnegative' } }), 'x | x \\geq 0'],
   [

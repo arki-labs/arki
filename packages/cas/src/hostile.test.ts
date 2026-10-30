@@ -9,9 +9,7 @@ import { parse, ParseError } from '@arki/expr';
 import { orThrow } from '@arki/failure';
 
 import { CasLimitError } from './index.js';
-import { expand, gcd, polynomialIn } from './polynomial.js';
-import { simplify } from './simplify.js';
-import { fastest } from './test-support.js';
+import { expand, fastest, gcd, polynomialIn, simplify } from './test-support.js';
 
 function budgetOf(run: () => unknown): string {
   const timed = fastest(run, 100);

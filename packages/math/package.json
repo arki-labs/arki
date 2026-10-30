@@ -202,7 +202,8 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/failure": "workspace:*"
+    "@arki/failure": "workspace:*",
+    "@arki/log": "workspace:*"
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",

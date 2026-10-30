@@ -20,6 +20,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import fixture from '../test/reference/fixtures/nist-strd.json' with { type: 'json' };
 import { Decimal } from './decimal.js';
 import { leastSquares } from './linear-algebra.js';
@@ -206,9 +208,11 @@ describe('NIST StRD linear least squares', () => {
     it(`${name} (${d.difficulty} difficulty): leastSquares estimates to ≥ ${minimum} digits`, () => {
       // Longley: y on an intercept and six predictors; NoInt1/2: y = B1·x, no intercept.
       const design = d.rows.map(row => (name === 'Longley' ? [1, ...row.slice(1).map(Number)] : [Number(row[1])]));
-      const estimates = leastSquares(
-        design,
-        d.rows.map(row => Number(row[0])),
+      const estimates = orThrow(
+        leastSquares(
+          design,
+          d.rows.map(row => Number(row[0])),
+        ),
       );
       const digits = d.parameters.map((p, k) => lre(estimates[k] ?? Number.NaN, Number(p.estimate)));
       expect(Math.min(...digits), `${name}: ${digits.map(v => v.toFixed(1)).join(', ')}`).toBeGreaterThanOrEqual(

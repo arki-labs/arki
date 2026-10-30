@@ -66,7 +66,9 @@ describe('parseDecimal', () => {
 
   it('keeps all 30 digits', () => {
     expect(orThrow(parseDecimal('123456789012345678901234567890')).toString()).toBe('123456789012345678901234567890');
-    expect(orThrow(parseDecimal('0.123456789012345678901234567890')).toString()).toBe('0.123456789012345678901234567890');
+    expect(orThrow(parseDecimal('0.123456789012345678901234567890')).toString()).toBe(
+      '0.123456789012345678901234567890',
+    );
   });
 
   it('succeeds where parseNumber overflows', () => {
@@ -108,5 +110,28 @@ describe('localeNumberSymbols', () => {
     expect(localeNumberSymbols('en-US')).toMatchObject({ decimal: '.', group: ',', minusSign: '-' });
     expect(localeNumberSymbols('de-DE')).toMatchObject({ decimal: ',', group: '.' });
     expect(localeNumberSymbols('en-US').digits).toEqual(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  });
+});
+
+describe('long runs of spaces in outside text', () => {
+  it('parseNumber and parseDecimal trim 200,000 spaces in linear time, not quadratic', () => {
+    const text = `1${' '.repeat(200_000)}x`;
+    const start = Date.now();
+    expect(InvalidNumber.is(parseNumber(text))).toBe(true);
+    expect(InvalidNumber.is(parseDecimal(text))).toBe(true);
+    expect(InvalidNumber.is(parseDecimal(text, { locale: 'fr-FR' }))).toBe(true);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('still trims the spaces and no-break spaces around a number', () => {
+    expect(parseNumber(`${' '.repeat(50_000)}12.5\u00A0\u202F\t `)).toBe(12.5);
+  });
+});
+
+describe('a malformed locale tag', () => {
+  it('falls back to the default locale instead of throwing a RangeError', () => {
+    expect(parseNumber('1,234.5', { locale: 'not a locale' })).toBe(1234.5);
+    expect(parseNumber('1,234.5', { locale: '' })).toBe(1234.5);
+    expect(localeNumberSymbols('xx_yy').decimal).toBe('.');
   });
 });

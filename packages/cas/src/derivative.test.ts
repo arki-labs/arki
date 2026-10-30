@@ -9,8 +9,8 @@ import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { DerivationStep } from './derivation.js';
 import { CasLimitError } from './core.js';
-import { derivation, ruleFormula, TEMPLATE_KEYS } from './derivation.js';
-import { derivative } from './derivative.js';
+import { ruleFormula, TEMPLATE_KEYS } from './derivation.js';
+import { derivation, derivative } from './test-support.js';
 
 const d = (input: string, variable = 'x', options = {}): string => derivative(input, variable, options).result.source;
 

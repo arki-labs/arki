@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Unit, UnitCategory } from './units.js';
-import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
+import { InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import { ratio } from './rational.js';
 import { convert, convertExact, formatUnit, isUnit, joinUnits, splitUnits, unitCategory, unitsOf } from './units.js';
 
@@ -574,5 +574,15 @@ describe('splitUnits and joinUnits', () => {
       { unit: 'arcmin', value: 30 },
       { unit: 'arcsec', value: 0 },
     ]);
+  });
+});
+
+describe('convert overflow', () => {
+  it('throws NumericRangeError instead of returning Infinity', () => {
+    expect(() => convert(1e308, 'km', 'mm')).toThrow(NumericRangeError);
+  });
+
+  it('a malformed locale tag formats with the default locale', () => {
+    expect(formatUnit(5, 'km', { locale: 'not a locale' })).toBe(formatUnit(5, 'km', { locale: 'en-US' }));
   });
 });

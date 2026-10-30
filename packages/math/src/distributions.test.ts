@@ -643,3 +643,17 @@ describe('erf and erfc across the approximation ranges', () => {
     expect(erf(1e-20)).toBeCloseTo(1.128_379_167_095_512_7e-20, 34);
   });
 });
+
+describe('parameters so large the result is not computable', () => {
+  it('throw NumericRangeError instead of returning NaN', () => {
+    expect(() => regularizedGammaP(1e200, 1e200)).toThrow(NumericRangeError);
+    expect(() => regularizedBeta(0.5, 1e300, 1e300)).toThrow(NumericRangeError);
+    expect(() => chiSquare(1e100).cdf(1e100)).toThrow(NumericRangeError);
+    expect(() => fisherF(1e300, 1e300).cdf(1)).toThrow(NumericRangeError);
+    expect(() => poisson(1e300).cdf(1e300)).toThrow(NumericRangeError);
+  });
+
+  it('betaLn overflow is a NumericRangeError, not an InvalidArgumentError about finiteness', () => {
+    expect(() => betaLn(1e308, 1e308)).toThrow(NumericRangeError);
+  });
+});

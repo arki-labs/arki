@@ -18,15 +18,13 @@ import { describe, expect, it } from 'vitest';
 import type { Expr } from '@arki/expr';
 import { parse } from '@arki/expr';
 import { compile } from '@arki/expr/float';
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 import { derivative as numericDerivative } from '@arki/math/differentiate';
-import { ConvergenceError } from '@arki/math/errors';
 
 import type { DerivationStep } from './derivation.js';
 import { CasLimitError } from './core.js';
-import { derivation, TEMPLATE_KEYS } from './derivation.js';
-import { derivative } from './derivative.js';
-import { polynomialIn } from './polynomial.js';
+import { TEMPLATE_KEYS } from './derivation.js';
+import { derivation, derivative, polynomialIn } from './test-support.js';
 
 /** Functions of x that are smooth on all of ℝ, so every sample point is in the domain. */
 const smooth = fc.letrec<{ node: string }>(tie => ({
@@ -55,13 +53,9 @@ function valueOf(expr: Expr | string, x: number): number {
 /** The numeric derivative, or `undefined` where Ridders cannot reach its tolerance. */
 function oracle(expr: Expr | string, x: number): { value: number; error: number } | undefined {
   const f = compile(typeof expr === 'string' ? orThrow(parse(expr)) : expr, { variables: ['x'] });
-  try {
-    const { value, errorEstimate } = numericDerivative(t => f({ x: t }), x);
-    return { value, error: errorEstimate };
-  } catch (error) {
-    if (error instanceof ConvergenceError) return undefined;
-    throw error;
-  }
+  const estimate = numericDerivative(t => f({ x: t }), x);
+  if (isFailure(estimate)) return undefined;
+  return { value: estimate.value, error: estimate.errorEstimate };
 }
 
 /** `c₀ + c₁·x + …` as text, written term by term. */

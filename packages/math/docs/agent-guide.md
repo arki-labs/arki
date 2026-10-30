@@ -59,19 +59,19 @@ Use `@arki/money`. It builds on this package.
 
 ## Errors
 
-| Code             | Error                      | What to do                                             |
-| ---------------- | -------------------------- | ------------------------------------------------------ |
-| `ARKI_MATH_E001` | `NumberFormatError`        | Pass plain ASCII decimal text                          |
-| `ARKI_MATH_E002` | `InvalidArgumentError`     | Fix the argument named in the message                  |
-| `ARKI_MATH_E003` | `DivisionByZeroError`      | Check the divisor                                      |
-| `ARKI_MATH_E004` | `RoundingNecessaryError`   | Pass a scale and a rounding mode                       |
-| `ARKI_MATH_E005` | `NumericRangeError`        | Use `bigint` or `Decimal`, or stay in the finite range |
-| `ARKI_MATH_E006` | `EmptyDataError`           | Check the data length first                            |
-| `ARKI_MATH_E007` | `ResourceLimitError`       | Stay within 10 000 digits                              |
-| `ARKI_MATH_E008` | `UnsupportedFeatureError`  | Pass `symbols`, or use another runtime                 |
-| `ARKI_MATH_E009` | `SingularMatrixError`      | Use `leastSquares` or `pseudoInverse`                  |
-| `ARKI_MATH_E010` | `ConvergenceError`         | Read `.best`; widen the tolerance or the bracket       |
-| `ARKI_MATH_E011` | `NotPositiveDefiniteError` | Use LU or QR instead of Cholesky                       |
+| Code             | Error                      | What to do                                                                         |
+| ---------------- | -------------------------- | ---------------------------------------------------------------------------------- |
+| `ARKI_MATH_E001` | `NumberFormatError`        | Pass plain ASCII decimal text                                                      |
+| `ARKI_MATH_E002` | `InvalidArgumentError`     | Fix the argument named in the message                                              |
+| `ARKI_MATH_E003` | `DivisionByZeroError`      | Check the divisor                                                                  |
+| `ARKI_MATH_E004` | `RoundingNecessaryError`   | Pass a scale and a rounding mode                                                   |
+| `ARKI_MATH_E005` | `NumericRangeError`        | Use `bigint` or `Decimal`, or stay in the finite range                             |
+| `ARKI_MATH_E006` | `EmptyDataError`           | Check the data length first                                                        |
+| `ARKI_MATH_E007` | `ResourceLimitError`       | Stay within 10 000 digits                                                          |
+| `ARKI_MATH_E008` | `UnsupportedFeatureError`  | Pass `symbols`, or use another runtime                                             |
+| `ARKI_MATH_E009` | `SingularMatrixError`      | Use `leastSquares` or `pseudoInverse`                                              |
+| `ARKI_MATH_E010` | `ConvergenceError`         | Is the `cause` of `NotConverged`; read `.best`, widen the tolerance or the bracket |
+| `ARKI_MATH_E011` | `NotPositiveDefiniteError` | Use LU or QR instead of Cholesky                                                   |
 
 ## Verify
 

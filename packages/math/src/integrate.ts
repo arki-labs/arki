@@ -56,16 +56,18 @@
  *   `NumericRangeError` naming the point (a non-integrable singularity usually
  *   ends this way), as does a sum that overflows;
  * - missing the tolerance within `maxEvaluations`, or a Gauss–Kronrod
- *   sub-interval too narrow to bisect, throws `IntegrationConvergenceError`, a
- *   `ConvergenceError` whose `best` field holds the best value and error
- *   estimate reached, so a caller that can live with less accuracy can still
- *   use it on purpose;
+ *   sub-interval too narrow to bisect, returns `NotConverged`
+ *   (`math.not_converged`): valid input that does not settle is a result, not a
+ *   bug. Its `cause` is an `IntegrationConvergenceError` whose `best` field
+ *   holds the best value and error estimate reached, so a caller that can live
+ *   with less accuracy can still use it on purpose;
  * - `NaN` bounds, equal infinite bounds or bad options throw
  *   `InvalidArgumentError`.
  */
 
+import type { NotConvergedFailure } from './errors.js';
 import type { RealFunction } from './internal/calculus.js';
-import { ConvergenceError, InvalidArgumentError, NumericRangeError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, NumericRangeError, orNotConverged } from './errors.js';
 import { assertFunction, call, noNegativeZero, readBounds, readCount, readTolerance } from './internal/calculus.js';
 
 export type { RealFunction } from './internal/calculus.js';
@@ -97,7 +99,7 @@ export class IntegrationConvergenceError extends ConvergenceError {
   readonly best: IntegrationResult;
 
   constructor(message: string, best: IntegrationResult) {
-    super(message);
+    super(message, best.evaluations);
     this.best = best;
   }
 }
@@ -149,6 +151,14 @@ export function integrate(
   f: RealFunction,
   bounds: readonly [number, number],
   options?: IntegrateOptions,
+): IntegrationResult | NotConvergedFailure {
+  return orNotConverged(() => integrateOrThrow(f, bounds, options));
+}
+
+function integrateOrThrow(
+  f: RealFunction,
+  bounds: readonly [number, number],
+  options?: IntegrateOptions,
 ): IntegrationResult {
   assertFunction(f, 'f');
   const [lower, upper] = readBounds(bounds, 'bounds', true);
@@ -189,16 +199,18 @@ export function integrate(
 
 /** Kronrod abscissae on [0, 1]; odd indices are the 7-point Gauss nodes, index 7 is the center. */
 const XGK: readonly number[] = [
-  0.991_455_371_120_812_6, 0.949_107_912_342_758_5, 0.864_864_423_359_769_1, 0.741_531_185_599_394_5, 0.586_087_235_467_691_1,
-  0.405_845_151_377_397_2, 0.207_784_955_007_898_48, 0,
+  0.991_455_371_120_812_6, 0.949_107_912_342_758_5, 0.864_864_423_359_769_1, 0.741_531_185_599_394_5,
+  0.586_087_235_467_691_1, 0.405_845_151_377_397_2, 0.207_784_955_007_898_48, 0,
 ];
 /** Weights of the 15-point Kronrod rule, matching `XGK`. */
 const WGK: readonly number[] = [
-  0.022_935_322_010_529_224, 0.063_092_092_629_978_56, 0.104_790_010_322_250_19, 0.140_653_259_715_525_92, 0.169_004_726_639_267_9,
-  0.190_350_578_064_785_42, 0.204_432_940_075_298_89, 0.209_482_141_084_727_82,
+  0.022_935_322_010_529_224, 0.063_092_092_629_978_56, 0.104_790_010_322_250_19, 0.140_653_259_715_525_92,
+  0.169_004_726_639_267_9, 0.190_350_578_064_785_42, 0.204_432_940_075_298_89, 0.209_482_141_084_727_82,
 ];
 /** Weights of the 7-point Gauss rule: `WG[j]` for `XGK[2j + 1]`, and `WG[3]` for the center. */
-const WG: readonly number[] = [0.129_484_966_168_869_7, 0.279_705_391_489_276_64, 0.381_830_050_505_118_9, 0.417_959_183_673_469_4];
+const WG: readonly number[] = [
+  0.129_484_966_168_869_7, 0.279_705_391_489_276_64, 0.381_830_050_505_118_9, 0.417_959_183_673_469_4,
+];
 
 const EPSILON = Number.EPSILON;
 const MIN_NORMAL = 2 ** -1022;

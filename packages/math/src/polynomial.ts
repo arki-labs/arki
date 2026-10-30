@@ -15,8 +15,15 @@
  * they got real numbers or `Complex` values: check `kind` first.
  */
 
+import type { NotConvergedFailure } from './errors.js';
 import { Complex } from './complex.js';
-import { ConvergenceError, InvalidArgumentError, NumericRangeError } from './errors.js';
+import {
+  ConvergenceError,
+  InvalidArgumentError,
+  NumericRangeError,
+  orNotConverged,
+  ResourceLimitError,
+} from './errors.js';
 import { assertFinite } from './number.js';
 
 /** Coefficients, highest degree first. */
@@ -57,6 +64,11 @@ function normalize(coefficients: Coefficients, name: string): number[] {
 function finite(value: number, operation: string): number {
   if (!Number.isFinite(value)) throw new NumericRangeError(`${operation} overflows the float range`);
   return value + 0;
+}
+
+/** A complex root, or `NumericRangeError` when a part overflows the float range. */
+function root(re: number, im: number, operation: string): Complex {
+  return Complex.fromParts(finite(re, operation), finite(im, operation));
 }
 
 /** Horner evaluation at a complex point, returning raw parts (no checks). */
@@ -193,7 +205,11 @@ export function quadraticRoots(a: number, b: number, c: number): QuadraticRoots 
   if (d < 0) {
     const re = -sb / (2 * sa) + 0;
     const im = Math.sqrt(-d) / (2 * Math.abs(sa));
-    return { kind: 'complex', roots: [Complex.fromParts(re, im), Complex.fromParts(re, -im)], discriminant: unscaled };
+    return {
+      kind: 'complex',
+      roots: [root(re, im, 'quadraticRoots'), root(re, -im, 'quadraticRoots')],
+      discriminant: unscaled,
+    };
   }
   const q = -(sb + (sb < 0 ? -1 : 1) * Math.sqrt(d)) / 2;
   if (q === 0) return { kind: 'real', roots: [0, 0], discriminant: unscaled };
@@ -330,7 +346,7 @@ export function cubicRoots(a: number, b: number, c: number, d: number): CubicRoo
   return {
     kind: 'mixed',
     real,
-    complex: [Complex.fromParts(re, im), Complex.fromParts(re, -im)],
+    complex: [root(re, im, 'cubicRoots'), root(re, -im, 'cubicRoots')],
   };
 }
 
@@ -339,6 +355,9 @@ export function cubicRoots(a: number, b: number, c: number, d: number): CubicRoo
 // ---------------------------------------------------------------------------
 
 const MAX_ITERATIONS = 500;
+
+/** Highest degree `polynomialRoots` accepts: the iteration costs about degree² per round, so 500 takes about two seconds. */
+const MAX_DEGREE = 500;
 
 function compareComplex(x: Complex, y: Complex): number {
   return x.re - y.re || x.im - y.im;
@@ -357,10 +376,20 @@ function compareComplex(x: Complex, y: Complex): number {
  * `1e-14 × |z|` is set to exactly 0, so real roots report `isReal()`.
  *
  * A constant has no roots (`[]`); the zero polynomial throws, because every
- * number is a root.
+ * number is a root. A degree past 500 throws `ResourceLimitError` (the cost
+ * grows with the square of the degree). A polynomial whose iteration does not
+ * settle in 500 rounds returns `NotConverged`; a root that overflows the float
+ * range throws `NumericRangeError`.
  */
-export function polynomialRoots(coefficients: Coefficients): Complex[] {
+export function polynomialRoots(coefficients: Coefficients): Complex[] | NotConvergedFailure {
+  return orNotConverged(() => polynomialRootsOrThrow(coefficients));
+}
+
+function polynomialRootsOrThrow(coefficients: Coefficients): Complex[] {
   const p = normalize(coefficients, 'coefficients');
+  if (p.length - 1 > MAX_DEGREE) {
+    throw new ResourceLimitError(`polynomialRoots takes a degree of at most ${MAX_DEGREE}, got ${p.length - 1}`);
+  }
   if (p.length === 1) {
     if (p[0] === 0) throw new InvalidArgumentError('the zero polynomial has every number as a root');
     return [];
@@ -377,16 +406,16 @@ export function polynomialRoots(coefficients: Coefficients): Complex[] {
 function nonZeroRoots(p: readonly number[]): Complex[] {
   const degree = p.length - 1;
   if (degree === 0) return [];
-  if (degree === 1) return [Complex.fromParts(-p[1]! / p[0]!, 0)];
+  if (degree === 1) return [root(-p[1]! / p[0]!, 0, 'polynomialRoots')];
   if (degree === 2) {
     const found = quadraticRoots(p[0]!, p[1]!, p[2]!);
-    return found.kind === 'real' ? found.roots.map(x => Complex.fromParts(x, 0)) : [...found.roots];
+    return found.kind === 'real' ? found.roots.map(x => root(x, 0, 'polynomialRoots')) : [...found.roots];
   }
   if (degree === 3) {
     const found = cubicRoots(p[0]!, p[1]!, p[2]!, p[3]!);
     return found.kind === 'real'
-      ? found.roots.map(x => Complex.fromParts(x, 0))
-      : [Complex.fromParts(found.real, 0), ...found.complex];
+      ? found.roots.map(x => root(x, 0, 'polynomialRoots'))
+      : [root(found.real, 0, 'polynomialRoots'), ...found.complex];
   }
   return aberth(p);
 }
@@ -461,11 +490,11 @@ function aberth(input: readonly number[]): Complex[] {
     }
   }
   if (remaining > 0) {
-    throw new ConvergenceError(`polynomialRoots did not converge in ${MAX_ITERATIONS} iterations`);
+    throw new ConvergenceError(`polynomialRoots did not converge in ${MAX_ITERATIONS} iterations`, MAX_ITERATIONS);
   }
   return re.map((x, k) => {
     const y = im[k]!;
     const noise = 1e-14 * Math.hypot(x, y);
-    return Complex.fromParts(Math.abs(x) <= noise ? 0 : x, Math.abs(y) <= noise ? 0 : y);
+    return root(Math.abs(x) <= noise ? 0 : x, Math.abs(y) <= noise ? 0 : y, 'polynomialRoots');
   });
 }

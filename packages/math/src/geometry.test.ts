@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { InvalidArgumentError } from './errors.js';
+import { InvalidArgumentError, NumericRangeError } from './errors.js';
 import {
   circle,
   circleSector,
@@ -399,5 +399,28 @@ describe('Pythagorean triples', () => {
     expect(pythagoreanTriples(0)).toEqual([]);
     expect(() => pythagoreanTriples(-1)).toThrow(InvalidArgumentError);
     expect(() => pythagoreanTriples(10.5)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('results that overflow the float range', () => {
+  it('throw NumericRangeError instead of returning Infinity', () => {
+    expect(() => sphere(1e200)).toThrow(NumericRangeError);
+    expect(() => cube(1e200)).toThrow(NumericRangeError);
+    expect(() => circle(1e200)).toThrow(NumericRangeError);
+    expect(() => regularPolygon({ sides: 5, sideLength: 1e200 })).toThrow(NumericRangeError);
+    expect(() =>
+      polygonArea([
+        [0, 0],
+        [1e200, 0],
+        [1e200, 1e200],
+      ]),
+    ).toThrow(NumericRangeError);
+    expect(() =>
+      signedPolygonArea([
+        [0, 0],
+        [1e200, 0],
+        [1e200, 1e200],
+      ]),
+    ).toThrow(NumericRangeError);
   });
 });

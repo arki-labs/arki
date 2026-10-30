@@ -2,7 +2,7 @@ Back to the [README](../../README.md#documentation).
 
 # @arki/math/integrate
 
-Adaptive Gauss-Kronrod and tanh-sinh integration, with infinite intervals. Every result carries an error estimate, and a method that misses its tolerance throws an `IntegrationConvergenceError` holding its best estimate (`.best`). A function that returns `NaN` or `Infinity` throws `NumericRangeError` naming the point.
+Adaptive Gauss-Kronrod and tanh-sinh integration, with infinite intervals. Every result carries an error estimate, and a method that misses its tolerance returns `NotConverged` (`math.not_converged`), whose `cause` is an `IntegrationConvergenceError` holding its best estimate (`.best`). A function that returns `NaN` or `Infinity` throws `NumericRangeError` naming the point.
 
 ```ts
 import { integrate } from '@arki/math/integrate';

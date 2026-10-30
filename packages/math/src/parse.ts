@@ -22,6 +22,7 @@ import { isFailure } from '@arki/failure';
 
 import { Decimal } from './decimal.js';
 import { InvalidNumber, NumberOutOfRange, UnsupportedFeatureError } from './errors.js';
+import { DEFAULT_LOCALE, resolveLocale } from './internal/locale.js';
 import { parseDecimalString } from './internal/parse.js';
 
 export type ParseOptions = {
@@ -50,7 +51,6 @@ export type LocaleNumberSymbols = {
   digits: string[];
 };
 
-const DEFAULT_LOCALE = 'en-US';
 // LRM, RLM and Arabic letter mark: invisible direction marks some locales put around signs.
 const BIDI_MARKS = /[\u200E\u200F؜]/g;
 const symbolCache = new Map<string, LocaleNumberSymbols>();
@@ -90,7 +90,8 @@ function prepare(locale: string): PreparedLocale {
 }
 
 /** The decimal, group and minus symbols and the digits a locale uses. Cached per locale. */
-export function localeNumberSymbols(locale: string): LocaleNumberSymbols {
+export function localeNumberSymbols(requested: string): LocaleNumberSymbols {
+  const locale = resolveLocale(requested);
   let symbols = symbolCache.get(locale);
   if (!symbols) {
     const formatter = new Intl.NumberFormat(locale);
@@ -115,11 +116,20 @@ export function localeNumberSymbols(locale: string): LocaleNumberSymbols {
 }
 
 const STRICT_DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
-const OUTER_SPACE = /^[ \t\n\r\f\v\u00A0\u202F]+|[ \t\n\r\f\v\u00A0\u202F]+$/g;
+const OUTER_SPACE = new Set([' ', '\t', '\n', '\r', '\f', '\v', '\u00A0', '\u202F']);
 const GROUP_SPACES = /[ \u00A0\u202F\u2009]/g;
 
+/** The text without leading and trailing {@link OUTER_SPACE}. A scan from both ends: a regex with a `$` alternative is quadratic on a long run of spaces. */
+function trimOuterSpace(input: string): string {
+  let start = 0;
+  let end = input.length;
+  while (start < end && OUTER_SPACE.has(input[start]!)) start++;
+  while (end > start && OUTER_SPACE.has(input[end - 1]!)) end--;
+  return input.slice(start, end);
+}
+
 function normalize(input: string, prepared: PreparedLocale): string {
-  let text = input.replaceAll(OUTER_SPACE, '').replaceAll(BIDI_MARKS, '');
+  let text = trimOuterSpace(input).replaceAll(BIDI_MARKS, '');
   let mapped = '';
   for (const char of text) mapped += prepared.digitMap.get(char) ?? char;
   text = prepared.groupIsSpace ? mapped.replaceAll(GROUP_SPACES, '') : mapped.split(prepared.group).join('');

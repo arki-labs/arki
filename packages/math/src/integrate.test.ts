@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { IntegrationMethod } from './integrate.js';
-import { ConvergenceError, InvalidArgumentError, NumericRangeError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, NotConverged, NumericRangeError } from './errors.js';
 import { integrate, IntegrationConvergenceError } from './integrate.js';
+
+/** The `ConvergenceError` inside a `NotConverged` result; fails the test when the call returned anything else. */
+function nonConvergence(result: unknown): unknown {
+  if (!NotConverged.is(result)) throw new Error('expected NotConverged');
+  return result.cause;
+}
 
 type Case = {
   readonly name: string;
@@ -92,7 +100,7 @@ describe('integrate: closed forms and hard cases', () => {
   for (const testCase of cases) {
     for (const method of testCase.methods) {
       it(`${testCase.name} — ${method}`, () => {
-        const result = integrate(testCase.f, testCase.bounds, { method });
+        const result = orThrow(integrate(testCase.f, testCase.bounds, { method }));
         const actualError = Math.abs(result.value - testCase.exact);
         // The contract: within tolerance, and the reported estimate is never smaller than the real error.
         expect(actualError).toBeLessThanOrEqual(result.errorEstimate);
@@ -104,14 +112,14 @@ describe('integrate: closed forms and hard cases', () => {
 
   it('tanh-sinh needs far fewer evaluations than subdivision for an endpoint singularity', () => {
     const f = (x: number): number => 1 / Math.sqrt(x);
-    const kronrod = integrate(f, [0, 1]);
-    const tanhSinh = integrate(f, [0, 1], { method: 'tanhSinh' });
+    const kronrod = orThrow(integrate(f, [0, 1]));
+    const tanhSinh = orThrow(integrate(f, [0, 1], { method: 'tanhSinh' }));
     expect(tanhSinh.evaluations * 3).toBeLessThan(kronrod.evaluations);
   });
 
   it('stops after one 15-point rule when both rules are exact (degree ≤ 13)', () => {
     // The estimate compares K15 with the embedded G7, so it only vanishes when G7 is exact too.
-    const result = integrate(x => x ** 13 - 3 * x ** 7, [0, 1]);
+    const result = orThrow(integrate(x => x ** 13 - 3 * x ** 7, [0, 1]));
     expect(result.evaluations).toBe(15);
     expect(result.value).toBeCloseTo(1 / 14 - 3 / 8, 15);
   });
@@ -119,47 +127,44 @@ describe('integrate: closed forms and hard cases', () => {
 
 describe('integrate: orientation and bounds', () => {
   it('negates the integral for reversed bounds, finite or infinite', () => {
-    expect(integrate(Math.sin, [Math.PI, 0]).value).toBeCloseTo(-2, 13);
-    expect(integrate(x => Math.exp(-x), [Infinity, 0], { method: 'tanhSinh' }).value).toBeCloseTo(-1, 12);
+    expect(orThrow(integrate(Math.sin, [Math.PI, 0])).value).toBeCloseTo(-2, 13);
+    expect(orThrow(integrate(x => Math.exp(-x), [Infinity, 0], { method: 'tanhSinh' })).value).toBeCloseTo(-1, 12);
   });
 
   it('gives exactly 0 for equal finite bounds without calling f', () => {
-    const result = integrate(() => {
-      throw new Error('not called');
-    }, [1, 1]);
+    const result = orThrow(
+      integrate(() => {
+        throw new Error('not called');
+      }, [1, 1]),
+    );
     expect(result).toEqual({ value: 0, errorEstimate: 0, evaluations: 0 });
   });
 
   it('rejects NaN bounds, equal infinite bounds and bad options', () => {
-    expect(() => integrate(Math.sin, [Number.NaN, 1])).toThrow(InvalidArgumentError);
-    expect(() => integrate(Math.sin, [Infinity, Infinity])).toThrow(InvalidArgumentError);
-    expect(() => integrate(Math.sin, [0, 1], { absoluteTolerance: 0, relativeTolerance: 0 })).toThrow(
+    expect(() => orThrow(integrate(Math.sin, [Number.NaN, 1]))).toThrow(InvalidArgumentError);
+    expect(() => orThrow(integrate(Math.sin, [Infinity, Infinity]))).toThrow(InvalidArgumentError);
+    expect(() => orThrow(integrate(Math.sin, [0, 1], { absoluteTolerance: 0, relativeTolerance: 0 }))).toThrow(
       InvalidArgumentError,
     );
-    expect(() => integrate(Math.sin, [0, 1], { maxEvaluations: 0 })).toThrow(InvalidArgumentError);
+    expect(() => orThrow(integrate(Math.sin, [0, 1], { maxEvaluations: 0 }))).toThrow(InvalidArgumentError);
   });
 });
 
 describe('integrate: failures are typed, never NaN', () => {
   it('reports a pole inside the interval as NumericRangeError naming the point', () => {
     // The first Gauss–Kronrod node is the midpoint, 0.5, where 1/(x − 0.5) is infinite.
-    expect(() => integrate(x => 1 / (x - 0.5), [0, 1])).toThrow(/f\(0\.5\) is Infinity/);
-    expect(() => integrate(() => Number.NaN, [0, 1])).toThrow(NumericRangeError);
+    expect(() => orThrow(integrate(x => 1 / (x - 0.5), [0, 1]))).toThrow(/f\(0\.5\) is Infinity/);
+    expect(() => orThrow(integrate(() => Number.NaN, [0, 1]))).toThrow(NumericRangeError);
   });
 
-  it('never returns a number for the divergent ∫₀¹ 1/x', () => {
+  it('returns NotConverged, never a number, for the divergent ∫₀¹ 1/x', () => {
     const f = (x: number): number => 1 / x;
-    expect(() => integrate(f, [0, 1])).toThrow(ConvergenceError);
-    expect(() => integrate(f, [0, 1], { method: 'tanhSinh' })).toThrow(ConvergenceError);
+    expect(nonConvergence(integrate(f, [0, 1]))).toBeInstanceOf(ConvergenceError);
+    expect(nonConvergence(integrate(f, [0, 1], { method: 'tanhSinh' }))).toBeInstanceOf(ConvergenceError);
   });
 
   it('carries the best estimate when the budget runs out', () => {
-    let error: unknown;
-    try {
-      integrate(x => Math.cos(50 * x), [0, 10], { maxEvaluations: 100 });
-    } catch (error_) {
-      error = error_;
-    }
+    const error = nonConvergence(integrate(x => Math.cos(50 * x), [0, 10], { maxEvaluations: 100 }));
     expect(error).toBeInstanceOf(IntegrationConvergenceError);
     expect(error).toBeInstanceOf(ConvergenceError);
     const { best } = error as IntegrationConvergenceError;
@@ -171,16 +176,11 @@ describe('integrate: failures are typed, never NaN', () => {
   it('flags a singularity at a non-zero endpoint through the error estimate, and the substitution fixes it', () => {
     // Nodes can only get within one ulp of 1, so the tail below 1 + 2e-16 is invisible;
     // the estimate admits it instead of claiming 1e-10.
-    let error: unknown;
-    try {
-      integrate(x => 1 / Math.sqrt(x - 1), [1, 2], { method: 'tanhSinh' });
-    } catch (error_) {
-      error = error_;
-    }
+    const error = nonConvergence(integrate(x => 1 / Math.sqrt(x - 1), [1, 2], { method: 'tanhSinh' }));
     expect(error).toBeInstanceOf(IntegrationConvergenceError);
     const { best } = error as IntegrationConvergenceError;
     expect(Math.abs(best.value - 2)).toBeLessThanOrEqual(best.errorEstimate);
     // u = x − 1 moves the singularity to 0, where the nodes reach 1e-308.
-    expect(integrate(u => 1 / Math.sqrt(u), [0, 1], { method: 'tanhSinh' }).value).toBeCloseTo(2, 12);
+    expect(orThrow(integrate(u => 1 / Math.sqrt(u), [0, 1], { method: 'tanhSinh' })).value).toBeCloseTo(2, 12);
   });
 });

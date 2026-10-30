@@ -20,11 +20,12 @@
  *
  * Lengths are unitless: results are in the unit of the inputs (squared for
  * areas, cubed for volumes). Every input must be finite and every length
- * positive; bad input throws `InvalidArgumentError`. Results never carry `-0`.
+ * positive; bad input throws `InvalidArgumentError`, and a result that overflows the float range (the area of a
+ * circle of radius `1e200`) throws `NumericRangeError`. Results never carry `-0`.
  */
 
 import type { AngleUnit } from './units.js';
-import { InvalidArgumentError } from './errors.js';
+import { InvalidArgumentError, NumericRangeError } from './errors.js';
 import { gcd } from './integer.js';
 import { digitCount } from './internal/bigint.js';
 import { assertIntermediateDigits } from './internal/limits.js';
@@ -62,6 +63,20 @@ function toRadians(value: number, unit: AngleUnit): number {
 
 function fromRadians(value: number, unit: AngleUnit): number {
   return unit === 'rad' ? value : (value * HALF_TURN[unit]) / Math.PI;
+}
+
+/** A result, or `NumericRangeError` when it overflowed the float range. Dimensions that are finite can still give an area or volume that is not. */
+function finiteNumber(value: number, operation: string): number {
+  if (!Number.isFinite(value)) throw new NumericRangeError(`${operation} overflows the float range`);
+  return value;
+}
+
+/** The record, or `NumericRangeError` when any number in it overflowed the float range. */
+function finiteResult<Result extends object>(result: Result, operation: string): Result {
+  for (const value of Object.values(result)) {
+    if (typeof value === 'number') finiteNumber(value, operation);
+  }
+  return result;
 }
 
 function assertPositive(value: number, name: string): void {
@@ -185,18 +200,10 @@ function buildTriangle(
       ? 'obtuse'
       : 'acute';
 
-  return {
-    a,
-    b,
-    c,
-    A: out[0],
-    B: out[1],
-    C: out[2],
-    area,
-    perimeter: a + b + c,
-    sideType,
-    angleType,
-  };
+  return finiteResult(
+    { a, b, c, A: out[0], B: out[1], C: out[2], area, perimeter: a + b + c, sideType, angleType },
+    'solveTriangle',
+  );
 }
 
 function solveParts(parts: TriangleParts, options: TriangleOptions | undefined): Solution {
@@ -344,7 +351,10 @@ export type Circle = {
 /** Diameter, circumference and area of a circle. */
 export function circle(radius: number): Circle {
   assertPositive(radius, 'radius');
-  return { radius, diameter: 2 * radius, circumference: 2 * Math.PI * radius, area: Math.PI * radius * radius };
+  return finiteResult(
+    { radius, diameter: 2 * radius, circumference: 2 * Math.PI * radius, area: Math.PI * radius * radius },
+    'circle',
+  );
 }
 
 export type CircleSector = {
@@ -372,12 +382,15 @@ export function circleSector(
   const t2 = theta * theta;
   const thetaMinusSin =
     theta < 1e-2 ? ((theta * t2) / 6) * (1 - (t2 / 20) * (1 - (t2 / 42) * (1 - t2 / 72))) : theta - Math.sin(theta);
-  return {
-    arcLength: radius * theta,
-    chordLength: Math.abs(2 * radius * Math.sin(theta / 2)),
-    sectorArea: (radius * radius * theta) / 2,
-    segmentArea: Math.max(0, (radius * radius * thetaMinusSin) / 2),
-  };
+  return finiteResult(
+    {
+      arcLength: radius * theta,
+      chordLength: Math.abs(2 * radius * Math.sin(theta / 2)),
+      sectorArea: (radius * radius * theta) / 2,
+      segmentArea: Math.max(0, (radius * radius * thetaMinusSin) / 2),
+    },
+    'circleSector',
+  );
 }
 
 export type Ellipse = {
@@ -408,11 +421,14 @@ export function ellipse(axes: { readonly semiAxisX: number; readonly semiAxisY: 
   }
   const agm = (an + bn) / 2;
   const ratio = minor / major;
-  return {
-    area: Math.PI * major * minor,
-    perimeter: ((2 * Math.PI) / agm) * (major * major - sum),
-    eccentricity: Math.sqrt((1 - ratio) * (1 + ratio)),
-  };
+  return finiteResult(
+    {
+      area: Math.PI * major * minor,
+      perimeter: ((2 * Math.PI) / agm) * (major * major - sum),
+      eccentricity: Math.sqrt((1 - ratio) * (1 + ratio)),
+    },
+    'ellipse',
+  );
 }
 
 export type RegularPolygon = {
@@ -441,15 +457,18 @@ export function regularPolygon(
   const half = Math.PI / sides;
   const apothem = sideLength / (2 * Math.tan(half));
   const perimeter = sides * sideLength;
-  return {
-    perimeter,
-    area: (perimeter * apothem) / 2,
-    apothem,
-    circumradius: sideLength / (2 * Math.sin(half)),
-    // In the target unit directly, so a hexagon's interior angle is exactly 120°.
-    interiorAngle: (HALF_TURN[unit] * (sides - 2)) / sides,
-    exteriorAngle: (2 * HALF_TURN[unit]) / sides,
-  };
+  return finiteResult(
+    {
+      perimeter,
+      area: (perimeter * apothem) / 2,
+      apothem,
+      circumradius: sideLength / (2 * Math.sin(half)),
+      // In the target unit directly, so a hexagon's interior angle is exactly 120°.
+      interiorAngle: (HALF_TURN[unit] * (sides - 2)) / sides,
+      exteriorAngle: (2 * HALF_TURN[unit]) / sides,
+    },
+    'regularPolygon',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -472,7 +491,10 @@ export type Box = Solid & { readonly spaceDiagonal: number };
 
 export function sphere(radius: number): Solid {
   assertPositive(radius, 'radius');
-  return { volume: (4 / 3) * Math.PI * radius ** 3, surfaceArea: 4 * Math.PI * radius * radius };
+  return finiteResult(
+    { volume: (4 / 3) * Math.PI * radius ** 3, surfaceArea: 4 * Math.PI * radius * radius },
+    'sphere',
+  );
 }
 
 export function cylinder(dimensions: { readonly radius: number; readonly height: number }): LateralSolid {
@@ -481,7 +503,7 @@ export function cylinder(dimensions: { readonly radius: number; readonly height:
   assertPositive(height, 'height');
   const base = Math.PI * radius * radius;
   const lateralArea = 2 * Math.PI * radius * height;
-  return { volume: base * height, lateralArea, surfaceArea: lateralArea + 2 * base };
+  return finiteResult({ volume: base * height, lateralArea, surfaceArea: lateralArea + 2 * base }, 'cylinder');
 }
 
 export function cone(dimensions: { readonly radius: number; readonly height: number }): SlantSolid {
@@ -491,7 +513,10 @@ export function cone(dimensions: { readonly radius: number; readonly height: num
   const base = Math.PI * radius * radius;
   const slantHeight = Math.hypot(radius, height);
   const lateralArea = Math.PI * radius * slantHeight;
-  return { volume: (base * height) / 3, slantHeight, lateralArea, surfaceArea: lateralArea + base };
+  return finiteResult(
+    { volume: (base * height) / 3, slantHeight, lateralArea, surfaceArea: lateralArea + base },
+    'cone',
+  );
 }
 
 /** A conical frustum: a cone with its tip cut off parallel to the base. */
@@ -506,17 +531,20 @@ export function frustum(dimensions: {
   assertPositive(height, 'height');
   const slantHeight = Math.hypot(r1 - r2, height);
   const lateralArea = Math.PI * (r1 + r2) * slantHeight;
-  return {
-    volume: (Math.PI * height * (r1 * r1 + r1 * r2 + r2 * r2)) / 3,
-    slantHeight,
-    lateralArea,
-    surfaceArea: lateralArea + Math.PI * (r1 * r1 + r2 * r2),
-  };
+  return finiteResult(
+    {
+      volume: (Math.PI * height * (r1 * r1 + r1 * r2 + r2 * r2)) / 3,
+      slantHeight,
+      lateralArea,
+      surfaceArea: lateralArea + Math.PI * (r1 * r1 + r2 * r2),
+    },
+    'frustum',
+  );
 }
 
 export function cube(side: number): Box {
   assertPositive(side, 'side');
-  return { volume: side ** 3, surfaceArea: 6 * side * side, spaceDiagonal: Math.sqrt(3) * side };
+  return finiteResult({ volume: side ** 3, surfaceArea: 6 * side * side, spaceDiagonal: Math.sqrt(3) * side }, 'cube');
 }
 
 /** A rectangular box. */
@@ -525,11 +553,14 @@ export function cuboid(dimensions: { readonly length: number; readonly width: nu
   assertPositive(length, 'length');
   assertPositive(width, 'width');
   assertPositive(height, 'height');
-  return {
-    volume: length * width * height,
-    surfaceArea: 2 * (length * width + width * height + length * height),
-    spaceDiagonal: Math.hypot(length, width, height),
-  };
+  return finiteResult(
+    {
+      volume: length * width * height,
+      surfaceArea: 2 * (length * width + width * height + length * height),
+      spaceDiagonal: Math.hypot(length, width, height),
+    },
+    'cuboid',
+  );
 }
 
 /** A right pyramid on a square base; `slantHeight` is the height of each triangular face. */
@@ -540,7 +571,10 @@ export function squarePyramid(dimensions: { readonly baseSide: number; readonly 
   const base = baseSide * baseSide;
   const slantHeight = Math.hypot(baseSide / 2, height);
   const lateralArea = 2 * baseSide * slantHeight;
-  return { volume: (base * height) / 3, slantHeight, lateralArea, surfaceArea: lateralArea + base };
+  return finiteResult(
+    { volume: (base * height) / 3, slantHeight, lateralArea, surfaceArea: lateralArea + base },
+    'squarePyramid',
+  );
 }
 
 /**
@@ -553,7 +587,10 @@ export function torus(dimensions: { readonly majorRadius: number; readonly minor
   assertPositive(big, 'majorRadius');
   assertPositive(small, 'minorRadius');
   if (big < small) throw new InvalidArgumentError('majorRadius must be at least minorRadius');
-  return { volume: 2 * Math.PI ** 2 * big * small * small, surfaceArea: 4 * Math.PI ** 2 * big * small };
+  return finiteResult(
+    { volume: 2 * Math.PI ** 2 * big * small * small, surfaceArea: 4 * Math.PI ** 2 * big * small },
+    'torus',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -581,7 +618,7 @@ export function distance(a: Point2, b: Point2): number;
 export function distance(a: Point3, b: Point3): number;
 export function distance(a: Point2 | Point3, b: Point2 | Point3): number {
   assertSameDimension(a, b);
-  return Math.hypot(...a.map((value, i) => (b[i] ?? 0) - value));
+  return finiteNumber(Math.hypot(...a.map((value, i) => (b[i] ?? 0) - value)), 'distance');
 }
 
 /** The point halfway between two points of the same dimension. */
@@ -622,7 +659,7 @@ export function signedPolygonArea(vertices: Iterable<Point2>): number {
     }
     previous = point;
   }
-  return twice / 2 + 0;
+  return finiteNumber(twice / 2, 'polygonArea') + 0;
 }
 
 /** Area of a simple polygon (shoelace formula), regardless of vertex order. */

@@ -15,10 +15,9 @@ import { InvalidArgumentError } from '@arki/math/errors';
 import type { Assumptions } from './index.js';
 import { Context } from './context.js';
 import { CasError, conditionToLatex } from './index.js';
-import { expand } from './polynomial.js';
 import { inputExpr, read } from './read.js';
 import { holds, SignOracle } from './sign.js';
-import { simplify } from './simplify.js';
+import { expand, simplify } from './test-support.js';
 
 function run(text: string, assume?: Assumptions): { result: string; conditions: string[]; applied: readonly string[] } {
   const r = simplify(text, assume === undefined ? {} : { assume });

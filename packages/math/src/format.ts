@@ -12,6 +12,7 @@ import type { Decimal } from './decimal.js';
 import type { RoundingMode } from './rounding.js';
 import { decimal, isDecimal } from './decimal.js';
 import { InvalidArgumentError, NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
+import { DEFAULT_LOCALE, resolveLocale } from './internal/locale.js';
 import { assertFinite } from './number.js';
 
 /** A formattable value. A string must be a number in plain decimal syntax (`'-1234.50'`). */
@@ -60,8 +61,6 @@ export type FileSizeOptions = {
   system?: 'si' | 'iec' | 'jedec';
 } & FormatOptions;
 
-const DEFAULT_LOCALE = 'en-US';
-
 /**
  * Pass as `locale` to use the runtime's default locale instead of `'en-US'`.
  * It is a word, not `undefined`, so a missing locale can never switch it on by accident.
@@ -89,7 +88,8 @@ function cacheKey(locale: string, o: Intl.NumberFormatOptions): string {
   return `${locale}|${o.style ?? ''}|${o.currency ?? ''}|${o.currencyDisplay ?? ''}|${o.currencySign ?? ''}|${o.notation ?? ''}|${o.compactDisplay ?? ''}|${o.minimumFractionDigits ?? ''}|${o.maximumFractionDigits ?? ''}|${String(o.useGrouping ?? '')}|${o.signDisplay ?? ''}|${o.roundingMode ?? ''}`;
 }
 
-function getNumberFormat(locale: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+function getNumberFormat(requested: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const locale = requested === RUNTIME_LOCALE ? requested : resolveLocale(requested);
   const key = cacheKey(locale, options);
   const cached = formatterCache.get(key);
   if (cached) return cached;

@@ -298,3 +298,10 @@ describe('runtime default locale', () => {
     );
   });
 });
+
+describe('a malformed locale tag', () => {
+  it('formats with the default locale instead of throwing a RangeError', () => {
+    expect(formatNumber(1234.5, { locale: 'not a locale' })).toBe(formatNumber(1234.5, { locale: 'en-US' }));
+    expect(formatCurrency(1234.5, 'USD', { locale: '' })).toBe(formatCurrency(1234.5, 'USD', { locale: 'en-US' }));
+  });
+});

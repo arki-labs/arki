@@ -49,6 +49,7 @@ import {
   NumberFormatError,
   NumberOutOfRange,
   NumericRangeError,
+  ResourceLimitError,
 } from './errors.js';
 import { assertFinite } from './number.js';
 
@@ -62,6 +63,9 @@ export type Polar = {
 };
 
 const BRAND = Symbol('arki.math.complex');
+
+/** Most roots `nthRoots` builds: each is an object, so a huge `n` would exhaust memory before it finished. */
+const MAX_NTH_ROOTS = 1_000_000;
 
 function refuseCoercion(): never {
   throw new TypeError(
@@ -702,11 +706,15 @@ export class Complex {
 
   /**
    * All `n` complex `n`-th roots, counter-clockwise from the principal root
-   * (index 0, the one `pow(1/n)` returns). Zero has `n` roots, all zero.
+   * (index 0, the one `pow(1/n)` returns). Zero has `n` roots, all zero. `n` above 1,000,000 throws
+   * `ResourceLimitError`: the roots are built as objects, so `n` is bounded by memory.
    */
   nthRoots(n: number): Complex[] {
     if (!Number.isSafeInteger(n) || n < 1) {
       throw new InvalidArgumentError(`n must be a positive safe integer, got ${n}`);
+    }
+    if (n > MAX_NTH_ROOTS) {
+      throw new ResourceLimitError(`nthRoots builds at most ${MAX_NTH_ROOTS} roots, got n = ${n}`);
     }
     if (this.isZero()) return Array.from({ length: n }, () => Complex.ZERO);
     const modulus = modulusPower(this.re, this.im, 1 / n);

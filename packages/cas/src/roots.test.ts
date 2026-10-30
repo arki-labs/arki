@@ -13,8 +13,8 @@ import { E, PI } from '@arki/math/decimal-math';
 import { InvalidArgumentError } from '@arki/math/errors';
 import { Rational } from '@arki/math/rational';
 
-import { polynomialIn } from './polynomial.js';
 import { exactRoots } from './roots.js';
+import { polynomialIn } from './test-support.js';
 
 type Field = readonly [Rational, Rational, Rational, Rational]; // 1, s, i, s·i
 

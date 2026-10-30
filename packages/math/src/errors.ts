@@ -35,7 +35,8 @@ export const InvalidNumber = /* @__PURE__ */ defineFailure('math.invalid_number'
 export const NumberOutOfRange = /* @__PURE__ */ defineFailure('math.number_out_of_range', {
   status: 400,
   message: 'Text holds a number outside the supported digits, scale or range.',
-  remediation: 'Keep values within 10 000 digits and an exponent of 10 000, or use parseDecimal for values past the float range.',
+  remediation:
+    'Keep values within 10 000 digits and an exponent of 10 000, or use parseDecimal for values past the float range.',
 });
 
 /** Every failure a `@arki/math` parser returns. The one list; {@link MathParseFailure} is derived from it. */
@@ -198,6 +199,43 @@ export class SingularMatrixError extends MathError {
 export class ConvergenceError extends MathError {
   readonly code = MATH_ERROR_CODES.convergence;
   readonly remediation = 'Loosen the tolerance, raise the iteration limit, or pass a better starting point.';
+  /** Iterations, sweeps or evaluations spent before the method stopped. */
+  readonly iterations: number;
+
+  constructor(message: string, iterations: number) {
+    super(message);
+    this.iterations = iterations;
+  }
+}
+
+/**
+ * A numeric method got valid input and still did not reach its tolerance in its iteration limit: a function with no
+ * limit at the point, an integrand that is not integrable, a matrix whose QR or SVD iteration stalls. `cause` is the
+ * `ConvergenceError` with `iterations`; the root, integral and limit errors also carry `best`, the last estimate.
+ *
+ * @fix Show the user that the method did not settle; loosen the tolerance, raise the iteration limit, or start elsewhere, and use `cause.best` if a rough value is enough.
+ * @verify cd packages/math && bun run vitest run src/errors.test.ts src/roots.test.ts src/integrate.test.ts
+ */
+export const NotConverged = /* @__PURE__ */ defineFailure('math.not_converged', {
+  status: 422,
+  message: 'The method did not converge within its iteration limit.',
+  remediation: 'Loosen the tolerance, raise the iteration limit, or pass a better starting point.',
+});
+
+/** A failure value returned by an iterative method that did not converge. */
+export type NotConvergedFailure = FailureOf<typeof NotConverged>;
+
+/**
+ * Runs an iterative method and returns {@link NotConverged} when it throws a {@link ConvergenceError} (with the error
+ * as `cause`). Invalid input and every other error are still thrown.
+ */
+export function orNotConverged<Value>(run: () => Value): Value | NotConvergedFailure {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof ConvergenceError) return NotConverged({ cause: error });
+    throw error;
+  }
 }
 
 /** A matrix that must be symmetric positive definite (for a Cholesky factorization) is not. */

@@ -8,7 +8,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { gcd, polynomialIn } from './polynomial.js';
+import { gcd, polynomialIn } from './test-support.js';
 
 const polynomial = fc
   .tuple(fc.array(fc.integer({ min: -12, max: 12 }), { minLength: 1, maxLength: 6 }), fc.integer({ min: 1, max: 9 }))

@@ -10,6 +10,25 @@
  */
 import { cpuUsage } from 'node:process';
 
+import { isFailure, UnexpectedFailure } from '@arki/failure';
+
+import type { CasResult } from './core.js';
+import type { Derivation } from './derivation.js';
+import type { CasTextFailure } from './failures.js';
+import type { Factored, PolynomialIn, Rationalized } from './polynomial.js';
+import type { SimplifyResult } from './simplify.js';
+import { derivation as realDerivation } from './derivation.js';
+import { derivative as realDerivative } from './derivative.js';
+import {
+  collect as realCollect,
+  expand as realExpand,
+  factor as realFactor,
+  gcd as realGcd,
+  polynomialIn as realPolynomialIn,
+  rationalize as realRationalize,
+} from './polynomial.js';
+import { simplify as realSimplify } from './simplify.js';
+
 /** One run: its CPU time in ms, and the value it returned or the error it threw. */
 export type Timed<T> =
   | { readonly ms: number; readonly ok: true; readonly value: T }
@@ -37,4 +56,51 @@ export function fastest<T>(run: () => T, bound: number, attempts = 3): Timed<T> 
     if (next.ms < best.ms) best = next;
   }
   return best;
+}
+
+/**
+ * The verbs as they behaved before strings returned failures: a failure is thrown as its `cause` (the `ParseError`,
+ * `CasError`, `CasLimitError`...). Most tests feed strings and assert on the value or on the thrown error; the
+ * returned failures themselves are tested in `text.test.ts` against the real verbs.
+ */
+function raise(failure: CasTextFailure): never {
+  if (failure.cause instanceof Error) throw failure.cause;
+  throw new UnexpectedFailure(failure);
+}
+
+export function derivative(...args: Parameters<typeof realDerivative>): CasResult {
+  const out = realDerivative(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function derivation(...args: Parameters<typeof realDerivation>): Derivation {
+  const out = realDerivation(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function simplify(...args: Parameters<typeof realSimplify>): SimplifyResult {
+  const out = realSimplify(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function expand(...args: Parameters<typeof realExpand>): CasResult {
+  const out = realExpand(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function collect(...args: Parameters<typeof realCollect>): CasResult {
+  const out = realCollect(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function rationalize(...args: Parameters<typeof realRationalize>): Rationalized {
+  const out = realRationalize(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function gcd(...args: Parameters<typeof realGcd>): CasResult {
+  const out = realGcd(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function polynomialIn(...args: Parameters<typeof realPolynomialIn>): PolynomialIn {
+  const out = realPolynomialIn(...args);
+  return isFailure(out) ? raise(out) : out;
+}
+export function factor(...args: Parameters<typeof realFactor>): Factored {
+  const out = realFactor(...args);
+  return isFailure(out) ? raise(out) : out;
 }

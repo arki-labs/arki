@@ -6,10 +6,18 @@
  * Results never carry `-0`.
  */
 
+import type { MathParseFailure } from './errors.js';
 import type { Decimal } from './internal/exact.js';
 import type { RoundingMode } from './rounding.js';
-import { InvalidArgumentError, NumberFormatError, NumericRangeError, ResourceLimitError } from './errors.js';
+import {
+  InvalidArgumentError,
+  InvalidNumber,
+  NumberOutOfRange,
+  NumericRangeError,
+  ResourceLimitError,
+} from './errors.js';
 import { abs, digitCount, divideRounded, pow10 } from './internal/bigint.js';
+import { exceedsDigitLimit } from './internal/limits.js';
 import { decimalParts } from './internal/parse.js';
 import { roundExact, roundToExact } from './internal/round.js';
 
@@ -310,17 +318,28 @@ const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
  * `'1200'` → 2, `'1200.'` → 4, `'0.00120'` → 3, `'1.20e3'` → 3. The exponent
  * is ignored. Zero counts its written zeros after the point (`'0'` → 1, `'0.00'` → 2).
  * Pass the text (or a `Decimal`, whose scale is its written precision):
- * a JS number cannot tell `1.20` from `1.2`. Anything else throws `NumberFormatError`.
+ * a JS number cannot tell `1.20` from `1.2`. Text is outside input, so text that is not a plain
+ * decimal returns `InvalidNumber`, and text with more than 10 000 digits returns `NumberOutOfRange`.
  */
-export function significantDigits(value: string | Decimal): number {
+export function significantDigits(value: Decimal): number;
+export function significantDigits(value: string): number | MathParseFailure;
+export function significantDigits(value: string | Decimal): number | MathParseFailure {
   const text = typeof value === 'string' ? value.trim() : value.toString();
-  if (!PLAIN_NUMBER.test(text)) throw new NumberFormatError(`"${text}" is not a plain decimal number`);
-  const mantissa = text.replace(/^[+-]/, '').split(/e/i)[0] ?? '';
+  if (!PLAIN_NUMBER.test(text)) return InvalidNumber();
+  const exponentAt = text.search(/e/i);
+  const sign = text.startsWith('+') || text.startsWith('-') ? 1 : 0;
+  const mantissa = text.slice(sign, exponentAt === -1 ? text.length : exponentAt);
+  if (exceedsDigitLimit(mantissa.length)) return NumberOutOfRange();
   const point = mantissa.indexOf('.');
-  const digits = mantissa.replace('.', '');
-  const significant = digits.replace(/^0+/, '');
-  if (significant === '') return point === -1 ? 1 : Math.max(1, mantissa.length - point - 1);
-  return point === -1 ? significant.replace(/0+$/, '').length : significant.length;
+  const digits = point === -1 ? mantissa : mantissa.slice(0, point) + mantissa.slice(point + 1);
+  // Scans, not `/^0+/` and `/0+$/`: a regex with a `$` alternative is quadratic on a long run of zeros.
+  let first = 0;
+  while (first < digits.length && digits[first] === '0') first++;
+  if (first === digits.length) return point === -1 ? 1 : Math.max(1, mantissa.length - point - 1);
+  if (point !== -1) return digits.length - first;
+  let last = digits.length;
+  while (digits[last - 1] === '0') last--;
+  return last - first;
 }
 
 /**

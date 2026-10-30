@@ -3,8 +3,12 @@
  * conditions. Only the result is built here; the rule-by-rule derivation tree
  * is `@arki/cas/derivation`, and none of its code is imported by this entry.
  */
+import type { Expr } from '@arki/expr';
+
 import type { CasInput, CasOptions, CasResult } from './core.js';
+import type { CasTextFailure } from './failures.js';
 import { differentiateOrders } from './differentiate.js';
+import { atTextDoor } from './failures.js';
 
 export type DerivativeOptions = CasOptions & {
   /** How many times to differentiate. Default 1; at most the `order` budget (default 10). */
@@ -28,13 +32,24 @@ export type DerivativeOptions = CasOptions & {
  * derivative('x^5', 'x', { order: 5 }).result.source; // '120'
  * ```
  *
- * Throws `CasError` `not-differentiable` for `floor ceil round fix sign mod`
+ * A string that does not parse returns `parse`'s failure; one the verb cannot handle returns `UnsupportedText`, one over a budget
+ * `OverCasBudget`, and one without a value (`x/0`) `NoCasValue`. For an `Expr` the same cases throw: `CasError`
+ * `not-differentiable` for `floor ceil round fix sign mod`
  * of the variable, `unsupported-function` for `factorial`, `gamma` and host
  * functions, and `bad-variable` when `variable` is a constant or function.
  */
-export function derivative(input: CasInput, variable: string, options: DerivativeOptions = {}): CasResult {
-  const { result, conditions } = differentiateOrders(input, variable, options, false);
-  return { result, conditions };
+export function derivative(input: Expr, variable: string, options?: DerivativeOptions): CasResult;
+export function derivative(input: CasInput, variable: string, options?: DerivativeOptions): CasResult | CasTextFailure;
+export function derivative(
+  input: CasInput,
+  variable: string,
+  options: DerivativeOptions = {},
+): CasResult | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => {
+    const { result, conditions } = differentiateOrders(input, variable, options, false);
+    return { result, conditions };
+  });
 }
 
 export type { CasInput, CasOptions, CasResult, Condition } from './core.js';
+export type { CasTextFailure } from './failures.js';

@@ -1,6 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { Matrix } from './linear-algebra.js';
 import { Complex } from './complex.js';
 import {
@@ -97,7 +99,7 @@ describe('linear-algebra properties', () => {
       fc.property(
         sizeArb.chain(squareArb).map(m => plus(m, transpose(m))),
         a => {
-          const { values, vectors } = symmetricEigenDecompose(a);
+          const { values, vectors } = orThrow(symmetricEigenDecompose(a));
           const scale = Math.max(1, size(a)) * a.length;
           for (const [k, v] of vectors.entries()) {
             const lambda = values[k] ?? Number.NaN;
@@ -117,7 +119,7 @@ describe('linear-algebra properties', () => {
 
   /** The largest `‖A·v − λ·v‖` over all returned eigenpairs, in complex arithmetic. */
   function worstResidual(a: Matrix): number {
-    const { values, vectors } = eigenDecompose(a);
+    const { values, vectors } = orThrow(eigenDecompose(a));
     expect(values).toHaveLength(a.length);
     let worst = 0;
     for (const [k, v] of vectors.entries()) {
@@ -241,7 +243,7 @@ describe('linear-algebra properties', () => {
     ];
     expect(worstResidual(a)).toBeLessThanOrEqual(32 * bound(a));
     // The roots of λ³ − λ² − 1e-12 (mpmath, 50 digits), plus the 0 that column 4 isolates.
-    const { values } = eigenDecompose(a);
+    const { values } = orThrow(eigenDecompose(a));
     const exact = [
       Complex.fromParts(-4.999_999_999_99e-13, -9.999_999_999_993_75e-7),
       Complex.fromParts(-4.999_999_999_99e-13, 9.999_999_999_993_75e-7),

@@ -3,8 +3,8 @@ Back to the [README](../../README.md#documentation).
 # @arki/math/roots
 
 Every result carries an error estimate, and a method that misses its tolerance
-throws a `ConvergenceError` subclass holding its best estimate (`.best`) instead
-of returning a wrong number. A function that returns `NaN` or `Infinity` throws
+returns `NotConverged` (`math.not_converged`) instead of a wrong number; its
+`cause` is a `ConvergenceError` subclass holding the best estimate (`.best`). A function that returns `NaN` or `Infinity` throws
 `NumericRangeError` naming the point. `derivative` and `limit` are numerical
 estimates, not proofs.
 

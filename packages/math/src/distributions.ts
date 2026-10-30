@@ -151,6 +151,9 @@ export function gamma(x: number): number {
 
 /** ln B(a, b) = ln Γ(a) + ln Γ(b) − ln Γ(a + b), for `a, b > 0`. */
 export function betaLn(a: number, b: number): number {
+  if (Number.isFinite(a) && Number.isFinite(b) && !Number.isFinite(a + b)) {
+    throw new NumericRangeError(`betaLn(${a}, ${b}) overflows: a + b exceeds the largest finite number`);
+  }
   return noNegativeZero(gammaLn(a) + gammaLn(b) - gammaLn(a + b));
 }
 
@@ -197,10 +200,10 @@ function gammaPQ(a: number, x: number, gln: number = lnGamma(a)): { p: number; q
   if (x <= 0) return { p: 0, q: 1 };
   if (x < a + 1) {
     const p = Math.min(1, gammaSeries(a, x, gln));
-    return { p, q: 1 - p };
+    return { p: finiteProbability(p, 'regularizedGammaP', a, x), q: 1 - p };
   }
   const q = Math.min(1, gammaContinuedFraction(a, x, gln));
-  return { p: 1 - q, q };
+  return { p: 1 - finiteProbability(q, 'regularizedGammaP', a, x), q };
 }
 
 /** Regularized lower incomplete gamma P(a, x) = γ(a, x) / Γ(a), for a > 0 and x ≥ 0. */
@@ -209,6 +212,16 @@ export function regularizedGammaP(a: number, x: number): number {
   assertFinite(x, 'x');
   if (x < 0) throw new InvalidArgumentError(`x must be at least 0, got ${x}`);
   return noNegativeZero(gammaPQ(a, x).p);
+}
+
+/** A probability from the series or continued fraction, or `NumericRangeError` when the parameters were so large that it came out `NaN`. */
+function finiteProbability(value: number, operation: string, first: number, second: number): number {
+  if (Number.isNaN(value)) {
+    throw new NumericRangeError(
+      `${operation} is not computable for (${first}, ${second}): the parameters are too large`,
+    );
+  }
+  return value;
 }
 
 function betaContinuedFraction(a: number, b: number, x: number): number {
@@ -255,8 +268,11 @@ function betaI(x: number, y: number, a: number, b: number, lnB: number = lnBeta(
   if (x <= 0) return 0;
   if (y <= 0) return 1;
   const front = Math.exp(a * Math.log(x) + b * Math.log(y) - lnB);
-  if (x < (a + 1) / (a + b + 2)) return Math.min(1, (front * betaContinuedFraction(a, b, x)) / a);
-  return Math.max(0, 1 - (front * betaContinuedFraction(b, a, y)) / b);
+  const value =
+    x < (a + 1) / (a + b + 2)
+      ? Math.min(1, (front * betaContinuedFraction(a, b, x)) / a)
+      : Math.max(0, 1 - (front * betaContinuedFraction(b, a, y)) / b);
+  return finiteProbability(value, 'regularizedBeta', a, b);
 }
 
 /** Regularized incomplete beta I_x(a, b) for x in [0, 1] and a, b > 0. */

@@ -5,7 +5,7 @@ import { orThrow } from '@arki/failure';
 import { MathError, ResourceLimitError } from '@arki/math/errors';
 
 import { CasError, CasLimitError, conditionToLatex } from './index.js';
-import { collect, expand, gcd, polynomialIn, rationalize } from './polynomial.js';
+import { collect, expand, gcd, polynomialIn, rationalize } from './test-support.js';
 
 function thrown(run: () => unknown): unknown {
   try {

@@ -39,8 +39,9 @@
 
 import type { RationalInput } from './rational.js';
 import type { RoundingMode } from './rounding.js';
-import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
+import { InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import { ratio } from './internal/exact.js';
+import { resolveLocale } from './internal/locale.js';
 import { assertFinite } from './number.js';
 import { Rational } from './rational.js';
 
@@ -742,16 +743,22 @@ function pairFactor(category: LinearCategory, from: Unit, to: Unit): number {
  * `convert(1, 'in', 'cm')` is exactly `2.54`; `convert(100, 'C', 'F')` is `212`.
  * Throws `InvalidArgumentError` for unknown units or units of different categories,
  * and for `0` to or from `l/100km` (zero fuel use or zero distance per litre is infinite).
+ * Throws `NumericRangeError` when the result overflows the float range (`1e308 km` in `mm`).
  */
 export function convert(value: number, from: Unit, to: Unit): number {
   assertFinite(value, 'value');
   const category = sharedCategory(from, to);
   if (from === to) return value;
-  if (category === 'temperature') {
-    return fromCelsius(toCelsius(value, from as TemperatureUnit), to as TemperatureUnit);
+  const converted =
+    category === 'temperature'
+      ? fromCelsius(toCelsius(value, from as TemperatureUnit), to as TemperatureUnit)
+      : category === 'fuelEconomy'
+        ? convertFuelEconomy(value, from, to)
+        : value * pairFactor(category, from, to);
+  if (!Number.isFinite(converted)) {
+    throw new NumericRangeError(`converting ${value} ${from} to ${to} overflows the float range`);
   }
-  if (category === 'fuelEconomy') return convertFuelEconomy(value, from, to);
-  return value * pairFactor(category, from, to);
+  return converted;
 }
 
 /**
@@ -980,11 +987,12 @@ const formatters = new Map<string, Intl.NumberFormat>();
 
 /** Bounded cache: past 256 entries the oldest insertion is evicted. */
 function getFormatter(
-  locale: string | undefined,
+  requested: string | undefined,
   intlUnit: string | undefined,
   display: 'short' | 'narrow' | 'long',
   maximumFractionDigits: number | undefined,
 ): Intl.NumberFormat {
+  const locale = requested === undefined ? undefined : resolveLocale(requested);
   const key = `${locale ?? ''}|${intlUnit ?? ''}|${display}|${maximumFractionDigits ?? ''}`;
   const cached = formatters.get(key);
   if (cached) return cached;

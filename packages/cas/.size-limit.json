@@ -3,65 +3,47 @@
     "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 10.07 kB (step 2 added lost-restriction conditions and the sign oracle; 70 B over target since the pre-publish fixes (conditions, error spans, the gcd sign rule))",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "10950 B",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "11460 B",
     "gzip": true
   },
   {
     "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): measured 13.67 kB, since step 4 exactRoots splits by factoring over Q",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "14 kB",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "15020 B",
     "gzip": true
   },
   {
     "name": "@arki/cas/polynomial factor (@arki/expr and @arki/math ignored): measured 12.77 kB",
     "path": "dist/polynomial.js",
     "import": "{ factor }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "13800 B",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "14120 B",
     "gzip": true
   },
   {
     "name": "@arki/cas/polynomial with exactRoots and factor (@arki/expr and @arki/math ignored): RFC target +8 kB over polynomial without them, measured +4.18 kB (14.22 kB)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots, factor }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "15350 B",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "15590 B",
     "gzip": true
   },
   {
     "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 12.64 kB (step 3 added a switch per rule, so a derivation can show each rule as a step)",
     "path": "dist/simplify.js",
     "import": "{ simplify }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "13650 B",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "13970 B",
     "gzip": true
   },
   {
     "name": "@arki/cas (errors, conditionToLatex; @arki/expr and @arki/math ignored)",
     "path": "dist/index.js",
     "import": "{ CasError, CasLimitError, conditionToLatex }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
+    "ignore": ["@arki/expr", "@arki/math"],
     "limit": "0.75 kB",
     "gzip": true
   },
@@ -69,22 +51,16 @@
     "name": "@arki/cas/derivative (includes simplify; no step code; @arki/expr and @arki/math ignored): RFC target 15 kB, measured 15.84 kB",
     "path": "dist/derivative.js",
     "import": "{ derivative }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "17050 B",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "17190 B",
     "gzip": true
   },
   {
     "name": "@arki/cas/derivation (@arki/expr and @arki/math ignored): RFC target derivative + 5 kB, measured 17.91 kB (+2.07 kB)",
     "path": "dist/derivation.js",
     "import": "{ derivation, ruleFormula, TEMPLATE_KEYS }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
-    "limit": "18.25 kB",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "19250 B",
     "gzip": true
   },
   {

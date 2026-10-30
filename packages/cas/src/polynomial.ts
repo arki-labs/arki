@@ -11,11 +11,13 @@ import { walk } from '@arki/expr';
 import type { Generator, RatFun } from './context.js';
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
 import type { Part } from './emit.js';
+import type { CasTextFailure } from './failures.js';
 import type { Poly } from './poly.js';
 import { inputDomain, lostConditions, mergeConditions } from './conditions.js';
 import { Context, rationalValue } from './context.js';
 import { CasError } from './core.js';
 import { binary, Emitter, exprOf, numberNode } from './emit.js';
+import { atTextDoor } from './failures.js';
 import {
   coefficientsIn,
   constant,
@@ -38,6 +40,7 @@ import { rationalFactorization, rationalFactors, rationalIn, squareFreeParts } f
 
 export { exactRoots } from './roots.js';
 export type { ExactRoots } from './roots.js';
+export type { CasTextFailure } from './failures.js';
 
 /** One coefficient: a canonical expression in ℚ(π, e), and its value when it is rational. */
 export type Coefficient = { readonly value: Expr; readonly rational: Rational | null };
@@ -116,7 +119,13 @@ function firstKernel(value: RatFun, ctx: Context): Span | undefined {
  * A quotient comes back as one fraction, cancelled by the gcd (the
  * `rationalize` form). Kernels (`sin(x)`, `sqrt(x)`) stay atoms.
  */
-export function expand(input: CasInput, options: CasOptions = {}): CasResult {
+export function expand(input: Expr, options?: CasOptions): CasResult;
+export function expand(input: CasInput, options?: CasOptions): CasResult | CasTextFailure;
+export function expand(input: CasInput, options: CasOptions = {}): CasResult | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => expandOrThrow(input, options));
+}
+
+function expandOrThrow(input: CasInput, options: CasOptions): CasResult {
   const { ctx, value } = load(input, options);
   return { result: exprOf(new Emitter(ctx).node(value), ctx), conditions: conditionsOf(value, ctx) };
 }
@@ -148,7 +157,13 @@ function collectedNode(emitter: Emitter, p: Poly, x: number): Node {
 }
 
 /** Grouped by powers of `variable`: `(2*pi + 3)*x + y`. Coefficients may hold other names, π, e and kernels. */
-export function collect(input: CasInput, variable: string, options: CasOptions = {}): CasResult {
+export function collect(input: Expr, variable: string, options?: CasOptions): CasResult;
+export function collect(input: CasInput, variable: string, options?: CasOptions): CasResult | CasTextFailure;
+export function collect(input: CasInput, variable: string, options: CasOptions = {}): CasResult | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => collectOrThrow(input, variable, options));
+}
+
+function collectOrThrow(input: CasInput, variable: string, options: CasOptions): CasResult {
   const ctx = new Context(options);
   ctx.checkVariable(variable);
   const value = read(inputExpr(input, ctx).root, ctx);
@@ -162,11 +177,20 @@ export function collect(input: CasInput, variable: string, options: CasOptions =
   return { result: exprOf(node, ctx), conditions };
 }
 
+export type Rationalized = {
+  readonly numerator: Expr;
+  readonly denominator: Expr;
+  readonly conditions: readonly Condition[];
+};
+
 /** One fraction `numerator/denominator` with polynomial parts, cancelled by the gcd. Throws `not-rational` on a kernel. */
-export function rationalize(
-  input: CasInput,
-  options: CasOptions = {},
-): { readonly numerator: Expr; readonly denominator: Expr; readonly conditions: readonly Condition[] } {
+export function rationalize(input: Expr, options?: CasOptions): Rationalized;
+export function rationalize(input: CasInput, options?: CasOptions): Rationalized | CasTextFailure;
+export function rationalize(input: CasInput, options: CasOptions = {}): Rationalized | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => rationalizeOrThrow(input, options));
+}
+
+function rationalizeOrThrow(input: CasInput, options: CasOptions): Rationalized {
   const { ctx, value } = load(input, options);
   const span = firstKernel(value, ctx);
   if (span !== undefined)
@@ -189,7 +213,13 @@ export function rationalize(
  * otherwise with coprime integer coefficients and the term that prints
  * first positive (`x - pi`). Generators include names, π, e and kernels.
  */
-export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResult {
+export function gcd(a: Expr, b: Expr, options?: CasOptions): CasResult;
+export function gcd(a: CasInput, b: CasInput, options?: CasOptions): CasResult | CasTextFailure;
+export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResult | CasTextFailure {
+  return atTextDoor(typeof a === 'string' || typeof b === 'string', () => gcdOrThrow(a, b, options));
+}
+
+function gcdOrThrow(a: CasInput, b: CasInput, options: CasOptions): CasResult {
   const ctx = new Context(options);
   const inputs = [inputExpr(a, ctx).root, inputExpr(b, ctx).root] as const;
   const [x, y] = [read(inputs[0], ctx), read(inputs[1], ctx)];
@@ -251,7 +281,17 @@ function offenderOf(value: RatFun, variable: string, ctx: Context): Offender | u
  * `other` says why and where. Conditions list the divisors the result no
  * longer shows (`x/x - 1` is `[]` with `x ≠ 0`).
  */
-export function polynomialIn(input: CasInput, variable: string, options: CasOptions = {}): PolynomialIn {
+export function polynomialIn(input: Expr, variable: string, options?: CasOptions): PolynomialIn;
+export function polynomialIn(input: CasInput, variable: string, options?: CasOptions): PolynomialIn | CasTextFailure;
+export function polynomialIn(
+  input: CasInput,
+  variable: string,
+  options: CasOptions = {},
+): PolynomialIn | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => polynomialInOrThrow(input, variable, options));
+}
+
+function polynomialInOrThrow(input: CasInput, variable: string, options: CasOptions): PolynomialIn {
   const ctx = new Context(options);
   ctx.checkVariable(variable);
   const value = read(inputExpr(input, ctx).root, ctx);
@@ -319,7 +359,13 @@ export type Factored = {
  * when the input is not a polynomial in the variable (a quotient by it, or a
  * function of it such as `sin(x)`).
  */
-export function factor(input: CasInput, variable: string, options: CasOptions = {}): Factored {
+export function factor(input: Expr, variable: string, options?: CasOptions): Factored;
+export function factor(input: CasInput, variable: string, options?: CasOptions): Factored | CasTextFailure;
+export function factor(input: CasInput, variable: string, options: CasOptions = {}): Factored | CasTextFailure {
+  return atTextDoor(typeof input === 'string', () => factorOrThrow(input, variable, options));
+}
+
+function factorOrThrow(input: CasInput, variable: string, options: CasOptions): Factored {
   const ctx = new Context(options);
   ctx.checkVariable(variable);
   const root = inputExpr(input, ctx).root;

@@ -47,8 +47,8 @@
  * number. Column pivoting reveals rank on all but contrived inputs (Kahan's
  * matrix defeats it); the SVD never misses. `conditionNumber` is `σ₁ / σₖ`;
  * `pseudoInverse` is `V·Σ⁺·Uᵀ`. The SVD's QR iteration is capped at 75 sweeps
- * per singular value (typically 2 or 3 are needed); past the cap it throws
- * `ConvergenceError`. Like the eigen routines, all of these work on a copy
+ * per singular value (typically 2 or 3 are needed); past the cap it returns
+ * `NotConverged`. Like the eigen routines, all of these work on a copy
  * scaled by a power of two, so entries near the float64 limits neither
  * overflow nor underflow.
  *
@@ -83,9 +83,11 @@
  * complex pair, as in every float library; their eigenvectors are then nearly
  * parallel. The QR iteration is capped (30 sweeps per eigenvalue for the
  * symmetric case, `30 · max(10, n)` per eigenvalue for the general case, with
- * exceptional shifts at 10 and 30); past the cap it throws `ConvergenceError`.
+ * exceptional shifts at 10 and 30); past the cap it returns `NotConverged`
+ * (`math.not_converged`, with the `ConvergenceError` and its sweep count as `cause`).
  */
 
+import type { NotConvergedFailure } from './errors.js';
 import { Complex } from './complex.js';
 import {
   ConvergenceError,
@@ -93,6 +95,7 @@ import {
   InvalidArgumentError,
   NotPositiveDefiniteError,
   NumericRangeError,
+  orNotConverged,
   ResourceLimitError,
   SingularMatrixError,
 } from './errors.js';
@@ -650,7 +653,11 @@ export type RankOptions = ToleranceOptions & {
  * `max(m, n) · Number.EPSILON · ‖A‖∞` instead. `{ tolerance }` replaces the
  * default with an absolute threshold for whichever quantity is counted.
  */
-export function rank(a: Matrix, options?: RankOptions): number {
+export function rank(a: Matrix, options?: RankOptions): number | NotConvergedFailure {
+  return orNotConverged(() => rankOrThrow(a, options));
+}
+
+function rankOrThrow(a: Matrix, options?: RankOptions): number {
   const [rows, columns] = assertMatrix(a, 'a');
   const method = options?.method ?? 'svd';
   if (method === 'elimination') return eliminationRank(a, rows, columns, options);
@@ -943,7 +950,7 @@ function tridiagonalQl(d: Float64Array, e: Float64Array, w: Float64Array[], n: n
     if (m > l) {
       do {
         if (budget-- === 0) {
-          throw new ConvergenceError(`symmetric QL iteration did not converge in ${30 * n} sweeps`);
+          throw new ConvergenceError(`symmetric QL iteration did not converge in ${30 * n} sweeps`, 30 * n);
         }
         // Shift: the eigenvalue of the leading 2×2 closer to d[l].
         let g = d[l]!;
@@ -1029,11 +1036,15 @@ function order(n: number, compare: (i: number, j: number) => number): number[] {
 /**
  * The eigenvalues of a symmetric matrix, ascending, repeated by multiplicity.
  * Throws `InvalidArgumentError` when `A` is not symmetric within the tolerance
- * (see the module docs, or pass `{ tolerance }`), and `ConvergenceError` if
+ * (see the module docs, or pass `{ tolerance }`), and returns `NotConverged` if
  * the QL iteration stalls. Faster than `symmetricEigenDecompose`: no
  * eigenvectors are accumulated.
  */
-export function symmetricEigenvalues(a: Matrix, options?: SymmetryOptions): number[] {
+export function symmetricEigenvalues(a: Matrix, options?: SymmetryOptions): number[] | NotConvergedFailure {
+  return orNotConverged(() => symmetricEigenvaluesOrThrow(a, options));
+}
+
+function symmetricEigenvaluesOrThrow(a: Matrix, options?: SymmetryOptions): number[] {
   const { w, n, scale } = symmetricInput(a, options);
   const d = new Float64Array(n);
   const e = new Float64Array(n);
@@ -1051,7 +1062,14 @@ export function symmetricEigenvalues(a: Matrix, options?: SymmetryOptions): numb
  * belongs to `values[k]`, has unit length, and its largest-magnitude entry is
  * positive. Throws like `symmetricEigenvalues`.
  */
-export function symmetricEigenDecompose(a: Matrix, options?: SymmetryOptions): SymmetricEigenDecomposition {
+export function symmetricEigenDecompose(
+  a: Matrix,
+  options?: SymmetryOptions,
+): SymmetricEigenDecomposition | NotConvergedFailure {
+  return orNotConverged(() => symmetricEigenDecomposeOrThrow(a, options));
+}
+
+function symmetricEigenDecomposeOrThrow(a: Matrix, options?: SymmetryOptions): SymmetricEigenDecomposition {
   const { w, n, scale } = symmetricInput(a, options);
   const d = new Float64Array(n);
   const e = new Float64Array(n);
@@ -1475,7 +1493,10 @@ function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Arra
       }
       iter++;
       if (iter > maxIterations) {
-        throw new ConvergenceError(`QR iteration did not converge in ${maxIterations} sweeps for eigenvalue ${en}`);
+        throw new ConvergenceError(
+          `QR iteration did not converge in ${maxIterations} sweeps for eigenvalue ${en}`,
+          maxIterations,
+        );
       }
       // Look for two consecutive small subdiagonal elements.
       let m = en - 2;
@@ -1733,9 +1754,13 @@ function complexOrder(d: Float64Array, e: Float64Array, n: number): number[] {
  * real part, then imaginary part, repeated by multiplicity. A real eigenvalue
  * has an imaginary part of exactly `0`; complex ones come in conjugate pairs.
  * For a symmetric matrix, `symmetricEigenvalues` is faster and returns plain
- * numbers. Throws `ConvergenceError` if the QR iteration stalls.
+ * numbers. Returns `NotConverged` if the QR iteration stalls.
  */
-export function eigenvalues(a: Matrix): Complex[] {
+export function eigenvalues(a: Matrix): Complex[] | NotConvergedFailure {
+  return orNotConverged(() => eigenvaluesOrThrow(a));
+}
+
+function eigenvaluesOrThrow(a: Matrix): Complex[] {
   const { n, h, scale } = generalInput(a);
   hessenberg(h, n);
   const d = new Float64Array(n);
@@ -1751,9 +1776,13 @@ export function eigenvalues(a: Matrix): Complex[] {
  * positive; a real eigenvalue's vector has real entries, and conjugate
  * eigenvalues have conjugate vectors. For a defective matrix the vectors of a
  * repeated eigenvalue are (nearly) parallel: there is no full basis to find.
- * Throws `ConvergenceError` if the QR iteration stalls.
+ * Returns `NotConverged` if the QR iteration stalls.
  */
-export function eigenDecompose(a: Matrix): EigenDecomposition {
+export function eigenDecompose(a: Matrix): EigenDecomposition | NotConvergedFailure {
+  return orNotConverged(() => eigenDecomposeOrThrow(a));
+}
+
+function eigenDecomposeOrThrow(a: Matrix): EigenDecomposition {
   const { n, h, scale, balancing } = generalInput(a);
   const v = squareRows(n);
   hessenberg(h, n, v);
@@ -1795,7 +1824,7 @@ export function eigenDecompose(a: Matrix): EigenDecomposition {
 function unitVector(re: Float64Array, im: Float64Array, n: number): Complex[] {
   let largest = 0;
   for (let i = 0; i < n; i++) largest = Math.max(largest, Math.abs(re[i]!), Math.abs(im[i]!));
-  if (largest === 0) throw new ConvergenceError('the QR iteration produced a zero eigenvector');
+  if (largest === 0) throw new ConvergenceError('the QR iteration produced a zero eigenvector', 0);
   let at = 0;
   let best = -1;
   for (let i = 0; i < n; i++) {
@@ -2132,7 +2161,7 @@ export function choleskySolve(a: Matrix, b: Vector | Matrix, options?: Tolerance
   return solutionOutput(columns, n, 1, vector);
 }
 
-/** Largest number of QR sweeps spent on one singular value before `ConvergenceError`. */
+/** Largest number of QR sweeps spent on one singular value before `NotConverged`. */
 const SVD_SWEEPS = 75;
 const SVD_TINY = 2 ** -966;
 
@@ -2320,7 +2349,10 @@ function golubKahan(
       }
       case 3: {
         if (++sweeps > SVD_SWEEPS) {
-          throw new ConvergenceError(`the SVD did not converge in ${SVD_SWEEPS} sweeps for one singular value`);
+          throw new ConvergenceError(
+            `the SVD did not converge in ${SVD_SWEEPS} sweeps for one singular value`,
+            SVD_SWEEPS,
+          );
         }
         // The shift: the eigenvalue of the trailing 2×2 of BᵀB nearer its last entry.
         const scale = Math.max(
@@ -2428,11 +2460,15 @@ function svdOf(
  * The singular values of any `m×n` matrix: `min(m, n)` of them, descending,
  * all `≥ 0` (the square roots of the eigenvalues of `AᵀA`, computed without
  * forming it). Golub–Kahan–Reinsch: backward stable, so each value is within
- * about `max(m, n) · ε · σ₁` of the exact one. Throws `ConvergenceError` if
+ * about `max(m, n) · ε · σ₁` of the exact one. Returns `NotConverged` if
  * the QR iteration stalls (see the module docs). Faster than
  * `singularValueDecompose`: no singular vectors are accumulated.
  */
-export function singularValues(a: Matrix): number[] {
+export function singularValues(a: Matrix): number[] | NotConvergedFailure {
+  return orNotConverged(() => singularValuesOrThrow(a));
+}
+
+function singularValuesOrThrow(a: Matrix): number[] {
   const [m, n] = assertMatrix(a, 'a');
   const { values, scale } = svdOf(a, m, n, false);
   const out: number[] = [];
@@ -2448,7 +2484,11 @@ export function singularValues(a: Matrix): number[] {
  * largest-magnitude entry of `left[k]` (the first, on a tie) is positive.
  * Throws like `singularValues`.
  */
-export function singularValueDecompose(a: Matrix): SingularValueDecomposition {
+export function singularValueDecompose(a: Matrix): SingularValueDecomposition | NotConvergedFailure {
+  return orNotConverged(() => singularValueDecomposeOrThrow(a));
+}
+
+function singularValueDecomposeOrThrow(a: Matrix): SingularValueDecomposition {
   const [m, n] = assertMatrix(a, 'a');
   const { values, left, right, scale } = svdOf(a, m, n, true);
   const out: SingularValueDecomposition = { values: [], left: [], right: [] };
@@ -2484,7 +2524,11 @@ export function singularValueDecompose(a: Matrix): SingularValueDecomposition {
  * that returns a non-finite number, since the condition number of a singular
  * matrix is infinite by definition.
  */
-export function conditionNumber(a: Matrix): number {
+export function conditionNumber(a: Matrix): number | NotConvergedFailure {
+  return orNotConverged(() => conditionNumberOrThrow(a));
+}
+
+function conditionNumberOrThrow(a: Matrix): number {
   const [m, n] = assertMatrix(a, 'a');
   const { values } = svdOf(a, m, n, false);
   const smallest = values.at(-1)!;
@@ -2500,7 +2544,11 @@ export function conditionNumber(a: Matrix): number {
  * minimum-norm least-squares solution, but `leastSquares` computes that faster
  * and more accurately.
  */
-export function pseudoInverse(a: Matrix, options?: ToleranceOptions): number[][] {
+export function pseudoInverse(a: Matrix, options?: ToleranceOptions): number[][] | NotConvergedFailure {
+  return orNotConverged(() => pseudoInverseOrThrow(a, options));
+}
+
+function pseudoInverseOrThrow(a: Matrix, options?: ToleranceOptions): number[][] {
   const [m, n] = assertMatrix(a, 'a');
   const { values, left, right, scale } = svdOf(a, m, n, true);
   const tolerance =
@@ -2538,9 +2586,17 @@ export function pseudoInverse(a: Matrix, options?: ToleranceOptions): number[][]
  * `max(m, n) · Number.EPSILON · σ₁` (or `{ tolerance }`). Never throws for a
  * singular or rank-deficient `A`.
  */
-export function leastSquares(a: Matrix, b: Vector, options?: ToleranceOptions): number[];
-export function leastSquares(a: Matrix, b: Matrix, options?: ToleranceOptions): number[][];
-export function leastSquares(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions): number[] | number[][] {
+export function leastSquares(a: Matrix, b: Vector, options?: ToleranceOptions): number[] | NotConvergedFailure;
+export function leastSquares(a: Matrix, b: Matrix, options?: ToleranceOptions): number[][] | NotConvergedFailure;
+export function leastSquares(
+  a: Matrix,
+  b: Vector | Matrix,
+  options?: ToleranceOptions,
+): number[] | number[][] | NotConvergedFailure {
+  return orNotConverged(() => leastSquaresOrThrow(a, b, options));
+}
+
+function leastSquaresOrThrow(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions): number[] | number[][] {
   const [m, n] = assertMatrix(a, 'a');
   const { columns: rhs, vector } = rightHandSides(b, m);
   const explicit = options?.tolerance === undefined ? undefined : resolveTolerance(options, () => 0);

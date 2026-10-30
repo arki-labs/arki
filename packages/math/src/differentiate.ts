@@ -35,15 +35,16 @@
  *
  * **Tolerance and failures.** An estimate is accepted when `errorEstimate ≤
  * max(absoluteTolerance, relativeTolerance · |value|)`, defaults `1e-10` and
- * `1e-8`. Otherwise `ExtrapolationConvergenceError` (a `ConvergenceError`)
- * is thrown with the best estimate in `best`; so are one-sided limits that
- * disagree. `f` returning `NaN` or `±Infinity` at a sample point throws
+ * `1e-8`. Otherwise the call returns `NotConverged`
+ * (`math.not_converged`) whose `cause` is an `ExtrapolationConvergenceError`
+ * with the best estimate in `best`; so do one-sided limits that disagree. `f` returning `NaN` or `±Infinity` at a sample point throws
  * `NumericRangeError` naming the point; bad arguments throw
  * `InvalidArgumentError`. Results are `{ value, errorEstimate, evaluations }`.
  */
 
+import type { NotConvergedFailure } from './errors.js';
 import type { RealFunction } from './internal/calculus.js';
-import { ConvergenceError, InvalidArgumentError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, orNotConverged } from './errors.js';
 import { assertFunction, call, noNegativeZero, readStep, readTolerance } from './internal/calculus.js';
 
 export type { RealFunction } from './internal/calculus.js';
@@ -78,7 +79,7 @@ export class ExtrapolationConvergenceError extends ConvergenceError {
   readonly best: ExtrapolationResult;
 
   constructor(message: string, best: ExtrapolationResult) {
-    super(message);
+    super(message, best.evaluations);
     this.best = best;
   }
 }
@@ -160,7 +161,15 @@ function defaultStep(x: number): number {
  * @example
  * derivative(Math.exp, 1).value; // 2.718281828459045 (to about 1e-12)
  */
-export function derivative(f: RealFunction, x: number, options?: ExtrapolationOptions): ExtrapolationResult {
+export function derivative(
+  f: RealFunction,
+  x: number,
+  options?: ExtrapolationOptions,
+): ExtrapolationResult | NotConvergedFailure {
+  return orNotConverged(() => derivativeOrThrow(f, x, options));
+}
+
+function derivativeOrThrow(f: RealFunction, x: number, options?: ExtrapolationOptions): ExtrapolationResult {
   assertFunction(f, 'f');
   if (typeof x !== 'number') throw new TypeError('x must be a number');
   if (!Number.isFinite(x)) throw new InvalidArgumentError(`x must be finite, got ${x}`);
@@ -193,7 +202,11 @@ export function derivative(f: RealFunction, x: number, options?: ExtrapolationOp
  * limit(x => Math.sin(x) / x, 0).value; // 1
  * limit(x => (1 + 1 / x) ** x, Infinity).value; // 2.718281828… (to about 1e-9)
  */
-export function limit(f: RealFunction, x0: number, options?: LimitOptions): ExtrapolationResult {
+export function limit(f: RealFunction, x0: number, options?: LimitOptions): ExtrapolationResult | NotConvergedFailure {
+  return orNotConverged(() => limitOrThrow(f, x0, options));
+}
+
+function limitOrThrow(f: RealFunction, x0: number, options?: LimitOptions): ExtrapolationResult {
   assertFunction(f, 'f');
   if (typeof x0 !== 'number') throw new TypeError('x0 must be a number');
   if (Number.isNaN(x0)) throw new InvalidArgumentError('x0 must not be NaN');
