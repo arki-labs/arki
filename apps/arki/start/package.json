@@ -67,6 +67,7 @@
     "@arki/arki-release": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/playwright-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
@@ -82,7 +83,6 @@
     "nitro": "catalog:tanstack/start",
     "oxc-transform-react": "catalog:",
     "vite": "catalog:build-tools",
-    "vitest": "catalog:",
-    "@arki/failure": "workspace:*"
+    "vitest": "catalog:"
   }
 }
