@@ -30,6 +30,7 @@ import {
   appendCandidateCheck,
   docsCheckId,
   readCandidate,
+  runtimesCheckId,
   runCandidate,
   type Candidate,
   type CandidateCheckEntry,
@@ -43,6 +44,7 @@ import { discoverManifests, type ParsedManifest } from './inventory';
 import { createEnvelope } from './json-output';
 import { LEDGER_PATH, renderLedgerEntry, writeLedgerEntry } from './ledger';
 import { npmVersionLookup, runOrder } from './order';
+import { isLeafLibrary } from './readiness';
 import { defaultGitRunner, defaultNpmRunner, execRunner, type ExecRunner, type GitRunner, type NpmRunner } from './runners';
 import { runScorecard } from './scorecard';
 import { runSmoke } from './smoke';
@@ -576,6 +578,17 @@ async function resume(options: ShipOptions, wave: string, dryRun: boolean, deps:
     steps.push({ id: docsCheckId(pkg.name), status: check.status === 'failure' ? 'failed' : check.status === 'warning' ? 'skipped' : 'done', detail: docsDetail(check) });
   }
 
+  // 3b. Runtimes: the producer of the readiness `runtimes` item. A leaf
+  // library promises Node, Bun, Deno, browsers and Hermes; `arki-runtimes`
+  // proves it on the built package.
+  for (const pkg of read.candidate.packages) {
+    const manifest = manifests.find(m => m.name === pkg.name);
+    if (manifest === undefined || !isLeafLibrary(config, manifest)) continue;
+    const check = await runRuntimes(path.dirname(path.resolve(cwd, manifest.manifestPath)), deps.exec);
+    await appendCandidateCheck(candidateDir, runtimesCheckId(pkg.name), check, deps.now);
+    steps.push({ id: runtimesCheckId(pkg.name), status: check.status === 'success' ? 'done' : 'failed', detail: `test:runtimes ${check.status === 'success' ? 'passed' : 'failed'}` });
+  }
+
   // 4. Demo candidate checks: each demo that uses a candidate package runs
   // against the tarballs. A failure is recorded, not fatal: the scorecard's
   // demo-impact decides. A demo not on disk is recorded as deferred.
@@ -638,6 +651,16 @@ function docsEntry(check: DocsCheck): CandidateCheckEntry {
 function docsDetail(entry: CandidateCheckEntry): string {
   if (entry.status === 'warning') return 'no test:docs script';
   return entry.status === 'success' ? 'doc examples pass' : 'doc examples failed';
+}
+
+/** Runs `test:runtimes` (arki-runtimes). A leaf library without the script fails: it cannot prove its runtimes. */
+async function runRuntimes(dir: string, exec: ExecRunner): Promise<CandidateCheckEntry> {
+  const manifest = scriptsSchema.safeParse(JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8')));
+  if (!manifest.success || manifest.data.scripts?.['test:runtimes'] === undefined) {
+    return { status: 'failure', envelope: { message: 'leaf library has no test:runtimes script' } };
+  }
+  const out = await exec('bun', ['run', 'test:runtimes'], { cwd: dir });
+  return { status: out.code === 0 ? 'success' : 'failure', envelope: { code: out.code, output: `${out.stdout}\n${out.stderr}`.trim().slice(-2000) } };
 }
 
 /** Runs `test:docs --json` (arki-doc-examples) when the package has the script. */

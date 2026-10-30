@@ -72,6 +72,11 @@ export function docsCheckId(pkg: string): string {
   return `docs:${pkg}`;
 }
 
+/** Check id under which `ship --resume` records a leaf library's `test:runtimes` run. */
+export function runtimesCheckId(pkg: string): string {
+  return `runtimes:${pkg}`;
+}
+
 /** Reads a package's doc-examples check from a candidate; `null` when none was recorded. */
 export function docsCheckOf(candidate: Candidate, pkg: string): DocsCheck | null {
   const parsed = docsCheckSchema.safeParse(candidate.checks[docsCheckId(pkg)]?.envelope);

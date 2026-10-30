@@ -903,6 +903,17 @@ describe('candidate mode: dimensions from the frozen tarball', () => {
     expect(published['mirror-tag']).toBe('fail');
   });
 
+  it('reads the runtimes item from the run ship recorded on the candidate', () => {
+    // Why: nothing else produces `runtimes`, so without this a leaf library could never pass readiness, and a
+    // broken runtime smoke (a moved export) would go unnoticed until users hit it.
+    const passing = { status: 'pass', details: '', evidence: [] } as const;
+    const recorded = (status: 'success' | 'failure') =>
+      frozenCandidate({ 'runtimes:@arki/a': { status, at: '2026-10-30T00:00:00.000Z', envelope: { code: status === 'success' ? 0 : 1 } } });
+    expect(readinessExternal('@arki/a', [], passing, false, recorded('success'), null)['runtimes']).toBe('pass');
+    expect(readinessExternal('@arki/a', [], passing, false, recorded('failure'), null)['runtimes']).toBe('fail');
+    expect(readinessExternal('@arki/a', [], passing, false, frozenCandidate({}), null)['runtimes']).toBeUndefined();
+  });
+
   it('fails dependencies when the tarball still carries workspace: or catalog: ranges', () => {
     // Why: npm consumers cannot resolve workspace:/catalog:, so those bytes are uninstallable even if the source tree looks fine.
     const dims = frozenDimensions(

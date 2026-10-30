@@ -53,6 +53,7 @@ import {
   lastShippedCommits,
   readCandidate,
   readTarball,
+  runtimesCheckId,
   type Candidate,
   type CandidatePackage,
   type TarballContents,
@@ -855,6 +856,9 @@ export function readinessExternal(
   // candidate gates that version they cannot pass yet; `history` checks them
   // once the version is out.
   if (inCandidate) for (const id of ['mirror-tag', 'mirror-release', 'mirror-security', 'mirror-integrity'] as const) external[id] = 'n/a';
+  const runtimes = inCandidate ? candidate?.checks[runtimesCheckId(pkg)] : undefined;
+  if (runtimes?.status === 'success') external['runtimes'] = 'pass';
+  if (runtimes?.status === 'failure') external['runtimes'] = 'fail';
   const smoke = inCandidate ? candidate?.checks['smoke'] : undefined;
   if (smoke?.status === 'success') external['install-smoke'] = 'pass';
   if (smoke?.status === 'failure') external['install-smoke'] = 'fail';

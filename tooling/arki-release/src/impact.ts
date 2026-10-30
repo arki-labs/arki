@@ -225,7 +225,8 @@ export function touchesDocs(dir: string, changedFiles: readonly string[]): boole
 
 export function evaluateDocsImpact(input: DocsImpactInput): ScorecardDimensionResult {
   const { pkg, dir, changedFiles, changesets } = input;
-  if (changedFiles === null) return result('warn', 'no previous release to diff against (first release); docs are checked by docs-fresh');
+  // A first release has nothing to diff against, and docs-fresh already gates its docs: warning here would block every first publish.
+  if (changedFiles === null) return result('pass', 'no previous release to diff against (first release); docs are checked by docs-fresh');
   if (touchesDocs(dir, changedFiles)) return result('pass', 'docs changed since the last release');
   const scan = scanReasons('docs', pkg, changesets);
   if (scan.reason !== null) return result('pass', `no docs impact: ${scan.reason}`);

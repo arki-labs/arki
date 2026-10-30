@@ -32,6 +32,11 @@ describe('docs-impact', () => {
     expect(evaluateDocsImpact(docsInput(['packages/math/README.md'], [])).status).toBe('pass');
   });
 
+  it('passes a first release, which has no previous release to diff against', () => {
+    // Why: a never-published package has no baseline; warning here closed the gate on every first publish, and docs-fresh already checks its docs.
+    expect(evaluateDocsImpact(docsInput(null, [])).status).toBe('pass');
+  });
+
   it('passes when docs/ changed', () => {
     // Why: guides live under docs/, not only in the README.
     expect(evaluateDocsImpact(docsInput(['packages/math/docs/agent-guide.md'], [])).status).toBe('pass');
