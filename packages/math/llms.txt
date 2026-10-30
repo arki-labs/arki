@@ -55,4 +55,4 @@ Build decimals from strings. Give every inexact step a scale and a rounding mode
 
 - Exact types throw `RoundingNecessaryError` until you pass a mode.
 - Nothing returns `NaN`; failures are `MathError` with a code.
-- Values stop at 10 000 digits.
+- Values stop at 10 000 digits; no bigint passes 18 000 digits (Hermes V1 limit), so roots reach about 9 000 digits, `exp`/`ln`/`log` about 8 900, and `factorial` n = 5 450.

@@ -6,10 +6,14 @@
  */
 
 import { ResourceLimitError } from '../errors.js';
-import { digitCount, pow10 } from './bigint.js';
+import { digitCount, pow10, timesPow10 } from './bigint.js';
+import { MAX_INTEGER_BITS, MAX_INTEGER_DIGITS } from './limits.js';
 
-/** Largest integer a root is taken of, in digits. */
-const MAX_RADICAND_DIGITS = 200_000;
+/**
+ * Largest integer a root is taken of, in digits. It is the bigint ceiling itself: the
+ * root is about 1/k of it, so a square root reaches about 9,000 digits.
+ */
+const MAX_RADICAND_DIGITS = MAX_INTEGER_DIGITS;
 
 function bitLength(n: bigint): number {
   return n.toString(2).length;
@@ -22,6 +26,13 @@ export function integerRoot(value: bigint, k: number): bigint {
   if (k >= bits) return 1n;
   const shift = Math.max(0, bits - 53);
   const rootLog2 = (Math.log2(Number(value >> BigInt(shift))) + shift) / k;
+  // Newton's step and the final checks raise a value near the root to the k-th power, about one
+  // bit of slack per factor above the radicand: size that before building it.
+  if (k * (Math.floor(rootLog2) + 2) > MAX_INTEGER_BITS) {
+    throw new ResourceLimitError(
+      `The root needs a ${k * (Math.floor(rootLog2) + 2)}-bit power; the limit is ${MAX_INTEGER_BITS}`,
+    );
+  }
   const exponent = Math.max(0, Math.floor(rootLog2) - 50);
   let x = (BigInt(Math.ceil(2 ** (rootLog2 - exponent) * (1 + 1e-9))) + 1n) << BigInt(exponent);
   const K = BigInt(k);
@@ -55,7 +66,7 @@ export function rootAt(
   const working = Math.max(precision, Math.ceil(scale / n));
   const shift = n * working - scale;
   assertRadicandSize(digitCount(magnitude) + shift);
-  const radicand = magnitude * pow10(shift);
+  const radicand = timesPow10(magnitude, shift, 'The root');
   const root = integerRoot(radicand, n);
   const exact = root ** BigInt(n) === radicand;
   if (working === precision) return { root, exact };

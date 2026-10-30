@@ -246,3 +246,21 @@ describe('immutability without freezing', () => {
     expect(Object.fromEntries(Object.entries(r))).toEqual({ numerator: -1n, denominator: 3n });
   });
 });
+
+describe('the 18 000-digit bigint ceiling (Hermes V1 rejects about 19 690 digits)', () => {
+  // Odd parts two apart share no factor, so each ratio is already in lowest terms at 10 000 digits.
+  const base = 10n ** 9999n;
+  const a = ratio(base + 1n, base + 3n);
+  const b = ratio(base + 7n, base + 9n);
+
+  it('refuses products, sums and comparisons of two 10 000-digit parts before building them', () => {
+    expect(() => a.times(b)).toThrow(ResourceLimitError);
+    expect(() => a.plus(b)).toThrow(ResourceLimitError);
+    expect(() => a.dividedBy(b)).toThrow(ResourceLimitError);
+    expect(() => a.compareTo(b)).toThrow(ResourceLimitError);
+  });
+
+  it('refuses a repeating decimal whose parts would pass the ceiling', () => {
+    expect(() => ratio(`0.(${'1'.repeat(18_000)})`)).toThrow(ResourceLimitError);
+  });
+});

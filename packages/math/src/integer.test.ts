@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DivisionByZeroError,
   InvalidArgumentError,
-  NumericRangeError,
   InvalidNumber,
   NumberOutOfRange,
+  NumericRangeError,
   ResourceLimitError,
 } from './errors.js';
 import {
@@ -52,12 +52,21 @@ describe('gcd', () => {
   });
 });
 
+describe('modPow at the bigint ceiling', () => {
+  it('refuses a modulus whose squares would pass 18,000 digits', () => {
+    expect(modPow(3n, 5n, 10n ** 8999n)).toBe(243n);
+    expect(() => modPow(3n, 5n, 10n ** 9000n)).toThrow(ResourceLimitError);
+  });
+});
+
 describe('lcm', () => {
-  it('caps a bigint result like combinations does, before multiplying', () => {
+  it('caps a bigint result at 18,000 digits (the Hermes bigint ceiling), before multiplying', () => {
+    // gcd(10^k, 3) is 1, so the lcm is 3 × 10^k: k + 1 digits.
+    expect(lcm(10n ** 17_999n, 3n).toString().length).toBe(18_000);
+    expect(() => lcm(10n ** 18_000n, 3n)).toThrow(ResourceLimitError);
     const a = 10n ** 60_000n + 1n;
     const b = 10n ** 60_000n + 3n; // odd and 2 apart, so gcd is 1 and the product has 120 001 digits
     expect(() => lcm(a, b)).toThrow(ResourceLimitError);
-    expect(lcm(10n ** 40_000n, 10n ** 40_000n + 1n) > 0n).toBe(true);
   });
 
   it('works on numbers', () => {
@@ -152,23 +161,33 @@ describe('factorial', () => {
     expect(() => factorial(-1)).toThrow(InvalidArgumentError);
     expect(() => factorial(-1n)).toThrow(InvalidArgumentError);
     expect(() => factorial(1.5)).toThrow(InvalidArgumentError);
-    expect(() => factorial(25_206n)).toThrow(ResourceLimitError); // 25,206! is the first past 100,000 digits
-    expect(factorial(25_205n).toString().length).toBe(99_996);
+    // 5,451! is the first past 18,000 digits, the Hermes bigint ceiling.
+    expect(() => factorial(5451n)).toThrow(ResourceLimitError);
+    expect(factorial(5450n).toString().length).toBe(17_999);
   });
-  it('computes 10,000! exactly and fast', () => {
+  it('computes 5,000! exactly and fast', () => {
     const start = Date.now();
-    const f = factorial(10_000n);
+    const f = factorial(5000n);
     const elapsed = Date.now() - start;
-    expect(f.toString().length).toBe(35_660);
-    expect(f % 10n ** 2499n).toBe(0n); // 2499 trailing zeros: floor(10000/5)+... = 2499
-    expect(f / factorial(9999n)).toBe(10_000n);
+    expect(f.toString().length).toBe(16_326);
+    expect(f % 10n ** 1249n).toBe(0n); // 1249 trailing zeros: 1000 + 200 + 40 + 8 + 1
+    expect(f / factorial(4999n)).toBe(5000n);
     expect(elapsed).toBeLessThan(500);
   });
-  it('permutations and combinations at n = 10,000', () => {
-    expect(permutations(10_000n, 10_000n)).toBe(factorial(10_000n));
-    expect(permutations(10_000n, 3n)).toBe(10_000n * 9999n * 9998n);
-    expect(combinations(10_000n, 5000n).toString().length).toBe(3009);
-    expect(combinations(10_000n, 1n)).toBe(10_000n);
+  it('permutations and combinations at n = 5,000', () => {
+    expect(permutations(5000n, 5000n)).toBe(factorial(5000n));
+    expect(permutations(5000n, 3n)).toBe(5000n * 4999n * 4998n);
+    expect(combinations(5000n, 2500n).toString().length).toBe(1504);
+    expect(combinations(5000n, 1n)).toBe(5000n);
+  });
+  it('combinations and permutations stop at 18,000 digits exactly', () => {
+    const half = 10n ** 9000n;
+    // C(10^9000, 2) has 18,000 digits; C(2 × 10^9000, 2) has 18,001.
+    expect(combinations(half, 2n).toString().length).toBe(18_000);
+    expect(() => combinations(2n * half, 2n)).toThrow(ResourceLimitError);
+    // 10^9000 × (10^9000 − 1) has 18,000 digits; (10^9000 + 1) × 10^9000 has 18,001.
+    expect(permutations(half, 2n).toString().length).toBe(18_000);
+    expect(() => permutations(half + 1n, 2n)).toThrow(ResourceLimitError);
   });
   it('gcd/lcm: number forms refuse unsafe inputs, bigint handles them', () => {
     expect(() => gcd(2 ** 53, 6)).toThrow(InvalidArgumentError);
@@ -392,7 +411,14 @@ describe('toBase / fromBase', () => {
   });
 
   it('returns InvalidNumber for a digit that does not exist in the base instead of guessing', () => {
-    for (const [text, base] of [['12', 2], ['g', 16], ['1_000', 10], ['0xff', 16], [' 1', 10], ['1.5', 10]] as const) {
+    for (const [text, base] of [
+      ['12', 2],
+      ['g', 16],
+      ['1_000', 10],
+      ['0xff', 16],
+      [' 1', 10],
+      ['1.5', 10],
+    ] as const) {
       expect(InvalidNumber.is(fromBase(text, base)), text).toBe(true);
     }
   });

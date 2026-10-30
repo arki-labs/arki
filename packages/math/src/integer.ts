@@ -96,8 +96,8 @@ export function divmod(
   return [quotient === 0 ? 0 : quotient, remainder === 0 ? 0 : remainder];
 }
 
-// Bigint results honour MAX_INTEGER_DIGITS (100,000 digits); 25,205! has 99,996 digits, 25,206! is the first to cross.
-const MAX_BIGINT_FACTORIAL = 25_205;
+// Bigint results honour MAX_INTEGER_DIGITS (18,000 digits); 5,450! has 17,999 digits, 5,451! has 18,003.
+const MAX_BIGINT_FACTORIAL = 5450;
 // Caps the loop length; the result's digit count is checked exactly afterwards.
 const MAX_BIGINT_TERMS = 100_000;
 // F(47,851) has 10,000 digits; F(47,852) is the first to cross the limit.
@@ -110,9 +110,32 @@ function assertIntegerDigits(digitTotal: number, what: string): void {
   }
 }
 
-/** Cheap pre-check: a product of `terms` factors each below `n` has at most `terms · digits(n)` digits. */
-function assertProductFits(terms: bigint, n: bigint, what: string): void {
-  if (terms * BigInt(digitCount(n)) > BigInt(MAX_INTEGER_DIGITS) * 4n) {
+/** log10 of a positive bigint, from its leading 17 digits, so it works past the range of a double. */
+function log10OfBigInt(n: bigint): number {
+  const text = n.toString();
+  const lead = text.slice(0, 17);
+  return Math.log10(Number(lead)) + (text.length - lead.length);
+}
+
+/**
+ * log10 of lo · (lo+1) · … · hi, for 1 ≤ lo ≤ hi and at most `MAX_BIGINT_TERMS` factors. Above 10^300
+ * every factor is within 1e-295 of the others, so one logarithm stands for all of them.
+ */
+function log10OfRange(lo: bigint, hi: bigint): number {
+  if (hi >= 10n ** 300n) return Number(hi - lo + 1n) * log10OfBigInt(hi);
+  let total = 0;
+  for (let i = lo; i <= hi; i++) total += Math.log10(Number(i));
+  return total;
+}
+
+/**
+ * Cheap pre-check from the logarithm: refuses a product (`log10Digits` is its log10) that surely
+ * has more than `MAX_INTEGER_DIGITS` digits, before any of it is built. Every partial product
+ * and every step of `combinations` stays within a few digits of the result, so this also bounds
+ * the intermediates. The exact digit count is checked on the result afterwards.
+ */
+function assertProductFits(log10Digits: number, what: string): void {
+  if (Math.floor(log10Digits - 1e-9) + 1 > MAX_INTEGER_DIGITS) {
     throw new ResourceLimitError(`${what} would exceed ${MAX_INTEGER_DIGITS} digits`);
   }
 }
@@ -144,7 +167,7 @@ function unsafeResult(what: string): NumericRangeError {
 /**
  * `n!`. The `number` form works up to `n = 18`; above that the result is
  * unsafe and it throws `NumericRangeError`. The `bigint` form is capped at
- * `n = 25_205` (results up to 100,000 digits; `ResourceLimitError`).
+ * `n = 5_450` (results up to 18,000 digits; `ResourceLimitError`).
  */
 export function factorial(n: number): number;
 export function factorial(n: bigint): bigint;
@@ -168,7 +191,7 @@ export function factorial(n: number | bigint): number | bigint {
  * Binomial coefficient C(n, k), the number of ways to choose `k` of `n`.
  * Returns `0` when `k` is outside `0..n`. Uses the multiplicative formula,
  * dividing at every step so values stay integral. The `bigint` form allows
- * at most 100_000 steps and a 100,000-digit result (`ResourceLimitError`).
+ * at most 100_000 steps and an 18,000-digit result (`ResourceLimitError`).
  */
 export function combinations(n: number, k: number): number;
 export function combinations(n: bigint, k: bigint): bigint;
@@ -184,7 +207,9 @@ export function combinations(n: number | bigint, k: number | bigint): number | b
       throw new ResourceLimitError(`combinations is limited to min(k, n - k) <= ${MAX_BIGINT_TERMS}`);
     }
     const base = n - steps;
-    assertProductFits(steps, n, `combinations(${n}, ${kb})`);
+    if (steps > 0n) {
+      assertProductFits(log10OfRange(base + 1n, n) - log10OfRange(1n, steps), `combinations(${n}, ${kb})`);
+    }
     let result = 1n;
     for (let i = 1n; i <= steps; i++) result = (result * (base + i)) / i;
     assertIntegerDigits(digitCount(result), `combinations(${n}, ${kb})`);
@@ -211,7 +236,7 @@ export function combinations(n: number | bigint, k: number | bigint): number | b
 
 /**
  * Ordered selections P(n, k) = n! / (n − k)!. Returns `0` when `k` is
- * outside `0..n`. The `bigint` form allows at most 100_000 terms and a 100,000-digit result.
+ * outside `0..n`. The `bigint` form allows at most 100_000 terms and an 18,000-digit result.
  */
 export function permutations(n: number, k: number): number;
 export function permutations(n: bigint, k: bigint): bigint;
@@ -224,7 +249,7 @@ export function permutations(n: number | bigint, k: number | bigint): number | b
     if (kb > BigInt(MAX_BIGINT_TERMS)) {
       throw new ResourceLimitError(`permutations is limited to k <= ${MAX_BIGINT_TERMS}`);
     }
-    assertProductFits(kb, n, `permutations(${n}, ${kb})`);
+    if (kb > 0n) assertProductFits(log10OfRange(n - kb + 1n, n), `permutations(${n}, ${kb})`);
     const result = rangeProduct(n - kb + 1n, n);
     assertIntegerDigits(digitCount(result), `permutations(${n}, ${kb})`);
     return result;
@@ -253,6 +278,8 @@ export function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint 
   if (modulus <= 0n) throw new InvalidArgumentError('modulus must be positive');
   if (exponent < 0n) throw new InvalidArgumentError('exponent must be non-negative');
   if (modulus === 1n) return 0n;
+  // Each step multiplies two residues below the modulus.
+  assertIntegerDigits(2 * digitCount(modulus), 'modPow');
   let result = 1n;
   let b = ((base % modulus) + modulus) % modulus;
   let e = exponent;

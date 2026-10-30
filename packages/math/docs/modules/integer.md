@@ -19,7 +19,8 @@ toBase(255, 16); // 'ff'
 fromBase('zz', 36); // 1295n   always bigint, exact past 2^53
 ```
 
-Bigint `factorial`, `permutations` and `combinations` allow results up to
-100 000 digits (`factorial` up to n = 25 205; 10 000! takes about 1.5 ms).
+Bigint `factorial`, `permutations`, `combinations` and `lcm` allow results up to
+18 000 digits (`factorial` up to n = 5 450), the bigint ceiling of Hermes V1;
+`modPow` needs a modulus under 9 000 digits.
 For a float factorial past the safe range, use `gamma(n + 1)` from
 `distributions`.

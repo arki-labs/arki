@@ -160,20 +160,20 @@ describe('effectiveRate / nominalRate', () => {
     expect(nominalRate(7, 3, { scale: 60, rounding: 'unnecessary' }).eq(3)).toBe(true);
     expect(nominalRate('0.1025', 2, { scale: 30, rounding: 'unnecessary' }).eq('0.1')).toBe(true);
   });
-  it('nominalRate obeys the 10 000-digit cap on its result only, not on its guard digits', () => {
-    // Rule: a result may have at most 10 000 digits (integer digits + scale); guard digits
-    // do not count. The root used to be built as a Decimal at scale + 11 digits, so a
-    // rate below 1 failed from scale 9989 on.
-    const LIMIT = 10_000;
+  it('nominalRate stops where its root would pass the 18,000-digit bigint ceiling, and not before', () => {
+    // Rule: the n-th root is built from an integer of n × (scale + guard digits) digits, and no bigint
+    // may pass 18,000 digits (Hermes V1 rejects about 19,690). The guard digits count; the result's
+    // own 10 000-digit cap is no longer the tighter one.
     const digits = (value: Decimal) => value.coefficient.toString().replace('-', '').length;
-    const full = nominalRate('0.21', 2, { scale: LIMIT, rounding: 'down' });
-    expect(digits(full)).toBe(LIMIT);
+    const full = nominalRate('0.21', 2, { scale: 8988, rounding: 'down' });
+    expect(digits(full)).toBe(8988);
+    expect(() => nominalRate('0.21', 2, { scale: 8989, rounding: 'down' })).toThrow(ResourceLimitError);
     // Truncating twice equals truncating once, so the long result agrees with a short one.
     expect(full.toScale(60, 'down').eq(nominalRate('0.21', 2, { scale: 60, rounding: 'down' }))).toBe(true);
-    expect(nominalRate('0.1025', 2, { scale: LIMIT, rounding: 'unnecessary' }).eq('0.1')).toBe(true);
-    // At the cap and one past it: the exact rate 3 needs 1 integer digit + scale.
-    expect(digits(nominalRate(7, 3, { scale: LIMIT - 1 }))).toBe(LIMIT);
-    expect(() => nominalRate(7, 3, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(nominalRate('0.1025', 2, { scale: 8000, rounding: 'unnecessary' }).eq('0.1')).toBe(true);
+    // At the edge and one past it: the exact rate 3 needs 1 integer digit + scale, and a cube root's radicand is 3× longer.
+    expect(digits(nominalRate(7, 3, { scale: 5988 }))).toBe(5989);
+    expect(() => nominalRate(7, 3, { scale: 5989 })).toThrow(ResourceLimitError);
   });
   it('rejects bad frequencies', () => {
     expect(() => effectiveRate(0.1, 0)).toThrow(InvalidArgumentError);

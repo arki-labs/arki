@@ -53,7 +53,7 @@ Use `@arki/money`. It builds on this package.
 - `decimal(0.1 + 0.2)` is already wrong. Build from strings.
 - `decimal(1).dividedBy(3)` throws `RoundingNecessaryError`. Pass a scale and a mode.
 - `d.toScale(1)` throws when it would drop a non-zero digit. Pass a mode.
-- A `Decimal` over 10 000 digits throws `ResourceLimitError`.
+- A `Decimal` over 10 000 digits throws `ResourceLimitError`. So does any operation whose bigint intermediate would pass 18 000 digits (Hermes V1 rejects about 19 690): two 10 000-digit operands cannot be multiplied, roots reach about 9 000 digits, `exp`, `ln` and `log` about 8 900, integer results (`factorial` up to 5 450!, `lcm`) 18 000.
 - Hermes on iOS has no `formatToParts`: locale parsing throws `UnsupportedFeatureError`. Pass `symbols`.
 - `linear-algebra` is not re-exported from the root.
 

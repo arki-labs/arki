@@ -166,10 +166,17 @@ Every `Decimal` and `Rational` — input or result — has at most 10 000 digits
 anything larger throws `ResourceLimitError`, early from an estimate and exactly
 on the result. Internal guard digits do not count, so `PI(9999)` is the largest
 π, and every value the library returns parses back from its own `toString()`.
-Bigint `factorial`, `permutations`, `combinations` and `lcm` allow results up to
-100 000 digits; `fibonacci` and `fromBase` keep 10 000. These are resource
-guards against hostile input, not precision settings — within them, arithmetic
-is exact.
+No bigint the library builds passes 18 000 digits (60 000 bits), on every
+runtime: Hermes V1 (React Native) throws `Maximum BigInt size exceeded` past
+about 19 690 digits (measured 2026-10-30 on 250829098.0.17), so the cap is the
+same everywhere. Every operation checks its intermediate from an estimate before
+building it and throws `ResourceLimitError`. In practice two 10 000-digit
+operands cannot be multiplied, roots reach about 9 000 digits (`sqrt(2, { scale:
+8998 })` is the last), `exp`, `ln`, `log` and non-integer `pow` about 8 900, and
+bigint `factorial` (up to n = 5 450), `permutations`, `combinations` and `lcm`
+allow results up to 18 000 digits; `fibonacci` and `fromBase` keep 10 000. These
+are resource guards against hostile input, not precision settings — within
+them, arithmetic is exact.
 
 Boundary example: a `Decimal` with 10 000 digits is the largest allowed. One more digit throws `ResourceLimitError`.
 

@@ -19,9 +19,10 @@ import type { RoundingMode } from './rounding.js';
 import { Decimal, isDecimal } from './decimal.js';
 import { normal, studentT } from './distributions.js';
 import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
-import { divideRounded, pow10 } from './internal/bigint.js';
+import { digitCount, divideRounded, pow10, timesPow10 } from './internal/bigint.js';
 import { assertScale } from './internal/fraction.js';
 import { applyQTranspose, backSubstitute, householderQr } from './internal/householder.js';
+import { assertIntermediateDigits } from './internal/limits.js';
 import { assertFinite } from './number.js';
 
 export type VarianceOptions = {
@@ -633,10 +634,10 @@ function decimalTotal(values: Iterable<number | Decimal>): { total: Decimal; cou
   for (const value of values) {
     if (!isDecimal(value)) throw mixedInputs();
     if (value.scale > scale) {
-      coefficient *= pow10(value.scale - scale);
+      coefficient = timesPow10(coefficient, value.scale - scale, 'The sum');
       scale = value.scale;
     }
-    coefficient += value.coefficient * pow10(scale - value.scale);
+    coefficient += timesPow10(value.coefficient, scale - value.scale, 'The sum');
     count++;
   }
   return { total: Decimal.fromParts({ coefficient, scale }), count };
@@ -690,10 +691,17 @@ function decimalStddev(values: readonly Decimal[], ddof: 0 | 1, target: ScaleOpt
   assertScale(target.scale);
   let common = 0;
   for (const value of values) if (value.scale > common) common = value.scale;
+  // Sizes the biggest bigint below: numerator × denominator inside `roundedSqrtOfRatio`.
+  let widest = 1;
+  for (const value of values) widest = Math.max(widest, digitCount(value.coefficient) + common - value.scale);
+  assertIntermediateDigits(
+    2 * widest + 4 * String(n).length + 2 * common + 2 * target.scale + 4,
+    'The standard deviation',
+  );
   let total = 0n;
   let squares = 0n;
   for (const value of values) {
-    const coefficient = value.coefficient * pow10(common - value.scale);
+    const coefficient = timesPow10(value.coefficient, common - value.scale, 'The standard deviation');
     total += coefficient;
     squares += coefficient * coefficient;
   }

@@ -238,8 +238,10 @@ describe('huge integer exponents', () => {
   });
 
   it('a moderate result of a huge exponent is still correctly rounded', () => {
-    // (1 + 10^-9998)^(10^9998) = e − e/2·10^-9998 + …, so e to 5 digits.
-    expect(pow(`1.${'0'.repeat(9997)}1`, '1e9998', { scale: 5 }).toString()).toBe('2.71828');
+    // (1 + 10^-3998)^(10^3998) = e − e/2·10^-3998 + …, so e to 5 digits.
+    expect(pow(`1.${'0'.repeat(3997)}1`, '1e3998', { scale: 5 }).toString()).toBe('2.71828');
+    // The same with a 9 998-digit base needs a logarithm of two 10 000-digit factors: past the bigint ceiling.
+    expect(() => pow(`1.${'0'.repeat(9997)}1`, '1e9998', { scale: 5 })).toThrow(ResourceLimitError);
   });
 
   it('no float overflow in the size estimate of a non-integer exponent', () => {
@@ -263,51 +265,62 @@ describe('huge integer exponents', () => {
   });
 });
 
-describe('the digit limit applies to the returned value only', () => {
+describe('the digit limit applies to the returned value; the bigint ceiling to the work', () => {
   // Rule: a result may have at most 10 000 digits in its coefficient (integer
-  // digits + scale), the same cap every Decimal obeys. Guard digits used inside
-  // do not count. One digit over throws ResourceLimitError, before the work.
+  // digits + scale), the same cap every Decimal obeys, and no intermediate bigint may
+  // pass 18 000 digits (Hermes V1 rejects about 19 690). Roots, exp, ln, log and
+  // non-integer powers build such intermediates, so each reaches fewer digits than the
+  // result cap: the edges below are exact. One scale over throws ResourceLimitError, before the work.
   const digits = (value: { coefficient: bigint }) => value.coefficient.toString().replace('-', '').length;
   const LIMIT = 10_000;
 
   it('roots', { timeout: 20_000 }, () => {
-    expect(digits(sqrt(2, { scale: LIMIT - 1 }))).toBe(LIMIT);
-    expect(() => sqrt(2, { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(digits(sqrt('0.5', { scale: LIMIT }))).toBe(LIMIT);
-    // 5000 integer digits + 10 000 fraction digits used to come back as 15 000 digits.
+    // √2 at scale s is taken from an integer of 2s + 3 digits: 8 998 is the last scale under 18 000.
+    expect(digits(sqrt(2, { scale: 8998 }))).toBe(8999);
+    expect(() => sqrt(2, { scale: 8999 })).toThrow(ResourceLimitError);
+    expect(digits(sqrt('0.5', { scale: 8999 }))).toBe(8999);
+    expect(() => sqrt('0.5', { scale: 9000 })).toThrow(ResourceLimitError);
+    // A 10 000-digit radicand is fine on its own; each fraction digit of the root adds 2 more digits to it.
     expect(() => sqrt('9'.repeat(LIMIT), { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(() => sqrt('9'.repeat(LIMIT), { scale: 5001 })).toThrow(ResourceLimitError);
-    expect(digits(sqrt('9'.repeat(LIMIT), { scale: 5000 }))).toBe(LIMIT);
-    expect(() => cbrt(2, { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(digits(cbrt('0.5', { scale: LIMIT }))).toBe(LIMIT);
-    expect(() => nthRoot(2, 5, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(() => sqrt('9'.repeat(LIMIT), { scale: 4000 })).toThrow(ResourceLimitError);
+    expect(digits(sqrt('9'.repeat(LIMIT), { scale: 3999 }))).toBe(9000);
+    // ∛2 and ⁵√2 need 3× and 5× the digits.
+    expect(digits(cbrt(2, { scale: 5998 }))).toBe(5999);
+    expect(() => cbrt(2, { scale: 5999 })).toThrow(ResourceLimitError);
+    expect(() => nthRoot(2, 5, { scale: 3599 })).toThrow(ResourceLimitError);
+    expect(digits(nthRoot(2, 5, { scale: 3598 }))).toBe(3599);
     // Just below a power of ten, the up-front estimate must not refuse a result that fits.
-    expect(digits(sqrt('99.999999999999', { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(digits(sqrt('99.999999999999', { scale: 8990 }))).toBe(8991);
   });
 
   it('exp', { timeout: 20_000 }, () => {
     expect(() => exp(1, { scale: LIMIT })).toThrow(ResourceLimitError);
     expect(() => exp(0, { scale: LIMIT })).toThrow(ResourceLimitError);
     expect(digits(exp(0, { scale: LIMIT - 1 }))).toBe(LIMIT);
-    expect(digits(exp(-1, { scale: LIMIT }))).toBe(LIMIT);
+    // e^x squares two (scale + guard)-digit values: 8 925 is the last scale for e^-1 and 8 923 for e.
+    expect(digits(exp(-1, { scale: 8925 }))).toBe(8925);
+    expect(() => exp(-1, { scale: 8926 })).toThrow(ResourceLimitError);
+    expect(digits(exp(1, { scale: 8923 }))).toBe(8924);
+    expect(() => exp(1, { scale: 8924 })).toThrow(ResourceLimitError);
   });
 
   it('ln and log', { timeout: 20_000 }, () => {
-    expect(digits(ln(2, { scale: LIMIT }))).toBe(LIMIT);
+    expect(digits(ln(2, { scale: 8974 }))).toBe(8974);
+    expect(() => ln(2, { scale: 8975 })).toThrow(ResourceLimitError);
     expect(() => ln(3, { scale: LIMIT })).toThrow(ResourceLimitError);
     expect(digits(ln(1, { scale: LIMIT }))).toBe(1);
-    expect(digits(log(2, 10, { scale: LIMIT }))).toBe(LIMIT);
+    expect(digits(log(2, 10, { scale: 8965 }))).toBe(8965);
+    expect(() => log(2, 10, { scale: 8966 })).toThrow(ResourceLimitError);
     expect(() => log(100, 10, { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(digits(log(100, 10, { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(digits(log(100, 10, { scale: 8900 }))).toBe(8901);
   });
 
   it('pow', { timeout: 20_000 }, () => {
     expect(digits(pow(3, 2, { scale: LIMIT - 1 }))).toBe(LIMIT);
     expect(() => pow(4, 2, { scale: LIMIT - 1 })).toThrow(ResourceLimitError);
     expect(() => pow(1, '0.5', { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(digits(pow(2, '0.5', { scale: LIMIT - 1 }))).toBe(LIMIT);
-    expect(() => pow(2, '0.5', { scale: LIMIT })).toThrow(ResourceLimitError);
-    expect(digits(pow('0.5', '0.5', { scale: LIMIT }))).toBe(LIMIT);
+    expect(digits(pow(2, '0.5', { scale: 8923 }))).toBe(8924);
+    expect(() => pow(2, '0.5', { scale: 8924 })).toThrow(ResourceLimitError);
   });
 
   it('π and e', { timeout: 20_000 }, () => {

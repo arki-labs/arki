@@ -1,7 +1,7 @@
 import type { RoundingMode } from '../rounding.js';
 import type { DecimalParts } from './parse.js';
 import { DivisionByZeroError, InvalidArgumentError, RoundingNecessaryError } from '../errors.js';
-import { divideRounded, gcd, pow10, stripFactor } from './bigint.js';
+import { divideRounded, gcd, stripFactor, timesPow10 } from './bigint.js';
 import { assertScaleLimit } from './limits.js';
 
 export type ScaleOptions = {
@@ -31,7 +31,11 @@ export function fractionToDecimalParts(numerator: bigint, denominator: bigint, o
 
   if (options) {
     assertScale(options.scale);
-    const scaled = divideRounded(numerator * pow10(options.scale), denominator, options.rounding ?? 'unnecessary');
+    const scaled = divideRounded(
+      timesPow10(numerator, options.scale, 'The quotient'),
+      denominator,
+      options.rounding ?? 'unnecessary',
+    );
     return { coefficient: scaled, scale: options.scale };
   }
 
@@ -50,5 +54,5 @@ export function fractionToDecimalParts(numerator: bigint, denominator: bigint, o
     );
   }
   const scale = Math.max(twos, fives);
-  return { coefficient: (p * pow10(scale)) / q, scale };
+  return { coefficient: timesPow10(p, scale, 'The quotient') / q, scale };
 }

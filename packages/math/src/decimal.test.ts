@@ -539,3 +539,28 @@ describe('immutability without freezing', () => {
     expect(Object.fromEntries(Object.entries(d))).toEqual({ coefficient: -150n, scale: 2 });
   });
 });
+
+describe('the 18 000-digit bigint ceiling (Hermes V1 rejects about 19 690 digits)', () => {
+  // Rule: a Decimal may hold 10 000 digits, but no intermediate may pass 18 000. The check
+  // comes before the bigint is built, so no runtime ever sees a raw RangeError.
+  const wide = decimal('9'.repeat(10_000));
+
+  it('refuses a product of two 10 000-digit operands before building it', () => {
+    expect(() => wide.times(wide)).toThrow(ResourceLimitError);
+    expect(() => wide.times('9'.repeat(8001))).toThrow(ResourceLimitError);
+    // 9 000 × 9 000 digits is exactly 18 000: built, then refused by the 10 000-digit result cap.
+    expect(() => decimal('9'.repeat(9000)).times('9'.repeat(9000))).toThrow(ResourceLimitError);
+  });
+
+  it('refuses a division whose scaled numerator would pass the ceiling', () => {
+    expect(() => wide.dividedBy(decimal(`0.${'0'.repeat(9999)}1`))).toThrow(ResourceLimitError);
+    expect(() => wide.dividedBy(3, { scale: 8001, rounding: 'down' })).toThrow(ResourceLimitError);
+  });
+
+  it('refuses to align scales or rescale past the ceiling', () => {
+    const tiny = decimal(`0.${'0'.repeat(9999)}1`);
+    expect(() => wide.plus(tiny)).toThrow(ResourceLimitError);
+    expect(() => wide.compareTo(tiny)).toThrow(ResourceLimitError);
+    expect(() => wide.toScale(9000)).toThrow(ResourceLimitError);
+  });
+});

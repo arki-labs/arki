@@ -26,6 +26,8 @@
 import type { AngleUnit } from './units.js';
 import { InvalidArgumentError } from './errors.js';
 import { gcd } from './integer.js';
+import { digitCount } from './internal/bigint.js';
+import { assertIntermediateDigits } from './internal/limits.js';
 import { approxEqual, assertFinite } from './number.js';
 
 // ---------------------------------------------------------------------------
@@ -658,6 +660,8 @@ export function isPythagoreanTriple(a: number | bigint, b: number | bigint, c: n
   }
   exact.sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
   const [p = 0n, q = 0n, r = 0n] = exact;
+  // The squares are built as bigints: refuse sides whose square would pass the bigint ceiling.
+  assertIntermediateDigits(2 * digitCount(r), 'isPythagoreanTriple');
   return p * p + q * q === r * r;
 }
 
