@@ -2,9 +2,37 @@
 
 The contract between an ARKI app and Foreman (the fleet control plane). An app exposes **modules** (reads and actions) behind signed requests. Foreman reads the manifest and calls them.
 
-Entries: `./module` (define modules), `./core` (`core.health`, `core.manifest`, `core.receipts`), `./env` (the `FOREMAN_*` variables), `./server` (handler and `createForemanRoute`), `./receipts` (receipt schemas and the KV store), `./pg` (the Postgres store for apps without a KV), `./client` (Foreman side), `./dot` (DOT entrypoint), `./http` (v1 `/api/fleet`).
+## Install
 
-## Turn it on
+```sh
+bun add @arki/admin
+```
+
+`@arki/http` and `drizzle-orm` are optional peers. Install `@arki/http` for `./http` and `drizzle-orm` for `./pg`.
+
+## Quick start
+
+An app with none of the `FOREMAN_*` variables answers every `/api/foreman/*` request with 404. This example shows it.
+
+```ts run
+import { createForemanRoute, memoryForemanStore } from '@arki/admin/server';
+
+const foremanRoute = createForemanRoute(() => ({
+  env: {},
+  app: { version: '1.0.0' },
+  store: memoryForemanStore(),
+  context: () => ({}),
+  health: () => ({ status: 'ok', checks: [] }),
+  modules: [],
+}));
+
+const response = await foremanRoute(new Request('http://localhost/api/foreman/manifest'));
+console.log(response.status);
+```
+
+To turn it on, set the variables below.
+
+### Turn it on
 
 Set all four variables, or none. With none set, `/api/foreman/*` answers 404 and the app boots as before. With only some set, the first request throws `ARKI_ADMIN_E014`.
 
@@ -21,11 +49,38 @@ Generate keys with `generateForemanKeyPair()`. Spread `foremanEnvShape` from `@a
 
 `FOREMAN_WRITES=on` also needs a receipt store (see [Receipts](#receipts)). Without one, every execute is refused with `ARKI_ADMIN_E017`.
 
+## When not to use this
+
+- The app does not talk to Foreman. The package has no other job.
+- You need a public API for end users. These routes accept only signed requests from Foreman.
+- You run one instance and want `FOREMAN_WRITES=on` with `memoryForemanStore`. A restart forgets the nonces. Use a KV or Postgres store.
+
+## Runtime support
+
+The handler uses the Fetch `Request` and `Response` types and Web Crypto (`globalThis.crypto.subtle`). `schemaHash` throws `ARKI_ADMIN_E006` when Web Crypto is missing. The entry `@arki/admin` carries no Node built-ins and no secrets.
+
+## Public imports
+
+| Entry point                       | What it has                                                                           | Optional peer |
+| --------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
+| `@arki/admin`                     | The fleet snapshot schemas, types and constants.                                      | none          |
+| `@arki/admin/module`              | `defineModule`, `defineRead`, `defineAction`, `defineSignal`, `moduleError`.          | none          |
+| `@arki/admin/core`                | `withCoreModules`: `core.health`, `core.manifest`, `core.receipts`.                   | none          |
+| `@arki/admin/env`                 | `foremanEnvShape`, `foremanEnvironmentFromNodeEnv`, `foremanConfigFromEnv`.           | none          |
+| `@arki/admin/server`              | `createForemanRoute`, `createForemanHandler`, `kvReceiptStore`, `memoryForemanStore`. | none          |
+| `@arki/admin/receipts`            | Receipt schemas and `kvReceiptStore`.                                                 | none          |
+| `@arki/admin/pg`                  | `foremanStoreTable`, `pgForemanStore`.                                                | `drizzle-orm` |
+| `@arki/admin/client`              | The Foreman side: `createForemanClient`, `generateForemanKeyPair`.                    | none          |
+| `@arki/admin/dot`                 | `foreman()`, an entrypoint of a Dot feature.                                          | none          |
+| `@arki/admin/http`                | `fleetRoutes`: the v1 `/api/fleet` route.                                             | `@arki/http`  |
+| `@arki/admin/panels`              | `boardOutputSchema`, `rowsOutputSchema`, `PANEL_RENDERER`.                            | none          |
+| `@arki/admin/connections/coolify` | The Coolify connection and `createCoolifyEnvWriter`.                                  | none          |
+
 ## Plain TanStack app
 
 `createForemanRoute` is the mount every app uses. It builds the handler on the first request, never at import. One store holds the nonces and the receipts, and the receipts are namespaced by the app's audience (`FOREMAN_APP_ID:environment`).
 
-```ts
+```ts skip="fragment: uses the app own env, kv and queues"
 // backend/src/features/fleet/foreman.ts
 import { createForemanRoute } from '@arki/admin/server';
 
@@ -61,7 +116,7 @@ Keep the `/api/fleet` route. Foreman still polls it until it negotiates protocol
 
 `foreman()` is an entrypoint of a feature. It takes the same options as `createForemanHandlerFromEnv`, built from the feature's `needs`.
 
-```ts
+```ts skip="fragment: needs a Dot app with a kv, a database and a journal"
 import { foreman } from '@arki/admin/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { journalReceiptStore } from '@arki/journal/foreman';
@@ -106,7 +161,7 @@ A panel names a renderer that Foreman bundles; a manifest never ships code. `@ar
 
 Use the schema itself as the read's `output`, so the app and Foreman parse the same shape.
 
-```ts
+```ts skip="fragment: z and defineRead are not imported"
 import { boardOutputSchema, PANEL_RENDERER } from '@arki/admin/panels';
 
 const today = defineRead({
@@ -129,24 +184,6 @@ const shop = defineModule({
 ```
 
 `core.health` has two reads, `core.health.status` and `core.health.checks`, in the v1 `fleetHealthSchema` shape. `core.manifest.get` returns the same manifest as `GET /api/foreman/manifest`. `core.receipts.get` is there when the app passes `receipts`. Both attachments add them for you (`withCoreModules`).
-
-## Module errors
-
-A module can refuse a request with its own coded error. Admin does not need to know what the code means.
-
-```ts
-import { moduleError } from '@arki/admin/module';
-
-throw moduleError('ARKI_JOURNAL_E002', 409, 'Job job_1 is not dead.', 'Reload the job and check its state.');
-```
-
-Actions may declare a `failures` tuple of canonical `@arki/failure` definitions and return those failures from `execute`. `runExecute` preserves the original failure and its exact inferred type. The dispatcher validates failures with the canonical serializer, records a failed receipt, and returns the failure code and HTTP status; it hides server messages and private causes. Undeclared or invalid failures become a supervised defect.
-
-`moduleError(code, status, message, remediation)` takes the module's own `code`, an HTTP `status` from 400 to 599, a `message` and a one-sentence `remediation`. A status outside 400 to 599, or an empty code, throws `ARKI_ADMIN_E014`. Server error messages stay private. A plain `Error` answers `ARKI_ADMIN_E015` and its text stays in the app's log. `isModuleError(error)` and the `ModuleError` type are exported from `@arki/admin/module`.
-
-The dispatcher answers a `ModuleError` with the module's own status and code, and the client reads them back. A failed receipt keeps both, so a lost answer settled later through `core.receipts.get` still says `ARKI_JOURNAL_E002`, not a generic code. The wire and receipt `code` is therefore a string: one of `ADMIN_ERROR_CODES`, or a module's own. `@arki/journal/foreman` (`ARKI_JOURNAL_E001` to `E005`) and `@arki/queue/foreman` (`ARKI_QUEUE_E014` to `E016`) use it.
-
-`redactSecrets` also lives in `@arki/admin/module`. A module runs error text through it before it reaches the wire.
 
 ## Receipts
 
@@ -173,7 +210,7 @@ An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) 
 
 **DOT app with a journal: `journalReceiptStore(...)`** (`@arki/journal/foreman`). Add the table and migrate:
 
-```ts
+```ts skip="@arki/journal is not a dependency of this package"
 // schema.ts
 import { foremanReceiptTables } from '@arki/journal/foreman';
 
@@ -181,3 +218,39 @@ export const { receipts: foremanReceipts } = foremanReceiptTables(); // table `f
 ```
 
 Then build the store once at boot with the app's `j`, composed `journal`, root `db`, the table and the `meta` its events record. Each claim and settle is a journal event on the `foreman_receipt` entity (`ForemanReceiptClaimed`, `ForemanReceiptSettled`), committed on its own: the claim before the action, the settle before the response.
+
+## Failure behaviour
+
+Every failure the package raises on purpose is an `AdminError` with a code from `ADMIN_ERROR_CODES` (`ARKI_ADMIN_E001` to `ARKI_ADMIN_E018`). Match on the code, never on the message. Each code has a `@fix` line in `src/errors.ts`. The full table is in the [agent guide](docs/agent-guide.md#errors).
+
+A module can refuse a request with its own coded error. Admin does not need to know what the code means.
+
+```ts skip="the example throws on purpose"
+import { moduleError } from '@arki/admin/module';
+
+throw moduleError('ARKI_JOURNAL_E002', 409, 'Job job_1 is not dead.', 'Reload the job and check its state.');
+```
+
+Actions may declare a `failures` tuple of canonical `@arki/failure` definitions and return those failures from `execute`. `runExecute` preserves the original failure and its exact inferred type. The dispatcher validates failures with the canonical serializer, records a failed receipt, and returns the failure code and HTTP status; it hides server messages and private causes. Undeclared or invalid failures become a supervised defect.
+
+`moduleError(code, status, message, remediation)` takes the module's own `code`, an HTTP `status` from 400 to 599, a `message` and a one-sentence `remediation`. A status outside 400 to 599, or an empty code, throws `ARKI_ADMIN_E014`. Server error messages stay private. A plain `Error` answers `ARKI_ADMIN_E015` and its text stays in the app's log. `isModuleError(error)` and the `ModuleError` type are exported from `@arki/admin/module`.
+
+The dispatcher answers a `ModuleError` with the module's own status and code, and the client reads them back. A failed receipt keeps both, so a lost answer settled later through `core.receipts.get` still says `ARKI_JOURNAL_E002`, not a generic code. The wire and receipt `code` is therefore a string: one of `ADMIN_ERROR_CODES`, or a module's own. `@arki/journal/foreman` (`ARKI_JOURNAL_E001` to `E005`) and `@arki/queue/foreman` (`ARKI_QUEUE_E014` to `E016`) use it.
+
+`redactSecrets` also lives in `@arki/admin/module`. A module runs error text through it before it reaches the wire.
+
+## Limits
+
+- One proposal covers 1 target by default (`DEFAULT_MAX_TARGETS`). An action can raise `maxTargets` to at most 5 (`MAX_TARGETS_LIMIT`).
+- A receipt lives 30 days by default. A `ttlSeconds` below 300 (Foreman's receipt window) throws `ARKI_ADMIN_E014`.
+- `moduleError` takes an HTTP status from 400 to 599. Any other status throws `ARKI_ADMIN_E014`.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): tasks, step by step.
+- [llms.txt](llms.txt): the map for agents.
+- [CHANGELOG](CHANGELOG.md).
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.

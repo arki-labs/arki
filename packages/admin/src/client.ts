@@ -88,6 +88,9 @@ export type ForemanTarget = {
   allowProtocol1?: boolean;
 };
 
+/** The `fetch` Foreman calls. Narrower than `typeof fetch`, which also has runtime extras such as Bun's `preconnect`. */
+export type FetchLike = (url: URL, init: RequestInit) => Promise<Response>;
+
 export type CreateForemanClientOptions = {
   target: ForemanTarget;
   /** Foreman's read private key for this environment (PKCS#8 base64url). */
@@ -96,8 +99,8 @@ export type CreateForemanClientOptions = {
   executeKey?: string;
   /** Time source for `iat`. Defaults to the system clock. */
   clock?: Clock;
-  /** Override the global fetch (tests). */
-  fetch?: typeof fetch;
+  /** Override the global fetch (tests, or a wrapper that guards requests). */
+  fetch?: FetchLike;
   /** Per-request timeout; defaults to 5000 ms. */
   timeoutMs?: number;
 };

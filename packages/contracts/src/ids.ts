@@ -39,7 +39,19 @@ export const userIdSchema = z.custom<UserId>(value => typeof value === 'string' 
  * Browser-safe on purpose: no Drizzle here. `@arki/db/id`'s `idColumns(storyId)`
  * turns the same declaration into table columns on the server.
  */
-export type IdDeclaration<P extends string> = ReturnType<typeof prefixedId<P>>;
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface IdDeclaration<P extends string> extends ReturnType<typeof prefixedId<P>> {}
+
+/**
+ * A prefixed id with a domain brand: `defineId('sty_', { kind: 'story' })`.
+ *
+ * Both declarations are interfaces over the implementation's return type: the shape stays written
+ * once, and a dependent's `.d.ts` prints this name. A `ReturnType` alias prints the anonymous body,
+ * with its Zod schema type, in every dependent (`TYPES_E001`). `ids.emitted.test.ts` guards that.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface BrandedIdDeclaration<P extends string, Kind extends string>
+  extends ReturnType<typeof brandedId<P, Kind>> {}
 
 /** Canonical failures returned by ID generation, including unexpected provider faults. */
 export const ID_GENERATION_FAILURES = [RandomSourceUnavailable, UnexpectedDefect] as const;
@@ -88,7 +100,7 @@ type IdFormat = 'uuid' | z.output<typeof customIdFormatSchema>;
  * storyId.create();                             // StoryId | IdGenerationFailure
  * ```
  */
-export function defineId<const P extends string>(prefix: P): ReturnType<typeof prefixedId<P>>;
+export function defineId<const P extends string>(prefix: P): IdDeclaration<P>;
 /**
  * Give same-format IDs distinct domain types without changing their stored values.
  * `format: 'uuid'` generates UUID v4; `{ alphabet, length }` uniformly samples
@@ -102,7 +114,7 @@ export function defineId<const P extends string, const Kind extends string>(
     readonly kind: Kind & (Record<never, never> extends Record<Kind, never> ? never : SingleKind<Kind>);
     readonly format?: IdFormat;
   },
-): ReturnType<typeof brandedId<P, Kind>>;
+): BrandedIdDeclaration<P, Kind>;
 export function defineId(prefix: string, options?: unknown) {
   if (!is(prefix, idPrefixSchema)) {
     throw new ContractsError(

@@ -7,7 +7,7 @@
  * {@link ResponseCache}. This is a response cache for HTTP replay. It is not the journal's
  * command receipt, which commits with the business write.
  */
-import { z } from 'zod';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { Failure } from '@arki/failure';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
@@ -16,6 +16,7 @@ import type { ContractLike, CoversFailures } from './contract.js';
 import type { HttpMiddleware } from './engine.js';
 import type { IdempotencyOwnerId } from './ids.js';
 import { idempotencyOwnerId } from './ids.js';
+import { storedResponseSchema } from './stored-response.js';
 import { observeHttp } from './telemetry.js';
 import { fromBase64, readCapped, toBase64, toHex } from './bytes.js';
 import { HTTP_ERROR_CODES, HttpConfigError, orThrowHttp } from './error.js';
@@ -57,23 +58,11 @@ export {
 export { idempotencyOwnerId } from './ids.js';
 export type { IdempotencyOwnerId } from './ids.js';
 
-/** Checks a {@link StoredResponse} read back from a cache: `parse(storedResponse, value)` from `@arki/schema`. */
-export const storedResponse = z.object({
-  status: z.int().min(200).max(599),
-  headers: z.record(z.string(), z.string()),
-  body: z.string(),
-}).refine(value => {
-  try {
-    new Headers(value.headers);
-    fromBase64(value.body);
-    return true;
-  } catch {
-    return false;
-  }
-}, 'Stored response headers and body must be valid HTTP/base64 values.');
+/** A response as the cache keeps it. An exact type test locks `storedResponseSchema` to this type. */
+export type StoredResponse = { status: number; headers: Record<string, string>; body: string };
 
-/** A response as the cache keeps it, inferred from its canonical persisted schema. */
-export type StoredResponse = z.output<typeof storedResponse>;
+/** Checks a {@link StoredResponse} read back from a cache: `parse(storedResponse, value)` from `@arki/schema`. */
+export const storedResponse: StandardSchemaV1<StoredResponse> = storedResponseSchema;
 
 /** What `begin` found for a key. */
 export type BeginResult =

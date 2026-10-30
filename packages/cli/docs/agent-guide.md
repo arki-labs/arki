@@ -85,7 +85,7 @@ Read [llms.txt](../llms.txt) first for the index. When this guide and `llms.txt`
 2. A step `(ctx) => object | Failure` adds the keys it returns to the context of what follows. A returned failure is the command's failure: same exit code and error output as a failure returned from `run`, and `run` never starts.
 3. An around `(ctx, next) => Promise<T>` wraps everything after it and `run`, and returns what `next()` returns.
 4. Runtime tells them apart by `fn.length >= 2`. Declare `next` as a plain second parameter: no default value, no rest parameter. Otherwise an around runs as a step.
-5. Model shared by all transports: [Steps and arounds](../../dot/docs/middleware.md).
+5. Model shared by all transports: Steps and arounds (`docs/middleware.md` in `@arki/dot`).
 
 ### Offer a dry run
 

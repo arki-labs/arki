@@ -1,9 +1,17 @@
+import type { z } from 'zod';
 import { expectTypeOf } from 'vitest';
 
 import type { IdGenerationFailure } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
-import type { TRANSACTION_FAILURES, TransactionalDb, TransactionFailure } from './transaction.js';
+import type { transactionSettings } from './transaction-settings.js';
+import type {
+  ResolvedTransactionSettings,
+  TRANSACTION_FAILURES,
+  TransactionalDb,
+  TransactionFailure,
+  TransactionSettings,
+} from './transaction.js';
 import { createUnitOfWork } from './composition.js';
 import { runTransaction, runTransactionOnce } from './transaction.js';
 
@@ -20,3 +28,6 @@ expectTypeOf(once).toEqualTypeOf<Promise<Expected>>();
 expectTypeOf(scoped).toEqualTypeOf<Promise<Expected>>();
 expectTypeOf<TransactionFailure>().toEqualTypeOf<ReturnType<(typeof TRANSACTION_FAILURES)[number]>>();
 expectTypeOf<Extract<TransactionFailure, IdGenerationFailure>>().toEqualTypeOf<IdGenerationFailure>();
+// The plain settings types are the source: the parser must read and write exactly them.
+expectTypeOf<z.input<typeof transactionSettings>>().toEqualTypeOf<TransactionSettings>();
+expectTypeOf<z.output<typeof transactionSettings>>().toEqualTypeOf<ResolvedTransactionSettings>();

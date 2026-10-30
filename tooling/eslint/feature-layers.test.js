@@ -41,10 +41,27 @@ test('a contract declares canonical failures and their RPC map without importing
 
 test('contracts may annotate browser-safe actions, canonical failures and MCP policy without importing executors', () => {
   const contractFile = 'src/features/demo/entrypoints/rpc.ts';
-  for (const source of ['@arki/dot/action', '@arki/auth', '@arki/db/errors', '@arki/mcp/contract']) {
+  for (const source of [
+    '@arki/dot/action',
+    '@arki/auth',
+    '@arki/db/errors',
+    '@arki/lock',
+    '@arki/mcp/contract',
+    '@arki/db/contract',
+    '@arki/queue/contract',
+  ]) {
     assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), []);
   }
-  for (const source of ['@arki/dot/execute', '@arki/auth/http', '@arki/db/orpc', '@arki/db/transaction', '@arki/mcp']) {
+  for (const source of [
+    '@arki/dot/execute',
+    '@arki/auth/http',
+    '@arki/db/orpc',
+    '@arki/db/transaction',
+    '@arki/mcp',
+    '@arki/lock/pg',
+    '@arki/lock/redis',
+    '@arki/queue',
+  ]) {
     assert.deepEqual(ruleIds(contractFile, `import { x } from '${source}';`), [RESTRICT]);
   }
 });

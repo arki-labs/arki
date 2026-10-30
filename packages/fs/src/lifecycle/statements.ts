@@ -5,7 +5,7 @@
  * (`./storage.ts`, `./cleanup.ts`) is shared. Every deadline is computed from
  * the database clock.
  */
-import type { FileId } from '../files/schemas.js';
+import type { FileId } from '../files/types.js';
 import type { FileRow, FilesTable } from './table.js';
 
 /** What a dialect's statements need from the parsed `fileStorage` options. */

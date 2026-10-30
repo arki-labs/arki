@@ -81,6 +81,6 @@ it('round-trips version 1 canonical outcomes without leaking private causes', as
     const revived = revive(envelope, LOCK_FAILURES);
     expect(revived).toMatchObject({ code: outcome.code, data: outcome.data });
     // `cause` is a prototype getter on every failure, so check its value.
-    expect(revived.cause).toBeUndefined();
+    expect(revived?.cause).toBeUndefined();
   }
 });

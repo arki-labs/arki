@@ -88,6 +88,9 @@
   },
   "files": [
     "dist/**",
+    "docs/**",
+    "llms.txt",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
     "package.json"
@@ -99,6 +102,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -115,6 +119,7 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/http": "workspace:*",
     "@arki/kv": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",

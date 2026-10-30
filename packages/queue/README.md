@@ -55,6 +55,25 @@ Welcome to Analytical Pizza, usr_ada
 
 To run the same job on Redis, build the queue with `q.createQueue({ connection: 'redis://localhost:6379', createContext })` instead. The job does not change.
 
+## When not to use this
+
+- You need a job to start only if your database write commits, and you do not want Redis. Use the outbox lane (`@arki/queue/outbox`). It is part of this package.
+- You need a general workflow engine. A flow here is a BullMQ tree: a step has at most one dependent. There are no loops and no fan-out.
+- You need exactly-once effects. Every lane delivers at least once. Make the effect safe to repeat.
+- You run on a platform with no long-lived process, such as a pure edge function. A worker is a process that stays up.
+
+## Runtime support
+
+`@arki/queue` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
+
+| Lane                        | Needs                                                                |
+| --------------------------- | -------------------------------------------------------------------- |
+| `q.createQueue` (BullMQ)    | A Redis server that BullMQ supports, and Node 22.12 or newer, or Bun |
+| `@arki/queue/runtime-local` | Node 22.12 or newer, or Bun. PGlite holds the data                   |
+| `@arki/queue/outbox`        | The `@arki/journal` tables in Postgres or PGlite                     |
+
+Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
+
 ## Steps and arounds
 
 `.use(step(fn))` and `.use(around(fn))` run plain functions around a job's handler. A step reads the context and returns keys to add, or a failure to refuse the job. An around wraps everything after it.
@@ -91,25 +110,6 @@ export const charge = q.job
 - **The old standard middleware is gone:** `timingMiddleware`, `loggingMiddleware`, `errorHandlingMiddleware`, `validationMiddleware`. Timing and logging are `logHandlers()` from `@arki/dot`. Error reports are `reportErrors()` from `@arki/dot`. Validation is `.input(schema)`. A time limit is `options.timeoutMs`. A per-job logger is a `step`.
 
 See [Steps and arounds](../dot/docs/middleware.md) for the full model, shared by every transport.
-
-## When not to use this
-
-- You need a job to start only if your database write commits, and you do not want Redis. Use the outbox lane (`@arki/queue/outbox`). It is part of this package.
-- You need a general workflow engine. A flow here is a BullMQ tree: a step has at most one dependent. There are no loops and no fan-out.
-- You need exactly-once effects. Every lane delivers at least once. Make the effect safe to repeat.
-- You run on a platform with no long-lived process, such as a pure edge function. A worker is a process that stays up.
-
-## Runtime support
-
-`@arki/queue` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
-
-| Lane                        | Needs                                                                |
-| --------------------------- | -------------------------------------------------------------------- |
-| `q.createQueue` (BullMQ)    | A Redis server that BullMQ supports, and Node 22.12 or newer, or Bun |
-| `@arki/queue/runtime-local` | Node 22.12 or newer, or Bun. PGlite holds the data                   |
-| `@arki/queue/outbox`        | The `@arki/journal` tables in Postgres or PGlite                     |
-
-Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
 
 ## Choose a lane
 

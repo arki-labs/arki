@@ -116,7 +116,7 @@ function appOptions(env: ForemanEnv, clock: MockClock): ForemanAppOptions<{ tena
     env,
     environment: ENVIRONMENT,
     app: { version: '1.2.3', commit: 'abc1234' },
-    packages: { '@arki/queue': '0.1.0' },
+    packages: { '@arki/queue': '0.2.0' },
     nonces: memoryNonces(clock),
     receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:prod' }),
     clock,

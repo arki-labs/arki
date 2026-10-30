@@ -12,6 +12,7 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 
+import type { FetchLike } from './client';
 import type { FleetSnapshot } from './contract';
 import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
 
@@ -100,8 +101,8 @@ export type FleetFetchResult =
   { id: string; ok: true; snapshot: FleetSnapshot } | { id: string; ok: false; error: string };
 
 export type FetchFleetSnapshotOptions = {
-  /** Override the global fetch (tests). */
-  fetch?: typeof fetch;
+  /** Override the global fetch (tests, or a wrapper that guards requests). */
+  fetch?: FetchLike;
   /** Per-request timeout; defaults to 5000ms. */
   timeoutMs?: number;
 };

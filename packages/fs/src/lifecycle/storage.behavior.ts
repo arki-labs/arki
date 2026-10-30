@@ -14,13 +14,14 @@ import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { InvalidInput, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
 
-import type { FileId } from '../files/schemas.js';
+import type { FileId } from '../files/types.js';
 import type { SignedUploadAdapter } from '../storage/types.js';
 import type { FileStorage, FileStorageOptions } from './storage.js';
 import type { FileRow, FilesTable } from './table.js';
 import { FILE_ERROR_CODES, isFileStorageError } from '../files/errors.js';
 import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
-import { fileId, fileRecord } from '../files/schemas.js';
+import { fileRecord } from '../files/schemas.js';
+import { fileId } from '../files/types.js';
 import { StorageUnavailable, StorageWriteUncertain } from '../storage/failures.js';
 import { memoryUploadAdapter } from '../testing.js';
 import { toFileRecord } from './record.js';

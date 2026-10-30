@@ -11,7 +11,7 @@ import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
 import { STORAGE_READ_FAILURES, STORAGE_WRITE_FAILURES } from '../storage/failures.js';
-import { fileId } from './schemas.js';
+import { fileId } from './types.js';
 
 /**
  * The file is missing, belongs to another bucket binding, or the policy denied

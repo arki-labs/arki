@@ -27,6 +27,7 @@ import { TransactionCancelled, TransactionConflict, TransactionDefect } from './
 import { assertSafeDriver, classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
 import { findDatabaseError } from './sql-state.js';
 import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
+import { transactionSettings } from './transaction-settings.js';
 
 export type { TransactionalDb } from './composition.js';
 
@@ -50,18 +51,16 @@ export type { TransactionFailure } from './errors.js';
 /** The wait before retry n is about 10 ms × 2^(n-1), varied ±25%, never above 250 ms. */
 const RETRY_BACKOFF = backoff.exponential({ base: 10, max: 250, jitter: 0.25 });
 
-const transactionSettings = z.strictObject({
+/** What a caller may set. An exact type test locks `transactionSettings` to this type. */
+export type TransactionSettings = {
   /** The only level in v1. Serializable is what makes "run it again" safe. */
-  isolation: z.literal('serializable').default('serializable'),
+  isolation?: 'serializable' | undefined;
   /** Extra attempts after the first: `3` means at most 4 runs. */
-  retries: z.int().min(0).max(10).default(3),
-});
-
-/** Declared once, as a schema. Everything else infers from it. */
-export type TransactionSettings = z.input<typeof transactionSettings>;
+  retries?: number | undefined;
+};
 
 /** What a transaction runs with once the defaults are filled in. */
-export type ResolvedTransactionSettings = z.output<typeof transactionSettings>;
+export type ResolvedTransactionSettings = { isolation: 'serializable'; retries: number };
 
 export type TransactionOptions = TransactionSettings & {
   /** Whose timer the wait between attempts uses. Default: the system clock. Pass a `MockClock` in tests. */

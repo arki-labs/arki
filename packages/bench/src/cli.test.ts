@@ -261,7 +261,7 @@ const saved = (overrides: Partial<BenchResult>): BenchResult => ({
   environment: {
     runtime: { name: 'node', version: '22.13.1' },
     flags: [],
-    harness: { version: '0.1.0', mitata: '1.0.34' },
+    harness: { version: '0.9.0', mitata: '1.0.34' },
     date: '2026-10-13T00:00:00.000Z',
   },
   packages: {},

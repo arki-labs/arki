@@ -1,16 +1,14 @@
 /** Durable rows retain cleanup duty until both object and row deletion are confirmed. */
-import { z } from 'zod';
-
 import { isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { SignedUploadAdapter } from '../storage/types.js';
 import type { FileStatements } from './statements.js';
 import type { FilesTable } from './table.js';
+import { cleanupOptions } from '../files/schemas.js';
 import { executeFs, storageWriteFailure } from '../storage/operation.js';
 import { writeStatement } from './database.js';
 
-export const cleanupOptions = z.strictObject({ batch: z.number().int().min(1).max(1000).default(100) });
 export type CleanupOptions = { batch?: number };
 export type CleanupResult = { removed: number; failed: number; more: boolean };
 

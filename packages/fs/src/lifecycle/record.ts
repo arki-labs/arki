@@ -6,7 +6,7 @@ import type { FileRecord } from '../files/schemas.js';
 import type { FileRow, FilesTable } from './table.js';
 
 /** A row as clients see it: no bucket, key, owner or etag. */
-export function toFileRecord(row: FileRow<FilesTable>): FileRecord {
+export function toFileRecord(row: FileRow<FilesTable>) {
   return {
     id: row.id,
     mime: row.mime,
@@ -14,5 +14,5 @@ export function toFileRecord(row: FileRow<FilesTable>): FileRecord {
     sha256: row.sha256,
     status: row.status,
     createdAt: row.createdAt.toString(),
-  };
+  } satisfies FileRecord;
 }

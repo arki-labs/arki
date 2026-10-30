@@ -1,7 +1,9 @@
+import type { z } from 'zod';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 
+import type { toFileRecord } from '../lifecycle/record.js';
 import type { FileId, FileRecord, UploadRequest, UploadTicket } from './index.js';
 import { StorageCancelled, StorageRejected, StorageWriteUncertain } from '../storage/failures.js';
 import {
@@ -293,5 +295,16 @@ describe('uploadFile', () => {
 
   it('parses as a ticket the server would send', () => {
     expect(uploadTicket.safeParse(fakeClient(record).ticket).success).toBe(true);
+  });
+});
+
+describe('types that server declarations print without Zod', () => {
+  it('lock the plain upload request to its schema in both directions', () => {
+    expectTypeOf<z.input<typeof uploadRequest>>().toEqualTypeOf<UploadRequest>();
+    expectTypeOf<z.output<typeof uploadRequest>>().toEqualTypeOf<UploadRequest>();
+  });
+
+  it('keep the row mapper exactly on the client record', () => {
+    expectTypeOf<ReturnType<typeof toFileRecord>>().toEqualTypeOf<FileRecord>();
   });
 });

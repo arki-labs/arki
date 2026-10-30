@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { FailureOf, UnexpectedDefect } from '@arki/failure';
 
 import type { RandomSourceUnavailable } from './errors.js';
-import type { ID_GENERATION_FAILURES, IdDeclaration, IdGenerationFailure, IdOf } from './ids.js';
+import type { BrandedIdDeclaration, ID_GENERATION_FAILURES, IdDeclaration, IdGenerationFailure, IdOf } from './ids.js';
 import { defineId } from './ids.js';
 
 it('ID generation exposes exact canonical failures while schema and IdOf remain success-only', () => {
@@ -17,6 +17,15 @@ it('ID generation exposes exact canonical failures while schema and IdOf remain 
   expectTypeOf<IdGenerationFailure>().toEqualTypeOf<FailureOf<(typeof ID_GENERATION_FAILURES)[number]>>();
   expectTypeOf<FailureOf<typeof storyId.create>>().toEqualTypeOf<
     FailureOf<typeof RandomSourceUnavailable> | FailureOf<typeof UnexpectedDefect>
+  >();
+});
+
+it('the named declarations keep the exact schema type that callers and id columns infer from', () => {
+  const _refundId = defineId('id_', { kind: 'billing.refund' });
+  expectTypeOf<BrandedIdDeclaration<'id_', 'billing.refund'>>().toEqualTypeOf<typeof _refundId>();
+  expectTypeOf<IdDeclaration<'sty_'>['schema']>().toEqualTypeOf<z.ZodTemplateLiteral<`sty_${string}`>>();
+  expectTypeOf<BrandedIdDeclaration<'id_', 'billing.refund'>['schema']>().toEqualTypeOf<
+    z.core.$ZodBranded<z.ZodTemplateLiteral<`id_${string}`>, 'billing.refund', 'out'>
   >();
 });
 

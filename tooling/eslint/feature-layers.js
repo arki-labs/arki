@@ -103,14 +103,16 @@ const USECASES_INWARD = layer(
  * marker (policy is declared on the contract), canonical failure definitions,
  * `errorMap` from
  * `@arki/failure/orpc` (browser-safe: it imports only `@orpc/client`), canonical
- * database failures from `@arki/db/errors`, its model, and (in the app
- * contract) the feature contracts.
+ * database failures from `@arki/db/errors`, canonical lock failures from
+ * `@arki/lock` (its root is browser-safe), any library's `./contract` entry
+ * (`arki-library-check` bundles each one for the browser, A-41), its model,
+ * and (in the app contract) the feature contracts.
  */
 const CONTRACT_ONLY = {
   regex:
-    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc|@arki/failure|@arki/failure/orpc|@arki/auth|@arki/db/errors|@arki/dot/action|@arki/mcp/contract)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
+    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts|@arki/offline/orpc|@arki/failure|@arki/failure/orpc|@arki/auth|@arki/db/errors|@arki/lock|@arki/dot/action|@arki/[^/]+/contract)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./features/[^/]+/entrypoints/rpc$)(?!\\.\\./\\.\\./[^/]+/entrypoints/rpc$).*',
   message:
-    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), @arki/failure (canonical failures), @arki/failure/orpc (errorMap), @arki/auth (canonical auth failures), @arki/db/errors (canonical database failures), @arki/dot/action, @arki/mcp/contract, ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
+    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts, @arki/offline/orpc (the offlineSafe marker), @arki/failure (canonical failures), @arki/failure/orpc (errorMap), @arki/auth (canonical auth failures), @arki/db/errors (canonical database failures), @arki/lock (canonical lock failures), @arki/dot/action, any @arki/<library>/contract entry, ../model/* and its child contracts (../features/<child>/entrypoints/rpc), the contract of a sibling feature whose procedures it mounts (../../<feature>/entrypoints/rpc; the app contract: ./features/<name>/entrypoints/rpc).',
 };
 
 /**

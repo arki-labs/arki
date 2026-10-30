@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { foremanEnvironmentFromNodeEnv } from './env';
 import { audienceSchema, foremanEnvironmentSchema } from './protocol';
 
+/** A process env with no NODE_ENV in it. */
+const emptyProcessEnv: NodeJS.ProcessEnv = {};
+
 describe('T(admin-env) one environment vocabulary: prod, staging, dev', () => {
   it('maps NODE_ENV production to prod and everything else to dev', () => {
     expect(foremanEnvironmentFromNodeEnv('production')).toBe('prod');
     expect(foremanEnvironmentFromNodeEnv('development')).toBe('dev');
     expect(foremanEnvironmentFromNodeEnv('test')).toBe('dev');
-    expect(foremanEnvironmentFromNodeEnv(undefined)).toBe('dev');
+    expect(foremanEnvironmentFromNodeEnv(emptyProcessEnv.NODE_ENV)).toBe('dev');
   });
 
   it('lets FOREMAN_ENVIRONMENT override, so a staging build of NODE_ENV=production is staging', () => {

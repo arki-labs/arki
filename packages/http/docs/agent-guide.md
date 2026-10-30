@@ -113,7 +113,7 @@ dot doctor --json | jq '.data'
 `dot explain` reads the manifest and starts nothing. `dot doctor` boots the app and disposes it.
 
 For shared action execution and the validation owner, see Dot’s
-[action migration guide](../../dot/docs/upgrade-actions.md). Native adapters retain
+action migration guide (`docs/upgrade-actions.md` in `@arki/dot`). Native adapters retain
 their own authorization, response headers and declared failures.
 
 Client policies admit the full ResilienceFailure union. CircuitOpen and BulkheadRejected remain canonical client outcomes; Timeout maps to RequestTimeout. Raw exhausted retryable responses and network exceptions retain their existing HTTP mapping through explicit throw fallback. Returned clock defects retain identity.

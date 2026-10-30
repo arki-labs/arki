@@ -33,13 +33,15 @@ const ZOD_LAYER_PACKAGES = new Set(['@arki/contracts']);
 /**
  * Single entries that are a Zod layer by design, keyed by package name.
  * - `@arki/db` `./id`, `./id-factory`: `defineId` columns carry the workspace's id schemas (zod, like contracts).
+ * - `@arki/db` `./pg`, `./sqlite`, `./columns`: JSON and id columns take a zod schema, because `createInsertSchema`
+ *   reads it from the column at runtime (founder, 2026-10-30; A-44).
  * - `@arki/env` `./contracts`: the zod parsing helpers (`json`, `csvArray`, ...) for `defineEnv`.
  * - `@arki/text` `./validation`: the zod input schemas of the text procedures.
  * - `@arki/content-build` `./presets`: `@content-collections` requires zod/v4 schemas in its collections, and the
  *   preset document types (`Post`, ...) are inferred from them.
  */
 const ZOD_LAYER_ENTRIES: Readonly<Record<string, ReadonlySet<string>>> = {
-  '@arki/db': new Set(['./id', './id-factory']),
+  '@arki/db': new Set(['./id', './id-factory', './pg', './sqlite', './columns']),
   '@arki/env': new Set(['./contracts']),
   '@arki/content-build': new Set(['./presets']),
 };

@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import { expectTypeOf, it } from 'vitest';
 
 import type { Failure, FailureOf } from '@arki/failure';
@@ -15,12 +16,15 @@ import type {
   storedResponse,
   StoredResponse,
 } from '../idempotency.js';
+import type { storedResponseSchema } from '../stored-response.js';
 import { createClient } from '../client.js';
 import { route } from '../contract.js';
 import { IDEMPOTENCY_FAILURES } from '../idempotency.js';
 
 it('keeps the shared replay schema exactly equal to the stored response type', () => {
   expectTypeOf<SchemaOutput<typeof storedResponse>>().toEqualTypeOf<StoredResponse>();
+  expectTypeOf<z.output<typeof storedResponseSchema>>().toEqualTypeOf<StoredResponse>();
+  expectTypeOf<z.input<typeof storedResponseSchema>>().toEqualTypeOf<StoredResponse>();
 });
 
 it('infers exact operation failures from their source tuples without widening to a generic failure', () => {

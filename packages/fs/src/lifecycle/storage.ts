@@ -16,14 +16,15 @@ import { z } from 'zod';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { ensure, is, parse, recordSchema } from '@arki/schema';
 
-import type { FileId, UploadRequest } from '../files/schemas.js';
+import type { FileId, UploadRequest } from '../files/types.js';
 import type { SignedUploadAdapter, StorageAdapter } from '../storage/types.js';
 import type { CleanupOptions } from './cleanup.js';
 import type { FileStatements, StatementConfig } from './statements.js';
 import type { FileRow, FilesTable, OwnerOf } from './table.js';
 import { FILE_ERROR_CODES } from '../files/errors.js';
 import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
-import { fileId, uploadRequest, uploadTicket } from '../files/schemas.js';
+import { uploadRequest, uploadTicket } from '../files/schemas.js';
+import { fileId } from '../files/types.js';
 import { executeFs, storageReadFailure, storageWriteFailure } from '../storage/operation.js';
 import { cleanupOrphans } from './cleanup.js';
 import { fail, filesLog } from './context.js';

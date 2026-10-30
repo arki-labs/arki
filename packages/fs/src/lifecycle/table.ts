@@ -8,7 +8,8 @@ import { sql } from 'drizzle-orm';
 import type { ColumnKit, Dialect } from '@arki/db/columns';
 import type { IdColumnSource } from '@arki/db/id';
 
-import { FILE_STATUSES, fileId } from '../files/schemas.js';
+import { FILE_STATUSES } from '../files/schemas.js';
+import { fileId } from '../files/types.js';
 
 export type FilesTableOptions<TOwner extends string> = {
   /** The owner id kind, e.g. the app's `defineId('usr_')`. Its type becomes `ownerId`'s type. */

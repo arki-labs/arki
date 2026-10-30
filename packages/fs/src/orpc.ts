@@ -30,7 +30,8 @@ import {
   FILE_URL_FAILURES,
   REMOVE_FILE_FAILURES,
 } from './files/failures.js';
-import { fileId, fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
+import { fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
+import { fileId } from './files/types.js';
 import { toFileRecord } from './lifecycle/record.js';
 import { StorageWriteUncertain } from './storage/failures.js';
 

@@ -58,11 +58,9 @@ Wrong wiring is a compile error at `.infra()`, `.features()` or `.entrypoints()`
 - Do not cast an app to read its manifest. Call `.configure().manifest`.
 - `@arki/dot` never imports its adapters (`@arki/env/dot`, `@arki/db/dot`, `@arki/kv/dot`, `@arki/journal/dot`).
 
-## Words
+## Optional
 - domain service: logic with dependencies that two or more usecases share, or that a child feature needs. One file in `domain-services/`, registered with `.domainServices({ name: factory })`, built once per boot. A child names it with `domainService(fn)`.
 - `DomainDeps`: what a domain service may ask for (needs and infra). `Deps` is what a usecase may ask for: the same plus the domain services.
-
-## Optional
 - [Lifecycle](docs/lifecycle.md): state machine, failure order, every error code.
 - [Diagnostics](docs/diagnostics.md): manifest and diagnostics contracts.
 - [Observability](docs/observability.md): OpenTelemetry, observers, `app.timeline()`.

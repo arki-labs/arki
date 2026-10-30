@@ -21,9 +21,7 @@ import { LockError } from '../errors.js';
 export const DEFAULT_LEASE_TABLE = 'arki_lock';
 
 /** `name` or `schema.name`; plain identifiers only, so the name is safe to quote. */
-export const tableNameSchema = z
-  .string()
-  .regex(/^[A-Z_]\w{0,62}(\.[A-Z_]\w{0,62})?$/i, 'must be "name" or "schema.name"');
+const tableNameSchema = z.string().regex(/^[A-Z_]\w{0,62}(\.[A-Z_]\w{0,62})?$/i, 'must be "name" or "schema.name"');
 
 /** The table name as a quoted SQL identifier. Throws `LockError{code:'config'}` for anything else. */
 export function tableIdentifier(table: string): SQL {

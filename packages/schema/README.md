@@ -47,6 +47,52 @@ export function fieldErrors(input: unknown): Record<string, string> {
 }
 ```
 
+## When not to use this
+
+- You want a validator. This package runs validators; Zod, Valibot or ArkType define them.
+- You want a throwing parse for expected bad input. `parse` returns failures. Only `assert` and `ensure` throw, and only for bugs.
+- You need a JSON Schema target other than draft-2020-12. Other targets throw `ARKI_SCHEMA_E003`.
+
+## Runtime support
+
+No Node or Bun built-ins are used. The table records the previous smoke run; rerun `test:runtimes` after building to verify the current tree.
+
+<!-- runtimes:start -->
+
+| Runtime | Result  | Version tested        | Date (UTC) |
+| ------- | ------- | --------------------- | ---------- |
+| node    | pass    | v26.11.1              | 2026-10-17 |
+| bun     | pass    | 1.4.2                 | 2026-10-17 |
+| deno    | pass    | 2.9.7                 | 2026-10-17 |
+| browser | pass    | Chromium 156.0.8078.4 | 2026-10-17 |
+| hermes  | not run | -                     | 2026-10-17 |
+
+<!-- runtimes:end -->
+
+## Public imports
+
+| Entry point    | What it has                                                                      |
+| -------------- | -------------------------------------------------------------------------------- |
+| `@arki/schema` | Everything below. It is the only entry point. See the API table for each export. |
+
+## API
+
+| Export                                                       | Purpose                                  |
+| ------------------------------------------------------------ | ---------------------------------------- |
+| `StandardSchemaV1`, `StandardJSONSchemaV1`                   | Canonical spec types                     |
+| `SchemaInput<S>`, `SchemaOutput<S>`                          | Infer input and output                   |
+| `SchemaWithJson<I, O>`                                       | Validation and JSON Schema in one schema |
+| `parse`, `parseAsync`                                        | Output or exact canonical failures       |
+| `is`, `assert`, `ensure`, `AssertOptions`                    | Throwing channel for bugs                |
+| `AssertError`, `AssertErrorCode`                             | Coded error with `issues`; no raw value  |
+| `recordSchema`, `plainObjectSchema`                          | Object-shape checks as schemas           |
+| `pathOf(issue)`                                              | Path as plain keys                       |
+| `formatIssues(issues)`                                       | All issue messages with paths            |
+| `isStandardSchema(value)`                                    | Recognize object and callable schemas    |
+| `hasJsonSchema(schema)`                                      | Narrow to a schema with converters       |
+| `withJsonSchema`                                             | Add draft-2020-12 converters             |
+| `SchemaRunError`, `SCHEMA_ERROR_CODES`, `SchemaRunErrorCode` | Unsupported JSON Schema target error     |
+
 ## Async validation
 
 `parseAsync` resolves to output or `InvalidInput` / `ValidatorDefect`. `parse` additionally returns `AsyncSchema` when a validator requires awaiting. Rejected promises received by sync parsing are observed.
@@ -64,7 +110,7 @@ if (isFailure(handle)) throw new Error(handle.message);
 if (handle !== 'ada') throw new Error('unexpected handle');
 ```
 
-## Failure behavior
+## Failure behaviour
 
 | Result                    | Meaning                                       | Handle with                                          |
 | ------------------------- | --------------------------------------------- | ---------------------------------------------------- |
@@ -116,40 +162,6 @@ if (!hasJsonSchema(Name)) throw new Error('expected JSON Schema');
 if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
 ```
 
-## API
-
-| Export                                                       | Purpose                                  |
-| ------------------------------------------------------------ | ---------------------------------------- |
-| `StandardSchemaV1`, `StandardJSONSchemaV1`                   | Canonical spec types                     |
-| `SchemaInput<S>`, `SchemaOutput<S>`                          | Infer input and output                   |
-| `SchemaWithJson<I, O>`                                       | Validation and JSON Schema in one schema |
-| `parse`, `parseAsync`                                        | Output or exact canonical failures       |
-| `is`, `assert`, `ensure`, `AssertOptions`                    | Throwing channel for bugs                |
-| `AssertError`, `AssertErrorCode`                             | Coded error with `issues`; no raw value  |
-| `recordSchema`, `plainObjectSchema`                          | Object-shape checks as schemas           |
-| `pathOf(issue)`                                              | Path as plain keys                       |
-| `formatIssues(issues)`                                       | All issue messages with paths            |
-| `isStandardSchema(value)`                                    | Recognize object and callable schemas    |
-| `hasJsonSchema(schema)`                                      | Narrow to a schema with converters       |
-| `withJsonSchema`                                             | Add draft-2020-12 converters             |
-| `SchemaRunError`, `SCHEMA_ERROR_CODES`, `SchemaRunErrorCode` | Unsupported JSON Schema target error     |
-
-## Runtime support
-
-No Node or Bun built-ins are used. The table records the previous smoke run; rerun `test:runtimes` after building to verify the current tree.
-
-<!-- runtimes:start -->
-
-| Runtime | Result  | Version tested        | Date (UTC) |
-| ------- | ------- | --------------------- | ---------- |
-| node    | pass    | v26.11.1              | 2026-10-17 |
-| bun     | pass    | 1.4.2                 | 2026-10-17 |
-| deno    | pass    | 2.9.7                 | 2026-10-17 |
-| browser | pass    | Chromium 156.0.8078.4 | 2026-10-17 |
-| hermes  | not run | -                     | 2026-10-17 |
-
-<!-- runtimes:end -->
-
 ## Limits
 
 - This package executes validators; it does not define one.
@@ -164,3 +176,7 @@ No Node or Bun built-ins are used. The table records the previous smoke run; rer
 - [Agent guide](docs/agent-guide.md)
 - [llms.txt](llms.txt)
 - [Changelog](CHANGELOG.md)
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.

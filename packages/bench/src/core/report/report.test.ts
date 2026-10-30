@@ -141,7 +141,7 @@ function fixture(overrides: Partial<BenchResult> = {}): BenchResult {
       cores: 14,
       memory: 36 * 1024 ** 3,
       flags: [],
-      harness: { version: '0.1.0', mitata: '1.0.34' },
+      harness: { version: '0.9.0', mitata: '1.0.34' },
       git: { revision: '355df1909cabcdef', dirty: false },
       date: '2026-10-13T10:00:00.000Z',
     },
@@ -267,13 +267,13 @@ describe('renderMarkdown', () => {
       specHash: 'abc123',
       profile: 'publish',
       date: '2026-10-13T10:00:00.000Z',
-      harness: '0.1.0',
+      harness: '0.9.0',
     });
   });
 
   it('names the environment, run design and every competitor version', () => {
     expect(markdown).toContain('Measured on Node 22.13.1 (darwin arm64, Apple M3 Max (14 cores))');
-    expect(markdown).toContain('@arki/bench 0.1.0 (mitata 1.0.34)');
+    expect(markdown).toContain('@arki/bench 0.9.0 (mitata 1.0.34)');
     expect(markdown).toContain('publish · 5 processes × 10 blocks, seed 42');
     expect(markdown).toContain('commit 355df1909c');
     expect(markdown).toContain(
@@ -351,7 +351,7 @@ describe('renderMarkdown', () => {
     expect(/^provenance: ([0-9a-f]{7,40})\s*$/m.exec(output)?.[1]).toBe('355df1909cabcdef');
     expect(output).toContain('- command: `arki-bench run --profile publish --write-readme`');
     expect(output).toContain('- profile: publish');
-    expect(output).toContain('@arki/bench 0.1.0, @arki/money 1.2.0, big.js 6.2.1');
+    expect(output).toContain('@arki/bench 0.9.0, @arki/money 1.2.0, big.js 6.2.1');
     expect(output).toContain('- machine: darwin arm64, Apple M3 Max (14 cores), 36 GB RAM');
     expect(output).toMatch(/- inputs: .* 12/);
     expect(output).toContain('- source commit: 355df1909cabcdef');

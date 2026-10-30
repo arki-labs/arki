@@ -40,6 +40,21 @@ await runtime.stop();
 ran: 3 rows
 ```
 
+## When not to use this
+
+- You need a job queue with retries, priorities and flows. Use `@arki/queue`. A schedule only decides when something starts.
+- You need an exact catch-up of every missed tick. Many missed ticks become one run, even when durable.
+- You need exactly-once effects. Durable delivery is at least once.
+- You run a single request and exit, such as a function on an edge platform. A schedule needs a process that stays up, or a host that calls `trigger`.
+
+## Runtime support
+
+`@arki/schedule` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
+
+The in-process runtime uses timers and runs on Node 22.12 or newer and Bun. Durable schedules also need Redis, through `@arki/queue`. With `clock: 'host'` the runtime arms no timers, and the host calls `trigger`.
+
+Debug logs use the `arki:schedule` category. Show them with `DEBUG=arki:schedule`.
+
 ## Steps and arounds
 
 `with: [...]` lists plain functions that run before the handler, in order. A step reads the context and returns keys to add, or a failure to refuse the run. An around wraps everything after it.
@@ -74,21 +89,6 @@ export const invoice = defineSchedule({
 - **Order matters.** Each element sees the keys added before it.
 
 See [Steps and arounds](../dot/docs/middleware.md) for the full model, shared by every transport.
-
-## When not to use this
-
-- You need a job queue with retries, priorities and flows. Use `@arki/queue`. A schedule only decides when something starts.
-- You need an exact catch-up of every missed tick. Many missed ticks become one run, even when durable.
-- You need exactly-once effects. Durable delivery is at least once.
-- You run a single request and exit, such as a function on an edge platform. A schedule needs a process that stays up, or a host that calls `trigger`.
-
-## Runtime support
-
-`@arki/schedule` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
-
-The in-process runtime uses timers and runs on Node 22.12 or newer and Bun. Durable schedules also need Redis, through `@arki/queue`. With `clock: 'host'` the runtime arms no timers, and the host calls `trigger`.
-
-Debug logs use the `arki:schedule` category. Show them with `DEBUG=arki:schedule`.
 
 ## Public imports
 

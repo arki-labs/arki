@@ -4,15 +4,16 @@
 
 ## Import paths
 <!-- llms:start -->
-- `@arki/lock`: distributed locks and semaphores over any store; a busy lock is a returned failure. `LOCK_COUNTER_NAMES`, `LOCK_ERROR_CODES`, `LockError`, `LockHeld`, `createLocks`; types `AcquireRequest`, `CreateLocksOptions`, `Duration`, `FenceOf`, `Grant`, `Guarantees`, `Guard`; and 28 more.
+- `@arki/lock`: distributed locks and semaphores over any store; a busy lock is a returned failure. `LOCK_COUNTER_NAMES`, `LOCK_ERROR_CODES`, `LOCK_FAILURES`, `LOCK_RUN_FAILURES`, `LockAborted`, `LockError`, `LockHeld`, `LockLost`, `LockReleaseFailed`, `LockStoreFailure`, `createLocks`; types `AcquireRequest`; and 41 more.
 - `@arki/lock/memory`: In-process hold store: mutex, counting semaphore and read/write locks. `memoryGuarantees`, `memoryStore`; types `MemoryEntry`, `MemoryGuarantees`, `MemoryStore`.
-- `@arki/lock/pg`: Postgres advisory locks as a hold store: `pgSession(db)` owns a pinned transaction for the whole life of a lock; `pgTransaction(tx)` takes the lock inside a transaction the caller already has, and the caller's COMMIT or ROLLBACK ends it. `HOLD_BEAT_SECONDS`, `HOLD_BEAT_TIMEOUT_MS`, `HOLD_FIRST_BEAT_SECONDS`, `WAIT_SLICE_MS`, `pgSession`, `pgSessionGuarantees`, `pgTransaction`, `pgTransactionGuarantees`; types `LockableDb`, `PgExecutor`, `PgLockOptions`, `PgSessionGuarantees`; and 2 more.
-- `@arki/lock/pg/lease`: `pgLease`: a lease in a Postgres table, with a durable fence. `DEFAULT_LEASE_TABLE`, `LEASE_TABLE_SQL`, `ensureLockTable`, `leaseTableSql`, `leaseUpgradeSql`, `pgLease`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`; types `LeaseDb`, `ListenClient`, `PgLeaseListenOptions`, `PgLeaseOptions`; and 3 more.
-- `@arki/lock/sqlite`: `sqliteLease`: a lease in a SQLite table, with a durable fence. `DEFAULT_LEASE_TABLE`, `LEASE_TABLE_SQL`, `ensureLockTable`, `leaseTableSql`, `sqliteLease`, `sqliteLeaseGuarantees`; types `SqliteLeaseDb`, `SqliteLeaseGuarantees`, `SqliteLeaseOptions`, `SqliteLeaseStore`.
-- `@arki/lock/redis`: a lease store on one Redis (ioredis). `redisGuarantees`, `redisKeys`, `redisStore`; types `RedisGuarantees`, `RedisStore`, `RedisStoreOptions`.
-- `@arki/lock/file`: Lock files for processes on one host. `fileGuarantees`, `fileStore`; types `FileGuarantees`, `FileStore`, `FileStoreOptions`.
+- `@arki/lock/pg`: `HOLD_BEAT_SECONDS`, `HOLD_BEAT_TIMEOUT_MS`, `HOLD_FIRST_BEAT_SECONDS`, `WAIT_SLICE_MS`, `pgSession`, `pgSessionGuarantees`, `pgTransaction`, `pgTransactionGuarantees`; types `LockableDb`, `PgExecutor`, `PgLockOptions`, `PgSessionGuarantees`; and 2 more.
+- `@arki/lock/pg/lease`: `DEFAULT_LEASE_TABLE`, `LEASE_TABLE_SQL`, `ensureLockTable`, `leaseTableSql`, `leaseUpgradeSql`, `pgLease`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`; types `LeaseDb`, `ListenClient`, `PgLeaseListenOptions`, `PgLeaseOptions`; and 3 more.
+- `@arki/lock/sqlite`: `DEFAULT_LEASE_TABLE`, `LEASE_TABLE_SQL`, `ensureLockTable`, `leaseTableSql`, `sqliteLease`, `sqliteLeaseGuarantees`; types `SqliteLeaseDb`, `SqliteLeaseGuarantees`, `SqliteLeaseOptions`, `SqliteLeaseStore`.
+- `@arki/lock/redis`: `redisGuarantees`, `redisKeys`, `redisStore`; types `RedisGuarantees`, `RedisStore`, `RedisStoreOptions`.
+- `@arki/lock/file`: `fileGuarantees`, `fileStore`; types `FileGuarantees`, `FileStore`, `FileStoreOptions`.
 - `@arki/lock/dot`: `locks(...)` — the lock manager as a Dot unit. `describeLocks`, `locks`; types `LocksDescription`, `LocksPluginOptions`.
 - `@arki/lock/testing`: a manual scheduler, an in-memory store with any store's guarantees, the store conformance suite, chaos hooks and the replica property. `ContractSkip`, `chaos`, `describeCases`, `describeStoreContract`, `manualScheduler`, `memoryStore`, `replicaCases`, `storeContract`, `testStore`; types `CaseStore`, `ChaosHooks`, `ContractCase`; and 9 more.
+- `@arki/lock/zod`: Canonical parsers for persisted lock identities. `durationSchema`, `grantSchema`, `guaranteesSchema`, `keyNameSchema`, `keySchema`, `limitSchema`, `lockFenceSchema`, `lockKeySchema`, `lockTokenSchema`, `semaphoreConfigSchema`, `storeTimeoutSchema`, `weightSchema`.
 <!-- llms:end -->
 
 ## Start here

@@ -6,7 +6,8 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { CONFIRM_UPLOAD_FAILURES, CREATE_UPLOAD_FAILURES } from './failures.js';
-import type { FileId, FileRecord, UploadRequest, UploadTicket } from './schemas.js';
+import type { FileRecord, UploadTicket } from './schemas.js';
+import type { FileId, UploadRequest } from './types.js';
 import { StorageCancelled, StorageRejected, StorageWriteUncertain } from '../storage/failures.js';
 import { executeFs, storageWriteFailure } from '../storage/operation.js';
 import { uploadTicket } from './schemas.js';

@@ -1,7 +1,72 @@
 # @arki/tanstack-start
 
-Shared TanStack Start wiring for arki apps (router, server entry, Sentry, PWA, devtools) and the
-typed oRPC client layer. Private to this monorepo. This README covers the oRPC entries.
+Shared TanStack Start wiring for Arki apps (router, server entry, Sentry, PWA, devtools) and the typed oRPC client layer.
+
+## Install
+
+```sh
+bun add @arki/tanstack-start
+```
+
+Install the peers the entries you use need: `react`, `react-dom`, `@arki/dot`, `@arki/schedule`, `@orpc/openapi`, `nitro`, `@sentry/node`, `@sentry/react`, `@sentry/tanstackstart-react`. The `@arki/dot`, `@arki/schedule`, `@orpc/openapi`, `nitro` and Sentry peers are optional.
+
+## Quick start
+
+`withForwardedProto` is the smallest entry to try. A proxy that ends TLS talks plain HTTP to the app. This function rebuilds a GET or HEAD request with an `https:` URL when the proxy sent `X-Forwarded-Proto: https`.
+
+```ts run
+import { withForwardedProto } from '@arki/tanstack-start/server';
+
+const incoming = new Request('http://pizzeria.example/menu', {
+  headers: { 'x-forwarded-proto': 'https' },
+});
+
+console.log(withForwardedProto(incoming).url);
+```
+
+The other entries are below: the oRPC client, the query hooks, the Vite plugins, and the proxy helper in full.
+
+## When not to use this
+
+- The app does not run on TanStack Start. The router, server entry and Vite helpers assume it.
+- The app does not use oRPC. The `orpc/*` entries build on oRPC contracts and procedures.
+
+## Runtime support
+
+The entries are split by where they run, as the `exports` map says.
+
+| Runs in           | Entries                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| browser           | `.`, `./router`, `./orpc/client`, `./orpc/query`, `./scripts`, `./error`, `./devtools`, `./sentry/client`, `./pwa/sw`, `./pwa/client` |
+| Node server       | `./config`, `./server`, `./dot`, `./orpc/server`, `./sentry/server`, `./server-error-overlay`                                         |
+| build time (Vite) | `./vite`, `./pwa`                                                                                                                     |
+| anywhere          | `./sentry/bridge`                                                                                                                     |
+
+The devtools render nothing in production. `useKeysetQuery` and `useOptimisticMutation` need React and TanStack Query.
+
+## Public imports
+
+| Entry point                                 | What it has                                                                             |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `@arki/tanstack-start`                      | `createAppConfig`, `createRouter`, `AnalyticsScript`, `RootErrorComponent`, `DevTools`. |
+| `@arki/tanstack-start/config`               | `createAppConfig`: a Vite config wired with the TanStack Start and React plugins.       |
+| `@arki/tanstack-start/router`               | `createRouter`.                                                                         |
+| `@arki/tanstack-start/server`               | `startServer`, `withForwardedProto`.                                                    |
+| `@arki/tanstack-start/dot`                  | `tanstackStart()`: the entrypoint plugin for a Dot app, with its mounts.                |
+| `@arki/tanstack-start/orpc/client`          | `createOrpcUtils`, `createORPCReact`, `getORPCUrl`, `createORPCClient`, `RPCLink`.      |
+| `@arki/tanstack-start/orpc/query`           | `useKeysetQuery`, `keysetOptions`, `keysetKey`, `useOptimisticMutation`.                |
+| `@arki/tanstack-start/orpc/server`          | The oRPC server setup for TanStack Start.                                               |
+| `@arki/tanstack-start/vite`                 | `zodCompiled`, `oneChunkPerRoute`, `fleetVite`.                                         |
+| `@arki/tanstack-start/scripts`              | `AnalyticsScript`.                                                                      |
+| `@arki/tanstack-start/error`                | `RootErrorComponent`.                                                                   |
+| `@arki/tanstack-start/devtools`             | `DevTools`.                                                                             |
+| `@arki/tanstack-start/sentry/client`        | `initSentryClient`: opt-in by DSN.                                                      |
+| `@arki/tanstack-start/sentry/server`        | `initSentryServer`: opt-in by DSN.                                                      |
+| `@arki/tanstack-start/sentry/bridge`        | `captureException` without importing `@sentry/*`.                                       |
+| `@arki/tanstack-start/server-error-overlay` | `withServerErrorOverlay`.                                                               |
+| `@arki/tanstack-start/pwa`                  | `createPwaPlugin`: the `vite-plugin-pwa` setup.                                         |
+| `@arki/tanstack-start/pwa/sw`               | The shared service worker base and `setupOfflineNavigation`.                            |
+| `@arki/tanstack-start/pwa/client`           | `registerPwa`.                                                                          |
 
 ## oRPC client: `@arki/tanstack-start/orpc/client`
 
@@ -9,7 +74,7 @@ Build the query utils from the contract **value**. Each leaf is oRPC's own `Proc
 (`queryOptions`, `infiniteOptions`, `mutationOptions`, keys) plus its operation under `'~op'`
 (`{ path, name, meta }`, see `@arki/contracts/orpc`). Groups keep `key()` for partial invalidation.
 
-```ts
+```ts skip="fragment: needs the app own contract and backend"
 // lib/orpc/client.tsx — keep your own link and serializers
 import type { ContractRouterClient } from '@orpc/contract';
 import { rpcContract } from '@my-app/backend/rpc';
@@ -44,7 +109,7 @@ written at the call site.
 
 A keyset-paged list over the `pageInput` / `page` contract of `@arki/contracts`.
 
-```tsx
+```tsx skip="fragment: needs the app own contract, components and React"
 const { items, status, loadMore } = useKeysetQuery(orpc.posts.list, { status: 'published' });
 
 {
@@ -78,14 +143,14 @@ or whose input has no `cursor` is a compile error.
 
 **Loader recipe** (one fetch: the hook finds the primed key):
 
-```ts
+```ts skip="fragment: needs the app own contract, components and React"
 loader: ({ context }) =>
   context.queryClient.infiniteQuery({ ...keysetOptions(orpc.posts.list, { status: 'published' }), staleTime: 'static' }),
 ```
 
 ### `useOptimisticMutation(utils, { apply, onSuccess?, onError? })`
 
-```tsx
+```tsx skip="fragment: needs the app own contract, components and React"
 const create = useOptimisticMutation(orpc.posts.create, {
   apply: (cache, input) =>
     cache.updateKeyset(orpc.posts.list, { status: 'published' }, (items, pageIndex) =>
@@ -122,7 +187,7 @@ for one action: calling both sends it twice.
 
 Build-time helpers for an app's `vite.config.ts`. Each one moves work from request time to `vite build`.
 
-```ts
+```ts skip="fragment: a vite.config.ts of an app, defineConfig is not imported"
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 
@@ -152,7 +217,7 @@ A proxy that ends TLS (nginx, Traefik, a CDN) talks plain HTTP to the app and ad
 
 `withForwardedProto(request)` rebuilds a GET or HEAD request with an `https:` URL when that header says `https`. Every other request comes back as the same object. Requests with a body are never copied, because copying would read the stream. Call it once, before the locale middleware:
 
-```ts
+```ts skip="fragment: needs the app and paraglideMiddleware"
 import { startServer, withForwardedProto } from '@arki/tanstack-start/server';
 
 export const server = startServer(app, {
@@ -165,3 +230,28 @@ export const server = startServer(app, {
 ```
 
 The header is trusted as sent. Behind a proxy that overwrites it, that is correct. Without a proxy, a client can only change the scheme of URLs built for its own response.
+
+## Failure behaviour
+
+- `createOrpcUtils` fails loud on a contract key the utils would shadow (`key`, `queryOptions`, or a key with `.`).
+- `useKeysetQuery` and `useOptimisticMutation` do not throw on a failed request. A failed page shows as `status: 'error'`. A failed optimistic mutation restores its snapshots.
+- `useOptimisticMutation` throws a `TypeError` when `apply` is async.
+- The Dot plugin `tanstackStart()` stops the boot with a coded error: `ARKI_TANSTACK_START_PLUGIN_E001` when the cron secret is empty, `ARKI_TANSTACK_START_PLUGIN_E002` when a CORS origin is not a bare `scheme://host[:port]`. The [agent guide](docs/agent-guide.md#errors) has the fixes.
+- `initSentryClient` and `initSentryServer` disable Sentry without an error when the DSN is missing, empty or malformed.
+
+## Limits
+
+- `useKeysetQuery` does not clamp `loadMore(n)`. An `n` above the contract's `maxLimit` fails server validation and shows as `error`.
+- Concurrent optimistic edits to one key are last-writer-wins until the refetch.
+- Optimistic rollback is local cache only. It never reverses a database write, a job or an email.
+- `withForwardedProto` copies only GET and HEAD requests.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): tasks, step by step.
+- [llms.txt](llms.txt): the map for agents.
+- [CHANGELOG](CHANGELOG.md).
+
+## Support
+
+Report bugs and ask questions at https://github.com/arki-labs/arki/issues.

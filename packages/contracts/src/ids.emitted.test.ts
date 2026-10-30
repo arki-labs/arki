@@ -10,6 +10,9 @@
  * cannot see this, because the bad type exists only in the emitted text. This
  * test builds the contracts declarations, a producer package against them, and
  * a consumer that sees only the producer's declarations, the way a linked app does.
+ *
+ * A branded id has the same risk in plain text: `defineId` used to return an anonymous
+ * object, so every dependent's `.d.ts` printed `schema: z.core.$ZodBranded<...>`.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,10 +35,13 @@ export function tableIds<TPrefix extends string>(prefix: TPrefix) {
   const id = defineId(prefix);
   return { prefix: id.prefix, parse: (value: unknown) => id.schema.parse(value), is: id.is };
 }
+
+export const orderId = defineId('ord_', { kind: 'shop.order' });
 `;
 
 const consumer = `
-import { tableIds } from './producer.js';
+import type { IdOf } from '@arki/contracts';
+import { orderId, tableIds } from './producer.js';
 
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
@@ -44,6 +50,9 @@ export const parsedIsPrefixed: Exact<ReturnType<typeof ids.parse>, \`vtmb_\${str
 
 const raw: unknown = 'vtmb_1';
 export const narrowed: \`vtmb_\${string}\` | undefined = ids.is(raw) ? raw : undefined;
+
+export const brandIsKept: Exact<IdOf<typeof orderId>, \`ord_\${string}\`> = false;
+export const schemaKeepsTheBrand: Exact<ReturnType<typeof orderId.schema.parse>, IdOf<typeof orderId>> = true;
 `;
 
 function run(args: readonly string[]): { readonly status: number | null; readonly errors: readonly string[] } {
@@ -98,6 +107,7 @@ describe('prefixed ids from emitted declarations', () => {
     // The producer's published id type is the plain template, with no Zod internals.
     const declaration = readFileSync(`${workDir}out/producer.d.ts`, 'utf8');
     expect(declaration).toContain('`${TPrefix}${string}`');
+    expect(declaration).toContain('BrandedIdDeclaration<"ord_", "shop.order">');
     expect(declaration).not.toMatch(/\$Zod|never/);
 
     // 3. An app that sees only declarations gets the concrete id type, not `never`.

@@ -1,0 +1,46 @@
+# @arki/tanstack-start
+
+> Shared TanStack Start wiring for Arki apps: router defaults, server entry, Sentry, PWA, devtools, Vite plugins, and typed oRPC client utils and hooks (keyset paging, optimistic mutations).
+
+## Import paths
+<!-- llms:start -->
+- `@arki/tanstack-start`: @arki/tanstack-start. `AnalyticsScript`, `DevTools`, `RootErrorComponent`, `createAppConfig`, `createRouter`; types `AnalyticsConfig`, `AppConfig`, `DevToolsProps`, `RouterConfig`.
+- `@arki/tanstack-start/config`: TanStack Start App Configuration. `createAppConfig`, `defineConfig`; types `AppConfig`.
+- `@arki/tanstack-start/vite`: `fleetVite`, `oneChunkPerRoute`, `zodCompiled`.
+- `@arki/tanstack-start/server`: `startServer(app, { hot })` — the server entry of a Dot app on TanStack Start. `startServer`, `withForwardedProto`; types `StartHandler`, `StartServer`, `StartServerOptions`.
+- `@arki/tanstack-start/dot`: the `tanstackStart()` entrypoint plugin and the one-line server-route handlers. `TANSTACK_START_PLUGIN_ERROR_CODES`, `authHandlers`, `cronHandlers`, `healthHandlers`, `rpcHandlers`, `tanstackStart`; types `CorsOptions`, `CronRouter`, `MountOptions`, `RequestContextOf`, `TanstackStartOptions`.
+- `@arki/tanstack-start/router`: TanStack Router Configuration. `createQueryClient`, `createRouter`, `createTanStackRouter`; types `RouterConfig`.
+- `@arki/tanstack-start/orpc/client`: oRPC Client Setup for TanStack Start. `RPCLink`, `createORPCClient`, `createORPCReact`, `createOrpcUtils`, `createTanstackQueryUtils`, `getORPCUrl`; types `ORPCClientConfig`, `OrpcUtils`, `RouterClient`.
+- `@arki/tanstack-start/orpc/query`: typed React hooks over oRPC query utils. `keysetKey`, `keysetOptions`, `optimisticMutationOptions`, `useKeysetQuery`, `useOptimisticMutation`; types `Cache`, `KeysetOptions`, `KeysetResult`, `KeysetStatus`, `KeysetUtils`, `OptimisticContext`, `OptimisticOptions`; and 2 more.
+- `@arki/tanstack-start/orpc/server`: oRPC Server Setup for TanStack Start. `RPCHandler`, `createORPCHandler`, `createRouteHandlers`, `createRouterClient`, `createServerCaller`, `getCorsHeaders`; types `ORPCServerConfig`, `RouterClient`.
+- `@arki/tanstack-start/scripts`: Analytics and Third-Party Script Components for TanStack Start. `AdsenseMeta`, `AnalyticsScript`, `AxiomScript`, `ContentSecurityPolicy`, `TurnstileScript`, `initClarity`, `initGoogleAnalytics`; types `AdsenseConfig`, `AnalyticsConfig`, `AxiomConfig`, `CSPConfig`, `TurnstileConfig`.
+- `@arki/tanstack-start/error`: `RootErrorComponent`.
+- `@arki/tanstack-start/devtools`: `DevTools`; types `DevToolsProps`.
+- `@arki/tanstack-start/sentry/client`: Browser-side Sentry initialization for TanStack Start apps. `Sentry`, `initSentryClient`; types `InitSentryClientOptions`.
+- `@arki/tanstack-start/sentry/server`: Server-side Sentry initialization for TanStack Start apps. `Sentry`, `initSentryServer`, `sentryGlobalFunctionMiddleware`, `sentryGlobalRequestMiddleware`, `wrapFetchWithSentry`, `wrapMiddlewaresWithSentry`; types `InitSentryServerOptions`.
+- `@arki/tanstack-start/sentry/bridge`: Zero-dependency bridge that lets shared package code call `captureException` without statically importing `@sentry/*`. `captureException`, `registerSentryCapture`; types `CaptureHandler`, `CaptureHint`.
+- `@arki/tanstack-start/server-error-overlay`: Server-side error overlay for TanStack Start `entry-server.ts`. `withServerErrorOverlay`.
+- `@arki/tanstack-start/pwa`: Configure `vite-plugin-pwa` for a TanStack Start app. `LAZY_CHUNK_IGNORES`, `MERMAID_DIAGRAM_IGNORES`, `SHIKI_LANG_IGNORES`, `SHIKI_THEME_IGNORES`, `createPwaPlugin`; types `CreatePwaPluginOptions`.
+- `@arki/tanstack-start/pwa/sw`: Shared service-worker base for TanStack Start apps. `setupOfflineNavigation`; types `OfflineNavigationOptions`.
+- `@arki/tanstack-start/pwa/client`: Register the app's service worker. `clearCachesOnUserChange`, `registerPwa`, `registerStaleChunkReload`, `useClearCachesOnUserChange`; types `RegisterPwaOptions`.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Use the typed oRPC client](docs/agent-guide.md#use-the-typed-orpc-client)
+- [Page a list with a cursor](docs/agent-guide.md#page-a-list-with-a-cursor)
+- [Edit the cache before the server answers](docs/agent-guide.md#edit-the-cache-before-the-server-answers)
+- [Fix a redirect that points at http](docs/agent-guide.md#fix-a-redirect-that-points-at-http)
+- [Add the Vite helpers](docs/agent-guide.md#add-the-vite-helpers)
+- [Start Sentry](docs/agent-guide.md#start-sentry)
+
+## Rules that bite
+- Keep browser entries and Node entries apart. The `exports` map says which is which.
+- The contract module given to `createOrpcUtils` must be browser-safe.
+- `apply` in `useOptimisticMutation` is synchronous and only records edits.
+- Sentry init runs before the router import.
+- Sentry is opt-in by DSN.

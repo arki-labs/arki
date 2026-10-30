@@ -1,0 +1,39 @@
+# @arki/admin
+
+> The contract between an ARKI app and Foreman, the fleet control plane. An app exposes modules (reads and actions) behind signed requests at /api/foreman. Foreman reads the manifest and calls them. Executes leave receipts.
+
+## Import paths
+<!-- llms:start -->
+- `@arki/admin`: isomorphic entry. `FLEET_AUTH_SCHEME`, `FLEET_ENDPOINT_PATH`, `FLEET_PROTOCOL_VERSION`, `fleetHealthCheckSchema`, `fleetHealthSchema`, `fleetInfoSchema`, `fleetMetricSchema`, `fleetMetricsSchema`, `fleetSnapshotSchema`; types `FleetHealth`, `FleetHealthCheck`, `FleetInfo`; and 3 more.
+- `@arki/admin/server`: server-only fleet helpers. `FOREMAN_BASE_PATH`, `FOREMAN_PROTOCOL_VERSION`, `NONCE_TTL_SECONDS`, `RECEIPT_WINDOW_SECONDS`, `createFleetHandler`, `createForemanHandler`, `createForemanHandlerFromEnv`, `createForemanRoute`, `fetchFleetSnapshot`, `foremanEnvironmentSchema`, `foremanManifestSchema`, `generateForemanKeyPair`; and 26 more.
+- `@arki/admin/http`: `@arki/http` bundle adapter for the fleet endpoint — the declare-once and bind-once halves of `GET /api/fleet`, so a DOT app's fleet plugin is a three-liner instead of hand-wiring `createFleetHandler` into a route binding. `fleetRoutes`, `fleetSnapshotRoute`.
+- `@arki/admin/module`: the isomorphic Foreman module contract. `ADMIN_ERROR_CODES`, `AdminError`, `DEFAULT_MAX_TARGETS`, `MAX_TARGETS_LIMIT`, `MODULE_META_SCHEMA`, `ModuleError`, `actionDescriptionSchema`, `actionRiskSchema`, `canonicalJson`, `defineAction`, `defineModule`, `defineRead`; and 39 more.
+- `@arki/admin/panels`: answer shapes for the generic screens Foreman bundles. `PANEL_RENDERER`, `boardCardSchema`, `boardFormatSchema`, `boardOutputSchema`, `panelToneSchema`, `rowsCellSchema`, `rowsColumnSchema`, `rowsFormatSchema`, `rowsOutputSchema`; types `BoardCard`, `BoardOutput`, `PanelTone`; and 3 more.
+- `@arki/admin/pg`: The Postgres store for Foreman's nonces and receipts, for apps without a KV. `foremanStoreTable`, `pgForemanStore`; types `ForemanStoreDb`, `ForemanStoreTable`, `ForemanStoreTableOptions`, `PgForemanStoreOptions`.
+- `@arki/admin/core`: The modules every Foreman target serves (RFC § 3.3): `core.health`, `core.manifest`, and `core.receipts` when the app has a receipt store. `CORE_HEALTH_MODULE_ID`, `CORE_MANIFEST_MODULE_ID`, `CORE_MODULE_VERSION`, `CORE_PERMISSION`, `withCoreModules`; types `CoreModulesOptions`.
+- `@arki/admin/env`: The environment variables of a Foreman v2 target (RFC § 3.3), and how they become handler config. `foremanConfigFromEnv`, `foremanEnvShape`, `foremanEnvironmentFromNodeEnv`; types `ForemanEnv`, `ForemanEnvConfig`.
+- `@arki/admin/dot`: The DOT attachment: `foreman()` is a feature slice that mounts the protocol-2 routes under `/api/foreman`. `foreman`; types `ForemanFeatureSlice`.
+- `@arki/admin/client`: the Foreman side of protocol 2. `FOREMAN_BASE_PATH`, `FOREMAN_HEADERS`, `FOREMAN_PROTOCOL_VERSION`, `MAX_CLOCK_SKEW_MS`, `NONCE_TTL_SECONDS`, `createForemanClient`, `envelopeSchema`, `foremanManifestSchema`, `foremanPaths`, `generateForemanKeyPair`, `permitClaimSchema`, `scopeCovers`; and 16 more.
+- `@arki/admin/receipts`: Execution receipts: what the app records about every execute, keyed by the permit's `executionId`, so Foreman can settle an execute whose answer was lost. `DEFAULT_RECEIPT_TTL_SECONDS`, `RECEIPTS_MODULE_ID`, `RECEIPTS_MODULE_VERSION`, `RECEIPTS_PERMISSION`, `RECEIPTS_READ_ID`, `RECEIPT_WINDOW_SECONDS`, `appliedReceiptSchema`, `failedReceiptSchema`, `kvReceiptStore`, `pendingReceiptSchema`, `receiptAnswerSchema`, `receiptsModule`; and 10 more.
+- `@arki/admin/connections/coolify`: `COOLIFY_RUNTIME_PROBE_KEY`, `COOLIFY_SUPPORTED_MAJOR`, `applicationSignal`, `confirmHint`, `createCoolifyClient`, `createCoolifyEnvWriter`, `deploymentSignal`, `parseWebhookHint`, `serverSignal`, `verifyWebhookSecret`; types `CoolifyApplication`, `CoolifyClient`; and 11 more.
+<!-- llms:end -->
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Mount Foreman in a plain TanStack app](docs/agent-guide.md#mount-foreman-in-a-plain-tanstack-app)
+- [Mount Foreman in a Dot app](docs/agent-guide.md#mount-foreman-in-a-dot-app)
+- [Define a module with a read](docs/agent-guide.md#define-a-module-with-a-read)
+- [Refuse with a module's own code](docs/agent-guide.md#refuse-with-a-modules-own-code)
+- [Show a screen without Foreman code](docs/agent-guide.md#show-a-screen-without-foreman-code)
+- [Turn writes on](docs/agent-guide.md#turn-writes-on)
+
+## Rules that bite
+- Set all four `FOREMAN_*` keys or none. A partial set throws `ARKI_ADMIN_E014`.
+- With no keys, `/api/foreman/*` answers 404.
+- Match on `AdminError.code`, never on the message.
+- An execute runs once per `executionId`. A lost answer is read through `core.receipts.get`.
+- `FOREMAN_WRITES=on` needs a receipt store, or every execute answers `ARKI_ADMIN_E017`.
