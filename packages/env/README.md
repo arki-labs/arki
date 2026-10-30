@@ -120,6 +120,38 @@ configure({ processors: [maskSecrets(secretValues)] });
 
 Messages name the file and the key, never a value. `loadEnvFiles` returns `EnvFilesFailed` with these entries in `data.errors`; native file-read problems use `env.file_read_failed`. No entries are applied when loading fails. Raw provider errors and stderr stay in the failure's private cause.
 
+### Node file API
+
+These come from `@arki/env/node`. The codec functions work on text and never touch the disk. The file functions read and write, and return a failure (check `isFailure`) instead of throwing.
+
+| Export | What it does and when to use it |
+| --- | --- |
+| `encryptEnvFile(file, keys?)` | Encrypts plaintext values in place, for the listed keys or every value. Returns the keys it encrypted. Use it to import an old plain file. Returns `MissingPublicKey` when the file has no header. |
+| `decryptEnvFile(file, privateKeys, keys?)` | Writes values back as plaintext, for the listed keys or every value. Use it for a one-off migration, never on a tracked file you plan to commit. |
+| `rotateEnvFiles(...)` | Gives every file of one environment a new keypair and encrypts it again. It decrypts everything first, so a wrong key changes nothing. Returns `RotationIncomplete` if it stops half way. |
+| `publicKeyIn(file)` | Reads the public key from the file header, or `undefined` when there is none. Use it to check that a file was initialised. |
+| `envHeader(fileName, publicKey)` | Builds the dotenvx header text (banner, public key, file line). `initEnvFile` uses it; call it to write a header yourself. |
+| `keyNamesFor(fileName)` | Gives the key variable names for a file: `.env.production` gives `DOTENV_PUBLIC_KEY_PRODUCTION` and `DOTENV_PRIVATE_KEY_PRODUCTION`. |
+| `isKeyName(key)` | True for `DOTENV_PUBLIC_KEY*` and `DOTENV_PRIVATE_KEY*`. Use it to skip key lines when you list app values. |
+| `isEncrypted(value)` | True for a value that starts with `encrypted:`. Use it to tell ciphertext from plaintext. |
+| `envValues(document)` | Every key of a parsed file with its last value, in first-seen order. |
+| `readEnvValue(document, key)` | The last value of one key in a parsed file, or `undefined`. |
+| `setEnvValue(text, key, value)` | Returns the text with the key set. It rewrites an existing line in place and appends a new key. Other lines stay as written. |
+| `removeEnvValue(text, key)` | Returns the text without any line that sets the key. |
+| `keysFileCandidates(file, root)` | The `.env.keys` paths searched for a file, nearest first. |
+| `findRoot(cwd)` | The nearest folder above `cwd` that has `.git`, else one with a `workspaces` package.json, else `cwd`. This is where file loading stops. |
+| `envDirs(root, cwd)` | The folders from `root` down to `cwd`, root first. Files load in this order, so a deeper folder wins. |
+| `referenceScheme(value, resolvers)` | Returns the scheme (`op`, `infisical`, `doppler`) when the value is a registered reference, else `undefined`. Unknown URLs stay plain values. |
+| `envPublicKeySchema`, `envPrivateKeySchema` | Standard Schemas that check a secp256k1 key and brand it as `EnvPublicKey` or `EnvPrivateKey`. They never repeat the key in an issue. `parsePublicKey` and `parsePrivateKey` call them. |
+
+### Node failures
+
+| Failure | Code | When it is returned | How to fix it |
+| --- | --- | --- | --- |
+| `MissingPublicKey` | `env.missing_public_key` | You tried to encrypt into a file that has no public key header. `data.file` names it. | Initialise the file first (`dot env init`, or `initEnvFile`). |
+| `MissingPrivateKey` | `env.missing_private_key` | A file has encrypted values and no private key is available. `data.file` names it. | Restore the key from its backup: set `DOTENV_PRIVATE_KEY_<ENV>` or restore `.env.keys`. |
+| `ReferenceFailed` | `env.reference_failed` | A provider CLI (`op`, `infisical`, `doppler`) rejected a read. `data.scheme` names the provider. HTTP status 502. | Check that the CLI is installed and signed in, and that the reference is right. The raw cause stays private. |
+
 ## Presets
 
 The `presets` namespace holds common variable shapes:
