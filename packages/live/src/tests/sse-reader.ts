@@ -4,6 +4,8 @@
  * blank line, `:keepalive` comments skipped, every `data:` checked against the
  * wire schema. Test-only.
  */
+import { isFailure } from '@arki/failure';
+
 import type { LiveEvent } from '../index.js';
 import { parseLiveEvent } from '../index.js';
 
@@ -33,7 +35,7 @@ export function sseReader(response: Response): SseReader {
           .map(line => line.slice('data: '.length))
           .join('\n');
         const event = parseLiveEvent(JSON.parse(data));
-        if (event === undefined) throw new Error(`not a live frame: ${data}`);
+        if (isFailure(event)) throw new Error(`not a live frame: ${data}`);
         return event;
       }
       const chunk = await reader.read();

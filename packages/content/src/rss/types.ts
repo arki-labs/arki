@@ -1,3 +1,5 @@
+import { defineFailure } from '@arki/failure';
+
 /** A link attached to a feed or an item (`<link>`, Atom `<link rel>`, RSS `<enclosure>`). */
 export type FeedLink = {
   href: string;
@@ -70,17 +72,49 @@ export type Feed = {
   items: FeedItem[];
 }
 
-export type FeedErrorCode = 'FEED_TOO_LARGE' | 'FEED_MALFORMED' | 'FEED_UNSUPPORTED' | 'FEED_LIMIT_EXCEEDED';
+/**
+ * The feed text is larger than `maxBytes`.
+ * @fix Raise `maxBytes`, or refuse the source.
+ * @verify bun run test -- src/rss/parser.test.ts
+ */
+export const FeedTooLarge = /* @__PURE__ */ defineFailure('content.feed_too_large', {
+  status: 413,
+  message: 'The feed is larger than the byte limit.',
+  remediation: 'Raise maxBytes in parseFeed options, or refuse the source.',
+});
 
-export class FeedError extends Error {
-  readonly code: FeedErrorCode;
+/**
+ * The text is not well-formed XML, or is neither an RSS nor an Atom document.
+ * @fix Fetch the feed again, or refuse the source.
+ * @verify bun run test -- src/rss/parser.test.ts
+ */
+export const FeedMalformed = /* @__PURE__ */ defineFailure('content.feed_malformed', {
+  status: 422,
+  message: 'The text is not well-formed XML, or is not an RSS or Atom feed.',
+  remediation: 'Fetch the feed again, or refuse the source.',
+});
 
-  constructor(code: FeedErrorCode, message: string) {
-    super(message);
-    this.name = 'FeedError';
-    this.code = code;
-  }
-}
+/**
+ * The feed declares a DOCTYPE or entities, which the parser never expands.
+ * @fix Refuse the source; entity declarations are an attack shape, not a feature.
+ * @verify bun run test -- src/rss/parser.test.ts
+ */
+export const FeedUnsupported = /* @__PURE__ */ defineFailure('content.feed_unsupported', {
+  status: 422,
+  message: 'Feed DOCTYPE and entity declarations are not supported.',
+  remediation: 'Refuse the source; entity declarations are not expanded.',
+});
+
+/**
+ * The feed has more items than `maxItems`.
+ * @fix Raise `maxItems`, or read the feed in pages.
+ * @verify bun run test -- src/rss/parser.test.ts
+ */
+export const FeedLimitExceeded = /* @__PURE__ */ defineFailure('content.feed_limit_exceeded', {
+  status: 413,
+  message: 'The feed has more items than the item limit.',
+  remediation: 'Raise maxItems in parseFeed options, or read the feed in pages.',
+});
 
 export type ParseFeedOptions = {
   /** Reject input larger than this many bytes of UTF-8. Default 10 MiB. */

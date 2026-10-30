@@ -144,6 +144,32 @@ export function describePubSubContract<Tx>(
         expect([first.messages, second.messages]).toEqual([['both'], ['both']]);
       }));
 
+    it('survives a subscriber that throws or rejects: the others still hear, nothing is left unhandled', () =>
+      withSubject(async ({ pubsub }) => {
+        // Why: an `async` callback is accepted where OnMessage returns void; its rejection must be logged, not crash the process.
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown): void => void unhandled.push(reason);
+        process.on('unhandledRejection', onUnhandled);
+        try {
+          const channel = freshChannel();
+          await pubsub.subscribe(channel, () => {
+            throw new Error('sync subscriber bug');
+          });
+          // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the case under test: an async callback where OnMessage returns void
+          await pubsub.subscribe(channel, async () => {
+            await Promise.resolve();
+            throw new Error('async subscriber bug');
+          });
+          const good = await listen(pubsub, channel);
+          await pubsub.publish(channel, 'still delivered');
+          await until(() => good.messages.length === 1, 'the healthy subscriber');
+          await sleep(settleMs);
+          expect(unhandled).toEqual([]);
+        } finally {
+          process.off('unhandledRejection', onUnhandled);
+        }
+      }));
+
     it('stops delivery to a subscription after unsubscribe', () =>
       withSubject(async ({ pubsub }) => {
         const channel = freshChannel();

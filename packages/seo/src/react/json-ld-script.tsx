@@ -18,7 +18,7 @@ import type { Thing, WithContext } from 'schema-dts';
  * @param data - A schema.org JSON-LD object with @context
  */
 export function JsonLdScript({ id, data }: { id: string; data: WithContext<Thing> }) {
-  const jsonString = JSON.stringify(data).replace(/</g, '\\u003c');
+  const jsonString = JSON.stringify(data).replaceAll('<', '\\u003c');
 
   return (
     <script

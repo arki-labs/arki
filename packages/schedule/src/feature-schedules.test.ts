@@ -318,7 +318,7 @@ describe('the scheduler service', () => {
       },
     });
     const runtime = createScheduleRuntime({ schedules: [slow], clock: 'host' });
-    runtime.start();
+    orThrow(await runtime.start());
 
     const accepted = runtime.trigger('slow');
     await Promise.resolve();

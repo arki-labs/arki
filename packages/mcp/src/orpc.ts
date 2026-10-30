@@ -10,11 +10,14 @@ import { ORPCError } from '@orpc/client';
 import { getEventIteratorSchemaDetails, isContractProcedure } from '@orpc/contract';
 
 import type { Failure, RevivalFailure } from '@arki/failure';
-import { defineFailure, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 import { reviveRpcError, RPC_FAILURE_DEFINITION, rpcFailureDefinitions } from '@arki/failure/orpc';
+import { getLogger } from '@arki/log';
+import { parse } from '@arki/schema';
 
 import type { McpMeta } from './contract.js';
 import type { McpTool, ToolCall } from './tool.js';
+import { mcpPolicySchema } from './policy.js';
 import { toolResult } from './result.js';
 
 /** Access refused. @fix Supply the required principal, roles and scopes. @verify bun run test -- src/orpc.test.ts */
@@ -41,6 +44,9 @@ export const Cancelled = defineFailure('mcp.cancelled', {
   message: 'The tool call was cancelled.',
   remediation: 'Start a new call if the result is still needed.',
 });
+/** Enable with `DEBUG=arki:mcp`. */
+const debugMcp = getLogger('arki:mcp');
+
 export const ADAPTER_FAILURES = [Forbidden, ApprovalRequired, InvalidInput, Cancelled, UnexpectedDefect] as const;
 type AdapterFailure = ReturnType<(typeof ADAPTER_FAILURES)[number]> | RevivalFailure;
 
@@ -156,9 +162,11 @@ export function fromRpc(
         continue;
       }
       const def = value['~orpc'];
-      const policy: unknown = def.meta.mcp;
-      if (policy === undefined) continue;
-      if (!isPolicy(policy)) throw new TypeError(`Invalid MCP policy at ${here.join('.')}`);
+      const declared: unknown = def.meta.mcp;
+      if (declared === undefined) continue;
+      // A wrong policy is a declaration bug, found while the tools are built (boot), never per call.
+      const policy = parse(mcpPolicySchema, declared);
+      if (isFailure(policy)) throw new TypeError(`Invalid MCP policy at ${here.join('.')}`);
       if (policy.hidden) continue;
       for (const [code, source] of Object.entries(def.errorMap)) {
         const item: unknown = source;
@@ -178,15 +186,15 @@ export function fromRpc(
       if (Object.hasOwn(tools, name)) throw new TypeError(`Duplicate MCP tool: ${name}`);
       const run = async (input: unknown, call: ToolCall) => {
         try {
-          if (!allowed(policy, call)) return Forbidden();
-          if (cancelled(call)) return Cancelled();
+          if (!allowed(policy, call)) return denied(name, Forbidden());
+          if (cancelled(call)) return denied(name, Cancelled());
           if (
             policy.effect === 'destructive' &&
             policy.confirm === 'elicit' &&
             (call.approve === undefined ||
               !(await call.approve({ name, input, principal: call.principal, signal: call.signal })))
           ) {
-            return ApprovalRequired();
+            return denied(name, ApprovalRequired());
           }
           // The typed gateway client owns validation, transforms and authorization.
           if (cancelled(call)) return Cancelled();
@@ -257,60 +265,10 @@ function allowed(policy: McpMeta, call: ToolCall): boolean {
   );
 }
 
-function strings(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string');
-}
-function isPolicy(value: unknown): value is McpMeta {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('description' in value) ||
-    typeof value.description !== 'string' ||
-    !('access' in value) ||
-    !('effect' in value)
-  )
-    return false;
-  const access = value.access;
-  if (
-    access !== 'public' &&
-    access !== 'user' &&
-    (typeof access !== 'object' ||
-      access === null ||
-      ('roles' in access && !strings(access.roles)) ||
-      ('scopes' in access && !strings(access.scopes)))
-  )
-    return false;
-  if ('name' in value && (typeof value.name !== 'string' || !/^[\d_a-z][\da-z]*_\w+$/.test(value.name))) return false;
-  if ('hidden' in value && value.hidden !== true) return false;
-  if ('idempotent' in value && typeof value.idempotent !== 'boolean') return false;
-  if ('openWorld' in value && typeof value.openWorld !== 'boolean') return false;
-  if (
-    'budget' in value &&
-    (typeof value.budget !== 'object' ||
-      value.budget === null ||
-      !('maxChars' in value.budget) ||
-      typeof value.budget.maxChars !== 'number' ||
-      !Number.isSafeInteger(value.budget.maxChars) ||
-      value.budget.maxChars <= 0)
-  )
-    return false;
-  if (
-    'remediation' in value &&
-    (typeof value.remediation !== 'object' ||
-      value.remediation === null ||
-      !Object.values(value.remediation).every(text => typeof text === 'string'))
-  )
-    return false;
-  if (value.effect === 'read' || value.effect === 'write') return true;
-  return (
-    value.effect === 'destructive' &&
-    'confirm' in value &&
-    (value.confirm === 'elicit' ||
-      (typeof value.confirm === 'object' &&
-        value.confirm !== null &&
-        'none' in value.confirm &&
-        typeof value.confirm.none === 'string'))
-  );
+/** A call refused before it reached the gateway: leave a debug trace, since no downstream span exists for it. */
+function denied<F extends Failure>(tool: string, failure: F): F {
+  debugMcp.debug('tool {tool} refused: {code}', { tool, code: failure.code });
+  return failure;
 }
 
 function cancelled(call: ToolCall): boolean {

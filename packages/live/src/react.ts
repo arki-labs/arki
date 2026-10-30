@@ -44,13 +44,14 @@ import type {
 import type { ReactElement, ReactNode } from 'react';
 import { createContext, createElement, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 import type { LiveStatus } from './client.js';
 import type { LiveCursor, LiveEvent, LiveKeyKind, LiveManifest, LiveReceipt } from './types.js';
 import { createLiveClient } from './client.js';
 import { debugReact } from './debug.js';
-import { LIVE_ERROR_CODES, liveError } from './errors.js';
+import { LIVE_ERROR_CODES, liveError, ReceiptTimeout } from './errors.js';
 import { tagKey } from './manifest.js';
 import { parseLiveCursor } from './parse.js';
 import { normalizeKey } from './scopes.js';
@@ -146,7 +147,7 @@ type LiveSession = {
   register(pathKey: string): () => void;
   /** Watches the query cache for the first-fetch race and for 401/403; returns the unsubscribe. */
   watch(): () => void;
-  awaitTxId(receipt: LiveReceipt, timeoutMs: number): Promise<void>;
+  awaitTxId(receipt: LiveReceipt, timeoutMs: number): Promise<void | ReturnType<typeof ReceiptTimeout>>;
 };
 
 /** The live session of each `QueryClient` with a mounted provider. */
@@ -347,7 +348,7 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
 
     awaitTxId(txid, timeoutMs) {
       if (recentTxIds.has(txid)) return Promise.resolve();
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<void | ReturnType<typeof ReceiptTimeout>>(resolve => {
         const set = waiters.get(txid) ?? new Set<TxIdWaiter>();
         waiters.set(txid, set);
         const forget = (): void => {
@@ -363,13 +364,7 @@ function liveSession(queryClient: QueryClient, keyPrefix: readonly string[], ini
         };
         const timer = setTimeout(() => {
           forget();
-          reject(
-            liveError(
-              LIVE_ERROR_CODES.limit,
-              `awaitTxId(${txid}): no change frame named this receipt within ${timeoutMs} ms`,
-              'Check that the mutation returns receipts.of(pg_current_xact_id()::text) of its own transaction, that the hub has the same receipts (app and secret), and that the stream is live; or refetch instead.',
-            ),
-          );
+          resolve(ReceiptTimeout({ timeoutMs }));
         }, timeoutMs);
         set.add(waiter);
       });
@@ -406,12 +401,18 @@ export type LiveProviderProps = {
   readonly children?: ReactNode;
 };
 
+/** The cursor a dehydrated page carried, or `undefined` when there is none or it is not one. */
+function storedCursor(value: unknown): LiveCursor | undefined {
+  const cursor = parseLiveCursor(value);
+  return isFailure(cursor) ? undefined : cursor;
+}
+
 /** One live stream for the `QueryClient` above it. A second provider for the same client logs E001. */
 export function LiveProvider(props: LiveProviderProps): ReactElement {
   const queryClient = useQueryClient();
   const { url = '/api/live', headers, fetch } = props;
   const [session] = useState(() =>
-    liveSession(queryClient, props.keyPrefix ?? [], parseLiveCursor(queryClient.getQueryData(CURSOR_KEY))),
+    liveSession(queryClient, props.keyPrefix ?? [], storedCursor(queryClient.getQueryData(CURSOR_KEY))),
   );
   /** Bumped to retry after a 401/403 once `headers` changed. */
   const [attempt, setAttempt] = useState(0);
@@ -504,14 +505,14 @@ export function setLiveCursor(queryClient: QueryClient, cursor: LiveCursor | und
  * live query), so the caller knows its own write is on its way into the cache.
  * `receipt` is what the mutation returned: `receipts.of(txid)` of its own
  * transaction, never the raw id.
- * Rejects with E006 after `timeoutMs` (default 10 000), and with E001 when no
- * `LiveProvider` is mounted for `queryClient`.
+ * Resolves a `live.receipt_timeout` failure after `timeoutMs` (default 10 000), and
+ * rejects with E001 when no `LiveProvider` is mounted for `queryClient` (a caller bug).
  */
 export function awaitTxId(
   queryClient: QueryClient,
   receipt: LiveReceipt,
   options: { readonly timeoutMs?: number } = {},
-): Promise<void> {
+): Promise<void | ReturnType<typeof ReceiptTimeout>> {
   const session = sessions.get(queryClient);
   if (session === undefined) {
     return Promise.reject(

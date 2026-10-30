@@ -14,6 +14,7 @@ import { getLogger } from '@arki/log';
 import type { OnMessage, TransactionalPubSub } from '../types.js';
 import type { PubsubTable } from './table.js';
 import { PubSubError } from '../errors.js';
+import { deliver } from '../deliver.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
 import { pubsubTable } from './table.js';
 
@@ -92,7 +93,7 @@ export function sqlitePubSub(options: SqlitePubSubOptions<SqlitePubSubDb>): Tran
       .orderBy(asc(table.id))
       .limit(POLL_BATCH)
       .catch((error: unknown) => {
-        log.debug('poll failed, trying again in {intervalMs} ms: {message}', {
+        log.warn('poll failed, trying again in {intervalMs} ms: {message}', {
           intervalMs,
           message: error instanceof Error ? error.message : String(error),
         });
@@ -102,14 +103,7 @@ export function sqlitePubSub(options: SqlitePubSubOptions<SqlitePubSubDb>): Tran
       cursor = Math.max(cursor, row.id);
       for (const subscription of channels.get(row.channel) ?? []) {
         if (row.id <= subscription.after || !channels.get(row.channel)?.has(subscription)) continue;
-        try {
-          subscription.onMessage(row.payload);
-        } catch (error) {
-          log.warn('a subscriber on {channel} threw: {message}', {
-            channel: row.channel,
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
+        deliver(row.channel, subscription.onMessage, row.payload);
       }
     }
   }

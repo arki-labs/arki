@@ -10,7 +10,7 @@
  * - Sitemap index pointing at shards: `sitemapIndexResponse({ shards })`
  */
 
-const DEFAULT_CACHE_SECONDS = 3_600; // 1 hour
+const DEFAULT_CACHE_SECONDS = 3600; // 1 hour
 
 const SITEMAP_NS = 'http://www.sitemaps.org/schemas/sitemap/0.9';
 
@@ -49,13 +49,24 @@ const escapeXml = (value: string) =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
 
-const toIsoDate = (date: Date) => date.toISOString();
+/**
+ * The date as ISO text, or `undefined` for an Invalid Date. `toISOString()` throws on an
+ * Invalid Date, which would fail the whole sitemap for one entry; `<lastmod>` is optional,
+ * so the entry stays listed without it.
+ */
+const toIsoDate = (date: Date): string | undefined =>
+  Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+
+const lastmodLine = (date: Date): string[] => {
+  const iso = toIsoDate(date);
+  return iso === undefined ? [] : [`    <lastmod>${iso}</lastmod>`];
+};
 
 const renderUrlEntry = (entry: SitemapEntry) => {
   const lines = [
     '  <url>',
     `    <loc>${escapeXml(entry.url)}</loc>`,
-    `    <lastmod>${toIsoDate(entry.lastModified)}</lastmod>`,
+    ...lastmodLine(entry.lastModified),
   ];
   if (entry.changeFrequency) {
     lines.push(`    <changefreq>${entry.changeFrequency}</changefreq>`);
@@ -71,12 +82,12 @@ const renderIndexEntry = (entry: SitemapIndexEntry) =>
   [
     '  <sitemap>',
     `    <loc>${escapeXml(entry.url)}</loc>`,
-    `    <lastmod>${toIsoDate(entry.lastModified)}</lastmod>`,
+    ...lastmodLine(entry.lastModified),
     '  </sitemap>',
   ].join('\n');
 
 /**
- * Renders a sitemap urlset XML body.
+ * Renders a sitemap urlset XML body. An entry with an Invalid Date is listed without `<lastmod>`.
  * Use directly when you need the raw string; otherwise prefer `sitemapResponse`.
  */
 export function renderUrlset(entries: readonly SitemapEntry[]): string {

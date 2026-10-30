@@ -19,6 +19,7 @@ import { listenOnPool } from '@arki/db/pg';
 import { getLogger } from '@arki/log';
 
 import type { OnMessage, TransactionalPubSub } from '../types.js';
+import { deliver } from '../deliver.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
 
 const log = getLogger('arki:pubsub');
@@ -80,14 +81,7 @@ export function pgPubSub(options: PgPubSubOptions): TransactionalPubSub<PgTransa
           options.listen,
         )(payload => {
           for (const callback of callbacks) {
-            try {
-              callback(payload);
-            } catch (error) {
-              log.warn('a subscriber on {channel} threw: {message}', {
-                channel: name,
-                message: error instanceof Error ? error.message : String(error),
-              });
-            }
+            deliver(name, callback, payload);
           }
         });
         channel = { callbacks, listening };

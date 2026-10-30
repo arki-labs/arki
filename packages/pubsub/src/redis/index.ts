@@ -8,6 +8,7 @@ import type { Redis } from 'ioredis';
 import { getLogger } from '@arki/log';
 
 import type { OnMessage, PubSub } from '../types.js';
+import { deliver } from '../deliver.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
 
 const log = getLogger('arki:pubsub');
@@ -33,18 +34,11 @@ export function redisPubSub(options: RedisPubSubOptions): PubSub {
     const created = client.duplicate();
     created.on('message', (name, payload) => {
       for (const callback of channels.get(name)?.callbacks ?? []) {
-        try {
-          callback(payload);
-        } catch (error) {
-          log.warn('a subscriber on {channel} threw: {message}', {
-            channel: name,
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
+        deliver(name, callback, payload);
       }
     });
     created.on('error', (error: Error) => {
-      log.debug('redis subscriber connection error: {message}', { message: error.message });
+      log.warn('redis subscriber connection error: {message}', { message: error.message });
     });
     log.debug('redis subscriber connection opened');
     subscriber = created;

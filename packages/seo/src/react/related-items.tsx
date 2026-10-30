@@ -83,7 +83,7 @@ function ItemCard({
   Icon: ComponentType<{ className?: string }>;
 }) {
   return (
-    <Link to={hrefBuilder(item.key) as string} className="group block h-full">
+    <Link to={hrefBuilder(item.key)} className="group block h-full">
       <Card
         className={cn(
           'relative flex h-full flex-col overflow-hidden transition-all duration-300',
@@ -192,7 +192,7 @@ export function RelatedItemsCompact({
         {items.map(item => (
           <li key={item.key}>
             <Link
-              to={hrefBuilder(item.key) as string}
+              to={hrefBuilder(item.key)}
               className="group flex items-center gap-2 text-foreground transition-colors hover:text-primary"
             >
               <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground group-hover:text-primary" />

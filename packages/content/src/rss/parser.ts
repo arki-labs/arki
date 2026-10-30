@@ -9,7 +9,7 @@ import type {
   FeedPerson,
   ParseFeedOptions,
 } from './types';
-import { FeedError } from './types';
+import { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types';
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ITEMS = 10_000;
@@ -195,9 +195,8 @@ function atomItem(row: Node): FeedItem {
   return item;
 }
 
-function rssFeed(root: Node, channel: Node, maxItems: number): Feed {
+function rssFeed(root: Node, channel: Node): Feed {
   const items = list(channel.item);
-  if (items.length > maxItems) throw new FeedError('FEED_LIMIT_EXCEEDED', `Feed has more than ${maxItems} items.`);
   const links = list(channel.link).flatMap(entry => {
     // Plain RSS <link> is text; Atom-namespaced links are objects with attributes.
     const parsed = typeof entry === 'string' ? undefined : link(entry);
@@ -237,9 +236,8 @@ function rssFeed(root: Node, channel: Node, maxItems: number): Feed {
   return feed;
 }
 
-function atomFeed(root: Node, channel: Node, maxItems: number): Feed {
+function atomFeed(root: Node, channel: Node): Feed {
   const entries = list(channel.entry);
-  if (entries.length > maxItems) throw new FeedError('FEED_LIMIT_EXCEEDED', `Feed has more than ${maxItems} items.`);
   const links = list(channel.link).flatMap(entry => {
     const parsed = link(entry);
     return parsed ? [parsed] : [];
@@ -285,32 +283,31 @@ function byteLength(xml: string, max: number): number {
 /**
  * Parse an RSS 2.0 or Atom 1.0 document into a {@link Feed}.
  *
- * Throws {@link FeedError}: `FEED_TOO_LARGE`, `FEED_MALFORMED` (not well-formed XML or not a feed),
- * `FEED_UNSUPPORTED` (DOCTYPE or entity declarations), `FEED_LIMIT_EXCEEDED` (too many items).
+ * Returns a failure for text from outside, never throws: `content.feed_too_large`,
+ * `content.feed_malformed` (not well-formed XML or not a feed), `content.feed_unsupported`
+ * (DOCTYPE or entity declarations), `content.feed_limit_exceeded` (too many items).
  */
-export function parseFeed(xml: string, options: ParseFeedOptions = {}): Feed {
+export function parseFeed(
+  xml: string,
+  options: ParseFeedOptions = {},
+): Feed | ReturnType<typeof FeedTooLarge | typeof FeedMalformed | typeof FeedUnsupported | typeof FeedLimitExceeded> {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
-  if (byteLength(xml, maxBytes) > maxBytes) {
-    throw new FeedError('FEED_TOO_LARGE', `Feed is larger than ${maxBytes} bytes.`);
-  }
-  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
-    throw new FeedError('FEED_UNSUPPORTED', 'Feed entity declarations are not supported.');
-  }
-  const validation = XMLValidator.validate(xml);
-  if (validation !== true) {
-    throw new FeedError('FEED_MALFORMED', `Feed is not well-formed XML: ${validation.err.msg}`);
-  }
+  if (byteLength(xml, maxBytes) > maxBytes) return FeedTooLarge();
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) return FeedUnsupported();
+  if (XMLValidator.validate(xml) !== true) return FeedMalformed();
   const document = node(xmlParser.parse(xml));
   if (document.rss !== undefined) {
     const root = node(document.rss);
     const channel = node(root.channel);
-    if (Object.keys(channel).length === 0) throw new FeedError('FEED_MALFORMED', 'RSS feed has no channel.');
-    return rssFeed(root, channel, maxItems);
+    if (Object.keys(channel).length === 0) return FeedMalformed();
+    if (list(channel.item).length > maxItems) return FeedLimitExceeded();
+    return rssFeed(root, channel);
   }
   if (document.feed !== undefined) {
     const root = node(document.feed);
-    return atomFeed(root, root, maxItems);
+    if (list(root.entry).length > maxItems) return FeedLimitExceeded();
+    return atomFeed(root, root);
   }
-  throw new FeedError('FEED_MALFORMED', 'Not an RSS or Atom feed.');
+  return FeedMalformed();
 }

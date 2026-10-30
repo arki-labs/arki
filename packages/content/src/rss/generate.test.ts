@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateAtom, generateFeed, generateRss } from './generate';
+import { orThrow } from '@arki/failure';
+
 import type { Feed } from './index';
-import { parseFeed } from './index';
+import { generateAtom, generateFeed, generateRss } from './generate';
+import { parseFeed as parseFeedResult } from './index';
+
+const parseFeed = (xml: string) => orThrow(parseFeedResult(xml));
 
 const feed: Feed = {
   format: 'rss',
@@ -101,5 +105,27 @@ describe('generateFeed', () => {
   it('picks the writer by format', () => {
     expect(generateFeed(feed, 'rss')).toContain('<rss');
     expect(generateFeed(feed, 'atom')).toContain('<feed');
+  });
+});
+
+describe('an Invalid Date', () => {
+  // Why: `toISOString()` throws RangeError; one bad entry must not fail the whole feed.
+  const bad = new Date('not a date');
+  const broken: Feed = {
+    ...feed,
+    updated: bad,
+    items: feed.items.flatMap(item => [{ ...item, published: bad, updated: bad }, item]),
+  };
+
+  it('Atom skips the bad date and still writes the whole feed', () => {
+    const xml = generateAtom(broken);
+    expect(xml).not.toContain('Invalid');
+    expect(orThrow(parseFeedResult(xml)).items).toHaveLength(2);
+  });
+
+  it('RSS leaves out the bad pubDate and lastBuildDate', () => {
+    const xml = generateRss(broken);
+    expect(xml).not.toContain('Invalid Date');
+    expect(orThrow(parseFeedResult(xml)).items).toHaveLength(2);
   });
 });

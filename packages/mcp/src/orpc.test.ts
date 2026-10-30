@@ -434,6 +434,31 @@ describe('fromRpc', () => {
   });
 });
 
+describe('fromRpc policy validation', () => {
+  it('refuses a malformed meta.mcp when the tools are built, with the path of the procedure', () => {
+    // Why: the policy is outside input (contract meta is plain data); a bad one must stop boot, not a call.
+    const bad = oc
+      .input(z.string())
+      .output(z.string())
+      .meta({ mcp: { description: 'x', access: 'everyone', effect: 'read' } });
+    const router = implement({ bad }).router({ bad: implement({ bad }).bad.handler(({ input }) => input) });
+    expect(() =>
+      fromRpc({ feature: 'x', contract: { bad }, router }, { client: () => createRouterClient(router) }),
+    ).toThrow('Invalid MCP policy at bad');
+  });
+
+  it('refuses a destructive tool with no confirmation', () => {
+    const bad = oc
+      .input(z.string())
+      .output(z.string())
+      .meta({ mcp: { description: 'x', access: 'user', effect: 'destructive' } });
+    const router = implement({ bad }).router({ bad: implement({ bad }).bad.handler(({ input }) => input) });
+    expect(() =>
+      fromRpc({ feature: 'x', contract: { bad }, router }, { client: () => createRouterClient(router) }),
+    ).toThrow('Invalid MCP policy at bad');
+  });
+});
+
 describe('fromRpc exact adapter failures', () => {
   it('returns mcp.approval_required when a destructive call has no approver or the approver refuses', async () => {
     let executions = 0;

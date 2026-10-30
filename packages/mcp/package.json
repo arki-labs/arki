@@ -77,10 +77,12 @@
   "dependencies": {
     "@arki/auth": "workspace:*",
     "@arki/failure": "workspace:*",
+    "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@modelcontextprotocol/server": "catalog:ai",
     "@orpc/client": "catalog:backend",
-    "@orpc/contract": "catalog:backend"
+    "@orpc/contract": "catalog:backend",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
@@ -92,8 +94,7 @@
     "@orpc/server": "catalog:backend",
     "@types/node": "catalog:node",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   },
   "prettier": "@arki/prettier-config"
 }

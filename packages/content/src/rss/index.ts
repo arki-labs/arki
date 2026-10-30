@@ -1,7 +1,6 @@
 export { parseFeed } from './parser';
 export type {
   Feed,
-  FeedErrorCode,
   FeedExtension,
   FeedExtensions,
   FeedItem,
@@ -9,4 +8,4 @@ export type {
   FeedPerson,
   ParseFeedOptions,
 } from './types';
-export { FeedError } from './types';
+export { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types';

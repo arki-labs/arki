@@ -349,7 +349,7 @@ describe('durable schedules', () => {
     const local = defineSchedule({ name: 'local', every: '1h', handler: async () => {} });
     const runtime = createScheduleRuntime({ schedules: [nightly, sweep, local], durable: fake });
 
-    runtime.start();
+    orThrow(await runtime.start());
     await runtime.stop();
 
     expect(fake.registered.map(({ run: _run, ...rest }) => rest)).toEqual([
@@ -378,7 +378,7 @@ describe('durable schedules', () => {
       createContext: () => ({ tenant: 'acme' }),
     });
 
-    runtime.start();
+    orThrow(await runtime.start());
     await expect(registration(fake, 'nightly').run()).resolves.toEqual({ name: 'nightly', status: 'ran' });
     expect(seen).toEqual(['acme']);
     expect(runtime.lockContention).toBe(0);
@@ -397,7 +397,7 @@ describe('durable schedules', () => {
     });
     const runtime = createScheduleRuntime({ schedules: [failing], durable: fake });
 
-    runtime.start();
+    orThrow(await runtime.start());
     await expect(registration(fake, 'failing').run()).resolves.toEqual({
       name: 'failing',
       status: 'handler-failed',
@@ -407,12 +407,12 @@ describe('durable schedules', () => {
     await runtime.stop();
   });
 
-  it('a bare runtime with a durable schedule and no backend fails at start with a coded error', () => {
+  it('a bare runtime with a durable schedule and no backend fails at start with a coded error', async () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
     const runtime = createScheduleRuntime({ schedules: [nightly] });
 
     try {
-      runtime.start();
+      orThrow(await runtime.start());
       throw new Error('Expected start to throw.');
     } catch (error) {
       expect(error).toBeInstanceOf(ScheduleError);
@@ -485,5 +485,31 @@ describe('durable schedules', () => {
     defineApp('durable-no-backend').entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }));
     // @ts-expect-error durable takes the DurableSchedules token, not a boolean.
     schedule({ schedules: [nightly], durable: true });
+  });
+});
+
+describe('durable start failure', () => {
+  it('start resolves schedule.durable_start_failed when the durable backend rejects,', async () => {
+    const refusing: DurableScheduler = {
+      async start() {
+        throw new Error('redis down');
+      },
+      async stop() {},
+    };
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const runtime = createScheduleRuntime({ schedules: [nightly], durable: refusing });
+
+    const started = await runtime.start();
+    await runtime.stop();
+
+    expect(started?.code).toBe('schedule.durable_start_failed');
+  });
+
+  it('start resolves undefined when the durable backend registers', async () => {
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const runtime = createScheduleRuntime({ schedules: [nightly], durable: fakeDurableScheduler() });
+
+    expect(await runtime.start()).toBeUndefined();
+    await runtime.stop();
   });
 });

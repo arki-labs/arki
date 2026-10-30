@@ -7,6 +7,7 @@ import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 
 import type { LiveScopes, TableTag } from '../types.js';
+import { debugSource } from '../debug.js';
 import { LIVE_ERROR_CODES, liveError } from '../errors.js';
 import { tagKey } from '../manifest.js';
 import { MAX_KEY_BYTES } from '../schema.js';
@@ -16,8 +17,9 @@ import { checkTags, liveChannel, MAX_KEYS } from './migration.js';
 /**
  * `await touch(tx, 'blog', { schema: 'public', table: 'post_stats' })` after `refresh materialized view`.
  * A scoped tag takes the changed `keys`: `touch(tx, { app: 'blog', scopes }, { schema, table, keys: [orgId] })`.
- * With `scopes`, a scoped tag without keys, keys on an unscoped tag, or a key that is not of the
- * dimension's kind is E001, and keys are written the way Postgres prints them (a UUID in lower
+ * With `scopes`, a scoped tag without keys or keys on an unscoped tag is E001. A key that is not of the
+ * dimension's kind, or is over the size limit, is data: it falls back to a table-wide hint instead of
+ * throwing inside your transaction. Keys are written the way Postgres prints them (a UUID in lower
  * case). The payload is built by the same SQL as the trigger's, so a touch and a trigger for one
  * table (and key) in one transaction collapse into one notification.
  */
@@ -59,18 +61,27 @@ export async function touch(
     if (tag.keys.length === 0 || tag.keys.length > MAX_KEYS) {
       fail(checked, `${tag.keys.length} keys`, `Pass 1 to ${MAX_KEYS} keys; more is a reset, not a hint.`);
     }
+    const normalizedKeys: string[] = [];
+    let badKey: string | undefined;
     for (const key of tag.keys) {
       const normalized = scope === undefined ? key : normalizeKey(scope.kind, key);
       if (normalized === undefined || new TextEncoder().encode(normalized).length > MAX_KEY_BYTES) {
-        fail(
-          checked,
-          `bad key ${JSON.stringify(key)}`,
-          `A key is a ${scope?.kind ?? 'text'} key of at most ${MAX_KEY_BYTES} bytes.`,
-        );
+        badKey ??= key;
       } else {
-        keyed.push({ ...checked, key: normalized });
+        normalizedKeys.push(normalized);
       }
     }
+    if (badKey !== undefined) {
+      // A key is data, not a declaration: throwing here would roll back the caller's write.
+      // A table-wide hint is always safe; it only makes clients refetch more than they need.
+      debugSource.debug('{tag}: bad key {key}; touching the whole table instead', {
+        tag: tagKey(checked),
+        key: JSON.stringify(badKey),
+      });
+      plain.push(checked);
+      continue;
+    }
+    for (const key of normalizedKeys) keyed.push({ ...checked, key });
   }
   if (plain.length > 0) {
     await tx.execute(sql`

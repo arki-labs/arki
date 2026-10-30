@@ -242,7 +242,7 @@ export function defineSchedule(
   };
 }
 
-export { ScheduleError, ScheduleLockFailed, SCHEDULE_ERROR_CODES, SCHEDULE_RUNTIME_FAILURES } from './errors.js';
+export { ScheduleDurableStartFailed, ScheduleError, ScheduleLockFailed, SCHEDULE_ERROR_CODES, SCHEDULE_RUNTIME_FAILURES } from './errors.js';
 export type {
   DurableScheduleRegistration,
   DurableScheduler,

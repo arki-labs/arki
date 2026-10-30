@@ -84,7 +84,14 @@ function namespaceAttributes(feed: Feed, needed: string[]): Record<string, strin
   return result;
 }
 
-const rfc822 = (value: Date): string => value.toUTCString();
+/**
+ * A date written with `format`, or `undefined` for an Invalid Date (a bad parse upstream).
+ * `toISOString()` throws on an Invalid Date, which would fail the whole feed for one entry.
+ */
+const moment = (value: Date | undefined, format: (date: Date) => string): string | undefined =>
+  value !== undefined && Number.isFinite(value.getTime()) ? format(value) : undefined;
+const rfc822 = (date: Date): string => date.toUTCString();
+const iso = (date: Date): string => date.toISOString();
 
 function rssItem(item: FeedItem): XmlElement {
   const permalink = item.id !== undefined && item.id === item.link;
@@ -98,7 +105,7 @@ function rssItem(item: FeedItem): XmlElement {
         : [{ name: 'guid', attributes: { isPermaLink: String(permalink) }, children: item.id }]),
       ...text('description', item.summary),
       ...text('content:encoded', item.content),
-      ...(item.published ? text('pubDate', rfc822(item.published)) : []),
+      ...text('pubDate', moment(item.published, rfc822)),
       ...item.authors.flatMap(author => text('dc:creator', author.name)),
       ...item.categories.flatMap(category => text('category', category)),
       ...item.links
@@ -133,7 +140,7 @@ export function generateRss(feed: Feed, options: GenerateFeedOptions = {}): stri
       ...text('copyright', feed.copyright),
       ...text('managingEditor', feed.managingEditor),
       ...text('webMaster', feed.webMaster),
-      ...(feed.updated ? text('lastBuildDate', rfc822(feed.updated)) : []),
+      ...text('lastBuildDate', moment(feed.updated, rfc822)),
       ...text('generator', feed.generator),
       ...(feed.ttl === undefined ? [] : text('ttl', String(feed.ttl))),
       ...(feed.image
@@ -172,13 +179,16 @@ const atomLink = (value: FeedLink): XmlElement => ({
 });
 
 function latest(feed: Feed): Date {
-  const times = feed.items.flatMap(item => [item.updated, item.published]).flatMap(d => (d ? [d.getTime()] : []));
+  const times = feed.items
+    .flatMap(item => [item.updated, item.published])
+    .flatMap(d => (d !== undefined && Number.isFinite(d.getTime()) ? [d.getTime()] : []));
   return new Date(times.length > 0 ? Math.max(...times) : 0);
 }
 
 function atomEntry(item: FeedItem): XmlElement {
   const id = item.id ?? item.link ?? item.title;
-  const updated = item.updated ?? item.published ?? new Date(0);
+  // `updated` is required in Atom: a bad date falls back to the next one, then to the epoch.
+  const updated = moment(item.updated, iso) ?? moment(item.published, iso) ?? iso(new Date(0));
   return {
     name: 'entry',
     children: [
@@ -186,8 +196,8 @@ function atomEntry(item: FeedItem): XmlElement {
       ...text('title', item.title),
       ...(item.link ? [atomLink({ href: item.link, rel: 'alternate' })] : []),
       ...item.links.map(l => atomLink(l)),
-      ...text('updated', updated.toISOString()),
-      ...(item.published ? text('published', item.published.toISOString()) : []),
+      ...text('updated', updated),
+      ...text('published', moment(item.published, iso)),
       ...item.authors.map(author => person('author', author)),
       ...item.categories.map((term): XmlElement => ({ name: 'category', attributes: { term } })),
       ...text('summary', item.summary),
@@ -212,7 +222,7 @@ export function generateAtom(feed: Feed, options: GenerateFeedOptions = {}): str
       ...text('id', feed.id ?? feed.link ?? feed.title),
       ...text('title', feed.title),
       ...text('subtitle', feed.description),
-      ...text('updated', (feed.updated ?? latest(feed)).toISOString()),
+      ...text('updated', moment(feed.updated, iso) ?? iso(latest(feed))),
       ...(feed.link ? [atomLink({ href: feed.link, rel: 'alternate' })] : []),
       ...feed.links.map(l => atomLink(l)),
       ...feed.authors.map(author => person('author', author)),

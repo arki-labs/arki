@@ -46,7 +46,7 @@ describe('JsonLdScript', () => {
     const match = html.match(/>(.+?)<\/script>/);
     expect(match).toBeTruthy();
     // After unescaping \u003c back to <, the JSON should parse correctly
-    const jsonStr = match![1]!.replace(/\\u003c/g, '<');
+    const jsonStr = match![1]!.replaceAll('\\u003c', '<');
     const parsed = JSON.parse(jsonStr);
     expect(parsed['@context']).toBe('https://schema.org');
     expect(parsed['@type']).toBe('WebSite');

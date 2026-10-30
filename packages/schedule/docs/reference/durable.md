@@ -64,7 +64,8 @@ const runtime = createScheduleRuntime({
   durable: createDurableScheduler({ connection: process.env.REDIS_URL ?? '', keyPrefix: 'billing:' }),
 });
 
-runtime.start(); // durable schedules go to BullMQ, the rest run in process
+const started = await runtime.start(); // durable schedules go to BullMQ, the rest run in process
+// `started` is a `schedule.durable_start_failed` failure when BullMQ refused them; none of them will run.
 // On shutdown:
 await runtime.stop();
 ```

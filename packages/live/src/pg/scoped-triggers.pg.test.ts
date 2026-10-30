@@ -229,6 +229,17 @@ describe.each([
     await settle();
   });
 
+  it('T2b: touch with a bad key (over 512 bytes) hints the whole table and the caller write still commits', async () => {
+    // Why: throwing here would roll back the caller's own write for a hint-only mistake.
+    await backend.transaction(async tx => {
+      await tx.execute(sql`INSERT INTO docs VALUES (20, 'Z')`);
+      await touch(tx, { app: 'blog', scopes }, { ...DOCS, keys: ['k'.repeat(513)] });
+    });
+    expect(await settleSorted()).toEqual(['docs:*', 'docs:Z']);
+    await backend.exec(`DELETE FROM docs`);
+    await settle();
+  });
+
   it('T3: past 65 536 keys, or a key past 512 bytes, a statement sends one overflow and still commits', async () => {
     await backend.exec(`INSERT INTO docs SELECT g, 'k' || g FROM generate_series(1, 65537) AS g`);
     expect(await settle()).toEqual(['docs:OVERFLOW']);

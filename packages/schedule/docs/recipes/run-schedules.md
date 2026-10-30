@@ -7,6 +7,7 @@ A schedule has a `name`, a timing (`cron` or `every`) and a `handler`. `createSc
 The schedule below sets `overlap: 'skip'`. While one run is active in this process, a second run is `skipped-overlap` and the handler does not start. Without it, both would run.
 
 ```ts from="examples/run-schedules.ts#run"
+import { orThrow } from '@arki/failure';
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
@@ -21,7 +22,7 @@ const doughProof = defineSchedule({
 });
 
 const runtime = createScheduleRuntime({ schedules: [doughProof] });
-runtime.start(); // arms the timer: the first tick is an hour away
+orThrow(await runtime.start()); // arms the timer: the first tick is an hour away
 
 // Run it now, as a test or an admin button would.
 const first = runtime.trigger('nightly-dough-proof');

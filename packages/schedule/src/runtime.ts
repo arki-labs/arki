@@ -1,4 +1,5 @@
 import { Cron } from 'croner';
+import { z } from 'zod';
 
 import type { Failure, FailureIn } from '@arki/failure';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
@@ -6,7 +7,13 @@ import { getLogger } from '@arki/log';
 
 import type { SCHEDULE_RUNTIME_FAILURES } from './errors.js';
 import type { ScheduleDef, ScheduleLock } from './index.js';
-import { lockCodeSchema, SCHEDULE_ERROR_CODES, ScheduleError, ScheduleLockFailed } from './errors.js';
+import {
+  lockCodeSchema,
+  SCHEDULE_ERROR_CODES,
+  ScheduleDurableStartFailed,
+  ScheduleError,
+  ScheduleLockFailed,
+} from './errors.js';
 import { DEFAULT_LOCK_HOLD_MS, parseEveryInterval } from './index.js';
 import { observe, observeSchedule } from './telemetry.js';
 
@@ -109,7 +116,13 @@ type RuntimeValueOf<
   : never;
 
 export type ScheduleRuntime<TDefinitions extends readonly ScheduleDef<never>[] = readonly ScheduleDef<never>[]> = {
-  start(): void;
+  /**
+   * Arm the in-process timers, then register the durable schedules. Resolves
+   * `schedule.durable_start_failed` when the durable backend refuses, so the
+   * caller (the Dot `start` hook) fails at start instead of running without
+   * its durable schedules. In-process timers are armed before the first await.
+   */
+  start(): Promise<ReturnType<typeof ScheduleDurableStartFailed> | undefined>;
   /** Stop firing, refuse new triggers (`unavailable`) and wait for accepted runs to finish. */
   stop(): Promise<void>;
   /** Returned business refusals and supervised handler defects. Scheduling skips do not increment this. */
@@ -135,10 +148,13 @@ export type ScheduleRuntime<TDefinitions extends readonly ScheduleDef<never>[] =
       ): Promise<ScheduleRunResult<RuntimeValueOf<TDefinitions, TName>>>;
     });
 
-/** The `code` of a `LockError`-like failure, read without importing the lock library. */
+/** A `LockError`-like failure: only its string `code` is read, without importing the lock library. */
+const lockErrorSchema = z.object({ code: z.string() });
+
+/** The `code` of a `LockError`-like failure, or `undefined` when the value has none. */
 function lockErrorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return typeof error.code === 'string' ? error.code : undefined;
+  const parsed = lockErrorSchema.safeParse(error);
+  return parsed.success ? parsed.data.code : undefined;
 }
 
 function hasUnref(value: TimerHandle): value is TimerHandle & UnrefHandle {
@@ -153,6 +169,10 @@ function randomDelay(max: number): number {
   if (max <= 0) return 0;
   return Math.floor(Math.random() * (max + 1));
 }
+
+/** What `start()` resolves when there is nothing to report. */
+// eslint-disable-next-line unicorn/no-useless-undefined -- the resolved value is the `undefined` half of start()'s result type
+const STARTED_CLEAN: Promise<undefined> = Promise.resolve(undefined);
 
 function ignorePromiseSettlement(): void {
   return;
@@ -410,29 +430,37 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
     return [];
   }
 
-  function startDurable(durable: DurableScheduler, schedules: readonly ScheduleDef<TContext>[]): void {
+  async function startDurable(
+    durable: DurableScheduler,
+    schedules: readonly ScheduleDef<TContext>[],
+  ): Promise<ReturnType<typeof ScheduleDurableStartFailed> | undefined> {
     durableStarted = true;
-    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch(() => {
-      observe(() => debugSchedule.debug('durable registration failed', { code: UnexpectedDefect.code }));
+    try {
+      await trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule))));
+      return undefined;
+    } catch (error) {
+      const failure = ScheduleDurableStartFailed({ cause: error });
       observe(() =>
         log.error('schedule durable registration failed', {
           schedules: schedules.map(schedule => schedule.name).join(','),
-          code: UnexpectedDefect.code,
+          code: failure.code,
         }),
       );
-    });
+      return failure;
+    }
   }
 
   return {
     start() {
-      if (stopped) return;
+      if (stopped) return STARTED_CLEAN;
       // The host owns the clock: nothing is armed; runs come only from trigger.
-      if (clock === 'host') return;
+      if (clock === 'host') return STARTED_CLEAN;
       assertDurableBackend(options.schedules, options.durable);
       const durableSchedules = options.schedules.filter(schedule => schedule.durable);
-      if (options.durable !== undefined && durableSchedules.length > 0) {
-        startDurable(options.durable, durableSchedules);
-      }
+      const durableStart =
+        options.durable !== undefined && durableSchedules.length > 0
+          ? startDurable(options.durable, durableSchedules)
+          : STARTED_CLEAN;
       for (const schedule of options.schedules) {
         if (schedule.durable) continue;
         if (schedule.cron === undefined) {
@@ -453,6 +481,7 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
           ),
         );
       }
+      return durableStart;
     },
     async stop() {
       stopped = true;

@@ -18,6 +18,7 @@ bun add @arki/schedule
 ## Quick start
 
 ```ts run expect
+import { orThrow } from '@arki/failure';
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
@@ -28,7 +29,7 @@ const doughProof = defineSchedule({
 });
 
 const runtime = createScheduleRuntime({ schedules: [doughProof] });
-runtime.start(); // arms the timer for 04:00
+orThrow(await runtime.start()); // arms the timer for 04:00
 
 const result = await runtime.trigger('nightly-dough-proof'); // run it now
 if (result.status === 'ran') console.log(`ran: ${result.value.rows} rows`);
@@ -117,6 +118,7 @@ A run never throws to the timer. It reports a `ScheduleRunResult`.
 A wrong declaration throws a `ScheduleError` with a code `ARKI_SCHEDULE_E001` to `E009` and a `.remediation`. The code is thrown at definition, boot or `start()`, never inside a tick. Each code has a fix and a check command in its JSDoc. The status table is checked by the example in [Run schedules](docs/recipes/run-schedules.md):
 
 ```ts from="examples/run-schedules.ts#run"
+import { orThrow } from '@arki/failure';
 import { defineSchedule } from '@arki/schedule';
 import { createScheduleRuntime } from '@arki/schedule/runtime';
 
@@ -131,7 +133,7 @@ const doughProof = defineSchedule({
 });
 
 const runtime = createScheduleRuntime({ schedules: [doughProof] });
-runtime.start(); // arms the timer: the first tick is an hour away
+orThrow(await runtime.start()); // arms the timer: the first tick is an hour away
 
 // Run it now, as a test or an admin button would.
 const first = runtime.trigger('nightly-dough-proof');

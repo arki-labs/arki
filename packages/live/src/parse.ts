@@ -3,17 +3,19 @@
  * cursor from storage or a dehydrated page. Plain functions over the
  * internal schemas, so no validator type leaks into the public API.
  */
-import type { LiveCursor, LiveEvent } from './types.js';
+import { parse } from '@arki/schema';
+
 import { liveCursorSchema, liveEventSchema } from './schema.js';
 
-/** A frame, or `undefined` for anything that is not one (unknown kind, extra key, bad cursor, too many tags). */
-export function parseLiveEvent(input: unknown): LiveEvent | undefined {
-  const parsed = liveEventSchema.safeParse(input);
-  return parsed.success ? parsed.data : undefined;
+/**
+ * A frame, or a `schema.invalid_input` failure for anything that is not one
+ * (unknown kind, extra key, bad cursor, too many tags).
+ */
+export function parseLiveEvent(input: unknown) {
+  return parse(liveEventSchema, input);
 }
 
-/** A cursor exactly as a frame gave it, or `undefined`. */
-export function parseLiveCursor(input: unknown): LiveCursor | undefined {
-  const parsed = liveCursorSchema.safeParse(input);
-  return parsed.success ? parsed.data : undefined;
+/** A cursor exactly as a frame gave it, or a `schema.invalid_input` failure. */
+export function parseLiveCursor(input: unknown) {
+  return parse(liveCursorSchema, input);
 }

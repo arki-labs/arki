@@ -4,21 +4,23 @@ import type { ArticleSchemaProps } from '../types';
 import { JsonLdScript } from './json-ld-script';
 
 /**
+ * A date as ISO text, a string as given, or `undefined` for an Invalid Date: `toISOString()` throws
+ * on it and would fail the whole page render, and both dates are optional in schema.org.
+ */
+function isoText(value: Date | string): string | undefined {
+  if (!(value instanceof Date)) return value;
+  return Number.isFinite(value.getTime()) ? value.toISOString() : undefined;
+}
+
+/**
  * Article schema for blog posts and content pages.
  * Displays article rich snippets with author and date.
  *
  * @see https://schema.org/Article
  */
 export function ArticleSchema({ article, siteName, siteUrl }: ArticleSchemaProps) {
-  const publishedDate =
-    article.publishedAt instanceof Date
-      ? article.publishedAt.toISOString()
-      : article.publishedAt;
-  const modifiedDate = article.modifiedAt
-    ? article.modifiedAt instanceof Date
-      ? article.modifiedAt.toISOString()
-      : article.modifiedAt
-    : publishedDate;
+  const publishedDate = isoText(article.publishedAt);
+  const modifiedDate = (article.modifiedAt ? isoText(article.modifiedAt) : undefined) ?? publishedDate;
 
   const fullUrl = article.url.startsWith('http') ? article.url : `${siteUrl}${article.url}`;
 
@@ -28,8 +30,8 @@ export function ArticleSchema({ article, siteName, siteUrl }: ArticleSchemaProps
     headline: article.title,
     description: article.description,
     url: fullUrl,
-    datePublished: publishedDate,
-    dateModified: modifiedDate,
+    ...(publishedDate === undefined ? {} : { datePublished: publishedDate }),
+    ...(modifiedDate === undefined ? {} : { dateModified: modifiedDate }),
     author: {
       '@type': 'Person',
       name: article.author.name,

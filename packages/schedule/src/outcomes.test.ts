@@ -127,7 +127,7 @@ describe('business outcomes', () => {
         stop: () => Promise.resolve(),
       },
     });
-    runtime.start();
+    orThrow(await runtime.start());
     const registration = registrations[0];
     expect(registration).toBeDefined();
     expect(await registration?.run()).toEqual({ name: 'durable-refusal', status: 'refused', failure: refusal });

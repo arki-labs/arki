@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { FeedError, parseFeed } from './index';
+import { orThrow } from '@arki/failure';
+
+import { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported, parseFeed as parseFeedResult } from './index';
+
+/** The parsed feed of a document the test knows is good. */
+const parseFeed = (xml: string, options?: Parameters<typeof parseFeedResult>[1]) =>
+  orThrow(parseFeedResult(xml, options));
 
 const rss = `<?xml version="1.0"?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
@@ -110,29 +116,28 @@ describe('parseFeed', () => {
 
   it('rejects malformed XML with a coded error', () => {
     const xml = '<rss version="2.0"><channel><title>x</channel></rss>';
-    expect(() => parseFeed(xml)).toThrow(FeedError);
-    expect(() => parseFeed(xml)).toThrow(expect.objectContaining({ code: 'FEED_MALFORMED' }));
+    expect(FeedMalformed.is(parseFeedResult(xml))).toBe(true);
   });
 
   it('rejects documents that are not feeds', () => {
-    expect(() => parseFeed('<html><body/></html>')).toThrow(expect.objectContaining({ code: 'FEED_MALFORMED' }));
+    expect(FeedMalformed.is(parseFeedResult('<html><body/></html>'))).toBe(true);
   });
 
   it('rejects entity declarations', () => {
     const bomb = '<!DOCTYPE rss [<!ENTITY a "aaaa">]><rss version="2.0"><channel><title>&a;</title></channel></rss>';
-    expect(() => parseFeed(bomb)).toThrow(expect.objectContaining({ code: 'FEED_UNSUPPORTED' }));
+    expect(FeedUnsupported.is(parseFeedResult(bomb))).toBe(true);
   });
 
   it('rejects input over the byte limit, counting UTF-8 bytes', () => {
     const body = `<rss version="2.0"><channel><title>${'é'.repeat(100)}</title></channel></rss>`;
     expect(parseFeed(body, { maxBytes: 1000 }).title).toHaveLength(100);
-    expect(() => parseFeed(body, { maxBytes: 150 })).toThrow(expect.objectContaining({ code: 'FEED_TOO_LARGE' }));
+    expect(FeedTooLarge.is(parseFeedResult(body, { maxBytes: 150 }))).toBe(true);
   });
 
   it('rejects feeds with too many items', () => {
     const items = '<item><title>x</title></item>'.repeat(3);
     const xml = `<rss version="2.0"><channel><title>t</title>${items}</channel></rss>`;
     expect(parseFeed(xml, { maxItems: 3 }).items).toHaveLength(3);
-    expect(() => parseFeed(xml, { maxItems: 2 })).toThrow(expect.objectContaining({ code: 'FEED_LIMIT_EXCEEDED' }));
+    expect(FeedLimitExceeded.is(parseFeedResult(xml, { maxItems: 2 }))).toBe(true);
   });
 });

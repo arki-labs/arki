@@ -1,4 +1,4 @@
-import type { Thing, WebSite, WithContext } from 'schema-dts';
+import type { WebSite, WithContext } from 'schema-dts';
 
 import type { WebSiteSchemaProps } from '../types';
 import { JsonLdScript } from './json-ld-script';
@@ -43,5 +43,5 @@ export function WebSiteSchema({
       }
     : base;
 
-  return <JsonLdScript id="website-schema" data={data as WithContext<Thing>} />;
+  return <JsonLdScript id="website-schema" data={data} />;
 }

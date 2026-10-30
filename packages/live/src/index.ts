@@ -25,4 +25,4 @@ export { liveReceipts } from './receipts.js';
 export type { LiveClient, LiveClientOptions, LiveStatus } from './client.js';
 export { createLiveClient } from './client.js';
 export type { LiveError } from './errors.js';
-export { LIVE_ERROR_CODES } from './errors.js';
+export { LIVE_ERROR_CODES, ReceiptTimeout } from './errors.js';

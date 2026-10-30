@@ -85,4 +85,14 @@ export const ScheduleLockFailed = defineFailure('schedule.lock_failed', {
   remediation: 'Inspect the lock provider before triggering this schedule again.',
 });
 
+/** The durable backend refused to register the durable schedules, so none of them will run.
+ * @fix Restore the durable backend (for BullMQ, the Redis connection) and start the runtime again.
+ * @verify bun run test -- src/schedule.test.ts
+ */
+export const ScheduleDurableStartFailed = /* @__PURE__ */ defineFailure('schedule.durable_start_failed', {
+  status: 503,
+  message: 'The durable backend could not register the durable schedules; they will not run.',
+  remediation: 'Restore the durable backend (for BullMQ, the Redis connection) and start the runtime again.',
+});
+
 export const SCHEDULE_RUNTIME_FAILURES = { lock: ScheduleLockFailed, defect: UnexpectedDefect } as const;

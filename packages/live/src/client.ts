@@ -27,6 +27,7 @@
  * slack) drops the connection and backs off like any lost one. In a browser,
  * `offline` drops it at once.
  */
+import { isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { LiveCursor, LiveEvent } from './types.js';
@@ -277,7 +278,7 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
         json = undefined;
       }
       const event = parseLiveEvent(json);
-      if (event === undefined) {
+      if (isFailure(event)) {
         debugClient.warn('[{code}] not a live frame: {data}', { code: LIVE_ERROR_CODES.protocol, data: message.data });
         return { next: 'backoff', reason: new Error('malformed live frame') };
       }
@@ -319,6 +320,10 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
           outcome = await connect();
         } catch (error) {
           if (stopped()) return;
+          // A throwing `onEvent` (or any other error) is retried below; say why once per attempt.
+          debugClient.warn('live connection attempt failed: {message}', {
+            message: error instanceof Error ? error.message : String(error),
+          });
           // No streaming body: retrying cannot help, so stop and say why.
           if (isLiveError(error, LIVE_ERROR_CODES.protocol)) {
             debugClient.error('{message}', { message: error.message });

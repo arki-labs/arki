@@ -213,7 +213,7 @@ describe('the first-fetch race (round 8, synthesis § 4 rows 1-3)', () => {
     await waitFor(() => expect(statuses).toContain('live'));
     expect(db.calls.posts).toBe(1); // the first fetch read v0 and is still running
     commit('posts', 'v1', '5');
-    await awaitTxId(queryClient, await RECEIPTS.of('5'));
+    expect(await awaitTxId(queryClient, await RECEIPTS.of('5'))).toBeUndefined();
     db.gate = Promise.resolve();
     gate.resolve();
     await waitFor(() => expect(queryClient.getQueryData(postsKey)).toEqual(['v1']));
@@ -354,8 +354,9 @@ describe('awaitTxId', () => {
     });
     mount(queryClient, [Posts]);
     await waitFor(() => expect(statuses).toContain('live'));
-    await expect(awaitTxId(queryClient, await RECEIPTS.of('7'), { timeoutMs: 20 })).rejects.toMatchObject({
-      code: LIVE_ERROR_CODES.limit,
+    await expect(awaitTxId(queryClient, await RECEIPTS.of('7'), { timeoutMs: 20 })).resolves.toMatchObject({
+      code: 'live.receipt_timeout',
+      data: { timeoutMs: 20 },
     });
   });
 });

@@ -99,6 +99,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
@@ -110,7 +111,6 @@
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
-    "@arki/failure": "workspace:*",
     "@arki/http": "workspace:*",
     "@arki/journal": "workspace:*",
     "@arki/library-tooling": "workspace:*",

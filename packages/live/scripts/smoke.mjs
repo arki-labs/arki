@@ -130,8 +130,8 @@ const checks = [
     JSON.stringify(liveTables([...manifest, { path: ['stats'], reads: [posts] }]).map(t => t.table)),
     '["posts","users"]',
   ],
-  ['malformed cursor', parseLiveCursor('nope'), undefined],
-  ['not a wire event', parseLiveEvent({ kind: 'change' }), undefined],
+  ['malformed cursor', parseLiveCursor('nope').code, 'schema.invalid_input'],
+  ['not a wire event', parseLiveEvent({ kind: 'change' }).code, 'schema.invalid_input'],
 ];
 
 let failed = 0;

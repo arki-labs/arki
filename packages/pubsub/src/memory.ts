@@ -5,6 +5,7 @@
 import { getLogger } from '@arki/log';
 
 import type { OnMessage, PubSub } from './types.js';
+import { deliver } from './deliver.js';
 import { checkChannel, checkMessage, checkOpen } from './limits.js';
 
 const log = getLogger('arki:pubsub');
@@ -27,14 +28,7 @@ export function memoryPubSub(): PubSub {
       queueMicrotask(() => {
         for (const onMessage of receivers) {
           if (!channels.get(channel)?.has(onMessage)) continue; // unsubscribed meanwhile
-          try {
-            onMessage(payload);
-          } catch (error) {
-            log.warn('a subscriber on {channel} threw: {message}', {
-              channel,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
+          deliver(channel, onMessage, payload);
         }
       });
     },

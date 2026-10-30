@@ -17,7 +17,7 @@ import { z } from 'zod';
 import type { LiveMeta, LiveScopes } from '../index.js';
 import { live, liveScopes } from '../drizzle/index.js';
 import { LIVE_ERROR_CODES } from '../errors.js';
-import { parseLiveEvent } from '../index.js';
+import { parseLiveCursor, parseLiveEvent } from '../index.js';
 import { liveManifest } from '../orpc/index.js';
 import { normalizeKey } from '../scopes.js';
 
@@ -166,13 +166,19 @@ describe('the wire shapes with scopes', () => {
   });
 
   it('refuses an empty key list, a key over 512 bytes, more than 1024 keys on a tag, a bad dimension', () => {
-    expect(parseLiveEvent(changeWith({ name: 'org', keys: [] }))).toBeUndefined();
-    expect(parseLiveEvent(changeWith({ name: 'org', keys: ['k'.repeat(513)] }))).toBeUndefined();
-    expect(parseLiveEvent(changeWith({ name: 'org', keys: ['k'.repeat(512)] }))).toBeDefined();
+    expect(parseLiveEvent(changeWith({ name: 'org', keys: [] }))).toMatchObject({ code: 'schema.invalid_input' });
+    expect(parseLiveEvent(changeWith({ name: 'org', keys: ['k'.repeat(513)] }))).toMatchObject({ code: 'schema.invalid_input' });
+    expect(parseLiveEvent(changeWith({ name: 'org', keys: ['k'.repeat(512)] }))).not.toMatchObject({ code: 'schema.invalid_input' });
     expect(
       parseLiveEvent(changeWith({ name: 'org', keys: Array.from({ length: 1025 }, (_, index) => `${index}`) })),
-    ).toBeUndefined();
-    expect(parseLiveEvent(changeWith({ name: 'o rg', keys: ['a'] }))).toBeUndefined();
+    ).toMatchObject({ code: 'schema.invalid_input' });
+    expect(parseLiveEvent(changeWith({ name: 'o rg', keys: ['a'] }))).toMatchObject({ code: 'schema.invalid_input' });
+  });
+});
+
+describe('parseLiveCursor', () => {
+  it('returns a schema.invalid_input failure for text that is not a cursor, never undefined', () => {
+    expect(parseLiveCursor('nope')).toMatchObject({ code: 'schema.invalid_input' });
   });
 });
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseFeed } from './rss/index';
+import { orThrow } from '@arki/failure';
+
+import { parseFeed as parseFeedResult } from './rss/index';
+
+const parseFeed = (xml: string) => orThrow(parseFeedResult(xml));
 
 import type { FeedChangelogEntry, FeedPost } from './index';
 import { buildChangelogFeed, buildPostFeed } from './index';

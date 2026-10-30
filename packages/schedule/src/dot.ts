@@ -679,7 +679,7 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
       },
     },
     start({ $state }) {
-      $state.runtime?.start();
+      return $state.runtime?.start();
     },
     async stop({ $state }) {
       await $state.runtime?.stop();

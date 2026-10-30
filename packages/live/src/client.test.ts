@@ -5,6 +5,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { fakeLog } from '@arki/log/testing';
+
 import type { LiveEvent, LiveStatus } from './index.js';
 import { createLiveClient } from './index.js';
 
@@ -124,6 +126,27 @@ describe('framing', () => {
     expect(events.map(event => event.kind)).toEqual(['hello', 'hello']);
     await vi.advanceTimersByTimeAsync(800); // second retry: 500 ms ± 25%
     expect(urls).toHaveLength(3);
+  });
+});
+
+describe('a throwing onEvent', () => {
+  it('is logged on every attempt, so a handler bug never reconnects in silence', async () => {
+    // Why: a thrown handler error becomes a backoff reason; without a log the loop leaves no trace.
+    using logs = fakeLog();
+    const { fetch, urls } = scriptedFetch([() => sse(body([frame(hello())])), () => sse(body([frame(hello())]))]);
+    const live = createLiveClient({
+      url: '/api/live',
+      fetch,
+      onEvent: () => {
+        throw new Error('handler bug');
+      },
+    });
+    live.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(urls.length).toBeGreaterThanOrEqual(2);
+    logs.assertLogged({ level: 'warn', template: 'live connection attempt failed: {message}', fields: { message: 'handler bug' } });
+    live.stop();
   });
 });
 
