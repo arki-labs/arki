@@ -147,6 +147,8 @@ A failure value from [`@arki/failure`](../failure) is a field like any other: `l
 
 The template is never turned into a string on the hot path. Formatters render it after redaction, so a secret cannot end up in the message text. `{{` and `}}` are literal braces.
 
+A custom formatter can reuse the same rules: `renderTemplate(template, fields)` fills each `{name}` from the fields and leaves a placeholder with no value as `{name}`. `serializeError(error)` turns an `Error` into plain fields: `name`, `message`, `stack`, `code`, its own fields, the `cause` chain and `AggregateError.errors`, with depth and cycles bounded.
+
 ## Context
 
 - Bound: `log.with(fields)`.

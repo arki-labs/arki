@@ -161,7 +161,7 @@ The guarantees Effect is known for (owned lifetimes, no orphaned work, cleanup t
 
 ### `scoped(plan, body, { signal, deadline }?)`
 
-Describe owned work before starting it. `resource(open, close)` acquires a value and registers cleanup only on success. `cleanup(close)` registers a finalizer; `child(run)` starts work whose settlement belongs to the scope. The body receives the successful resources and a cancellation signal.
+Describe owned work before starting it. `resource(open, close)` acquires a value and registers cleanup only on success. To tell descriptors apart without running them, `isScopeEntry(value)` is true for any `resource`, `cleanup` or `child` descriptor this module made, and `isResource(value)` only for a `resource`; neither acquires anything. `cleanup(close)` registers a finalizer; `child(run)` starts work whose settlement belongs to the scope. The body receives the successful resources and a cancellation signal.
 
 ```ts run
 import { cleanup, resource, scoped } from '@arki/async';
