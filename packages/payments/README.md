@@ -124,6 +124,7 @@ Every consuming app must:
 ## Documentation
 
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.
+- [API reference](docs/api-reference.md): every export grouped by purpose, with when to import it.
 - [llms.txt](llms.txt): the import map.
 
 ## Support

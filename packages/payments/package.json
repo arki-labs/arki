@@ -405,6 +405,7 @@
     "CHANGELOG.md",
     "llms.txt",
     "docs/agent-guide.md",
+    "docs/api-reference.md",
     "package.json"
   ],
   "scripts": {

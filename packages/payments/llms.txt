@@ -18,6 +18,7 @@
 - [Agent guide](docs/agent-guide.md): read first.
 - [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): the long overview.
+- [API reference](docs/api-reference.md): every export grouped by purpose, with when to import it.
 
 ## By task
 - [Charge or check a card](docs/agent-guide.md#charge-or-check-a-card)
