@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { InvalidArgumentError, MathError, UnsupportedFeatureError } from '@arki/math/errors';
+import { InvalidArgumentError } from '@arki/math/errors';
 
-import { ParseError } from './errors.js';
+import { InvalidLocale, InvalidSyntax, ParseError } from './errors.js';
 import { defineLanguage, scientific } from './language.js';
 import { names } from './names.js';
 import { parse } from './parser.js';
 import { print } from './print.js';
-import { canonical, decimalComma, defineSyntax, syntaxFor } from './syntax.js';
+import { canonical, decimalComma, defineSyntax, parseSyntax, syntaxFor } from './syntax.js';
 
 describe('defineLanguage', () => {
   const physics = defineLanguage({
@@ -117,13 +117,26 @@ describe('syntax', () => {
     expect(syntaxFor(['fr-FR'])).toBe(decimalComma);
   });
 
-  it('syntaxFor throws UnsupportedFeatureError without formatToParts (Hermes on iOS)', () => {
+  it('syntaxFor still reads the decimal mark without formatToParts (Hermes on iOS), instead of crashing', () => {
     Object.defineProperty(Intl.NumberFormat.prototype, 'formatToParts', {
       value: undefined,
       configurable: true,
       writable: true,
     });
-    expect(() => syntaxFor('de-DE')).toThrow(UnsupportedFeatureError);
-    expect(() => syntaxFor('de-DE')).toThrow(MathError);
+    expect(syntaxFor('de-DE')).toBe(decimalComma);
+    expect(syntaxFor('en-US')).toBe(canonical);
+  });
+
+  it('syntaxFor returns InvalidLocale for a tag Intl rejects, because the locale comes from outside', () => {
+    expect(InvalidLocale.is(syntaxFor('not a locale!'))).toBe(true);
+    expect(InvalidLocale.is(syntaxFor(['en-US', '']))).toBe(true);
+  });
+
+  it('parseSyntax returns InvalidSyntax for a stored setting that is not a syntax', () => {
+    expect(parseSyntax({ decimal: ',', separator: ';' })).toEqual(decimalComma);
+    expect(parseSyntax({ decimal: '.', separator: ',' })).toEqual(canonical);
+    for (const stored of [{ decimal: ',', separator: ',' }, { decimal: '·', separator: ';' }, 'canonical', null, {}]) {
+      expect(InvalidSyntax.is(parseSyntax(stored)), JSON.stringify(stored)).toBe(true);
+    }
   });
 });

@@ -1,6 +1,6 @@
 # @arki/math
 
-Zero-dependency math toolkit for TypeScript. Exact where it must be, fast
+Math toolkit for TypeScript, whose one dependency is `@arki/failure`. Exact where it must be, fast
 where it can be, and honest about which is which. Runs unchanged in Node 22+,
 Bun, Deno, browsers, and React Native (Hermes).
 
@@ -124,6 +124,27 @@ try {
 }
 ```
 
+Parsers return, builders throw. Outside text (a form field, a query string,
+an import) goes through `parseNumber`, `parseDecimal`, `parseComplex` or
+`fromBase`. Each returns the value or a typed failure from `@arki/failure`,
+and never throws for bad text:
+
+| Code                       | Failure            | When                                                                                       |
+| -------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `math.invalid_number`      | `InvalidNumber`    | the text is not a number in the parser's syntax, locale or base                            |
+| `math.number_out_of_range` | `NumberOutOfRange` | past 10 000 digits, an exponent or scale past ±10 000, or past the float range of a number |
+
+```ts
+import { isFailure } from '@arki/failure';
+import { parseDecimal } from '@arki/math/parse';
+
+const amount = parseDecimal('1.234,56', { locale: 'de-DE' });
+const shown = isFailure(amount) ? `rejected: ${amount.code}` : amount.toString(); // '1234.56'
+```
+
+Builders (`decimal('1.5')`, `ratio('1/3')`, `complex('3+4i')`) take text you
+control and throw. Arithmetic throws the documented errors below.
+
 | Code             | Error                      | When                                                                                                                                                                             |
 | ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ARKI_MATH_E001` | `NumberFormatError`        | a string is not a number in the accepted syntax                                                                                                                                  |
@@ -145,7 +166,7 @@ Every `Decimal` and `Rational` — input or result — has at most 10 000 digits
 anything larger throws `ResourceLimitError`, early from an estimate and exactly
 on the result. Internal guard digits do not count, so `PI(9999)` is the largest
 π, and every value the library returns parses back from its own `toString()`.
-Bigint `factorial`, `permutations` and `combinations` allow results up to
+Bigint `factorial`, `permutations`, `combinations` and `lcm` allow results up to
 100 000 digits; `fibonacci` and `fromBase` keep 10 000. These are resource
 guards against hostile input, not precision settings — within them, arithmetic
 is exact.

@@ -33,6 +33,7 @@ import { compare, defineSuite, size } from '@arki/bench';
 import { parse } from '@arki/expr';
 import { compile as compileDecimal, evaluate as evaluateDecimal } from '@arki/expr/decimal';
 import { compile, evaluate } from '@arki/expr/float';
+import { orThrow } from '@arki/failure';
 
 const math = create(
   {
@@ -289,7 +290,7 @@ export default defineSuite({
         arki: c({
           label: '@arki/expr evaluate',
           package: '@arki/expr',
-          run: text => evaluate(text),
+          run: text => orThrow(evaluate(text)),
           normalize: keypadNormal,
         }),
         mathjs: c({
@@ -316,7 +317,7 @@ export default defineSuite({
         arki: c({
           label: '@arki/expr/decimal evaluate',
           package: '@arki/expr',
-          run: text => evaluateDecimal(text),
+          run: text => orThrow(evaluateDecimal(text)),
           normalize: value => value.toString(),
         }),
         mathjs: c({

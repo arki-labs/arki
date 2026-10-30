@@ -12,13 +12,17 @@
  * but 1234 in `de-DE`. Group separators are only removed, never validated, so
  * `'1,23,4'` is accepted in `en-US` and reads as 1234.
  *
+ * Parsers return, they do not throw: text that is not a number returns the
+ * `InvalidNumber` failure, a value past the limits returns `NumberOutOfRange`.
  * Runtimes without `Intl.NumberFormat#formatToParts` (React Native's Hermes on
- * iOS) throw `UnsupportedFeatureError`; pass `symbols` to parse without `Intl`.
+ * iOS) throw `UnsupportedFeatureError`, a setup fault; pass `symbols` to parse without `Intl`.
  */
 
-import type { Decimal } from './decimal.js';
-import { decimal } from './decimal.js';
-import { NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
+import { isFailure } from '@arki/failure';
+
+import { Decimal } from './decimal.js';
+import { InvalidNumber, NumberOutOfRange, UnsupportedFeatureError } from './errors.js';
+import { parseDecimalString } from './internal/parse.js';
 
 export type ParseOptions = {
   /** BCP 47 locale tag. Default `'en-US'`. Ignored when `symbols` is given. */
@@ -126,34 +130,36 @@ function normalize(input: string, prepared: PreparedLocale): string {
     .replaceAll(/[\u2212\u2013]/g, '-');
 }
 
-function normalizeOrThrow(input: string, options: ParseOptions): string {
+/** The text in strict ASCII syntax, or `InvalidNumber` when it does not read as a number in the locale or symbols. */
+function normalizeText(input: string, options: ParseOptions) {
   if (typeof input !== 'string') throw new TypeError('input must be a string; convert other types first');
   const symbols = options.symbols;
-  const locale = options.locale ?? DEFAULT_LOCALE;
-  const normalized = normalize(input, symbols === undefined ? prepare(locale) : prepareSymbols(symbols));
-  if (!STRICT_DECIMAL.test(normalized)) {
-    const source =
-      symbols === undefined
-        ? `in locale '${locale}'; check the locale matches the text (the decimal mark differs between locales)`
-        : `with decimal mark '${symbols.decimal}' and group separator '${symbols.group}'`;
-    throw new NumberFormatError(`Cannot parse '${input}' as a number ${source}, or pass an ASCII string to decimal()`);
-  }
-  return normalized;
+  const normalized = normalize(
+    input,
+    symbols === undefined ? prepare(options.locale ?? DEFAULT_LOCALE) : prepareSymbols(symbols),
+  );
+  return STRICT_DECIMAL.test(normalized) ? normalized : InvalidNumber();
 }
 
 /**
  * Parses a locale-formatted number: `parseNumber('1.234,56', { locale: 'de-DE' })` → `1234.56`.
- * Lenient and locale-aware; for strict ASCII input use `decimal()`.
+ * Lenient and locale-aware. Returns `InvalidNumber` for text that is not a number in the locale,
+ * and `NumberOutOfRange` past the float range (use `parseDecimal` to keep every digit).
  */
-export function parseNumber(input: string, options: ParseOptions = {}): number {
-  const result = Number(normalizeOrThrow(input, options));
-  if (!Number.isFinite(result)) {
-    throw new NumericRangeError(`'${input}' is too large for a JS number; use parseDecimal to keep every digit`);
-  }
-  return result;
+export function parseNumber(input: string, options: ParseOptions = {}) {
+  const normalized = normalizeText(input, options);
+  if (isFailure(normalized)) return normalized;
+  const result = Number(normalized);
+  return Number.isFinite(result) ? result : NumberOutOfRange();
 }
 
-/** Like `parseNumber` (lenient, locale-aware) but exact: every digit survives in the returned `Decimal`. */
-export function parseDecimal(input: string, options: ParseOptions = {}): Decimal {
-  return decimal(normalizeOrThrow(input, options));
+/**
+ * Like `parseNumber` (lenient, locale-aware) but exact: every digit survives in the returned `Decimal`.
+ * Returns `InvalidNumber` for text that is not a number, `NumberOutOfRange` past 10 000 digits or a scale of ±10 000.
+ */
+export function parseDecimal(input: string, options: ParseOptions = {}) {
+  const normalized = normalizeText(input, options);
+  if (isFailure(normalized)) return normalized;
+  const parts = parseDecimalString(normalized);
+  return isFailure(parts) ? parts : Decimal.fromParts(parts);
 }

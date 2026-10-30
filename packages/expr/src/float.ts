@@ -10,6 +10,7 @@
  * when the checked tree evaluates it to a finite number, which both trees
  * would return at every call anyway.
  */
+import { attempt } from '@arki/failure';
 import { DivisionByZeroError, InvalidArgumentError, NumericRangeError } from '@arki/math/errors';
 
 import type { Equation, Expr, Node, Warning } from './ast.js';
@@ -19,7 +20,7 @@ import type { ConstantNameOf, FunctionNameOf, Language, ScientificConstant, Scie
 import type { CompileLimits, Limits } from './limits.js';
 import type { Syntax } from './syntax.js';
 import { Binder } from './bind.js';
-import { ExprLimitError, ParseError } from './errors.js';
+import { evaluationFailure, ExprLimitError, ParseError } from './errors.js';
 import { builtins, FLOAT_CONSTANTS, powChecked } from './float-builtins.js';
 import { isLanguage, scientific } from './language.js';
 import { resolveCompileLimits } from './limits.js';
@@ -626,11 +627,13 @@ export function compileEquation<const V extends string = never, L extends Langua
   });
 }
 
-/** Parses, compiles and evaluates an expression with no variables: the keypad's one-shot call (C-15). */
-export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>): number {
+/** Parses, compiles and evaluates an expression with no variables: the keypad's one-shot call (C-15). Reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES` (`expr.invalid_text`, `expr.over_budget`, `expr.no_value`, each with the thrown error as `cause`) and never throws for bad text. */
+export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) {
   const settings: EvaluateOptions<L> | undefined = options;
-  const expr = parse(text, { language: settings?.language, syntax: settings?.syntax, limits: settings?.limits });
-  const built = core([expr.root], expr.source, expr.warnings, [], settings ?? {});
-  const root = rootOf(built, 0);
-  return closure(root.ir, true)(NO_VALUES);
+  return attempt(() => {
+    const expr = parse(text, { language: settings?.language, syntax: settings?.syntax, limits: settings?.limits });
+    const built = core([expr.root], expr.source, expr.warnings, [], settings ?? {});
+    const root = rootOf(built, 0);
+    return closure(root.ir, true)(NO_VALUES);
+  }, evaluationFailure);
 }

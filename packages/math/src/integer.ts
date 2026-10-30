@@ -7,12 +7,13 @@
 import {
   DivisionByZeroError,
   InvalidArgumentError,
-  NumberFormatError,
+  InvalidNumber,
+  NumberOutOfRange,
   NumericRangeError,
   ResourceLimitError,
 } from './errors.js';
 import { abs as absBigInt, digitCount, floorDiv, gcd as gcdBigInt } from './internal/bigint.js';
-import { assertDigitLimit, MAX_INTEGER_DIGITS } from './internal/limits.js';
+import { exceedsDigitLimit, MAX_INTEGER_DIGITS } from './internal/limits.js';
 
 function assertSafeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
@@ -48,7 +49,11 @@ export function lcm(a: number | bigint, b: number | bigint): number | bigint {
   if (typeof a === 'bigint') {
     const bb = b as bigint;
     if (a === 0n || bb === 0n) return 0n;
-    const product = (a / gcdBigInt(a, bb)) * bb;
+    const reduced = a / gcdBigInt(a, bb);
+    // Cheap pre-check, like combinations: the product has at least digits(x) + digits(y) - 1 digits.
+    assertIntegerDigits(digitCount(reduced) + digitCount(bb) - 1, 'lcm');
+    const product = reduced * bb;
+    assertIntegerDigits(digitCount(product), 'lcm');
     return product < 0n ? -product : product;
   }
   const bn = b as number;
@@ -503,14 +508,16 @@ export function toBase(value: number | bigint, base: number): string {
  * Reads an integer written in `base` 2 to 36 into a `bigint`: `fromBase('ff', 16)`
  * is `255n`. An optional leading `-` or `+` is allowed and digits are case
  * insensitive. Anything else (spaces, `_`, a `0x` prefix, a digit too large for
- * the base, empty text) throws `NumberFormatError`.
+ * the base, empty text) returns the `InvalidNumber` failure; more than 10 000
+ * digits returns `NumberOutOfRange`. A base outside 2 to 36 is a bug and throws
+ * `InvalidArgumentError`.
  */
-export function fromBase(text: string, base: number): bigint {
+export function fromBase(text: string, base: number) {
   assertBase(base);
   const negative = text.startsWith('-');
   const start = negative || text.startsWith('+') ? 1 : 0;
-  if (text.length - start === 0) throw new NumberFormatError(`"${text}" has no digits`);
-  assertDigitLimit(text.length - start, 'fromBase input');
+  if (text.length - start === 0) return InvalidNumber();
+  if (exceedsDigitLimit(text.length - start)) return NumberOutOfRange();
   const radix = BigInt(base);
   let result = 0n;
   for (let i = start; i < text.length; i++) {
@@ -520,9 +527,7 @@ export function fromBase(text: string, base: number): bigint {
     if (code >= 48 && code <= 57) digit = code - 48;
     else if (code >= 97 && code <= 122) digit = code - 87;
     else if (code >= 65 && code <= 90) digit = code - 55;
-    if (digit >= base) {
-      throw new NumberFormatError(`"${text.charAt(i)}" is not a valid base ${base} digit (in "${text}")`);
-    }
+    if (digit >= base) return InvalidNumber();
     result = result * radix + BigInt(digit);
   }
   return negative ? -result : result;

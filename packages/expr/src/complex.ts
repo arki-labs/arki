@@ -28,9 +28,11 @@
  * `NumericRangeError`; a pole (`ln(0)`, `atanh(1)`, `cot(0)`) is
  * `InvalidArgumentError`. No result has a `NaN` or infinite part.
  */
+import { attempt } from '@arki/failure';
 import { Complex, isComplex } from '@arki/math/complex';
 import { InvalidArgumentError, NumericRangeError } from '@arki/math/errors';
 
+import { evaluationFailure } from './errors.js';
 import type { Equation, Expr } from './ast.js';
 import type {
   Binary,
@@ -289,7 +291,7 @@ export function compileEquation<const V extends string = never, L extends Langua
   );
 }
 
-/** Parses, compiles and evaluates an expression with no variables: `evaluate('sqrt(-4)')` is `2i`. */
-export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>): Complex {
-  return evaluateExact(domainFor(options?.angle), undefined, text, options ?? {});
+/** Parses, compiles and evaluates an expression with no variables: `evaluate('sqrt(-4)')` is `2i`. Reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES` (`expr.invalid_text`, `expr.over_budget`, `expr.no_value`, each with the thrown error as `cause`) and never throws for bad text. */
+export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) {
+  return attempt(() => evaluateExact(domainFor(options?.angle), undefined, text, options ?? {}), evaluationFailure);
 }

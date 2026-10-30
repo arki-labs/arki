@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { NumberFormatError, NumericRangeError } from './errors.js';
+import { orThrow } from '@arki/failure';
+
+import type { Decimal } from './decimal.js';
+import type { MathParseFailure } from './errors.js';
+import { InvalidNumber, NumberOutOfRange } from './errors.js';
 import { localeNumberSymbols, parseDecimal, parseNumber } from './parse.js';
 
 describe('parseNumber', () => {
@@ -33,42 +37,50 @@ describe('parseNumber', () => {
     expect(parseNumber(text, { locale: 'ar-EG' })).toBe(123.45);
   });
 
-  it('rejects text that is not a number', () => {
+  it('returns InvalidNumber for text that is not a number, because typed text is an expected outcome', () => {
     for (const bad of ['abc', '', ' ', '1.2.3', 'Infinity', 'NaN', '1e', '--1']) {
-      expect(() => parseNumber(bad)).toThrow(NumberFormatError);
+      expect(InvalidNumber.is(parseNumber(bad)), bad).toBe(true);
     }
+    expect(parseNumber('xyz', { locale: 'de-DE' })).toMatchObject({ code: 'math.invalid_number', status: 400 });
   });
 
-  it('error message names the input and the locale', () => {
-    expect(() => parseNumber('xyz', { locale: 'de-DE' })).toThrow(/xyz.*de-DE/);
+  it('types the result as the number or the parse failures, nothing wider', () => {
+    expectTypeOf(parseNumber('1')).toEqualTypeOf<number | MathParseFailure>();
+    expectTypeOf(parseDecimal('1')).toEqualTypeOf<Decimal | MathParseFailure>();
   });
 
   it('accepts misplaced group separators because groups are just removed', () => {
     expect(parseNumber('1,23,4')).toBe(1234);
   });
 
-  it('throws NumericRangeError when the value overflows a JS number', () => {
-    expect(() => parseNumber('1e400')).toThrow(NumericRangeError);
+  it('returns NumberOutOfRange when the value overflows a JS number', () => {
+    expect(NumberOutOfRange.is(parseNumber('1e400'))).toBe(true);
   });
 });
 
 describe('parseDecimal', () => {
   it('parses exactly', () => {
-    expect(parseDecimal('1,234.56').toString()).toBe('1234.56');
-    expect(parseDecimal('1.234,56', { locale: 'de-DE' }).toString()).toBe('1234.56');
+    expect(orThrow(parseDecimal('1,234.56')).toString()).toBe('1234.56');
+    expect(orThrow(parseDecimal('1.234,56', { locale: 'de-DE' })).toString()).toBe('1234.56');
   });
 
   it('keeps all 30 digits', () => {
-    expect(parseDecimal('123456789012345678901234567890').toString()).toBe('123456789012345678901234567890');
-    expect(parseDecimal('0.123456789012345678901234567890').toString()).toBe('0.123456789012345678901234567890');
+    expect(orThrow(parseDecimal('123456789012345678901234567890')).toString()).toBe('123456789012345678901234567890');
+    expect(orThrow(parseDecimal('0.123456789012345678901234567890')).toString()).toBe('0.123456789012345678901234567890');
   });
 
   it('succeeds where parseNumber overflows', () => {
-    expect(() => parseDecimal('1e400')).not.toThrow();
+    expect(orThrow(parseDecimal('1e400')).toString()).toBe(`1${'0'.repeat(400)}`);
   });
 
-  it('rejects garbage', () => {
-    expect(() => parseDecimal('abc')).toThrow(NumberFormatError);
+  it('returns InvalidNumber for garbage', () => {
+    expect(InvalidNumber.is(parseDecimal('abc'))).toBe(true);
+  });
+
+  it('returns NumberOutOfRange when the text passes the digit or scale limit, instead of throwing', () => {
+    expect(NumberOutOfRange.is(parseDecimal('1'.repeat(10_001)))).toBe(true);
+    expect(NumberOutOfRange.is(parseDecimal('1e10001'))).toBe(true);
+    expect(NumberOutOfRange.is(parseDecimal('1e-10001'))).toBe(true);
   });
 });
 
@@ -76,7 +88,7 @@ describe('explicit symbols', () => {
   it('parses without Intl, for runtimes that lack formatToParts (Hermes on iOS)', () => {
     const german = { symbols: { decimal: ',', group: '.' } };
     expect(parseNumber('1.234,56', german)).toBe(1234.56);
-    expect(parseDecimal('-1.234.567,891', german).toString()).toBe('-1234567.891');
+    expect(orThrow(parseDecimal('-1.234.567,891', german)).toString()).toBe('-1234567.891');
     expect(parseNumber('\u22125', german)).toBe(-5);
   });
 
@@ -86,10 +98,8 @@ describe('explicit symbols', () => {
     expect(parseNumber('1\u202F234,5', { symbols: { decimal: ',', group: '\u202F' } })).toBe(1234.5);
   });
 
-  it('names the symbols in the error, not a locale', () => {
-    expect(() => parseNumber('1,2,3', { symbols: { decimal: ',', group: '.' } })).toThrow(
-      "Cannot parse '1,2,3' as a number with decimal mark ',' and group separator '.'",
-    );
+  it('returns InvalidNumber when the text does not fit the given symbols', () => {
+    expect(InvalidNumber.is(parseNumber('1,2,3', { symbols: { decimal: ',', group: '.' } }))).toBe(true);
   });
 });
 

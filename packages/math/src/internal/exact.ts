@@ -19,7 +19,7 @@ import {
 import { abs, digitCount, divideRounded, floorDiv, gcd, pow10, sign } from './bigint.js';
 import { assertScale, fractionToDecimalParts } from './fraction.js';
 import { assertDigitLimit, MAX_DIGITS, MAX_SCALE } from './limits.js';
-import { parseDecimalString, partsFromBigInt, partsFromNumber } from './parse.js';
+import { decimalParts, partsFromBigInt, partsFromNumber } from './parse.js';
 
 export type { ScaleOptions } from './fraction.js';
 
@@ -89,7 +89,7 @@ function toDecimalParts(value: DecimalInput): DecimalParts {
   if (value instanceof Decimal) return { coefficient: value.coefficient, scale: value.scale };
   switch (typeof value) {
     case 'string': {
-      return parseDecimalString(value);
+      return decimalParts(value);
     }
     case 'number': {
       return partsFromNumber(value);
@@ -786,7 +786,7 @@ function parseRational(input: string): Rational {
     const denominator = period * pow10(fractionDigits!.length);
     return Rational.fromParts(signText === '-' ? -numerator : numerator, denominator);
   }
-  const parts = parseDecimalString(input);
+  const parts = decimalParts(input);
   return Rational.fromParts(parts.coefficient, pow10(parts.scale));
 }
 

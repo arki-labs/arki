@@ -10,12 +10,14 @@
  * hold it. Logarithms, `exp`, trigonometry and the constants `pi`, `e` have
  * no rational value and are a compile-time `not-in-domain`.
  */
+import { attempt } from '@arki/failure';
 import type { RationalInput } from '@arki/math/rational';
 import { decimal, isDecimal } from '@arki/math/decimal';
 import { nthRoot } from '@arki/math/decimal-math';
 import { DivisionByZeroError, InvalidArgumentError, RoundingNecessaryError } from '@arki/math/errors';
 import { isRational, ratio, Rational } from '@arki/math/rational';
 
+import { evaluationFailure } from './errors.js';
 import type { Equation, Expr } from './ast.js';
 import type {
   Builtin,
@@ -231,7 +233,7 @@ export function compileEquation<const V extends string = never, L extends Langua
   return compileEquationExact(DOMAIN, undefined, equation, [...(options?.variables ?? [])], options ?? {});
 }
 
-/** Parses, compiles and evaluates an expression with no variables: `evaluate('8^(2/3)')` is 4. */
-export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>): Rational {
-  return evaluateExact(DOMAIN, undefined, text, options ?? {});
+/** Parses, compiles and evaluates an expression with no variables: `evaluate('8^(2/3)')` is 4. Reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES` (`expr.invalid_text`, `expr.over_budget`, `expr.no_value`, each with the thrown error as `cause`) and never throws for bad text. */
+export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) {
+  return attempt(() => evaluateExact(DOMAIN, undefined, text, options ?? {}), evaluationFailure);
 }

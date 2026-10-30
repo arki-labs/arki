@@ -69,7 +69,13 @@ Pure TypeScript with no `eval`, no `new Function`, and no Node built-ins. It run
 
 ## Failure behaviour
 
-Every failure throws. Nothing returns `NaN`, `Infinity` or a half-built value.
+Parsers of outside values return, builders throw. Nothing returns `NaN`, `Infinity` or a half-built value.
+
+- **`evaluate(text)`** in every domain reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES`: `InvalidExpression` (`expr.invalid_text`), `ExpressionOverBudget` (`expr.over_budget`) or `NoValue` (`expr.no_value`, for example `0^i` or `1/0`). The thrown error is kept as `cause`, so `cause.span` still places the caret.
+- **`syntaxFor(locale)`** returns `InvalidLocale` (`expr.invalid_locale`) for a tag `Intl` rejects, and reads the mark with `format`, so Hermes on iOS works without `formatToParts`.
+- **`parseSyntax(stored)`** reads a stored setting and returns `InvalidSyntax` (`expr.invalid_syntax`). `defineSyntax` is the builder for syntax written in code and throws.
+
+`parse`, `compile` and compiled functions throw:
 
 - **Bad text or a bad stored AST:** `ParseError`. Read `code` (`unexpected-token`, `unknown-name`, `arity`, `not-in-domain`, and the others in `ParseErrorCode`), `span` for the caret, and `expected` for what would fit. Show the user the span; do not retry the same text.
 - **Over a budget:** `ExprLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.

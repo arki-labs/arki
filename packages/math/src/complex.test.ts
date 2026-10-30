@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { Complex, complex, isComplex } from './complex.js';
-import { DivisionByZeroError, InvalidArgumentError, NumberFormatError, NumericRangeError } from './errors.js';
+import { Complex, complex, isComplex, parseComplex } from './complex.js';
+import {
+  DivisionByZeroError,
+  InvalidArgumentError,
+  InvalidNumber,
+  NumberFormatError,
+  NumberOutOfRange,
+  NumericRangeError,
+} from './errors.js';
 
 const close = (actual: Complex, expected: Complex | number, tolerance = 1e-14): void => {
   expect(actual.approxEqual(expected, tolerance), `${actual.toString()} ≉ ${String(expected)}`).toBe(true);
@@ -56,6 +63,13 @@ describe('construction and parsing', () => {
     expect(() => complex('1e400')).toThrow(NumericRangeError);
     expect(() => complex(Number.NaN, 1)).toThrow(InvalidArgumentError);
     expect(() => complex(1, Number.POSITIVE_INFINITY)).toThrow(InvalidArgumentError);
+  });
+
+  it('parseComplex returns failures for outside text, while the complex() builder throws', () => {
+    expect(parseComplex(' -2.5 + 4i ')).toEqual(complex(-2.5, 4));
+    for (const junk of ['', 'i4', '3+4j', 'NaN', '1,5']) expect(InvalidNumber.is(parseComplex(junk)), junk).toBe(true);
+    expect(NumberOutOfRange.is(parseComplex('1e400'))).toBe(true);
+    expect(NumberOutOfRange.is(parseComplex('3+1e400i'))).toBe(true);
   });
 
   it('round-trips through toString exactly', () => {

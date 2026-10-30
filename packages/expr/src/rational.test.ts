@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { Rational } from '@arki/math/rational';
 import { decimal } from '@arki/math/decimal';
 import { DivisionByZeroError, InvalidArgumentError, RoundingNecessaryError } from '@arki/math/errors';
@@ -8,7 +10,17 @@ import { ratio } from '@arki/math/rational';
 import { ExprLimitError, ParseError } from './errors.js';
 import { defineLanguage, scientific } from './language.js';
 import { parse, parseEquation } from './parser.js';
-import { compile, compileEquation, evaluate } from './rational.js';
+import type { EvaluateOptions } from './rational.js';
+import { compile, compileEquation, evaluate as evaluateText } from './rational.js';
+import type { Scientific } from './exact.js';
+import type { Language } from './language.js';
+
+/** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
+const evaluate = <L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) => {
+  const result = evaluateText(text, options);
+  if (isFailure(result)) throw result.cause;
+  return result;
+};
 
 function thrown(run: () => unknown): unknown {
   try {
@@ -37,7 +49,7 @@ describe('RFC §8: the rational row', () => {
       '-1/3',
       '1/2',
     ]);
-    expect(() => evaluate('1/(1/3 - 2/6)')).toThrow(DivisionByZeroError);
+    expect(evaluateText('1/(1/3 - 2/6)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('integer exponents are exact; a rational exponent only when the root is exact (8^(2/3) = 4)', () => {
@@ -45,12 +57,12 @@ describe('RFC §8: the rational row', () => {
       ['(2/3)^3', '2^-3', '0^0', '8^(2/3)', '(9/4)^(1/2)', '(8/27)^(-2/3)', '0^(1/2)'].map(text => value(text)),
     ).toEqual(['8/27', '1/8', '1', '4', '3/2', '9/4', '0']);
     // The exact answer exists but a Rational cannot hold it.
-    expect(() => evaluate('2^(1/2)')).toThrow(RoundingNecessaryError);
-    expect(() => evaluate('9^(1/1000)')).toThrow(RoundingNecessaryError);
+    expect(evaluateText('2^(1/2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(RoundingNecessaryError) });
+    expect(evaluateText('9^(1/1000)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(RoundingNecessaryError) });
     // Same classes as the float domain: not real, and division by zero.
-    expect(() => evaluate('(-8)^(1/3)')).toThrow(InvalidArgumentError);
-    expect(() => evaluate('0^(-1/2)')).toThrow(DivisionByZeroError);
-    expect(() => evaluate('0^-1')).toThrow(DivisionByZeroError);
+    expect(evaluateText('(-8)^(1/3)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('0^(-1/2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
+    expect(evaluateText('0^-1')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('sqrt cbrt nthRoot only when the root is exact', () => {
@@ -60,9 +72,9 @@ describe('RFC §8: the rational row', () => {
       '2',
       '4',
     ]);
-    expect(() => evaluate('sqrt(2)')).toThrow(RoundingNecessaryError);
-    expect(() => evaluate('sqrt(-4)')).toThrow(InvalidArgumentError);
-    expect(() => evaluate('nthRoot(8, 1/2)')).toThrow(InvalidArgumentError);
+    expect(evaluateText('sqrt(2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(RoundingNecessaryError) });
+    expect(evaluateText('sqrt(-4)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('nthRoot(8, 1/2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('exp, logarithms and trigonometry are compile-time not-in-domain errors, with no special cases', () => {
@@ -94,13 +106,13 @@ describe('integer-only operations are exact', () => {
       '-2',
       '1/6',
     ]);
-    expect(() => evaluate('mod(1, 0)')).toThrow(DivisionByZeroError);
+    expect(evaluateText('mod(1, 0)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('factorial is exact on integers and undefined elsewhere (no gamma here)', () => {
     expect(value('20!')).toBe('2432902008176640000');
-    expect(() => evaluate('(1/2)!')).toThrow(InvalidArgumentError);
-    expect(() => evaluate('(-1)!')).toThrow(InvalidArgumentError);
+    expect(evaluateText('(1/2)!')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('(-1)!')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 });
 

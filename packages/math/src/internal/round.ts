@@ -9,7 +9,7 @@
 import type { RoundingMode } from '../rounding.js';
 import type { DecimalParts } from './parse.js';
 import { divideRounded, pow10 } from './bigint.js';
-import { parseDecimalString } from './parse.js';
+import { decimalParts } from './parse.js';
 
 function noNegativeZero(value: number): number {
   return value === 0 ? 0 : value;
@@ -18,7 +18,7 @@ function noNegativeZero(value: number): number {
 // The shortest text, not `partsFromNumber`: that guard stops `decimal(1e20)` from
 // pretending to be exact, but a float past 2^53 still rounds as the number you typed.
 function shortestParts(value: number): DecimalParts {
-  return parseDecimalString(String(value));
+  return decimalParts(String(value));
 }
 
 /** `round(x, places, mode)` on the shortest decimal text of `x`. Arguments are already validated. */

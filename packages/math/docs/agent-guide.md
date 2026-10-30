@@ -35,7 +35,7 @@ total.times('0.19').toScale(2, 'halfEven').toString(); // '11.45'
 ### Format and parse numbers
 
 1. Show with `formatNumber`, `formatCurrency` or `formatPercent` from `@arki/math/format`.
-2. Read locale text with `parseNumber` or `parseDecimal` from `@arki/math/parse`.
+2. Read locale text with `parseNumber` or `parseDecimal` from `@arki/math/parse`. They return the value or a failure (`InvalidNumber`, `NumberOutOfRange`); check with `isFailure` from `@arki/failure`.
 
 ### Statistics, distributions and roots
 
@@ -49,6 +49,7 @@ Use `@arki/money`. It builds on this package.
 
 ## Rules that bite
 
+- Parsers return, builders throw. Outside text goes through `parseNumber`, `parseDecimal`, `parseComplex` or `fromBase`, which return `InvalidNumber` or `NumberOutOfRange`. `decimal('…')`, `ratio('…')` and `complex('…')` throw.
 - `decimal(0.1 + 0.2)` is already wrong. Build from strings.
 - `decimal(1).dividedBy(3)` throws `RoundingNecessaryError`. Pass a scale and a mode.
 - `d.toScale(1)` throws when it would drop a non-zero digit. Pass a mode.

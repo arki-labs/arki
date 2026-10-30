@@ -1,20 +1,20 @@
 # @arki/math
 
-> Zero-dependency math for TypeScript: exact `Decimal` and `Rational`, plus float helpers. Not money, symbolic algebra or expression parsing.
+> Math for TypeScript, depending only on `@arki/failure`: exact `Decimal` and `Rational`, plus float helpers. Not money, symbolic algebra or expression parsing.
 
 Build decimals from strings. Give every inexact step a scale and a rounding mode.
 
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/math`: @arki/math: the whole numeric toolkit from one import, except `linear-algebra`, whose short names would clash. `Complex`, `ConvergenceError`, `Decimal`, `DivisionByZeroError`, `E`, `EmptyDataError`, `ExtrapolationConvergenceError`, `IntegrationConvergenceError`, `InvalidArgumentError`, `MATH_ERROR_CODES`, `MAX_NONCENTRALITY`, `MathError`; and 294 more.
-- `@arki/math/errors`: Every failure this package raises extends `MathError`. `ConvergenceError`, `DivisionByZeroError`, `EmptyDataError`, `InvalidArgumentError`, `MATH_ERROR_CODES`, `MathError`, `NotPositiveDefiniteError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `RoundingNecessaryError`, `SingularMatrixError`; and 2 more.
+- `@arki/math`: the whole numeric toolkit from one import, except `linear-algebra`, whose short names would clash. `Complex`, `ConvergenceError`, `Decimal`, `DivisionByZeroError`, `E`, `EmptyDataError`, `ExtrapolationConvergenceError`, `IntegrationConvergenceError`, `InvalidArgumentError`, `InvalidNumber`, `MATH_ERROR_CODES`, `MATH_PARSE_FAILURES`; and 299 more.
+- `@arki/math/errors`: Parsers return, builders throw. `ConvergenceError`, `DivisionByZeroError`, `EmptyDataError`, `InvalidArgumentError`, `InvalidNumber`, `MATH_ERROR_CODES`, `MATH_PARSE_FAILURES`, `MathError`, `NotPositiveDefiniteError`, `NumberFormatError`, `NumberOutOfRange`, `NumericRangeError`; and 6 more.
 - `@arki/math/rounding`: One rounding vocabulary for the whole package. `ROUNDING_MODES`, `isRoundingMode`; types `RoundingMode`.
 - `@arki/math/number`: Helpers for ordinary JS numbers: the fast, approximate 80% case (UI, geometry, charts). `approxEqual`, `assertFinite`, `clamp`, `inRange`, `inverseLerp`, `lerp`, `linspace`, `range`, `remap`, `round`, `roundTo`, `roundToSignificant`; and 2 more.
 - `@arki/math/integer`: Integer and number-theory helpers with matching `number` and `bigint` overloads. `combinations`, `digitSum`, `divisors`, `divmod`, `factorial`, `fibonacci`, `fromBase`, `gcd`, `isEven`, `isOdd`, `isPrime`, `lcm`; and 5 more.
-- `@arki/math/decimal`: @arki/math/decimal: exact decimals with a retained scale. `Decimal`, `decimal`, `isDecimal`; types `DecimalInput`, `RoundingMode`, `ScaleOptions`.
+- `@arki/math/decimal`: exact decimals with a retained scale. `Decimal`, `decimal`, `isDecimal`; types `DecimalInput`, `RoundingMode`, `ScaleOptions`.
 - `@arki/math/decimal-math`: Roots, logarithms and exponentials on `Decimal`. `E`, `PI`, `cbrt`, `exp`, `ln`, `log`, `log10`, `log2`, `nthRoot`, `pow`, `sqrt`.
-- `@arki/math/rational`: @arki/math/rational: exact fractions on `bigint`. `Rational`, `isRational`, `ratio`; types `IntegerInput`, `MixedNumber`, `RationalInput`, `RoundingMode`, `ScaleOptions`.
+- `@arki/math/rational`: exact fractions on `bigint`. `Rational`, `isRational`, `ratio`; types `IntegerInput`, `MixedNumber`, `RationalInput`, `RoundingMode`, `ScaleOptions`.
 - `@arki/math/stats`: Descriptive statistics over plain JS numbers, or over `Decimal` values. `QUANTILE_METHODS`, `confidenceInterval`, `correlation`, `exponentialRegression`, `linearRegression`, `logarithmicRegression`, `marginOfError`, `mean`, `median`, `minMax`, `mode`, `percentile`; and 34 more.
 - `@arki/math/distributions`: Probability distributions and the special functions behind them, over plain JS numbers. `MAX_NONCENTRALITY`, `beta`, `betaLn`, `binomial`, `chiSquare`, `erf`, `erfInv`, `erfc`, `exponential`, `fisherF`, `gamma`, `gammaLn`; and 10 more.
 - `@arki/math/format`: Presentation helpers built on `Intl.NumberFormat`. `RUNTIME_LOCALE`, `createFormatter`, `formatCompact`, `formatCurrency`, `formatFileSize`, `formatNumber`, `formatPercent`; types `CompactOptions`, `CurrencyOptions`, `FileSizeOptions`, `FormatOptions`, `FormatValue`; and 1 more.
@@ -35,7 +35,7 @@ Build decimals from strings. Give every inexact step a scale and a rounding mode
 - `@arki/math/differentiate`: Numerical derivatives and limits of a one-variable function. `ExtrapolationConvergenceError`, `derivative`, `limit`; types `ExtrapolationOptions`, `ExtrapolationResult`, `LimitOptions`, `LimitSide`, `RealFunction`.
 - `@arki/math/geometry`: Plane and solid geometry on ordinary JS numbers. `circle`, `circleSector`, `cone`, `cube`, `cuboid`, `cylinder`, `distance`, `ellipse`, `frustum`, `isPythagoreanTriple`, `midpoint`, `polygonArea`; and 25 more.
 - `@arki/math/linear-algebra`: Dense linear algebra over plain float64 numbers. `angleBetween`, `choleskyDecompose`, `choleskySolve`, `conditionNumber`, `cross`, `determinant`, `dot`, `eigenDecompose`, `eigenvalues`, `identity`, `inverse`, `leastSquares`; and 31 more.
-- `@arki/math/complex`: Complex numbers on plain JS floats (`number`). `Complex`, `complex`, `isComplex`; types `ComplexInput`, `Polar`.
+- `@arki/math/complex`: Complex numbers on plain JS floats (`number`). `Complex`, `complex`, `isComplex`, `parseComplex`; types `ComplexInput`, `Polar`.
 - `@arki/math/polynomial`: Polynomials over plain JS floats, stored as coefficient arrays. `addPolynomials`, `cubicRoots`, `evaluatePolynomial`, `multiplyPolynomials`, `polynomialDerivative`, `polynomialRoots`, `quadraticRoots`; types `Coefficients`, `CubicRoots`, `QuadraticRoots`.
 <!-- llms:end -->
 

@@ -12,6 +12,7 @@
  * `RoundingNecessaryError` — the same default as `Decimal#dividedBy`.
  * Trigonometry has no exact result and is a compile-time `not-in-domain`.
  */
+import { attempt } from '@arki/failure';
 import type { Decimal, DecimalInput, RoundingMode } from '@arki/math/decimal';
 import { decimal, isDecimal } from '@arki/math/decimal';
 import { E, exp, ln, log, log2, log10, nthRoot, PI, pow } from '@arki/math/decimal-math';
@@ -24,6 +25,7 @@ import {
 import { gcd } from '@arki/math/integer';
 import { isRoundingMode } from '@arki/math/rounding';
 
+import { evaluationFailure } from './errors.js';
 import type { Equation, Expr } from './ast.js';
 import type {
   Builtin,
@@ -307,7 +309,7 @@ export function compileEquation<const V extends string = never, L extends Langua
   return compileEquationExact(DOMAIN, contextOf(options), equation, [...(options?.variables ?? [])], options ?? {});
 }
 
-/** Parses, compiles and evaluates an expression with no variables: `evaluate('0.1 + 0.2')` is `0.3`. */
-export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>): Decimal {
-  return evaluateExact(DOMAIN, contextOf(options), text, options ?? {});
+/** Parses, compiles and evaluates an expression with no variables: `evaluate('0.1 + 0.2')` is `0.3`. Reads outside text, so it returns the value or a failure from `EVALUATE_FAILURES` (`expr.invalid_text`, `expr.over_budget`, `expr.no_value`, each with the thrown error as `cause`) and never throws for bad text. */
+export function evaluate<L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) {
+  return attempt(() => evaluateExact(DOMAIN, contextOf(options), text, options ?? {}), evaluationFailure);
 }

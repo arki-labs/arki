@@ -1,17 +1,29 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { Complex } from '@arki/math/complex';
 import { complex } from '@arki/math/complex';
 import { DivisionByZeroError, InvalidArgumentError, NumericRangeError } from '@arki/math/errors';
 
-import { compile, compileEquation, evaluate } from './complex.js';
+import type { EvaluateOptions } from './complex.js';
+import { compile, compileEquation, evaluate as evaluateText } from './complex.js';
+import type { Scientific } from './exact.js';
+import type { Language } from './language.js';
 import { compile as compileDecimal } from './decimal.js';
-import { ParseError } from './errors.js';
+import { ExpressionOverBudget, InvalidExpression, NoValue, ParseError } from './errors.js';
 import { compile as compileFloat, evaluate as evaluateFloat } from './float.js';
 import { defineLanguage, scientific } from './language.js';
 import { parse, parseEquation } from './parser.js';
 import { compile as compileRational } from './rational.js';
+
+/** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
+const evaluate = <L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) => {
+  const result = evaluateText(text, options);
+  if (isFailure(result)) throw result.cause;
+  return result;
+};
 
 function thrown(run: () => unknown): unknown {
   try {
@@ -34,6 +46,28 @@ const close = (z: Complex, re: number, im: number): void => {
   expect(z.im).toBeCloseTo(im, 14);
 };
 
+describe('evaluate reads outside text, so it returns failures instead of throwing', () => {
+  it('returns NoValue for 0^i, which has no principal power', () => {
+    const result = evaluateText('0^i');
+    expect(NoValue.is(result)).toBe(true);
+    expect(result).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
+  });
+
+  it('returns InvalidExpression for text that does not parse, keeping the ParseError span as the cause', () => {
+    const result = evaluateText('1 +');
+    expect(InvalidExpression.is(result)).toBe(true);
+    expect(result).toMatchObject({ cause: expect.any(ParseError) });
+  });
+
+  it('returns ExpressionOverBudget past a budget', () => {
+    expect(ExpressionOverBudget.is(evaluateText('1+1+1+1', { limits: { tokens: 3 } }))).toBe(true);
+  });
+
+  it('returns NoValue from every domain, not only the complex one', () => {
+    expect(NoValue.is(evaluateFloat('1/0'))).toBe(true);
+  });
+});
+
 describe('RFC §8: the complex row', () => {
   it('+ - * / are float arithmetic on both parts', () => {
     expect(parts(evaluate('(1 + 2i) + (3 - 4i)'))).toEqual([4, -2]);
@@ -44,9 +78,9 @@ describe('RFC §8: the complex row', () => {
   });
 
   it('/0 throws DivisionByZeroError, the same class as float, also when the divisor is complex zero', () => {
-    expect(() => evaluate('1/0')).toThrow(DivisionByZeroError);
-    expect(() => evaluate('(1 + i)/(i - i)')).toThrow(DivisionByZeroError);
-    expect(() => evaluate('0^(-1)')).toThrow(DivisionByZeroError);
+    expect(evaluateText('1/0')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
+    expect(evaluateText('(1 + i)/(i - i)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
+    expect(evaluateText('0^(-1)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('pi, e and i are constants', () => {
@@ -161,24 +195,24 @@ describe('the real axis is the float domain', () => {
   });
 
   it('leaves the axis only where float has no real answer', () => {
-    expect(() => evaluateFloat('sqrt(-2)')).toThrow(InvalidArgumentError);
+    expect(evaluateFloat('sqrt(-2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
     expect(evaluate('sqrt(-2)').toString()).toBe('1.4142135623730951i');
-    expect(() => evaluateFloat('ln(-2)')).toThrow(InvalidArgumentError);
+    expect(evaluateFloat('ln(-2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
     close(evaluate('ln(-2)'), Math.LN2, Math.PI);
   });
 });
 
 describe('errors', () => {
   it('overflow is NumericRangeError, never an infinite part', () => {
-    expect(() => evaluate('10^400')).toThrow(NumericRangeError);
-    expect(() => evaluate('exp(1000)')).toThrow(NumericRangeError);
-    expect(() => evaluate('1e300 * 1e300 i')).toThrow(NumericRangeError);
-    expect(() => evaluate('1e400')).toThrow(NumericRangeError);
+    expect(evaluateText('10^400')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
+    expect(evaluateText('exp(1000)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
+    expect(evaluateText('1e300 * 1e300 i')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
+    expect(evaluateText('1e400')).toMatchObject({ code: 'expr.no_value', cause: expect.any(NumericRangeError) });
   });
 
   it('poles are InvalidArgumentError, as in float', () => {
     for (const text of ['ln(0)', 'cot(0)', 'csc(0)', 'atanh(1)', 'acoth(1)', 'asec(0)', 'log(5, 1)']) {
-      expect([text, thrown(() => evaluateFloat(text))]).toEqual([text, expect.any(InvalidArgumentError)]);
+      expect([text, evaluateFloat(text)]).toEqual([text, expect.objectContaining({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) })]);
       expect([text, thrown(() => evaluate(text))]).toEqual([text, expect.any(InvalidArgumentError)]);
     }
   });
@@ -224,12 +258,12 @@ describe('degrees measure real angles', () => {
     expect(parts(evaluate('cos(90)', deg))).toEqual([0, 0]);
     expect(evaluate('sin(30)', deg).re).toBe(evaluateFloat('sin(30)', deg));
     expect(evaluate('asin(0.5)', deg).re).toBe(evaluateFloat('asin(0.5)', deg));
-    expect(() => evaluate('tan(90)', deg)).toThrow(InvalidArgumentError);
+    expect(evaluateText('tan(90)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('a complex angle, or an inverse with no real angle, is InvalidArgumentError', () => {
-    expect(() => evaluate('sin(i)', deg)).toThrow(InvalidArgumentError);
-    expect(() => evaluate('asin(2)', deg)).toThrow(InvalidArgumentError);
+    expect(evaluateText('sin(i)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('asin(2)', deg)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('everything else is unaffected: hyperbolics, roots and logarithms take no angle', () => {

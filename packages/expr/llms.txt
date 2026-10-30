@@ -7,12 +7,12 @@ Never store the user's raw text. Store `print(parse(text))`, and treat every sto
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/expr`: @arki/expr: a safe expression language on `@arki/math`. `ExprLimitError`, `ParseError`, `canonical`, `children`, `decimalComma`, `defineLanguage`, `defineSyntax`, `fromJSON`, `names`, `parse`, `parseEquation`, `print`; and 34 more.
-- `@arki/expr/float`: @arki/expr/float: the float domain (RFC §8, §10). `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `Angle`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `EvaluateOptions`, `FloatFunction`, `HostImplementations`, `Reading`; and 2 more.
-- `@arki/expr/latex`: @arki/expr/latex: LaTeX for display (RFC §12, C-26). `toLatex`; types `LatexOptions`.
-- `@arki/expr/decimal`: @arki/expr/decimal: the Decimal domain (RFC §8). `Decimal`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `DecimalContext`, `DecimalFunction`, `DecimalInput`; and 6 more.
-- `@arki/expr/rational`: @arki/expr/rational: the Rational domain (RFC §8). `Rational`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `Detailed`, `EvaluateOptions`, `ExactLimits`; and 4 more.
-- `@arki/expr/complex`: @arki/expr/complex: the Complex domain (RFC §8). `Complex`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `Angle`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `ComplexFunction`, `ComplexLike`; and 5 more.
+- `@arki/expr`: a safe expression language on `@arki/math`. `ExprLimitError`, `ParseError`, `canonical`, `children`, `decimalComma`, `defineLanguage`, `defineSyntax`, `fromJSON`, `names`, `parse`, `parseEquation`, `print`; and 34 more.
+- `@arki/expr/float`: the float domain (RFC §8, §10). `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `Angle`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `EvaluateOptions`, `FloatFunction`, `HostImplementations`, `Reading`; and 2 more.
+- `@arki/expr/latex`: LaTeX for display (RFC §12, C-26). `toLatex`; types `LatexOptions`.
+- `@arki/expr/decimal`: the Decimal domain (RFC §8). `Decimal`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `DecimalContext`, `DecimalFunction`, `DecimalInput`; and 6 more.
+- `@arki/expr/rational`: the Rational domain (RFC §8). `Rational`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `Detailed`, `EvaluateOptions`, `ExactLimits`; and 4 more.
+- `@arki/expr/complex`: the Complex domain (RFC §8). `Complex`, `compile`, `compileEquation`, `evaluate`; types `AbortSignalLike`, `Angle`, `CallOptions`, `CompileOptions`, `CompiledEquation`, `CompiledFunction`, `ComplexFunction`, `ComplexLike`; and 5 more.
 <!-- llms:end -->
 
 ## Start here

@@ -1,14 +1,26 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import { DivisionByZeroError, InvalidArgumentError, MathError, NumericRangeError } from '@arki/math/errors';
 
 import type { Node } from './ast.js';
 import { ExprLimitError, ParseError } from './errors.js';
-import { compile, compileEquation, evaluate } from './float.js';
+import type { EvaluateOptions } from './float.js';
+import { compile, compileEquation, evaluate as evaluateText } from './float.js';
+import type { Scientific } from './exact.js';
+import type { Language } from './language.js';
 import { defineLanguage, scientific } from './language.js';
 import { parse, parseEquation } from './parser.js';
 import { decimalComma } from './syntax.js';
+
+/** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
+const evaluate = <L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) => {
+  const result = evaluateText(text, options);
+  if (isFailure(result)) throw result.cause;
+  return result;
+};
 
 function thrown(run: () => unknown): unknown {
   try {
@@ -416,8 +428,8 @@ describe('gamma', () => {
   });
 
   it('throws a typed error at a pole in a single evaluation', () => {
-    expect(() => evaluate('gamma(0)')).toThrow(InvalidArgumentError);
-    expect(() => evaluate('gamma(-2)')).toThrow(InvalidArgumentError);
+    expect(evaluateText('gamma(0)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('gamma(-2)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('marks poles as gaps in sample()', () => {

@@ -3,7 +3,10 @@
  * locale: `canonical` (`0.5`, `log(x, 2)`) and `decimalComma` (`0,5`,
  * `log(x; 2)`). Storage is always canonical; see `print`.
  */
-import { InvalidArgumentError, UnsupportedFeatureError } from '@arki/math/errors';
+import { isFailure } from '@arki/failure';
+import { InvalidArgumentError } from '@arki/math/errors';
+
+import { InvalidLocale, InvalidSyntax } from './errors.js';
 
 /** A valid syntax. A decimal comma always pairs with the `;` separator, so `f(1,5; 2)` is unambiguous. */
 export type Syntax =
@@ -19,45 +22,59 @@ export const canonical: Syntax = Object.freeze({ decimal: '.', separator: ',' })
 export const decimalComma: Syntax = Object.freeze({ decimal: ',', separator: ';' });
 
 /**
- * Validates a syntax and returns it frozen. Throws `InvalidArgumentError` for
- * an unknown mark or for a decimal comma with a `,` separator.
+ * Reads a syntax from a stored or untyped value (a user setting, JSON). Returns
+ * the frozen syntax, or `InvalidSyntax` for an unknown mark or a decimal comma
+ * with a `,` separator.
+ */
+export function parseSyntax(value: unknown) {
+  if (typeof value !== 'object' || value === null) return InvalidSyntax();
+  const decimal: unknown = 'decimal' in value ? value.decimal : undefined;
+  const separator: unknown = 'separator' in value ? value.separator : undefined;
+  if (separator !== ',' && separator !== ';') return InvalidSyntax();
+  if (decimal === '.') {
+    const syntax: Syntax = Object.freeze({ decimal, separator });
+    return syntax;
+  }
+  if (decimal === ',' && separator === ';') {
+    const syntax: Syntax = Object.freeze({ decimal, separator });
+    return syntax;
+  }
+  return InvalidSyntax();
+}
+
+/**
+ * Validates a syntax written in code and returns it frozen. The builder: it
+ * throws `InvalidArgumentError` for a decimal comma with a `,` separator, or
+ * for an unknown mark from an untyped caller. Stored settings go through
+ * {@link parseSyntax}, which returns a failure instead.
  */
 export function defineSyntax(definition: SyntaxDefinition): Syntax {
-  // Typed callers cannot pass anything else; JavaScript callers and stored settings can.
-  const decimal: unknown = definition.decimal;
-  const separator: unknown = definition.separator;
-  if (separator !== ',' && separator !== ';') {
-    throw new InvalidArgumentError(`Unknown argument separator ${JSON.stringify(separator)}; use "," or ";"`);
+  const syntax = parseSyntax(definition);
+  if (isFailure(syntax)) {
+    throw new InvalidArgumentError(
+      `${JSON.stringify(definition)} is not a syntax: use "." or "," as the decimal mark and "," or ";" between arguments; a decimal comma needs ";"`,
+    );
   }
-  if (decimal === '.') return Object.freeze({ decimal, separator });
-  if (decimal === ',') {
-    if (separator === ',') {
-      throw new InvalidArgumentError(
-        'A decimal comma needs the ";" argument separator: "1,5" cannot also split arguments',
-      );
-    }
-    return Object.freeze({ decimal, separator });
-  }
-  throw new InvalidArgumentError(`Unknown decimal mark ${JSON.stringify(decimal)}; use "." or ","`);
+  return syntax;
 }
 
 /**
  * The preset for a locale: `decimalComma` where the locale writes `1,5`,
  * `canonical` otherwise. Calls `Intl` only when invoked, never at module load.
- *
- * Runtimes without `Intl.NumberFormat#formatToParts` (React Native's Hermes on
- * iOS) throw `UnsupportedFeatureError`; pass a preset instead.
+ * Returns `InvalidLocale` for a tag `Intl` rejects. Reads the mark from
+ * `format`, which every runtime has, so React Native's Hermes on iOS (no
+ * `formatToParts`) gets the same answer.
  */
-export function syntaxFor(locale?: string | readonly string[]): Syntax {
-  const formatter = new Intl.NumberFormat(
-    locale === undefined ? undefined : typeof locale === 'string' ? locale : [...locale],
-  );
-  // React Native's Hermes on Apple platforms has Intl.NumberFormat but no formatToParts.
-  if (typeof formatter.formatToParts !== 'function') {
-    throw new UnsupportedFeatureError(
-      "This runtime lacks Intl.NumberFormat#formatToParts, which syntaxFor needs (React Native's Hermes on iOS); pass a syntax preset instead",
-    );
+export function syntaxFor(locale?: string | readonly string[]) {
+  let formatted: string;
+  try {
+    formatted = new Intl.NumberFormat(
+      locale === undefined ? undefined : typeof locale === 'string' ? locale : [...locale],
+      { useGrouping: false },
+    ).format(1.5);
+  } catch {
+    // Intl throws a RangeError (or a TypeError for a non-string entry) for a tag it rejects.
+    return InvalidLocale();
   }
-  const mark = formatter.formatToParts(1.5).find(part => part.type === 'decimal')?.value;
-  return mark === ',' ? decimalComma : canonical;
+  return formatted.includes(',') ? decimalComma : canonical;
 }

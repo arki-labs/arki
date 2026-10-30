@@ -1,13 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import type { Decimal } from '@arki/math/decimal';
 import { decimal, isDecimal } from '@arki/math/decimal';
 import { DivisionByZeroError, InvalidArgumentError, RoundingNecessaryError } from '@arki/math/errors';
 
-import { compile, compileEquation, evaluate } from './decimal.js';
+import type { EvaluateOptions } from './decimal.js';
+import { compile, compileEquation, evaluate as evaluateText } from './decimal.js';
+import type { Scientific } from './exact.js';
+import type { Language } from './language.js';
 import { ExprLimitError, ParseError } from './errors.js';
 import { defineLanguage, scientific } from './language.js';
 import { parse, parseEquation } from './parser.js';
+
+/** Unwraps a returned failure to the error that caused it, so rule tests below assert the exact `@arki/math` error. */
+const evaluate = <L extends Language = Scientific>(text: string, options?: EvaluateOptions<L>) => {
+  const result = evaluateText(text, options);
+  if (isFailure(result)) throw result.cause;
+  return result;
+};
 
 function thrown(run: () => unknown): unknown {
   try {
@@ -50,7 +62,7 @@ describe('RFC §8: the decimal row', () => {
     expect(detailed('1/8', { scale: 2, rounding: 'halfEven' })).toEqual(['0.125', true]);
     expect(detailed('10/3', { scale: 2, rounding: 'halfEven' })).toEqual(['3.33', false]);
     expect(detailed('2/3', { scale: 2, rounding: 'floor' })).toEqual(['0.66', false]);
-    expect(() => evaluate('1/0')).toThrow(DivisionByZeroError);
+    expect(evaluateText('1/0')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('^ with an integer exponent is exact; a negative one rounds only when 1/base does not terminate', () => {
@@ -58,7 +70,7 @@ describe('RFC §8: the decimal row', () => {
     expect(detailed('2^-3')).toEqual(['0.125', true]);
     expect(detailed('3^-1', { scale: 4, rounding: 'halfEven' })).toEqual(['0.3333', false]);
     expect(detailed('0^0')).toEqual(['1', true]);
-    expect(() => evaluate('0^-1')).toThrow(DivisionByZeroError);
+    expect(evaluateText('0^-1')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 
   it('^ with a non-integer exponent is decimal-math pow at scale, exact when the root is', () => {
@@ -66,7 +78,7 @@ describe('RFC §8: the decimal row', () => {
     expect(detailed('2^0.5', { scale: 3, rounding: 'halfEven' })).toEqual(['1.414', false]);
     // The exponent 1/3 itself rounds to 0.33 first, so this is 8^0.33, not a cube root.
     expect(detailed('pow(8, 1/3)', { scale: 2, rounding: 'halfEven' })).toEqual(['1.99', false]);
-    expect(() => evaluate('(-8)^0.5', HALF_EVEN)).toThrow(InvalidArgumentError);
+    expect(evaluateText('(-8)^0.5', HALF_EVEN)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('sqrt cbrt nthRoot exp ln log log10 log2 are correctly rounded at scale', () => {
@@ -88,8 +100,8 @@ describe('RFC §8: the decimal row', () => {
     expect(detailed('log(8, 4)', { scale: 2, rounding: 'halfEven' })).toEqual(['1.50', true]);
     expect(detailed('log10(0.001)', { scale: 0, rounding: 'halfEven' })).toEqual(['-3', true]);
     expect(detailed('log2(0.125)', { scale: 0, rounding: 'halfEven' })).toEqual(['-3', true]);
-    expect(() => evaluate('sqrt(-1)', HALF_EVEN)).toThrow(InvalidArgumentError);
-    expect(() => evaluate('ln(0)', HALF_EVEN)).toThrow(InvalidArgumentError);
+    expect(evaluateText('sqrt(-1)', HALF_EVEN)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('ln(0)', HALF_EVEN)).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('trigonometry is a compile-time not-in-domain error pointing at the call, never a float fallback', () => {
@@ -134,7 +146,7 @@ describe('the default rounding is unnecessary', () => {
   it('an inexact step throws RoundingNecessaryError unless the caller chose a mode, like Decimal#dividedBy', () => {
     // Silent rounding is how 0.1 + 0.2 bugs start: the caller must opt in.
     for (const text of ['1/3', '3^-1', 'sqrt(2)', 'ln(2)', 'pi', 'e', '2^0.5']) {
-      expect(() => evaluate(text)).toThrow(RoundingNecessaryError);
+      expect(evaluateText(text)).toMatchObject({ code: 'expr.no_value', cause: expect.any(RoundingNecessaryError) });
     }
     expect(() => decimal(1).dividedBy(3)).toThrow(RoundingNecessaryError);
   });
@@ -167,8 +179,8 @@ describe('integer-only operations are exact', () => {
   it('factorial uses @arki/math/integer: 25! keeps every digit a double would lose', () => {
     expect(evaluate('25!').toString()).toBe('15511210043330985984000000');
     expect(evaluate('factorial(0)').toString()).toBe('1');
-    expect(() => evaluate('2.5!')).toThrow(InvalidArgumentError);
-    expect(() => evaluate('(-1)!')).toThrow(InvalidArgumentError);
+    expect(evaluateText('2.5!')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
+    expect(evaluateText('(-1)!')).toMatchObject({ code: 'expr.no_value', cause: expect.any(InvalidArgumentError) });
   });
 
   it('floor ceil round fix sign abs mod follow the float domain’s definitions, exactly', () => {
@@ -178,7 +190,7 @@ describe('integer-only operations are exact', () => {
     expect(
       ['sign(-0.5)', 'abs(-0.5)', 'mod(-7, 3)', 'mod(7, -3)', 'mod(5.5, 2)'].map(text => evaluate(text).toString()),
     ).toEqual(['-1', '0.5', '2', '-2', '1.5']);
-    expect(() => evaluate('mod(1, 0)')).toThrow(DivisionByZeroError);
+    expect(evaluateText('mod(1, 0)')).toMatchObject({ code: 'expr.no_value', cause: expect.any(DivisionByZeroError) });
   });
 });
 

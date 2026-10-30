@@ -10,7 +10,7 @@ import type { Decimal } from './internal/exact.js';
 import type { RoundingMode } from './rounding.js';
 import { InvalidArgumentError, NumberFormatError, NumericRangeError, ResourceLimitError } from './errors.js';
 import { abs, digitCount, divideRounded, pow10 } from './internal/bigint.js';
-import { parseDecimalString } from './internal/parse.js';
+import { decimalParts } from './internal/parse.js';
 import { roundExact, roundToExact } from './internal/round.js';
 
 /** Interval notation: `[` / `]` include the bound, `(` / `)` exclude it. */
@@ -291,7 +291,7 @@ export function roundToSignificant(x: number, digits: number, mode: RoundingMode
   }
   if (x === 0) return 0;
   // The shortest text, not `partsFromNumber`: past 2^53 its digits are still the number you typed.
-  const { coefficient, scale } = parseDecimalString(String(x));
+  const { coefficient, scale } = decimalParts(String(x));
   const drop = digitCount(abs(coefficient)) - digits;
   if (drop <= 0) return x;
   const rounded = divideRounded(coefficient, pow10(drop), mode);

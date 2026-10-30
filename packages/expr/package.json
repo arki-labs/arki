@@ -84,6 +84,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "@arki/math": "workspace:*",
     "@arki/schema": "workspace:*"
   },

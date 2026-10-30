@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DivisionByZeroError,
   InvalidArgumentError,
-  NumberFormatError,
   NumericRangeError,
+  InvalidNumber,
+  NumberOutOfRange,
   ResourceLimitError,
 } from './errors.js';
 import {
@@ -52,6 +53,13 @@ describe('gcd', () => {
 });
 
 describe('lcm', () => {
+  it('caps a bigint result like combinations does, before multiplying', () => {
+    const a = 10n ** 60_000n + 1n;
+    const b = 10n ** 60_000n + 3n; // odd and 2 apart, so gcd is 1 and the product has 120 001 digits
+    expect(() => lcm(a, b)).toThrow(ResourceLimitError);
+    expect(lcm(10n ** 40_000n, 10n ** 40_000n + 1n) > 0n).toBe(true);
+  });
+
   it('works on numbers', () => {
     expect(lcm(4, 6)).toBe(12);
     expect(lcm(0, 5)).toBe(0);
@@ -383,17 +391,19 @@ describe('toBase / fromBase', () => {
     }
   });
 
-  it('rejects a digit that does not exist in the base instead of guessing', () => {
-    expect(() => fromBase('12', 2)).toThrow(NumberFormatError);
-    expect(() => fromBase('g', 16)).toThrow(NumberFormatError);
-    expect(() => fromBase('1_000', 10)).toThrow(NumberFormatError);
-    expect(() => fromBase('0xff', 16)).toThrow(NumberFormatError);
-    expect(() => fromBase(' 1', 10)).toThrow(NumberFormatError);
-    expect(() => fromBase('1.5', 10)).toThrow(NumberFormatError);
+  it('returns InvalidNumber for a digit that does not exist in the base instead of guessing', () => {
+    for (const [text, base] of [['12', 2], ['g', 16], ['1_000', 10], ['0xff', 16], [' 1', 10], ['1.5', 10]] as const) {
+      expect(InvalidNumber.is(fromBase(text, base)), text).toBe(true);
+    }
   });
 
-  it('rejects empty text and sign-only text', () => {
-    for (const text of ['', '-', '+']) expect(() => fromBase(text, 10)).toThrow(NumberFormatError);
+  it('returns InvalidNumber for empty text and sign-only text', () => {
+    for (const text of ['', '-', '+']) expect(InvalidNumber.is(fromBase(text, 10)), text).toBe(true);
+  });
+
+  it('returns NumberOutOfRange past 10 000 digits, before building the bigint', () => {
+    expect(NumberOutOfRange.is(fromBase('1'.repeat(10_001), 2))).toBe(true);
+    expect(fromBase('1'.repeat(10_000), 10)).toBe(BigInt('1'.repeat(10_000)));
   });
 
   it('rejects bases outside 2-36 and unsafe numbers', () => {

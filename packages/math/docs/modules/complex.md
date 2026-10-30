@@ -22,3 +22,7 @@ branches (C99 Annex G). The library has no `-0`, so a point exactly on a branch
 cut takes Kahan's counter-clockwise rule, like `sqrt` and `ln` and like mpmath
 and Mathematica; C and NumPy pick the other side on half of the cuts.
 Measured within 3.1 ulp of a 700-digit reference from 1e-300 to 1e300.
+
+Outside text goes through `parseComplex`, which returns the `InvalidNumber` or
+`NumberOutOfRange` failure instead of throwing. `complex('3+4i')` is the builder
+for text you control and throws `NumberFormatError`.

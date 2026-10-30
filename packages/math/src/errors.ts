@@ -1,11 +1,48 @@
 /**
- * Every failure this package raises extends `MathError`. Callers can catch the whole family with one
- * `instanceof`. Each concrete class carries
- * a stable `code` and a one-sentence `remediation`: match on the code, never on
- * the message. Wrong runtime types (a string where a number was required, or
- * `decimal('2') + 1`) throw the built-in `TypeError` instead. Nothing in this
- * package returns `NaN` or `null` as a hidden failure channel.
+ * Parsers return, builders throw. The `parse*` functions and `fromBase` read
+ * outside text and return a typed failure ({@link InvalidNumber},
+ * {@link NumberOutOfRange}) for text that is not a number or is past a limit.
+ * Builders (`decimal('1.5')`, `ratio('1/3')`, `complex('3+4i')`) and arithmetic
+ * throw: every thrown error extends `MathError`, so callers can catch the whole
+ * family with one `instanceof`. Each concrete class carries a stable `code` and
+ * a one-sentence `remediation`: match on the code, never on the message. Wrong
+ * runtime types (a string where a number was required, or `decimal('2') + 1`)
+ * throw the built-in `TypeError` instead. Nothing in this package returns
+ * `NaN` or `null` as a hidden failure channel.
  */
+import type { FailureOf } from '@arki/failure';
+import { defineFailure } from '@arki/failure';
+
+/**
+ * Outside text is not a number in the parser's syntax. The text is not echoed back.
+ *
+ * @fix Show the user the field again. For `parseNumber` and `parseDecimal` check that the locale or `symbols` match the text; for `fromBase` check the base.
+ * @verify cd packages/math && bun run vitest run src/parse.test.ts src/integer.test.ts src/complex.test.ts
+ */
+export const InvalidNumber = defineFailure('math.invalid_number', {
+  status: 400,
+  message: 'Text is not a number in the accepted syntax.',
+  remediation: 'Check the text against the syntax and locale the parser expects, then ask for the number again.',
+});
+
+/**
+ * Outside text holds a number past a documented limit: more than 10 000 digits,
+ * an exponent or scale past ±10 000, or a value outside the float range for a `number` result.
+ *
+ * @fix Reject the input as too large, or for a `number` result parse with `parseDecimal` to keep every digit.
+ * @verify cd packages/math && bun run vitest run src/parse.test.ts src/integer.test.ts src/complex.test.ts
+ */
+export const NumberOutOfRange = defineFailure('math.number_out_of_range', {
+  status: 400,
+  message: 'Text holds a number outside the supported digits, scale or range.',
+  remediation: 'Keep values within 10 000 digits and an exponent of 10 000, or use parseDecimal for values past the float range.',
+});
+
+/** Every failure a `@arki/math` parser returns. The one list; {@link MathParseFailure} is derived from it. */
+export const MATH_PARSE_FAILURES = [InvalidNumber, NumberOutOfRange] as const;
+
+/** A failure value returned by a `@arki/math` parser. */
+export type MathParseFailure = FailureOf<(typeof MATH_PARSE_FAILURES)[number]>;
 
 /** Stable error codes of `@arki/math`. */
 export const MATH_ERROR_CODES = {

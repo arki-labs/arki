@@ -16,7 +16,7 @@ parseNumber('1 234,56', { locale: 'fr-FR' }); // 1234.56
 parseNumber('−5', { locale: 'sv-SE' }); // -5   (U+2212 minus)
 parseDecimal('1,234.56').toString(); // '1234.56'
 parseNumber('1.234,56', { symbols: { decimal: ',', group: '.' } }); // 1234.56, no Intl needed
-parseNumber('abc'); // throws NumberFormatError
+parseNumber('abc'); // the InvalidNumber failure, code 'math.invalid_number'; parsers return, never throw
 ```
 
 The locale decides what a dot means: `'1.234'` is 1.234 in `en-US` and 1234
