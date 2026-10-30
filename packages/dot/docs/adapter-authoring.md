@@ -336,6 +336,16 @@ manifest, for what no action holds (the journal registers its event graph
 there). A projection module may also export `render(document)`; its string is
 what `dot explain --as <format>` prints without `--json`.
 
+**A console page.** Add `console: { title }` to `registerProjection` and export
+`consolePage(document)` from the projection module. It receives the same document
+`project(manifest)` returned and returns the page's HTML as a string. The `dot dev`
+console puts it in its shell, under a menu entry named `title`, and calls it for each
+request. Style the page with the shell's CSS variables (`--bg`, `--surface`, `--fg`,
+`--muted`, `--line`, `--accent`, `--warn`, `--bad`, `--ok`, `--radius`, `--font`,
+`--mono`; they follow light and dark) and load nothing from the network.
+`dot explain --as <format> --page --json` returns the HTML in `data.page`. A module
+without `consolePage` makes that command fail with `dot.projection_execution_failed`.
+
 Rules an adapter's `features:` option must follow:
 
 - **Partial tokens are accepted by design.** A feature with no slice for

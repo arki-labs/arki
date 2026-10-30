@@ -4,19 +4,8 @@
  * in, so a file kept in an app's docs changes only when the app's events, commands or handlers do.
  * `projection.ts` re-exports it as `eventMapMermaid`.
  */
+import { flowOf } from './event-map-flow.js';
 import type { EventMapDocument, EventMapEdge, EventMapEdgeKind, EventMapNode, EventMapNodeKind } from './projection.js';
-
-/** Mermaid draws data flow: a command writes an event, the event feeds its consumers, a workflow runs a command. */
-const FLOWS_FROM_OBJECT: Readonly<Record<EventMapEdgeKind, boolean>> = {
-  writes: false,
-  folds: true,
-  projects: true,
-  reacts: true,
-  'waits-for': true,
-  runs: false,
-  calls: false,
-  'owned-by': false,
-};
 
 const NODE_ORDER: Readonly<Record<EventMapNodeKind, number>> = {
   entrypoint: 0,
@@ -92,8 +81,8 @@ export function eventMapMermaid(document: Pick<EventMapDocument, 'nodes' | 'edge
   const drawn = [...document.edges]
     .filter(edge => edge.kind !== 'owned-by' && ids.has(edge.from) && ids.has(edge.to))
     .map(edge => {
-      const [tail, head] = FLOWS_FROM_OBJECT[edge.kind] ? [edge.to, edge.from] : [edge.from, edge.to];
-      return { edge, tail: ids.get(tail) ?? tail, head: ids.get(head) ?? head };
+      const { source, target } = flowOf(edge);
+      return { edge, tail: ids.get(source) ?? source, head: ids.get(target) ?? target };
     })
     .sort((a, b) => {
       const key = (x: typeof a): string =>

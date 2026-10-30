@@ -664,6 +664,7 @@ function registerJournal(ctx: DotConfigureContext, flow?: EventMapMeta): void {
     format: 'event-map',
     binding: 'journal',
     module: '@arki/journal/event-map',
+    console: { title: 'Event map' },
     ...(flow === undefined ? {} : { meta: flow }),
   });
 }

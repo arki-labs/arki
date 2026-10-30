@@ -97,6 +97,12 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
   and repeats the database step, the preflight and the runner. Under Vite, other
   `src/` changes are left to Vite's hot reload (`createAppRuntime`). A crashed
   app is not restarted until a change or `r`.
+- **Console.** `dot dev` serves a console on `http://127.0.0.1:<console-port>/` and
+  writes its URL to `dev.json`. It has one page per projection that registered
+  `console: { title }`. For each request it runs `dot explain` in a fresh process, so a
+  page shows the app as it is on disk. Nothing loads from the network. If the port
+  is taken, `dot dev` prints a warning and runs without the console. The journal
+  adds an "Event map" page this way.
 - **One per folder.** `.local/dot/dev.json` names the running session. A second
   `dot dev` in the same folder gets `dot.dev_already_running`.
 - **Keys** (terminal only): `q` quit, `r` restart, `c` open the console,
@@ -104,6 +110,9 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
 - **Flags:** `--app`, `--cwd`, `--db auto|pglite|pg`, `--allow-remote-db`,
   `--port` (3000), `--console-port` (4321), `--no-console`, `--no-open`,
   `--once`, `--run`.
+- **`dot explain --as <format> --page`** also returns the HTML page the projection
+  module gives the console (`data.page`). It is what the console runs; use it to
+  test a page without a browser.
 - **Failure codes:** `dot.dev_db_unreachable`, `dot.dev_runner_failed`,
   `dot.dev_port_in_use`, `dot.dev_already_running`,
   `dot.dev_remote_db_refused`, `dot.dev_app_started`, `dot.dev_preflight_failed`. With `--output ndjson`,

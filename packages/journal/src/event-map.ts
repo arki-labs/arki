@@ -28,6 +28,7 @@ import type { EventMapDocument, EventMapProblem, EventMapScanEntry } from './pro
 import { journalCommandSchema } from './event-map-schema.js';
 import { projectGraph, withEntrypoints } from './projection.js';
 
+export { eventMapPage as consolePage } from './event-map-page.js';
 export { render } from './projection.js';
 
 const PROCEDURE_FILE = /\.(?:ts|tsx|mts|js|mjs)$/;

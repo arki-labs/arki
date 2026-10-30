@@ -13,7 +13,7 @@ import { isFailure } from '@arki/failure';
 
 import type { DevEvent } from '../dev-events.js';
 import { devEventSchema } from '../dev-events.js';
-import { claimDevState, DEV_STATE_PATH, devStateSchema, releaseDevState } from '../dev-state.js';
+import { claimDevState, DEV_STATE_PATH, devStateSchema, publishConsoleUrl, releaseDevState } from '../dev-state.js';
 import { tempProject } from './dev-helpers.js';
 
 let workDir: string;
@@ -98,5 +98,18 @@ describe('devEventSchema', () => {
     const badUrl = await devEventSchema['~standard'].validate({ kind: 'console', url: 'not a url' });
     expect('issues' in unknown).toBe(true);
     expect('issues' in badUrl).toBe(true);
+  });
+});
+
+describe('publishConsoleUrl', () => {
+  it('adds the console URL to the file of this pid and leaves another session\'s file alone', async () => {
+    const claimed = await claimDevState(workDir);
+    if (isFailure(claimed)) throw new Error(claimed.code);
+    await publishConsoleUrl(claimed.file, 'http://127.0.0.1:4321/');
+    const published = JSON.parse(await readFile(claimed.file, 'utf8')) as unknown;
+    expect(published).toMatchObject({ pid: process.pid, console: { url: 'http://127.0.0.1:4321/' } });
+
+    await publishConsoleUrl(claimed.file, 'http://127.0.0.1:9/', process.pid + 1);
+    expect(await readFile(claimed.file, 'utf8')).toContain('4321');
   });
 });

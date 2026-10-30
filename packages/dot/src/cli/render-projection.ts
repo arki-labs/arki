@@ -29,11 +29,14 @@ export type ProjectionData = {
   format: string;
   document: JsonValue;
   text?: string;
+  /** Set when `page` was asked for and the module exports `consolePage(document)`: the console page's HTML. */
+  page?: string;
 };
 
 type ProjectionModule = {
   project(manifest: DotAppManifest): unknown;
   render?: (document: JsonValue) => unknown;
+  consolePage?: (document: JsonValue) => unknown;
 };
 
 export type ProjectionSource = {
@@ -43,6 +46,8 @@ export type ProjectionSource = {
   appFilePath: string;
   /** Per-invocation debug override for the selected projection module. */
   module?: string;
+  /** Also run the module's `consolePage(document)` and return its HTML as `page`. */
+  page?: boolean;
   /**
    * How to import the projection module. Default: resolve the specifier
    * relative to the app file (Bun's resolver, else Node's) and `import()` it.
@@ -142,7 +147,8 @@ function hasProject(value: unknown): value is ProjectionModule {
   return (
     is(value, recordSchema) &&
     typeof value['project'] === 'function' &&
-    (value['render'] === undefined || typeof value['render'] === 'function')
+    (value['render'] === undefined || typeof value['render'] === 'function') &&
+    (value['consolePage'] === undefined || typeof value['consolePage'] === 'function')
   );
 }
 
@@ -204,10 +210,20 @@ export async function renderProjection(source: ProjectionSource): Promise<Projec
 
   try {
     const document = toProjectionJsonValue(await loaded.project(source.manifest));
-    if (loaded.render === undefined) return { format: source.format, document };
+    let page: string | undefined;
+    if (source.page === true) {
+      if (loaded.consolePage === undefined)
+        throw new TypeError('A projection module needs consolePage(document) to give the console a page.');
+      const html = loaded.consolePage(document);
+      if (typeof html !== 'string')
+        throw new TypeError('A projection module\'s consolePage(document) must return a string.');
+      page = html;
+    }
+    const withPage = page === undefined ? {} : { page };
+    if (loaded.render === undefined) return { format: source.format, document, ...withPage };
     const text = loaded.render(document);
     if (typeof text !== 'string') throw new TypeError('A projection module\'s render(document) must return a string.');
-    return { format: source.format, document, text };
+    return { format: source.format, document, text, ...withPage };
   } catch (error) {
     return ProjectionExecutionFailed(
       { format: source.format, specifier, registeringPlugin: projection.plugin, causeMessage: messageOf(error) },

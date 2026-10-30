@@ -19,6 +19,11 @@ export default defineCommand({
       graph: z.boolean().optional().describe('The unit graph as Mermaid flowchart source, in boot order'),
       as: z.string().optional().describe('A registered projection format: openapi, asyncapi, help-text, ...'),
       module: z.string().optional().describe('Replace the projection module for this run (with --as)'),
+      page: z.boolean().optional().describe('Also return the HTML page the projection gives the dev console (with --as)'),
+    })
+    .refine(input => input.page !== true || input.as !== undefined, {
+      message: '--page needs --as <format>',
+      path: ['page'],
     })
     .refine(input => input.as === undefined || input.graph !== true, {
       message: '--as and --graph cannot be used together',
@@ -42,6 +47,7 @@ export default defineCommand({
       graph: input.graph,
       as: input.as,
       module: input.module,
+      page: input.page,
       appFilePath: discovered.filePath,
     });
   },

@@ -21,6 +21,8 @@ export type ExplainOptions = {
   readonly as?: string | undefined;
   /** Replace the projection module for this run (`--as` only). */
   readonly module?: string | undefined;
+  /** With `as`: also return the console page the projection module offers. */
+  readonly page?: boolean | undefined;
   /** The app file: projection modules resolve relative to it. Defaults to the cwd. */
   readonly appFilePath?: string | undefined;
 };
@@ -49,6 +51,7 @@ export async function runExplain(discovered: DiscoveredApp, opts: ExplainOptions
       format: opts.as,
       appFilePath: opts.appFilePath ?? process.cwd(),
       ...(opts.module === undefined ? {} : { module: opts.module }),
+      ...(opts.page === true ? { page: true } : {}),
     });
   }
   if (opts.graph === true) return renderGraph(manifest);

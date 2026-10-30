@@ -137,6 +137,19 @@ export async function claimDevState(
   }
 }
 
+/**
+ * Add `console.url` to the state file, but only while it still names `pid`. The rewrite goes through a private
+ * temp file and a rename, so a reader never sees half a file.
+ */
+export async function publishConsoleUrl(file: string, url: string, pid: number = process.pid): Promise<void> {
+  const state = await readDevState(file);
+  if (state?.pid !== pid) return;
+  const temp = `${file}.${String(pid)}.console.tmp`;
+  const next: DevState = { ...state, console: { url } };
+  await writeFile(temp, `${JSON.stringify(next)}\n`);
+  await rename(temp, file);
+}
+
 /** Remove the state file, but only while it still names `pid`: never another supervisor's file. */
 export async function releaseDevState(file: string, pid: number = process.pid): Promise<void> {
   const state = await readDevState(file);

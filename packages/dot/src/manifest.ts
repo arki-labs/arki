@@ -150,6 +150,11 @@ export type ProjectionManifest = {
    * (the journal's folds and inline projections run inside a write, not at an app boundary). Opaque to the kernel.
    */
   meta?: Readonly<JsonObject>;
+  /**
+   * Gives the `dot dev` console a page for this projection. `title` is the page's name in the console's
+   * menu. The projection module must export `consolePage(document)`: it returns the page's HTML.
+   */
+  console?: { readonly title: string };
 };
 
 /**

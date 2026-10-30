@@ -157,6 +157,41 @@ export function render(document) {
     expect(projected).toEqual({ format: 'flow', document: { events: ['A', 'B'] }, text: 'A\nB' });
   });
 
+  it("adds the module's consolePage(document) as page only when asked, and fails when the module has none", async () => {
+    const appFilePath = path.join(workDir, 'app.ts');
+    await writeFile(appFilePath, '');
+    await writeFile(
+      path.join(workDir, 'paged.ts'),
+      `
+export function project() {
+  return { events: ['A'] };
+}
+export function consolePage(document) {
+  return '<p>' + document.events.join(',') + '</p>';
+}
+`,
+    );
+    await writeFile(path.join(workDir, 'plain.ts'), 'export function project() { return {}; }\n');
+    const manifest = manifestOf({
+      projections: [
+        { format: 'paged', binding: 'x', module: './paged.ts', plugin: 'x', console: { title: 'Paged' } },
+        { format: 'plain', binding: 'x', module: './plain.ts', plugin: 'x' },
+      ],
+    });
+
+    expect(await renderProjection({ manifest, format: 'paged', appFilePath })).toEqual({
+      format: 'paged',
+      document: { events: ['A'] },
+    });
+    expect(await renderProjection({ manifest, format: 'paged', appFilePath, page: true })).toEqual({
+      format: 'paged',
+      document: { events: ['A'] },
+      page: '<p>A</p>',
+    });
+    const refused = await renderProjection({ manifest, format: 'plain', appFilePath, page: true });
+    expect(refused).toMatchObject({ code: 'dot.projection_execution_failed' });
+  });
+
   it('refuses a render(document) that returns no string, so the CLI never prints a non-string', async () => {
     const appFilePath = path.join(workDir, 'app.ts');
     await writeFile(appFilePath, '');

@@ -35,9 +35,11 @@ import type { RunnerHandle, RunnerKind, RunnerSpec } from './dev-runner.js';
 import type { ProjectWatcher, RestartRequest, RestartScheduler } from './dev-watch.js';
 import type { DoctorReport } from './failures.js';
 import { prepareDb } from './dev-db.js';
+import type { RunningConsole } from './dev-console.js';
+import { cliExplainRunner, startConsole } from './dev-console.js';
 import { openLoopbackHost, pollUntil, probeTcp } from './dev-net.js';
 import { chooseRunner, createOutputBuffer, startRunner } from './dev-runner.js';
-import { claimDevState, readDevState, releaseDevState } from './dev-state.js';
+import { claimDevState, publishConsoleUrl, readDevState, releaseDevState } from './dev-state.js';
 import { classifyChange, createRestartScheduler, watchProject } from './dev-watch.js';
 import {
   AppImportFailed,
@@ -594,6 +596,7 @@ async function superviseUntilQuit(
   // From here on a runner may live: everything below is undone in the `finally`, even when it throws.
   let watcher: ProjectWatcher | undefined;
   let consolePoll: ReturnType<typeof setInterval> | undefined;
+  let runningConsole: RunningConsole | undefined;
   let stopKeys: (() => void) | null = null;
   let scheduler: RestartScheduler | undefined;
   const removeSignalHandlers = handleProcessSignals(sessionAbort, () => state.runner);
@@ -642,6 +645,15 @@ async function superviseUntilQuit(
     let opened = false;
     let polling = false;
     if (session.console) {
+      const started = await startConsole({
+        port: session.consolePort,
+        explain: cliExplainRunner({ cliEntry, cwd, appFile: projectAppFile, env: () => childEnv(env) }),
+      });
+      if ('message' in started) ui.warn(`dot dev ▸ ${started.message}`);
+      else {
+        runningConsole = started;
+        await publishConsoleUrl(session.stateFile, started.url);
+      }
       consolePoll = setInterval(() => {
         if (polling) return;
         polling = true;
@@ -701,6 +713,7 @@ async function superviseUntilQuit(
     // Stops everything new restarts could come from before waiting for the running one.
     sessionAbort.abort();
     clearInterval(consolePoll);
+    await runningConsole?.close();
     watcher?.close();
     stopKeys?.();
     await scheduler?.idle();
