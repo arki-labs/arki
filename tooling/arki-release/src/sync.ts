@@ -3,15 +3,18 @@
  *
  * Two halves, split by who may run them:
  *
- *   - {@link runSyncPrepare} is agent-safe and local. It rebuilds the public
- *     tree, prepares one commit and one annotated tag in `.release/arki-mirror`,
- *     rebuilds a tree per package in `.release/package-mirrors/<name>` from
- *     the npm tarball, writes release notes, and records everything in
- *     `.release/sync-plan.json`. It reads the network (fetch, npm) but never
- *     pushes and never runs a `gh` write.
+ *   - {@link runSyncPrepare} is agent-safe and local. It rebuilds a tree per
+ *     package in `.release/package-mirrors/<name>` from the npm tarball,
+ *     writes release notes, puts one annotated wave tag on the candidate's
+ *     source commit in this repo (it never commits here: this repo is the
+ *     real source of `arki-labs/arki`, not a mirror), and records everything
+ *     in `.release/sync-plan.json`. It reads the network (fetch, npm) but
+ *     never pushes and never runs a `gh` write.
  *   - {@link runSyncApply} is founder-only. It pushes, tags and creates the
- *     GitHub Releases from that plan. It refuses under an agent or without a
- *     terminal, and it skips whatever already exists, so a rerun is safe.
+ *     GitHub Releases from that plan. It pushes `main` only where prepare made
+ *     a new commit, so it never pushes this repo's `main`. It refuses under
+ *     an agent or without a terminal, and it skips whatever already exists,
+ *     so a rerun is safe.
  *
  * It never force-pushes: a rejected push means someone else moved the
  * branch, and a human has to look (troubleshooting.md).
@@ -26,12 +29,10 @@ import debugFactory from 'debug';
 import { z } from 'zod';
 
 import { readCandidate } from './candidate';
-import { exportPublicTree } from './export-public';
 import { discoverManifests } from './inventory';
 import { createEnvelope } from './json-output';
 import type { ExternalOutcome, ExternalResults } from './readiness';
 import { defaultGitRunner, defaultNpmRunner, execRunner, type ExecRunner, type GitRunner, type NpmRunner } from './runners';
-import { createSourceSnapshot } from './snapshot';
 import type { ReleaseCommandEnvelope, ReleaseConfig, ReleaseError } from './types';
 
 const debug = debugFactory('arki:release:sync');
@@ -53,19 +54,19 @@ export const SYNC_ERROR_CODES = {
   mirrorNotCheckout: 'MSYNC_E007',
   /** A tarball could not be packed, verified or unpacked. */
   tarballFailed: 'MSYNC_E008',
-  /** The public tree could not be exported. */
-  exportFailed: 'MSYNC_E009',
+  // MSYNC_E009 (public tree export failed) is retired with the generated arki mirror; never reuse it.
   /** A `gh` command failed. */
   ghFailed: 'MSYNC_E010',
   /** A push was rejected. */
   pushRejected: 'MSYNC_E011',
+  /** A local wave tag already points at another commit; published tags never move. */
+  tagMoved: 'MSYNC_E012',
 } as const;
 
 const COMMAND = 'sync' as const;
 const ORG = 'arki-labs';
 const ARKI_REPO = `${ORG}/arki`;
 export const SYNC_PLAN_PATH = path.join('.release', 'sync-plan.json');
-const ARKI_MIRROR_DIR = path.join('.release', 'arki-mirror');
 const PACKAGE_MIRRORS_DIR = path.join('.release', 'package-mirrors');
 const STAGING_DIR = path.join('.release', 'sync');
 
@@ -76,9 +77,9 @@ const RELEASE_BOT = { name: 'ARKI Release Bot', email: 'bot@arki-labs.org' } as 
 // ---------------------------------------------------------------------------
 
 const repoStateSchema = z.object({
-  /** Repo path relative to the workspace root. */
+  /** Repo path relative to the workspace root; `.` for the wave, which is this repo. */
   dir: z.string(),
-  /** Commit prepared on top of the remote branch; null when nothing changed. */
+  /** Commit prepared on top of the remote branch; null when nothing changed (always null for the wave). */
   commit: z.string().nullable(),
   tag: z.string(),
   /** True when the tag already exists on the remote at prepare time. */
@@ -185,8 +186,6 @@ type RepoRequest = {
   readonly dir: string;
   readonly remote: string;
   readonly identity: Identity;
-  /** A package mirror may not exist on GitHub yet; the arki mirror must. */
-  readonly allowNewRemote: boolean;
   readonly writeTree: (dir: string) => Promise<void>;
   readonly message: string;
   readonly tag: string;
@@ -263,7 +262,8 @@ async function prepareRepo(request: RepoRequest): Promise<{ readonly ok: true; r
   let remoteIsNew = false;
   const fetched = await run(['fetch', '-q', 'origin', '--tags']);
   if (fetched.code !== 0) {
-    if (request.allowNewRemote && /not found|does not appear to be a git repository|does not exist/i.test(fetched.stderr)) {
+    // A package mirror may not exist on GitHub yet.
+    if (/not found|does not appear to be a git repository|does not exist/i.test(fetched.stderr)) {
       remoteIsNew = true;
     } else {
       return gitFailure('git fetch', fetched);
@@ -309,21 +309,60 @@ async function prepareRepo(request: RepoRequest): Promise<{ readonly ok: true; r
   return { ok: true, result: { commit, tagExists: false } };
 }
 
+/**
+ * Puts the annotated wave tag on `commit` in the source repo (`cwd`). Never
+ * commits and never moves a branch. Stops when the tag is already on the
+ * remote. Fails when a local tag of that name points at another commit:
+ * published tags never move.
+ */
+async function tagSourceRepo(request: {
+  readonly git: GitRunner;
+  readonly cwd: string;
+  readonly commit: string;
+  readonly tag: string;
+  readonly tagMessage: string;
+}): Promise<{ readonly ok: true; readonly tagExists: boolean } | { readonly ok: false; readonly error: ReleaseError }> {
+  const { git, cwd, tag } = request;
+  const run = (args: readonly string[]) => git(args, { cwd });
+  const gitFailure = (what: string, out: { stderr: string; stdout: string }): { ok: false; error: ReleaseError } => ({
+    ok: false,
+    error: fail(SYNC_ERROR_CODES.gitFailed, `${what} failed in ${cwd}: ${(out.stderr.trim() || out.stdout.trim()).slice(0, 300)}`, 'Fix the git problem and run `sync --prepare` again.', ARKI_REPO),
+  });
+
+  const resolved = await run(['rev-parse', '--verify', '--quiet', `${request.commit}^{commit}`]);
+  if (resolved.code !== 0) {
+    return {
+      ok: false,
+      error: fail(SYNC_ERROR_CODES.gitFailed, `The source commit ${request.commit} is not in ${cwd}.`, 'Fetch it (`git fetch origin`), or freeze a new candidate from this repo.', ARKI_REPO),
+    };
+  }
+  const commit = resolved.stdout.trim();
+
+  const remoteTag = await run(['ls-remote', '--tags', 'origin', `refs/tags/${tag}`]);
+  if (remoteTag.code !== 0) return gitFailure('git ls-remote', remoteTag);
+  if (remoteTag.stdout.trim().length > 0) return { ok: true, tagExists: true };
+
+  const localTag = await run(['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]);
+  if (localTag.code === 0) {
+    const tagged = localTag.stdout.trim();
+    if (tagged === commit) return { ok: true, tagExists: false };
+    return {
+      ok: false,
+      error: fail(
+        SYNC_ERROR_CODES.tagMoved,
+        `The local tag ${tag} points at ${tagged.slice(0, 12)}, not at the source commit ${commit.slice(0, 12)}.`,
+        `Published tags never move. If ${tag} was never pushed and you know why it is there, delete it (\`git tag -d ${tag}\`) and prepare again. Otherwise stop and ask.`,
+        ARKI_REPO,
+      ),
+    };
+  }
+  const created = await run([...gitIdentityArgs(FOUNDER), 'tag', '-a', tag, '-m', request.tagMessage, commit]);
+  if (created.code !== 0) return gitFailure('git tag', created);
+  return { ok: true, tagExists: false };
+}
+
 // Prepare
 // ---------------------------------------------------------------------------
-
-export type TreeExporter = (input: { readonly cwd: string; readonly config: ReleaseConfig }) => Promise<readonly ReleaseError[]>;
-
-/** Exports the committed (HEAD) tree to `config.publicTreePath`, with the workspaces root so cloners can `bun install`. */
-export const exportCommittedPublicTree: TreeExporter = async ({ cwd, config }) => {
-  const snapshot = await createSourceSnapshot({ rootCwd: cwd });
-  try {
-    const exported = await exportPublicTree({ rootCwd: cwd, sourceRoot: snapshot.dir, config });
-    return exported.errors;
-  } finally {
-    await snapshot.cleanup();
-  }
-};
 
 export interface RunSyncPrepareOptions {
   readonly cwd: string;
@@ -334,7 +373,6 @@ export interface RunSyncPrepareOptions {
   readonly npmRunner?: NpmRunner;
   /** Runs `tar`. */
   readonly exec?: ExecRunner;
-  readonly exportTree?: TreeExporter;
   /** `git@github.com:<repo>.git` by default. */
   readonly remoteUrl?: (repo: string) => string;
   readonly now?: () => Date;
@@ -349,12 +387,15 @@ function defaultRemote(repo: string): string {
 }
 
 /** Candidate tarballs, or the published versions of every admitted package packed from npm. */
-async function collectTarballs(options: RunSyncPrepareOptions, stagingRoot: string): Promise<{ wave: string; tarballs: Tarball[]; errors: ReleaseError[] }> {
+async function collectTarballs(
+  options: RunSyncPrepareOptions,
+  stagingRoot: string,
+): Promise<{ wave: string; sourceCommit: string | null; tarballs: Tarball[]; errors: ReleaseError[] }> {
   const { cwd, config } = options;
   const errors: ReleaseError[] = [];
   if (options.candidateDir !== undefined) {
     const read = await readCandidate(options.candidateDir);
-    if (!read.ok) return { wave: 'unknown', tarballs: [], errors: read.errors.map(e => ({ ...e, code: SYNC_ERROR_CODES.candidateUnusable })) };
+    if (!read.ok) return { wave: 'unknown', sourceCommit: null, tarballs: [], errors: read.errors.map(e => ({ ...e, code: SYNC_ERROR_CODES.candidateUnusable })) };
     const tarballs = read.candidate.packages.map(pkg => ({
       name: pkg.name,
       version: pkg.version,
@@ -362,7 +403,7 @@ async function collectTarballs(options: RunSyncPrepareOptions, stagingRoot: stri
       // readCandidate already compared every sha512.
       integrityVerified: true,
     }));
-    return { wave: read.candidate.wave, tarballs, errors };
+    return { wave: read.candidate.wave, sourceCommit: read.candidate.sourceCommit, tarballs, errors };
   }
 
   const npm = options.npmRunner ?? defaultNpmRunner;
@@ -399,7 +440,8 @@ async function collectTarballs(options: RunSyncPrepareOptions, stagingRoot: stri
     }
     tarballs.push({ name: manifest.name, version: manifest.version, file, integrityVerified: verified === 'match' });
   }
-  return { wave: 'all', tarballs, errors };
+  // No candidate names a commit; the wave tag goes on HEAD, the state these versions were published from.
+  return { wave: 'all', sourceCommit: null, tarballs, errors };
 }
 
 async function npmIntegrityMatches(npm: NpmRunner, cwd: string, spec: string, file: string): Promise<'match' | 'mismatch' | 'unknown'> {
@@ -415,10 +457,9 @@ async function npmIntegrityMatches(npm: NpmRunner, cwd: string, spec: string, fi
 
 /** Local, agent-safe half of `sync`: everything is prepared on disk, nothing is pushed. */
 export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<SyncEnvelope> {
-  const { cwd, config } = options;
+  const { cwd } = options;
   const git = options.gitRunner ?? defaultGitRunner;
   const exec = options.exec ?? execRunner;
-  const exportTree = options.exportTree ?? exportCommittedPublicTree;
   const remoteUrl = options.remoteUrl ?? defaultRemote;
   const now = (options.now ?? (() => new Date()))();
   const date = now.toISOString().slice(0, 10);
@@ -443,7 +484,7 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
   // The text is written once, in the root SECURITY.md that the public tree also ships.
   const securityMd = await readFile(path.join(cwd, 'SECURITY.md'), 'utf8');
 
-  // 2. Per-package trees and notes. Built before the arki mirror so a bad tarball stops early.
+  // 2. Per-package trees and notes. Built before the wave tag so a bad tarball stops early.
   const packages: SyncPlanPackage[] = [];
   const noteSections: string[] = [];
   for (const tarball of collected.tarballs) {
@@ -488,7 +529,6 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
       dir: mirrorDir,
       remote: remoteUrl(repo),
       identity: RELEASE_BOT,
-      allowNewRemote: true,
       writeTree: dest => cp(tree, dest, { recursive: true }),
       message: `release: ${tarball.name} v${tarball.version}`,
       tag: `v${tarball.version}`,
@@ -523,38 +563,16 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
   }
   if (errors.length > 0) return stop(`${errors.length.toString()} package mirrors failed to prepare.`);
 
-  // 3. The arki mirror: public tree on top of origin/main.
-  const exportErrors = (await exportTree({ cwd, config })).filter(e => e.severity === 'error');
-  if (exportErrors.length > 0) {
-    errors.push(...exportErrors.map(e => ({ ...e, code: SYNC_ERROR_CODES.exportFailed })));
-    return stop('Exporting the public tree failed.');
-  }
-  const publicTree = path.resolve(cwd, config.publicTreePath);
+  // 3. The wave tag, on the source commit in this repo. No tree export, no commit: this repo is the source.
   const arkiTag = `v${wave}-${date}`;
-  const arkiDir = path.join(cwd, ARKI_MIRROR_DIR);
   const summaryLine = packages.map(p => `${p.name}@${p.version}`).join(', ');
-  const arkiPrepared = await prepareRepo({
-    git,
-    dir: arkiDir,
-    remote: remoteUrl(ARKI_REPO),
-    identity: FOUNDER,
-    allowNewRemote: false,
-    writeTree: dest => cp(publicTree, dest, { recursive: true }),
-    message: `release: ${wave} ${date}\n\n${summaryLine}`,
-    tag: arkiTag,
-    tagMessage: `${wave} ${date}\n\n${summaryLine}`,
-  });
-  if (!arkiPrepared.ok) {
-    errors.push(arkiPrepared.error);
-    items.unshift({ target: ARKI_REPO, kind: 'wave', action: 'failed', detail: arkiPrepared.error.message });
-    return stop('Preparing the arki mirror failed.');
+  const waveTagged = await tagSourceRepo({ git, cwd, commit: collected.sourceCommit ?? 'HEAD', tag: arkiTag, tagMessage: `${wave} ${date}\n\n${summaryLine}` });
+  if (!waveTagged.ok) {
+    errors.push(waveTagged.error);
+    items.unshift({ target: ARKI_REPO, kind: 'wave', action: 'failed', detail: waveTagged.error.message });
+    return stop('Tagging the wave failed.');
   }
-  items.unshift({
-    target: ARKI_REPO,
-    kind: 'wave',
-    action: arkiPrepared.result.tagExists ? 'already-tagged' : arkiPrepared.result.commit === null ? 'unchanged' : 'prepared',
-    detail: arkiTag,
-  });
+  items.unshift({ target: ARKI_REPO, kind: 'wave', action: waveTagged.tagExists ? 'already-tagged' : 'prepared', detail: arkiTag });
   const waveNotes = path.join(stagingRoot, 'wave-notes.md');
   await writeFile(waveNotes, `# ${wave} (${date})\n\n${noteSections.join('\n\n')}\n`);
 
@@ -566,10 +584,10 @@ export async function runSyncPrepare(options: RunSyncPrepareOptions): Promise<Sy
     date,
     arki: {
       repo: ARKI_REPO,
-      dir: rel(arkiDir),
-      commit: arkiPrepared.result.commit,
+      dir: '.',
+      commit: null,
       tag: arkiTag,
-      tagExists: arkiPrepared.result.tagExists,
+      tagExists: waveTagged.tagExists,
       notesFile: rel(waveNotes),
       assets: [],
     },
@@ -695,7 +713,7 @@ export async function runSyncApply(options: RunSyncApplyOptions): Promise<SyncEn
       items.push({ target: target.repo, kind: target.kind, action: 'failed', detail: error.message });
     };
 
-    // Push main and the tag. A plain push: a rejection means the branch moved and a human decides.
+    // Push main (only when prepare made a new commit) and the tag. A plain push: a rejection means the branch moved and a human decides.
     if (target.tagExists || state.pushed) {
       done.push('tag already pushed');
     } else {
@@ -710,10 +728,13 @@ export async function runSyncApply(options: RunSyncApplyOptions): Promise<SyncEn
           }
         }
       }
-      const pushMain = await git(['push', 'origin', 'main'], { cwd: dir });
-      if (pushMain.code !== 0) {
-        failed(fail(SYNC_ERROR_CODES.pushRejected, `git push origin main for ${target.repo} failed: ${pushMain.stderr.trim().slice(0, 300)}`, `Never force-push. Run \`git -C ${target.dir} fetch\`, read \`git log main..origin/main\`, and if you do not recognize what landed, stop. Otherwise rerun \`sync --prepare\` then \`--apply\`.`, target.repo));
-        continue;
+      // The wave never has a commit, so a release never pushes this repo's main as a side effect.
+      if (target.commit !== null) {
+        const pushMain = await git(['push', 'origin', 'main'], { cwd: dir });
+        if (pushMain.code !== 0) {
+          failed(fail(SYNC_ERROR_CODES.pushRejected, `git push origin main for ${target.repo} failed: ${pushMain.stderr.trim().slice(0, 300)}`, `Never force-push. Run \`git -C ${target.dir} fetch\`, read \`git log main..origin/main\`, and if you do not recognize what landed, stop. Otherwise rerun \`sync --prepare\` then \`--apply\`.`, target.repo));
+          continue;
+        }
       }
       const pushTag = await git(['push', 'origin', target.tag], { cwd: dir });
       if (pushTag.code !== 0) {

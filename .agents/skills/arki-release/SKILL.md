@@ -1,17 +1,17 @@
 ---
 name: arki-release
 user-invocable: false
-description: End-to-end release pipeline for the `@arki/*` npm scope and the `arki-labs/arki` public GitHub mirror. Use when the user mentions "ship arki", "publish @arki", "update the arki repo", "release a wave", "promote a package to public", or any release-tooling-related task. Encapsulates the full release doctrine (deterministic public tree → npm + GitHub mirror) and the 5-stage scorecard gate. Sub-procedures live alongside this file for deep dives (`ship-update.md`, `add-new-package.md`, `sync.md`, `troubleshooting.md`).
+description: End-to-end release pipeline for the `@arki/*` npm scope, the per-package GitHub mirrors and the wave tags on `arki-labs/arki`. Use when the user mentions "ship arki", "publish @arki", "update the arki repo", "release a wave", "promote a package to public", or any release-tooling-related task. Encapsulates the full release doctrine (deterministic public tree → npm → per-package mirrors; wave tag on the source repo) and the 5-stage scorecard gate. Sub-procedures live alongside this file for deep dives (`ship-update.md`, `add-new-package.md`, `sync.md`, `troubleshooting.md`).
 ---
 
 # arki-release
 
-> **Changed 2026-10-30: this repo is now `arki-labs/arki` itself.** The source
-> moved out of the private monorepo, so `arki-labs/arki` is no longer a mirror
-> of `.release/arki-public/`. Until `tooling/arki-release` drops that target:
-> never run `sync --apply` for the `arki-labs/arki` repo, and push source
-> changes with plain `git push`. The ship phases, the scorecard, npm publishing
-> and the per-package mirrors (`arki-labs/<name>`) work as described below.
+> **Changed 2026-10-30: this repo is `arki-labs/arki` itself.** It is the real
+> source, not a generated mirror. A release never writes a commit here and never
+> pushes `main`. `sync --prepare` only puts the annotated wave tag
+> `v<wave>-<date>` on the candidate's source commit. `sync --apply` pushes that
+> tag and creates the wave's GitHub Release. Push your own source changes with a
+> plain `git push`, as usual.
 
 ## When to invoke
 
@@ -22,28 +22,24 @@ description: End-to-end release pipeline for the `@arki/*` npm scope and the `ar
 
 Don't invoke for: general npm questions, generic monorepo work, or tasks that aren't about the `@arki/*` ecosystem.
 
-## The five surfaces — keep them synchronized
+## The four surfaces — keep them synchronized
 
 ```
-┌───────────────────────────┐   bun release:arki   ┌────────────────────┐
-│ Private monorepo source   │   export-public      │ Materialized tree  │
-│ packages/<pkg>/*          │ ───────────────────► │ .release/arki-     │
-│ + tooling/arki-release/   │                      │   public/          │
-└──────────┬────────────────┘                      └────────┬───────────┘
-           │                                                │
-           │  scorecard reads source          ┌─────────────┼─────────────┐
-           │                                  │             │             │
-           ▼                                  ▼             ▼
-   `bun release:arki                  ┌──────────────┐  ┌──────────────┐
-    scorecard` (gate)                 │ npm registry │  │ arki-labs/   │
-                                      │ @arki/*      │  │ arki on      │
-                                      └──────┬───────┘  │ GitHub       │
-                                             │          └──────────────┘
-                                             │
-                            bun release:arki │
-                            sync --apply     │
-                                             │
-                                             ▼
+┌──────────────────────────────┐   bun release:arki   ┌────────────────────┐
+│ Source: this repo,           │   export-public      │ Materialized tree  │
+│ = arki-labs/arki on GitHub   │ ───────────────────► │ .release/arki-     │
+│ packages/<pkg>/*             │                      │   public/          │
+│ + tooling/arki-release/      │                      └────────┬───────────┘
+└──────────┬───────────────────┘                               │ candidate
+           │       ▲                                           │ tarballs
+           │       │ wave tag v<wave>-<date>                   ▼
+           │       │ + GitHub Release                   ┌──────────────┐
+           │       │ (sync --apply; no commit,          │ npm registry │
+           │       │  never pushes main)                │ @arki/*      │
+           │       │                                    └──────┬───────┘
+           ▼                                                   │ bun release:arki
+   `bun release:arki                                           │ sync --apply
+    scorecard` (gate)                                          ▼
                                       ┌──────────────────────────────────┐
                                       │ arki-labs/<name>                 │
                                       │ (per-package read-only mirrors;  │
@@ -55,7 +51,7 @@ Don't invoke for: general npm questions, generic monorepo work, or tasks that ar
                                       └──────────────────────────────────┘
 ```
 
-**Doctrine:** the **materialized tree at `.release/arki-public/`** is the canonical artifact. npm and `arki-labs/arki` are mirrors of it; the per-package repos at `arki-labs/<name>` are mirrors *of npm* (reconstructed from npm tarballs, one commit per published version). The materialized tree is **deterministically regenerated** from monorepo source — never hand-edit it. Per-package repos are **deterministically reconstructable** from npm — never hand-edit them either; the read-only signal is the `[Read-only mirror]` prefix on the repo description plus Issues/Wiki being disabled at create time.
+**Doctrine:** this repo is the source and is `arki-labs/arki` on GitHub. The **materialized tree at `.release/arki-public/`** is what npm gets; it is **deterministically regenerated** from source — never hand-edit it. A release marks itself in this repo with one annotated wave tag on the candidate's source commit, plus a GitHub Release. It never commits a generated tree here and never pushes `main`. The per-package repos at `arki-labs/<name>` are mirrors *of npm* (reconstructed from npm tarballs, one commit per published version). They are **deterministically reconstructable** from npm — never hand-edit them; the read-only signal is the `[Read-only mirror]` prefix on the repo description plus Issues/Wiki being disabled at create time.
 
 ## The release-doctrine non-negotiables
 
@@ -80,7 +76,7 @@ These are encoded as scorecard dimensions; the tool enforces them, this list onl
 | — Commit | orchestrator | the printed commit line | |
 | 2. Freeze + check + packet | agent | `bun release:arki ship --wave <id> --resume` | `packet.md` path, or SHIP_E007 with the blockers |
 | — Publish | **founder** | the `npm publish` lines in `packet.md`, from `/tmp` | |
-| 3. Finish | **founder** | `bun release:arki ship --finish --candidate <dir>` | ledger entry written, mirror synced, demo pin bumps printed |
+| 3. Finish | **founder** | `bun release:arki ship --finish --candidate <dir>` | ledger entry written, package mirrors synced, wave tag pushed, demo pin bumps printed |
 
 Details per phase: [ship-update.md](./ship-update.md). Error codes and fixes: [troubleshooting.md](./troubleshooting.md#error-codes-from-ship).
 
@@ -89,7 +85,7 @@ Other procedures:
 | Procedure | Sub-doc |
 |---|---|
 | Promote a private package to a public wave | [add-new-package.md](./add-new-package.md) |
-| Sync the GitHub mirrors (`arki-labs/arki` and `arki-labs/<name>`) | [sync.md](./sync.md) |
+| Sync the GitHub mirrors (`arki-labs/<name>`) and tag the wave on `arki-labs/arki` | [sync.md](./sync.md) |
 | Diagnose a release issue | [troubleshooting.md](./troubleshooting.md) |
 
 ## Hard rules
@@ -97,7 +93,7 @@ Other procedures:
 - **Agents run only `--dry-run`, phase 1 and `--resume`.** `ship --finish` refuses with SHIP_E004 when `CLAUDECODE` is set or stdin is not a TTY. Never work around it.
 - **Apps and non-wave packages are never versioned.** `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, every package outside the waves is `private: true`, and `ship` runs `changeset version --ignore <every package outside the set>`. If a bump still lands outside the set, `ship` stops with SHIP_E002; restore those files, do not commit them.
 - **`arki.release.config.ts` is the source of truth** for which packages are in which wave.
-- **Never commit `.release/`** — candidates, the public tree and the mirror checkout are regenerated.
+- **Never commit `.release/`** — candidates, the public tree and the package mirror checkouts are regenerated.
 - **`npm publish` needs the founder's OTP** — see [troubleshooting.md](./troubleshooting.md#the-npm-otp-wall).
 - **Never force-push `arki-labs/arki`** — see [troubleshooting.md](./troubleshooting.md#never-force-push-arki-labsarki).
 

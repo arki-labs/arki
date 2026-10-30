@@ -46,14 +46,14 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 
 **Symptom:** Running `git add -A` inside `.release/arki-public/` (or any folder without its own `.git/`) stages files from the parent monorepo (`apps/<x>/`, `tooling/<y>/`, `.claude/`). `git status` shows paths like `../../apps/avocabo/...`.
 
-**Root cause:** the export folder never has a `.git/` (`export-public`'s `removeDirectory(outputPath)` wipes it); mirror git work belongs in `.release/arki-mirror/`. Git walks UP looking for a `.git/`, finds the monorepo's, and operates against THAT.
+**Root cause:** the export folder never has a `.git/` (`export-public`'s `removeDirectory(outputPath)` wipes it). Never do git work there. Git walks UP looking for a `.git/`, finds this repo's, and operates against THAT. Package mirror git work belongs in `.release/package-mirrors/<name>/`, which `sync --prepare` creates with its own `.git/`.
 
 **Detect before damaging:**
 ```bash
-cd /Users/afurculita/Developer/workspace/.release/arki-mirror
+cd .release/package-mirrors/<name>
 git rev-parse --git-dir
-# MUST be:  /Users/afurculita/Developer/workspace/.release/arki-mirror/.git
-# If it's the monorepo's path, STOP: clone the mirror there first (sync.md: `sync --prepare` clones it).
+# MUST be:  .git (this folder's own)
+# If it's this repo's path, STOP: delete the folder and run `sync --prepare` (it creates the checkout).
 ```
 
 **Recover after damaging:** the index pollution is reversible via `git reset HEAD <path>`, but the workspace's "only-touch-own-edits" rule forbids `reset` on sibling-agent files. So:
@@ -138,7 +138,7 @@ npm view @arki/<pkg> version
 
 **Root cause:** `export-public` calls `removeDirectory(outputPath)`, which wipes `.release/arki-public/` entirely, `.git/` included. Moving `.git/` out and back is fragile (a `mv` into an existing dir nests it).
 
-**Fix (since 2026-10-13):** never keep git state in the export folder. The mirror checkout lives in `.release/arki-mirror/` and is rebuilt by `sync --prepare`; see [sync.md](./sync.md).
+**Fix (since 2026-10-13):** never keep git state in the export folder. Since 2026-10-30 there is no `arki-labs/arki` mirror checkout at all: this repo is the source, and a release only tags it. The package mirror checkouts live in `.release/package-mirrors/` and are rebuilt by `sync --prepare`; see [sync.md](./sync.md).
 
 ## Chicken-and-egg: transitive `@arki/*` deps in pre-publication state
 
@@ -199,9 +199,11 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 
 ## Never force-push `arki-labs/arki`
 
-**Rule (founder, 2026-10-13):** the mirror keeps one commit per release on top of the last. Syncs use a plain `git push`. Before that date every sync was `git init` + `git push --force`, which reset `main` to a single commit and broke every clone's `git pull`.
+**Rule (founder, 2026-10-13):** never force-push. Before that date every sync was `git init` + `git push --force`, which reset `main` to a single commit and broke every clone's `git pull`.
 
-**If a plain push is rejected:** `origin/main` moved since your fetch. Inspect `git log --oneline main..origin/main` in `.release/arki-mirror/`; if you don't recognize it, STOP and surface it to the user. Otherwise run `sync --prepare` again, then `sync --apply` ([sync.md](./sync.md)). Do not force.
+**Since 2026-10-30:** this repo is `arki-labs/arki`, the real source. `sync` never commits here and never pushes `main`. It only pushes the wave tag. Push source changes yourself with a plain `git push`. If that push is rejected, `git fetch` and read `git log --oneline main..origin/main`; if you don't recognize it, STOP and surface it to the user. Do not force.
+
+**Package mirrors:** if `sync --apply` reports a rejected push (`MSYNC_E011`) for `arki-labs/<name>`, inspect `git log --oneline main..origin/main` in `.release/package-mirrors/<name>/`. If you don't recognize it, STOP. Otherwise run `sync --prepare` again, then `sync --apply` ([sync.md](./sync.md)).
 
 ## Per-package mirror repo or Release creation fails
 
@@ -211,7 +213,7 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 
 **Fix:** Re-auth with `gh auth login -s repo`, check `gh auth status -h github.com`, wait a minute if it was a rate limit, then run `sync --apply` again. It skips every tag and Release that already exists, so a rerun only does what is left.
 
-**Symptom:** `sync --prepare` fails with `MSYNC_E006` (dirty mirror) or `MSYNC_E007` (not its own checkout).
+**Symptom:** `sync --prepare` fails with `MSYNC_E006` (dirty package mirror) or `MSYNC_E007` (not its own checkout).
 
 **Fix:** See [sync.md](./sync.md). Delete the directory it names and prepare again; the checkouts under `.release/` are disposable.
 

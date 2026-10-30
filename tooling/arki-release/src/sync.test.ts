@@ -80,7 +80,7 @@ async function makeCandidate(): Promise<string> {
     path.join(dir, 'candidate.json'),
     JSON.stringify({
       wave: 'foundation',
-      sourceCommit: 'abc',
+      sourceCommit: (await ok('git', ['rev-parse', 'HEAD'], root)).trim(),
       createdAt: now().toISOString(),
       packages: [{ name: '@arki/assert', version: '1.2.0', tarball: 'tarballs/arki-assert-1.2.0.tgz', sha512, publishOrder: 1 }],
       checks: {},
@@ -89,18 +89,11 @@ async function makeCandidate(): Promise<string> {
   return dir;
 }
 
-async function exportTree(): Promise<readonly []> {
-  const tree = path.join(root, '.release', 'arki-public');
-  await mkdir(tree, { recursive: true });
-  await writeFile(path.join(tree, 'README.md'), 'public tree\n');
-  return [];
-}
-
-type Call = { readonly command: string; readonly args: readonly string[] };
+type Call = { readonly command: string; readonly args: readonly string[]; readonly cwd?: string };
 
 function recordingGit(calls: Call[]): GitRunner {
   return (args, options) => {
-    calls.push({ command: 'git', args });
+    calls.push({ command: 'git', args, cwd: options.cwd });
     return defaultGitRunner(args, options);
   };
 }
@@ -112,7 +105,6 @@ function prepareOptions(candidateDir: string, git: GitRunner = defaultGitRunner,
     candidateDir,
     gitRunner: git,
     exec,
-    exportTree,
     now,
     remoteUrl: (repo: string) => path.join(remotes, `${repo.split('/')[1] ?? ''}.git`),
   };
@@ -126,8 +118,20 @@ beforeEach(async () => {
   remotes = path.join(root, 'remotes');
   await mkdir(remotes, { recursive: true });
   await writeFile(path.join(root, 'SECURITY.md'), SECURITY_TEXT);
-  await seedRemote('arki');
+  // The workspace is this repo: a clone of arki-labs/arki with one local source commit on top.
+  await ok('git', ['init', '-q', '-b', 'main'], root);
+  await ok('git', ['remote', 'add', 'origin', await seedRemote('arki')], root);
+  await ok('git', ['fetch', '-q', 'origin'], root);
+  await ok('git', ['checkout', '-q', '-B', 'main', 'origin/main'], root);
+  await commitInRoot('SECURITY.md', 'source work');
 });
+
+/** Commits one path in the source repo, the way the founder works on main. */
+async function commitInRoot(file: string, message: string): Promise<string> {
+  await ok('git', ['add', file], root);
+  await ok('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], root);
+  return (await ok('git', ['rev-parse', 'HEAD'], root)).trim();
+}
 
 afterEach(async () => {
   await rm(root, { recursive: true, force: true, maxRetries: 5 });
@@ -152,7 +156,7 @@ describe('helpers', () => {
 });
 
 describe('runSyncPrepare', () => {
-  it('prepares commits, tags, trees, notes and a plan without any push or gh write', async () => {
+  it('prepares package commits, tags, trees, notes and a plan without any push or gh write', async () => {
     // Why: agents run --prepare; if it ever pushed or wrote through gh, an agent could publish.
     const candidate = await makeCandidate();
     const calls: Call[] = [];
@@ -169,7 +173,8 @@ describe('runSyncPrepare', () => {
 
     const plan = syncPlanSchema.parse(JSON.parse(await readFile(path.join(root, SYNC_PLAN_PATH), 'utf8')));
     expect(plan.arki.tag).toBe('vfoundation-2026-10-17');
-    expect(plan.arki.commit).not.toBeNull();
+    expect(plan.arki.dir).toBe('.');
+    expect(plan.arki.commit).toBeNull();
     const pkg = plan.packages[0];
     expect(pkg?.tag).toBe('v1.2.0');
     expect(pkg?.assets.map(a => path.basename(a))).toEqual(['arki-assert-1.2.0.tgz', 'assert-api.json']);
@@ -178,9 +183,34 @@ describe('runSyncPrepare', () => {
     expect(readme.startsWith('Read-only mirror of `@arki/assert` v1.2.0.')).toBe(true);
     expect(await readFile(path.join(root, '.release/package-mirrors/assert/SECURITY.md'), 'utf8')).toBe(SECURITY_TEXT);
     expect(await readFile(path.join(root, pkg?.notesFile ?? ''), 'utf8')).toBe('- Added `ensure`.\n');
-    // The arki tag is annotated and local; the remote has none.
-    expect(await ok('git', ['cat-file', '-t', 'vfoundation-2026-10-17'], path.join(root, '.release/arki-mirror'))).toBe('tag\n');
+    // The wave tag is annotated, local, and sits on the candidate's source commit; the remote has none.
+    expect(await ok('git', ['cat-file', '-t', 'vfoundation-2026-10-17'], root)).toBe('tag\n');
+    expect(await ok('git', ['rev-parse', 'vfoundation-2026-10-17^{commit}'], root)).toBe(await ok('git', ['rev-parse', 'HEAD'], root));
     expect(await ok('git', ['tag'], path.join(remotes, 'arki.git'))).toBe('');
+  });
+
+  it('never writes a commit or moves a branch in the source repo', async () => {
+    // Why: this repo is the real source of arki-labs/arki; a generated commit on main would clobber the founder's work.
+    const candidate = await makeCandidate();
+    const refsBefore = await ok('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes'], root);
+    const headBefore = await ok('git', ['rev-parse', 'HEAD'], root);
+    const calls: Call[] = [];
+    const result = await runSyncPrepare(prepareOptions(candidate, recordingGit(calls)));
+    expect(result.status).toBe('success');
+    expect(await ok('git', ['rev-parse', 'HEAD'], root)).toBe(headBefore);
+    expect(await ok('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes'], root)).toBe(refsBefore);
+    expect(calls.filter(c => c.cwd === root).some(c => c.args.includes('commit') || c.args.includes('checkout') || c.args.includes('add'))).toBe(false);
+    expect(await ok('git', ['tag'], root)).toBe('vfoundation-2026-10-17\n');
+  });
+
+  it('fails when a local wave tag already points at another commit', async () => {
+    // Why: published tags never move; a stale local tag must stop the release, not be silently retargeted.
+    const candidate = await makeCandidate();
+    await ok('git', ['tag', 'vfoundation-2026-10-17', 'origin/main'], root);
+    const result = await runSyncPrepare(prepareOptions(candidate));
+    expect(result.status).toBe('failure');
+    expect(result.errors[0]?.code).toBe(SYNC_ERROR_CODES.tagMoved);
+    expect(await ok('git', ['rev-parse', 'vfoundation-2026-10-17'], root)).toBe(await ok('git', ['rev-parse', 'origin/main'], root));
   });
 
   it('fails loudly when a mirror checkout is dirty', async () => {
@@ -188,7 +218,7 @@ describe('runSyncPrepare', () => {
     const candidate = await makeCandidate();
     const first = await runSyncPrepare(prepareOptions(candidate));
     expect(first.status).toBe('success');
-    await writeFile(path.join(root, '.release/arki-mirror/stray.txt'), 'x');
+    await writeFile(path.join(root, '.release/package-mirrors/assert/stray.txt'), 'x');
     const second = await runSyncPrepare(prepareOptions(candidate));
     expect(second.status).toBe('failure');
     expect(second.errors[0]?.code).toBe(SYNC_ERROR_CODES.mirrorDirty);
@@ -201,6 +231,7 @@ describe('runSyncPrepare', () => {
     const second = await runSyncPrepare(prepareOptions(candidate));
     expect(second.status).toBe('success');
     expect(second.items.every(i => i.action === 'prepared' || i.action === 'unchanged')).toBe(true);
+    expect(await ok('git', ['tag'], root)).toBe('vfoundation-2026-10-17\n');
   });
 
   it('rejects an unusable candidate with MSYNC_E004', async () => {
@@ -268,6 +299,23 @@ describe('runSyncApply', () => {
     expect(second.items.every(i => i.action === 'skipped')).toBe(true);
     expect(again.some(c => c.args[0] === 'push')).toBe(false);
     expect(again.some(c => c.command === 'gh' && c.args[1] === 'create')).toBe(false);
+  });
+
+  it('never pushes the source repo main, only the wave tag', async () => {
+    // Why: the founder's local main may hold unreviewed work; a release must not publish it as a side effect.
+    const plan = await prepared();
+    expect(plan.arki.commit).toBeNull();
+    await ok('git', ['init', '-q', '--bare', '-b', 'main', path.join(remotes, 'assert.git')], root);
+    const remoteMain = await ok('git', ['rev-parse', 'main'], path.join(remotes, 'arki.git'));
+    await writeFile(path.join(root, 'later.txt'), 'unreleased\n');
+    await commitInRoot('later.txt', 'later work');
+    const calls: Call[] = [];
+    const result = await runSyncApply({ cwd: root, env: {}, isTty: () => true, gitRunner: recordingGit(calls), exec: ghFake(calls, { repos: ['arki-labs/assert', 'arki-labs/arki'] }) });
+    expect(result.errors).toEqual([]);
+    const rootPushes = calls.filter(c => c.cwd === root && c.args[0] === 'push');
+    expect(rootPushes.map(c => c.args)).toEqual([['push', 'origin', plan.arki.tag]]);
+    expect(await ok('git', ['rev-parse', 'main'], path.join(remotes, 'arki.git'))).toBe(remoteMain);
+    expect(await ok('git', ['tag'], path.join(remotes, 'arki.git'))).toBe(`${plan.arki.tag}\n`);
   });
 
   it('skips a tag that already exists on the remote and an existing release', async () => {
