@@ -113,6 +113,24 @@ async function menuOf(explain: ExplainRunner): Promise<{ menu: ConsoleMenuItem[]
 const problem = (message: string): string =>
   `<h1>The console could not read the app</h1><pre style="white-space:pre-wrap">${escapeHtml(message)}</pre>`;
 
+/** A path segment, decoded; `undefined` for a malformed escape such as `%E0%A4%A`, which `decodeURIComponent` throws on. */
+function decodedSegment(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a request's `Host` names this console. The server listens on 127.0.0.1 only, but a page on another site can
+ * point its own domain at 127.0.0.1 (DNS rebinding) and read the console as same-origin. That page's requests carry its
+ * domain in `Host`, so only the console's own names pass. Exported so a test needs no socket.
+ */
+export function isConsoleHost(host: string | undefined, port: number): boolean {
+  return host === `127.0.0.1:${String(port)}` || host === `localhost:${String(port)}`;
+}
+
 /** The page for one request path: the HTML and its status. Exported so a test needs no socket. */
 export async function respond(explain: ExplainRunner, pathname: string): Promise<{ status: number; html: string }> {
   const menuResult = await menuOf(explain);
@@ -126,7 +144,8 @@ export async function respond(explain: ExplainRunner, pathname: string): Promise
     return { status: 200, html: shell(menu, null, 'Pages', `<h1>Pages</h1>${list}`) };
   }
   const match = /^\/page\/([^/]+)$/.exec(pathname);
-  const item = match?.[1] === undefined ? undefined : menu.find(entry => entry.format === decodeURIComponent(match[1] ?? ''));
+  const format = match?.[1] === undefined ? undefined : decodedSegment(match[1]);
+  const item = format === undefined ? undefined : menu.find(entry => entry.format === format);
   if (item === undefined) return { status: 404, html: shell(menu, null, 'Not found', '<h1>No such page</h1>') };
   const result = await explain(['--as', item.format, '--page']);
   const page = result.ok ? pageSchema.safeParse(result.data) : undefined;
@@ -150,11 +169,23 @@ export function startConsole(options: {
         response.writeHead(405, { allow: 'GET' }).end();
         return;
       }
+      if (!isConsoleHost(request.headers.host, options.port)) {
+        response.writeHead(421, { 'content-type': 'text/plain; charset=utf-8' }).end('Misdirected request');
+        return;
+      }
       const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-      void respond(options.explain, pathname).then(({ status, html }) => {
-        response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-        response.end(html);
-      });
+      respond(options.explain, pathname).then(
+        ({ status, html }) => {
+          response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          response.end(html);
+        },
+        (error: unknown) => {
+          // A page that fails to render answers 500 and keeps the console running for the next request.
+          const message = error instanceof Error ? error.message : String(error);
+          response.writeHead(500, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          response.end(shell([], null, 'Error', problem(message)));
+        },
+      );
     });
     server.once('error', error => {
       resolve({ message: `console: could not listen on port ${String(options.port)} (${error.message})` });

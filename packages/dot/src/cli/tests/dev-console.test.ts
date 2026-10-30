@@ -5,6 +5,8 @@
  * cannot be read (an empty page would look like an app with nothing in it). The server is real (a socket on a
  * free port); only `dot explain` is a stub, because its output is covered by the explain tests.
  */
+import { request as httpRequest } from 'node:http';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ExplainResult, ExplainRunner, RunningConsole } from '../dev-console.js';
@@ -80,6 +82,44 @@ describe('the dev console', () => {
     const html = await response.text();
     expect(response.status).toBe(500);
     expect(html).toContain('dot.app_import_failed &lt;boom&gt;');
+  });
+
+  it('answers 404 for a malformed escape in the path, and keeps serving', async () => {
+    const base = await open(stub().runner);
+    expect((await fetch(`${base}page/%E0%A4%A`)).status).toBe(404);
+    expect((await fetch(base)).status).toBe(200);
+  });
+
+  it('answers 500 when a page fails to render, and keeps serving the next request', async () => {
+    let failing = true;
+    const { runner } = stub();
+    const flaky: ExplainRunner = args => (failing ? Promise.reject(new Error('<boom>')) : runner(args));
+    const base = await open(flaky);
+    const response = await fetch(base);
+    expect(response.status).toBe(500);
+    expect(await response.text()).toContain('&lt;boom&gt;');
+    failing = false;
+    expect((await fetch(base)).status).toBe(200);
+  });
+
+  // WHY: a page on another site can point its own domain at 127.0.0.1 (DNS rebinding) and read the console, which
+  // shows the app's file paths. Its requests carry its own domain in Host, so only the console's names may pass.
+  it('refuses a request whose Host is not the console, and serves 127.0.0.1 and localhost', async () => {
+    const base = await open(stub().runner);
+    const { port } = new URL(base);
+    const statusFor = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        const request = httpRequest({ host: '127.0.0.1', port: Number(port), path: '/', headers: { host } }, response => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        });
+        request.once('error', reject);
+        request.end();
+      });
+    expect(await statusFor(`evil.example:${port}`)).toBe(421);
+    expect(await statusFor('127.0.0.1')).toBe(421);
+    expect(await statusFor(`127.0.0.1:${port}`)).toBe(200);
+    expect(await statusFor(`localhost:${port}`)).toBe(200);
   });
 
   it('answers only GET', async () => {
