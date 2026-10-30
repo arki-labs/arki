@@ -541,6 +541,8 @@ export type StoredEventRow = JournalTables['events']['$inferSelect'];
 export type ForwardArgs = { events: StoredEventRow[] };
 /** The node manifest a run stores in `workflow_runs.shape`, the type of that column. */
 export type { WorkflowShape } from './workflow/shape.js';
+/** One key's `perKey` override in `journal_limits.keys`; the column's type, so a schema module can name it. */
+export type { LimitKeyOverride } from './workflow/limit-types.js';
 
 /** The names of journal tables that no top-level export of `Module` holds. */
 type MissingJournalTables<Module> = {

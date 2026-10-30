@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { ExportsEveryJournalTable, JournalTables } from './pg.js';
+import type { ExportsEveryJournalTable, JournalTables, LimitKeyOverride } from './pg.js';
 
 // Compile-time only: tsc checks this file, vitest does not run it.
 // A schema module as drizzle-kit sees it: one top-level export per table.
@@ -27,5 +27,12 @@ describe('ExportsEveryJournalTable', () => {
   it('fails when the tables are exported only inside one object', () => {
     // @ts-expect-error -- drizzle-kit does not look inside a nested object.
     expectTypeOf<ExportsEveryJournalTable<{ allJournalTables: JournalTables }>>().toBeObject();
+  });
+});
+
+describe('LimitKeyOverride', () => {
+  it('is the type of journal_limits.keys, so a schema module that infers its tables can name it (TS2883)', () => {
+    expectTypeOf<JournalTables['limits']['$inferSelect']['keys']>().toEqualTypeOf<Readonly<Record<string, LimitKeyOverride>>>();
+    expectTypeOf<LimitKeyOverride>().toEqualTypeOf<{ readonly perKey: number; readonly until: string }>();
   });
 });
