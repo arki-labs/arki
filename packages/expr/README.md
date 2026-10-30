@@ -41,6 +41,8 @@ print(parse('log(0,5; 2)', { syntax: decimalComma })); // 'log(0.5, 2)'
 // parse('foo(x)') throws ParseError { code: 'not-a-function', span: { start: 0, end: 3 } }
 ```
 
+`walk(node, visit)` visits a parsed tree parent first, left to right; return `false` from `visit` to skip that node's children. It uses a loop, so deep trees never overflow the stack. `syntaxFor(locale)` picks the `decimalComma` preset for locales that write `1,5`, and `canonical` otherwise. It throws `UnsupportedFeatureError` where `Intl.NumberFormat#formatToParts` is missing (Hermes on iOS); pass a preset there.
+
 A name followed by `(` is a call only when the language registers it as a function. To read a variable before `(` as a product (`x(y+1)`), pass the variables: `parse('x(y+1)', { variables: ['x', 'y'] })`.
 
 ## When not to use this
