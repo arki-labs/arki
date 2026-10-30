@@ -8,7 +8,8 @@
  *     .infra(store, mailer)                              its own units, private to it
  *     .domainServices({ extras })                        domain services, built once; usecases and children see them
  *     .features(compile, deliver)                       its nested features, named `daily-digest.<child>`
- *     .usecases({ preview, send })                       what it does: one factory per usecase
+ *     .usecases({ preview, send }, contributions…)       what it does: one factory per usecase, plus
+ *                                                        application contributions (`journalHandlers(core, …)`)
  *     .provides({ digests: ({ usecases }) => … })        what it offers other features
  *     .entrypoints(rpc(…), schedules(…), …)              how it is reached
  *
@@ -150,7 +151,7 @@ export type EntrypointServices<N extends NeedsShape, U> = ([EntrypointOnlyKeys<N
 
 /**
  * An entrypoint descriptor — the protocol adapter packages implement
- * (`rpc`, `schedules`, `journalEffects`, `endpoints`). Structural on purpose:
+ * (`rpc`, `schedules`, `journalWorker`, `endpoints`). Structural on purpose:
  * an adapter imports nothing from Dot at runtime.
  *
  * - `kind` names the descriptor (`'rpc'`, `'schedules'`, …).
@@ -174,6 +175,34 @@ export type Entrypoint<TServices = never> = FeatureSlice<string, unknown, TServi
 
 /** The erased entrypoint — what helpers that only read `kind` / `key` / `actions` accept. */
 export type AnyEntrypoint = Entrypoint<never>;
+
+/**
+ * An application contribution: application code of the feature that is not a usecase handle.
+ * `.usecases(factories, ...contributions)` takes it; `journalHandlers(core, { effects })` from
+ * `@arki/journal/dot` makes one. Structural on purpose: an adapter imports nothing from Dot at runtime.
+ *
+ * - `kind` names the descriptor (`'journal'`).
+ * - `key` is its slot in the slice record the feature publishes under `feature.<name>`, next to the
+ *   entrypoints' payloads. The app-level adapter reads the bound payload there with `sliceOf`.
+ * - Its static declarations are the adapter's own fields. An app-level adapter reads them from
+ *   `feature.contributions` before anything boots, as it reads `feature.entrypoints`.
+ * - `actionsOf(feature)` joins the feature's manifest, named after the mounting feature.
+ * - `bind(deps)` runs once, at the feature's boot, with the usecase-level deps: the needs that are not
+ *   entrypoint-only, the infra, the domain services and the children's services. Nothing else. Its
+ *   return is the payload under `key`.
+ *
+ * A contribution is never a member of `usecases`, and it has no lifecycle hooks: it declares, then it binds.
+ * Entrypoints still see only the usecases and the entrypoint-only needs.
+ */
+export type ApplicationContribution<TDeps = never> = {
+  readonly kind: string;
+  readonly key: string;
+  readonly actionsOf?: (feature: string) => readonly ActionSource[];
+  readonly bind: (deps: TDeps) => unknown;
+};
+
+/** The erased contribution: what `feature.contributions` holds. */
+export type AnyApplicationContribution = ApplicationContribution<never>;
 
 /**
  * The one descriptor with static data: the feature's oRPC contract and the
@@ -758,6 +787,8 @@ export type DefinedFeature<
   /** Raw infra handles this feature (or a descendant) owns → the owning feature. Checked by `mountFeatures`. */
   readonly owned: ReadonlyMap<object, string>;
   readonly entrypoints: E;
+  /** The application contributions `.usecases(factories, ...contributions)` took, as declared. Never usecase handles. */
+  readonly contributions: readonly AnyApplicationContribution[];
   /** The contract of the `rpc` entrypoint (`never` without one) — `routerFor` matches on it. */
   readonly contract: ContractOf<E>;
   readonly router: RouterOf<E>;
@@ -801,6 +832,7 @@ export type AnyDefinedFeature = {
   readonly provides: Readonly<Record<string, AnyHandle>>;
   readonly features: readonly AnyDefinedFeature[];
   readonly entrypoints: readonly AnyEntrypoint[];
+  readonly contributions: readonly AnyApplicationContribution[];
   readonly contract: unknown;
   readonly router: unknown;
   /** Raw infra handles this feature (or a descendant) owns → the owning feature. Checked by `mountFeatures`. */
@@ -1103,12 +1135,23 @@ export type UsecasesStage<
    * `Property 'mailer' is missing` and never reaches the guard. TypeScript then
    * tries the second, today's signature, whose guard prints the `DOT:` label —
    * and prints the LAST overload's failure under "No overload matches this call".
+   *
+   * After the factories, the feature's application contributions (`journalHandlers(core, { effects })`).
+   * Each binds once per boot to the same deps a usecase sees, and none becomes a usecase handle.
    */
-  usecases<const F extends UsecaseFactoriesOf<CoreDeps<N, I, C, S>>>(
+  usecases<
+    const F extends UsecaseFactoriesOf<CoreDeps<N, I, C, S>>,
+    const A extends readonly ApplicationContribution<CoreDeps<N, I, C, S>>[] = readonly [],
+  >(
     factories: F & UsecaseSignatureGuard<F>,
+    ...contributions: A
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
-  usecases<const F extends UsecaseFactories>(
+  usecases<
+    const F extends UsecaseFactories,
+    const A extends readonly ApplicationContribution<CoreDeps<N, I, C, S>>[] = readonly [],
+  >(
     factories: F & UsecaseGuard<CoreDeps<N, I, C, S>, F> & UsecaseSignatureGuard<F>,
+    ...contributions: A
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;
 };
 
@@ -1193,6 +1236,8 @@ type FeatureState<P extends ServiceRecord = ServiceRecord, U extends ServiceReco
   readonly step: (typeof STEP)[keyof typeof STEP];
   readonly children: readonly RuntimeFeature[];
   readonly usecases: { readonly [Key in keyof U]: (services: never) => U[Key] } | undefined;
+  /** The application contributions `.usecases()` took after its factories. */
+  readonly contributions: readonly AnyApplicationContribution[];
   readonly provides: { readonly [K in keyof P]: (services: never) => P[K] };
 };
 
@@ -1205,6 +1250,7 @@ type RuntimeFeature<out Owned extends UnitOwnership = UnitOwnership> = {
   readonly features: readonly RuntimeFeature[];
   readonly owned: ReadonlyMap<object, string>;
   readonly entrypoints: readonly AnyEntrypoint[];
+  readonly contributions: readonly AnyApplicationContribution[];
   readonly contract: unknown;
   readonly router: unknown;
   units(): readonly AnyUnit[];
@@ -1226,9 +1272,10 @@ type RuntimeStage<in out P extends ServiceRecord = ServiceRecord, in out U exten
   infra(...plugins: readonly AnyUnit[]): RuntimeStage<P, U>;
   domainServices(factories: Readonly<Record<string, Factory>>): RuntimeStage<P, U>;
   features(...children: readonly RuntimeFeature[]): RuntimeStage<P, U>;
-  usecases<Next extends ServiceRecord>(factories: {
-    readonly [Key in keyof Next]: (services: never) => Next[Key];
-  }): RuntimeStage<P, Next>;
+  usecases<Next extends ServiceRecord>(
+    factories: { readonly [Key in keyof Next]: (services: never) => Next[Key] },
+    ...contributions: readonly AnyApplicationContribution[]
+  ): RuntimeStage<P, Next>;
   provides<Next extends ServiceRecord>(factories: {
     readonly [K in keyof Next]: (services: never) => Next[K];
   }): RuntimeStage<Next, U>;
@@ -1549,11 +1596,22 @@ function replaceServices(p: AnyUnit, values: Readonly<Record<string, unknown>>, 
 
 function checkEntrypoints(state: FeatureState, entrypoints: readonly AnyEntrypoint[]): void {
   const seen = new Set<string>();
+  // Contributions share the slice record with the entrypoints, so one key may name one of them only.
+  for (const c of state.contributions) {
+    if (seen.has(c.key)) {
+      throw new FeatureError({
+        code: FEATURE_ERROR_CODES.duplicateSliceKey,
+        message: `[feature] "${state.name}" lists two "${c.key}" contributions; the second would silently replace the first.`,
+        remediation: `Merge the two "${c.key}" contributions into one call (journalHandlers(core, { effects, taps, workflows })).`,
+      });
+    }
+    seen.add(c.key);
+  }
   for (const e of entrypoints) {
     if (seen.has(e.key)) {
       throw new FeatureError({
         code: FEATURE_ERROR_CODES.duplicateSliceKey,
-        message: `[feature] "${state.name}" declares two "${e.key}" entrypoints; the second would silently replace the first.`,
+        message: `[feature] "${state.name}" declares two "${e.key}" entrypoints or contributions; the second would silently replace the first.`,
         remediation: `Merge the two "${e.key}" entrypoints into one, or move one into its own feature.`,
       });
     }
@@ -1683,6 +1741,14 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     ...Object.fromEntries(Object.entries(ctx).filter(([k]) => doorKeys.has(k) || k.startsWith('$'))),
     usecases: usecasesOf(ctx),
   });
+  // What a contribution binds to: what a usecase factory sees (no entrypoint-only need), without the kernel's keys
+  // and without the usecases themselves. A contribution is application code, never an exit.
+  const usecaseDepsOf = (ctx: object): object =>
+    Object.freeze(
+      Object.fromEntries(
+        Object.entries(ctx).filter(([k]) => !doorKeys.has(k) && !k.startsWith('$') && k !== 'usecases'),
+      ),
+    );
 
   const factories: Record<string, (ctx: object) => unknown> = {
     [usecasesKey]: usecasesOf,
@@ -1692,11 +1758,16 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     // The one exception is `$handlers`: transport adapters read it to emit handler events, then strip it.
     [servicesKey]: ctx =>
       Object.fromEntries(Object.entries(servicesOf(ctx)).filter(([k]) => !k.startsWith('$') || k === HANDLERS_KEY)),
-    // One record under `feature.<name>`, keyed by entrypoint key — what `sliceOf` reads.
+    // One record under `feature.<name>`, keyed by entrypoint and contribution key — what `sliceOf` reads.
     [sliceKey]: ctx => {
       const services = servicesOf(ctx);
-      // Erasure seam: each entrypoint was typed against these services by `.entrypoints()`.
-      return Object.fromEntries(entrypoints.map(e => [e.key, e.resolve(services as never)]));
+      const deps = usecaseDepsOf(ctx);
+      return Object.fromEntries([
+        // Erasure seam: each contribution was typed against the usecase deps by `.usecases()`.
+        ...state.contributions.map(c => [c.key, c.bind(deps as never)]),
+        // Erasure seam: each entrypoint was typed against these services by `.entrypoints()`.
+        ...entrypoints.map(e => [e.key, e.resolve(services as never)]),
+      ]);
     },
   };
   for (const [key, factory] of Object.entries(state.provides)) {
@@ -1746,7 +1817,10 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     runtime,
     name: state.name,
     needs: { ...state.needs, ...infra.handles, ...domainHandles, ...childHandles(state.children) },
-    actions: entrypoints.flatMap(e => [...e.actions, ...(e.actionsOf?.(state.name, state.children) ?? [])]),
+    actions: [
+      ...state.contributions.flatMap(c => c.actionsOf?.(state.name) ?? []),
+      ...entrypoints.flatMap(e => [...e.actions, ...(e.actionsOf?.(state.name, state.children) ?? [])]),
+    ],
     renames: {},
     role: 'feature',
     provides: unitHandles,
@@ -1802,6 +1876,7 @@ function compile<P extends ServiceRecord, U extends ServiceRecord>(
     features: state.children,
     owned,
     entrypoints,
+    contributions: state.contributions,
     contract: rpc !== undefined && 'contract' in rpc ? rpc.contract : undefined,
     router: rpc !== undefined && 'router' in rpc ? rpc.router : undefined,
     units: () => units,
@@ -2072,7 +2147,8 @@ function stage<P extends ServiceRecord, U extends ServiceRecord>(state: FeatureS
       }
       return stage({ ...state, domainServices: factories, step: STEP.domainServices });
     },
-    usecases: factories => stage({ ...state, usecases: factories, step: STEP.usecases }),
+    usecases: (factories, ...contributions) =>
+      stage({ ...state, usecases: factories, contributions, step: STEP.usecases }),
     provides: factories => {
       const infraKeys = new Set(state.infra.flatMap(p => Object.keys(p.provides)));
       for (const key of Object.keys(factories)) {
@@ -2124,6 +2200,7 @@ export function defineFeature<const TName extends string>(name: TName & FeatureN
     step: STEP.needs,
     children: [],
     usecases: undefined,
+    contributions: [],
     provides: {},
   }) as unknown as NeedsStage<TName>;
 }

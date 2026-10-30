@@ -145,6 +145,11 @@ export type ProjectionManifest = {
   module: string;
   /** Unit that registered this projection. */
   plugin: string;
+  /**
+   * Adapter-owned, JSON-serializable data the projection module reads, for what no action carries
+   * (the journal's folds and inline projections run inside a write, not at an app boundary). Opaque to the kernel.
+   */
+  meta?: Readonly<JsonObject>;
 };
 
 /**

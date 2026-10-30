@@ -601,7 +601,9 @@ export class DotAppImpl<
     record: UnitRecord<TOpen, TClose, TPhases>,
     projection: Omit<ProjectionManifest, 'plugin'>,
   ): void {
-    record.projections.push({ ...projection, plugin: record.plugin.name });
+    // Checked like an action's meta: the manifest is plain JSON, so a projection's meta must survive a round trip.
+    const meta = projection.meta === undefined ? undefined : toJsonObject(projection.meta);
+    record.projections.push({ ...projection, ...(meta === undefined ? {} : { meta }), plugin: record.plugin.name });
   }
 
   #registerRouteShim(

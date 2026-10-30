@@ -222,6 +222,14 @@ Rules the types enforce (each is also a coded runtime check):
   `{ ...needs, ...infra, ...domainServices }` (and may `Pick` a subset);
   asking for a dep the feature lacks is a compile error. Each factory gets its
   own frozen copy, built once per boot.
+- `.usecases(factories, ...contributions)` also takes application
+  contributions (`ApplicationContribution`): application code that is not a
+  usecase handle, such as the journal's effects (`journalHandlers(core, …)`).
+  A contribution exposes static declarations that app-level adapters read
+  before boot (`feature.contributions`), binds once per boot to the same deps
+  a usecase sees (never an `entrypointOnly` need), and puts its bound payload
+  in the feature's slice record under its `key`. It is never a member of
+  `usecases`, and it has no lifecycle hooks.
 - `.provides` factories get `{ usecases }` and nothing else. Entrypoints get
   the usecases, the request keys, and the needs marked `entrypointOnly(...)`.
   Neither sees repos, infra, plain needs or domain services. To publish data

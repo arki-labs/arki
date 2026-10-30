@@ -21,14 +21,19 @@ import {
   ProjectionNotFound,
 } from './failures.js';
 
-/** The `data` of `explain --as`: the format and the document `project(manifest)` returned. */
+/**
+ * The `data` of `explain --as`: the format and the document `project(manifest)` returned. `text` is set when
+ * the module also exports `render(document)`: what `dot explain --as <format>` prints without `--json`.
+ */
 export type ProjectionData = {
   format: string;
   document: JsonValue;
+  text?: string;
 };
 
 type ProjectionModule = {
   project(manifest: DotAppManifest): unknown;
+  render?: (document: JsonValue) => unknown;
 };
 
 export type ProjectionSource = {
@@ -134,7 +139,11 @@ function messageOf(error: unknown): string {
 }
 
 function hasProject(value: unknown): value is ProjectionModule {
-  return is(value, recordSchema) && typeof value['project'] === 'function';
+  return (
+    is(value, recordSchema) &&
+    typeof value['project'] === 'function' &&
+    (value['render'] === undefined || typeof value['render'] === 'function')
+  );
 }
 
 /** Resolve the specifier relative to the app file and `import()` it: the default importer. */
@@ -195,7 +204,10 @@ export async function renderProjection(source: ProjectionSource): Promise<Projec
 
   try {
     const document = toProjectionJsonValue(await loaded.project(source.manifest));
-    return { format: source.format, document };
+    if (loaded.render === undefined) return { format: source.format, document };
+    const text = loaded.render(document);
+    if (typeof text !== 'string') throw new TypeError('A projection module\'s render(document) must return a string.');
+    return { format: source.format, document, text };
   } catch (error) {
     return ProjectionExecutionFailed(
       { format: source.format, specifier, registeringPlugin: projection.plugin, causeMessage: messageOf(error) },

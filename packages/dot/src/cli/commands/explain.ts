@@ -48,7 +48,9 @@ export default defineCommand({
   render(data, ui) {
     if (isGraphData(data)) ui.out(data.source);
     else if (isProjectionData(data)) {
-      ui.out(typeof data.document === 'string' ? data.document : JSON.stringify(data.document, null, 2));
+      if (data.text === undefined)
+        ui.out(typeof data.document === 'string' ? data.document : JSON.stringify(data.document, null, 2));
+      else ui.out(data.text);
     } else renderExplainText(data, ui);
   },
 });

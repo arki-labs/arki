@@ -58,10 +58,12 @@ export {
   routerFor,
 } from './define-feature.js';
 export type {
+  AnyApplicationContribution,
   AnyDefinedFeature,
   AnyEntrypoint,
   AnyFeatureCore,
   AppContract,
+  ApplicationContribution,
   ChildHandles,
   ChildOverrides,
   ChildProvides,
@@ -84,6 +86,7 @@ export type {
   FeatureCore,
   FeatureParams,
   DomainServicesStage,
+  DomainServiceValues,
   FeaturesStage,
   FeatureUnit,
   InfraProvides,

@@ -312,10 +312,29 @@ Well-known slice keys, each owned by the adapter that consumes it:
 | `routes`    | an HTTP route bundle (bindings + steps + rpc mounts)                  | `@arki/http`        |
 | `queue`     | a queue definition registry (jobs, queue-schedules, flows)            | `@arki/queue`       |
 | `schedules` | in-process schedule definitions                                       | `@arki/schedule`    |
-| `journal`   | a journal bundle (projections + effects, from `journalHandlers(...)`) | `@arki/journal`     |
+| `journal`   | a feature's bound journal services (`journalHandlers(core, …)` contribution) | `@arki/journal`     |
 
 Third-party adapters MUST package-qualify their slice keys (`'acme:bus'`)
 — the same namespacing rule as bindings.
+
+**Application contributions.** Application code that an app-level adapter
+runs, but that is not a way the feature is reached (the journal's effects,
+taps and workflows), is an `ApplicationContribution` from
+`@arki/dot/feature`, passed after the factories:
+`.usecases(factories, journalHandlers(core, { effects }))`. It has a `kind`,
+a `key`, optional `actionsOf(feature)`, its own static declarations (read by
+the adapter from `feature.contributions` before boot) and `bind(deps)`.
+`bind` runs once at the feature's boot with the usecase-level deps (needs
+that are not `entrypointOnly`, infra, domain services, children); its return
+lands in the slice record under `key`, where the adapter reads it with
+`sliceOf`. A contribution and an entrypoint may not share a key. It is never
+a `usecases` member and has no lifecycle hooks.
+
+**Projection data.** `ctx.registerProjection({ format, binding, module, meta })`
+may carry `meta`: adapter-owned JSON the projection module reads from the
+manifest, for what no action holds (the journal registers its event graph
+there). A projection module may also export `render(document)`; its string is
+what `dot explain --as <format>` prints without `--json`.
 
 Rules an adapter's `features:` option must follow:
 

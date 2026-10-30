@@ -8,8 +8,8 @@ and [Upgrade owned lifetimes](upgrade-ownership.md). Earlier migrations follow.
 `@arki/dot/event-sourcing`, and `@arki/dot/presets/runtime-local`) is **not
 shipped** in v0.1. Use `defineApp` / `infra` for composition. For
 event-sourced writes use `@arki/journal`: its `@arki/journal/dot` unit
-`journal(...)` and feature slice `journalHandlers(...)` replace the old
-event-sourcing helpers.
+`journal(...)`, `journalProjections(...)` and the application contribution
+`journalHandlers(core, …)` replace the old event-sourcing helpers.
 
 Future breaking changes will be documented here, version by version, with:
 

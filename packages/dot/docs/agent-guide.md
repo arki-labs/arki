@@ -245,6 +245,9 @@ as Mermaid.
    ask for. A child names it with `domainService(fn)`.
 4. `provides` factories get `{ usecases }` and nothing else. Entrypoints get
    usecases, the request keys and needs marked `entrypointOnly(...)`.
+   Application code that is not a usecase handle (the journal's effects) is an
+   application contribution: `.usecases(factories, journalHandlers(core, …))`.
+   It binds once per boot to the usecase deps and never joins `usecases`.
 5. Mount it with `.features([myFeature])`.
 6. `npx dot explain --json | jq '.data.dependencies'`: the feature's edges
    show, with the capability `key`.
