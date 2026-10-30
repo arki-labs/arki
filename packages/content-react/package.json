@@ -18,15 +18,18 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "test": "vitest run --configLoader runner"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/content": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/failure": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
     "@arki/math": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@arki/ui": "workspace:*",
     "@content-collections/mdx": "catalog:next",
     "nuqs": "catalog:",
@@ -35,14 +38,22 @@
     "remark-parse": "catalog:content",
     "remark-rehype": "catalog:content",
     "unified": "catalog:",
-    "use-intl": "catalog:"
+    "use-intl": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
-    "@arki/failure": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "react": "catalog:react"
+    "@arki/vitest-config": "workspace:*",
+    "@testing-library/react": "catalog:testing",
+    "@types/react": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
+    "@types/react-dom": "catalog:react",
+    "jsdom": "catalog:text-processing",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "react": "^18 || ^19"

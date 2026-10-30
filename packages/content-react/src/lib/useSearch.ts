@@ -1,44 +1,35 @@
 import { useEffect, useState } from 'react';
 
 import type { PostOverview } from '@arki/content';
+import { isFailure } from '@arki/failure';
 import { useDebouncedValue } from '@arki/ui/hooks/debounce';
+
+import type { SearchFailure } from './search-posts';
+import { searchPosts } from './search-posts';
 
 /**
  * Searches posts through the app's `/posts/search?query=` route as the reader types (debounced 300ms).
  * A newer query aborts the request still in flight.
  *
- * States: `isLoading` while a request runs, `isError` when the last search failed (network error,
- * non-ok response, or a body that is not JSON; `result` is then empty), and `retry()` to run the same
- * query again.
+ * States: `isLoading` while a request runs, `failure` when the last search failed (`SearchUnavailable`
+ * for a network error or non-ok response, `SearchResponseMalformed` for a body that is not a list of
+ * posts; `result` is then empty), and `retry()` to run the same query again.
  */
 const useSearch = () => {
   const [query, setQuery] = useState('');
-  const [result, setResult] = useState<PostOverview[]>([]);
   const [debouncedQuery] = useDebouncedValue(query, 300);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isError, setIsError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // The last finished search and the query and attempt it answered. A search is loading while nothing finished for the current ones.
+  const [settled, setSettled] = useState<
+    { query: string; attempt: number; outcome: PostOverview[] | SearchFailure } | undefined
+  >();
 
   useEffect(() => {
     if (debouncedQuery.length === 0) return;
     const abortController = new AbortController();
-    const search = async () => {
-      setIsLoading(true);
-      setIsError(false);
-      const response = await fetch(`/posts/search?query=${encodeURIComponent(debouncedQuery)}`, {
-        signal: abortController.signal,
-      });
-      if (!response.ok) {
-        throw new Error('failed to search');
-      }
-      setResult(await response.json());
-      setIsLoading(false);
-    };
-    search().catch(() => {
+    void searchPosts(debouncedQuery, abortController.signal).then(outcome => {
       if (abortController.signal.aborted) return;
-      setResult([]);
-      setIsError(true);
-      setIsLoading(false);
+      setSettled({ query: debouncedQuery, attempt, outcome });
     });
     return () => {
       abortController.abort();
@@ -46,15 +37,15 @@ const useSearch = () => {
   }, [debouncedQuery, attempt]);
 
   // An empty query shows nothing and loads nothing, whatever the last search left behind.
-  const hasQuery = debouncedQuery.length > 0;
+  const current = debouncedQuery.length > 0 && settled?.query === debouncedQuery && settled.attempt === attempt ? settled.outcome : undefined;
   return {
     query,
-    result: hasQuery ? result : [],
+    result: current === undefined || isFailure(current) ? [] : current,
     search: setQuery,
-    isLoading: hasQuery && isLoading,
-    isError: hasQuery && isError,
+    isLoading: debouncedQuery.length > 0 && current === undefined,
+    failure: isFailure(current) ? current : undefined,
     retry: () => {
-      setAttempt((count) => count + 1);
+      setAttempt(count => count + 1);
     },
   };
 };

@@ -20,7 +20,7 @@ type FormFieldContextValue<
   name: TName;
 };
 
-const FormFieldContext = React.createContext<FormFieldContextValue>({} as FormFieldContextValue);
+const FormFieldContext = React.createContext<FormFieldContextValue | null>(null);
 
 const FormField = <
   TFieldValues extends FieldValues = FieldValues,
@@ -38,13 +38,17 @@ const FormField = <
 const useFormField = () => {
   const fieldContext = React.useContext(FormFieldContext);
   const itemContext = React.useContext(FormItemContext);
-  const { getFieldState } = useFormContext();
-  const formState = useFormState({ name: fieldContext.name });
-  const fieldState = getFieldState(fieldContext.name, formState);
+  // react-hook-form types this as non-null, but it is null outside <Form>.
+  const formContext: ReturnType<typeof useFormContext> | null = useFormContext();
 
+  if (!formContext) {
+    throw new Error('useFormField should be used within <Form>');
+  }
   if (!fieldContext) {
     throw new Error('useFormField should be used within <FormField>');
   }
+  const formState = useFormState({ name: fieldContext.name });
+  const fieldState = formContext.getFieldState(fieldContext.name, formState);
 
   const { id } = itemContext;
 
@@ -157,8 +161,8 @@ function FormHints<T extends string | number | Date>({
   onHintClick?: (value: T) => void;
   renderHint?: (value: T) => React.ReactNode;
 }) {
-  const { setValue } = useFormContext();
   const { name } = useFormField();
+  const { setValue } = useFormContext();
   const id = useId();
 
   const resolved = hints.map((hint) => {

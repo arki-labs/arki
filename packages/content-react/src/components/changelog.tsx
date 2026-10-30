@@ -2,7 +2,7 @@ import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/serv
 import { useTranslations } from 'use-intl';
 
 import type { LinkComponent } from '@arki/intl/react';
-import { format } from '@arki/date/format';
+import { formatPublished } from '../lib/format-published';
 import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
@@ -147,7 +147,7 @@ export function ChangelogCard({ post }: { post: Omit<ChangelogEntry, 'slug'> }) 
   return (
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
-        <p className="font-mono text-sm text-muted-foreground">{format(new Date(post.publishedAt), 'LLL dd, y')}</p>
+        <p className="font-mono text-sm text-muted-foreground">{formatPublished(post.publishedAt, 'LLL dd, y')}</p>
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
         <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border">
           <img src={post.image.url} alt={post.title} className="absolute inset-0 h-full w-full object-cover" />

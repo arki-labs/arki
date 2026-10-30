@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { copyText } from './copy-text';
+import { copyText } from '../copy-text';
 
 describe('copyText', () => {
   it('reports copied when the clipboard takes the text', async () => {

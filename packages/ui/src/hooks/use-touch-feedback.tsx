@@ -2,7 +2,11 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
+import { getLogger } from '@arki/log';
+
 import { useViewport } from './use-viewport';
+
+const touchLog = getLogger('arki:ui:touch');
 
 export type HapticFeedbackType = 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error' | 'selection';
 
@@ -47,7 +51,7 @@ export function useTouchFeedback() {
     try {
       navigator.vibrate(patterns[type]);
     } catch (error) {
-      console.debug('Haptic feedback not supported:', error);
+      touchLog.debug('haptic feedback not supported: {error}', { error: String(error) });
     }
   }, [viewport.isTouch]);
 
@@ -73,7 +77,7 @@ export function useTouchFeedback() {
       oscillator.start(audioContext.current.currentTime);
       oscillator.stop(audioContext.current.currentTime + duration / 1000);
     } catch (error) {
-      console.debug('Audio feedback error:', error);
+      touchLog.debug('audio feedback failed: {error}', { error: String(error) });
     }
   }, [viewport.isTouch]);
 

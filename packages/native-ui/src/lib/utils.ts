@@ -20,19 +20,24 @@ export function getInitials(name: string): string {
   return (first + last).toUpperCase();
 }
 
+/** A debounced function: call it like the original, or `cancel()` the pending call (for example on unmount). */
+export type Debounced<Args extends unknown[]> = ((...args: Args) => void) & { cancel: () => void };
+
 /**
  * Debounces a function call
  * @param fn - Function to debounce
  * @param delay - Delay in milliseconds
- * @returns Debounced function
+ * @returns Debounced function with a `cancel()` for the pending call
  */
-export function debounce<T extends (...args: any[]) => any>(
-  fn: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
+export function debounce<Args extends unknown[]>(fn: (...args: Args) => unknown, delay: number): Debounced<Args> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const debounced = (...args: Args) => {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => fn(...args), delay);
   };
+  debounced.cancel = () => {
+    clearTimeout(timeoutId);
+    timeoutId = undefined;
+  };
+  return debounced;
 }

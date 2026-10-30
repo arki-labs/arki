@@ -35,7 +35,8 @@ type FileSizeProps = {
 };
 
 const FileSize = ({ size }: FileSizeProps) => {
-  if (size === undefined) {
+  // MDX authors type the size. A negative or non-finite one shows no size, since formatFileSize refuses it.
+  if (size === undefined || !Number.isFinite(size) || size < 0) {
     return null;
   }
   return <span className="mr-2">({formatFileSize(size)})</span>;

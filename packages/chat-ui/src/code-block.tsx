@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Check, Copy, Warning } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
-import { copyText } from './copy-text';
+import { copyText } from '@arki/ui/copy-text';
 
 type CodeBlockProps = React.ComponentProps<'div'> & {
   code: string;

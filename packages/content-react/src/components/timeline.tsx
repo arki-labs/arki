@@ -1,5 +1,5 @@
 import type { LinkComponent } from '@arki/intl/react';
-import { format } from '@arki/date/format';
+import { formatPublished } from '../lib/format-published';
 
 type TimelineProps = {
   title: string;
@@ -42,7 +42,7 @@ function Article({ publishedAt, imageSrc, title, children, href, Link }: Article
       <div className="relative row-span-2">
         <div className="sticky top-20">
           <time className="order-2 font-mono text-sm text-muted-foreground md:order-1 md:col-span-1">
-            {format(publishedAt, 'LLL dd, y')}
+            {formatPublished(publishedAt, 'LLL dd, y')}
           </time>
         </div>
       </div>

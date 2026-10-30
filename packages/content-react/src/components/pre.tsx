@@ -5,6 +5,7 @@ import React from 'react';
 import { Check, Copy, Warning } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { cn } from '@arki/ui/cn';
+import { copyText } from '@arki/ui/copy-text';
 
 export type PreProps = {} & React.HTMLAttributes<HTMLPreElement>;
 
@@ -27,21 +28,8 @@ export default function Pre({ children, className, ...props }: PreProps) {
   const onClick = () => {
     const content = ref.current?.textContent;
     if (!content) return;
-    // The check mark shows only once the text is on the clipboard. A refused write, or a page with no
-    // clipboard (plain http), leaves the copy icon and shows the failed icon for 2 seconds.
-    const clipboard: Clipboard | undefined = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-    if (clipboard === undefined) {
-      setCopyState('failed');
-      return;
-    }
-    clipboard.writeText(content).then(
-      () => {
-        setCopyState('copied');
-      },
-      () => {
-        setCopyState('failed');
-      },
-    );
+    // The check mark shows only once the text is on the clipboard; a refused write shows the failed icon for 2 seconds.
+    void copyText(content).then(setCopyState);
   };
 
   return (

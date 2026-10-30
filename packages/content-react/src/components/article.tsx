@@ -1,8 +1,8 @@
-import { format } from '@arki/date/format';
 import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
 import { Badge } from '@arki/ui/badge';
 import { ScrollToTop } from '@arki/ui/scroll-to-top';
 
+import { formatPublished } from '../lib/format-published';
 import { Mdx } from './mdx';
 
 /** What an article reads from a post. A content-build `Post` has these fields. */
@@ -51,7 +51,7 @@ export function Article({ post }: { post: ArticlePost }) {
               {post.author.name}
             </a>
             <div className="flex flex-wrap items-center gap-1.5">
-              <time className="font-mono">{format(post.publishedAt, 'LLL dd, y')}</time>
+              <time className="font-mono">{formatPublished(post.publishedAt, 'LLL dd, y')}</time>
               <span className="text-muted-foreground/70">&bull;</span>
               <span className="font-mono">{post.readingTime}</span>
               <span className="text-muted-foreground/70">&bull;</span>

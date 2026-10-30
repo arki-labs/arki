@@ -108,7 +108,7 @@ Components do not return failure values. Mistakes in how you compose them show u
 - A missing token gives a wrong colour, not an error. If a page looks unstyled, check the `@source` line and the token imports first.
 - `Toaster` reads the theme from `@arki/ui/theme`. Without a `ThemeProvider` it uses `system`.
 - The theme never throws. `useTheme()` outside a `ThemeProvider` returns `theme: undefined` and a `setTheme` that does nothing. A blocked `localStorage` drops writes, so the theme lasts until reload. A stored name not in `themes` becomes `defaultTheme`. If system preference detection is missing or throws, `system` resolves to `light`.
-- Hooks under `hooks/*` do not throw for bad input. `useAsyncMemo` returns `undefined` (or your `initial`) until the promise resolves; a rejected promise is not caught, so catch inside the factory. On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop.
+- Hooks under `hooks/*` do not throw for bad input. `useAsyncMemo` returns `{ value, isPending, failure, retry }`: `value` is `undefined` (or your `initial`) until the promise resolves, a rejected promise becomes `failure`, and `retry()` runs the factory again. On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop. It returns that same desktop on the first client render too, then reads the real window after mount, so hydration matches the server.
 
 ## Limits
 

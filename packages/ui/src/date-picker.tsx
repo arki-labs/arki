@@ -28,7 +28,7 @@ export function DatePicker({ date, setDate, ...props }: DatePickerProps) {
         }
       >
         <CalendarIcon className="mr-2 h-4 w-4" weight="regular" />
-        {date ? format(date, 'PPP') : <span>Pick a date</span>}
+        {date && !Number.isNaN(date.getTime()) ? format(date, 'PPP') : <span>Pick a date</span>}
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" {...props}>
         <Calendar mode="single" selected={date} onSelect={setDate} autoFocus />

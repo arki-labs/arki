@@ -35,6 +35,11 @@
       "import": "./src/cn.ts",
       "browser": "./src/cn.ts"
     },
+    "./copy-text": {
+      "types": "./dist/src/copy-text.d.ts",
+      "import": "./src/copy-text.ts",
+      "browser": "./src/copy-text.ts"
+    },
     "./accordion": {
       "types": "./dist/src/accordion.d.ts",
       "import": "./src/accordion.tsx",
@@ -465,6 +470,9 @@
       ],
       "cn": [
         "src/cn.ts"
+      ],
+      "copy-text": [
+        "src/copy-text.ts"
       ],
       "accordion": [
         "src/accordion.tsx"
