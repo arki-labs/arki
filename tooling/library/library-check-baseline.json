@@ -101,26 +101,6 @@
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodObject, ZodString",
-      "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodObject, ZodString",
-      "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./foreman\" exposes Zod types: ZodArray, ZodDefault, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
-      "package": "@arki/journal",
-      "error": "TYPES_E001 export \"./orpc\" exposes Zod types: ZodObject, ZodString",
-      "reason": "Now-tier Wave 2 docs standard 2026-10-17"
-    },
-    {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \".\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
       "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
