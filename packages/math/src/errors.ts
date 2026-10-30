@@ -19,7 +19,7 @@ import { defineFailure } from '@arki/failure';
  * @fix Show the user the field again. For `parseNumber` and `parseDecimal` check that the locale or `symbols` match the text; for `fromBase` check the base.
  * @verify cd packages/math && bun run vitest run src/parse.test.ts src/integer.test.ts src/complex.test.ts
  */
-export const InvalidNumber = defineFailure('math.invalid_number', {
+export const InvalidNumber = /* @__PURE__ */ defineFailure('math.invalid_number', {
   status: 400,
   message: 'Text is not a number in the accepted syntax.',
   remediation: 'Check the text against the syntax and locale the parser expects, then ask for the number again.',
@@ -32,7 +32,7 @@ export const InvalidNumber = defineFailure('math.invalid_number', {
  * @fix Reject the input as too large, or for a `number` result parse with `parseDecimal` to keep every digit.
  * @verify cd packages/math && bun run vitest run src/parse.test.ts src/integer.test.ts src/complex.test.ts
  */
-export const NumberOutOfRange = defineFailure('math.number_out_of_range', {
+export const NumberOutOfRange = /* @__PURE__ */ defineFailure('math.number_out_of_range', {
   status: 400,
   message: 'Text holds a number outside the supported digits, scale or range.',
   remediation: 'Keep values within 10 000 digits and an exponent of 10 000, or use parseDecimal for values past the float range.',

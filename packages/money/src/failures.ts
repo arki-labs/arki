@@ -17,7 +17,7 @@ import { defineFailure } from '@arki/failure';
  * @fix Show the person the expected format, for example `19.99 EUR`. Do not guess a repair.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const InvalidMoneyText = defineFailure('money.invalid_text', {
+export const InvalidMoneyText = /* @__PURE__ */ defineFailure('money.invalid_text', {
   status: 400,
   message: 'The text is not an amount of money in the expected format.',
   remediation:
@@ -30,7 +30,7 @@ export const InvalidMoneyText = defineFailure('money.invalid_text', {
  * @fix Send `{ amount, currency }` with both fields as strings, as `Money#toJSON()` writes them.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const InvalidMoneyShape = defineFailure('money.invalid_shape', {
+export const InvalidMoneyShape = /* @__PURE__ */ defineFailure('money.invalid_shape', {
   status: 400,
   message: 'The value is not an object with a string amount and a string currency.',
   remediation: 'Send an object with an amount string and a currency string, as Money#toJSON() writes them.',
@@ -43,7 +43,7 @@ export const InvalidMoneyShape = defineFailure('money.invalid_shape', {
  * @fix Use an ISO 4217 code in upper case, or pass the custom `Currency` objects you accept.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const UnknownCurrency = defineFailure('money.unknown_currency', {
+export const UnknownCurrency = /* @__PURE__ */ defineFailure('money.unknown_currency', {
   status: 400,
   message: 'The currency is not in the ISO 4217 table or the list of custom currencies.',
   remediation: 'Use an upper-case ISO 4217 code, or pass the custom currencies you accept.',
@@ -55,7 +55,7 @@ export const UnknownCurrency = defineFailure('money.unknown_currency', {
  * @fix Ask for an amount with fewer decimals, or pass an explicit `rounding` mode to the parser.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const RoundingNecessary = defineFailure('money.rounding_necessary', {
+export const RoundingNecessary = /* @__PURE__ */ defineFailure('money.rounding_necessary', {
   status: 400,
   message: 'The amount has more decimals than allowed and no rounding mode was given.',
   remediation: 'Ask for fewer decimals, or pass a rounding mode such as halfEven.',
@@ -67,7 +67,7 @@ export const RoundingNecessary = defineFailure('money.rounding_necessary', {
  * @fix Send minor units as a string or bigint when they may pass 2^53, and never send a fraction.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const AmountOutOfRange = defineFailure('money.out_of_range', {
+export const AmountOutOfRange = /* @__PURE__ */ defineFailure('money.out_of_range', {
   status: 400,
   message: 'The number is not a safe whole number of minor units.',
   remediation: 'Send whole minor units as a string or bigint when they may pass 2^53.',
@@ -80,7 +80,7 @@ export const AmountOutOfRange = defineFailure('money.out_of_range', {
  * @fix Refuse the input at your boundary. Real amounts are far shorter than these limits.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const InputTooLarge = defineFailure('money.input_too_large', {
+export const InputTooLarge = /* @__PURE__ */ defineFailure('money.input_too_large', {
   status: 413,
   message: 'The input is longer or has more digits than money parsing accepts.',
   remediation: 'Refuse the input. Real amounts are far below the limits.',
@@ -92,7 +92,7 @@ export const InputTooLarge = defineFailure('money.input_too_large', {
  * @fix Pass a well-formed BCP 47 tag such as `de-DE`, or pass `symbols` to parse without `Intl`.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const UnsupportedLocale = defineFailure('money.unsupported_locale', {
+export const UnsupportedLocale = /* @__PURE__ */ defineFailure('money.unsupported_locale', {
   status: 400,
   message: 'The locale is not a valid language tag for this runtime.',
   remediation: 'Pass a well-formed BCP 47 locale such as de-DE, or pass symbols to parse without Intl.',
@@ -105,7 +105,7 @@ export const UnsupportedLocale = defineFailure('money.unsupported_locale', {
  * @fix Check the provider's amount and currency. Never round a provider amount to make it fit.
  * @verify cd packages/money && bun run vitest run src/failures.test.ts
  */
-export const ProviderAmount = defineFailure('money.provider_amount', {
+export const ProviderAmount = /* @__PURE__ */ defineFailure('money.provider_amount', {
   status: 422,
   message: "The provider amount does not fit the provider's unit rule for this currency.",
   remediation: "Check the provider's amount and currency. Do not round it to make it fit.",
