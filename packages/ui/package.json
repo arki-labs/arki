@@ -680,6 +680,7 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "docs/agent-guide.md",
+    "docs/components.md",
     "llms.txt",
     "README.md",
     "LICENSE",
