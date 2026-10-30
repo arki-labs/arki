@@ -254,26 +254,26 @@ export const REFUND_STEPS = {
     {
       id: 'imports',
       path: README_FILE,
-      from: 982,
+      from: 996,
       imports: true,
       lines: ["import { z } from 'zod';"],
     },
     {
       id: 'hold',
       path: README_FILE,
-      from: 1021,
+      from: 1023,
       lines: ["  .step('hold', ({ input, payments }) => payments.hold(input.paymentId, input.amount), {"],
     },
     {
       id: 'undo',
       path: README_FILE,
-      from: 1022,
+      from: 1024,
       lines: ['    undo: ({ result, payments }) => payments.release(result.holdId),'],
     },
     {
       id: 'hold-end',
       path: README_FILE,
-      from: 1023,
+      from: 1025,
       lines: [
         '  })',
         '  // `key` is the same on every try of this step: the provider dedupes on it. `output` checks the stored result, so',
@@ -283,7 +283,7 @@ export const REFUND_STEPS = {
     {
       id: 'payBack',
       path: README_FILE,
-      from: 1026,
+      from: 1028,
       lines: [
         "  .step('payBack', ({ input, key, payments }) => payments.refund(input.paymentId, input.amount, key), {",
         '    output: z.object({ refundId: z.string() }),',
@@ -293,7 +293,7 @@ export const REFUND_STEPS = {
     {
       id: 'wait',
       path: README_FILE,
-      from: 1029,
+      from: 1031,
       lines: [
         "  // The run parks here until the provider's webhook sends the signal.",
         "  .waitFor('settled', { signal: 'provider.refund.settled', schema: Settled, timeout: '3d' })",
@@ -306,17 +306,17 @@ export const REFUND_STEPS = {
 export const JOURNAL_VERBS = [
   {
     path: README_FILE,
-    line: 482,
+    line: 496,
     text: 'Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`',
   },
   {
     path: README_FILE,
-    line: 378,
+    line: 390,
     text: '`journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction.',
   },
   {
     path: README_FILE,
-    line: 376,
+    line: 388,
     text: "An event that can hold personal data declares its erased form: `j.event('MessageSent', schema, { erased: data => ({ ...data, content: '' }) })`.",
   },
 ] as const satisfies readonly SourceQuote[];

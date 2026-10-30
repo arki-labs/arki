@@ -14,10 +14,13 @@ import type {
   CommandInvalid,
   CommandNotFound,
   WorkflowBusy,
+  WorkflowPending,
   WorkflowReadMismatch,
+  WorkflowRunCancelled,
+  WorkflowRunFailed,
 } from '../errors.js';
 import type { RetentionAge } from '../retention.js';
-import type { DbHandle, TransactionSource } from '../types.js';
+import type { DbHandle, RootDb, TransactionSource } from '../types.js';
 import type { AnySignals, DefExtension } from './define.js';
 import type { RunDetail } from './read.js';
 import type { RunFields, RunOverrides, RunTiming } from './run-fields.js';
@@ -36,6 +39,50 @@ export type ReplayArgs = { readonly runId: string; readonly overrides?: ReplayOv
 /** What `def.read` gives: the run, typed, or why it cannot be. A throwing validator is a `ValidatorDefect`. */
 export type ReadOutcome<Input, ReadOutput, ReadResults> =
   RunDetail<Input, ReadOutput, ReadResults> | WorkflowReadMismatch | ReturnType<typeof ValidatorDefect> | undefined;
+
+/**
+ * How long `def.settled` and `def.startAndWait` wait, in seconds (the number form of a retention age). More than 0 and
+ * at most `SETTLE_LIMIT_SECONDS`: a request that waits longer is a job, and the caller should take the run id instead.
+ */
+export type WaitSeconds = number;
+/** The options of `def.settled`. `within` is required: a wait with no end is not offered. */
+export type SettleOptions = { readonly within: WaitSeconds };
+/**
+ * What `def.settled` returns: the run once it has ended (completed, failed, cancelled or expired), typed as `def.read`
+ * types it; `WorkflowPending` with the run id when `within` passed first; `CommandNotFound` when there is no such run
+ * of this workflow. A run whose stored values no longer fit is `WorkflowReadMismatch`, as for `def.read`.
+ */
+export type SettledOutcome<Input, ReadOutput, ReadResults> =
+  | RunDetail<Input, ReadOutput, ReadResults>
+  | WorkflowPending
+  | CommandNotFound
+  | WorkflowReadMismatch
+  | ReturnType<typeof ValidatorDefect>;
+/** The options of `def.startAndWait`: the meta `start` records, how long to wait, and a signal that stops the wait. */
+export type StartAndWaitOptions<MetaIn> = {
+  readonly meta: MetaIn;
+  readonly timeout: WaitSeconds;
+  /** Stops the wait, never the run: the result is then `WorkflowPending`, as for a timeout. */
+  readonly signal?: AbortSignal | undefined;
+};
+/**
+ * What `def.startAndWait` returns: the run's output (`def.read`'s type of it, `null` when the run has none); `WorkflowRunFailed` when the run ended
+ * `failed` or `expired`; `WorkflowRunCancelled`; `WorkflowPending` with the run id on a timeout or an abort (the run
+ * goes on); or what `def.start` or `def.read` refuses with.
+ */
+export type StartAndWaitOutcome<ReadOutput> =
+  | ReadOutput
+  | null
+  | WorkflowRunFailed
+  | WorkflowRunCancelled
+  | WorkflowPending
+  | CommandFailure
+  | WorkflowBusy
+  | CommandConflict
+  | CommandInvalid
+  | CommandNotFound
+  | WorkflowReadMismatch
+  | ReturnType<typeof ValidatorDefect>;
 
 /**
  * The arguments of `def.start`: the input, the run id, the run fields (`scope`, `tags`, `metadata`), its timing
@@ -113,6 +160,28 @@ export type WorkflowStarter<
    * makes `read` refuse.
    */
   readonly read: (db: DbHandle, runId: string) => Promise<ReadOutcome<SchemaOutput<Input>, ReadOutput, ReadResults>>;
+  /**
+   * The typed run (as `read` gives it) once it has ended, or `WorkflowPending { runId }` when `within` seconds pass
+   * first. `within` is required, above 0 and at most 30. It polls the run with a growing pause; waiting never changes
+   * the run. It needs the root database: a transaction handle throws `BAD_ARGUMENT`, because a wait inside a
+   * transaction holds it open and a snapshot would never see the run end.
+   */
+  readonly settled: (
+    db: RootDb,
+    runId: string,
+    options: SettleOptions,
+  ) => Promise<SettledOutcome<SchemaOutput<Input>, ReadOutput, ReadResults>>;
+  /**
+   * Starts a run (`start`) and waits for it to end, for a caller that must answer with the result, such as a request.
+   * Root database only (a transaction handle throws `BAD_ARGUMENT`). A timeout or an abort never cancels the run: the
+   * result is `WorkflowPending { runId }`, and the caller can take the id and read it later. The workflow must be
+   * registered with `compose({ workflows })`, which gives it the journal to start with.
+   */
+  readonly startAndWait: (
+    db: RootDb & TransactionSource<Tx>,
+    args: StartArgs<SchemaInput<Input>>,
+    options: StartAndWaitOptions<SchemaInput<Meta>>,
+  ) => Promise<StartAndWaitOutcome<ReadOutput>>;
 };
 /** What `j.workflow` adds to a definition: a `WorkflowStarter` for the signals the finished definition declares. */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- `this['signals']` is only available in an interface

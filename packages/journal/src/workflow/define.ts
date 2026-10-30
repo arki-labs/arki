@@ -99,8 +99,13 @@ const noOutput: StandardSchemaV1<unknown, null> = z.null();
  */
 const waitResultSchema: StandardSchemaV1 = storedWaitResultSchema;
 
-/** The schema a stored node result is checked with, and whether `null` (skipped, or timed out into `continue`) is kept. */
-export function resultSchemaOf(node: WorkflowNode) {
+/**
+ * The schema a stored node result is checked with, and whether `null` (skipped, or timed out into `continue`) is kept.
+ * `each`: the stored result is a list and the schema checks every item (a `map` that waits for all).
+ */
+export function resultSchemaOf(
+  node: WorkflowNode,
+): { readonly schema: StandardSchemaV1; readonly nullable: boolean; readonly each?: true } | undefined {
   if (node.kind === 'step' && node.options.output !== undefined) {
     return { schema: node.options.output, nullable: node.options.when !== undefined };
   }
@@ -112,6 +117,18 @@ export function resultSchemaOf(node: WorkflowNode) {
   }
   if (node.kind === 'eventWait') {
     return { schema: waitResultSchema, nullable: node.onTimeout === 'continue' || node.when !== undefined };
+  }
+  // A sleep stores `null`, always.
+  if (node.kind === 'sleep') return { schema: noOutput, nullable: false };
+  // A child's result is its run's output, which its workflow checked with its `output` schema; a child chosen at run
+  // time (a function) has no schema to read it with.
+  if (node.kind === 'child' && typeof node.def !== 'function' && node.def.output !== undefined) {
+    return { schema: node.def.output, nullable: false };
+  }
+  if (node.kind === 'map' && node.def.output !== undefined) {
+    return node.wait === 'all'
+      ? { schema: node.def.output, nullable: false, each: true }
+      : { schema: node.def.output, nullable: false };
   }
   return;
 }
@@ -483,6 +500,10 @@ export type Resolved<Returned> = Exclude<Awaited<Returned>, Failure>;
 type Host = { readonly db: unknown; readonly run: unknown; readonly commandContext: unknown };
 type StandaloneHost = { readonly db: RootDb; readonly run: unknown; readonly commandContext: never };
 type OutputOf<Def extends WorkflowDef> = NonNullable<Def['types']>['output'];
+/** What `def.read` gives for a child's run output: the child's `output` schema's output, `unknown` without one. */
+type ReadOutputOfDef<Def extends WorkflowDef> = NonNullable<Def['types']>['readOutput'];
+/** A list of checked items, or `unknown` when the item is not checked (no schema): an unchecked list is not known to be one. */
+type CheckedList<Item> = unknown extends Item ? unknown : Item[];
 /** `Signals` plus one signal. A name used twice keeps the later schema; `define` refuses two different schemas for one name. */
 type AddSignal<Signals extends AnySignals, Name extends string, Payload extends StandardSchemaV1> = {
   readonly [K in keyof Signals | Name]: K extends Name ? Payload : K extends keyof Signals ? Signals[K] : never;
@@ -528,6 +549,47 @@ type CommandResult<Output, Accept extends readonly AcceptedBy<unknown>[], When> 
   When
 >;
 
+/** The options of a `child` node, for the child workflow `Def`. */
+type ChildOptions<Input extends StandardSchemaV1, Results extends AnyResults, N extends Needs, Where extends Host, Def extends WorkflowDef> = {
+  readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
+  /** What a cancel of this run does to the child: cancel it (default) or leave it running. */
+  readonly onCancel?: 'cancel' | 'detach';
+  /** Undoes the node when the run compensates. Without it, the child run itself is compensated. */
+  readonly undo?: (ctx: Ctx<Input, Results, N, Where> & { readonly result: OutputOf<Def> }) => unknown;
+};
+/** `.child(name, def, options)` and `.child(name, ctx => def, options)`: two forms, because only the first can be checked on read. */
+type ChildNode<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Ext extends DefExtension,
+  Signals extends AnySignals,
+  Checked extends AnyResults,
+> = {
+  <Name extends string, Def extends WorkflowDef>(
+    name: Fresh<Results, Name>,
+    def: Def,
+    options: ChildOptions<Input, Results, N, Where, Def>,
+  ): WorkflowBuilder<
+    Input,
+    Add<Results, Name, OutputOf<Def>>,
+    N,
+    Declared,
+    OutputOf<Def>,
+    Where,
+    Ext,
+    Signals,
+    Add<Checked, Name, ReadOutputOfDef<Def>>
+  >;
+  <Name extends string, Def extends WorkflowDef>(
+    name: Fresh<Results, Name>,
+    def: (ctx: Ctx<Input, Results, N, Where>) => Def,
+    options: ChildOptions<Input, Results, N, Where, Def>,
+  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals, Checked>;
+};
+
 export type WorkflowBuilder<
   Input extends StandardSchemaV1,
   Results extends AnyResults,
@@ -545,7 +607,7 @@ export type WorkflowBuilder<
     Returned,
     When extends ((ctx: Ctx<Input, Results, N, Where>) => boolean) | undefined,
     Output extends StandardSchemaV1<unknown, Resolved<Returned>> | undefined = undefined,
-    const Failures extends readonly AcceptedBy<RefusalOf<Returned>>[] = readonly [],
+    const Failures extends readonly AcceptedBy<Failure>[] = readonly [],
     OnFailure extends 'continue' | undefined = undefined,
   >(
     name: Fresh<Results, Name>,
@@ -562,15 +624,15 @@ export type WorkflowBuilder<
       readonly when?: When;
       readonly output?: Output;
       /**
-       * The failures the step may return. Each must be one the body can return, and carries the schema that checks its
-       * stored data. Without `onFailure` a returned failure fails the step, as ever.
+       * The failures the step may return, each with the schema that checks its stored data. (The list is not tied to the
+       * body's return type: that tie would fix the body's type before its context is typed.) Without `onFailure` a returned failure fails the step, as ever.
        */
       readonly failures?: Failures;
       /**
        * `'continue'`: a returned failure that `failures` lists is the step's result and the run goes on from it. The
        * result is stored as the failure's envelope and read back as a real failure. Any other failure fails the step.
        */
-      readonly onFailure?: OnFailure;
+      readonly onFailure?: [Output] extends [StandardSchemaV1] ? OnFailure : never;
     },
   ): WorkflowBuilder<
     Input,
@@ -616,19 +678,14 @@ export type WorkflowBuilder<
         | 'next'
         | ((view: WaitView<SchemaOutput<Input>, Results>) => (keyof Results & string) | 'next');
     },
-  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals, Checked>;
+  ): WorkflowBuilder<Input, Add<Results, Name, null>, N, Declared, null, Where, Ext, Signals, Add<Checked, Name, null>>;
 
-  child<Name extends string, Def extends WorkflowDef>(
-    name: Fresh<Results, Name>,
-    def: Def | ((ctx: Ctx<Input, Results, N, Where>) => Def),
-    options: {
-      readonly input: (ctx: Ctx<Input, Results, N, Where>) => SchemaInput<Def['input']>;
-      /** What a cancel of this run does to the child: cancel it (default) or leave it running. */
-      readonly onCancel?: 'cancel' | 'detach';
-      /** Undoes the node when the run compensates. Without it, the child run itself is compensated. */
-      readonly undo?: (ctx: Ctx<Input, Results, N, Where> & { readonly result: OutputOf<Def> }) => unknown;
-    },
-  ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals, Checked>;
+  /**
+   * Runs another workflow as a child run and takes its output as the result. With the definition itself, `def.read`
+   * checks the stored result with the child's `output` schema, and types it. With a function that picks the
+   * definition at run time, there is no schema to check with, so `def.read` gives `unknown`.
+   */
+  child: ChildNode<Input, Results, N, Declared, Where, Ext, Signals, Checked>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -648,7 +705,7 @@ export type WorkflowBuilder<
     Where,
     Ext,
     Signals,
-    Checked
+    Add<Checked, Name, Wait extends 'any' ? ReadOutputOfDef<Def> : CheckedList<ReadOutputOfDef<Def>>>
   >;
 
   /**
@@ -1100,6 +1157,13 @@ function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
 }
 
 /** `waitFor`'s options as the builder reads them, in either form. */
+/** The options of a `child` node as the implementation takes them: nothing is known about the child's types. */
+type ErasedChildOptions = {
+  readonly input: Body<unknown>;
+  readonly onCancel?: 'cancel' | 'detach';
+  readonly undo?: BivariantFn<[ctx: ErasedContext & { readonly result: unknown }], unknown>;
+};
+
 type ErasedWaitOptions =
   | {
       readonly signal: string;
@@ -1179,6 +1243,9 @@ function makeBuilder<
       if (options?.onFailure === 'continue' && (options.failures ?? []).length === 0) {
         refuse(state.name, `step '${name}' has onFailure 'continue' and lists no failures to continue on`);
       }
+      if (options?.onFailure === 'continue' && options.output === undefined) {
+        refuse(state.name, `step '${name}' continues on failures, so it needs an output schema: a stored result is checked when read`);
+      }
       if (options?.failures !== undefined && options.failures.length > 0 && options.onFailure === undefined) {
         refuse(state.name, `step '${name}' lists failures but has no onFailure: set onFailure to 'continue'`);
       }
@@ -1237,7 +1304,11 @@ function makeBuilder<
       refuseUndo(state.name, 'sleep', name, options);
       return makeBuilder(withNode(state, { kind: 'sleep', name, undo: false, until, next: options?.next }));
     },
-    child: (name, def, options) => {
+    child: <R extends AnyResults, L, C extends AnyResults>(
+      name: string,
+      def: WorkflowDef | Body<WorkflowDef>,
+      options: ErasedChildOptions,
+    ): WorkflowBuilder<Input, R, N, Declared, L, Where, Ext, Signals, C> => {
       return makeBuilder(
         withNode(state, {
           kind: 'child',

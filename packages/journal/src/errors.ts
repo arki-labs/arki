@@ -366,6 +366,47 @@ export const WorkflowReadMismatch = defineFailure('journal.workflow_read_mismatc
 /** A {@link WorkflowReadMismatch} failure value. */
 export type WorkflowReadMismatch = ReturnType<typeof WorkflowReadMismatch>;
 
+/** `def.settled` or `def.startAndWait` stopped waiting before the run ended. The run goes on: a wait never cancels it.
+ * `runId` is the run to read again later (`def.settled`), or to cancel on purpose.
+ * @fix Read the run again with def.settled, or take the run id and return to the caller now; do not start the work again.
+ * @verify bun run test -- src/workflow/outcomes.test.ts
+ */
+export const WorkflowPending = defineFailure('journal.workflow_pending', {
+  status: 408,
+  data: z.object({ runId: z.string() }),
+  message: 'workflow run {runId} has not ended yet',
+  remediation:
+    'Read the run again with def.settled, or take the run id and return to the caller now; do not start the work again.',
+});
+/** A {@link WorkflowPending} failure value. */
+export type WorkflowPending = ReturnType<typeof WorkflowPending>;
+
+/** A run that `def.startAndWait` waited for ended `failed` (or `expired`): a step died, or a node refused. `error` is the text the run recorded.
+ * @fix Read the run (def.read) to see which node failed, and retry that step or start the run again.
+ * @verify bun run test -- src/workflow/outcomes.test.ts
+ */
+export const WorkflowRunFailed = defineFailure('journal.workflow_run_failed', {
+  status: 422,
+  data: z.object({ runId: z.string(), state: z.enum(['failed', 'expired']), error: z.string() }),
+  message: 'workflow run {runId} ended {state}: {error}',
+  remediation: 'Read the run (def.read) to see which node failed, and retry that step or start the run again.',
+});
+/** A {@link WorkflowRunFailed} failure value. */
+export type WorkflowRunFailed = ReturnType<typeof WorkflowRunFailed>;
+
+/** A run that `def.startAndWait` waited for was cancelled. `reason` is the cancel's reason, or `null` when none was recorded.
+ * @fix Start the run again if the work is still wanted.
+ * @verify bun run test -- src/workflow/outcomes.test.ts
+ */
+export const WorkflowRunCancelled = defineFailure('journal.workflow_run_cancelled', {
+  status: 409,
+  data: z.object({ runId: z.string(), reason: z.string().nullable() }),
+  message: 'workflow run {runId} was cancelled',
+  remediation: 'Start the run again if the work is still wanted.',
+});
+/** A {@link WorkflowRunCancelled} failure value. */
+export type WorkflowRunCancelled = ReturnType<typeof WorkflowRunCancelled>;
+
 /** Failures owned by command execution, in addition to the command definition's inferred refusals. */
 export const COMMAND_FAILURES = [...SCHEMA_FAILURES, ...TRANSACTION_FAILURES, CommandConflict] as const;
 export type CommandFailure = ReturnType<(typeof COMMAND_FAILURES)[number]>;

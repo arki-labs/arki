@@ -1107,7 +1107,7 @@ A finished definition has three commands and one read. The commands run through 
 - `def.startBatch` takes `{ items, batchId? }` and starts many runs of one workflow in one transaction. Each item is what `def.start` takes, and there are 1 to `BATCH_LIMIT` (1000) items. It returns `{ batchId, runs }`: `runs[i]` is item i's outcome, `{ runId }` or its refusal (`WorkflowBusy`, `CommandConflict`, `CommandInvalid`). Each item runs in its own savepoint, so a refused item rolls back only itself and the others start. An item that does not fit the start schema, or a wrong number of items, is a caller bug: the whole batch is `InvalidInput` and nothing starts. The default batch id is `wfb_<random>`; every run stores it in `batchId`. `journal.workflows.batch(db, batchId)` counts its runs by state, and `runs(db, { batchId })` lists them (§ Operators).
 - `def.signal(name)` takes `{ runId, deliveryId, payload }`. `name` must be a signal one of the `waitFor` nodes declares. `deliveryId` is the sender's own id, such as the webhook event id. It returns a `status`: `woke` (the run moved on), `kept` (stored; the run takes it when it reaches the wait), `duplicate` (this `deliveryId` was seen) or `finished` (the run is over, so it was dropped) or `no-run` (no run of this workflow has that id, or the id belongs to another workflow; nothing is stored). `no-run` is a status, not a failure, so a webhook for a missing run is answered 200 and the provider stops resending. The operator verb `journal.workflows.signal` names a specific run and still refuses an unknown one.
 - `def.cancel` takes `{ runId, reason }`. It returns `{ state: 'compensating' }` while the run undoes its steps, or `{ state: 'cancelled' }` when there was nothing to undo.
-- `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema, the events of an event wait). A result without a schema is `unknown`. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
+- `def.read(db, runId)` reads the run back, typed. It checks the input, the output and each result that has a schema (a step `output`, a `waitFor` schema, the events of an event wait, a command's `output`, a sleep's `null`, and a child or `map` whose workflow declares an `output`; a `map` that waits for all checks every item). A result without a schema is `unknown`, and so is a child chosen by a function. A stored value that no longer fits its schema returns the failure `WorkflowReadMismatch` (code `journal.workflow_read_mismatch`). Another workflow's run, or an unknown id, gives `undefined`.
 
 ```ts continue
 const { db, client } = await openJournalDb(tables); // in an app: the root database
@@ -1475,11 +1475,80 @@ await client.close();
 - The result is what the command's `output` schema gives: `j.command(name, input, { writes, output }, handler)`. A command with no `output` stores `null`. The schema must fit what the handler returns: another schema does not compile. A result that fails the schema, or does not survive JSON, rolls the command back and fails the attempt.
 - A refused command rolls back its savepoint, and the node's failure still commits. The node then fails like a step that returned a failure: `retry` with a `while` that accepts it tries again, and without one the step is dead, so `onDeadStep` decides (`'compensate'` fails the run, `'wait'` leaves it for an operator).
 - `accept: [OverLimit]` names failures the run goes on from. Only failures the command returns compile. The savepoint stays rolled back and the failure is the node's result, so `results.x` and `def.read` have the type `Output | ReturnType<typeof OverLimit>`. The stored JSON is checked: a code no definition in `accept` knows reads as `WorkflowReadMismatch`.
-- A last node with `accept` needs a function in `.finish`: a run's output is never a failure. `finish` throws `BAD_DEFINITION` without it.
+- A last node with `accept` needs a function in `.finish`: a run's output is never a failure. `.finish()` without one does not compile (a definition built past the types throws `BAD_DEFINITION`).
 - `undo: { command, input }` runs in compensation, in reverse order, exactly once, the same way. `input` also gets `result`, the stored result. A node that ended in an accepted failure did nothing, so its undo is skipped.
 - `when` skips the node: the command does not run and the result is `null`. `retry` works as on a step. There is no `timeout`: a transaction is not the place to wait.
 - The shape stores the kind `command` and the command names, so changing a node's command is a new shape. Bump the version.
 - The input function's return gets no help from the command's type for literals, the same as `.child`. Write `kind: 'card' as const` for a field that takes a union of strings.
+
+### Continue on a step's failure
+
+A step that returns a failure is dead at once and follows `onDeadStep`. When a failure is a normal answer, such as a declined card, list it and the run goes on from it:
+
+- `failures: [Declined]` lists the failure definitions the step may return. `onFailure: 'continue'` makes a listed failure the step's result. Any other returned failure still fails the step.
+- The result type is the step's `output` plus the listed failures, so `Declined.is(results.card)` narrows it. The failure is stored as its own envelope (`serialize`) and read back with its own `dataSchema` (`revive`), also by `def.read`. A code the list no longer names reads as `WorkflowReadMismatch`.
+- `onFailure: 'continue'` needs an `output` schema, so the stored result can be checked on read. A definition with `onFailure` and no `failures`, `failures` and no `onFailure`, or no `output` throws `BAD_DEFINITION` when it is built. The list is not tied to the body's return type.
+- A continued failure did nothing to undo, so the step's `undo` is skipped for it, as for a command's accepted failure.
+- A run's output is never a failure. A last node that can be a failure (a command with `accept`, a step with `onFailure: 'continue'`) needs a function in `.finish`, and `.finish()` without one does not compile. The definition still throws `BAD_DEFINITION` for an erased caller.
+
+### Get an outcome: `settled` and `startAndWait`
+
+A caller that must answer with the result, such as a request, can wait for a run. Both forms need the root database (a transaction handle is a type error and throws `BAD_ARGUMENT`), and neither ever cancels the run. A caller should normally take the run id; a bounded wait is a convenience.
+
+- `def.settled(db, runId, { within })` returns the run, typed as `def.read` types it, once it has ended (`completed`, `failed`, `cancelled` or `expired`). If `within` passes first it returns the failure `WorkflowPending { runId }`. A run that does not exist, or belongs to another workflow, is `CommandNotFound`.
+- `def.startAndWait(db, args, { meta, timeout, signal })` starts the run with `start`, then waits. It returns the output (`null` for a run with no output; `unknown` when the workflow declares no `output` schema, because nothing checks it), or `WorkflowRunFailed { runId, state, error }` for a run that ended `failed` or `expired`, `WorkflowRunCancelled { runId, reason }`, or `WorkflowPending { runId }` on a timeout or when `signal` aborts. A refusal of `start` or of the read comes back as it is.
+- `within` and `timeout` are seconds, above 0 and at most 30 (`SETTLE_LIMIT_SECONDS`). A missing, zero or longer value throws `BAD_ARGUMENT`: a wait that long is a job, so take the run id.
+- It polls the run, from a 10 ms pause growing to 250 ms. Nothing here wakes a worker: run one (`journal.worker`, or `drain` in a test).
+- `startAndWait` needs the workflow in `compose({ workflows })`, which gives it the journal to start with. Otherwise it throws `WORKFLOW_UNKNOWN`.
+
+```ts run
+import { z } from 'zod';
+
+import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { initJournal, WorkflowPending, WorkflowRunFailed } from '@arki/journal';
+import { journalTables } from '@arki/journal/pg';
+import { openJournalDb } from '@arki/journal/testing';
+
+const tables = journalTables();
+const j = initJournal({ tables, meta: z.object({ actorId: z.string() }) });
+const Declined = defineFailure('pay.declined', { status: 402, data: z.object({ reason: z.string() }) });
+
+export const charge = j
+  .workflow('pay.charge', { version: 1, input: z.object({ amount: z.int() }), output: z.string() })
+  .step('card', ({ input }) => (input.amount > 100 ? Declined({ reason: 'over the limit' }) : { chargeId: 'ch_1' }), {
+    output: z.object({ chargeId: z.string() }),
+    failures: [Declined],
+    onFailure: 'continue',
+  })
+  .finish(({ results }) => (Declined.is(results.card) ? `declined: ${results.card.data.reason}` : results.card.chargeId));
+
+const journal = j.compose({ workflows: [charge], workflowMeta: { actorId: 'system:workflow' } });
+const { db, client } = await openJournalDb(tables);
+const caller = { actorId: 'usr_ada' };
+
+// A worker, as an app runs one. In a test `journal.drain` does the same.
+let working = true;
+const worker = (async () => {
+  while (working) {
+    orThrow(await journal.drain(db));
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+})();
+
+const answer = await charge.startAndWait(db, { input: { amount: 500 } }, { meta: caller, timeout: 5 });
+if (answer !== 'declined: over the limit') throw new Error('the declined card is the run\'s answer, not a failure');
+
+const started = orThrow(await journal.run(db, charge.start, { input: { amount: 20 } }, caller));
+const settled = await charge.settled(db, started.runId, { within: 5 });
+if (isFailure(settled)) throw new Error(`not settled: ${settled.code}`);
+if (settled.run.output !== 'ch_1') throw new Error('the typed run carries the output');
+
+working = false;
+await worker;
+await client.close();
+void WorkflowPending;
+void WorkflowRunFailed;
+```
 
 ### Concurrency and limits
 

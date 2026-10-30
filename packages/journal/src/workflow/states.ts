@@ -19,6 +19,9 @@ export const RUN_STATES = [
   'expired',
 ] as const;
 
+/** The states a run never leaves. `def.settled` returns the run once it is in one of them. */
+export const ENDED_STATES = ['completed', 'failed', 'cancelled', 'expired'] as const;
+
 /** Every status `workflow_steps.status` stores. */
 export const STEP_STATUSES = ['scheduled', 'done', 'skipped', 'failed'] as const;
 

@@ -214,7 +214,7 @@ export const insideGroups = [
         new: false,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '537',
+          lines: '539',
           code: 'An effect runs after the commit, at least once, from a row in `journal_jobs`. An effect reaches out: a mail, a webhook, a provider. A handler gets the event and a context: `(e, { jobId, signal, db })`.',
         },
       },
@@ -225,10 +225,10 @@ export const insideGroups = [
         state: 'shipped',
         new: true,
         proof: {
-          path: 'packages/journal/src/write.ts',
-          lines: '410',
-          code: '          sql`select pg_notify(${deps.wakeChannel}, ${JSON.stringify({ from: Math.min(...seqs), to: Math.max(...seqs) })})`,',
-          imports: [{ lines: '7', code: "import { and, eq, sql } from 'drizzle-orm';" }],
+          path: 'packages/journal/src/store.ts',
+          lines: '199',
+          code: "      await db.execute(sql`select pg_notify(${deps.wakeChannel}, ${JSON.stringify(range)})`);",
+          imports: [{ lines: '10', code: "import { and, asc, eq, gt, gte, inArray, is, lte, max, sql } from 'drizzle-orm';" }],
         },
       },
       {
@@ -240,7 +240,7 @@ export const insideGroups = [
         new: true,
         proof: {
           path: 'packages/journal/README.md',
-          lines: '945',
+          lines: '947',
           code: 'A workflow is a list of steps that runs to the end even when the process dies. Each step runs as a job in `journal_jobs`. When a step finishes, its result is saved (a checkpoint) and the next step is scheduled, in one transaction. A run can wait for a signal from outside, or sleep, for hours or days. When it cannot finish, it undoes the steps it did, newest first (compensation). The run is a journal entity (`workflow.run`), so every move is an event in `journal_events`.',
         },
       },

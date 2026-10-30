@@ -257,6 +257,7 @@ function createInit<
         registry: workflows.started,
         meta: config.workflowMeta,
         stepHooks: workflows.stepHooks,
+        bindRun: runner?.bindRun,
       });
     },
   };
@@ -333,6 +334,8 @@ function createJournal<
     readonly meta: SchemaInput<Meta> | undefined;
     /** The step hooks the runner wraps each step body and undo in. */
     readonly stepHooks: ReturnType<typeof createWorkflows<Meta, Tx, AppDb>>['stepHooks'];
+    /** Gives the workflows' `startAndWait` this journal's `run`. Absent when no workflow is registered. */
+    readonly bindRun?: ((run: Journal<Meta, Tx, AppDb>['run']) => void) | undefined;
   },
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
@@ -643,5 +646,6 @@ function createJournal<
     },
   };
 
+  workflowWiring?.bindRun?.((source, command, input, meta, opts) => journal.run(source, command, input, meta, opts));
   return journal;
 }

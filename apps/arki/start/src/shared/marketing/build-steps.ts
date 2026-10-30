@@ -78,28 +78,28 @@ export const DEFINE_APP = {
     {
       id: 'import-dot',
       path: APP_FILE,
-      from: 16,
+      from: 15,
       imports: true,
-      lines: ["import { defineApp, logHandlers, token } from '@arki/dot';"],
+      lines: ["import { defineApp, logHandlers } from '@arki/dot';"],
     },
     {
       id: 'import-start',
       path: APP_FILE,
-      from: 18,
+      from: 17,
       imports: true,
       lines: ["import { tanstackStart } from '@arki/tanstack-start/dot';"],
     },
     {
       id: 'import-features',
       path: APP_FILE,
-      from: 21,
+      from: 20,
       imports: true,
       lines: ["import { features } from './features';"],
     },
     {
       id: 'import-units',
       path: APP_FILE,
-      from: 23,
+      from: 22,
       imports: true,
       lines: [
         "import { sentryErrors } from './entrypoints/middleware';",
@@ -116,7 +116,7 @@ export const DEFINE_APP = {
     {
       id: 'app',
       path: APP_FILE,
-      from: 42,
+      from: 35,
       lines: [
         "export const app = defineApp('avocabo', { observers: [sentryErrors, logHandlers()] })",
         '  .infra(database, cache, appMail, emailClient, authn, locking, embedding, vectors, vectorErasure, audioStorage)',
@@ -127,7 +127,7 @@ export const DEFINE_APP = {
         '    tanstackStart({',
       ],
     },
-    { id: 'end', path: APP_FILE, from: 65, lines: ['    }),', '  );'] },
+    { id: 'end', path: APP_FILE, from: 58, lines: ['    }),', '  );'] },
   ],
 } as const satisfies Excerpt;
 
@@ -360,25 +360,25 @@ export const SERVE_APP = {
     {
       id: 'import-start',
       path: APP_FILE,
-      from: 18,
+      from: 17,
       imports: true,
       lines: ["import { tanstackStart } from '@arki/tanstack-start/dot';"],
     },
     {
       id: 'import-gateway',
       path: APP_FILE,
-      from: 24,
+      from: 23,
       imports: true,
       lines: ["import { gateway } from './entrypoints/gateway';"],
     },
-    { id: 'import-auth', path: APP_FILE, from: 27, imports: true, lines: ["import { authn } from './infra/auth';"] },
+    { id: 'import-auth', path: APP_FILE, from: 26, imports: true, lines: ["import { authn } from './infra/auth';"] },
     {
       id: 'serve',
       path: APP_FILE,
-      from: 48,
+      from: 41,
       lines: [
         '    tanstackStart({',
-        '      needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler },',
+        '      needs: { rpc: gateway.provides.rpc, auth: authn.provides.auth, scheduler: hostClock.provides.scheduler },',
         '      session: ({ auth }, request) => auth.principal(request.headers),',
         '      rpc: ({ rpc }, request) => rpc.client(request.headers),',
       ],

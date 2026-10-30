@@ -33,7 +33,14 @@ import {
 } from '@arki/failure';
 import { ensure, is, parseAsync } from '@arki/schema';
 
-import type { CommandContext, JournalDefinitions, LimitOps, RootCommandRunner, WorkflowCommandRunner } from '../api.js';
+import type {
+  CommandContext,
+  Journal,
+  JournalDefinitions,
+  LimitOps,
+  RootCommandRunner,
+  WorkflowCommandRunner,
+} from '../api.js';
 import type { CommandFailure } from '../errors.js';
 import type { createEventDecoder } from '../history.js';
 import type { OwnedEffectContext } from '../internal-context.js';
@@ -57,6 +64,7 @@ import type {
   AnyResults,
   AnySignals,
   ErasedContext,
+  ErasedFailureDefinition,
   ErasedStartOn,
   RunEnding,
   WorkflowDef,
@@ -79,6 +87,7 @@ import type {
   StartBatchSchema,
   StartOutcome,
   StartSchema,
+  WorkflowStarter,
 } from './run-types.js';
 import type { RUN_STATES, SignalStatus, StepPhase } from './states.js';
 import { callbackDefect } from '../callback.js';
@@ -90,7 +99,10 @@ import {
   isJournalError,
   JournalError,
   WorkflowBusy,
+  WorkflowPending,
   WorkflowReadMismatch,
+  WorkflowRunCancelled,
+  WorkflowRunFailed,
   WorkflowTransitionLimit,
 } from '../errors.js';
 import { givenServices, ownedEffectFor } from '../handlers.js';
@@ -120,7 +132,8 @@ import {
   waitPointerSchema,
 } from './run-field-schemas.js';
 import { BATCH_LIMIT, changedMetadata, metadataRefusal, newTags, RUN_FIELD_LIMITS } from './run-fields.js';
-import { STEP_PHASES } from './states.js';
+import { pollUntil, refuseTransaction, waitMs } from './settle.js';
+import { ENDED_STATES, STEP_PHASES } from './states.js';
 import { codeOf, isStrandedError, strandedFailure } from './stranded.js';
 import { withWaitEvents } from './wait-results.js';
 
@@ -620,10 +633,17 @@ type EventWaitNode = Extract<WorkflowNode, { readonly kind: 'eventWait' }>;
 /** `decodeEvent`, as the plain functions below use it: they pass its result on and check only for a failure. */
 type DecodeEvent = (row: StoredEventRow, def: AnyEventDef | undefined, id: string) => unknown;
 
-/** The failure a command node stored, real again, or `undefined` when its `accept` list no longer names it. */
-function revivedRefusal(node: CommandNode, stored: unknown): Failure | undefined {
-  const revived = revive(ensure(stored, refusedResultSchema)[REFUSED], node.accept);
-  return isFailure<unknown>(revived) && node.accept.some(known => known.is(revived)) ? revived : undefined;
+type StepNodeOf = Extract<WorkflowNode, { readonly kind: 'step' }>;
+/** The failures a node may keep as its result: a command's `accept`, a step's `failures` under `onFailure: 'continue'`. */
+function keptFailuresOf(node: CommandNode | StepNodeOf): readonly ErasedFailureDefinition[] {
+  return node.kind === 'command' ? node.accept : node.options.onFailure === 'continue' ? (node.options.failures ?? []) : [];
+}
+
+/** The failure a node stored, real again, or `undefined` when its `accept` or `failures` list no longer names it. */
+function revivedRefusal(node: CommandNode | StepNodeOf, stored: unknown): Failure | undefined {
+  const known = keptFailuresOf(node);
+  const revived = revive(ensure(stored, refusedResultSchema)[REFUSED], known);
+  return isFailure<unknown>(revived) && known.some(definition => definition.is(revived)) ? revived : undefined;
 }
 
 /** An event wait's stored result as a body gets it: the event decoded as a job's event is, so its upcasters apply. */
@@ -647,14 +667,14 @@ function liveResults(def: WorkflowDef, runId: string, stored: AnyResults, decode
       if (isFailure(result)) throw new JournalError('REPLAY_FAILED', 'workflow', runId, reasonText(result));
       live[node.name] = result;
     }
-    if (node.kind !== 'command' || !is(stored[node.name], refusedResultSchema)) continue;
+    if ((node.kind !== 'command' && node.kind !== 'step') || !is(stored[node.name], refusedResultSchema)) continue;
     const failure = revivedRefusal(node, stored[node.name]);
     if (failure === undefined) {
       throw new JournalError(
         'BAD_DEFINITION',
         'workflow',
         runId,
-        `command '${node.name}' stored a failure its accept list does not name`,
+        `${node.kind} '${node.name}' stored a failure its ${node.kind === 'command' ? 'accept' : 'failures'} list does not name`,
       );
     }
     live[node.name] = failure;
@@ -1236,7 +1256,7 @@ export function createWorkflows<
     for (const item of remainingUndos(def, settled, options.doneNow, options.undoneNow)) {
       const node = def.nodes.find(candidate => candidate.name === item.path);
       // An accepted failure: the command was refused and rolled back, so it did nothing to undo.
-      if (node?.kind === 'command' && is(item.result, refusedResultSchema)) {
+      if ((node?.kind === 'command' || node?.kind === 'step') && is(item.result, refusedResultSchema)) {
         out.push(
           events.NodeSkipped({
             path: item.path,
@@ -3914,17 +3934,27 @@ export function createWorkflows<
         const field = `results.${node.name}`;
         const stored = results[node.name];
         // An accepted failure is checked by its own definition's schema, and read as a real failure.
-        if (node.kind === 'command' && is(stored, refusedResultSchema)) {
+        if ((node.kind === 'command' || node.kind === 'step') && is(stored, refusedResultSchema)) {
           const refusal = revivedRefusal(node, stored);
           if (refusal === undefined) {
-            const detail = `${field}: a failure the command's accept list does not name`;
+            const detail = `${field}: a failure the ${node.kind === 'command' ? 'accept' : 'failures'} list does not name`;
             return WorkflowReadMismatch({ runId, field, detail });
           }
           results[node.name] = refusal;
           checkedFields.add(field);
           continue;
         }
-        if (stored !== null || !own.nullable) {
+        if (own.each === true) {
+          const list = await checkStored(z.array(z.unknown()), stored, runId, field);
+          if (WorkflowReadMismatch.is(list) || ValidatorDefect.is(list)) return list;
+          const items: unknown[] = [];
+          for (const [position, item] of list.value.entries()) {
+            const checked = await checkStored(own.schema, item, runId, `${field}[${position}]`);
+            if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
+            items.push(checked.value);
+          }
+          results[node.name] = items;
+        } else if (stored !== null || !own.nullable) {
           const checked = await checkStored(own.schema, stored, runId, field);
           if (WorkflowReadMismatch.is(checked) || ValidatorDefect.is(checked)) return checked;
           results[node.name] = checked.value;
@@ -3948,15 +3978,95 @@ export function createWorkflows<
       return read;
     };
 
-  /** `j.workflow`: the step-2 builder, with `start`, `signal`, `cancel` and `read` on the finished definition. */
+  /** The text a failed run recorded (`RunFailed`), for `WorkflowRunFailed`. An expired run recorded none. */
+  const failureTextOf = async (db: DbHandle, runId: string, state: 'failed' | 'expired'): Promise<string> => {
+    if (state === 'expired') return 'its ttl passed before its first node started';
+    const [failed] = await db
+      .select({ data: tables.events.data })
+      .from(tables.events)
+      .where(and(eq(tables.events.entityId, runId), eq(tables.events.type, 'RunFailed')))
+      .orderBy(desc(tables.events.seq))
+      .limit(1);
+    const text = z.object({ error: z.string() }).safeParse(failed?.data);
+    return text.success ? text.data.error : 'the run recorded no error';
+  };
+
+  /**
+   * `def.settled`: reads the run (`readFor`) until it has ended or `within` passes. A read that fails (a stored value
+   * that no longer fits) ends the wait with that failure, as it would for `def.read`.
+   */
+  const settledFor =
+    <Input extends StandardSchemaV1, ReadOutput, ReadResults extends AnyResults>(
+      def: WorkflowDef<Input, unknown, AnySignals, Needs, ReadOutput, ReadResults>,
+    ): WorkflowStarter<Meta, Tx, Input, AnySignals, ReadOutput, ReadResults>['settled'] =>
+    async (db, runId, options) => {
+      refuseTransaction(db, 'settled', def.name);
+      const ms = waitMs(options?.within, 'within', def.name);
+      const read = readFor(def);
+      const found = await pollUntil(ms, undefined, async () => {
+        const outcome = await read(db, runId);
+        if (outcome === undefined) return CommandNotFound({ detail: `no workflow run "${runId}" of "${def.name}"` });
+        if (isFailure(outcome)) return outcome;
+        return ENDED_STATES.some(ended => ended === outcome.run.state) ? outcome : undefined;
+      });
+      return found ?? WorkflowPending({ runId });
+    };
+
+  /** The journal's `run`, given by `compose` once it exists: a definition is built before the journal is. */
+  let journalRun: Journal<Meta, Tx, AppDb>['run'] | undefined;
+
+  /** `def.startAndWait`: `start`, then the wait of `settled`, then the run's end as one of the outcome's arms. */
+  const startAndWaitFor =
+    <Input extends StandardSchemaV1, ReadOutput, ReadResults extends AnyResults>(
+      def: WorkflowDef<Input, unknown, AnySignals, Needs, ReadOutput, ReadResults>,
+      startCommand: ReturnType<typeof startCommandFor<Input>>,
+    ): WorkflowStarter<Meta, Tx, Input, AnySignals, ReadOutput, ReadResults>['startAndWait'] =>
+    async (db, args, options) => {
+      refuseTransaction(db, 'startAndWait', def.name);
+      const ms = waitMs(options?.timeout, 'timeout', def.name);
+      if (journalRun === undefined) {
+        throw new JournalError(
+          'WORKFLOW_UNKNOWN',
+          'workflow',
+          def.name,
+          `${def.name}: startAndWait needs the journal; pass the workflow to compose({ workflows })`,
+        );
+      }
+      const started = await journalRun(db, startCommand, args, options.meta);
+      if (isFailure(started)) return started;
+      const { runId } = started;
+      const read = readFor(def);
+      const found = await pollUntil(ms, options.signal, async () => {
+        const outcome = await read(db, runId);
+        if (outcome === undefined) return CommandNotFound({ detail: `no workflow run "${runId}" of "${def.name}"` });
+        if (isFailure(outcome)) return outcome;
+        return ENDED_STATES.some(ended => ended === outcome.run.state) ? outcome : undefined;
+      });
+      if (found === undefined) return WorkflowPending({ runId });
+      if (isFailure(found)) return found;
+      const { state } = found.run;
+      if (state === 'completed') return found.run.output;
+      if (state === 'cancelled') return WorkflowRunCancelled({ runId, reason: found.run.cancelReason });
+      if (state === 'failed' || state === 'expired') {
+        return WorkflowRunFailed({ runId, state, error: await failureTextOf(db, runId, state) });
+      }
+      return WorkflowPending({ runId });
+    };
+
+  /** `j.workflow`: the step-2 builder, with `start`, `signal`, `cancel`, `read`, `settled` and `startAndWait` on the finished definition. */
   const workflow: JournalDefinitions<Meta, Tx, AppDb>['workflow'] = (name, options) =>
-    workflowWith(name, options, def => ({
-      start: startCommandFor(def),
-      startBatch: startBatchCommandFor(def),
-      signal: signalCommandFor(def),
-      cancel: cancelCommandFor(def),
-      read: readFor(def),
-    }));
+    workflowWith(name, options, def => {
+      const start = startCommandFor(def);
+      return {
+        start,
+        startBatch: startBatchCommandFor(def),
+        signal: signalCommandFor(def),
+        cancel: cancelCommandFor(def),
+        read: readFor(def),
+        settled: settledFor(def),
+        startAndWait: startAndWaitFor(def, start),
+      };
+    });
 
   /** `j.task`: `j.workflow(name, options)` with one step, `run`. */
   const task: JournalDefinitions<Meta, Tx, AppDb>['task'] = (name, options, run) =>
@@ -4221,15 +4331,25 @@ export function createWorkflows<
       } catch (error) {
         return failed(error);
       }
-      // A returned Failure is a decision, not an accident: the step is dead at once, with no retry.
-      if (isFailure(result)) return failed(result);
+      // A failure the step lists under `onFailure: 'continue'` is its result. Any other returned Failure is a decision,
+      // not an accident: the step is dead at once, with no retry.
+      const continued = isFailure(result) && keptFailuresOf(node).some(known => known.is(result));
+      if (isFailure(result) && !continued) return failed(result);
 
       try {
-        const parsed = node.options.output === undefined ? result : await parseAsync(node.options.output, result);
-        if (isFailure(parsed)) return failed(parsed, false);
-        const kept = storable(parsed, def.limits.payload, `the result of step '${node.name}'`, row.id);
+        let stored: unknown = result;
+        if (continued) {
+          const envelope = serialize(result, keptFailuresOf(node));
+          if (isFailure(envelope)) return failed(envelope, false);
+          stored = { [REFUSED]: envelope };
+        } else if (node.options.output !== undefined) {
+          const parsed = await parseAsync(node.options.output, result);
+          if (isFailure(parsed)) return failed(parsed, false);
+          stored = parsed;
+        }
+        const kept = storable(stored, def.limits.payload, `the result of step '${node.name}'`, row.id);
         if (kept instanceof JournalError) return failed(kept);
-        const route = await routeFrom(def, index, node, row, kept.value, make, ctx.signal);
+        const route = await routeFrom(def, index, node, row, continued ? result : kept.value, make, ctx.signal);
         if (isFailure(route)) return failed(route, false);
         return { kind: 'completed', result: kept.value, route };
       } catch (error) {
@@ -4972,7 +5092,15 @@ export function createWorkflows<
       },
     ).withSchedule({ runAt: event => untilOf(event.data) });
 
-    return { effects: [effect, timer, limitTimer, ...starts, ...wakes, ...lifecycle], steps: machine.steps, eventStarts };
+    return {
+      effects: [effect, timer, limitTimer, ...starts, ...wakes, ...lifecycle],
+      steps: machine.steps,
+      eventStarts,
+      /** Gives `startAndWait` the composed journal's `run`. `compose` calls it once the journal exists. */
+      bindRun: (run: Journal<Meta, Tx, AppDb>['run']) => {
+        journalRun = run;
+      },
+    };
   }
 
   return {
