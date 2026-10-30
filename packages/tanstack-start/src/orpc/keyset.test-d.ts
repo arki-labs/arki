@@ -37,7 +37,7 @@ describe('useKeysetQuery', () => {
     expectTypeOf(useKeysetQuery(plain.posts.list, { status: 'x' }).items).toEqualTypeOf<readonly Post[]>();
   });
 
-  it('takes a client whose context is optional (the oRPC default and the Avocabo shape)', () => {
+  it('takes a client whose context is optional (the oRPC default, and a common app shape)', () => {
     const withContext = createOrpcUtils(contract, contextClient);
     expectTypeOf(useKeysetQuery(withContext.posts.list, { status: 'x' }).items).toEqualTypeOf<readonly Post[]>();
   });
