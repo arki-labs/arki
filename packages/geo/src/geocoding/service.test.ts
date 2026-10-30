@@ -1,3 +1,4 @@
+import { fakeLog } from '@arki/log/testing';
 import { http, HttpResponse, setupMswServer } from '@arki/testing/msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -274,6 +275,39 @@ describe('GeocodingService', () => {
       const service = new GeocodingService(baseConfig({ provider: 'google', fallbackProviders: [], cache: noCache }));
 
       expect(ProviderRejected.is(await service.geocode('x'))).toBe(true);
+    });
+
+    // A provider failure is returned to callers (often straight into an API
+    // response) and logged, so the API key in the request URL must never be in it.
+    it('never puts the API key in a returned failure or a log record when the request fails on the network', async () => {
+      server.use(http.get(GOOGLE, () => HttpResponse.error()));
+      const logs = fakeLog();
+      const service = new GeocodingService(baseConfig({ provider: 'google', fallbackProviders: [], cache: noCache }));
+
+      const result = await service.geocode('x');
+      logs.restore();
+
+      expect(ProviderUnreachable.is(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('google-key');
+      expect(JSON.stringify(logs.records)).not.toContain('google-key');
+    });
+
+    it('removes the API key when the provider echoes it back in its error message', async () => {
+      server.use(
+        http.get(GOOGLE, () =>
+          HttpResponse.json({ status: 'REQUEST_DENIED', error_message: 'The key google-key is not valid.', results: [] }),
+        ),
+      );
+      const logs = fakeLog();
+      const service = new GeocodingService(baseConfig({ provider: 'google', fallbackProviders: [], cache: noCache }));
+
+      const result = await service.geocode('x');
+      logs.restore();
+
+      expect(ProviderRejected.is(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('google-key');
+      expect(JSON.stringify(result)).toContain('[redacted]');
+      expect(JSON.stringify(logs.records)).not.toContain('google-key');
     });
 
     it('gives up on a provider that never answers once the timeout passes', async () => {

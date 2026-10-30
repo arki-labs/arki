@@ -114,6 +114,13 @@ const classify = (
   return { provider, kind: 'unreachable', message };
 };
 
+/** Every form an API key can take in a provider message: as configured, and as encoded into the request URL. */
+const secretForms = (secret: string): string[] => [
+  secret,
+  encodeURIComponent(secret),
+  new URLSearchParams({ secret }).toString().slice('secret='.length),
+];
+
 type Lookup =
   | { kind: 'found'; result: GeocodeResult }
   | { kind: 'failed'; answeredWithNoResults: boolean; attempts: (ProviderAttempt & { retryAfterMs?: number })[] }
@@ -128,6 +135,8 @@ export class GeocodingService {
   private cacheTTL: number;
   private cacheKeyPrefix: string;
   private timeoutMs: number;
+  /** The configured API keys in every form they can appear in a message. Removed from each provider message. */
+  private secrets: string[];
 
   constructor(config: GeocodingConfig, kv?: GeocodingCache) {
     this.providerOptions = new Map();
@@ -185,6 +194,14 @@ export class GeocodingService {
     if (config.geocodio.enabled && config.geocodio.apiKey) {
       this.providerOptions.set('geocodio', { provider: 'geocodio', apiKey: config.geocodio.apiKey, formatter: null });
     }
+
+    this.secrets = [
+      ...new Set(
+        [...this.providerOptions.values()].flatMap((options) =>
+          'apiKey' in options && options.apiKey ? secretForms(options.apiKey) : [],
+        ),
+      ),
+    ];
   }
 
   /**
@@ -351,7 +368,10 @@ export class GeocodingService {
           answeredWithNoResults = true;
           continue;
         }
-        const attempt = classify(provider, error, seen);
+        // Provider messages can carry the request URL (and so the API key), and
+        // the attempt is both logged and returned to the caller.
+        const classified = classify(provider, error, seen);
+        const attempt = { ...classified, message: this.redactSecrets(classified.message) };
         log.warn('Geocoding with provider {provider} failed ({kind}): {message}', {
           provider,
           kind: attempt.kind,
@@ -362,6 +382,11 @@ export class GeocodingService {
     }
 
     return { kind: 'failed', answeredWithNoResults, attempts };
+  }
+
+  /** Replaces every configured API key in `text` with `[redacted]`. */
+  private redactSecrets(text: string): string {
+    return this.secrets.reduce((redacted, secret) => redacted.replaceAll(secret, '[redacted]'), text);
   }
 
   /**
