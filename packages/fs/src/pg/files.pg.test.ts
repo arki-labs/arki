@@ -99,7 +99,7 @@ describe('sweep', () => {
     const drain = async (storage: FileStorage<typeof files>) => {
       let removed = 0;
       for (;;) {
-        const result = await storage.cleanupOrphans({ batch: 5 });
+        const result = orThrow(await storage.cleanupOrphans({ batch: 5 }));
         removed += result.removed;
         if (!result.more) return removed;
       }
@@ -178,13 +178,13 @@ describe('confirm races', () => {
     );
     const sweep = (async () => {
       for (;;) {
-        const result = await storageB.cleanupOrphans({ batch: 7 });
+        const result = orThrow(await storageB.cleanupOrphans({ batch: 7 }));
         if (!result.more) return;
       }
     })();
     const outcomes = await Promise.all(confirms);
     await sweep;
-    await storageB.cleanupOrphans({ batch: 1000 });
+    orThrow(await storageB.cleanupOrphans({ batch: 1000 }));
 
     for (const [index, id] of ids.entries()) {
       const status = await statusOf(id);

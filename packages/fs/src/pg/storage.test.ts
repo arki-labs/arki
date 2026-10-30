@@ -16,7 +16,9 @@ import type { StorageHarness, UserId } from '../lifecycle/storage.behavior.js';
 import type { FileRow, FilesDb, FileStorage, FileStorageOptions, OwnerOf } from './index.js';
 import { FILE_ERROR_CODES } from '../files/index.js';
 import { describeFileStorage, userId } from '../lifecycle/storage.behavior.js';
+import { StorageRejected } from '../storage/failures.js';
 import { createLocalStorageAdapter } from '../storage/local-adapter';
+import { memoryUploadAdapter } from '../testing.js';
 import { filesTable, fileStorage } from './index.js';
 
 const files = filesTable(pgColumns(), { owner: userId });
@@ -80,6 +82,22 @@ describe('fileStorage types', () => {
       ]);
     expect(call).toThrow(expect.objectContaining({ code: FILE_ERROR_CODES.unsupported }));
   });
+});
+
+it('returns a definite SQL refusal from a real database without exposing driver errors', async () => {
+  await db.execute(sql`alter table files add constraint owned_fs_refusal check (mime <> 'text/x-refuse')`);
+  try {
+    const storage = fileStorage(db, memoryUploadAdapter(), {
+      files,
+      bucket: 'sql-outcome',
+      limits: { maxSize: 100, allowedMime: ['*/*'] },
+    });
+    const outcome = await storage.createUpload(orThrow(userId.create()), { mime: 'text/x-refuse', size: 1 });
+    expect(StorageRejected.is(outcome)).toBe(true);
+    expect(JSON.stringify(outcome)).not.toContain('owned_fs_refusal');
+  } finally {
+    await db.execute(sql`alter table files drop constraint owned_fs_refusal`);
+  }
 });
 
 const harness: StorageHarness = {

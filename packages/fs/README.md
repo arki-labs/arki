@@ -95,15 +95,15 @@ Upload from the browser in one call:
 
 ```ts
 // browser: createUpload → PUT → confirmUpload in one call; keep the FileId
-export async function attach(orpc: AppClient, blob: Blob, onPercent: (percent: number) => void): Promise<FileId> {
-  const file = await uploadFile(orpc.files, blob, {
+export async function attach(orpc: AppClient, blob: Blob, onPercent: (percent: number) => void) {
+  const file = await uploadFile(filesUploadClient(orpc.files), blob, {
     onProgress: (sent, total) => onPercent(total === 0 ? 100 : Math.round((sent / total) * 100)),
   });
-  return file.id;
+  return isFailure(file) ? file : file.id;
 }
 ```
 
-With TanStack Query: `useMutation({ mutationFn: (blob: Blob) => uploadFile(orpc.files, blob) })`.
+With TanStack Query: `useMutation({ mutationFn: (blob: Blob) => uploadFile(filesUploadClient(orpc.files), blob) })`.
 Keep upload and download URLs out of persisted query caches, logs and analytics.
 
 Read it back. Store the `FileId`, never a URL:
@@ -238,6 +238,7 @@ export async function drain(storage: FileStorage<typeof files>, options: { batch
   let failed = 0;
   for (;;) {
     const result = await storage.cleanupOrphans({ batch: options.batch });
+    if (isFailure<unknown>(result)) return result;
     removed += result.removed;
     failed += result.failed;
     if (!result.more || Date.now() >= deadline) return { removed, failed };
@@ -317,16 +318,53 @@ when the policy refused a new upload.
 `filesContract` lists these per procedure (`errorMap`), so a client gets them as declared, typed
 `ORPCError`s with the failure's code, status and data.
 
-Faults stay **thrown** as a `FileStorageError` with a stable `code` and `retryable`. Match on the
-code, never the message. `filesRouter` maps them to oRPC codes and puts the code in `data.code`.
+Owned adapters and file lifecycle methods return their value or a canonical failure. `StorageUnavailable`
+means a read/signing operation could not reach storage; `StorageRejected` means a definite provider or SQL
+refusal; `StorageWriteUncertain` means a dispatched write has no confirmed outcome. Reconcile its object
+or durable row before deciding whether to retry. The SDK never automatically replays a write.
+`StorageCancelled` stops the next phase; acknowledged earlier phases remain. Schema refusals use the
+canonical `SCHEMA_FAILURES`, and unclassified callback/provider defects use `UnexpectedDefect`.
 
-| Code           | Name          | oRPC                    | Meaning                                                                      |
-| -------------- | ------------- | ----------------------- | ---------------------------------------------------------------------------- |
-| `ARKI_FS_E001` | `invalid`     | `BAD_REQUEST`           | bad input or config: TTL over the cap, size over the limit, mime not allowed |
-| `ARKI_FS_E006` | `unsupported` | `INTERNAL_SERVER_ERROR` | the adapter cannot sign uploads (local)                                      |
-| `ARKI_FS_E007` | `storage`     | `INTERNAL_SERVER_ERROR` | the object store failed; `retryable`                                         |
+`createUpload` and `confirmUpload` retain their existing business/ID failures. Their source tuples also
+feed the native RPC error maps. At the native client bridge, wrap the RPC client with
+`filesUploadClient` from `@arki/fs/orpc` before passing it to `uploadFile`. Known declared failures revive
+unchanged; a lost or malformed mutation acknowledgement becomes `StorageWriteUncertain`. Custom
+`UploadClient` implementations return canonical failures directly. Check `isFailure` before using a record.
 
-E002 to E005 are retired: those outcomes are the failures above.
+The sweep returns an exact failure when deletion cannot be confirmed. Its claim has already retained
+cleanup duty with backoff; earlier confirmed deletions stay confirmed. A successful `CleanupResult` has
+`failed: 0`. A returned failure never implies that no earlier rows changed.
+
+Static bad configuration still throws `FileStorageError` (`ARKI_FS_E001` or `ARKI_FS_E006`). The legacy
+`ARKI_FS_E007` constructor remains available for explicit foreign integrations; owned storage operations
+return the canonical outcomes above and never mark an unconfirmed write as retryable success.
+
+### Local filesystem and foreign bridges
+
+Local adapter keys are relative slash-separated object keys without empty, `.` or `..` segments, absolute
+paths, backslashes or NUL. Reads, writes, metadata, deletion and listing use this policy. Descendant
+symlinks are refused; recursive listing does not follow symlinks. Leaf reads/writes use `O_NOFOLLOW`.
+The configured base directory is resolved to its canonical location and must remain application-owned.
+Portable Node filesystem APIs cannot protect against a hostile process concurrently replacing ancestor
+directories; this adapter does not promise that isolation. Do not put its directory under attacker control.
+Only actual ENOENT becomes missing (`null`, `false`, or idempotent delete); ENOTDIR and outages remain failures.
+
+`readFirstLine` returns the first line, `undefined` at empty EOF, or a canonical read failure. It closes its
+reader/stream on every terminal path and accepts an optional signal. `StorageNotFound` is the missing-file
+outcome. The older synchronous `readFile` helper remains a separate native-helper migration obligation.
+
+The `del`, `glob` iterator/stream, append-file reexports and legacy `initializeStorage` Flystorage handle
+retain their upstream contracts. The importing application operation owns their throws, stream errors,
+cancellation and cleanup. These named foreign bridges do not exempt the owned adapters or lifecycle.
+
+### Observability
+
+Owned local/S3 calls, readFirstLine, the upload workflow and files lifecycle emit default `@arki/fs` spans,
+`fs.operations` counters and `fs.operation.duration` histograms. Applications own the OTel SDK and context
+manager. Active parent context propagates into composed operations; no SDK is configured by the library.
+Only bounded operation names and canonical `failure.code` are recorded: no paths, keys, URLs, bytes,
+credentials, owner IDs or private causes. Reporter faults cannot replace outcomes or execute work twice.
+Pure URL/path/schema/table construction and in-memory test harnesses need no separate execution spans.
 
 ## Logging
 

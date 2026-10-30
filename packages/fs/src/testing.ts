@@ -8,13 +8,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import type {
-  SignedUploadAdapter,
-  SignedUrlOptions,
-  StoredFile,
-  StoredFileMetadata,
-  StoreOptions,
-} from './storage/types.js';
+import type { SignedUrlOptions, StoredFile, StoredFileMetadata, StoreOptions } from './storage/types.js';
 
 const BASE_URL = 'https://memory.arki.invalid';
 
@@ -30,14 +24,7 @@ type Grant = Required<Pick<SignedUrlOptions, 'operation'>> &
     readonly expiresAt: number;
   };
 
-export type MemoryUploadAdapter = SignedUploadAdapter & {
-  /**
-   * Plays the browser's PUT to a signed URL. Answers 403 when the grant is
-   * unknown, expired, not a PUT, or the signed headers differ; 412 when
-   * `If-None-Match: *` was signed and the object exists; 200 otherwise.
-   */
-  browserPut(url: string, body: Uint8Array, headers: Record<string, string>): Promise<Response>;
-};
+export type MemoryUploadAdapter = ReturnType<typeof memoryUploadAdapter>;
 
 function getUrl(key: string): string {
   return `${BASE_URL}/${encodeURI(key)}`;
@@ -48,7 +35,7 @@ function etagOf(bytes: Uint8Array): string {
 }
 
 /** An in-memory store with signed uploads. One instance per test. */
-export function memoryUploadAdapter(): MemoryUploadAdapter {
+export function memoryUploadAdapter() {
   const objects = new Map<string, StoredObject>();
   const grants = new Map<string, Grant>();
 
@@ -59,7 +46,7 @@ export function memoryUploadAdapter(): MemoryUploadAdapter {
   };
 
   return {
-    capabilities: { signedPut: true },
+    capabilities: { signedPut: true as const },
 
     put(key: string, data: Buffer, options?: StoreOptions): Promise<StoredFile> {
       const object = store(key, data, options?.contentType ?? 'application/octet-stream');

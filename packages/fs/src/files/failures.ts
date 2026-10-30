@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { ID_GENERATION_FAILURES } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
+import { STORAGE_READ_FAILURES, STORAGE_WRITE_FAILURES } from '../storage/failures.js';
 import { fileId } from './schemas.js';
 
 /**
@@ -28,7 +29,7 @@ export const FileUnavailable = defineFailure('fs.file_unavailable', {
 });
 
 /** Declared refusals of upload creation, including failure before an object key or row exists. */
-export const CREATE_UPLOAD_FAILURES = [FileUnavailable, ...ID_GENERATION_FAILURES] as const;
+export const CREATE_UPLOAD_FAILURES = [FileUnavailable, ...ID_GENERATION_FAILURES, ...STORAGE_WRITE_FAILURES] as const;
 
 /** Confirm came before the PUT finished. The row stays pending, so confirming again later is fine.
  * @fix Finish the PUT to the ticket URL, then confirm again.
@@ -65,3 +66,15 @@ export const UploadMismatch = defineFailure('fs.upload_mismatch', {
   message: 'the stored object does not match the upload of {fileId}: {reason}',
   remediation: 'Upload the file again, with the size and type the upload request declared.',
 });
+
+export const CONFIRM_UPLOAD_FAILURES = [
+  FileUnavailable,
+  FileWrongState,
+  UploadPending,
+  UploadMismatch,
+  ...ID_GENERATION_FAILURES,
+  ...STORAGE_WRITE_FAILURES,
+] as const;
+export const FILE_URL_FAILURES = [FileUnavailable, FileWrongState, ...STORAGE_READ_FAILURES] as const;
+export const REMOVE_FILE_FAILURES = [FileUnavailable, ...ID_GENERATION_FAILURES, ...STORAGE_WRITE_FAILURES] as const;
+export const UPLOAD_FILE_FAILURES = [...CREATE_UPLOAD_FAILURES, ...CONFIRM_UPLOAD_FAILURES] as const;

@@ -4,15 +4,18 @@
  * Creates storage instances based on configuration
  */
 
+import { unreachable } from '@arki/failure';
+
+import type { StorageConfig } from './types';
 import { createLocalStorageAdapter } from './local-adapter';
 import { createS3StorageAdapter } from './s3-adapter';
-import type { StorageAdapter, StorageConfig } from './types';
 
 export { createLocalStorageAdapter } from './local-adapter';
 export { createS3StorageAdapter } from './s3-adapter';
 export { createR2Storage } from './r2';
 export type { R2StorageConfig } from './r2';
 export type * from './types';
+export * from './failures.js';
 
 /**
  * Create a storage instance based on the provided configuration
@@ -38,7 +41,7 @@ export type * from './types';
  * });
  * ```
  */
-export function createStorage(config: StorageConfig): StorageAdapter {
+export function createStorage(config: StorageConfig) {
   switch (config.provider) {
     case 'local': {
       return createLocalStorageAdapter(config);
@@ -47,7 +50,7 @@ export function createStorage(config: StorageConfig): StorageAdapter {
       return createS3StorageAdapter(config);
     }
     default: {
-      throw new Error(`Unknown storage provider: ${(config as StorageConfig).provider}`);
+      return unreachable(config);
     }
   }
 }

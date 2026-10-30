@@ -20,7 +20,7 @@ import { reviveRpcError } from '@arki/failure/orpc';
 import type { FileRecord, SignedFileUrl } from './files/index.js';
 import type { FileStorage } from './pg/index.js';
 import { CREATE_UPLOAD_FAILURES, fileId, FileUnavailable, uploadFile, UploadPending } from './files/index.js';
-import { filesContract, filesRouter } from './orpc.js';
+import { filesContract, filesRouter, filesUploadClient } from './orpc.js';
 import { filesTable, fileStorage } from './pg/index.js';
 import { memoryUploadAdapter } from './testing.js';
 
@@ -105,7 +105,9 @@ describe('filesRouter', () => {
   it('drives createUpload → PUT → confirmUpload → url → remove, with uploadFile on the client', async () => {
     stubStoreFetch();
     const client = clientFor(alice);
-    const record = await uploadFile(client.files, new Blob(['hello'], { type: 'text/plain' }));
+    const record = orThrow(
+      await uploadFile(filesUploadClient(client.files), new Blob(['hello'], { type: 'text/plain' })),
+    );
     expect(record).toMatchObject({ mime: 'text/plain', size: 5, status: 'ready' });
 
     const link = await client.files.url({ fileId: record.id });
@@ -127,7 +129,7 @@ describe('filesRouter', () => {
 
   // A returned failure is part of the contract: the client gets it declared and typed, and
   // can revive it to branch on. Thrown faults stay plain oRPC codes with the ARKI_FS code in data.
-  it('sends returned failures as declared errors, and thrown faults as oRPC codes (E001 → BAD_REQUEST)', async () => {
+  it('declares business and invalid-input outcomes through their canonical RPC maps', async () => {
     const ticket = await clientFor(alice).files.createUpload({ mime: 'text/plain', size: 2 });
 
     const asBob = await clientFor(bob)
@@ -154,7 +156,7 @@ describe('filesRouter', () => {
     const tooBig = await clientFor(alice)
       .files.createUpload({ mime: 'text/plain', size: 101 })
       .catch((error: unknown) => error);
-    expect(tooBig).toMatchObject({ code: 'BAD_REQUEST', data: { code: 'ARKI_FS_E001' } });
+    expect(tooBig).toMatchObject({ code: 'schema.invalid_input', status: 400, defined: true });
   });
 
   it('lets the actor binding refuse anonymous callers', async () => {
@@ -162,5 +164,16 @@ describe('filesRouter', () => {
       .files.createUpload({ mime: 'text/plain', size: 1 })
       .catch((error_: unknown) => error_);
     expect(error).toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('revives an expected native RPC refusal before the browser workflow dispatches a PUT', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const outcome = await uploadFile(
+      filesUploadClient(clientFor(alice).files),
+      new Blob(['x'.repeat(101)], { type: 'text/plain' }),
+    );
+    expect(outcome).toMatchObject({ code: 'schema.invalid_input' });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+
+import { orThrow } from '@arki/failure';
 
 import type { SignedUploadAdapter } from '../types';
 import { createLocalStorageAdapter } from '../local-adapter';
@@ -37,7 +39,7 @@ describe('createR2Storage', () => {
   });
 
   it('presigns GET URLs against the Cloudflare R2 endpoint (offline)', async () => {
-    const url = await storage.getSignedUrl('characters/abc/ref.png', { expiresIn: 600 });
+    const url = orThrow(await storage.getSignedUrl('characters/abc/ref.png', { expiresIn: 600 }));
 
     // The signed URL must target the R2 S3 API host derived from the account id,
     // reference the object key, and carry SigV4 query parameters.
@@ -48,7 +50,7 @@ describe('createR2Storage', () => {
   });
 
   it('presigns PUT URLs when operation is "put"', async () => {
-    const url = await storage.getSignedUrl('uploads/new.png', { operation: 'put' });
+    const url = orThrow(await storage.getSignedUrl('uploads/new.png', { operation: 'put' }));
     expect(url).toContain('X-Amz-Signature=');
     expect(url).toContain('uploads/new.png');
   });
@@ -57,12 +59,14 @@ describe('createR2Storage', () => {
   // a leaked PUT URL could store any type, any size, or overwrite a confirmed object.
   it('signs Content-Type, Content-Length and If-None-Match into a PUT URL', async () => {
     const url = new URL(
-      await storage.getSignedUrl('uploads/new.png', {
-        operation: 'put',
-        contentType: 'image/png',
-        contentLength: 1234,
-        ifNoneMatch: '*',
-      }),
+      orThrow(
+        await storage.getSignedUrl('uploads/new.png', {
+          operation: 'put',
+          contentType: 'image/png',
+          contentLength: 1234,
+          ifNoneMatch: '*',
+        }),
+      ),
     );
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host;if-none-match');
   });
@@ -70,7 +74,7 @@ describe('createR2Storage', () => {
   // SDK 3.1147 defaults to computing a checksum for every request. For a presigned PUT that is
   // the CRC32 of an EMPTY body, so a real upload would fail the check on the store.
   it('puts no empty-body checksum into PUT URLs', async () => {
-    const url = await storage.getSignedUrl('uploads/new.png', { operation: 'put', contentType: 'image/png' });
+    const url = orThrow(await storage.getSignedUrl('uploads/new.png', { operation: 'put', contentType: 'image/png' }));
     const names = [...new URL(url).searchParams.keys()].map(name => name.toLowerCase());
     expect(names.filter(name => name.includes('checksum'))).toEqual([]);
   });
@@ -87,7 +91,7 @@ describe('LocalStorageAdapter (new capabilities)', () => {
   let storage: ReturnType<typeof createLocalStorageAdapter>;
 
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'arki-fs-test-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'arki-fs-test-'));
     storage = createLocalStorageAdapter({ provider: 'local', basePath: dir, baseUrl: 'https://cdn.local' });
   });
 
@@ -96,13 +100,13 @@ describe('LocalStorageAdapter (new capabilities)', () => {
   });
 
   it('returns the public URL as the "signed" URL (local has no signing)', async () => {
-    await storage.put('a/b.png', Buffer.from('x'), { contentType: 'image/png' });
-    expect(await storage.getSignedUrl('a/b.png')).toBe('https://cdn.local/a/b.png');
+    orThrow(await storage.put('a/b.png', Buffer.from('x'), { contentType: 'image/png' }));
+    expect(orThrow(await storage.getSignedUrl('a/b.png'))).toBe('https://cdn.local/a/b.png');
   });
 
   it('returns metadata with size and inferred content type', async () => {
-    await storage.put('a/c.json', Buffer.from('{"k":1}'), { contentType: 'application/json' });
-    const meta = await storage.getMetadata('a/c.json');
+    orThrow(await storage.put('a/c.json', Buffer.from('{"k":1}'), { contentType: 'application/json' }));
+    const meta = orThrow(await storage.getMetadata('a/c.json'));
 
     expect(meta).not.toBeNull();
     expect(meta?.size).toBe(7);
@@ -111,6 +115,6 @@ describe('LocalStorageAdapter (new capabilities)', () => {
   });
 
   it('returns null metadata for a missing key', async () => {
-    expect(await storage.getMetadata('does/not/exist.png')).toBeNull();
+    expect(orThrow(await storage.getMetadata('does/not/exist.png'))).toBeNull();
   });
 });

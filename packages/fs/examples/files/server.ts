@@ -77,6 +77,7 @@ export async function drain(storage: FileStorage<typeof files>, options: { batch
   let failed = 0;
   for (;;) {
     const result = await storage.cleanupOrphans({ batch: options.batch });
+    if (isFailure<unknown>(result)) return result;
     removed += result.removed;
     failed += result.failed;
     if (!result.more || Date.now() >= deadline) return { removed, failed };

@@ -11,7 +11,7 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "rootDir": "./src/files",
+    "rootDir": "./src",
     "outDir": "./.cache/files-dist"
   },
   "include": ["src/files"],

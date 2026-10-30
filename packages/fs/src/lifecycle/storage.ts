@@ -8,26 +8,26 @@
  * Storage I/O never runs inside a database transaction. Each dialect hands
  * in its statements (`./statements.ts`); everything else lives here once.
  *
- * Expected outcomes are returned as failures (`FileUnavailable`, `UploadPending`,
- * `FileWrongState`, `UploadMismatch`); bad input, config and store faults throw.
+ * Business and provider outcomes are returned as canonical failures. Static configuration
+ * faults throw; unknown policy and implementation defects are supervised by the operation.
  */
 import { z } from 'zod';
 
-import type { FailureOf } from '@arki/failure';
-import { isFailure } from '@arki/failure';
-import { is, recordSchema } from '@arki/schema';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { ensure, is, parse, recordSchema } from '@arki/schema';
 
-import type { CREATE_UPLOAD_FAILURES } from '../files/failures.js';
-import type { FileId, SignedFileUrl, UploadRequest, UploadTicket } from '../files/schemas.js';
+import type { FileId, UploadRequest } from '../files/schemas.js';
 import type { SignedUploadAdapter, StorageAdapter } from '../storage/types.js';
-import type { CleanupOptions, CleanupResult } from './cleanup.js';
+import type { CleanupOptions } from './cleanup.js';
 import type { FileStatements, StatementConfig } from './statements.js';
 import type { FileRow, FilesTable, OwnerOf } from './table.js';
-import { FILE_ERROR_CODES, FileStorageError } from '../files/errors.js';
+import { FILE_ERROR_CODES } from '../files/errors.js';
 import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
-import { fileId, uploadRequest } from '../files/schemas.js';
+import { fileId, uploadRequest, uploadTicket } from '../files/schemas.js';
+import { executeFs, storageReadFailure, storageWriteFailure } from '../storage/operation.js';
 import { cleanupOrphans } from './cleanup.js';
 import { fail, filesLog } from './context.js';
+import { readStatement, writeStatement } from './database.js';
 
 /** Who may do what. Every check gets the acting owner id. */
 export type FilePolicy<T extends FilesTable> = {
@@ -60,33 +60,9 @@ export type FileStorageOptions<T extends FilesTable> = {
   policy?: FilePolicy<T>;
 };
 
-type Unavailable = FailureOf<typeof FileUnavailable>;
-type WrongState = FailureOf<typeof FileWrongState>;
-
-export type FileStorage<T extends FilesTable> = {
-  /** Writes a pending row, then signs a create-only PUT. Policy and ID refusals return before I/O. */
-  createUpload(
-    actor: OwnerOf<T>,
-    request: UploadRequest,
-  ): Promise<UploadTicket | FailureOf<(typeof CREATE_UPLOAD_FAILURES)[number]>>;
-  /** Checks the stored object against the row and marks it ready. Idempotent. */
-  confirmUpload(
-    actor: OwnerOf<T>,
-    id: FileId,
-  ): Promise<
-    FileRow<T> | Unavailable | WrongState | FailureOf<typeof UploadPending> | FailureOf<typeof UploadMismatch>
-  >;
-  get(actor: OwnerOf<T>, id: FileId): Promise<FileRow<T> | Unavailable>;
-  /** A GET URL for a ready file. Store the `FileId`, never this URL. */
-  url(
-    actor: OwnerOf<T>,
-    id: FileId,
-    options?: { expiresIn?: number; disposition?: 'inline' | 'attachment'; filename?: string },
-  ): Promise<SignedFileUrl | Unavailable | WrongState>;
-  /** Marks the file deleting; deletes now when it is safe, else leaves it to the sweep. */
-  remove(actor: OwnerOf<T>, id: FileId): Promise<{ physical: 'done' | 'scheduled' } | Unavailable>;
-  cleanupOrphans(options?: CleanupOptions): Promise<CleanupResult>;
-};
+/** Inferred from the owned implementation; underlying Failure kinds cannot be erased. */
+export type FileStorage<T extends FilesTable> = ReturnType<typeof createFileStorage<T>>;
+export type FileUrlOptions = { expiresIn?: number; disposition?: 'inline' | 'attachment'; filename?: string };
 
 /** S3 SigV4 URLs live at most 7 days. */
 const MAX_SIGNED_SECONDS = 604_800;
@@ -143,13 +119,12 @@ function signsUploads(adapter: StorageAdapter): boolean {
   return is(capabilities, recordSchema) && Reflect.get(capabilities, 'signedPut') === true;
 }
 
-/** Runs one object-store call; any failure that is not already coded becomes `ARKI_FS_E007`. */
-async function storeCall<R>(what: string, call: () => Promise<R>): Promise<R> {
+/** Own a custom adapter read/signing throw without changing a returned canonical failure. */
+async function storeCall<R>(call: () => Promise<R>) {
   try {
     return await call();
   } catch (error) {
-    if (error instanceof FileStorageError) throw error;
-    return fail(FILE_ERROR_CODES.storage, `object store failed: ${what}`, error);
+    return storageReadFailure(error);
   }
 }
 
@@ -158,6 +133,8 @@ function wrongState(fileId: FileId, why: string) {
   filesLog.debug('{fileId}: wrong state ({why})', { fileId, why });
   return FileWrongState({ fileId });
 }
+
+const parseId = (id: FileId) => parse(fileId.schema, id);
 
 function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -173,7 +150,7 @@ export function createFileStorage<T extends FilesTable>(
   adapter: SignedUploadAdapter,
   options: FileStorageOptions<T>,
   statementsFor: (config: StatementConfig) => FileStatements<T>,
-): FileStorage<T> {
+) {
   const { files: _files, policy = {}, ...rest } = options;
   const parsed = configSchema.safeParse(rest);
   if (!parsed.success) fail(FILE_ERROR_CODES.invalid, `fileStorage: invalid options: ${z.prettifyError(parsed.error)}`);
@@ -187,11 +164,6 @@ export function createFileStorage<T extends FilesTable>(
   const canRead = policy.canRead ?? ((file, actor) => file.ownerId === actor);
   const canRemove = policy.canRemove ?? ((file, actor) => file.ownerId === actor);
 
-  const parseId = (id: FileId): FileId => {
-    const result = fileId.schema.safeParse(id);
-    return result.success ? result.data : fail(FILE_ERROR_CODES.invalid, 'not a file id');
-  };
-
   /** One failure for missing, other binding and denied, so callers cannot probe for existence. The log says which. */
   const load = async (
     actor: OwnerOf<T>,
@@ -199,7 +171,9 @@ export function createFileStorage<T extends FilesTable>(
     allowed: (file: FileRow<T>, actor: OwnerOf<T>) => boolean | Promise<boolean>,
   ) => {
     const fileId = parseId(id);
-    const row = await statements.read(fileId);
+    if (isFailure<unknown>(fileId)) return fileId;
+    const row = await readStatement(() => statements.read(fileId));
+    if (isFailure<unknown>(row)) return row;
     if (!row) {
       filesLog.debug('{fileId}: unavailable (no row in this bucket)', { fileId });
       return FileUnavailable({ fileId });
@@ -213,138 +187,148 @@ export function createFileStorage<T extends FilesTable>(
 
   /** Ends a pending row whose object is wrong; the sweep deletes it once a late PUT can no longer land. */
   const reject = async (row: FileRow<T>, reason: string) => {
-    await statements.reject(row.id);
+    const outcome = await writeStatement(() => statements.reject(row.id));
+    if (isFailure<unknown>(outcome)) return outcome;
     filesLog.debug('{fileId}: pending → deleting ({reason})', { fileId: row.id, reason });
     return UploadMismatch({ fileId: row.id, reason });
   };
 
   return {
-    async createUpload(actor, request) {
-      const parsedRequest = uploadRequest.safeParse(request);
-      if (!parsedRequest.success) {
-        fail(FILE_ERROR_CODES.invalid, `invalid upload request: ${z.prettifyError(parsedRequest.error)}`);
-      }
-      const { mime, size } = parsedRequest.data;
-      if (size > config.limits.maxSize) {
-        fail(FILE_ERROR_CODES.invalid, `size ${String(size)} is over the limit of ${String(config.limits.maxSize)}`);
-      }
-      if (!mimeAllowed(mime, config.limits.allowedMime))
-        fail(FILE_ERROR_CODES.invalid, `type "${mime}" is not allowed`);
-      if (!(await canCreate(actor, parsedRequest.data))) {
-        filesLog.debug('upload refused by the policy');
-        return FileUnavailable({});
-      }
-
-      const id = fileId.create();
-      if (isFailure(id)) return id;
-      const key = `${config.keyPrefix}/${id}`;
-      const ttl = config.uploadTtlSeconds;
-      // The row commits before any URL exists (G1). If signing fails, the sweep removes the row.
-      const expiresAt = await statements.insertPending({ id, ownerId: actor, key, mime, size }, ttl);
-      if (!expiresAt) return fail(FILE_ERROR_CODES.storage, 'insert returned no row');
-
-      const url = await storeCall('sign PUT', () =>
-        adapter.getSignedUrl(key, {
-          operation: 'put',
-          expiresIn: ttl,
-          contentType: mime,
-          contentLength: size,
-          ifNoneMatch: '*',
-        }),
-      );
-      filesLog.debug('{fileId}: created pending ({size} bytes)', { fileId: id, size });
-      return {
-        fileId: id,
-        url,
-        method: 'PUT',
-        headers: { 'Content-Type': mime, 'If-None-Match': '*' },
-        expiresAt: expiresAt.toString(),
-      };
-    },
-
-    async confirmUpload(actor, id) {
-      const row = await load(actor, id, canRead);
-      if (FileUnavailable.is(row)) return row;
-      if (row.status === 'ready') return row;
-      if (row.status === 'deleting') return wrongState(row.id, 'being deleted');
-
-      // No object yet: the PUT has not landed. The row stays pending, so a later confirm can win.
-      const meta = await storeCall('HEAD', () => adapter.getMetadata(row.key));
-      if (!meta) return UploadPending({ fileId: row.id });
-      if (meta.size !== row.size) return reject(row, `size ${String(meta.size)} ≠ ${String(row.size)}`);
-      if (meta.contentType.toLowerCase() !== row.mime.toLowerCase()) {
-        return reject(row, `type "${meta.contentType}" ≠ "${row.mime}"`);
-      }
-
-      let sha256: string | null = null;
-      if (config.verify === 'hash') {
-        const bytes = await storeCall('GET', () => adapter.get(row.key));
-        if (!bytes) return UploadPending({ fileId: row.id });
-        if (bytes.byteLength !== row.size) return reject(row, `downloaded ${String(bytes.byteLength)} bytes`);
-        sha256 = toHex(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes)));
-      }
-
-      const ready = await statements.markReady(row.id, { etag: meta.etag || null, sha256 });
-      if (ready) {
-        filesLog.debug('{fileId}: pending → ready', { fileId: row.id });
-        return ready;
-      }
-
-      // Lost the race: a concurrent confirm won (fine), or the sweep or a remove did.
-      const now = await statements.read(row.id);
-      if (now?.status === 'ready') return now;
-      return wrongState(row.id, now ? `${now.status}, confirm window passed` : 'swept');
-    },
-
-    async get(actor, id) {
-      return load(actor, id, canRead);
-    },
-
-    async url(actor, id, options = {}) {
-      const parsedOptions = urlOptionsSchema.safeParse(options);
-      if (!parsedOptions.success)
-        fail(FILE_ERROR_CODES.invalid, `invalid url options: ${z.prettifyError(parsedOptions.error)}`);
-      const { expiresIn = config.urlTtlSeconds, disposition = 'attachment', filename } = parsedOptions.data;
-      if (expiresIn > config.maxUrlTtlSeconds) {
-        fail(
-          FILE_ERROR_CODES.invalid,
-          `expiresIn ${String(expiresIn)} is over the cap of ${String(config.maxUrlTtlSeconds)}`,
+    createUpload(actor: OwnerOf<T>, request: UploadRequest) {
+      return executeFs('fs.files.create_upload', async () => {
+        const parsedRequest = parse(
+          uploadRequest.refine(
+            value => value.size <= config.limits.maxSize && mimeAllowed(value.mime, config.limits.allowedMime),
+            { message: 'Upload exceeds the size or MIME policy.' },
+          ),
+          request,
         );
-      }
+        if (isFailure<unknown>(parsedRequest)) return parsedRequest;
+        const { mime, size } = parsedRequest;
+        if (!(await canCreate(actor, parsedRequest))) {
+          filesLog.debug('upload refused by the policy');
+          return FileUnavailable({});
+        }
 
-      const row = await load(actor, id, canRead);
-      if (FileUnavailable.is(row)) return row;
-      if (row.status !== 'ready') return wrongState(row.id, `${row.status}, not ready`);
-      // Taken before signing, so the reported deadline is never later than the real one.
-      const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-      const url = await storeCall('sign GET', () =>
-        adapter.getSignedUrl(row.key, { operation: 'get', expiresIn, disposition, filename }),
-      );
-      return { url, expiresAt };
+        const id = fileId.create();
+        if (isFailure<unknown>(id)) return id;
+        const key = `${config.keyPrefix}/${id}`;
+        const ttl = config.uploadTtlSeconds;
+        // The row commits before any URL exists (G1). If signing fails, the sweep removes the row.
+        const expiresAt = await writeStatement(() =>
+          statements.insertPending({ id, ownerId: actor, key, mime, size }, ttl),
+        );
+        if (isFailure<unknown>(expiresAt)) return expiresAt;
+        if (!expiresAt) return UnexpectedDefect({ cause: new Error('insert returned no row') });
+
+        const url = await storeCall(() =>
+          adapter.getSignedUrl(key, {
+            operation: 'put',
+            expiresIn: ttl,
+            contentType: mime,
+            contentLength: size,
+            ifNoneMatch: '*',
+          }),
+        );
+        if (isFailure<unknown>(url)) return url;
+        filesLog.debug('{fileId}: created pending ({size} bytes)', { fileId: id, size });
+        return ensure(
+          {
+            fileId: id,
+            url,
+            method: 'PUT' as const,
+            headers: { 'Content-Type': mime, 'If-None-Match': '*' },
+            expiresAt: expiresAt.toString(),
+          },
+          uploadTicket,
+        );
+      });
     },
 
-    async remove(actor, id) {
-      const row = await load(actor, id, canRemove);
-      if (FileUnavailable.is(row)) return row;
-      const marked = await statements.markDeleting(row.id);
-      if (!marked) return { physical: 'scheduled' };
-      filesLog.debug('{fileId}: {from} → deleting', { fileId: row.id, from: row.status });
-      if (!marked.due) return { physical: 'scheduled' };
+    confirmUpload(actor: OwnerOf<T>, id: FileId) {
+      return executeFs('fs.files.confirm_upload', async () => {
+        const row = await load(actor, id, canRead);
+        if (isFailure<unknown>(row)) return row;
+        if (row.status === 'ready') return row;
+        if (row.status === 'deleting') return wrongState(row.id, 'being deleted');
 
-      try {
-        await adapter.delete(marked.key);
-      } catch (error) {
-        filesLog.warn('{fileId}: object delete failed; the sweep retries it', {
-          fileId: row.id,
-          error: error instanceof Error ? error : String(error),
-        });
-        return { physical: 'scheduled' };
-      }
-      await statements.deleteRow(row.id);
-      return { physical: 'done' };
+        // No object yet: the PUT has not landed. The row stays pending, so a later confirm can win.
+        const meta = await storeCall(() => adapter.getMetadata(row.key));
+        if (isFailure<unknown>(meta)) return meta;
+        if (!meta) return UploadPending({ fileId: row.id });
+        if (meta.size !== row.size) return reject(row, `size ${String(meta.size)} ≠ ${String(row.size)}`);
+        if (meta.contentType.toLowerCase() !== row.mime.toLowerCase()) {
+          return reject(row, `type "${meta.contentType}" ≠ "${row.mime}"`);
+        }
+
+        let sha256: string | null = null;
+        if (config.verify === 'hash') {
+          const bytes = await storeCall(() => adapter.get(row.key));
+          if (isFailure<unknown>(bytes)) return bytes;
+          if (!bytes) return UploadPending({ fileId: row.id });
+          if (bytes.byteLength !== row.size) return reject(row, `downloaded ${String(bytes.byteLength)} bytes`);
+          sha256 = toHex(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes)));
+        }
+
+        const ready = await writeStatement(() => statements.markReady(row.id, { etag: meta.etag || null, sha256 }));
+        if (isFailure<unknown>(ready)) return ready;
+        if (ready) {
+          filesLog.debug('{fileId}: pending → ready', { fileId: row.id });
+          return ready;
+        }
+
+        // Lost the race: a concurrent confirm won (fine), or the sweep or a remove did.
+        const now = await readStatement(() => statements.read(row.id));
+        if (isFailure<unknown>(now)) return now;
+        if (now?.status === 'ready') return now;
+        return wrongState(row.id, now ? `${now.status}, confirm window passed` : 'swept');
+      });
     },
 
-    cleanupOrphans(cleanupOptions) {
+    get(actor: OwnerOf<T>, id: FileId) {
+      return executeFs('fs.files.get', () => load(actor, id, canRead));
+    },
+
+    url(actor: OwnerOf<T>, id: FileId, options: FileUrlOptions = {}) {
+      return executeFs('fs.files.url', async () => {
+        const parsedOptions = parse(
+          urlOptionsSchema.refine(value => (value.expiresIn ?? config.urlTtlSeconds) <= config.maxUrlTtlSeconds, {
+            message: 'expiresIn is over the configured cap.',
+          }),
+          options,
+        );
+        if (isFailure<unknown>(parsedOptions)) return parsedOptions;
+        const { expiresIn = config.urlTtlSeconds, disposition = 'attachment', filename } = parsedOptions;
+
+        const row = await load(actor, id, canRead);
+        if (isFailure<unknown>(row)) return row;
+        if (row.status !== 'ready') return wrongState(row.id, `${row.status}, not ready`);
+        // Taken before signing, so the reported deadline is never later than the real one.
+        const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+        const url = await storeCall(() =>
+          adapter.getSignedUrl(row.key, { operation: 'get', expiresIn, disposition, filename }),
+        );
+        if (isFailure<unknown>(url)) return url;
+        return { url, expiresAt };
+      });
+    },
+
+    remove(actor: OwnerOf<T>, id: FileId) {
+      return executeFs('fs.files.remove', async () => {
+        const row = await load(actor, id, canRemove);
+        if (isFailure<unknown>(row)) return row;
+        const marked = await writeStatement(() => statements.markDeleting(row.id));
+        if (isFailure<unknown>(marked)) return marked;
+        if (!marked || !marked.due) return { physical: 'scheduled' as const };
+        const deleted = await adapter.delete(marked.key).catch((error: unknown) => storageWriteFailure(error));
+        if (isFailure<unknown>(deleted)) return deleted;
+        const removed = await writeStatement(() => statements.deleteRow(row.id));
+        if (isFailure<unknown>(removed)) return removed;
+        return { physical: 'done' as const };
+      });
+    },
+
+    cleanupOrphans(cleanupOptions?: CleanupOptions) {
       return cleanupOrphans(statements, adapter, cleanupOptions);
     },
   };

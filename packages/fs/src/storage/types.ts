@@ -1,3 +1,11 @@
+import type { FailureOf } from '@arki/failure';
+
+import type { STORAGE_READ_FAILURES, STORAGE_WRITE_FAILURES } from './failures.js';
+
+export type StorageReadFailure = FailureOf<(typeof STORAGE_READ_FAILURES)[number]>;
+export type StorageWriteFailure = FailureOf<(typeof STORAGE_WRITE_FAILURES)[number]>;
+export type StorageCallOptions = { signal?: AbortSignal };
+
 /**
  * Storage - Core Types
  *
@@ -50,6 +58,7 @@ export type StoredFile = {
  * Options for storing a file
  */
 export type StoreOptions = {
+  signal?: AbortSignal;
   contentType?: string;
   metadata?: Record<string, string>;
   cacheControl?: string;
@@ -76,6 +85,7 @@ export type StoredFileMetadata = {
  * Options for generating a presigned URL via {@link StorageAdapter.getSignedUrl}.
  */
 export type SignedUrlOptions = {
+  signal?: AbortSignal;
   /** Expiry in seconds. Defaults to 3600 (1 hour). */
   expiresIn?: number;
   /** Whether the URL is for downloading (`get`, default) or uploading (`put`). */
@@ -101,27 +111,27 @@ export type StorageAdapter = {
   /**
    * Store a file
    */
-  put(key: string, data: Buffer, options?: StoreOptions): Promise<StoredFile>;
+  put(key: string, data: Buffer, options?: StoreOptions): Promise<StoredFile | StorageWriteFailure>;
 
   /**
    * Retrieve a file
    */
-  get(key: string): Promise<Buffer | null>;
+  get(key: string, options?: StorageCallOptions): Promise<Buffer | null | StorageReadFailure>;
 
   /**
    * Delete a file
    */
-  delete(key: string): Promise<void>;
+  delete(key: string, options?: StorageCallOptions): Promise<void | StorageWriteFailure>;
 
   /**
    * Delete multiple files
    */
-  deleteMany(keys: string[]): Promise<void>;
+  deleteMany(keys: string[], options?: StorageCallOptions): Promise<void | StorageWriteFailure>;
 
   /**
    * Check if a file exists
    */
-  exists(key: string): Promise<boolean>;
+  exists(key: string, options?: StorageCallOptions): Promise<boolean | StorageReadFailure>;
 
   /**
    * Get public URL for a file
@@ -134,17 +144,17 @@ export type StorageAdapter = {
    * For providers without signing support (e.g. local), this returns the
    * public {@link getUrl} value.
    */
-  getSignedUrl(key: string, options?: SignedUrlOptions): Promise<string>;
+  getSignedUrl(key: string, options?: SignedUrlOptions): Promise<string | StorageReadFailure>;
 
   /**
    * Get full metadata for a stored object, or `null` if it does not exist.
    */
-  getMetadata(key: string): Promise<StoredFileMetadata | null>;
+  getMetadata(key: string, options?: StorageCallOptions): Promise<StoredFileMetadata | null | StorageReadFailure>;
 
   /**
    * List files with a prefix
    */
-  list(prefix: string): Promise<string[]>;
+  list(prefix: string, options?: StorageCallOptions): Promise<string[] | StorageReadFailure>;
 };
 
 /**

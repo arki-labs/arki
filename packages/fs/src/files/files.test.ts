@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { FileId, FileRecord, UploadRequest, UploadTicket } from './index.js';
+import { StorageCancelled, StorageRejected, StorageWriteUncertain } from '../storage/failures.js';
 import {
   FILE_ERROR_CODES,
   fileId,
@@ -102,7 +103,7 @@ describe('uploadFile', () => {
   it('sends an untyped blob as application/octet-stream', async () => {
     const { client } = fakeClient(record);
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 200 })));
-    await uploadFile(client, new Blob(['hello']));
+    orThrow(await uploadFile(client, new Blob(['hello'])));
     expect(client.createUpload).toHaveBeenCalledWith({ mime: 'application/octet-stream', size: 5 });
   });
 
@@ -111,7 +112,7 @@ describe('uploadFile', () => {
     const { client } = fakeClient(record);
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('SignatureDoesNotMatch', { status: 403 })));
     const error: unknown = await uploadFile(client, new Blob(['hello'])).catch((error_: unknown) => error_);
-    expect(isFileStorageError(error) && error.code).toBe(FILE_ERROR_CODES.storage);
+    expect(StorageRejected.is(error)).toBe(true);
     expect(client.confirmUpload).not.toHaveBeenCalled();
   });
 
@@ -149,7 +150,11 @@ describe('uploadFile', () => {
     vi.stubGlobal('XMLHttpRequest', FakeXhr);
     const progress: number[] = [];
 
-    await uploadFile(client, new Blob(['hello'], { type: 'text/plain' }), { onProgress: sent => progress.push(sent) });
+    orThrow(
+      await uploadFile(client, new Blob(['hello'], { type: 'text/plain' }), {
+        onProgress: sent => progress.push(sent),
+      }),
+    );
 
     expect(progress).toEqual([2, 5]);
     expect(sentHeaders).toEqual(ticket.headers);
@@ -158,9 +163,133 @@ describe('uploadFile', () => {
 
   it('stops before asking for a ticket when the signal is already aborted', async () => {
     const { client } = fakeClient(record);
-    await expect(uploadFile(client, new Blob(['x']), { signal: AbortSignal.abort() })).rejects.toThrow();
+    expect(StorageCancelled.is(await uploadFile(client, new Blob(['x']), { signal: AbortSignal.abort() }))).toBe(true);
     expect(client.createUpload).not.toHaveBeenCalled();
   });
+
+  it.each(['fetch', 'xhr'] as const)(
+    'does not send or confirm after cancellation while creating a ticket: %s',
+    async mode => {
+      const { client, ticket } = fakeClient(record);
+      const controller = new AbortController();
+      client.createUpload.mockImplementationOnce(() => {
+        controller.abort();
+        return Promise.resolve(ticket);
+      });
+      const Request = vi.fn();
+      if (mode === 'xhr') vi.stubGlobal('XMLHttpRequest', Request);
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      expect(
+        StorageCancelled.is(
+          await uploadFile(client, new Blob(['x']), {
+            signal: controller.signal,
+            onProgress() {
+              /* no UI observer */
+            },
+          }),
+        ),
+      ).toBe(true);
+      expect(Request).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(client.confirmUpload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves uncertainty when cancellation interrupts a dispatched XHR PUT', async () => {
+    const { client } = fakeClient(record);
+    const controller = new AbortController();
+    class InterruptedXhr {
+      status = 200;
+      listeners = new Map<string, () => void>();
+      upload = {
+        addEventListener() {
+          /* no progress in this fixture */
+        },
+      };
+      open() {
+        /* fixture */
+      }
+      setRequestHeader() {
+        /* fixture */
+      }
+      addEventListener(name: string, listener: () => void) {
+        this.listeners.set(name, listener);
+      }
+      abort() {
+        this.listeners.get('abort')?.();
+      }
+      send() {
+        controller.abort();
+        this.listeners.get('load')?.();
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', InterruptedXhr);
+    const outcome = await uploadFile(client, new Blob(['x']), {
+      signal: controller.signal,
+      onProgress() {
+        /* no UI observer */
+      },
+    });
+    expect(StorageWriteUncertain.is(outcome)).toBe(true);
+    expect(client.confirmUpload).not.toHaveBeenCalled();
+  });
+
+  it('supervises a progress callback fault and never starts confirm after that fault', async () => {
+    const { client } = fakeClient(record);
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 200 })));
+    const cause = new Error('progress renderer defect');
+    const outcome = await uploadFile(client, new Blob(['x']), {
+      onProgress() {
+        throw cause;
+      },
+    });
+    expect(UnexpectedDefect.is(outcome)).toBe(true);
+    expect(outcome).toMatchObject({ cause });
+    expect(client.confirmUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(['fetch', 'xhr'] as const)(
+    'owns a rejected asynchronous progress callback before confirm: %s',
+    async mode => {
+      const { client } = fakeClient(record);
+      const error = new Error('async progress defect');
+      if (mode === 'fetch') vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 200 })));
+      else {
+        class ProgressXhr {
+          status = 200;
+          listeners = new Map<string, () => void>();
+          report?: () => void;
+          upload = {
+            addEventListener: (_name: string, callback: (event: { loaded: number; total: number }) => void) => {
+              this.report = () => callback({ loaded: 1, total: 1 });
+            },
+          };
+          open() {
+            /* fixture */
+          }
+          setRequestHeader() {
+            /* fixture */
+          }
+          addEventListener(name: string, callback: () => void) {
+            this.listeners.set(name, callback);
+          }
+          abort() {
+            this.listeners.get('abort')?.();
+          }
+          send() {
+            this.report?.();
+            this.listeners.get('load')?.();
+          }
+        }
+        vi.stubGlobal('XMLHttpRequest', ProgressXhr);
+      }
+      const outcome = await uploadFile(client, new Blob(['x']), { onProgress: () => Promise.reject(error) });
+      expect(UnexpectedDefect.is(outcome)).toBe(true);
+      expect(outcome).toMatchObject({ cause: error });
+      expect(client.confirmUpload).not.toHaveBeenCalled();
+    },
+  );
 
   it('parses as a ticket the server would send', () => {
     expect(uploadTicket.safeParse(fakeClient(record).ticket).success).toBe(true);

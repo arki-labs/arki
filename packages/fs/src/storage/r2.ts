@@ -7,7 +7,6 @@
  * `S3Client` directly.
  */
 
-import type { SignedUploadAdapter } from './types';
 import { createS3StorageAdapter } from './s3-adapter';
 
 export type R2StorageConfig = {
@@ -27,7 +26,7 @@ export type R2StorageConfig = {
 };
 
 /**
- * Create a {@link SignedUploadAdapter} backed by Cloudflare R2.
+ * Create a signed-upload adapter backed by Cloudflare R2.
  *
  * @example
  * ```ts
@@ -42,7 +41,7 @@ export type R2StorageConfig = {
  * const url = await storage.getSignedUrl('characters/abc/ref.png', { expiresIn: 600 });
  * ```
  */
-export function createR2Storage(config: R2StorageConfig): SignedUploadAdapter {
+export function createR2Storage(config: R2StorageConfig) {
   return createS3StorageAdapter({
     provider: 's3',
     bucket: config.bucket,

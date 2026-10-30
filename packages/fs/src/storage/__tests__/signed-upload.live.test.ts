@@ -14,6 +14,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { orThrow } from '@arki/failure';
+
 import { createS3StorageAdapter } from '../s3-adapter';
 
 const liveEnv = z
@@ -44,13 +46,15 @@ const used: string[] = [];
 async function ticket(expiresIn = 300): Promise<{ key: string; url: string }> {
   const key = `${randomUUID()}.txt`;
   used.push(key);
-  const url = await storage.getSignedUrl(key, {
-    operation: 'put',
-    expiresIn,
-    contentType: 'text/plain',
-    contentLength: body.byteLength,
-    ifNoneMatch: '*',
-  });
+  const url = orThrow(
+    await storage.getSignedUrl(key, {
+      operation: 'put',
+      expiresIn,
+      contentType: 'text/plain',
+      contentLength: body.byteLength,
+      ifNoneMatch: '*',
+    }),
+  );
   return { key, url };
 }
 
@@ -60,14 +64,14 @@ const put = (url: string, headers: Record<string, string>, payload: Uint8Array =
 const signed = { 'Content-Type': 'text/plain', 'If-None-Match': '*' };
 
 afterAll(async () => {
-  await storage.deleteMany(used);
+  orThrow(await storage.deleteMany(used));
 });
 
 describe('signed PUT on a live store', () => {
   it('stores the object when the request matches the signature', async () => {
     const { key, url } = await ticket();
     expect(await put(url, signed)).toHaveProperty('status', 200);
-    const meta = await storage.getMetadata(key);
+    const meta = orThrow(await storage.getMetadata(key));
     expect(meta).toMatchObject({ size: body.byteLength, contentType: 'text/plain' });
   });
 

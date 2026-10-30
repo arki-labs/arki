@@ -14,7 +14,7 @@ import {
   UploadPending,
   uploadRequest,
   uploadTicket,
-} from '../.cache/files-dist/index.js';
+} from '../.cache/files-dist/files/index.js';
 
 const check = (name, ok) => {
   if (!ok) throw new Error(`smoke check failed: ${name}`);

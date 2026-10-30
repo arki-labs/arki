@@ -16,38 +16,43 @@ import { oc } from '@orpc/contract';
 import { ORPCError } from '@orpc/server';
 import { z } from 'zod';
 
-import { errorMap, orThrowRpc } from '@arki/failure/orpc';
+import { InvalidEnvelope } from '@arki/failure';
+import { errorMap, orThrowRpc, reviveRpcError } from '@arki/failure/orpc';
 
 import type { FileErrorCode } from './files/errors.js';
+import type { UploadClient } from './files/upload-file.js';
 import type { FileStorage } from './lifecycle/storage.js';
 import type { FilesTable, OwnerOf } from './lifecycle/table.js';
 import { FILE_ERROR_CODES, isFileStorageError } from './files/errors.js';
 import {
+  CONFIRM_UPLOAD_FAILURES,
   CREATE_UPLOAD_FAILURES,
-  FileUnavailable,
-  FileWrongState,
-  UploadMismatch,
-  UploadPending,
+  FILE_URL_FAILURES,
+  REMOVE_FILE_FAILURES,
 } from './files/failures.js';
 import { fileId, fileRecord, signedFileUrl, uploadRequest, uploadTicket } from './files/schemas.js';
 import { toFileRecord } from './lifecycle/record.js';
+import { StorageWriteUncertain } from './storage/failures.js';
 
 const byFileId = z.strictObject({ fileId: fileId.schema });
 
 export const filesContract = {
   createUpload: oc
-    .errors(errorMap(...CREATE_UPLOAD_FAILURES))
+    .errors(errorMap(...new Set(CREATE_UPLOAD_FAILURES)))
     .input(uploadRequest)
     .output(uploadTicket),
   confirmUpload: oc
-    .errors(errorMap(FileUnavailable, FileWrongState, UploadPending, UploadMismatch))
+    .errors(errorMap(...new Set(CONFIRM_UPLOAD_FAILURES)))
     .input(byFileId)
     .output(fileRecord),
   url: oc
-    .errors(errorMap(FileUnavailable, FileWrongState))
+    .errors(errorMap(...new Set(FILE_URL_FAILURES)))
     .input(z.strictObject({ fileId: fileId.schema, expiresIn: z.number().int().min(1).optional() }))
     .output(signedFileUrl),
-  remove: oc.errors(errorMap(FileUnavailable)).input(byFileId).output(z.void()),
+  remove: oc
+    .errors(errorMap(...new Set(REMOVE_FILE_FAILURES)))
+    .input(byFileId)
+    .output(z.void()),
 };
 export type FilesContract = typeof filesContract;
 
@@ -69,6 +74,28 @@ async function answer<R>(call: () => Promise<R>): Promise<R> {
       cause: error,
     });
   }
+}
+
+/** Restore native oRPC rejection at the explicit client bridge before uploadFile owns execution. */
+export function filesUploadClient(client: UploadClient): UploadClient {
+  return {
+    async createUpload(input) {
+      try {
+        return await client.createUpload(input);
+      } catch (error) {
+        const failure = reviveRpcError(error, CREATE_UPLOAD_FAILURES);
+        return failure === undefined || InvalidEnvelope.is(failure) ? StorageWriteUncertain({ cause: error }) : failure;
+      }
+    },
+    async confirmUpload(input) {
+      try {
+        return await client.confirmUpload(input);
+      } catch (error) {
+        const failure = reviveRpcError(error, CONFIRM_UPLOAD_FAILURES);
+        return failure === undefined || InvalidEnvelope.is(failure) ? StorageWriteUncertain({ cause: error }) : failure;
+      }
+    },
+  };
 }
 
 /**

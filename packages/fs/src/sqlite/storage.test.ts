@@ -9,15 +9,15 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vit
 
 import { findDatabaseError } from '@arki/db/errors';
 import { createLibsqlDb } from '@arki/db/libsql';
-import { sqliteColumns } from '@arki/db/sqlite';
+import { sqliteNowMs as nowMs, sqliteColumns } from '@arki/db/sqlite';
 import { orThrow } from '@arki/failure';
 
 import type { FileId } from '../files/index.js';
 import type { StorageHarness, UserId } from '../lifecycle/storage.behavior.js';
 import type { FileRow, FileStorage, OwnerOf } from './index.js';
 import { describeFileStorage, userId } from '../lifecycle/storage.behavior.js';
+import { StorageRejected } from '../storage/failures.js';
 import { memoryUploadAdapter } from '../testing.js';
-import { sqliteNowMs as nowMs } from '@arki/db/sqlite';
 import { filesTable, fileStorage } from './index.js';
 
 const files = filesTable(sqliteColumns(), { owner: userId });
@@ -31,6 +31,24 @@ beforeAll(async () => {
 
 afterAll(() => {
   close();
+});
+
+it('returns a definite SQLite refusal from the actual driver and keeps the row absent', async () => {
+  await db.run(
+    sql`create trigger owned_fs_refusal before insert on files when new.mime = 'text/x-refuse' begin select raise(abort, 'owned refusal'); end`,
+  );
+  try {
+    const storage = fileStorage(db, memoryUploadAdapter(), {
+      files,
+      bucket: 'sql-outcome',
+      limits: { maxSize: 100, allowedMime: ['*/*'] },
+    });
+    const outcome = await storage.createUpload(orThrow(userId.create()), { mime: 'text/x-refuse', size: 1 });
+    expect(StorageRejected.is(outcome)).toBe(true);
+    expect(JSON.stringify(outcome)).not.toContain('owned refusal');
+  } finally {
+    await db.run(sql`drop trigger owned_fs_refusal`);
+  }
 });
 
 describe('filesTable on SQLite', () => {

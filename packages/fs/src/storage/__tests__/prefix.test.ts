@@ -12,7 +12,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isFileStorageError } from '../../files/errors.js';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
+
 import { createS3StorageAdapter } from '../s3-adapter';
 
 type Sent = { readonly command: string; readonly key: string | undefined };
@@ -67,11 +68,11 @@ describe('S3 adapter key prefix', () => {
     const sent = stubClient(TEXT_HEAD);
     const storage = adapter('p');
 
-    await storage.put('a.txt', Buffer.from('x'), { contentType: 'text/plain' });
-    await storage.getMetadata('a.txt');
-    await storage.delete('a.txt');
+    orThrow(await storage.put('a.txt', Buffer.from('x'), { contentType: 'text/plain' }));
+    orThrow(await storage.getMetadata('a.txt'));
+    orThrow(await storage.delete('a.txt'));
     expect(await storage.list('')).toEqual(['a.txt']);
-    const signed = new URL(await storage.getSignedUrl('a.txt', { operation: 'put' }));
+    const signed = new URL(orThrow(await storage.getSignedUrl('a.txt', { operation: 'put' })));
 
     for (const entry of sent.filter(entry => entry.command !== 'list')) expect(entry.key).toBe('p/a.txt');
     expect(sent.map(entry => entry.command)).toEqual(expect.arrayContaining(['put', 'head', 'delete', 'list']));
@@ -80,18 +81,18 @@ describe('S3 adapter key prefix', () => {
 
   it('uses the bare key without a prefix', async () => {
     const sent = stubClient(TEXT_HEAD);
-    await adapter().getMetadata('a.txt');
+    orThrow(await adapter().getMetadata('a.txt'));
     expect(sent).toEqual([{ command: 'head', key: 'a.txt' }]);
   });
 });
 
 describe('S3 adapter getMetadata', () => {
   // The files table compares size and type against its row; an invented 0 or octet-stream would lie.
-  it('throws ARKI_FS_E007 instead of inventing a size or type', async () => {
+  it('returns a supervised malformed-response defect instead of inventing a size or type', async () => {
     stubClient({ ContentType: 'text/plain' });
     const error: unknown = await adapter()
       .getMetadata('a.txt')
       .catch((error_: unknown) => error_);
-    expect(isFileStorageError(error) && error.code).toBe('ARKI_FS_E007');
+    expect(UnexpectedDefect.is(error)).toBe(true);
   });
 });
