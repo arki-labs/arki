@@ -1,3 +1,4 @@
+import failure from '@arki/failure/eslint';
 import baseConfig, { restrictEnvAccess } from '@arki/eslint-config/base';
 import reactConfig from '@arki/eslint-config/react';
 
@@ -8,6 +9,7 @@ export default [
     ignores: ['dist/**', 'src/paraglide/**', 'routeTree.gen.ts', 'src/content/packages/**'],
   },
   ...baseConfig,
+  failure.configs.recommended,
   ...reactConfig,
   ...restrictEnvAccess,
   {

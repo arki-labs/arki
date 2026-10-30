@@ -82,6 +82,7 @@
     "nitro": "catalog:tanstack/start",
     "oxc-transform-react": "catalog:",
     "vite": "catalog:build-tools",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@arki/failure": "workspace:*"
   }
 }
