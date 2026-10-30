@@ -13,6 +13,34 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 1 — Foundation (foundation) @ bc952ff (2026-10-30)
+
+<!-- candidate: foundation-bc952ff -->
+
+**Packages shipped** (9, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/failure | 0.3.0 | 1 |
+| @arki/log | 0.3.1 | 2 |
+| @arki/ts | 0.1.0 | 3 |
+| @arki/clock | 0.2.0 | 4 |
+| @arki/schema | 0.3.0 | 5 |
+| @arki/string | 0.4.1 | 6 |
+| @arki/async | 0.2.0 | 7 |
+| @arki/contracts | 0.4.0 | 8 |
+| @arki/date | 0.4.0 | 9 |
+
+**Source commit**: `bc952ff794c197f29543bc316d3fe13743560dc9`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (9 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` deferred, `demo:faultline` deferred, `docs:@arki/async` success, `docs:@arki/clock` success, `docs:@arki/contracts` success, `docs:@arki/date` success, `docs:@arki/failure` success, `docs:@arki/log` success, `docs:@arki/schema` success, `docs:@arki/string` success, `docs:@arki/ts` success, `published:@arki/async` success, `published:@arki/clock` success, `published:@arki/contracts` success, `published:@arki/date` success, `published:@arki/failure` success, `published:@arki/log` success, `published:@arki/schema` success, `published:@arki/string` success, `published:@arki/ts` success, `runtimes:@arki/ts` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/foundation-bc952ff/candidate.json`.
+
+---
+
 ## Deprecated — `@arki/event-sourcing` (2026-10-13)
 
 **npm only.** All 9 published versions (`0.1.0`–`0.1.5`, `0.2.1`–`0.2.3`) are deprecated with the message
