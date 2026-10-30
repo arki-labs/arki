@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { instant, plainDate, zoned } from './core.js';
-import { fromDate, fromPickerDate, systemTimeZone, toDate, toPickerDate } from './interop.js';
+import { InvalidNativeDate, UnknownTimeZone } from './failures.js';
+import { fromDate, fromPickerDate as fromPickerDateResult, systemTimeZone, toDate, toPickerDate } from './interop.js';
+
+const fromPickerDate = (...args: Parameters<typeof fromPickerDateResult>) => orThrow(fromPickerDateResult(...args));
 
 describe('fromDate / toDate', () => {
   it('keeps the instant and returns a fresh mutable Date', () => {
@@ -36,7 +41,12 @@ describe('fromPickerDate / toPickerDate', () => {
     expect(fromPickerDate(toPickerDate(d)).equals(d)).toBe(true);
     expect(toPickerDate(d, { basis: 'utc' }).toISOString()).toBe('2026-02-28T00:00:00.000Z');
     expect(toPickerDate(plainDate('0050-01-01')).getFullYear()).toBe(50);
-    expect(() => fromPickerDate(new Date(Number.NaN))).toThrow(RangeError);
+    const invalid = fromPickerDateResult(new Date(Number.NaN));
+    expect(InvalidNativeDate.is(invalid) && invalid.data.reason).toBe('invalid_date');
+    // The last Date there is still has a calendar date: no range failure exists to handle.
+    expect(fromPickerDate(new Date(8.64e15), { basis: 'utc' }).toString()).toBe('+275760-09-13');
+    const zone = fromPickerDateResult(new Date(0), { basis: 'zone', timeZone: 'Mars/Olympus' });
+    expect(UnknownTimeZone.is(zone) && zone.data.timeZone).toBe('Mars/Olympus');
     // Samoa skipped 2011-12-30 entirely
     expect(() => toPickerDate(plainDate('2011-12-30'), { basis: 'zone', timeZone: 'Pacific/Apia' })).toThrow(
       RangeError,

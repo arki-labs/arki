@@ -5,9 +5,9 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/date`: Date and time math on Temporal values: constructors, arithmetic, calendar, intervals, business days, formatting, parsing and relative text. `DEFAULT_BUSINESS_CALENDAR`, `DEFAULT_WEEKEND`, `DateValue`, `ISO_WEEK`, `SUNDAY_WEEK`, `Temporal`, `absDuration`, `abuts`, `add`, `addBusinessDays`, `addDuration`, `age`; and 219 more.
+- `@arki/date`: Date and time math on Temporal values: constructors, arithmetic, calendar, intervals, business days, formatting, parsing and relative text. `DATE_TEXT_OPERATIONS`, `DATE_TEXT_REASONS`, `DEFAULT_BUSINESS_CALENDAR`, `DEFAULT_WEEKEND`, `DateValue`, `ISO_WEEK`, `InvalidDateText`, `InvalidNativeDate`, `NATIVE_DATE_REASONS`, `SUNDAY_WEEK`, `Temporal`, `UnknownTimeZone`; and 225 more.
 - `@arki/date/types`: Shared vocabulary for @arki/date. `ISO_WEEK`, `SUNDAY_WEEK`, `Temporal`, `isDuration`, `isInstant`, `isPlainDate`, `isPlainDateTime`, `isPoint`, `isZonedDateTime`, `kindOf`; types `Amount`, `AmountFor`; and 28 more.
-- `@arki/date/core`: Construction and parsing. `fromMillis`, `fromUnix`, `instant`, `parseISO`, `plainDate`, `plainDateTime`, `toISO`, `toInstant`, `toMillis`, `toPlainDate`, `toUnix`, `tryParse`; and 5 more.
+- `@arki/date/core`: Construction and parsing. `fromMillis`, `fromUnix`, `instant`, `parseISO`, `plainDate`, `plainDateTime`, `toISO`, `toInstant`, `toMillis`, `toPlainDate`, `toUnix`, `zoned`; and 2 more.
 - `@arki/date/interop`: The native `Date` boundary. `fromDate`, `fromPickerDate`, `systemTimeZone`, `toDate`, `toPickerDate`; types `DateBasis`.
 - `@arki/date/math`: Arithmetic, field access, boundaries, rounding and differences. `add`, `ceil`, `diff`, `diffElapsed`, `elapsedNanoseconds`, `endOf`, `floor`, `nextBoundary`, `parts`, `round`, `set`, `startOf`; and 12 more.
 - `@arki/date/calendar`: Calendar facts: weekdays, week numbers, quarters, leap years, age. `DEFAULT_WEEKEND`, `age`, `calendarDaysBetween`, `dayOfWeek`, `dayOfYear`, `daysInMonth`, `daysInYear`, `easter`, `isLeapYear`, `isWeekday`, `isWeekend`, `isoWeek`; and 9 more.
@@ -17,7 +17,7 @@
 - `@arki/date/interval`: Interval algebra over half-open ranges `[start, end)`. `abuts`, `contains`, `each`, `gap`, `gapsBetween`, `intersection`, `interval`, `intervalEquals`, `intervalLength`, `isEmptyInterval`, `mergeIntervals`, `overlaps`; and 10 more.
 - `@arki/date/business`: Business-day arithmetic: weekends and holidays. `DEFAULT_BUSINESS_CALENDAR`, `addBusinessDays`, `businessCalendar`, `businessDaysBetween`, `businessDaysIn`, `isBusinessDay`, `nextBusinessDay`, `previousBusinessDay`, `subBusinessDays`; types `BusinessCalendar`, `BusinessCalendarOptions`.
 - `@arki/date/format`: Formatting: Unicode LDML patterns (`format`), ISO 8601 text (`formatISO`) and locale-native output (`formatIntl`). `format`, `formatISO`, `formatIntl`, `formatRange`; types `FormatIntlOptions`, `FormatOptions`.
-- `@arki/date/parse`: Pattern parsing: the inverse of `format`. `parseDate`, `parseDateTime`, `parseZoned`, `tryParseDate`, `tryParseDateTime`, `tryParseZoned`; types `ParseOptions`.
+- `@arki/date/parse`: Pattern parsing: the inverse of `format`. `parseDate`, `parseDateTime`, `parseZoned`; types `ParseOptions`.
 - `@arki/date/relative`: "In 3 days" / "3 days ago" — relative time text via `Intl.RelativeTimeFormat`. `relative`, `relativeToNow`, `relativeUnit`; types `RelativeOptions`, `RelativeUnit`, `RelativeValue`.
 - `@arki/date/clock`: "What time is it?" — answered only through an `@arki/clock` `Clock`, read once per call and copied into an immutable value. `isFuture`, `isPast`, `isThisMonth`, `isThisWeek`, `isThisYear`, `isToday`, `isTomorrow`, `isYesterday`, `now`, `nowIn`, `today`; types `ClockOptions`; and 1 more.
 - `@arki/date/fluent`: The fluent face of the package: `date(x, { timeZone })` wraps a `ZonedDateTime` plus the display/clock settings it should use, and exposes every receiver-first function as a method. `DateValue`, `createDateContext`, `date`; types `DateContext`, `DateContextOptions`, `DateLike`.
@@ -46,6 +46,6 @@
 
 - Time comes from a `Clock` you pass. The zone comes from an argument. Nothing is hidden.
 - `add` clamps (Jan 31 + 1 month = Feb 28). Pass `{ overflow: 'reject' }` to throw.
-- `zoned` on a zone-less string throws. `tryParse*` returns `undefined`.
+- `zoned` on a zone-less string throws. `parse*` and `fromPickerDate` return typed failures for outside input.
 - `diff` counts calendar units, `diffElapsed` counts exact time.
 - `zod`, `react`, `orpc` and `tanstack` are subpaths, not root exports.

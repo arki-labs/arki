@@ -1,11 +1,25 @@
 import { parse as fnsParse } from 'date-fns/parse';
 import { describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { plainDate, plainDateTime, zoned } from './core.js';
+import { InvalidDateText, UnknownTimeZone } from './failures.js';
 import { format } from './format.js';
-import { parseDate, parseDateTime, parseZoned, tryParseDate, tryParseDateTime, tryParseZoned } from './parse.js';
+import * as parsers from './parse.js';
 
 const BUCHAREST = 'Europe/Bucharest';
+
+// Happy-path tests read the value; a returned failure there is a bug, so it throws.
+const parseDate = (...args: Parameters<typeof parsers.parseDate>) => orThrow(parsers.parseDate(...args));
+const parseDateTime = (...args: Parameters<typeof parsers.parseDateTime>) => orThrow(parsers.parseDateTime(...args));
+const parseZoned = (...args: Parameters<typeof parsers.parseZoned>) => orThrow(parsers.parseZoned(...args));
+
+/** The data of an `InvalidDateText` failure; anything else fails the test. */
+function textFailure(result: unknown) {
+  if (!InvalidDateText.is(result)) throw new Error('expected an InvalidDateText failure');
+  return result.data;
+}
 
 describe('parseDate — token groups', () => {
   it('reads every year width', () => {
@@ -22,7 +36,10 @@ describe('parseDate — token groups', () => {
     expect(parseDate('5/3/2026', 'd/M/yyyy').toString()).toBe('2026-03-05');
     expect(parseDate('15/12/2026', 'd/M/yyyy').toString()).toBe('2026-12-15');
     expect(parseDate('05/03/2026', 'dd/MM/yyyy').toString()).toBe('2026-03-05');
-    expect(() => parseDate('5/03/2026', 'dd/MM/yyyy')).toThrow(/expected a 2-digit day for "dd" at position 0/);
+    expect(textFailure(parsers.parseDate('5/03/2026', 'dd/MM/yyyy'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'no_match',
+    });
   });
 
   it('reads month names case-insensitively, format and stand-alone', () => {
@@ -42,7 +59,10 @@ describe('parseDate — token groups', () => {
   it('reads a day of year without month or day tokens', () => {
     expect(parseDate('2024-60', 'yyyy-D').toString()).toBe('2024-02-29');
     expect(parseDate('2026-365', 'yyyy-DDD').toString()).toBe('2026-12-31');
-    expect(() => parseDate('2026-366', 'yyyy-DDD')).toThrow(/day of year 366 is out of range for 2026/);
+    expect(textFailure(parsers.parseDate('2026-366', 'yyyy-DDD'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'invalid_date',
+    });
     expect(() => parseDate('2026-60-3', 'yyyy-D-M')).toThrow(/mixes day of year/);
   });
 
@@ -51,14 +71,18 @@ describe('parseDate — token groups', () => {
     expect(parseDate('Thursday 2026-03-05', 'EEEE yyyy-MM-dd').toString()).toBe('2026-03-05');
     expect(parseDate('4 2026-03-05', 'i yyyy-MM-dd').toString()).toBe('2026-03-05');
     expect(parseDate('thursday 2026-03-05', 'iiii yyyy-MM-dd').toString()).toBe('2026-03-05');
-    expect(() => parseDate('Fri, 5 Mar 2026', 'EEE, d MMM yyyy')).toThrow(
-      /parseDate: weekday 5 does not match 2026-03-05/,
-    );
+    expect(textFailure(parsers.parseDate('Fri, 5 Mar 2026', 'EEE, d MMM yyyy'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'weekday_mismatch',
+    });
   });
 
   it('reads and validates time tokens, then drops them', () => {
     expect(parseDate('2026-03-05 23:59', 'yyyy-MM-dd HH:mm').toString()).toBe('2026-03-05');
-    expect(() => parseDate('2026-03-05 24:00', 'yyyy-MM-dd HH:mm')).toThrow(/parseDate: time 24:00:00 is invalid/);
+    expect(textFailure(parsers.parseDate('2026-03-05 24:00', 'yyyy-MM-dd HH:mm'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'invalid_time',
+    });
   });
 
   it('matches quoted literals and escaped quotes', () => {
@@ -83,7 +107,10 @@ describe('parseDateTime — token groups', () => {
     expect(at('9:05 a.m.', 'h:mm aaaa')).toBe('2026-03-05T09:05:00');
     expect(at('0:15 PM', 'K:mm a')).toBe('2026-03-05T12:15:00');
     expect(at('11:15 PM', 'KK:mm a')).toBe('2026-03-05T23:15:00');
-    expect(() => at('13:00 PM', 'h:mm a')).toThrow(/hour 13 is out of range for "h"/);
+    expect(textFailure(parsers.parseDateTime('2026-03-05 13:00 PM', 'yyyy-MM-dd h:mm a'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'invalid_time',
+    });
   });
 
   it('reads k as 1-24 with 24 meaning midnight', () => {
@@ -98,34 +125,60 @@ describe('parseDateTime — token groups', () => {
   });
 
   it('refuses tokens that disagree', () => {
-    expect(() => parseDateTime('2026-03-05 13 02 PM', 'yyyy-MM-dd HH hh a')).toThrow(/disagree/);
-    expect(() => parseDateTime('2026-03-05 2027', 'yyyy-MM-dd yyyy')).toThrow(/conflicts with 2026/);
+    expect(textFailure(parsers.parseDateTime('2026-03-05 13 02 PM', 'yyyy-MM-dd HH hh a'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'conflicting_tokens',
+    });
+    expect(textFailure(parsers.parseDateTime('2026-03-05 2027', 'yyyy-MM-dd yyyy'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'conflicting_tokens',
+    });
   });
 });
 
 describe('errors', () => {
   it('reports leftover text with its position', () => {
-    expect(() => parseDate('2026-03-05 extra', 'yyyy-MM-dd')).toThrow(
-      'parseDate: unexpected text " extra" at position 10 of "2026-03-05 extra" (pattern "yyyy-MM-dd")',
-    );
+    expect(textFailure(parsers.parseDate('2026-03-05 extra', 'yyyy-MM-dd'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'trailing_text',
+    });
   });
 
   it('reports missing text with what was expected', () => {
-    expect(() => parseDate('2026-03', 'yyyy-MM-dd')).toThrow(/parseDate: expected "-" at position 7/);
-    expect(() => parseDateTime('2026-03-05 10:', 'yyyy-MM-dd HH:mm')).toThrow(
-      /parseDateTime: expected a 2-digit minute for "mm" at position 14/,
-    );
+    expect(textFailure(parsers.parseDate('2026-03', 'yyyy-MM-dd'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'no_match',
+    });
+    expect(textFailure(parsers.parseDateTime('2026-03-05 10:', 'yyyy-MM-dd HH:mm'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'no_match',
+    });
   });
 
   it('rejects an unknown month name', () => {
-    expect(() => parseDate('Mrz 5, 2026', 'MMM d, yyyy')).toThrow(/expected a month name for "MMM" at position 0/);
+    expect(textFailure(parsers.parseDate('Mrz 5, 2026', 'MMM d, yyyy'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'no_match',
+    });
   });
 
   it('rejects impossible dates and times instead of clamping', () => {
-    expect(() => parseDate('2026-02-30', 'yyyy-MM-dd')).toThrow('parseDate: date 2026-02-30 is invalid');
-    expect(() => parseDate('2026-13-01', 'yyyy-MM-dd')).toThrow(/is invalid/);
-    expect(() => parseDateTime('2026-03-05 10:60', 'yyyy-MM-dd HH:mm')).toThrow(/time 10:60:00 is invalid/);
-    expect(() => parseDateTime('2026-03-05 24:00', 'yyyy-MM-dd HH:mm')).toThrow(RangeError);
+    expect(textFailure(parsers.parseDate('2026-02-30', 'yyyy-MM-dd'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'invalid_date',
+    });
+    expect(textFailure(parsers.parseDate('2026-13-01', 'yyyy-MM-dd'))).toMatchObject({
+      operation: 'parseDate',
+      reason: 'invalid_date',
+    });
+    expect(textFailure(parsers.parseDateTime('2026-03-05 10:60', 'yyyy-MM-dd HH:mm'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'invalid_time',
+    });
+    expect(textFailure(parsers.parseDateTime('2026-03-05 24:00', 'yyyy-MM-dd HH:mm'))).toMatchObject({
+      operation: 'parseDateTime',
+      reason: 'invalid_time',
+    });
   });
 
   it('rejects unsupported tokens, naming the function', () => {
@@ -145,13 +198,26 @@ describe('errors', () => {
     expect(() => parseDate('2026-03-05+02', 'yyyy-MM-ddx')).toThrow(/use parseZoned/);
   });
 
-  it('tryParse returns undefined for bad text but still throws for a bad pattern', () => {
-    expect(tryParseDate('2026-02-30', 'yyyy-MM-dd')).toBeUndefined();
-    expect(tryParseDate('2026-03-05', 'yyyy-MM-dd')?.toString()).toBe('2026-03-05');
-    expect(tryParseDateTime('2026-03-05 25:00', 'yyyy-MM-dd HH:mm')).toBeUndefined();
-    expect(tryParseZoned('nope', 'yyyy-MM-dd', BUCHAREST)).toBeUndefined();
-    expect(() => tryParseDate('2026', 'qqq')).toThrow(/unsupported pattern token/);
-    expect(() => tryParseZoned('2026-03-05', 'yyyy-MM-dd', 'Mars/Olympus')).toThrow(/unknown time zone/);
+  it('returns the failure for bad text and the value for good text; a bad pattern still throws', () => {
+    expect(parsers.parseDate('2026-03-05', 'yyyy-MM-dd')).toEqual(plainDate('2026-03-05'));
+    expect(textFailure(parsers.parseDateTime('2026-03-05 25:00', 'yyyy-MM-dd HH:mm')).reason).toBe('invalid_time');
+    expect(textFailure(parsers.parseZoned('nope', 'yyyy-MM-dd', BUCHAREST)).reason).toBe('no_match');
+    expect(() => parsers.parseDate('2026', 'qqq')).toThrow(/unsupported pattern token/);
+  });
+
+  it('keeps a bounded, whole-character view of the input', () => {
+    const short = textFailure(parsers.parseDate('nope', 'yyyy-MM-dd'));
+    expect(short).toMatchObject({ input: 'nope', truncated: false });
+    const long = textFailure(parsers.parseDate(`${'x'.repeat(63)}😀${'y'.repeat(500)}`, 'yyyy-MM-dd'));
+    expect(long.truncated).toBe(true);
+    expect(long.input).toBe('x'.repeat(63));
+    expect(long.input.length).toBeLessThanOrEqual(64);
+  });
+
+  it('returns UnknownTimeZone for an unknown zone name instead of throwing', () => {
+    const result = parsers.parseZoned('2026-03-05', 'yyyy-MM-dd', 'Mars/Olympus');
+    expect(UnknownTimeZone.is(result) && result.data.timeZone).toBe('Mars/Olympus');
+    expect(result).toMatchObject({ code: 'date.unknown_time_zone' });
   });
 });
 
@@ -165,10 +231,9 @@ describe('parseZoned', () => {
     expect(parseZoned('2026-03-29 03:30', pattern, BUCHAREST, { disambiguation: 'earlier' }).toString()).toBe(
       '2026-03-29T02:30:00+02:00[Europe/Bucharest]',
     );
-    expect(() => parseZoned('2026-03-29 03:30', pattern, BUCHAREST, { disambiguation: 'reject' })).toThrow(
-      /parseZoned: wall time 2026-03-29T03:30:00 in Europe\/Bucharest is invalid/,
-    );
-    expect(tryParseZoned('2026-03-29 03:30', pattern, BUCHAREST, { disambiguation: 'reject' })).toBeUndefined();
+    expect(
+      textFailure(parsers.parseZoned('2026-03-29 03:30', pattern, BUCHAREST, { disambiguation: 'reject' })),
+    ).toMatchObject({ operation: 'parseZoned', reason: 'invalid_wall_time' });
   });
 
   it('resolves a repeated wall time (fall back 04:00 → 03:00) with the disambiguation rule', () => {
@@ -189,8 +254,14 @@ describe('parseZoned', () => {
     expect(parseZoned('2026-03-29 01:00 +05', 'yyyy-MM-dd HH:mm x', 'UTC').toString()).toBe(
       '2026-03-28T20:00:00+00:00[UTC]',
     );
-    expect(() => parseZoned('2026-03-29 01:00 Z', 'yyyy-MM-dd HH:mm xxx', 'UTC')).toThrow(/an offset like \+02:00/);
-    expect(() => parseZoned('2026-03-29 01:00 +24:00', 'yyyy-MM-dd HH:mm XXX', 'UTC')).toThrow(/out of range/);
+    expect(textFailure(parsers.parseZoned('2026-03-29 01:00 Z', 'yyyy-MM-dd HH:mm xxx', 'UTC'))).toMatchObject({
+      operation: 'parseZoned',
+      reason: 'no_match',
+    });
+    expect(textFailure(parsers.parseZoned('2026-03-29 01:00 +24:00', 'yyyy-MM-dd HH:mm XXX', 'UTC'))).toMatchObject({
+      operation: 'parseZoned',
+      reason: 'offset_out_of_range',
+    });
   });
 });
 

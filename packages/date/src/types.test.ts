@@ -1,7 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { BucketUnitFor } from './compare.js';
-import type { ParseResult } from './core.js';
+import type { parseISO } from './core.js';
+import type { DateTextReason, InvalidDateText, UnknownTimeZone } from './failures.js';
 import type {
   Amount,
   AmountFor,
@@ -39,8 +40,9 @@ describe('type utilities', () => {
     expectTypeOf<BucketUnitFor<ZonedDateTime>>().toEqualTypeOf<Unit>();
   });
 
-  it('ParseResult is a discriminated union on ok', () => {
-    expectTypeOf<Extract<ParseResult<PlainDate>, { ok: true }>['value']>().toEqualTypeOf<PlainDate>();
-    expectTypeOf<Extract<ParseResult<PlainDate>, { ok: false }>['error']>().toEqualTypeOf<RangeError>();
+  it('parsers return the value or a typed failure, and failure data is typed', () => {
+    // Outside text never throws: the failures are part of the return type, so callers must handle them.
+    expectTypeOf<ReturnType<typeof parseISO>>().toEqualTypeOf<Instant | InvalidDateText | UnknownTimeZone>();
+    expectTypeOf<InvalidDateText['data']['reason']>().toEqualTypeOf<DateTextReason>();
   });
 });

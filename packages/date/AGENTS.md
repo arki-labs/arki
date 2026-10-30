@@ -13,7 +13,7 @@ Date and time math on Temporal values, with one arithmetic policy. Read [docs/ag
 5. Calendar units move the wall clock and exact units move the instant. `diff` counts calendar units and `diffElapsed` counts exact time. A function states which.
 6. Intervals are half-open: `[start, end)`. Touching intervals do not overlap. `union` never bridges a gap.
 7. Iteration is lazy and bounded. More than `maxItems` throws. Nothing truncates silently.
-8. Invalid input throws `RangeError`. Mixed kinds throw `TypeError`. The `try*` functions return `undefined` and are the only non-throwing doors.
+8. Parsers return, builders throw. Outside input goes through `parseISO`, `parseDate`, `parseDateTime`, `parseZoned` or `fromPickerDate`: they return the value or a typed failure (`InvalidDateText`, `InvalidNativeDate`, `UnknownTimeZone` in `src/failures.ts`) and never throw on bad input. Builders (`plainDate`, `plainDateTime`, `instant`, `zoned`, `fromUnix`, `inZone`) take the caller's own values, a zone name included, and throw `RangeError` on a bad one. A bad pattern is a bug and throws. Mixed kinds throw `TypeError`. There are no `try*` functions.
 9. The default locale is `en-US`, so a server and a client render the same text. A caller passes its own locale.
 10. The runtime floor is `ECMAScript` plus `Intl`. `temporal-polyfill` supplies `Temporal` where the engine has none. No `node:*` import in portable entries.
 11. The optional subpaths (`zod`, `react`, `orpc`, `tanstack`) keep their peers optional and are not re-exported from the root.

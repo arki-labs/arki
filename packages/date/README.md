@@ -84,7 +84,7 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, and so
 | Subpath     | Contents                                                                                                                                                                                                                                                                         |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `types`     | the value-type aliases, `Point`/`Civil`/`Timeline` unions, unit and option types, `ISO_WEEK` `SUNDAY_WEEK`, `isPlainDate`… guards, `kindOf`                                                                                                                                      |
-| `core`      | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `tryParse` `parseISO` `tryParse`                                                                                                                     |
+| `core`      | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `parseISO`                                                                                                                                           |
 | `interop`   | `fromDate` `toDate` `fromPickerDate` `toPickerDate` `systemTimeZone`                                                                                                                                                                                                             |
 | `math`      | `add` `sub` `set` `parts` `startOf` `endOf` `nextBoundary` `floor` `ceil` `round` `diff` `until` `diffElapsed` `elapsedNanoseconds`                                                                                                                                              |
 | `calendar`  | `dayOfWeek` `dayOfYear` `daysInMonth` `daysInYear` `isLeapYear` `isWeekend` `isWeekday` `isoWeek` `weekOf` `weeksInYear` `quarter` `calendarDaysBetween` `age` `nthWeekdayOfMonth` `lastWeekdayOfMonth` `easter` `weekRulesFor`                                                  |
@@ -97,7 +97,7 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, and so
 | `relative`  | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                                           |
 | `clock`     | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                                           |
 | `fluent`    | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                                           |
-| `parse`     | `parseDate` `parseDateTime` `parseZoned` `tryParseDate` `tryParseDateTime` `tryParseZoned` (inverse of `format`)                                                                                                                                                                 |
+| `parse`     | `parseDate` `parseDateTime` `parseZoned` (inverse of `format`)                                                                                                                                                                                                                   |
 | `zod`       | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
 | `react`     | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
 | `serialize` | optional, needs `@orpc/client` and/or `superjson`: `temporalJsonSerializers` `registerTemporalTypes` `TEMPORAL_RPC_TYPES`                                                                                                                                                        |
@@ -106,19 +106,22 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, and so
 
 ## Failure behaviour
 
-Invalid input throws at construction. Nothing returns a result object, and the package defines no error codes.
+Parsers return, builders throw. Outside text goes through a parser, which returns the value or an `@arki/failure` value. Your own values go through a builder, which throws on a bad one.
 
-- A bad value (month 13, `2026-02-30`, an unknown time zone) throws `RangeError`.
+- `parseISO`, `parseDate`, `parseDateTime` and `parseZoned` return `InvalidDateText` (`date.invalid_text`, 400) for bad text. `data.reason` says why (`no_match`, `invalid_date`, `not_iso`, …) and `data.input` is a copy of the text cut to 64 characters.
+- `fromPickerDate` returns `InvalidNativeDate` (`date.invalid_native_date`, 400) for an Invalid Date.
+- A parser given an unknown zone name returns `UnknownTimeZone` (`date.unknown_time_zone`, 400).
+- A builder given a bad value (month 13, `2026-02-30`, an unknown time zone) throws `RangeError`. Check outside zone names with `isValidTimeZone` first.
 - Mixed kinds (a `PlainDate` compared with an `Instant`) throw `TypeError`.
 - An unknown format token throws. A time token on a `PlainDate`, or a zone token on a value without a zone, throws.
 - A zone-less string passed to `zoned` throws and tells you to pass a zone. A zone is never guessed.
-- `tryParse`, `tryParseDate`, `tryParseDateTime` and `tryParseZoned` return `undefined` instead of throwing. Use them for user input.
 - `{ overflow: 'reject' }` and `{ disambiguation: 'reject' }` turn a clamp or a DST choice into a `RangeError`.
 
 ```ts run
-import { plainDate, tryParseDate } from '@arki/date';
+import { InvalidDateText, parseDate, plainDate } from '@arki/date';
 
-if (tryParseDate('nope', 'yyyy-MM-dd') !== undefined) throw new Error('expected undefined');
+const parsed = parseDate('nope', 'yyyy-MM-dd');
+if (!InvalidDateText.is(parsed) || parsed.data.reason !== 'no_match') throw new Error('expected InvalidDateText');
 try {
   plainDate('2026-02-30');
   throw new Error('expected a RangeError');
@@ -278,7 +281,7 @@ relativeToNow(launch, { numeric: 'auto', clock });
 - **No hidden now, no hidden zone.** Time comes from an `@arki/clock` `Clock` passed in (or `SystemClock`). Functions that need a zone take it explicitly; `today()`/`nowIn()` default to the runtime zone and say so — pass it when rendering on both server and client.
 - **Default locale is `en-US`** so server and client agree. Pass your app's locale.
 - **Half-open intervals.** `[start, end)` everywhere; touching intervals do not overlap; `union` returns sorted disjoint pieces and never bridges a gap.
-- **Fail loud.** Invalid input throws `RangeError` at construction; mixed kinds throw `TypeError`; unknown format tokens throw. `tryParse` is the non-throwing door for user input.
+- **Fail loud.** Invalid input throws `RangeError` at construction; mixed kinds throw `TypeError`; unknown format tokens throw. Outside text goes through a `parse*` function, which returns a typed failure instead.
 
 ## Guides
 
@@ -335,19 +338,19 @@ Any other letter throws. Time tokens on a `PlainDate`, and zone tokens on a valu
 
 ### Parsing text
 
-`parse` is the inverse of `format` for the same tokens (no ordinals or presets): the whole text must match, names are matched case-insensitively in the pattern's locale, and impossible dates throw.
+`parse` is the inverse of `format` for the same tokens (no ordinals or presets): the whole text must match, names are matched case-insensitively in the pattern's locale, and bad or impossible text returns an `InvalidDateText` failure. A bad pattern throws.
 
 ```ts
-import { parseDate, parseDateTime, parseZoned, tryParseDate } from '@arki/date';
+import { parseDate, parseDateTime, parseZoned } from '@arki/date';
 
 parseDate('20 May 2026', 'd MMMM yyyy'); // PlainDate 2026-05-20
 parseDateTime('2026-05-20 09:30 PM', 'yyyy-MM-dd hh:mm a'); // PlainDateTime
 parseZoned('20/05/2026 09:30', 'dd/MM/yyyy HH:mm', 'Europe/Bucharest'); // wall clock in that zone
 parseZoned('2026-05-20T09:30+03:00', "yyyy-MM-dd'T'HH:mmxxx", 'UTC'); // exact, shown in UTC
-tryParseDate('nope', 'yyyy-MM-dd'); // undefined
+parseDate('nope', 'yyyy-MM-dd'); // InvalidDateText, data.reason 'no_match'
 ```
 
-For lenient ISO text (`2026-05-20`, `2026-W41-5`, `20260520T1030`) use `parseISO`, which returns an `Instant` and reads zone-less text in `options.timeZone` (runtime zone by default).
+For lenient ISO text (`2026-05-20`, `2026-W41-5`, `20260520T1030`) use `parseISO`, which returns an `Instant` (or `InvalidDateText`) and reads zone-less text in `options.timeZone` (runtime zone by default).
 
 ### Validating input (`@arki/date/zod`)
 

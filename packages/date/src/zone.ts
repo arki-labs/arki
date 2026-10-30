@@ -9,7 +9,11 @@ import type { PlainDate, Timeline, TimeParts, ZonedDateTime } from './types.js';
 import { instant, plainDateTime } from './core.js';
 import { Temporal } from './types.js';
 
-/** The same instant, shown in another zone. */
+/**
+ * The same instant, shown in another zone. `timeZone` is the caller's own value:
+ * an unknown name throws `RangeError`. Check zone text from outside with
+ * `isValidTimeZone` first, or read it with a `parse*` door that returns `UnknownTimeZone`.
+ */
 export function inZone(value: Timeline | Date, timeZone: string): ZonedDateTime {
   // A Date goes straight to its ZonedDateTime, without an intermediate Instant.
   if (value instanceof Date) {
@@ -53,12 +57,4 @@ export function offsetMinutes(value: ZonedDateTime): number {
   return value.offsetNanoseconds / 60_000_000_000;
 }
 
-/** Is this a time zone the runtime knows (IANA name or fixed offset)? */
-export function isValidTimeZone(id: string): boolean {
-  try {
-    new Temporal.ZonedDateTime(0n, id);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { isValidTimeZone } from './internal/system-zone.js';

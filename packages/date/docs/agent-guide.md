@@ -8,7 +8,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 2. Pure functions, one subpath per module. `date(...)` from `/fluent` wraps a `ZonedDateTime` for chains.
 3. A `Date` is an instant that pretends to be a calendar date. Convert at the edge with `fromDate`, `toDate`, `fromPickerDate` and `toPickerDate`.
 4. Time comes from a `Clock` you pass. The zone comes from an argument.
-5. Invalid input throws. `tryParse*` returns `undefined`.
+5. Parsers return, builders throw. `parse*` and `fromPickerDate` return a typed failure for bad outside input. Builders throw `RangeError` on a bad value of your own.
 
 ## Task map
 
@@ -53,8 +53,9 @@ if (String(add(plainDate('2026-01-31'), { months: 1 })) !== '2026-02-28') throw 
 
 ### Parse user text
 
-1. Use `tryParseDate(text, 'yyyy-MM-dd')`. It returns `undefined` for bad input.
-2. For ISO text in many shapes, use `parseISO`. Zone-less text is read in local time.
+1. Use `parseDate(text, 'yyyy-MM-dd')`. Bad text returns `InvalidDateText`; check it with `InvalidDateText.is(result)` or `isFailure(result)` and show `result.data.reason`.
+2. For ISO text in many shapes, use `parseISO`. Zone-less text is read in local time. Bad text returns `InvalidDateText` with reason `not_iso`.
+3. A zone name from outside goes to `parseZoned` or `parseISO`, which return `UnknownTimeZone`. Before passing one to `zoned` or `inZone`, check it with `isValidTimeZone`.
 
 ### Send values over the wire
 
@@ -75,11 +76,13 @@ if (String(add(plainDate('2026-01-31'), { months: 1 })) !== '2026-02-28') throw 
 
 ## Errors
 
-| Code         | Meaning                                                                | What to do                                               |
-| ------------ | ---------------------------------------------------------------------- | -------------------------------------------------------- |
-| none         | The package defines no error codes.                                    | Catch the built-in error types below.                    |
-| `RangeError` | A value is out of range, or a zone is unknown, or `reject` was chosen. | Fix the input, or use a `tryParse*` function.            |
-| `TypeError`  | Two values of different kinds were mixed.                              | Convert one with `toPlainDate`, `toInstant` or `inZone`. |
+| Code                       | Meaning                                                                | What to do                                                    |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `date.invalid_text`        | `InvalidDateText`: a parser refused the text. `data.reason` says why.  | Ask for the text again or use another pattern.                |
+| `date.invalid_native_date` | `InvalidNativeDate`: `fromPickerDate` got an Invalid Date.             | Reject the value or ask for another date.                     |
+| `date.unknown_time_zone`   | `UnknownTimeZone`: a parser got a zone name the runtime does not know. | Ask for an IANA name or an offset.                            |
+| `RangeError`               | A builder got a bad value of your own, or `reject` was chosen.         | Fix the value, or read outside text with a `parse*` function. |
+| `TypeError`                | Two values of different kinds were mixed.                              | Convert one with `toPlainDate`, `toInstant` or `inZone`.      |
 
 ## Verify
 

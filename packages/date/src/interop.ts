@@ -5,8 +5,11 @@
  * *calendar fields* a picker showed the user.
  */
 
+import type { UnknownTimeZone } from './failures.js';
 import type { Instant, PlainDate, Timeline } from './types.js';
 import { instant, plainDate } from './core.js';
+import { InvalidNativeDate, unknownTimeZone } from './failures.js';
+import { isValidTimeZone } from './internal/system-zone.js';
 
 /** The instant a `Date` represents. */
 export function fromDate(value: Date): Instant {
@@ -27,9 +30,19 @@ export type DateBasis =
 
 const LOCAL: DateBasis = { basis: 'local' };
 
-/** The calendar date a picker selected, read from the `Date`'s fields in the stated basis. */
-export function fromPickerDate(value: Date, basis: DateBasis = LOCAL): PlainDate {
-  if (Number.isNaN(value.getTime())) throw new RangeError('fromPickerDate received an invalid Date');
+/**
+ * The calendar date a picker selected, read from the `Date`'s fields in the stated basis.
+ * A picker's `Date` is outside input, so this never throws on it: an Invalid Date returns
+ * `InvalidNativeDate`, and an unknown `timeZone` returns `UnknownTimeZone`.
+ */
+export function fromPickerDate(value: Date, basis: DateBasis = LOCAL): PlainDate | InvalidNativeDate | UnknownTimeZone {
+  if (Number.isNaN(value.getTime())) return InvalidNativeDate({ reason: 'invalid_date' });
+  if (basis.basis === 'zone' && !isValidTimeZone(basis.timeZone)) return unknownTimeZone(basis.timeZone);
+  // Every valid Date fits a Temporal date in every basis (the PlainDate range is a day wider than Date's on each side).
+  return pickerFields(value, basis);
+}
+
+function pickerFields(value: Date, basis: DateBasis): PlainDate {
   switch (basis.basis) {
     case 'local': {
       return plainDate({ year: value.getFullYear(), month: value.getMonth() + 1, day: value.getDate() });
@@ -66,7 +79,7 @@ export function toPickerDate(value: PlainDate, basis: DateBasis = LOCAL): Date {
       break;
     }
   }
-  if (!fromPickerDate(result, basis).equals(value)) {
+  if (!pickerFields(result, basis).equals(value)) {
     throw new RangeError(`${value.toString()} cannot be represented as a Date in the ${basis.basis} basis`);
   }
   return result;

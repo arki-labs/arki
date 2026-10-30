@@ -1,7 +1,12 @@
 import { parseISO as fnsParseISO } from 'date-fns/parseISO';
 import { describe, expect, it } from 'vitest';
 
-import { parseISO, toMillis, tryParse } from './core.js';
+import { orThrow } from '@arki/failure';
+
+import { parseISO as parseISOResult, toMillis } from './core.js';
+import { InvalidDateText, UnknownTimeZone } from './failures.js';
+
+const parseISO = (...args: Parameters<typeof parseISOResult>) => orThrow(parseISOResult(...args));
 
 // Every form date-fns accepts and its quirks: same instant as date-fns `parseISO` (local zone for zone-less text).
 const VALID = [
@@ -76,7 +81,8 @@ describe('parseISO — differential against date-fns v4', () => {
 
   it.each(INVALID)('%j is rejected like date-fns', text => {
     expect(Number.isNaN(fnsParseISO(text).getTime())).toBe(true);
-    expect(() => parseISO(text)).toThrow(RangeError);
+    const result = parseISOResult(text);
+    expect(InvalidDateText.is(result) && result.data).toMatchObject({ operation: 'parseISO', reason: 'not_iso' });
   });
 });
 
@@ -89,8 +95,14 @@ describe('parseISO — semantics', () => {
     expect(parseISO('2026-03-29T03:30', { timeZone: 'Europe/Bucharest' }).toString()).toBe('2026-03-29T01:30:00Z');
   });
 
-  it('is available through tryParse', () => {
-    expect(tryParse('2026-W41-5', 'iso').ok).toBe(true);
-    expect(tryParse('2026-02-30', 'iso').ok).toBe(false);
+  it('returns a failure with the reason, not a throw, for text that is not ISO', () => {
+    expect(InvalidDateText.is(parseISOResult('2026-W41-5'))).toBe(false);
+    const bad = parseISOResult('2026-02-30');
+    expect(InvalidDateText.is(bad) && bad.data.input).toBe('2026-02-30');
+  });
+
+  it('returns UnknownTimeZone for an unknown options.timeZone', () => {
+    const result = parseISOResult('2026-05-20T10:30', { timeZone: 'Mars/Olympus' });
+    expect(UnknownTimeZone.is(result) && result.data.timeZone).toBe('Mars/Olympus');
   });
 });

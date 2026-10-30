@@ -10,7 +10,6 @@ import {
   toMillis,
   toPlainDate,
   toUnix,
-  tryParse,
   zoned,
 } from './core.js';
 import { isInstant, isPlainDate, isPoint, isZonedDateTime, kindOf } from './types.js';
@@ -105,21 +104,12 @@ describe('unix / millis / iso', () => {
     expect(toMillis(zoned('1970-01-01T02:00:00+02:00[Europe/Bucharest]'))).toBe(0);
     expect(() => fromMillis(1.5)).toThrow(RangeError);
     expect(() => fromUnix(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+    // 1e300 is finite, but 1e300 * 1e9 overflows to Infinity and BigInt(Infinity) used to throw a bare RangeError.
+    expect(() => fromUnix(1e300)).toThrow(/fromUnix needs seconds within/);
+    expect(() => fromUnix(-1e300)).toThrow(/fromUnix needs seconds within/);
+    expect(fromUnix(1.5).toString()).toBe('1970-01-01T00:00:01.5Z');
     expect(toISO(plainDate('2026-05-20'))).toBe('2026-05-20');
     expect(toPlainDate(zoned('2026-05-20T23:30:00-07:00[America/Los_Angeles]')).toString()).toBe('2026-05-20');
-  });
-});
-
-describe('tryParse', () => {
-  it('returns ok/err without throwing and never reinterprets a kind', () => {
-    const ok = tryParse('2026-05-20', 'plainDate');
-    expect(ok.ok && ok.value.toString()).toBe('2026-05-20');
-    const bad = tryParse('2026-05-20', 'instant');
-    expect(bad.ok).toBe(false);
-    expect(!bad.ok && bad.error).toBeInstanceOf(RangeError);
-    const dur = tryParse('P1DT2H', 'duration');
-    expect(dur.ok && dur.value.hours).toBe(2);
-    expect(tryParse('nonsense', 'zoned').ok).toBe(false);
   });
 });
 
