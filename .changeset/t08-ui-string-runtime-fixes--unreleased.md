@@ -1,8 +1,5 @@
 ---
-'@arki/string': patch
-'@arki/chat-ui': patch
 '@arki/content-react': minor
-'@arki/ui': patch
 ---
 
 Fix runtime failures that plain input could trigger.

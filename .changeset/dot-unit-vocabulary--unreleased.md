@@ -1,5 +1,4 @@
 ---
-'@arki/tanstack-start': patch
 '@arki/admin': patch
 ---
 

@@ -1,4 +1,5 @@
 ---
+'@arki/tanstack-start': patch
 '@arki/db': patch
 '@arki/kv': patch
 '@arki/auth': patch
