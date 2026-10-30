@@ -29,12 +29,28 @@ These come from `@arki/journal/http/webhooks`. See [Outgoing webhooks](../README
   - `badEncryptionKey` (`ARKI_JOURNAL_WEBHOOK_E005`): `encryptionKey` is not 32 bytes of base64.
   - `deliveryFailed` (`ARKI_JOURNAL_WEBHOOK_E006`): the subscriber answered with a status other than 2xx. The worker retries it.
 
-## Event graph
+## Event map
 
-The graph behind `dot explain --as journal-flow`. The README shows the printed output, and the agent guide's Dot part explains it. `project` and `render` come from `@arki/journal/projection`. The constants below come from the same entry and give the allowed values of the graph's fields.
+The graph behind `dot explain --as event-map`. The README shows the printed output, and the agent guide's Dot part explains it. The portable parts come from `@arki/journal/projection`. The parts that read the filesystem come from `@arki/journal/event-map`, which is Node-only.
 
-- `project(manifest)`: builds the app's event graph from a Dot manifest's projections. It merges every journal the app mounts. Each node and edge appears once. Import it when you want the graph as data, for a custom report or a test.
-- `render(document)`: turns a graph document into the text that `dot explain --as journal-flow` prints: per event, each consumer with its timing, owner, deps and retry. Import it when you print the graph yourself.
-- `JOURNAL_FLOW_EDGE_KINDS`: the edge kinds, `'folds'`, `'projects'`, `'reacts'` and `'owned-by'`. In an edge, `from` is the subject and `to` the object.
-- `JOURNAL_FLOW_TIMINGS`: when a consumer runs: `'same-transaction'` (inside the write) or `'after-commit'`.
-- `JOURNAL_FLOW_DELIVERIES`: how often an after-commit consumer sees an event: `'exactly-once'`, `'at-least-once'` or `'at-most-once'`.
+From `@arki/journal/projection`:
+
+- `projectGraph(manifest)`: builds the app's graph from a Dot manifest's projections, without the scan. Returns `{ document, entrypointRoot }`. It merges every journal the app mounts. Each node and edge appears once. Import it when you want the declared graph as data in a browser or an edge runtime.
+- `withEntrypoints(document, scanned, problems)`: adds scan results to a document: an `entrypoint` node per file, a `command` node per command, the `writes` and `calls` edges.
+- `render(document)`: turns a document into the text that `dot explain --as event-map` prints: per event, its writers and consumers with timing, owner, deps and retry; then each workflow's nodes, each entrypoint's commands, and the files the scan could not read.
+- `eventMapMermaid(document)`: the graph as Mermaid `flowchart LR` text, in a stable order, ending in a newline. Arrows follow the data. After-commit links are dotted. Feature nodes and `owned-by` edges are left out.
+- `edgeKey(edge)`: the key that makes an edge unique (`kind from to node label undo`).
+- `EVENT_MAP_NODE_KINDS`: `'event'`, `'entity'`, `'projection'`, `'effect'`, `'tap'`, `'workflow'`, `'feature'`, `'command'`, `'entrypoint'`.
+- `EVENT_MAP_EDGE_KINDS`: `'writes'` (command writes event), `'folds'`, `'projects'`, `'reacts'` (effect, tap or workflow reacts to event; a workflow's `startOn`), `'waits-for'` (workflow waits for event), `'runs'` (workflow runs command; `undo: true` for an undo), `'calls'` (entrypoint imports command), `'owned-by'`. In an edge, `from` is the subject and `to` the object.
+- `EVENT_MAP_TIMINGS`: when a consumer runs: `'same-transaction'` (inside the write) or `'after-commit'`.
+- `EVENT_MAP_DELIVERIES`: how often an after-commit consumer sees an event: `'exactly-once'`, `'at-least-once'` or `'at-most-once'`.
+- Types: `EventMapGraph`, `EventMapNode`, `EventMapEdge`, `EventMapDocument`, `EventMapMeta`, `EventMapProblem`, `EventMapScanEntry`.
+
+From `@arki/journal/event-map` (Node only; it uses `node:fs`):
+
+- `project(manifest, cwd?)`: what Dot loads for `dot explain --as event-map`. It is `projectGraph` plus the scan of the manifest's `entrypointRoot`, resolved against `cwd` (default `process.cwd()`).
+- `scanEntrypoints({ root })`: reads the procedure files under the absolute folder `root`. Returns `{ entries, problems }`.
+- `checkEventMapFile({ file, mermaid, update? })`: compares `mermaid` with the file. Returns `{ state: 'fresh' }`, `{ state: 'written' }` (when `update` is true), or `{ state: 'stale' | 'missing', diff }`.
+- `render`: the same function as in `@arki/journal/projection`.
+
+`journal({ j, entrypointRoot })` sets the folder the scan reads, relative to the folder `dot` runs in (default `'src/features'`).

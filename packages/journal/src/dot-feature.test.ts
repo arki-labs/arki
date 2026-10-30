@@ -2,7 +2,7 @@
  * The journal inside a `defineFeature` feature: projections in `.infra(...)`
  * (`journalProjections`), effects and taps in `.usecases(...)` as an application
  * contribution (`journalHandlers(core, …)`, deps picked with `needsOf`), and the
- * `dot explain --as journal-flow` graph.
+ * `dot explain --as event-map` graph.
  *
  * Why these tests exist: the journal composes BEFORE the features boot, so it
  * must find a feature's handlers in the feature value itself, wherever the
@@ -29,7 +29,7 @@ import type { JobRunner } from './types.js';
 import { journal, journalHandlers, journalProjections, journalWorker, needsOf } from './dot.js';
 import { jobId } from './id.js';
 import { initJournal } from './journal.js';
-import { project, render } from './projection.js';
+import { projectGraph, render } from './projection.js';
 import { customerOrderCounts, j, meta, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
 
 const POLL_MS = 20;
@@ -229,7 +229,7 @@ describe('journalProjections + journalHandlers in a defineFeature feature', () =
   });
 });
 
-describe('dot explain --as journal-flow: the event graph', () => {
+describe('dot explain --as event-map: the event graph', () => {
   // Why: nothing in the code connects a command to the effect its event starts. The graph is the one place
   // a reader sees, per event, what runs in the write and what runs later, who owns it and what it touches.
   function configuredFlow() {
@@ -245,10 +245,10 @@ describe('dot explain --as journal-flow: the event graph', () => {
   it('derives the graph from the declarations before boot: fold, projection, reaction, owner', () => {
     const configured = configuredFlow();
     expect(configured.manifest.projections).toContainEqual(
-      expect.objectContaining({ format: 'journal-flow', module: '@arki/journal/projection', plugin: 'journal' }),
+      expect.objectContaining({ format: 'event-map', module: '@arki/journal/event-map', plugin: 'journal' }),
     );
-    const document = project(configured.manifest);
-    expect(document.format).toBe('journal-flow');
+    const document = projectGraph(configured.manifest).document;
+    expect(document.format).toBe('event-map');
     expect(document.nodes).toEqual(
       expect.arrayContaining([
         { id: 'event:OrderPlaced', kind: 'event', name: 'OrderPlaced' },
@@ -287,7 +287,7 @@ describe('dot explain --as journal-flow: the event graph', () => {
   });
 
   it('prints each event with its fold first, then its projections, then its reactions', () => {
-    const text = render(project(configuredFlow().manifest));
+    const text = render(projectGraph(configuredFlow().manifest).document);
     const placed = text.split('\n\n').find(block => block.startsWith('OrderPlaced'));
     expect(placed?.split('\n')).toEqual([
       'OrderPlaced',
@@ -318,7 +318,7 @@ describe('dot explain --as journal-flow: the event graph', () => {
         journalHandlers(core, { workflows: [started('with-write', 'with-event'), started('later', 'after-commit')] }),
       )
       .entrypoints();
-    const document = project(
+    const { document } = projectGraph(
       orThrow(
         defineApp('starts')
           .infra(dbPlugin())

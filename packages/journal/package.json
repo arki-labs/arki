@@ -77,6 +77,11 @@
       "import": "./dist/projection.js",
       "default": "./dist/projection.js"
     },
+    "./event-map": {
+      "types": "./dist/event-map.d.ts",
+      "import": "./dist/event-map.js",
+      "default": "./dist/event-map.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",

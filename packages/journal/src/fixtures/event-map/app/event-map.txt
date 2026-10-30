@@ -1,0 +1,35 @@
+OrderPlaced
+  written by command place-order  [orders: orders/entrypoints/rpc.ts]
+  fold order  [same transaction]
+  projection order-count  [same transaction]  owner orders
+  effect send-receipt  [after commit, at least once]  owner orders; deps mailer; retry default, 7 retries
+  tap order-feed  [after commit, at most once]  owner orders; deps none; no retry
+  workflow checkout@1 starts  [after commit, at least once]  owner payments; deps none; retry per step
+  workflow reserve-stock@1 starts  [same transaction]  owner payments; deps none; retry per step
+
+OrderCancelled
+  written by command cancel-order  [workflow checkout@1 node notify.push.release; orders: orders/entrypoints/rpc.ts]
+  fold order  [same transaction]
+
+PaymentSettled
+  written by command charge-payment  [workflow checkout@1 node charge; payments: payments/entrypoints/webhook.ts]
+  fold payment  [same transaction]
+  workflow checkout@1 waits as "settled" at node confirm  owner payments; deps none; retry per step
+
+PaymentRefunded
+  written by command refund-payment  [workflow checkout@1 node charge (undo); payments: payments/entrypoints/webhook.ts]
+  fold payment  [same transaction]
+
+Workflow checkout@1
+  node charge  runs command charge-payment
+  node charge  undoes with command refund-payment
+  node confirm  waits for PaymentSettled as "settled"
+  node notify.push.release  runs command cancel-order
+  opaque steps (may run commands, not drawn): notify.mail.send-mail, log
+
+Workflow reserve-stock@1
+  opaque steps (may run commands, not drawn): hold
+
+Entrypoints
+  orders: orders/entrypoints/rpc.ts  imports cancel-order, place-order
+  payments: payments/entrypoints/webhook.ts  imports charge-payment, refund-payment

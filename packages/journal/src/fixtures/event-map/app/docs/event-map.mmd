@@ -1,0 +1,39 @@
+flowchart LR
+  entrypoint_orders_entrypoints_rpc_ts>"orders: orders/entrypoints/rpc.ts"]
+  entrypoint_payments_entrypoints_webhook_ts>"payments: payments/entrypoints/webhook.ts"]
+  command_cancel_order["command cancel-order"]
+  command_charge_payment["command charge-payment"]
+  command_place_order["command place-order"]
+  command_refund_payment["command refund-payment"]
+  event_OrderCancelled(["OrderCancelled"])
+  event_OrderPlaced(["OrderPlaced"])
+  event_PaymentRefunded(["PaymentRefunded"])
+  event_PaymentSettled(["PaymentSettled"])
+  entity_order[("entity order")]
+  entity_payment[("entity payment")]
+  projection_order_count[["projection order-count"]]
+  effect_send_receipt{{"effect send-receipt"}}
+  tap_order_feed{{"tap order-feed"}}
+  workflow_checkout_1[/"workflow checkout@1"/]
+  workflow_reserve_stock_1[/"workflow reserve-stock@1"/]
+  entrypoint_orders_entrypoints_rpc_ts -- "calls" --> command_cancel_order
+  entrypoint_orders_entrypoints_rpc_ts -- "calls" --> command_place_order
+  entrypoint_payments_entrypoints_webhook_ts -- "calls" --> command_charge_payment
+  entrypoint_payments_entrypoints_webhook_ts -- "calls" --> command_refund_payment
+  command_cancel_order -- "writes" --> event_OrderCancelled
+  command_charge_payment -- "writes" --> event_PaymentSettled
+  command_place_order -- "writes" --> event_OrderPlaced
+  command_refund_payment -- "writes" --> event_PaymentRefunded
+  event_OrderCancelled -- "folds: same transaction" --> entity_order
+  event_OrderPlaced -- "folds: same transaction" --> entity_order
+  event_PaymentRefunded -- "folds: same transaction" --> entity_payment
+  event_PaymentSettled -- "folds: same transaction" --> entity_payment
+  event_OrderPlaced -- "projects: same transaction" --> projection_order_count
+  event_OrderPlaced -. "reacts: after commit" .-> effect_send_receipt
+  event_OrderPlaced -. "reacts: after commit" .-> tap_order_feed
+  event_OrderPlaced -. "starts: after commit" .-> workflow_checkout_1
+  event_OrderPlaced -- "starts: same transaction" --> workflow_reserve_stock_1
+  event_PaymentSettled -- "waits-for: confirm, as settled" --> workflow_checkout_1
+  workflow_checkout_1 -- "runs: notify.push.release" --> command_cancel_order
+  workflow_checkout_1 -- "runs: charge" --> command_charge_payment
+  workflow_checkout_1 -- "runs: undo, charge" --> command_refund_payment

@@ -4,5 +4,12 @@
   ],
   "tags": [
     "platform"
-  ]
+  ],
+  "tasks": {
+    "test": {
+      "env": [
+        "EVENT_MAP_UPDATE"
+      ]
+    }
+  }
 }

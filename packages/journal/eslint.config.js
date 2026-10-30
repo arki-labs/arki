@@ -15,10 +15,17 @@ const orpcOnlyInAdapter = {
   message: '`@orpc/server` is an optional peer. Only `src/orpc.ts` may import it, so the core entry loads without it.',
 };
 
-// `src/dot.ts`, `src/orpc.ts`, `src/kurrentdb.ts` and `src/foreman/` are the adapters; `src/test-support.ts` is test scaffolding.
+// `src/dot.ts`, `src/orpc.ts`, `src/kurrentdb.ts`, `src/event-map.ts` (Node-only: it reads the filesystem) and `src/foreman/` are the adapters; `src/test-support.ts` and `src/fixtures/` are test scaffolding.
 export default [
   ...library({
-    adapters: ['src/dot.ts', 'src/orpc.ts', 'src/kurrentdb.ts', 'src/foreman/*.ts', 'src/test-support.ts'],
+    adapters: [
+      'src/dot.ts',
+      'src/orpc.ts',
+      'src/kurrentdb.ts',
+      'src/event-map.ts',
+      'src/foreman/*.ts',
+      'src/test-support.ts',
+    ],
   }),
   // `failure/must-use` and `failure/no-blind-accept`: a returned failure is never thrown away or accepted unchecked.
   failure.configs.recommended,
@@ -30,8 +37,10 @@ export default [
       'src/dot.ts',
       'src/orpc.ts',
       'src/kurrentdb.ts',
+      'src/event-map.ts',
       'src/foreman/*.ts',
       'src/test-support.ts',
+      'src/fixtures/**',
     ],
     rules: {
       'no-restricted-imports': [

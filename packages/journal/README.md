@@ -1962,16 +1962,48 @@ export const orders = logic.entrypoints(rpc(ordersRpcContract, rpcImplementer, p
 - Duplicate names are refused across features, naming both.
 - A reaction that serves several behaviours gets its own business-named file in `usecases/`. A reaction that crosses features belongs to the consuming feature. Keeping a command and its reactions in one file assigns ownership. It never limits who subscribes, and it never implies one transaction.
 
-**The event graph.** `dot explain --as journal-flow` prints, per event, the entity fold, the projections and the reactions. Each line gives the timing, the owner feature, the deps and the retry policy:
+**The event map.** `dot explain --as event-map` prints, per event, who writes it, then what folds, projects, reacts to, starts or waits for it. Each line gives the timing, the owner feature, the deps and the retry policy:
 
 ```text
 OrderPlaced
+  written by command place-order  [orders: orders/entrypoints/rpc.ts]
   fold order  [same transaction]
-  projection placed-count  [same transaction]  owner orders
+  projection order-count  [same transaction]  owner orders
   effect send-receipt  [after commit, at least once]  owner orders; deps mailer; retry default, 7 retries
+  workflow checkout@1 starts  [after commit, at least once]  owner payments; deps none; retry per step
+  workflow reserve-stock@1 starts  [same transaction]  owner payments; deps none; retry per step
 ```
 
-It is derived from the declarations when the app is configured; nothing is collected at runtime. With `--json` it is one graph for the whole app: `nodes` (`event`, `entity`, `projection`, `effect`, `tap`, `workflow`, `feature`) and `edges` that read subject to object (`folds`, `projects`, `reacts`, `owned-by`), each edge to an event with its `timing` and `delivery`. A workflow without `startOn` is listed under "Started by no event".
+After the events, the text lists each workflow's command nodes (with their `undo`) and event waits, each procedure file with the commands it imports, and the files the scan could not read.
+
+Most of the map comes from declarations when the app is configured: the `writes` of each command, the fold, the projections, the handlers' events, `startOn` with its timing, and a workflow's `.command` and `.waitFor` nodes. Nothing is collected at runtime. Commands are not registered anywhere (a procedure imports one and calls `context.run(command, input)`), so the `entrypoint to command` edges come from a scan:
+
+- The scan reads every file under an `entrypoints` folder below `src/features`, relative to the folder `dot` runs in. Pass `journal({ j, entrypointRoot: 'src/modules' })` for another root. Test, spec and `.d.ts` files are skipped.
+- It reads each file's relative `import` statements (`import type` is skipped), imports those modules, and keeps the exports that are journal commands (a `name`, a `writes` list of events and a `handler`). A named import keeps those names, a namespace import keeps every export.
+- A command that is imported and never called still gets an edge. A path alias or a package specifier is not followed. A module that fails to import is listed under "Not scanned" and the rest of the map is drawn.
+- A workflow `.step` that calls `ctx.run` cannot be drawn. The workflow node lists its `.step` names as `opaqueSteps`, and the text prints them. Use a `.command` node for a command that must show on the map.
+- The scan needs `node:fs`, so it lives in the Node-only entry `@arki/journal/event-map`. The portable `@arki/journal/projection` has the types, `render` and `eventMapMermaid`.
+
+With `--json` the output is one graph for the whole app: `nodes` (`event`, `entity`, `projection`, `effect`, `tap`, `workflow`, `feature`, `command`, `entrypoint`) and `edges` that read subject to object (`writes`, `folds`, `projects`, `reacts`, `waits-for`, `runs`, `calls`, `owned-by`), each edge to an event with its `timing` and `delivery`, and each workflow edge with its `node`, `label` and `undo`. A workflow without `startOn` is listed under "Started by no event".
+
+**The Mermaid file.** `eventMapMermaid(document)` draws the same graph as `flowchart LR` text, in an order that depends only on the graph. Keep the file in your docs and let a test hold it fresh:
+
+```ts skip="fragment: part of a test, with an app and its manifest in scope"
+import { checkEventMapFile, project } from '@arki/journal/event-map';
+import { eventMapMermaid } from '@arki/journal/projection';
+
+it('keeps docs/event-map.mmd fresh', async () => {
+  const mermaid = eventMapMermaid(await project(configured.manifest));
+  const checked = await checkEventMapFile({
+    file: 'docs/event-map.mmd',
+    mermaid,
+    update: process.env['EVENT_MAP_UPDATE'] === '1',
+  });
+  expect(checked).toEqual({ state: 'fresh' });
+});
+```
+
+A stale file fails the test and the report shows the diff (`checked.diff`). To regenerate, run `EVENT_MAP_UPDATE=1 bun run test`; the run that writes the file still fails, so an update never passes in CI. Commit the new file.
 
 **The actor.** `actorRun(select)` from `@arki/journal/orpc` is a middleware that adds `context.run`, the journal's runner bound to the request's database and actor. The app's `select` says who the actor is; the journal assumes no session shape.
 

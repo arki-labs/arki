@@ -1,12 +1,18 @@
-import type { z } from 'zod';
 import { describe, expectTypeOf, it } from 'vitest';
+import type { z } from 'zod';
 
-import type { journalFlowGraphSchema } from './journal-flow-schema.js';
-import type { JournalFlowGraph } from './projection.js';
+import type { eventMapDocumentSchema, eventMapGraphSchema, eventMapMetaSchema } from './event-map-schema.js';
+import type { EventMapDocument, EventMapGraph, EventMapMeta } from './projection.js';
 
-describe('the journal-flow graph', () => {
-  it('reads back exactly the type the journal writes: the schema is locked to `JournalFlowGraph`', () => {
-    expectTypeOf<z.output<typeof journalFlowGraphSchema>>().toEqualTypeOf<JournalFlowGraph>();
-    expectTypeOf<JournalFlowGraph>().toEqualTypeOf<z.output<typeof journalFlowGraphSchema>>();
+describe('the event-map graph', () => {
+  it('reads back exactly the type the journal writes: the schemas are locked to the types', () => {
+    expectTypeOf<z.output<typeof eventMapGraphSchema>>().toEqualTypeOf<EventMapGraph>();
+    expectTypeOf<EventMapGraph>().toEqualTypeOf<z.output<typeof eventMapGraphSchema>>();
+    // `EventMapMeta` and `EventMapDocument` extend the graph with an intersection, which `toEqualTypeOf` reads
+    // as a different shape from the schema's flat object; assignable both ways is the same check for them.
+    expectTypeOf<z.output<typeof eventMapMetaSchema>>().toExtend<EventMapMeta>();
+    expectTypeOf<EventMapMeta>().toExtend<z.output<typeof eventMapMetaSchema>>();
+    expectTypeOf<z.output<typeof eventMapDocumentSchema>>().toExtend<EventMapDocument>();
+    expectTypeOf<EventMapDocument>().toExtend<z.output<typeof eventMapDocumentSchema>>();
   });
 });

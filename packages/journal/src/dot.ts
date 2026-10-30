@@ -51,12 +51,15 @@ import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import type { Journal, JournalDefinitions } from './api.js';
 import type {
-  JournalFlowDelivery,
-  JournalFlowEdge,
-  JournalFlowGraph,
-  JournalFlowNode,
-  JournalFlowRetry,
+  EventMapDelivery,
+  EventMapEdge,
+  EventMapGraph,
+  EventMapMeta,
+  EventMapNode,
+  EventMapRetry,
 } from './projection.js';
+import { EVENT_MAP_DEFAULT_ENTRYPOINT_ROOT } from './event-map-kinds.js';
+import { edgeKey } from './projection.js';
 import type {
   AnyEntity,
   DbHandle,
@@ -74,7 +77,7 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
-import type { WorkflowDef, WorkflowServices } from './workflow/define.js';
+import type { ErasedCommand, WorkflowDef, WorkflowNode, WorkflowServices } from './workflow/define.js';
 import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
@@ -340,6 +343,11 @@ export type JournalFeatureOptions<
   readonly j: Pick<JournalDefinitions<Meta, Tx, AppDb>, 'compose'>;
   /** The meta the workflow runner records its checkpoints with. Required when a feature declares workflows. */
   readonly workflowMeta?: SchemaInput<Meta>;
+  /**
+   * The folder `dot explain --as event-map` scans for procedure files, relative to the folder `dot` runs in.
+   * Default `src/features`: the scan reads every `entrypoints/` folder under it.
+   */
+  readonly entrypointRoot?: string;
 };
 
 export type JournalPlugin<
@@ -453,7 +461,7 @@ const handlersOf = (contribution: AnyApplicationContribution): unknown =>
   'handlers' in contribution ? contribution.handlers : undefined;
 
 /** An effect's retry policy, as the graph shows it: JSON has no `Infinity`, so no limit is `null`. */
-function retryOf(effect: Effect<unknown, RootDb, Needs>): JournalFlowRetry {
+function retryOf(effect: Effect<unknown, RootDb, Needs>): EventMapRetry {
   const retry = effect.schedule.retry ?? defaultEffectRetry;
   return {
     policy: effect.schedule.retry === undefined ? 'default' : 'custom',
@@ -461,20 +469,53 @@ function retryOf(effect: Effect<unknown, RootDb, Needs>): JournalFlowRetry {
   };
 }
 
+/** The `.step` nodes of a workflow, by name; a branch's steps are named `parallel.branch.step`. */
+function opaqueStepsOf(nodes: readonly WorkflowNode[], prefix = ''): string[] {
+  return nodes.flatMap(item =>
+    item.kind === 'step'
+      ? [`${prefix}${item.name}`]
+      : item.kind === 'parallel'
+        ? item.branches.flatMap(branch => opaqueStepsOf(branch.def.nodes, `${prefix}${item.name}.${branch.name}.`))
+        : [],
+  );
+}
+
+/** What a workflow's nodes declare, for the event map: the commands its command nodes run, and the events its waits wait for. */
+function workflowEdges(
+  nodes: readonly WorkflowNode[],
+  prefix: string,
+  found: {
+    readonly runs: (node: string, command: ErasedCommand, undo: boolean) => void;
+    readonly waits: (node: string, label: string, entity: AnyEntity, type: string) => void;
+  },
+): void {
+  for (const item of nodes) {
+    const path = `${prefix}${item.name}`;
+    if (item.kind === 'command') {
+      found.runs(path, item.command, false);
+      if (item.options.undo !== undefined) found.runs(path, item.options.undo.command, true);
+    }
+    if (item.kind === 'eventWait')
+      for (const source of item.on) for (const event of source.events) found.waits(path, source.label, source.entity, event.type);
+    if (item.kind === 'parallel')
+      for (const branch of item.branches) workflowEdges(branch.def.nodes, `${path}.${branch.name}.`, found);
+  }
+}
+
 /**
- * The app's event graph for `dot explain --as journal-flow`, from the features' declarations alone:
+ * The app's event graph for `dot explain --as event-map`, from the features' declarations alone:
  * each entity and the events it folds, each projection and the events it reads, each effect, tap and
  * workflow and the events it reacts to, and the feature that owns each handler. Nothing runs and
  * nothing is collected at runtime. A declaration the boot would refuse is left out: the boot names it.
  */
-function journalFlow(features: readonly AnyDefinedFeature[]): JournalFlowGraph {
-  const nodes = new Map<string, JournalFlowNode>();
-  const edges = new Map<string, JournalFlowEdge>();
-  const node = (added: JournalFlowNode): string => {
+function eventMap(features: readonly AnyDefinedFeature[]): EventMapGraph {
+  const nodes = new Map<string, EventMapNode>();
+  const edges = new Map<string, EventMapEdge>();
+  const node = (added: EventMapNode): string => {
     if (!nodes.has(added.id)) nodes.set(added.id, added);
     return added.id;
   };
-  const edge = (added: JournalFlowEdge): void => void edges.set(`${added.kind} ${added.from} ${added.to}`, added);
+  const edge = (added: EventMapEdge): void => void edges.set(edgeKey(added), added);
   const eventNode = (type: string): string => node({ id: `event:${type}`, kind: 'event', name: type });
   const entityNode = (entity: AnyEntity): void => {
     const id = node({ id: `entity:${entity.kind}`, kind: 'entity', name: entity.kind, table: getTableName(entity.table) });
@@ -482,7 +523,13 @@ function journalFlow(features: readonly AnyDefinedFeature[]): JournalFlowGraph {
     // The fold runs in the write itself: the entity row and the event commit together.
     for (const type of entity.reducers.keys()) edge({ kind: 'folds', from: id, to: eventNode(type), timing: 'same-transaction' });
   };
-  const reacts = (from: string, types: Iterable<string>, delivery: JournalFlowDelivery): void => {
+  /** A command a workflow runs, with the events it writes: found through the workflow even when no procedure imports it. */
+  const commandNode = (command: ErasedCommand): string => {
+    const id = node({ id: `command:${command.name}`, kind: 'command', name: command.name });
+    for (const written of command.writes) edge({ kind: 'writes', from: id, to: eventNode(written.type) });
+    return id;
+  };
+  const reacts = (from: string, types: Iterable<string>, delivery: EventMapDelivery): void => {
     for (const type of types) edge({ kind: 'reacts', from, to: eventNode(type), timing: 'after-commit', delivery });
   };
   /** A `with-event` workflow: the run is written in the event's transaction, so it needs no delivery word. */
@@ -528,6 +575,17 @@ function journalFlow(features: readonly AnyDefinedFeature[]): JournalFlowGraph {
           version: def.version,
           deps: Object.keys(def.needs),
           signals: signalsOf(def),
+          opaqueSteps: opaqueStepsOf(def.nodes),
+        });
+        workflowEdges(def.nodes, '', {
+          runs: (node, command, undo) => {
+            const commandId = commandNode(command);
+            edge(undo ? { kind: 'runs', from: id, to: commandId, node, undo: true } : { kind: 'runs', from: id, to: commandId, node });
+          },
+          waits: (node, label, entity, type) => {
+            entityNode(entity);
+            edge({ kind: 'waits-for', from: id, to: eventNode(type), node, label });
+          },
         });
         if (def.startOn !== undefined) {
           entityNode(def.startOn.entity);
@@ -595,17 +653,17 @@ function journalNeeds<Tx extends TransactionSource<Tx>, AppDb extends RootDb>() 
 }
 
 /**
- * The journal unit's manifest entries, in both modes. `flow` is the graph `dot explain --as journal-flow`
+ * The journal unit's manifest entries, in both modes. `flow` is the graph `dot explain --as event-map`
  * prints: in feature mode it is derived from the features' declarations; a journal the app composed
  * itself has no feature to read it from.
  */
-function registerJournal(ctx: DotConfigureContext, flow?: JournalFlowGraph): void {
+function registerJournal(ctx: DotConfigureContext, flow?: EventMapMeta): void {
   ctx.registerService('journal', 'custom');
   ctx.declareProvides('journal');
   ctx.registerProjection({
-    format: 'journal-flow',
+    format: 'event-map',
     binding: 'journal',
-    module: '@arki/journal/projection',
+    module: '@arki/journal/event-map',
     ...(flow === undefined ? {} : { meta: flow }),
   });
 }
@@ -629,12 +687,12 @@ function journalFromFeatures<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
->({ j, workflowMeta }: JournalFeatureOptions<Meta, Tx, AppDb>) {
+>({ j, workflowMeta, entrypointRoot = EVENT_MAP_DEFAULT_ENTRYPOINT_ROOT }: JournalFeatureOptions<Meta, Tx, AppDb>) {
   return infra.fromFeatures({
     name: 'journal',
     needs: journalNeeds<Tx, AppDb>(),
     configure(ctx) {
-      registerJournal(ctx, journalFlow(ctx.$features));
+      registerJournal(ctx, { ...eventMap(ctx.$features), entrypointRoot });
     },
     provides: {
       journal: ({ $features }) =>
