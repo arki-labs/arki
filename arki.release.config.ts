@@ -113,6 +113,7 @@ export const config: ReleaseConfig = {
         '@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live',
         '@arki/lock', '@arki/mail', '@arki/auth', '@arki/schedule', '@arki/queue',
         '@arki/testing',
+        '@arki/tanstack-start',
       ],
     },
     {

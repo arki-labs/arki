@@ -284,5 +284,18 @@
   ],
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "homepage": "https://arki.dev",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "ai",
+    "llm",
+    "embeddings",
+    "rag",
+    "agents"
+  ]
 }

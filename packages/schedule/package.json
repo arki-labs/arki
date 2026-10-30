@@ -120,5 +120,13 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "cron",
+    "schedule",
+    "interval",
+    "jobs"
+  ]
 }

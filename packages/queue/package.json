@@ -149,5 +149,15 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "queue",
+    "jobs",
+    "background-jobs",
+    "bullmq",
+    "pg-boss",
+    "outbox"
+  ]
 }

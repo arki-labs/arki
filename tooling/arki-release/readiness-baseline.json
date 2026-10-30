@@ -1,203 +1,84 @@
 {
   "@arki/async": [
-    "file-changelog",
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/auth": [
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-keywords",
     "pkg-homepage",
     "pkg-engines"
   ],
-  "@arki/bench": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "files-ship-dist-docs"
-  ],
   "@arki/cas": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/clock": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/contracts": [
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-engines"
   ],
   "@arki/date": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/db": [
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-engines"
   ],
   "@arki/dot": [
-    "file-agents-md",
     "pkg-engines"
   ],
   "@arki/env": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/expr": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/failure": [
-    "file-changelog",
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/http": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/icons": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/journal": [
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-engines"
   ],
   "@arki/kv": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/lock": [
-    "file-changelog",
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/log": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/mail": [
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-keywords",
     "pkg-homepage",
     "pkg-engines"
   ],
   "@arki/math": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/money": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/payments": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/resilience": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/schema": [
-    "file-changelog",
-    "file-agents-md",
-    "readme-h2-order",
     "pkg-engines"
   ],
   "@arki/string": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/ts": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ],
   "@arki/ui": [
-    "file-llms-txt",
-    "file-agents-md",
-    "file-agent-guide",
-    "readme-h2-order",
-    "pkg-engines",
-    "files-ship-dist-docs"
+    "pkg-engines"
   ]
 }
