@@ -2,6 +2,8 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // One call per feature, plus one past 2^53; the unit tests cover the details.
 
+import { isFailure } from '@arki/failure';
+
 import { MoneyBag } from '../dist/bag.js';
 import { toRational } from '../dist/exact.js';
 import { createConverter, ratesFrom } from '../dist/exchange.js';
@@ -21,6 +23,11 @@ const converter = createConverter(ratesFrom({ base: 'EUR', rates: { USD: '1.0832
 const hasFormatToParts = typeof Intl.NumberFormat.prototype.formatToParts === 'function';
 const deSymbols = { decimal: ',', group: '.', currency: ['€'] };
 const enSymbols = { decimal: '.', group: ',' };
+// Parsers return a failure for bad text; builders throw. `failureCode` names what a parser returned.
+const failureCode = run => {
+  const result = run();
+  return isFailure(result) ? result.code : 'accepted';
+};
 const errorName = fn => {
   try {
     fn();
@@ -58,11 +65,11 @@ const checks = [
   ['JSON', JSON.stringify(money('1.5', 'EUR')), '{"amount":"1.50","currency":"EUR"}'],
   ['rational bridge', toRational(money('19.90', 'EUR')).toString(), '199/10'],
   // Hermes on Apple has Intl.NumberFormat but no formatToParts: locale parsing must
-  // fail with a typed error, and the Intl-free `symbols` path must still work.
+  // throw a typed error (a runtime gap, not bad text), and the Intl-free `symbols` path must still work.
   ...(hasFormatToParts
     ? [
         ['parse de-DE', parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' }).toString(), '1234.56 EUR'],
-        ['parse strict', errorName(() => parseMoney('1,23,4', 'USD')), 'NumberFormatError'],
+        ['parse strict', failureCode(() => parseMoney('1,23,4', 'USD')), 'money.invalid_text'],
       ]
     : [
         [
@@ -71,7 +78,7 @@ const checks = [
           'UnsupportedFeatureError',
         ],
         ['parse with symbols', parseMoney('1.234,56 €', 'EUR', { symbols: deSymbols }).toString(), '1234.56 EUR'],
-        ['parse strict', errorName(() => parseMoney('1,23,4', 'USD', { symbols: enSymbols })), 'NumberFormatError'],
+        ['parse strict', failureCode(() => parseMoney('1,23,4', 'USD', { symbols: enSymbols })), 'money.invalid_text'],
       ]),
   [
     'convert via base',

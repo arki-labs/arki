@@ -3,6 +3,8 @@
 // It exercises each export once, plus a 256-deep expression (RFC §18); the
 // unit tests cover the details.
 
+import { isFailure } from '@arki/failure';
+
 import { evaluate as evaluateComplex } from '../dist/complex.js';
 import { evaluate as evaluateDecimal } from '../dist/decimal.js';
 import { compile, evaluate } from '../dist/float.js';
@@ -21,24 +23,15 @@ import {
 import { toLatex } from '../dist/latex.js';
 import { evaluate as evaluateRational } from '../dist/rational.js';
 
+// Parsers and evaluate(text) return a failure; `code` names it and its cause.
+const detail = cause =>
+  cause instanceof ParseError ? cause.code : cause instanceof ExprLimitError ? cause.budget : cause.message;
 const code = run => {
-  try {
-    run();
-    return 'none';
-  } catch (error) {
-    return error instanceof ParseError ? error.code : error instanceof ExprLimitError ? error.budget : 'other';
-  }
+  const result = run();
+  return isFailure(result) ? `${result.code}:${detail(result.cause)}` : 'none';
 };
 
 const deep = `${'('.repeat(255)}x${')'.repeat(255)}`;
-const message = run => {
-  try {
-    run();
-    return 'none';
-  } catch (error) {
-    return error instanceof Error ? error.message : 'other';
-  }
-};
 const gaps = compile(parse('1/x'), { variables: ['x'] }).sample(new Float64Array([0, 2]), new Float64Array(2));
 
 const physics = defineLanguage({ extends: scientific, functions: { hypot: { arity: [2, 16] } } });
@@ -51,23 +44,23 @@ const checks = [
   ['names', names(parse('pi*x + |y|')).variables.join(), 'x,y'],
   ['host language', print(parse('hypot(3, 4)', { language: physics })), 'hypot(3, 4)'],
   ['fromJSON', print(fromJSON(JSON.parse(JSON.stringify(parse('1/2x'))))), '1 / 2 * x'],
-  ['not a function', code(() => parse('foo(x)')), 'not-a-function'],
-  ['unbalanced bar', code(() => parse('|x|y|')), 'unbalanced-bar'],
+  ['not a function', code(() => parse('foo(x)')), 'expr.invalid_text:not-a-function'],
+  ['unbalanced bar', code(() => parse('|x|y|')), 'expr.invalid_text:unbalanced-bar'],
   ['256-deep expression', print(parse(deep)), deep],
   ['float evaluate', evaluate('2^10 - 1'), 1023],
   ['float degrees', evaluate('sin(90)', { angle: 'deg' }), 1],
   ['float 256-deep expression', compile(parse(deep), { variables: ['x'] }).at(3), 3],
-  ['float typed error', message(() => evaluate('1/0')), 'Division by zero: 1 / 0'],
+  ['float typed error', code(() => evaluate('1/0')), 'expr.no_value:Division by zero: 1 / 0'],
   ['float sample gap', `${gaps[0]},${gaps[1]}`, 'NaN,0.5'],
   ['latex', toLatex(parse('sqrt(x)/2')), '\\frac{\\sqrt{x}}{2}'],
   ['decimal evaluate', evaluateDecimal('0.1 + 0.2 + 10/3', { scale: 2, rounding: 'halfEven' }).toString(), '3.63'],
   ['rational evaluate', evaluateRational('8^(2/3) + 1/3').toString(), '13/3'],
-  ['rational digits budget', code(() => evaluateRational('9^9^9')), 'digits'],
+  ['rational digits budget', code(() => evaluateRational('9^9^9')), 'expr.over_budget:digits'],
   ['complex principal branch', `${evaluateComplex('sqrt(-4)')} ${evaluateComplex('ln(-1)')}`, '2i 3.141592653589793i'],
   [
     '100 000 parentheses',
     code(() => parse(`${'('.repeat(100000)}x`, { limits: { length: 200000, tokens: 200000 } })),
-    'depth',
+    'expr.over_budget:depth',
   ],
 ];
 

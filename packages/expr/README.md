@@ -99,6 +99,9 @@ Every input has a budget. A text or stored AST that goes over one is returned as
 
 `sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal, root + rational and root + complex ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational, ≈ 13 kB complex).
 
+**Size budgets re-baselined 2026-10-30** (founder decision). `.size-limit.json` limits are the measured gzip size rounded up to the next 100 B, plus 5%, rounded up to the next 50 B; the figures quoted in the sentence above are the older ones. Why: typed parse failures from @arki/failure add the defineFailure core to entries that parse. Commits: 5d5b7b14a1, 420db90f62, 8323e0c892, 0b70840f74.
+
+
 Boundary example: a text of 10 001 characters returns `ExpressionOverBudget` whose `cause` is an `ExprLimitError` with `budget: 'length'`, `limit: 10000` and `actual: 10001`. A text of 10 000 characters parses.
 
 ```ts run

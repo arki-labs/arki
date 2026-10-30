@@ -5,24 +5,29 @@
 
 import { gzipSync } from 'node:zlib';
 
-// Bytes after minify + gzip, each including the core it imports. Measured
-// 2026-10-12 plus about 8% headroom. Raise a budget only on purpose.
+// Bytes after minify + gzip, each including the core it imports.
+// Re-baselined 2026-10-30 (founder decision). Rule: measured gzip size rounded
+// up to the next 100 B, plus 5%, rounded up to the next 50 B.
+// Why: typed parse failures from @arki/failure add the defineFailure core to
+// entries that parse; money budgets were already stale since 2026-10-12.
+// Commits: 5d5b7b14a1, 420db90f62, 8323e0c892, 0b70840f74.
+// Raise a budget only on purpose.
 const BUDGETS = {
-  index: 6800,
-  currency: 2500,
-  errors: 600,
-  format: 1200,
-  exact: 4400,
-  parse: 7800,
-  exchange: 7500,
-  provider: 6600,
-  stripe: 7000,
-  rational: 10_200,
-  bag: 10_700,
-  zod: 8300,
-  'drizzle/pg': 6900,
-  'drizzle/mysql': 6900,
-  'drizzle/sqlite': 6900,
+  index: 9250,
+  currency: 3900,
+  errors: 1300,
+  format: 1500,
+  exact: 6450,
+  parse: 10000,
+  exchange: 9900,
+  provider: 8950,
+  stripe: 9350,
+  rational: 13450,
+  bag: 13900,
+  zod: 10300,
+  'drizzle/pg': 9150,
+  'drizzle/mysql': 9150,
+  'drizzle/sqlite': 9150,
 };
 
 async function gzipSize(entry) {
