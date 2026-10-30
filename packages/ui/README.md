@@ -85,7 +85,7 @@ Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStac
 
 ## Public imports
 
-There is no root import. Every component is its own subpath: `@arki/ui/button`, `@arki/ui/dialog`, `@arki/ui/select`, `@arki/ui/table`, `@arki/ui/chart`. [`llms.txt`](./llms.txt) lists all of them with their names.
+There is no root import. Every component is its own subpath: `@arki/ui/button`, `@arki/ui/dialog`, `@arki/ui/select`, `@arki/ui/table`, `@arki/ui/chart`. [`llms.txt`](./llms.txt) lists all of them with their names. The [component reference](./docs/components.md) says what each export is for.
 
 | Group | Subpaths |
 | --- | --- |

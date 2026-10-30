@@ -11,4 +11,5 @@
 ## Start here
 - [Agent guide](docs/agent-guide.md): read first for tasks and rules. No root import; unstyled output means `@source` is missing; one design system per app.
 ## By task
+- [Component reference](docs/components.md): every export grouped by purpose (forms, overlays, menus, feedback, layout, data display, hooks), with what it renders.
 ## Rules that bite
