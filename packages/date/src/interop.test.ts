@@ -69,3 +69,23 @@ describe('systemTimeZone', () => {
     expect(() => zoned(instant('2026-01-01T00:00Z'), systemTimeZone())).not.toThrow();
   });
 });
+
+describe('fromPickerDate failure codes', () => {
+  it('returns date.invalid_native_date with status 400 for an Invalid Date, in every basis', () => {
+    for (const basis of [{ basis: 'local' }, { basis: 'utc' }, { basis: 'zone', timeZone: 'UTC' }] as const) {
+      expect(fromPickerDateResult(new Date(Number.NaN), basis)).toMatchObject({
+        code: 'date.invalid_native_date',
+        status: 400,
+        data: { reason: 'invalid_date' },
+      });
+    }
+  });
+
+  it('returns date.unknown_time_zone with status 400 for an unknown zone basis', () => {
+    expect(fromPickerDateResult(new Date(0), { basis: 'zone', timeZone: 'Mars/Olympus' })).toMatchObject({
+      code: 'date.unknown_time_zone',
+      status: 400,
+      data: { timeZone: 'Mars/Olympus', truncated: false },
+    });
+  });
+});

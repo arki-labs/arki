@@ -22,7 +22,7 @@ import { FILE_ERROR_CODES, isFileStorageError } from '../files/errors.js';
 import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
 import { fileRecord } from '../files/schemas.js';
 import { fileId } from '../files/types.js';
-import { StorageUnavailable, StorageWriteUncertain } from '../storage/failures.js';
+import { StorageRejected, StorageUnavailable, StorageWriteUncertain } from '../storage/failures.js';
 import { memoryUploadAdapter } from '../testing.js';
 import { toFileRecord } from './record.js';
 
@@ -217,6 +217,33 @@ export function describeFileStorage(label: string, harness: StorageHarness) {
         const first = await env.storage.confirmUpload(alice, ticket.fileId);
         const second = await env.storage.confirmUpload(alice, ticket.fileId);
         expect(second).toEqual(first);
+      });
+
+      it('returns StorageUnavailable when the object store cannot be read, and keeps the row pending', async () => {
+        const env = setup();
+        const ticket = await upload(env);
+        const broken = harness.storage(
+          {
+            ...env.adapter,
+            getMetadata: () => Promise.reject(Object.assign(new Error('store down'), { code: 'ECONNRESET' })),
+          },
+          { bucket: 'uploads', limits: { maxSize: 1000, allowedMime: ['text/*'] } },
+        );
+        expect(await codeOf(broken.confirmUpload(alice, ticket.fileId))).toBe(StorageUnavailable.code);
+        expect(await row(ticket.fileId)).toHaveProperty('status', 'pending');
+        expect(await env.storage.confirmUpload(alice, ticket.fileId)).toHaveProperty('status', 'ready');
+      });
+
+      it('returns a refusal the adapter returned as it is, and does not mark the row ready', async () => {
+        const env = setup();
+        const ticket = await upload(env);
+        const refusal = StorageRejected();
+        const refusing = harness.storage(
+          { ...env.adapter, getMetadata: () => Promise.resolve(refusal) },
+          { bucket: 'uploads', limits: { maxSize: 1000, allowedMime: ['text/*'] } },
+        );
+        expect(await refusing.confirmUpload(alice, ticket.fileId)).toBe(refusal);
+        expect(await row(ticket.fileId)).toHaveProperty('status', 'pending');
       });
 
       it('returns UploadPending before the PUT finished and keeps the row pending', async () => {

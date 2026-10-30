@@ -159,6 +159,18 @@ describe('file store', () => {
   });
 });
 
+describe('file store outages', () => {
+  it('acquire returns lock.store with unknown ownership, never contention or a grant, when the lock directory is a regular file', async () => {
+    const blocked = nodePath.join(dir, 'not-a-directory');
+    await writeFile(blocked, 'x');
+    const store = fileStore(blocked);
+    expect(await store.acquire(key('outage'), { token: lockTokenSchema.parse('t') })).toMatchObject({
+      code: 'lock.store',
+      data: { method: 'acquire', outcome: 'unknown' },
+    });
+  });
+});
+
 describe('file store chaos', () => {
   it('frees a SIGKILLed holder only after stale: a crashed process must not block the key forever, nor be stolen early', async () => {
     const stale = 800;

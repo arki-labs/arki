@@ -363,3 +363,41 @@ describe('agrees with date-fns parse when every field is present', () => {
     }
   });
 });
+
+describe('parse failures keep their exact code and reason', () => {
+  // One row per reason a pattern reader can give; the code and the operation are part of the contract.
+  const CASES = [
+    ['no_match', 'parseDate', () => parsers.parseDate('abc', 'yyyy-MM-dd')],
+    ['trailing_text', 'parseDate', () => parsers.parseDate('2026-05-20 x', 'yyyy-MM-dd')],
+    ['invalid_date', 'parseDate', () => parsers.parseDate('2026-02-30', 'yyyy-MM-dd')],
+    ['weekday_mismatch', 'parseDate', () => parsers.parseDate('Mon, 2026-05-20', 'EEE, yyyy-MM-dd')],
+    ['invalid_time', 'parseDateTime', () => parsers.parseDateTime('2026-05-20 25:00', 'yyyy-MM-dd HH:mm')],
+    ['conflicting_tokens', 'parseDateTime', () => parsers.parseDateTime('2026-05-20 13:00 AM', 'yyyy-MM-dd HH:mm a')],
+    [
+      'invalid_wall_time',
+      'parseZoned',
+      () => parsers.parseZoned('2026-03-29 03:30', 'yyyy-MM-dd HH:mm', BUCHAREST, { disambiguation: 'reject' }),
+    ],
+    [
+      'offset_out_of_range',
+      'parseZoned',
+      () => parsers.parseZoned('2026-05-20 10:00 +25:00', 'yyyy-MM-dd HH:mm xxx', 'UTC'),
+    ],
+  ] as const;
+
+  it.each(CASES)('%s from %s is date.invalid_text with status 400', (reason, operation, run) => {
+    const result = run();
+    expect(InvalidDateText.is(result)).toBe(true);
+    expect(result).toMatchObject({ code: 'date.invalid_text', status: 400, data: { operation, reason } });
+  });
+
+  it('keeps a bounded copy of long text and says it was cut', () => {
+    const data = textFailure(parsers.parseDate('x'.repeat(500), 'yyyy-MM-dd'));
+    expect(data.input).toHaveLength(64);
+    expect(data.truncated).toBe(true);
+  });
+
+  it('still throws for a bad pattern, which is a caller bug', () => {
+    expect(() => parsers.parseDate('2026-05-20', 'yyyy-MM')).toThrow(RangeError);
+  });
+});

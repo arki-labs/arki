@@ -28,4 +28,13 @@ describe('createDb', () => {
     expect(db.$client.options.connectionString).toBe(url);
     await db.$client.end();
   });
+
+  it('throws a configuration Error that names DB_URL, before any pool exists, when neither `url` nor DB_URL is set', async () => {
+    delete process.env['DB_URL'];
+    delete process.env['DATABASE_URL'];
+    vi.resetModules();
+    const { createDb } = await import('./factory.js');
+
+    expect(() => createDb({ relations: {} })).toThrow(/DB_URL/);
+  });
 });

@@ -7,12 +7,13 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { serialize } from '@arki/failure';
 import { buildEngine, route, routes, step } from '@arki/http';
 import { createClient } from '@arki/http/client';
 
 import type { TestAuth } from './testing/index.js';
 import { authTables } from './__fixtures__/tables.js';
-import { AccessDenied, AUTH_FAILURES, AuthenticationRequired } from './boundary-failures.js';
+import { AccessDenied, AUTH_FAILURES, AuthenticationRequired, checkPrincipal, requirePrincipal, resolvePrincipal } from './boundary-failures.js';
 import { defineAuth } from './definition.js';
 import { AUTH_ERROR_CODES, AuthError } from './errors.js';
 import { authFailureHeaders, principalFromHeaders } from './http.js';
@@ -158,5 +159,45 @@ describe('canonical auth boundaries', () => {
         data: { retryAfter: 7 },
       },
     });
+  });
+});
+
+describe('resolvePrincipal on the error a principal source throws', () => {
+  const failWith = (error: unknown) => resolvePrincipal({ principal: () => Promise.reject(error) }, new Headers());
+
+  it('a store outage is auth.unavailable (503) and keeps its private cause off the failure data', async () => {
+    const outage = new AuthError(AUTH_ERROR_CODES.storeUnavailable, 'pg host db-7 refused');
+    const failure = await failWith(outage);
+    expect(failure).toMatchObject({ code: 'auth.unavailable', status: 503 });
+    expect(JSON.stringify(serialize(failure, AUTH_FAILURES))).not.toContain('db-7');
+  });
+
+  it('an unknown error is failure.unexpected_defect, never a signed-out answer', async () => {
+    expect(await failWith(new Error('boom'))).toMatchObject({ code: 'failure.unexpected_defect' });
+  });
+
+  it('an expired session is auth.unauthenticated (401) and a revoked right is auth.forbidden (403)', async () => {
+    expect(await failWith(new AuthError(AUTH_ERROR_CODES.unauthenticated, 'expired'))).toMatchObject({
+      code: 'auth.unauthenticated',
+    });
+    expect(await failWith(new AuthError(AUTH_ERROR_CODES.forbidden, 'no'))).toMatchObject({ code: 'auth.forbidden' });
+  });
+});
+
+describe('requirePrincipal and checkPrincipal return the failure as a value', () => {
+  const principal = { user: { id: 'usr_1', emailVerified: false }, roles: ['member'] } as unknown as Parameters<
+    typeof checkPrincipal
+  >[0];
+
+  it('a missing principal is auth.unauthenticated (401) from both', () => {
+    expect(requirePrincipal(null)).toMatchObject({ code: 'auth.unauthenticated', status: 401 });
+    expect(checkPrincipal(null)).toMatchObject({ code: 'auth.unauthenticated', status: 401 });
+  });
+
+  it('an unverified email or a missing role is auth.forbidden (403), and a passing principal comes back as is', () => {
+    expect(checkPrincipal(principal, { verified: true })).toMatchObject({ code: 'auth.forbidden', status: 403 });
+    expect(checkPrincipal(principal, { role: 'admin' })).toMatchObject({ code: 'auth.forbidden', status: 403 });
+    expect(checkPrincipal(principal, { role: 'member' })).toBe(principal);
+    expect(requirePrincipal(principal)).toBe(principal);
   });
 });

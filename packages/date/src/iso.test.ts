@@ -106,3 +106,27 @@ describe('parseISO — semantics', () => {
     expect(UnknownTimeZone.is(result) && result.data.timeZone).toBe('Mars/Olympus');
   });
 });
+
+describe('parseISO — failure codes', () => {
+  it('returns date.invalid_text with status 400 and the not_iso reason', () => {
+    expect(parseISOResult('not a date')).toMatchObject({
+      code: 'date.invalid_text',
+      status: 400,
+      data: { operation: 'parseISO', reason: 'not_iso', input: 'not a date', truncated: false },
+    });
+  });
+
+  it('returns date.unknown_time_zone with status 400 for an unknown zone option', () => {
+    expect(parseISOResult('2026-05-20', { timeZone: 'Mars/Olympus' })).toMatchObject({
+      code: 'date.unknown_time_zone',
+      status: 400,
+      data: { timeZone: 'Mars/Olympus', truncated: false },
+    });
+  });
+
+  it('bounds the copy of long bad text', () => {
+    const failure = parseISOResult('9'.repeat(300));
+    expect(InvalidDateText.is(failure) && failure.data.input.length).toBe(64);
+    expect(InvalidDateText.is(failure) && failure.data.truncated).toBe(true);
+  });
+});

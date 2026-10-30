@@ -10,7 +10,7 @@
  */
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { defineRelations } from 'drizzle-orm';
+import { defineRelations, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -138,6 +138,32 @@ describe('segment criteria', () => {
     const updated = await service.updateSegment(good.id, { criteria: bad });
     expect(UnknownCurrency.is(updated)).toBe(true);
     expect((await service.getSegment(good.id))?.criteria).toEqual({});
+  });
+
+  it('a segment stored with a range money refuses makes every method that reads it return the failure', async () => {
+    const [stored] = await db
+      .insert(tables.customerSegments)
+      .values({
+        name: 'Stored bad range',
+        type: 'custom',
+        criteria: { totalSpent: { min: { amount: '10', currency: 'ZZZ' } } },
+        autoUpdate: false,
+        updateFrequency: 24,
+        createdBy: 'usr_admin',
+      })
+      .returning();
+    if (!stored) throw new Error('the segment was not stored');
+    const buyer = await newCustomer('badsegment');
+    await pay(buyer, 1000);
+
+    try {
+      expect(UnknownCurrency.is(await service.updateSegmentCustomerCount(stored.id))).toBe(true);
+      expect(UnknownCurrency.is(await service.getCustomersInSegment(stored.id))).toBe(true);
+      expect(UnknownCurrency.is(await service.getCustomerSegments(buyer.id))).toBe(true);
+      expect(UnknownCurrency.is(await service.updateCustomerRiskProfile(buyer.id))).toBe(true);
+    } finally {
+      await db.delete(tables.customerSegments).where(eq(tables.customerSegments.id, stored.id));
+    }
   });
 
   it('planTier: customers on a plan of that tier match', async () => {

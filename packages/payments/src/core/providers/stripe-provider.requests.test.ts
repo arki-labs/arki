@@ -15,7 +15,8 @@ import { money } from '@arki/money';
 
 import type { Customer, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
-import { createCustomerId, createPlanId, createSubscriptionId } from '../primitives.js';
+import { createRefundId } from '../../refunds/primitives.js';
+import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
@@ -439,5 +440,180 @@ describe('ID failure before charge requests', () => {
       ),
     ).toBe(true);
     expect(http.requests).toHaveLength(0);
+  });
+});
+
+/**
+ * T08 ledger proof: every provider call that takes one of our ids returns `ReferenceNotFound` for an id with no row,
+ * before any Stripe request. A call that asks Stripe to move money returns `CardDeclined` or `IdempotencyConflict`
+ * when Stripe says so. Each row is asserted by its exact failure code.
+ */
+describe('failures returned by every call that takes our ids', () => {
+  const unknownCustomerId = orThrow(createCustomerId());
+  const unknownPlanId = orThrow(createPlanId());
+  const unknownSubscriptionId = orThrow(createSubscriptionId());
+
+  const missingCustomerCalls = {
+    updateCustomer: (stripe: StripeProvider) => stripe.updateCustomer(unknownCustomerId, { name: 'x' }),
+    deleteCustomer: (stripe: StripeProvider) => stripe.deleteCustomer(unknownCustomerId),
+    listPaymentMethods: (stripe: StripeProvider) => stripe.listPaymentMethods(unknownCustomerId),
+    setDefaultPaymentMethod: (stripe: StripeProvider) =>
+      stripe.setDefaultPaymentMethod({ customerId: unknownCustomerId, paymentMethodId: 'pm_1' }),
+    attachPaymentMethod: (stripe: StripeProvider) =>
+      stripe.attachPaymentMethod({ customerId: unknownCustomerId, paymentMethodId: 'pm_1' }),
+    createSetupIntent: (stripe: StripeProvider) => stripe.createSetupIntent(unknownCustomerId),
+    createPaymentIntent: (stripe: StripeProvider) =>
+      stripe.createPaymentIntent({
+        customerId: unknownCustomerId,
+        amount: money('9.99', 'USD'),
+        paymentMethodId: 'pm_1',
+        automatic: true,
+      }),
+    createPayment: (stripe: StripeProvider) =>
+      stripe.createPayment({ customerId: unknownCustomerId, amount: money('9.99', 'USD'), paymentMethodId: 'pm_1' }),
+    createSubscription: (stripe: StripeProvider) =>
+      stripe.createSubscription({ customerId: unknownCustomerId, planId: proPlan.id }),
+  };
+
+  it.each(Object.entries(missingCustomerCalls))('%s returns ReferenceNotFound for an unknown customer', async (_name, call) => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const result = await call(stripe);
+
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: unknownCustomerId, missing: 'row' },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  const missingPlanCalls = {
+    updatePlan: (stripe: StripeProvider) => stripe.updatePlan(unknownPlanId, { name: 'x' }),
+    deletePlan: (stripe: StripeProvider) => stripe.deletePlan(unknownPlanId),
+    updateSubscriptionToUnknownPlan: (stripe: StripeProvider) =>
+      stripe.updateSubscription(subscriptionRow.id, { planId: unknownPlanId }),
+    previewSubscriptionChange: (stripe: StripeProvider) =>
+      stripe.previewSubscriptionChange({ subscriptionId: subscriptionRow.id, planId: unknownPlanId }),
+  };
+
+  it.each(Object.entries(missingPlanCalls))('%s returns ReferenceNotFound for an unknown plan', async (_name, call) => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    const result = await call(stripe);
+
+    expect(result).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'plan', id: unknownPlanId, missing: 'row' },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('getPlan returns null for an unknown plan row and ReferenceNotFound for a plan with no Stripe price', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+    const noPrice = planRow(null);
+    const withoutPrice = new StripeProvider(
+      { apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' },
+      { references: { ...references, findPlanById: () => Promise.resolve(noPrice) } },
+    );
+
+    expect(await stripe.getPlan(unknownPlanId)).toBeNull();
+    expect(await withoutPrice.getPlan(noPrice.id)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'plan', id: noPrice.id, missing: 'provider_id' },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  const missingSubscriptionCalls = {
+    updateSubscription: (stripe: StripeProvider) => stripe.updateSubscription(unknownSubscriptionId, {}),
+    reactivateSubscription: (stripe: StripeProvider) => stripe.reactivateSubscription(unknownSubscriptionId),
+    pauseSubscription: (stripe: StripeProvider) => stripe.pauseSubscription(unknownSubscriptionId),
+    resumeSubscription: (stripe: StripeProvider) => stripe.resumeSubscription(unknownSubscriptionId),
+    previewSubscriptionChange: (stripe: StripeProvider) =>
+      stripe.previewSubscriptionChange({ subscriptionId: unknownSubscriptionId, planId: proPlan.id }),
+  };
+
+  it.each(Object.entries(missingSubscriptionCalls))(
+    '%s returns ReferenceNotFound for an unknown subscription',
+    async (_name, call) => {
+      const { stripe, requests } = provider(() => ({ body: {} }));
+
+      const result = await call(stripe);
+
+      expect(result).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'subscription', id: unknownSubscriptionId, missing: 'row' },
+      });
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  const unknownPaymentId = orThrow(createPaymentId());
+  const missingPaymentCalls = {
+    confirmPayment: (stripe: StripeProvider) => stripe.confirmPayment(unknownPaymentId),
+    cancelPayment: (stripe: StripeProvider) => stripe.cancelPayment(unknownPaymentId),
+    refundPayment: (stripe: StripeProvider) =>
+      stripe.refundPayment(unknownPaymentId, { refundId: orThrow(createRefundId()), idempotencyKey: 'k1' }),
+    findRefund: (stripe: StripeProvider) => stripe.findRefund(unknownPaymentId, orThrow(createRefundId())),
+  };
+
+  it.each(Object.entries(missingPaymentCalls))('%s returns ReferenceNotFound for an unknown payment', async (_name, call) => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+
+    expect(await call(stripe)).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'payment', id: unknownPaymentId, missing: 'row' },
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  const declinedCalls = {
+    createPayment: (stripe: StripeProvider) =>
+      stripe.createPayment({ customerId: customer.id, amount: money('9.99', 'USD'), paymentMethodId: 'pm_bad' }),
+    attachPaymentMethod: (stripe: StripeProvider) =>
+      stripe.attachPaymentMethod({ customerId: customer.id, paymentMethodId: 'pm_bad' }),
+    createPaymentIntent: (stripe: StripeProvider) =>
+      stripe.createPaymentIntent({
+        customerId: customer.id,
+        amount: money('9.99', 'USD'),
+        paymentMethodId: 'pm_bad',
+        automatic: true,
+      }),
+    updateSubscription: (stripe: StripeProvider) =>
+      stripe.updateSubscription(subscriptionRow.id, { paymentMethodId: 'pm_bad' }),
+  };
+
+  it.each(Object.entries(declinedCalls))('%s returns a declined card as payments.card_declined', async (_name, call) => {
+    const { stripe } = provider(() => ({
+      status: 402,
+      body: { error: { type: 'card_error', code: 'card_declined', decline_code: 'generic_decline', message: 'no' } },
+    }));
+
+    expect(await call(stripe)).toMatchObject({ code: 'payments.card_declined', status: 402 });
+  });
+
+  const conflictCalls = {
+    cancelSubscription: (stripe: StripeProvider) =>
+      stripe.cancelSubscription(subscriptionRow.id, { idempotencyKey: 'k1' }),
+    updateSubscription: (stripe: StripeProvider) =>
+      stripe.updateSubscription(subscriptionRow.id, { cancelAtPeriodEnd: true, idempotencyKey: 'k1' }),
+    createSetupIntent: (stripe: StripeProvider) => stripe.createSetupIntent(customer.id, { idempotencyKey: 'k1' }),
+    createPaymentIntent: (stripe: StripeProvider) =>
+      stripe.createPaymentIntent({
+        customerId: customer.id,
+        amount: money('9.99', 'USD'),
+        paymentMethodId: 'pm_1',
+        automatic: true,
+        idempotencyKey: 'k1',
+      }),
+  };
+
+  it.each(Object.entries(conflictCalls))('%s returns a reused key as payments.idempotency_conflict', async (_name, call) => {
+    const { stripe } = provider(() => ({
+      status: 400,
+      body: { error: { type: 'idempotency_error', message: 'Keys for idempotent requests can only be used once.' } },
+    }));
+
+    expect(await call(stripe)).toMatchObject({ code: 'payments.idempotency_conflict', status: 409 });
   });
 });

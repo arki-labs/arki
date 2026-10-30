@@ -200,6 +200,18 @@ describe('sqliteLease', () => {
     });
   });
 
+  it('ensureLockTable returns lock.store for method ddl, with unknown ownership, when the database is closed', async () => {
+    const client = createClient({ url: newFile() });
+    const db = drizzle({ client });
+    client.close();
+    const outcome = await ensureLockTable(db);
+    expect(outcome).toMatchObject({ code: 'lock.store', data: { method: 'ddl', outcome: 'unknown' } });
+  });
+
+  it('ensureLockTable throws the config error, not a store failure, for a table name that is not a plain identifier', async () => {
+    await expect(ensureLockTable(open(newFile()), 'locks; DROP TABLE users')).rejects.toThrow(LockError);
+  });
+
   it('refuses a semaphore acquire under a different limit while the key is held', async () => {
     const db = open(newFile());
     orThrow(await ensureLockTable(db));

@@ -1,11 +1,11 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { FailureIn } from '@arki/failure';
-import { InvalidInput, isFailure, orThrow } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { LocalStorageAdapter } from './local-adapter.js';
 import type { StorageReadFailure, StorageWriteFailure } from './types.js';
@@ -92,6 +92,42 @@ describe('local key confinement', () => {
   });
 });
 
+describe('local adapter cancellation and refusals', () => {
+  it('a cancelled signal returns StorageCancelled from every local operation and writes nothing', async () => {
+    const { storage } = await fixture();
+    const options = { signal: AbortSignal.abort() };
+    expect(StorageCancelled.is(await storage.put('new', Buffer.from('x'), options))).toBe(true);
+    expect(StorageCancelled.is(await storage.get('new', options))).toBe(true);
+    expect(StorageCancelled.is(await storage.delete('new', options))).toBe(true);
+    expect(StorageCancelled.is(await storage.getMetadata('new', options))).toBe(true);
+    expect(StorageCancelled.is(await storage.exists('new', options))).toBe(true);
+    expect(StorageCancelled.is(await storage.list('', options))).toBe(true);
+    expect(StorageCancelled.is(await storage.getSignedUrl('new', options))).toBe(true);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('a key that names a directory is refused with StorageRejected on every operation, and nothing is overwritten', async () => {
+    const { base, storage } = await fixture();
+    await mkdir(path.join(base, 'dir'));
+    expect(StorageRejected.is(await storage.put('dir', Buffer.from('x')))).toBe(true);
+    expect(StorageRejected.is(await storage.get('dir'))).toBe(true);
+    expect(StorageRejected.is(await storage.delete('dir'))).toBe(true);
+    expect(StorageRejected.is(await storage.getMetadata('dir'))).toBe(true);
+    expect(StorageRejected.is(await storage.exists('dir'))).toBe(true);
+  });
+
+  it('deleteMany stops at the first failure, keeps earlier deletes, and signed URLs use the same key policy', async () => {
+    const { storage } = await fixture();
+    orThrow(await storage.put('keep/a', Buffer.from('a')));
+    orThrow(await storage.put('keep/b', Buffer.from('b')));
+    expect(InvalidInput.is(await storage.deleteMany(['keep/a', '../escape', 'keep/b']))).toBe(true);
+    expect(await storage.get('keep/a')).toBeNull();
+    expect(orThrow(await storage.get('keep/b'))?.toString()).toBe('b');
+    expect(InvalidInput.is(await storage.getSignedUrl('../escape'))).toBe(true);
+    expect(await storage.getSignedUrl('keep/b')).toBe('https://audit.invalid/keep/b');
+  });
+});
+
 function s3() {
   return new S3StorageAdapter({
     provider: 's3',
@@ -119,6 +155,25 @@ it('distinguishes a failed read, a definite refusal and a dispatched write witho
   refuse(Object.assign(new Error('denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } }));
   expect(StorageRejected.is(await storage.get('key'))).toBe(true);
   expect(StorageRejected.is(await storage.put('key', Buffer.from('owned')))).toBe(true);
+});
+
+it('returns the right failure for S3 list, metadata and bulk delete, and never invents a list', async () => {
+  const storage = s3();
+  refuse(Object.assign(new Error('socket'), { code: 'ECONNRESET' }));
+  expect(StorageUnavailable.is(await storage.list(''))).toBe(true);
+  expect(StorageUnavailable.is(await storage.getMetadata('key'))).toBe(true);
+  expect(StorageWriteUncertain.is(await storage.deleteMany(['a', 'b']))).toBe(true);
+  vi.restoreAllMocks();
+  refuse(Object.assign(new Error('missing'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } }));
+  expect(await storage.getMetadata('key')).toBeNull();
+  expect(await storage.exists('key')).toBe(false);
+  expect(await storage.get('key')).toBeNull();
+  vi.restoreAllMocks();
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- SDK send has a legacy callback overload.
+  vi.spyOn(S3Client.prototype, 'send').mockImplementation(command =>
+    command instanceof ListObjectsV2Command ? Promise.resolve({ IsTruncated: true, Contents: [] }) : Promise.reject(new Error('unexpected')),
+  );
+  expect(UnexpectedDefect.is(await storage.list(''))).toBe(true);
 });
 
 it('does not dispatch SDK commands for a pre-cancelled operation', async () => {

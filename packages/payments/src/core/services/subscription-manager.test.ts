@@ -23,7 +23,7 @@ import type { Subscription, SubscriptionId } from '../types.js';
 import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
 import { core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
 import { createPlanId } from '../primitives.js';
-import { CardDeclined } from '../providers/provider-error.js';
+import { CardDeclined, IdempotencyConflict, ReferenceNotFound } from '../providers/provider-error.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 type Provider = ConstructorParameters<typeof SubscriptionManager>[0];
@@ -285,5 +285,99 @@ describe('syncSubscriptionWithProvider', () => {
     await manager.syncSubscriptionWithProvider(id);
 
     expect(await countEvents(db)).toBe(eventsBefore);
+  });
+});
+
+/** A refusal the provider returns is final: the manager hands it back unchanged and writes no row and no event. */
+describe('a failure the provider returns is handed back, and nothing is written', () => {
+  const missing = (id: SubscriptionId) => ReferenceNotFound({ kind: 'subscription', id, missing: 'row' });
+
+  const calls = {
+    cancelSubscription: (manager: SubscriptionManager, id: SubscriptionId) => manager.cancelSubscription(id),
+    setCancelAtPeriodEnd: (manager: SubscriptionManager, id: SubscriptionId) =>
+      manager.setCancelAtPeriodEnd(id, true),
+  };
+
+  it.each(Object.entries(calls))('%s returns the provider ReferenceNotFound', async (_name, call) => {
+    const { id } = await seedSubscription(writes, 'active');
+    const rowBefore = await subscriptionRow(db, id);
+    const eventsBefore = await countEvents(db);
+    const manager = new SubscriptionManager(
+      {
+        ...providerReporting(current => current),
+        cancelSubscription: () => Promise.resolve(missing(id)),
+        updateSubscription: () => Promise.resolve(missing(id)),
+      },
+      reads,
+      writes,
+    );
+
+    const result = await call(manager, id);
+
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(await subscriptionRow(db, id)).toEqual(rowBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it.each([
+    ['reactivateSubscription', 'canceled'],
+    ['pauseSubscription', 'active'],
+    ['resumeSubscription', 'paused'],
+  ] as const)('%s returns the provider failure', async (name, status) => {
+    const { id } = await seedSubscription(writes, status);
+    const rowBefore = await subscriptionRow(db, id);
+    const eventsBefore = await countEvents(db);
+    const manager = new SubscriptionManager(
+      { ...providerReporting(current => current), [name]: () => Promise.resolve(missing(id)) },
+      reads,
+      writes,
+    );
+
+    const result = await manager[name](id);
+
+    expect(ReferenceNotFound.is(result)).toBe(true);
+    expect(await subscriptionRow(db, id)).toEqual(rowBefore);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('cancelSubscription returns a reused idempotency key as IdempotencyConflict', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const manager = new SubscriptionManager(
+      { ...providerReporting(current => current), cancelSubscription: () => Promise.resolve(IdempotencyConflict()) },
+      reads,
+      writes,
+    );
+
+    expect(IdempotencyConflict.is(await manager.cancelSubscription(id))).toBe(true);
+  });
+
+  it('createSubscription returns the provider CardDeclined unchanged when the user has no active subscription', async () => {
+    const { userId } = await seedSubscription(writes, 'canceled');
+    const manager = new SubscriptionManager(
+      {
+        ...providerReporting(current => current),
+        createSubscription: () => Promise.resolve(CardDeclined({ providerCode: 'card_declined' })),
+      },
+      { ...reads, findActiveSubscriptionByUserId: () => Promise.resolve(null) },
+      writes,
+    );
+
+    expect(CardDeclined.is(await manager.createSubscription(userId, planId))).toBe(true);
+  });
+
+  it('previewSubscriptionChange returns the provider ReferenceNotFound unchanged', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const premium = orThrow(createPlanId());
+    await db.insert(core.plans).values({ id: premium, name: 'Premium preview', priceMinor: 2000 });
+    const manager = new SubscriptionManager(
+      {
+        ...providerReporting(current => current),
+        previewSubscriptionChange: () => Promise.resolve(missing(id)),
+      },
+      reads,
+      writes,
+    );
+
+    expect(ReferenceNotFound.is(await manager.previewSubscriptionChange(id, premium))).toBe(true);
   });
 });

@@ -265,6 +265,15 @@ describe('ensureLockTable', () => {
       expect(results.filter(result => result.status === 'rejected')).toEqual([]);
     }
   }, 30_000);
+
+  it('a real Postgres refusal (the schema does not exist) returns lock.store for method ddl with unknown ownership', async () => {
+    const outcome = await ensureLockTable(dbA, `no_such_schema_${Math.random().toString(36).slice(2, 8)}.locks`);
+    expect(outcome).toMatchObject({ code: 'lock.store', data: { method: 'ddl', outcome: 'unknown' } });
+  });
+
+  it('a table name with SQL in it throws the config error and sends nothing to Postgres', async () => {
+    await expect(ensureLockTable(dbA, 'locks; DROP TABLE users')).rejects.toThrow(LockError);
+  });
 });
 
 // --- the durable fence ------------------------------------------------------
