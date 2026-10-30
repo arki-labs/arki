@@ -208,9 +208,9 @@ Put two markers in your README where the section goes:
 
 What the portable core adds to a browser bundle (minified, then compressed file by file), next to the timing libraries people reach for. Timing itself is mitata: `@arki/bench` calls its `measure`, so per-operation overhead is the same.
 
-Measured on Node 22.13.1 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.0.2 (mitata 1.0.34) · publish, seed 1592639052 · commit eeb0867c7e · 2026-10-13.
+Measured on Node 26.11.1 (Darwin 27.0.0 arm64, Apple M2 Max (12 cores)) · @arki/bench 0.1.0 (mitata 1.0.34) · publish, seed 1592639052 · commit 75a6b82a39 · 2026-10-30.
 
-Versions: @arki/bench 0.0.2 · mitata 1.0.34 · tinybench 6.2.1.
+Versions: @arki/bench 0.1.0 · mitata 1.0.34 · tinybench 6.2.1.
 
 ### Define, run and render a suite
 
@@ -218,7 +218,7 @@ Rows marked _different contract_ do other work: they are measured and shown, nev
 
 | Library              | Version | JS+CSS gzip |  brotli |     raw | Budget (gzip) | vs @arki/bench/core                                 |
 | -------------------- | ------- | ----------: | ------: | ------: | ------------- | --------------------------------------------------- |
-| **@arki/bench/core** | 0.0.2   |     19.1 kB | 17.1 kB | 55.4 kB | 21 kB         | baseline                                            |
+| **@arki/bench/core** | 0.1.0   |     19.4 kB | 17.4 kB | 56.3 kB | 21 kB         | baseline                                            |
 | mitata (bench, run)  | 1.0.34  |       13 kB | 11.7 kB | 41.6 kB | —             | different contract: timing and console output only  |
 | tinybench (Bench)    | 6.2.1   |     6.42 kB | 5.77 kB | 20.5 kB | —             | different contract: timing and a results table only |
 
@@ -226,9 +226,19 @@ Rows marked _different contract_ do other work: they are measured and shown, nev
 
 - The rivals are timing libraries only. They have no contract check, no bootstrap intervals, no verdicts and no README rendering, so they are shown but not ranked.
 
+**Provenance**
+
+- command: `arki-bench run --profile publish`
+- profile: publish
+- packages: @arki/bench 0.1.0, @arki/bench 0.1.0, mitata 1.0.34, tinybench 6.2.1
+- machine: Darwin 27.0.0 arm64, Apple M2 Max (12 cores), 96 GB RAM
+- source commit: 75a6b82a39592ba246061263ab070bdbd6d18285
+
+provenance: 75a6b82a39592ba246061263ab070bdbd6d18285
+
 Reproduce: `bunx arki-bench run --profile publish` in the package directory.
 
-<!-- bench:meta {"schema":1,"suite":"@arki/bench","specHash":"aaaf231c94631308","profile":"publish","date":"2026-10-13T11:41:19.933Z","harness":"0.0.2"} -->
+<!-- bench:meta {"schema":1,"suite":"@arki/bench","specHash":"aaaf231c94631308","profile":"publish","date":"2026-10-30T19:16:29.360Z","harness":"0.1.0"} -->
 <!-- bench:end -->
 ```
 
