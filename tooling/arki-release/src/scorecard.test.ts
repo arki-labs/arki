@@ -21,6 +21,7 @@ import type { Candidate } from './candidate';
 import {
   auditFrozenTarball,
   frozenDimensions,
+  readinessExternal,
   renderScorecardText,
   runScorecard,
   SCORECARD_ERROR_CODES,
@@ -889,6 +890,18 @@ describe('candidate mode: dimensions from the frozen tarball', () => {
     homepage: 'h',
     bugs: { url: 'b' },
   };
+
+  it('treats mirror items as n/a for a version the candidate has not published yet', () => {
+    // Why: a tag and GitHub Release for the candidate version can only exist after npm publish and sync, so
+    // counting them as missing would keep the pre-publish gate closed for every release.
+    const passing = { status: 'pass', details: '', evidence: [] } as const;
+    const previousSync = { '@arki/a': { 'mirror-tag': 'fail', 'mirror-release': 'fail', 'mirror-security': 'fail', 'mirror-integrity': 'fail' } } as const;
+    const gated = readinessExternal('@arki/a', [], passing, false, frozenCandidate({}), previousSync);
+    expect([gated['mirror-tag'], gated['mirror-release'], gated['mirror-security'], gated['mirror-integrity']]).toEqual(['n/a', 'n/a', 'n/a', 'n/a']);
+    // Outside a candidate the sync plan still decides: a published version without its tag is a real gap.
+    const published = readinessExternal('@arki/a', [], passing, false, null, previousSync);
+    expect(published['mirror-tag']).toBe('fail');
+  });
 
   it('fails dependencies when the tarball still carries workspace: or catalog: ranges', () => {
     // Why: npm consumers cannot resolve workspace:/catalog:, so those bytes are uninstallable even if the source tree looks fine.

@@ -840,7 +840,7 @@ function libraryDocErrors(packageDir: string): readonly string[] | null {
 }
 
 /** Readiness items other modules produce. Absent = no result yet (READY_E002). */
-function readinessExternal(
+export function readinessExternal(
   pkg: string,
   uses: readonly DemoUse[],
   docsFresh: ScorecardDimensionResult,
@@ -849,7 +849,13 @@ function readinessExternal(
   mirror: Awaited<ReturnType<typeof loadMirrorReadiness>>,
 ): ExternalResults {
   const external: ExternalResults = { ...mirror?.[pkg] };
-  const smoke = candidate?.packages.some(p => p.name === pkg) === true ? candidate.checks['smoke'] : undefined;
+  const inCandidate = candidate?.packages.some(p => p.name === pkg) === true;
+  // The mirror items describe a published version: its tag, GitHub Release
+  // and integrity exist only after `npm publish` and `sync`. While a
+  // candidate gates that version they cannot pass yet; `history` checks them
+  // once the version is out.
+  if (inCandidate) for (const id of ['mirror-tag', 'mirror-release', 'mirror-security', 'mirror-integrity'] as const) external[id] = 'n/a';
+  const smoke = inCandidate ? candidate?.checks['smoke'] : undefined;
   if (smoke?.status === 'success') external['install-smoke'] = 'pass';
   if (smoke?.status === 'failure') external['install-smoke'] = 'fail';
   // A docs-fresh fail caused only by the missing doc-examples report is a
