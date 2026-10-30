@@ -8,6 +8,7 @@
 
 ### Patch Changes
 
+- e6694fd: `@arki/icons/home` is a plain React SVG component. It no longer re-exports the `unplugin-icons` virtual module `~icons/twemoji/house`, so it builds in any bundler without that plugin. `HomeIcon` and `HouseIcon` keep their names and 1.2em size.
 - b31c52d: The published `dist/api.json` no longer lists one row per icon. The 22,000 same-type icon constants are one group row, and their names ship in `dist/api-names/`. The tarball is about 4 MB smaller; the exports themselves are unchanged.
 
   no docs impact: only the machine-readable API index changes, no page or example does.
