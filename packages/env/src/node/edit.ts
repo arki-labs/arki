@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { isFailure } from '@arki/failure';
+import { InvalidInput, isFailure } from '@arki/failure';
 
 import type { EnvPrivateKey, EnvPublicKey } from './key-schemas.js';
 import {
@@ -190,10 +190,10 @@ export function rotateEnvFiles(
   options: { readonly root: string; readonly env?: Readonly<Record<string, string | undefined>> },
 ) {
   const first = files[0];
-  if (first === undefined) throw new Error('no files to rotate');
+  if (first === undefined) return InvalidInput({ issues: [{ message: 'No files to rotate.' }] });
   const names = keyNamesFor(path.basename(first));
   if (files.some(file => keyNamesFor(path.basename(file)).privateKey !== names.privateKey)) {
-    throw new Error('rotate takes files of one environment at a time');
+    return InvalidInput({ issues: [{ message: 'Rotate takes files of one environment at a time.' }] });
   }
   return nodeOperation('rotate', () => {
     const pair = generateKeypair();

@@ -76,6 +76,9 @@ export function redact(paths: readonly string[], options: { readonly censor?: Ce
   };
 }
 
+/** What replaces an object that contains itself. */
+const CIRCULAR = '[Circular]';
+
 /** Values shorter than this are never masked: too likely to match ordinary text. */
 export const MIN_SECRET_LENGTH = 8;
 
@@ -88,7 +91,22 @@ export const MIN_SECRET_LENGTH = 8;
 export function maskSecrets(values: () => readonly string[], options: { readonly censor?: string } = {}): Processor {
   const censor = options.censor ?? '[REDACTED]';
 
-  const mask = (value: Value, secrets: readonly string[]): Value => {
+  // `active` holds the objects on the path from the root to `value`, so a cycle becomes a marker
+  // instead of unbounded recursion that would drop the whole record.
+  const mask = (value: Value, secrets: readonly string[], active: Set<object> = new Set()): Value => {
+    if (typeof value === 'object' && value !== null) {
+      if (active.has(value)) return CIRCULAR;
+      active.add(value);
+      try {
+        return maskValue(value, secrets, active);
+      } finally {
+        active.delete(value);
+      }
+    }
+    return maskValue(value, secrets, active);
+  };
+
+  const maskValue = (value: Value, secrets: readonly string[], active: Set<object>): Value => {
     if (typeof value === 'string') {
       let text = value;
       for (const secret of secrets) text = text.replaceAll(secret, censor);
@@ -98,7 +116,7 @@ export function maskSecrets(values: () => readonly string[], options: { readonly
       const list: readonly Value[] = value;
       let copy: Value[] | undefined;
       for (let index = 0; index < list.length; index++) {
-        const next = mask(list[index], secrets);
+        const next = mask(list[index], secrets, active);
         if (next !== list[index]) {
           copy ??= [...list];
           copy[index] = next;
@@ -108,19 +126,19 @@ export function maskSecrets(values: () => readonly string[], options: { readonly
     }
     if (isFailureLike(value)) {
       const serialised = serializeFailure(value);
-      const masked = mask(serialised, secrets);
+      const masked = mask(serialised, secrets, active);
       return masked === serialised ? value : masked;
     }
     if (value instanceof Error) {
       // An error inside the fields (`{ err }`): mask its serialised form, like the record's own error.
       const serialised = serializeError(value);
-      const masked = mask(serialised, secrets);
+      const masked = mask(serialised, secrets, active);
       return masked !== serialised && isFieldMap(masked) ? errorFrom(masked) : value;
     }
     if (!isFieldMap(value)) return value;
     let copy: Record<string, Value> | undefined;
     for (const key of Object.keys(value)) {
-      const next = mask(value[key], secrets);
+      const next = mask(value[key], secrets, active);
       if (next !== value[key]) {
         copy ??= { ...value };
         copy[key] = next;

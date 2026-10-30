@@ -2,10 +2,11 @@ import type { CreateEnv, DefaultCombinedSchema } from '@t3-oss/env-core';
 import { createEnv } from '@t3-oss/env-core';
 
 import type { StandardSchemaV1 } from '@arki/schema';
-import { InvalidInput, orThrow } from '@arki/failure';
+import { InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
 import { parse, pathOf } from '@arki/schema';
 
 import { registerEnvDescription } from './describe.js';
+import { InvalidEnvironment } from './errors.js';
 
 /**
  * The process environment, or `undefined` on engines with no `process` (Hermes, browsers, Deno without
@@ -146,7 +147,8 @@ export function defineEnv<
       ((issues: ValidationIssues): never => {
         const message = formatIssues(config.name, issues);
         console.error(message);
-        throw new Error(message);
+        // A configuration fault at boot: a typed failure, so a catcher can match on the code.
+        throw new UnexpectedFailure(InvalidEnvironment({ report: message }));
       });
 
     // A value that is still `encrypted:` means the env files were not loaded (Bun auto-loads them

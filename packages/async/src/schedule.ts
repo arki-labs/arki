@@ -24,6 +24,12 @@ export type DebounceOptions = {
   readonly maxWait?: number;
   /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */
   readonly clock?: Clock;
+  /**
+   * Receives an error thrown by `fn`, or the rejection of a promise `fn` returned. Without it the error is
+   * rethrown from a microtask, which is an uncaught error. Either way the schedule stays consistent and a
+   * call from the leading edge never throws into the caller.
+   */
+  readonly onError?: (error: unknown) => void;
 };
 
 /** Options of {@link throttle}. */
@@ -34,6 +40,12 @@ export type ThrottleOptions = {
   readonly trailing?: boolean;
   /** Whose time and timers to use. Default: the system clock. Pass a `MockClock` to make tests instant. */
   readonly clock?: Clock;
+  /**
+   * Receives an error thrown by `fn`, or the rejection of a promise `fn` returned. Without it the error is
+   * rethrown from a microtask, which is an uncaught error. Either way the schedule stays consistent and a
+   * call from the leading edge never throws into the caller.
+   */
+  readonly onError?: (error: unknown) => void;
 };
 
 /**
@@ -49,6 +61,7 @@ function schedule<A extends readonly unknown[]>(
   trailing: boolean,
   maxWait: number | undefined,
   clock: Clock | undefined,
+  onError: ((error: unknown) => void) | undefined,
 ): Scheduled<A> {
   assertWait(name, 'wait', wait);
   if (maxWait !== undefined) assertWait(name, 'maxWait', maxWait);
@@ -63,11 +76,28 @@ function schedule<A extends readonly unknown[]>(
   let lastCallTime: number | undefined;
   let lastInvokeTime = 0;
 
+  const fail = (error: unknown): void => {
+    if (onError === undefined) {
+      queueMicrotask(() => {
+        throw error;
+      });
+    } else {
+      onError(error);
+    }
+  };
+
   const invoke = (time: number): void => {
     const args = lastArgs;
     lastArgs = undefined;
     lastInvokeTime = time;
-    if (args !== undefined) fn(...args);
+    if (args === undefined) return;
+    try {
+      const result: unknown = fn(...args);
+      // `fn` is typed to return void, but an async function fits that type: observe its rejection.
+      if (result instanceof Promise) void result.catch(fail);
+    } catch (error) {
+      fail(error);
+    }
   };
 
   const remaining = (time: number): number => {
@@ -143,7 +173,7 @@ function isScheduled<A extends readonly unknown[]>(f: (...args: A) => void): f i
 
 /**
  * Delays `fn` until `wait` ms have passed without a new call. The latest
- * arguments win. Defaults: `leading: false`, `trailing: true`. Throws
+ * arguments win. Defaults: `leading: false`, `trailing: true`. An error from `fn` goes to `onError`. Throws
  * `ARKI_ASYNC_E001` for an invalid `wait` or `maxWait`.
  */
 export function debounce<A extends readonly unknown[]>(
@@ -159,6 +189,7 @@ export function debounce<A extends readonly unknown[]>(
     options.trailing ?? true,
     options.maxWait,
     options.clock,
+    options.onError,
   );
 }
 
@@ -171,5 +202,5 @@ export function throttle<A extends readonly unknown[]>(
   wait: number,
   options: ThrottleOptions = {},
 ): Scheduled<A> {
-  return schedule('throttle', fn, wait, options.leading ?? true, options.trailing ?? true, wait, options.clock);
+  return schedule('throttle', fn, wait, options.leading ?? true, options.trailing ?? true, wait, options.clock, options.onError);
 }

@@ -372,3 +372,52 @@ describe('debounce and throttle with a clock', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe('errors from the callback', () => {
+  it('debounce hands a thrown error to onError and stays usable', () => {
+    const onError = vi.fn();
+    const boom = new Error('boom');
+    const calls: number[] = [];
+    const d = debounce(
+      (n: number) => {
+        calls.push(n);
+        if (n === 1) throw boom;
+      },
+      10,
+      { onError },
+    );
+    d(1);
+    tick(10);
+    expect(onError).toHaveBeenCalledExactlyOnceWith(boom);
+    expect(d.pending).toBe(false);
+    d(2);
+    tick(10);
+    expect(calls).toEqual([1, 2]);
+  });
+
+  it('a throw on the leading edge does not reach the caller of the scheduled function', () => {
+    const onError = vi.fn();
+    const t = throttle(
+      () => {
+        throw new Error('leading');
+      },
+      10,
+      { onError },
+    );
+    expect(() => t()).not.toThrow();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(t.pending).toBe(true);
+  });
+
+  it('a rejected promise from an async callback goes to onError', async () => {
+    vi.useRealTimers();
+    const errors: unknown[] = [];
+    const reason = new Error('rejected');
+    // The callback type says void; an async callback still fits it, and that is the case under test.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    const d = debounce(() => Promise.reject(reason), 1, { onError: error => errors.push(error) });
+    d();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(errors).toEqual([reason]);
+  });
+});

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger, Logging } from './logging.js';
-import type { LogConfig, LogRecord, Processor, Sink } from './types.js';
+import type { Fields, LogConfig, LogRecord, Processor, Sink } from './types.js';
 import { logfmt, pretty } from './formatters.js';
 import { createLogging } from './logging.js';
 import { dropWhen, enrich, maskSecrets, redact } from './processors.js';
@@ -369,5 +369,37 @@ describe('sink level', () => {
     log.info('held');
     log.error('trigger');
     expect(templates(seen.records)).toEqual(['trigger']);
+  });
+});
+
+describe('circular fields', () => {
+  function circularFields(): Fields {
+    const fields: Record<string, unknown> = { a: 1, note: 'token supersecret-value' };
+    fields.self = fields;
+    return fields as Fields;
+  }
+
+  it('redact with a wildcard keeps a record whose fields are circular', () => {
+    vi.spyOn(console, 'error').mockReturnValue();
+    const sink = memorySink();
+    const logging = createLogging();
+    logging.configure({ default: { level: 'info', channels: ['m'] }, channels: { m: sink }, processors: [redact(['*.a'])] });
+    expect(() => logging.getLogger('x').info('hi', circularFields())).not.toThrow();
+    expect(sink.records).toHaveLength(1);
+  });
+
+  it('maskSecrets masks around a circular field and keeps the record', () => {
+    const consoleError = vi.spyOn(console, 'error').mockReturnValue();
+    const sink = memorySink();
+    const logging = createLogging();
+    logging.configure({
+      default: { level: 'info', channels: ['m'] },
+      channels: { m: sink },
+      processors: [maskSecrets(() => ['supersecret-value'])],
+    });
+    logging.getLogger('x').info('hi', circularFields());
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(sink.records).toHaveLength(1);
+    expect(sink.records[0]?.fields).toMatchObject({ a: 1, note: 'token [REDACTED]', self: '[Circular]' });
   });
 });

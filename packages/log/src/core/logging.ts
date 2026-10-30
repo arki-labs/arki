@@ -430,7 +430,14 @@ class LoggingImpl implements InternalLogging {
     let min = Number.POSITIVE_INFINITY;
     for (const name of names) {
       const sink = state.channels.get(name);
-      if (sink === undefined) throw unknownChannelError(name, [...state.channels.keys()]);
+      if (sink === undefined) {
+        const error = unknownChannelError(name, [...state.channels.keys()]);
+        // A category rule is checked by configure(), so only a to() name can be unknown here; it
+        // can go stale after reconfigure(). A log call must never throw into its caller.
+        if (to === undefined) throw error;
+        reportFailure(this, `routing to channel "${name}"`, error);
+        continue;
+      }
       if (entries.some(entry => entry.sink === sink)) continue;
       const entryMin =
         sink.captureFrom === undefined

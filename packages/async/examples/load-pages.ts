@@ -2,7 +2,8 @@ import type { Clock } from '@arki/clock';
 import type { FailureOf } from '@arki/failure';
 import { SystemClock } from '@arki/clock';
 
-import { mapConcurrent, resource, scoped, sleep } from '../src/index.js';
+import type { sleep } from '../src/index.js';
+import { mapConcurrent, resource, scoped } from '../src/index.js';
 
 // #region load-pages
 /** A connection that loads one page at a time and must be closed when the work ends. */

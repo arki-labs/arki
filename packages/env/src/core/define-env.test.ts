@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineEnv, formatIssues } from './define-env.js';
+import { InvalidEnvironment } from './errors.js';
 
 const server = { PORT: z.coerce.number(), NAME: z.string().default('app') };
 
@@ -254,3 +255,12 @@ describe('defineEnv() with a value that is still encrypted', () => {
   });
 });
 
+
+describe('the default validation error', () => {
+  it('is a typed InvalidEnvironment failure that still names the variable', () => {
+    vi.spyOn(console, 'error').mockReturnValue();
+    const env = defineEnv({ server: { PORT: z.coerce.number().int() }, runtimeEnv: { PORT: 'nope' }, options: { skipValidation: false } });
+    expect(() => env.PORT).toThrow(expect.objectContaining({ code: 'env.invalid_environment', failure: expect.objectContaining({ code: InvalidEnvironment.code }) }));
+    expect(() => env.PORT).toThrow(/PORT/);
+  });
+});

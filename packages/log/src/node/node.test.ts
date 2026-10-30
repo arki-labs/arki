@@ -116,3 +116,10 @@ describe('file sink', () => {
     expect(process.listenerCount('exit')).toBe(before);
   });
 });
+
+describe('file sink that cannot open its path', () => {
+  it('throws a coded LogError with the cause, at configure time', () => {
+    const missing = path.join(tempFile(), 'no-such-folder', 'app.log');
+    expect(() => file({ path: missing })).toThrow(expect.objectContaining({ code: LOG_ERROR_CODES.fileOpenFailed, cause: expect.any(Error) }));
+  });
+});

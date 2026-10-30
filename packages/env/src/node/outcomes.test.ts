@@ -9,7 +9,7 @@ import type { Failure, FailureOf } from '@arki/failure';
 import type { SchemaOutput } from '@arki/schema';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 
-import type { EncryptionFailed, KeyGenerationFailed } from './errors.js';
+import type { KeyGenerationFailed } from './errors.js';
 import type { EnvPrivateKey, envPrivateKeySchema, EnvPublicKey, envPublicKeySchema } from './key-schemas.js';
 import { defineEnv } from '../core/define-env.js';
 import { commonPresets } from '../presets/common.js';
@@ -20,17 +20,20 @@ import {
   envHeader,
   generateKeypair,
   parseEnv,
+  publicKeyOf,
   readEnvValue,
   setEnvValue,
 } from './codec.js';
-import { rotateEnvFiles, setEnvFileValue } from './edit.js';
+import { decryptEnvFile, encryptEnvFile, initEnvFile, publicKeyIn, rotateEnvFiles, setEnvFileValue } from './edit.js';
 import {
   DecryptionFailed,
+  EncryptionFailed,
   EnvCancelled,
   EnvDeadline,
   EnvFilesFailed,
   FileReadFailed,
   FileWriteFailed,
+  MissingPublicKey,
   ReferenceFailed,
   RotationIncomplete,
   UnrepresentableValue,
@@ -292,4 +295,78 @@ it('stops before any ciphertext rewrite if staging a later local key store fails
   } finally {
     chmodSync(other, 0o700);
   }
+});
+
+describe('foundation outcomes: failures returned, never thrown', () => {
+  it('returns MissingPublicKey when an encrypted set or encrypt targets a file with no public key', () => {
+    const file = path.join(root, '.env.development');
+    writeFileSync(file, 'A=1\n');
+    expect(MissingPublicKey.is(setEnvFileValue(file, 'B', '2', { plain: false }))).toBe(true);
+    expect(MissingPublicKey.is(encryptEnvFile(file))).toBe(true);
+  });
+
+  it('returns InvalidInput for a malformed key text instead of throwing', () => {
+    expect(InvalidInput.is(parsePublicKey('nope'))).toBe(true);
+    expect(InvalidInput.is(parsePrivateKey('0'.repeat(64)))).toBe(true);
+    expect(InvalidInput.is(parsePrivateKey('zz'))).toBe(true);
+  });
+
+  it('findPrivateKey returns InvalidInput for a malformed key in the environment', () => {
+    const found = findPrivateKey(path.join(root, '.env.development'), { root, env: { DOTENV_PRIVATE_KEY_DEVELOPMENT: 'bad' } });
+    expect(InvalidInput.is(found)).toBe(true);
+  });
+
+  it('decryptEnvFile returns DecryptionFailed when no key matches', () => {
+    const file = path.join(root, '.env.development');
+    const pair = orThrow(generateKeypair());
+    writeFileSync(file, `${envHeader('.env.development', pair.publicKey)}\nA=1\n`);
+    orThrow(encryptEnvFile(file));
+    const other = orThrow(generateKeypair());
+    expect(DecryptionFailed.is(decryptEnvFile(file, [other.privateKey]))).toBe(true);
+  });
+
+  it('publicKeyOf accepts every key the private key schema accepts', () => {
+    const pair = orThrow(generateKeypair());
+    expect(publicKeyOf(pair.privateKey)).toBe(pair.publicKey);
+  });
+
+  it('loadEnvFiles reports a bad provider reference as EnvFilesFailed without applying values', () => {
+    writeFileSync(path.join(root, '.env.development'), 'A=1\nB=op://x/y/z\n');
+    const env: Record<string, string | undefined> = {};
+    const result = loadEnvFiles({ cwd: root, root, env, references: { op: () => ReferenceFailed({ scheme: 'op' }) } });
+    expect(EnvFilesFailed.is(result)).toBe(true);
+    expect(env.A).toBeUndefined();
+  });
+
+  it('rotateEnvFiles returns InvalidInput for an empty list and for files of two environments', () => {
+    const development = path.join(root, '.env.development');
+    const production = path.join(root, '.env.production');
+    expect(InvalidInput.is(rotateEnvFiles([], { root, env: {} }))).toBe(true);
+    expect(InvalidInput.is(rotateEnvFiles([development, production], { root, env: {} }))).toBe(true);
+  });
+
+  it('encryptValue returns EncryptionFailed for a public key the curve rejects', () => {
+    expect(EncryptionFailed.is(Reflect.apply(encryptValue, null, ['value', 'not-a-key']))).toBe(true);
+  });
+
+  it('publicKeyIn returns InvalidInput for a bad key line and FileReadFailed for an unreadable file', () => {
+    const file = path.join(root, '.env.development');
+    writeFileSync(file, 'DOTENV_PUBLIC_KEY_DEVELOPMENT="bad"\n');
+    expect(InvalidInput.is(publicKeyIn(file))).toBe(true);
+    const directory = path.join(root, '.env.test');
+    mkdirSync(directory);
+    expect(FileReadFailed.is(publicKeyIn(directory))).toBe(true);
+  });
+
+  it('initEnvFile returns FileReadFailed when the key store is a directory', () => {
+    mkdirSync(path.join(root, '.env.keys'));
+    expect(FileReadFailed.is(initEnvFile(path.join(root, '.env.development'), { root, env: {} }))).toBe(true);
+  });
+
+  it('findPrivateKey returns FileReadFailed for an unreadable key file and writePrivateKey FileWriteFailed for a missing folder', () => {
+    mkdirSync(path.join(root, '.env.keys'));
+    expect(FileReadFailed.is(findPrivateKey(path.join(root, '.env.development'), { root, env: {} }))).toBe(true);
+    const pair = orThrow(generateKeypair());
+    expect(FileWriteFailed.is(writePrivateKey(path.join(root, 'missing', '.env.keys'), 'DOTENV_PRIVATE_KEY', pair.privateKey, 'c'))).toBe(true);
+  });
 });

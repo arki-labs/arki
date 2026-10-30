@@ -1,10 +1,11 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { Logger, Logging } from './logging.js';
 import type { LogRecord, Sink } from './types.js';
 import { DEFAULT_KEY, defaultLogging, getLogger } from './default.js';
 import { LOG_ERROR_CODES, LogError } from './errors.js';
 import { createInternalLogging, createLogging } from './logging.js';
+import { memorySink } from './sinks.js';
 
 function capture(extra: Partial<Sink> = {}): { records: LogRecord[]; sink: Sink } {
   const records: LogRecord[] = [];
@@ -395,5 +396,31 @@ describe('default instance', () => {
     expect(DEFAULT_KEY).toBe(Symbol.for('@arki/log/default@1'));
     expect(defaultLogging()).toBe(fromOtherCopy);
     expect(getLogger('shared')).toBe(fromOtherCopy.getLogger('shared'));
+  });
+});
+
+describe('to() with a channel that is not defined', () => {
+  it('never throws into the caller, skips the unknown channel and reports it once', () => {
+    const consoleError = vi.spyOn(console, 'error').mockReturnValue();
+    const logging = createLogging();
+    expect(() => logging.getLogger('x').to('missing').info('x')).not.toThrow();
+    const out = memorySink();
+    logging.configure({ channels: { out }, default: { level: 'info', channels: ['out'] } });
+    const log = logging.getLogger('x').to('missing', 'out');
+    expect(() => log.info('kept')).not.toThrow();
+    expect(out.records.map(record => record.template)).toEqual(['kept']);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+  });
+
+  it('survives reconfigure() removing the channel a to() logger was built for', async () => {
+    vi.spyOn(console, 'error').mockReturnValue();
+    const logging = createLogging();
+    const audit = memorySink();
+    const handle = logging.configure({ channels: { audit }, default: { level: 'info', channels: ['audit'] } });
+    const log = logging.getLogger('x').to('audit');
+    log.info('before');
+    await handle.reconfigure({ channels: {}, default: { level: 'info', channels: [] } });
+    expect(() => log.info('after')).not.toThrow();
+    expect(audit.records.map(record => record.template)).toEqual(['before']);
   });
 });

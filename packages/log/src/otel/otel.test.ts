@@ -1,4 +1,5 @@
 import type { Context, ContextManager } from '@opentelemetry/api';
+import type { Fields } from '../core/types.js';
 import type { LoggerProvider, LogRecord as OtelLogRecord } from '@opentelemetry/api-logs';
 import { context, ROOT_CONTEXT, trace, TraceFlags } from '@opentelemetry/api';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -125,5 +126,18 @@ describe('otelSink', () => {
 
     const carried = emitted[0]?.context === undefined ? undefined : trace.getSpanContext(emitted[0].context);
     expect(carried).toMatchObject(SPAN);
+  });
+});
+
+describe('otelSink with a circular field', () => {
+  it('emits the record with a marker where the object points back at itself', () => {
+    const { provider, emitted } = capturingProvider();
+    const logging = createLogging();
+    logging.configure({ channels: { otel: otelSink(provider) }, default: { level: 'info', channels: ['otel'] } });
+    const fields: Record<string, unknown> = { a: 1 };
+    fields.self = fields;
+    logging.getLogger('x').info('hi', fields as Fields);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.attributes).toMatchObject({ a: 1, self: { a: 1, self: '[Circular]' } });
   });
 });

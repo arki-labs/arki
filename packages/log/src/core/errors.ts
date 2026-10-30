@@ -39,6 +39,13 @@ export const LOG_ERROR_CODES = {
    * @verify bun run test -- src/core/logging.test.ts
    */
   staleHandle: 'ARKI_LOG_E005',
+  /**
+   * `file({ path })` could not open the file for appending (missing folder, no permission, or a directory).
+   *
+   * @fix Create the folder, fix its permissions, or point `path` at a writable file.
+   * @verify bun run test -- src/node/node.test.ts
+   */
+  fileOpenFailed: 'ARKI_LOG_E006',
 } as const;
 
 export type LogErrorCode = (typeof LOG_ERROR_CODES)[keyof typeof LOG_ERROR_CODES];
@@ -47,8 +54,8 @@ export class LogError extends Error {
   readonly code: LogErrorCode;
   readonly remediation: string;
 
-  constructor(args: { readonly code: LogErrorCode; readonly message: string; readonly remediation: string }) {
-    super(`${args.code}: ${args.message}`);
+  constructor(args: { readonly code: LogErrorCode; readonly message: string; readonly remediation: string; readonly cause?: unknown }) {
+    super(`${args.code}: ${args.message}`, args.cause === undefined ? undefined : { cause: args.cause });
     this.name = 'LogError';
     this.code = args.code;
     this.remediation = args.remediation;
@@ -98,5 +105,15 @@ export function staleHandleError(): LogError {
     code: LOG_ERROR_CODES.staleHandle,
     message: 'This logging handle no longer owns the configuration: it was closed, or configure() ran again.',
     remediation: 'Use the handle returned by the latest configure() call.',
+  });
+}
+
+/** `file()` could not open its path for appending. */
+export function fileOpenError(path: string, cause: unknown): LogError {
+  return new LogError({
+    code: LOG_ERROR_CODES.fileOpenFailed,
+    message: `Cannot open log file "${path}" for appending: ${cause instanceof Error ? cause.message : String(cause)}`,
+    remediation: 'Create the folder, fix its permissions, or point path at a writable file.',
+    cause,
   });
 }

@@ -8,7 +8,7 @@ import process from 'node:process';
 
 import type { LevelName } from '../core/levels.js';
 import type { ContextStore, EnvSettings, Fields, Formatter, Sink } from '../core/types.js';
-import { invalidLevelError } from '../core/errors.js';
+import { fileOpenError, invalidLevelError } from '../core/errors.js';
 import { json } from '../core/formatters.js';
 import { Level } from '../core/levels.js';
 import { reportFailure } from '../core/report.js';
@@ -105,7 +105,12 @@ export function stderr(options: FdSinkOptions = {}): Sink {
 
 /** Appends lines (JSON by default) to a file, opened when this is called. */
 export function file(options: { readonly path: string; readonly format?: Formatter }): Sink {
-  const fd = openSync(options.path, 'a');
+  let fd: number;
+  try {
+    fd = openSync(options.path, 'a');
+  } catch (error) {
+    throw fileOpenError(options.path, error);
+  }
   return fdSink(fd, options.format ?? json(), () => closeSync(fd));
 }
 

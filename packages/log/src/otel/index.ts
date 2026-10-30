@@ -70,7 +70,11 @@ function attributesOf(record: LogRecord): AnyValueMap {
   return attributes;
 }
 
-function toAnyValue(value: Value): AnyValue {
+/** What replaces an object that contains itself. */
+const CIRCULAR = '[Circular]';
+
+/** `active` holds the objects on the path from the root to `value`, so a cycle ends in a marker, not a stack overflow. */
+function toAnyValue(value: Value, active = new Set<object>()): AnyValue {
   if (value === null || value === undefined) return value;
   switch (typeof value) {
     case 'string':
@@ -86,12 +90,18 @@ function toAnyValue(value: Value): AnyValue {
     }
   }
   if (value instanceof Date) return value.toISOString();
-  if (value instanceof Error) return toAnyValue(serializeError(value));
-  if (isFailureLike(value)) return toAnyValue(serializeFailure(value));
-  if (isValueArray(value)) return value.map(item => toAnyValue(item));
-  const map: AnyValueMap = {};
-  for (const key in value) map[key] = toAnyValue(value[key]);
-  return map;
+  if (active.has(value)) return CIRCULAR;
+  active.add(value);
+  try {
+    if (value instanceof Error) return toAnyValue(serializeError(value), active);
+    if (isFailureLike(value)) return toAnyValue(serializeFailure(value), active);
+    if (isValueArray(value)) return value.map(item => toAnyValue(item, active));
+    const map: AnyValueMap = {};
+    for (const key in value) map[key] = toAnyValue(value[key], active);
+    return map;
+  } finally {
+    active.delete(value);
+  }
 }
 
 function isValueArray(value: Value): value is readonly Value[] {
