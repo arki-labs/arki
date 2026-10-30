@@ -50,7 +50,13 @@ const endsInFailure = j
   })
   .finish(({ results }) => (Declined.is(results.pay) ? 'declined' : 'paid'));
 
-const journal = j.compose({ workflows: [continuing, endsInFailure], workflowMeta });
+/** A success that looks like a stored refusal: read as one, it would skip its undo and fail `read`. */
+const lookalike = j
+  .workflow('test.step-refused-lookalike', { version: 1, input })
+  .step('spoof', () => ({ '~refused': { code: Declined.code } }), { retry: noRetry })
+  .finish();
+
+const journal = j.compose({ workflows: [continuing, endsInFailure, lookalike], workflowMeta });
 let db: PgliteDatabase;
 let client: PGlite;
 beforeAll(async () => {
@@ -80,6 +86,15 @@ describe('a step that continues on a listed failure', () => {
     expect(Declined.is(paid)).toBe(true);
     if (!Declined.is(paid)) throw new Error('the failure was not read back');
     expect(paid.data.reason).toBe('too big');
+  });
+
+  it('a success shaped like a stored refusal is refused, never stored to be read as a failure', async () => {
+    const { runId } = orThrow(await journal.run(db, lookalike.start, { id: 'cont:lookalike', input: { amount: 1 } }, caller));
+    await settle();
+    expect(await runOf(runId)).toMatchObject({ state: 'running', results: {} });
+    const [step] = await db.select().from(tables.workflowSteps).where(eq(tables.workflowSteps.runId, runId));
+    expect(step?.status).toBe('failed');
+    expect(step?.error).toContain('refused result');
   });
 
   it('a success passes through the output schema as it always did', async () => {

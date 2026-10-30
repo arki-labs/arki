@@ -639,6 +639,15 @@ function keptFailuresOf(node: CommandNode | StepNodeOf): readonly ErasedFailureD
   return node.kind === 'command' ? node.accept : node.options.onFailure === 'continue' ? (node.options.failures ?? []) : [];
 }
 
+/**
+ * A success may not take the shape of a kept failure. Readers tell the two apart by the `~refused` key alone, so a
+ * success shaped like one would be read as a failure: compensation would skip its undo, and `read` would refuse it.
+ */
+function refusedShapeClash(value: unknown, what: string, runId: string): JournalError | undefined {
+  if (!is(value, refusedResultSchema)) return undefined;
+  return new JournalError('BAD_DEFINITION', 'workflow', runId, `${what} has the shape the journal keeps for a refused result (a "${REFUSED}" key); return another shape`);
+}
+
 /** The failure a node stored, real again, or `undefined` when its `accept` or `failures` list no longer names it. */
 function revivedRefusal(node: CommandNode | StepNodeOf, stored: unknown): Failure | undefined {
   const known = keptFailuresOf(node);
@@ -1256,7 +1265,11 @@ export function createWorkflows<
     for (const item of remainingUndos(def, settled, options.doneNow, options.undoneNow)) {
       const node = def.nodes.find(candidate => candidate.name === item.path);
       // An accepted failure: the command was refused and rolled back, so it did nothing to undo.
-      if ((node?.kind === 'command' || node?.kind === 'step') && is(item.result, refusedResultSchema)) {
+      if (
+        (node?.kind === 'command' || node?.kind === 'step') &&
+        keptFailuresOf(node).length > 0 &&
+        is(item.result, refusedResultSchema)
+      ) {
         out.push(
           events.NodeSkipped({
             path: item.path,
@@ -3169,6 +3182,8 @@ export function createWorkflows<
         const { output } = node.command;
         const parsed = output === undefined ? null : await parseAsync(output, outcome);
         if (isFailure(parsed)) return parsed;
+        const clash = refusedShapeClash(parsed, `the result of command '${node.name}'`, row.id);
+        if (clash !== undefined) throw clash;
         stored = parsed;
         live = parsed;
       }
@@ -4347,6 +4362,8 @@ export function createWorkflows<
           if (isFailure(parsed)) return failed(parsed, false);
           stored = parsed;
         }
+        const clash = continued ? undefined : refusedShapeClash(stored, `the result of step '${node.name}'`, row.id);
+        if (clash !== undefined) return failed(clash);
         const kept = storable(stored, def.limits.payload, `the result of step '${node.name}'`, row.id);
         if (kept instanceof JournalError) return failed(kept);
         const route = await routeFrom(def, index, node, row, continued ? result : kept.value, make, ctx.signal);
