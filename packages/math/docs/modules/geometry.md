@@ -21,3 +21,22 @@ polygonArea([
   [4, 3],
 ]); // 6
 ```
+
+`signedPolygonArea` keeps the sign of the winding: positive when the vertices
+run counterclockwise (y up), negative when clockwise. `polygonArea` is its
+absolute value. Solids return their measures as plain objects: `cube`,
+`cuboid`, `cylinder`, `cone`, `frustum`, `squarePyramid` (with the
+`slantHeight` of each face) and `torus` (a ring torus, so `majorRadius` must be
+at least `minorRadius`).
+
+```ts
+import { signedPolygonArea, squarePyramid, torus } from '@arki/math/geometry';
+
+signedPolygonArea([
+  [0, 0],
+  [4, 3],
+  [4, 0],
+]); // -6   clockwise
+squarePyramid({ baseSide: 6, height: 4 }); // { volume: 48, slantHeight: 5, lateralArea: 60, surfaceArea: 96 }
+torus({ majorRadius: 3, minorRadius: 1 }).volume; // 59.21762640653615
+```

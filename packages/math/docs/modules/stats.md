@@ -52,13 +52,16 @@ freedom are left (a line through two points).
 
 Inference uses exact critical values from `distributions` (Student t by
 default, `method: 'z'` for the normal). `sampleSize` rounds up.
+`standardError` is `stddev / √n`, from the data (sample `stddev` unless you
+pass `ddof`) or from a known `{ stddev, n }`.
 
 ```ts
-import { confidenceInterval, polynomialRegression, sampleSize, zScore } from '@arki/math/stats';
+import { confidenceInterval, polynomialRegression, sampleSize, standardError, zScore } from '@arki/math/stats';
 
 confidenceInterval([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); // { mean: 5.5, lower: 3.33…, upper: 7.67…, … }  R t.test
 sampleSize({ marginOfError: 0.03 }); // 1068   a ±3% poll at 95%
 zScore(130, 100, 15); // 2
+standardError({ stddev: 15, n: 25 }); // 3
 polynomialRegression([0, 1, 2, 3], [1, 2, 5, 10], 2).coefficients; // [1, 0, 1]  lowest degree first
 ```
 

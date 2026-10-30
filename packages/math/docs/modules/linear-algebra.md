@@ -31,6 +31,33 @@ inverse([
 ]); // [[-2, 1], [1.5, -0.5]]
 ```
 
+Vectors and matrices: `transpose`, `trace` (sum of the diagonal) and
+`multiply`, which takes a matrix (`A·B`) or a vector (`A·v`) as its second
+argument. `normalize` returns the unit vector and `projection(v, onto)` the
+part of `v` along `onto`; both throw `DivisionByZeroError` for a zero vector.
+
+```ts
+import { multiply, normalize, projection, trace, transpose } from '@arki/math/linear-algebra';
+
+transpose([
+  [1, 2, 3],
+  [4, 5, 6],
+]); // [[1, 4], [2, 5], [3, 6]]
+trace([
+  [1, 2],
+  [3, 4],
+]); // 5
+multiply(
+  [
+    [1, 2],
+    [3, 4],
+  ],
+  [1, 1],
+); // [3, 7]
+normalize([3, 4]); // [0.6, 0.8]
+projection([2, 3], [1, 1]); // [2.5, 2.5]
+```
+
 Decompositions follow LAPACK's algorithms: pivoted Householder QR, Cholesky
 (`NotPositiveDefiniteError` when it fails), SVD (Golub–Kahan–Reinsch), and
 eigenvalues — symmetric by Householder tridiagonalization and implicit QL,
@@ -64,4 +91,37 @@ leastSquares(
   ],
   [1, 2, 2],
 ); // [0.666…, 0.5]   intercept, slope
+```
+
+The factors themselves come from the `…Decompose` functions. `luDecompose`
+gives `P·A = L·U` (`permutation` and its `sign`) and never throws for a
+singular matrix: `upper` then has a zero or tiny diagonal entry.
+`qrDecompose` gives the thin `A·P = Q·R` with a non-negative diagonal in `R`
+and the numerical `rank`; `{ pivoting: false }` factors `A` itself.
+`symmetricEigenDecompose` gives ascending `values` with orthonormal `vectors`
+(`A = V·Λ·Vᵀ`, `V = transpose(vectors)`). `singularValueDecompose` gives the
+thin `A = U·Σ·Vᵀ`: `transpose(left)` is `U` and `right` is `Vᵀ` (NumPy's `Vh`).
+Each vector's sign is fixed so its largest-magnitude entry is positive, so
+results are reproducible.
+
+```ts
+import { luDecompose, qrDecompose, singularValueDecompose, symmetricEigenDecompose } from '@arki/math/linear-algebra';
+
+luDecompose([
+  [1, 2],
+  [3, 4],
+]); // { lower: [[1, 0], [0.333…, 1]], upper: [[3, 4], [0, 0.666…]], permutation: [1, 0], sign: -1 }
+qrDecompose([
+  [1, 2],
+  [2, 4],
+  [3, 6],
+]).rank; // 1   the columns are parallel
+symmetricEigenDecompose([
+  [2, 1],
+  [1, 2],
+]); // { values: [1.0000000000000002, 3], vectors: [[0.707…, -0.707…], [0.707…, 0.707…]] }
+singularValueDecompose([
+  [3, 0],
+  [4, 5],
+]).values; // [6.708203932499369, 2.2360679774997894]
 ```

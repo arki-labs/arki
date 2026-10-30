@@ -8,9 +8,10 @@ does not exist, `Infinity` where it diverges). Parameters are validated up
 front; nothing returns `NaN`.
 
 ```ts
-import { binomial, chiSquare, fisherF, noncentralT, normal, poisson, studentT } from '@arki/math/distributions';
+import { binomial, chiSquare, fisherF, noncentralT, normal, poisson, standardNormal, studentT } from '@arki/math/distributions';
 
 normal().quantile(0.975); // 1.959963984540054
+standardNormal.cdf(1.96); // 0.9750021048517795   N(0, 1), built once and shared
 normal(100, 15).cdf(130); // 0.9772498680518208
 studentT(10).quantile(0.975); // 2.2281388519862744
 chiSquare(1).quantile(0.95); // 3.841458820694124
