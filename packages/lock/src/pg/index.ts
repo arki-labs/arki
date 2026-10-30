@@ -1,3 +1,5 @@
+import type { LockToken } from '../identities.js';
+import { observeLock } from '../telemetry.js';
 /**
  * Postgres advisory locks as a hold store: `pgSession(db)` owns a pinned
  * transaction for the whole life of a lock; `pgTransaction(tx)` takes the lock
@@ -40,6 +42,7 @@
  */
 import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
 import { is, recordSchema } from '@arki/schema';
@@ -54,7 +57,7 @@ import type {
   SharedRequest,
   Store,
 } from '../types.js';
-import { LockError } from '../errors.js';
+import { LockError, storeFailure } from '../errors.js';
 import { legacyPgText, toPgPair } from '../key.js';
 
 const log = getLogger('arki:lock');
@@ -121,14 +124,23 @@ const LOCK_TIMEOUT_CODE = '55P03';
 const SAVEPOINT = 'arki_lock_wait';
 
 /** `{ rows: [...] }` (node-postgres, PGlite) or a bare array (postgres.js): the first row, if any. */
+const pgRowsSchema = z.union([z.array(z.unknown()), z.object({ rows: z.array(z.unknown()) })]);
+const acquiredRowSchema = z.object({ acquired: z.boolean() });
+const settingSchema = z.string();
+
 function firstRow(result: unknown): Record<string, unknown> | undefined {
-  const rows: unknown = Array.isArray(result) ? result : is(result, recordSchema) ? result['rows'] : undefined;
-  const first: unknown = Array.isArray(rows) ? rows[0] : undefined;
+  const parsed = pgRowsSchema.parse(result);
+  const rows = Array.isArray(parsed) ? parsed : parsed.rows;
+  const first = rows[0];
   return is(first, recordSchema) ? first : undefined;
 }
 
 function wasAcquired(result: unknown): boolean {
-  return firstRow(result)?.['acquired'] === true;
+  try { return acquiredRowSchema.parse(firstRow(result)).acquired; }
+  catch (error) {
+    throw new LockError({ code: 'store', message: 'Postgres returned an invalid acquire response',
+      remediation: 'Reconcile ownership; the acquire statement may have executed.', method: 'acquire', outcome: 'unknown', cause: error });
+  }
 }
 
 /** Drizzle wraps driver errors; the Postgres code sits on the error or one of its causes. */
@@ -175,7 +187,7 @@ function blockingLockSql({ key, legacy, mode }: Target): SQL {
     : sql`select pg_advisory_xact_lock(${hi}::int4, ${lo}::int4)`;
 }
 
-const settingOr = (value: unknown): string => (typeof value === 'string' ? value : '0');
+const settingOr = (value: unknown): string => settingSchema.safeParse(value).data ?? '0';
 
 /**
  * One slice of a wait: block on the lock for at most `sliceMs`. A timeout is an
@@ -239,6 +251,7 @@ async function takeLock(
 }
 
 function notAcquired(cause: unknown): LockError {
+  if (cause instanceof LockError && cause.outcome === 'unknown') return cause;
   return new LockError({
     code: 'store',
     message: 'the Postgres advisory lock attempt failed',
@@ -264,18 +277,24 @@ export function pgTransaction(
   options: PgLockOptions = {},
 ): Store<PgTransactionGuarantees> & { readonly shared: SharedOps } {
   const legacy = options.legacyKeys === true;
-  const granted = new Set<string>();
-  async function take(target: Target, req: AcquireRequest): Promise<Grant | undefined> {
+  const granted = new Set<LockToken>();
+  async function take(target: Target, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
     let got: boolean;
     try {
       got = await takeLock(tx, target, waitDeadline(req.waitMs), req.signal);
     } catch (error) {
       throw notAcquired(error);
     }
-    if (!got) return undefined;
+    if (!got) return;
     granted.add(req.token);
     return { key: target.key, token: req.token };
-  }
+  
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+}
   const release = (grant: Grant): Promise<ReleaseOutcome> =>
     // The transaction owns the lock; there is nothing to give back here.
     Promise.resolve(granted.delete(grant.token) ? 'released' : 'not-owner');
@@ -356,7 +375,7 @@ export function pgSession(
 ): Store<PgSessionGuarantees> & { readonly shared: SharedOps } {
   const legacy = options.legacyKeys === true;
   const keepAlive = options.keepAlive !== false;
-  const ends = new Map<string, () => Promise<ReleaseOutcome>>();
+  const ends = new Map<LockToken, () => Promise<ReleaseOutcome>>();
   const release = (grant: Grant): Promise<ReleaseOutcome> => {
     const end = ends.get(grant.token);
     return end === undefined ? Promise.resolve('not-owner') : end();
@@ -365,24 +384,43 @@ export function pgSession(
   // of readers can starve a writer. `SharedOps.waiter` is therefore left out on purpose: the
   // manager's wait loop retries, and the contract's writer-preference case skips.
   const shared: SharedOps = {
-    async acquire(key: Key, req: SharedRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: SharedRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       // `legacyKeys` is for mutexes only: read/write keys never had a legacy key.
       return (await open({ key, legacy: false, mode: modeOf(req) }, req)) ?? undefined;
-    },
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
     release,
   };
 
   return {
     name: 'pg-session',
     guarantees: pgSessionGuarantees,
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       return (await open({ key, legacy, mode: 'exclusive' }, req)) ?? undefined;
-    },
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
     release,
     shared,
-    async dispose(): Promise<void> {
+    async dispose() {
+ return observeLock('store.dispose', async () => {
+      try {
       await Promise.all([...ends.values()].map(end => end()));
-    },
+    
+        return;
+      } catch (error) { return storeFailure(error, 'dispose'); }
+
+ });
+},
   };
 
   /** One attempt on a fresh pinned transaction; `null` = not granted. */

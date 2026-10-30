@@ -15,10 +15,11 @@
  * overload: the public signature promises `Locks<S>`, the implementation
  * returns the wide `LocksImpl` and TypeScript checks the two are compatible.
  */
+import { isFailure, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
-import type { LockHeld as LockHeldFailure, LockMethod } from './errors.js';
-import type { Scheduler, SchedulerHandle } from './scheduler.js';
+import type { LockHeld as LockHeldFailure, LockMethod, LockOperationFailure, LockRunFailure, StoreFailure, ReleaseFailure } from './errors.js';
+import type { SchedulerHandle } from './scheduler.js';
 import type {
   AcquireRequest,
   CreateLocksOptions,
@@ -26,6 +27,10 @@ import type {
   Grant,
   Key,
   LockCounters,
+  LockContext,
+  LeaderOps,
+  TryOptions,
+  WeightOption,
   Locks,
   PermitOps,
   ReleaseOutcome,
@@ -34,11 +39,15 @@ import type {
   Store,
   Waiter,
 } from './types.js';
-import { LockError, LockHeld } from './errors.js';
+import { lockFailure, releaseFailure, storeFailure, LockError, LockHeld, LockStoreFailure, LockReleaseFailed } from './errors.js';
+import type { LockFence } from './identities.js';
+import { lockToken } from './identities.js';
 import { createKey } from './key.js';
 import { lead } from './lead.js';
-import { defaultScheduler } from './scheduler.js';
-import { isPermitCount, semaphoreConfigSchema, storeTimeoutSchema } from './types.js';
+import { defaultScheduler, supervisedScheduler } from './scheduler.js';
+import { observeLock, report } from './telemetry.js';
+import { isPermitCount } from './types.js';
+import { semaphoreConfigSchema, storeTimeoutSchema } from './schemas.js';
 import {
   answerSoFar,
   BACKOFF_MAX_MS,
@@ -63,34 +72,28 @@ const DEFAULT_STORE_TIMEOUT: Duration = '10s';
 // Wide internal shapes (the gated public types are conditional on `S`)
 // ---------------------------------------------------------------------------
 
-type CallOptions = {
-  readonly wait?: Duration;
-  readonly signal?: AbortSignal;
-  readonly weight?: number;
-  readonly holdAtLeast?: Duration;
-  readonly onLost?: 'abort' | 'ignore';
-};
+type CallOptions = TryOptions<WeightOption> & { readonly wait?: Duration };
 
-type ContextImpl = { readonly signal: AbortSignal; readonly fence: bigint | undefined; readonly key: Key };
+type ContextImpl = LockContext<Store>;
 
 type GuardImpl = {
   readonly key: Key;
   readonly signal: AbortSignal;
   readonly held: boolean;
-  readonly fence: bigint | undefined;
+  readonly fence: LockFence | undefined;
   readonly expiresAt: number | undefined;
-  readonly extend?: () => Promise<void>;
-  release(): Promise<void>;
+  readonly extend?: () => Promise<void | LockOperationFailure>;
+  release(): Promise<void | ReleaseFailure>;
   [Symbol.asyncDispose](): Promise<void>;
 };
 
 type HandleImpl = {
-  tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockHeldFailure>;
-  run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockHeldFailure>;
-  acquire(opts?: CallOptions): Promise<GuardImpl | LockHeldFailure>;
-  tryAcquire(opts?: CallOptions): Promise<GuardImpl | LockHeldFailure>;
+  tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockRunFailure>;
+  run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T> | LockRunFailure>;
+  acquire(opts?: CallOptions): Promise<GuardImpl | LockRunFailure>;
+  tryAcquire(opts?: CallOptions): Promise<GuardImpl | LockRunFailure>;
   /** Lease stores only. */
-  lead?(fn: (ctx: ContextImpl) => unknown, opts?: { readonly signal?: AbortSignal }): Promise<void>;
+  lead?: LeaderOps<Store>['lead'];
 };
 
 /**
@@ -98,9 +101,9 @@ type HandleImpl = {
  * mutex request; a semaphore or read/write protocol adds its own fields before the store sees it.
  */
 type Protocol = {
-  acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined>;
-  release(grant: Grant): Promise<ReleaseOutcome>;
-  extend?(grant: Grant, ttlMs: number): Promise<boolean>;
+  acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined | StoreFailure>;
+  release(grant: Grant): Promise<ReleaseOutcome | StoreFailure>;
+  extend?(grant: Grant, ttlMs: number): Promise<boolean | StoreFailure>;
   /** A store-aware wait (writer preference, permits that fit). Absent or `undefined`: wait on `Store.waitFor`. */
   waiter?(key: Key): Waiter | undefined;
 };
@@ -119,7 +122,7 @@ type LocksImpl = {
 /** One hold, as the manager sees it. */
 type Held = {
   readonly key: Key;
-  readonly fence: bigint | undefined;
+  readonly fence: LockFence | undefined;
   signal(): AbortSignal;
   release(): Promise<void>;
   lostError(): LockError | undefined;
@@ -146,6 +149,7 @@ function toError(error: unknown): Error {
 }
 
 function asStoreError(error: unknown, method: LockMethod): LockError {
+  if (error instanceof UnexpectedFailure && UnexpectedDefect.is(error.failure)) throw error;
   if (error instanceof LockError) return error;
   return new LockError({
     code: 'store',
@@ -155,6 +159,15 @@ function asStoreError(error: unknown, method: LockMethod): LockError {
     outcome: 'unknown',
     method,
   });
+}
+
+
+/** Private ownership flow uses exceptions; the public store protocol returns failures. */
+async function storeValue<T>(promise: Promise<T | StoreFailure>, method: LockMethod) {
+  const value = await promise;
+  if (LockStoreFailure.is(value)) throw asStoreError(value, method);
+  if (UnexpectedDefect.is(value)) throw new UnexpectedFailure(value);
+  return value;
 }
 
 function asReleaseError(error: unknown): LockError {
@@ -172,12 +185,12 @@ function asReleaseError(error: unknown): LockError {
 function addSuppressed(error: unknown, extra: readonly Error[]): void {
   if (!(error instanceof Error) || extra.length === 0) return;
   const existing = error instanceof LockError ? (error.suppressed ?? []) : [];
-  Object.defineProperty(error, 'suppressed', {
+  report(() => Object.defineProperty(error, 'suppressed', {
     value: [...existing, ...extra],
     configurable: true,
     writable: true,
     enumerable: false,
-  });
+  }));
 }
 
 function configError(message: string, remediation: string): LockError {
@@ -191,7 +204,7 @@ function configError(message: string, remediation: string): LockError {
 export function createLocks<S extends Store>(options: CreateLocksOptions<S>): Locks<S>;
 export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Locks<Store> {
   const { store, namespace, onReleaseError } = options;
-  const scheduler: Scheduler = options.scheduler ?? defaultScheduler;
+  const scheduler = options.scheduler === undefined ? defaultScheduler : supervisedScheduler(options.scheduler);
   const storeTimeoutMs = parseDuration(options.storeTimeout ?? DEFAULT_STORE_TIMEOUT);
   if (!storeTimeoutSchema.safeParse(storeTimeoutMs).success) {
     throw new LockError({
@@ -231,11 +244,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   if (leased && sharedOps !== undefined && sharedOps.extend === undefined) {
     throw configError('a lease store needs shared.extend', "Add `extend` to the store's shared ops.");
   }
-  const nonce = Math.random().toString(36).slice(2);
-  let tokenCounter = 0;
   const counts = { releaseErrors: 0, leadAcquired: 0, leadLost: 0 };
 
-  const nextToken = (): string => `${nonce}-${(tokenCounter++).toString(36)}`;
+
   const keyField = (key: Key): string => (logKeys ? key.full : 'hidden');
   /** The busy answer. The key rides along only under `logKeys`, as in logs. */
   const heldFailure = (key: Key, waitedMs: number): LockHeldFailure =>
@@ -258,7 +269,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   /** Give a grant back with its own token, through the protocol that issued it. Never throws. */
   async function giveBack(protocol: Protocol, grant: Grant, why: string): Promise<void> {
     try {
-      await storeAnswer(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
+      await storeAnswer(storeValue(protocol.release(grant), 'release'), storeTimeoutMs, 'release', scheduler);
     } catch (error) {
       log.error(toError(error), { why, key: keyField(grant.key) });
     }
@@ -275,7 +286,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     waiter: Waiter | undefined,
   ): Promise<Attempt | undefined> {
     if (signal?.aborted === true) await raceSignal(Promise.resolve(), signal);
-    const request: Writable<AcquireRequest> = { token: nextToken() };
+    const token = lockToken.create();
+    if (isFailure(token)) throw new UnexpectedFailure(token);
+    const request: Writable<AcquireRequest> = { token };
     if (leased) request.ttlMs = leaseMs;
     if (waitMs !== undefined) request.waitMs = waitMs;
     if (signal !== undefined) request.signal = signal;
@@ -284,7 +297,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     const sentAt = leased ? scheduler.now() : 0;
     let raw: Promise<Grant | undefined>;
     try {
-      raw = protocol.acquire(key, request);
+      raw = storeValue(protocol.acquire(key, request), 'acquire');
     } catch (error) {
       // A store that throws instead of rejecting fails the same way.
       raw = Promise.reject(asStoreError(error, 'acquire'));
@@ -319,11 +332,11 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         throw asStoreError(error, 'acquire');
       }
     }
-    if (grant === undefined) return undefined;
+    if (grant === undefined) return;
     if (leased && scheduler.now() - sentAt >= leaseMs) {
       log.warn('grant for {key} arrived after its ttl; refused', { key: keyField(key) });
       await giveBack(protocol, grant, 'stale grant');
-      return undefined;
+      return;
     }
     return { grant, sentAt };
   }
@@ -340,8 +353,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       session === undefined
         ? store.waitFor === undefined
           ? undefined
-          : (s: AbortSignal): Promise<void> => store.waitFor?.(key, s) ?? Promise.resolve()
-        : (s: AbortSignal): Promise<void> => session.waitFor(s);
+          : (s: AbortSignal): Promise<void> => storeValue(store.waitFor?.(key, s) ?? Promise.resolve(), 'waitFor')
+        : (s: AbortSignal): Promise<void> => storeValue(session.waitFor(s), 'waitFor');
     const ms = waitFor === undefined ? Math.min(backoffDelay(attempt), leftMs) : Math.min(leftMs, BACKOFF_MAX_MS);
     // Tells the store's wait to stop listening once this pause is over. Dropped when the store itself ended the wait.
     let wakeup = waitFor === undefined ? undefined : new AbortController();
@@ -408,8 +421,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     const stopTimers = (): void => {
       detachCaller?.();
       detachCaller = undefined;
-      if (beatTimer !== undefined) scheduler.clearTimeout(beatTimer);
-      if (deadlineTimer !== undefined) scheduler.clearTimeout(deadlineTimer);
+      const beat = beatTimer;
+      const expiry = deadlineTimer;
+      if (beat !== undefined) report(() => scheduler.clearTimeout(beat));
+      if (expiry !== undefined) report(() => scheduler.clearTimeout(expiry));
       beatTimer = undefined;
       deadlineTimer = undefined;
     };
@@ -454,7 +469,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       stopTimers();
       let outcome;
       try {
-        const raw = protocol.release(grant);
+        const raw = storeValue(protocol.release(grant), 'release');
         const first = await answerSoFar(raw);
         outcome = first === NOT_YET ? await storeAnswer(raw, storeTimeoutMs, 'release', scheduler) : first;
       } catch (error) {
@@ -473,7 +488,12 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     };
 
     const release = (): Promise<void> => {
-      releasing ??= doRelease();
+      releasing ??= (async () => {
+        const outcome = await observeLock('release', async () => {
+          try { await doRelease(); return; } catch (error) { return releaseFailure(error); }
+        });
+        if (LockReleaseFailed.is(outcome)) throw asReleaseError(outcome);
+      })();
       return releasing;
     };
 
@@ -486,6 +506,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
           ? undefined
           : (g: Grant, ttlMs: number) => protocol.extend?.(g, ttlMs) ?? Promise.resolve(false);
       let renewing: Promise<void> | undefined;
+      let renewalFailure: StoreFailure | undefined;
 
       const armDeadline = (): void => {
         if (deadlineTimer !== undefined) scheduler.clearTimeout(deadlineTimer);
@@ -507,7 +528,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
           () => {
             beatTimer = undefined;
             if (ended !== undefined || renewing !== undefined) return;
-            return renewOnce();
+            return renewOnce().catch(error => { lose('renewal', error); });
           },
           delayMs,
           { ref: false },
@@ -519,10 +540,12 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         const run = (async (): Promise<void> => {
           if (extendFn === undefined) return;
           const sentAt = scheduler.now();
+          renewalFailure = undefined;
           let ok: boolean;
           try {
-            ok = await withStoreTimeout(extendFn(grant, leaseMs), storeTimeoutMs, 'extend', scheduler);
+            ok = await withStoreTimeout(storeValue(extendFn(grant, leaseMs), 'extend'), storeTimeoutMs, 'extend', scheduler);
           } catch (error) {
+            renewalFailure = storeFailure(error, 'extend');
             log.error(toError(error), { note: 'renewal failed; retrying until the deadline', key: keyField(key) });
             armBeat(leaseMs / 3);
             return;
@@ -556,6 +579,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
             await renewing;
           }
           if (ended === 'lost' && lostError !== undefined) throw lostError;
+          if (renewalFailure !== undefined) throw asStoreError(renewalFailure, 'extend');
         };
       }
       armDeadline();
@@ -590,16 +614,22 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         get expiresAt() {
           return grant.expiresAt === undefined ? undefined : grant.expiresAt + (deadline - firstDeadline);
         },
-        ...(extend === undefined ? {} : { extend }),
-        release,
-        [Symbol.asyncDispose]: release,
+        ...(extend === undefined ? {} : { extend: () => observeLock('extend', async () => {
+          try { await extend(); return; } catch (error) { return lockFailure(error); }
+        }) }),
+        release: async () => {
+          try { await release(); return; } catch (error) { return releaseFailure(error); }
+        },
+        [Symbol.asyncDispose]: async () => {
+          // ECMAScript disposal is a foreign void protocol: surface the canonical outcome explicitly.
+          const result = await guard().release();
+          if (isFailure(result)) throw new UnexpectedFailure(result);
+        },
       };
       return view;
     };
 
-    void grant.lost?.then(reason => {
-      lose('connection', reason);
-    });
+    report(() => grant.lost?.then(reason => { lose('connection', reason); }, error => { lose('connection', error); }));
     log.debug('acquired {key}', { key: keyField(key) });
     const renewNow = renew !== undefined && first.sentAt + leaseMs - scheduler.now() < leaseMs / 3 ? renew : undefined;
     return { key, fence: grant.fence, signal: signalOf, release, lostError: () => lostError, guard, renewNow };
@@ -638,7 +668,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
             : undefined;
         const got = await gated(key, () => attemptOnce(protocol, key, nativeWait, opts.signal, session));
         if (got !== undefined) {
-          const held = makeHeld(protocol, key, got, opts, holdMs);
+          let held: Held;
+          try { held = makeHeld(protocol, key, got, opts, holdMs); }
+          catch (error) { await giveBack(protocol, got.grant, 'hold setup failed'); throw error; }
           // A grant with less than ttl/3 left renews at once instead of waiting a beat.
           if (held.renewNow !== undefined) await held.renewNow();
           // Lost before the callback starts (refused, or past the deadline): never acquired.
@@ -659,7 +691,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     held: Held,
     fn: (ctx: ContextImpl) => T | Promise<T>,
     opts: CallOptions,
-  ): Promise<Awaited<T>> {
+  ): Promise<Awaited<T> | LockOperationFailure> {
     let settled: Settled<Awaited<T>>;
     try {
       const ctx: ContextImpl = {
@@ -686,9 +718,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         settled.error,
         [lost, releaseError].filter(e => e !== undefined),
       );
-      throw settled.error;
+      return UnexpectedDefect({ cause: settled.error });
     }
-    if (lost !== undefined && (opts.onLost ?? 'abort') === 'abort') throw lost;
+    // A callback failure is its own public identity even when ownership or cleanup also failed.
+    if (!isFailure<unknown>(settled.value) && lost !== undefined && (opts.onLost ?? 'abort') === 'abort') return lockFailure(lost);
     if (releaseError !== undefined) {
       // Decision 4: the callback succeeded, so the value is returned. The failure is reported, not thrown.
       counts.releaseErrors += 1;
@@ -697,7 +730,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         error: releaseError,
       });
       try {
-        onReleaseError?.(releaseError);
+        report(() => onReleaseError?.(releaseFailure(releaseError)));
       } catch (error) {
         log.error(toError(error), { note: 'onReleaseError threw' });
       }
@@ -711,26 +744,42 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       async tryRun<T>(
         fn: (ctx: ContextImpl) => T | Promise<T>,
         opts: CallOptions = {},
-      ): Promise<Awaited<T> | LockHeldFailure> {
-        const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
-        if (LockHeld.is(held)) return held;
-        return runHeld(held, fn, opts);
+      ): Promise<Awaited<T> | LockRunFailure> {
+        return await observeLock('try_run', async () => {
+          try {
+            const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
+            if (LockHeld.is(held)) return held;
+            return await runHeld(held, fn, opts);
+          } catch (error) { return lockFailure(error); }
+        });
       },
       async run<T>(
         fn: (ctx: ContextImpl) => T | Promise<T>,
         opts: CallOptions = {},
-      ): Promise<Awaited<T> | LockHeldFailure> {
-        const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
-        if (LockHeld.is(held)) return held;
-        return runHeld(held, fn, opts);
+      ): Promise<Awaited<T> | LockRunFailure> {
+        return await observeLock('run', async () => {
+          try {
+            const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
+            if (LockHeld.is(held)) return held;
+            return await runHeld(held, fn, opts);
+          } catch (error) { return lockFailure(error); }
+        });
       },
       async acquire(opts = {}) {
-        const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
-        return LockHeld.is(held) ? held : held.guard();
+        return observeLock('acquire', async () => {
+          try {
+            const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
+            return LockHeld.is(held) ? held : held.guard();
+          } catch (error) { return lockFailure(error); }
+        });
       },
       async tryAcquire(opts = {}) {
-        const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
-        return LockHeld.is(held) ? held : held.guard();
+        return observeLock('try_acquire', async () => {
+          try {
+            const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
+            return LockHeld.is(held) ? held : held.guard();
+          } catch (error) { return lockFailure(error); }
+        });
       },
     };
   }
@@ -751,7 +800,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     return {
       ...handle,
       lead: (fn, opts) =>
-        lead(
+        observeLock('lead', () => lead(
           {
             key,
             keyField: keyField(key),
@@ -760,15 +809,20 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
             counts,
             tryAcquire: async callOpts => {
               const guard = await handle.tryAcquire(callOpts);
-              return LockHeld.is(guard) ? undefined : guard;
+              if (LockHeld.is(guard)) return;
+              if (isFailure(guard)) throw new UnexpectedFailure(guard);
+              return { ...guard, release: async () => {
+                const result = await guard.release();
+                if (isFailure(result)) throw new UnexpectedFailure(result);
+              } };
             },
-            ...(store.waitFor === undefined ? {} : { waitFor: (k, s) => store.waitFor?.(k, s) ?? Promise.resolve() }),
+            ...(store.waitFor === undefined ? {} : { waitFor: (k, s) => storeValue(store.waitFor?.(k, s) ?? Promise.resolve(), 'waitFor') }),
             onReleaseError: error => {
               const releaseError = asReleaseError(error);
               counts.releaseErrors += 1;
               log.error('release of {key} failed while leading: {error}', { key: keyField(key), error: releaseError });
               try {
-                onReleaseError?.(releaseError);
+                report(() => onReleaseError?.(releaseFailure(releaseError)));
               } catch (hookError) {
                 log.error(toError(hookError), { note: 'onReleaseError threw' });
               }
@@ -776,7 +830,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
           },
           fn,
           opts,
-        ),
+        )),
     };
   }
 

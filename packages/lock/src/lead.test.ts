@@ -1,3 +1,6 @@
+import { collect } from '@arki/failure';
+import { orThrow } from '@arki/failure';
+import { lockTokenSchema, lockFenceSchema } from './identity-schemas.js';
 import { describe, expect, it } from 'vitest';
 
 import type { AcquireRequest, Grant, Guarantees, Key, ReleaseOutcome, Store } from './types.js';
@@ -40,8 +43,8 @@ function leaseTable(now: () => number, withWake = false) {
       const current = holders.get(key.full);
       if (current !== undefined && current.expiresAt > now()) return undefined;
       fence += 1n;
-      holders.set(key.full, { token: req.token, expiresAt: now() + TTL_MS });
-      const grant: Grant = { key, token: req.token, fence, expiresAt: now() + TTL_MS };
+      holders.set(key.full, { token: lockTokenSchema.parse(req.token), expiresAt: now() + TTL_MS });
+      const grant: Grant = { key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(fence), expiresAt: now() + TTL_MS };
       return grant;
     },
     release(grant: Grant) {
@@ -85,7 +88,7 @@ function leaseTable(now: () => number, withWake = false) {
     },
     /** Someone outside the test holds the lease for good. */
     occupy(key: Key): void {
-      holders.set(key.full, { token: 'outsider', expiresAt: Number.POSITIVE_INFINITY });
+      holders.set(key.full, { token: lockTokenSchema.parse('outsider'), expiresAt: Number.POSITIVE_INFINITY });
     },
   };
 }
@@ -157,7 +160,7 @@ describe('lead', () => {
     }
     expect(state.maxActive).toBe(1);
     stop.abort();
-    await done;
+    orThrow(collect(await done));
     expect(state.active).toBe(0);
     expect(clock.pendingTimers).toBe(0);
   });
@@ -182,7 +185,8 @@ describe('lead', () => {
     expect(state.active).toBeLessThanOrEqual(1);
 
     stop.abort();
-    await done;
+    const outcomes = await done;
+    expect(outcomes.filter(outcome => outcome?.code === 'lock.lost')).toHaveLength(1);
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -207,11 +211,12 @@ describe('lead', () => {
     expect(campaigners[0]?.counters.leadLost).toBe(0);
 
     stop.abort();
-    await done;
+    const outcomes = await done;
+    expect(outcomes.map(outcome => outcome?.code)).toEqual(['failure.unexpected_defect', undefined, undefined]);
     expect(clock.pendingTimers).toBe(0);
   });
 
-  it('never starts a second fn while the first is still running after a loss', async () => {
+  it('settles with ownership loss after the first fn ends and never replays its effects', async () => {
     const { clock, table, campaigners } = setup(1);
     const stop = new AbortController();
     const slow = deferred();
@@ -231,9 +236,9 @@ describe('lead', () => {
     slow.resolve();
     await clock.advance(BEAT);
     await clock.advance(BEAT);
-    expect(calls).toBe(2);
+    expect(calls).toBe(1);
+    expect(await done).toMatchObject({ code: 'lock.lost' });
     stop.abort();
-    await done;
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -252,14 +257,14 @@ describe('lead', () => {
     await clock.advance(BEAT);
     expect(clock.pendingTimers).toBe(1);
     stop.abort();
-    await done;
+    orThrow(await done);
     expect(calls).toBe(0);
     expect(clock.pendingTimers).toBe(0);
   });
 
   it('resolves without acquiring when the signal is already aborted', async () => {
     const { clock, table, campaigners } = setup(1);
-    await campaigners[0]?.mutex('feed').lead(() => 0, { signal: AbortSignal.abort() });
+    orThrow(await campaigners[0]?.mutex('feed').lead(() => 0, { signal: AbortSignal.abort() }));
     expect(table.stats.acquires).toBe(0);
     expect(clock.pendingTimers).toBe(0);
   });
@@ -281,7 +286,7 @@ describe('lead', () => {
     expect(calls).toBe(2);
     expect(campaigners[0]?.counters.leadAcquired).toBe(2);
     stop.abort();
-    await done;
+    orThrow(await done);
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -303,7 +308,7 @@ describe('lead', () => {
     await clock.advance('10ms'); // far less than one beat
     expect(state.leading[other]).toBe(true);
     stop.abort();
-    await done;
+    orThrow(collect(await done));
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -314,7 +319,7 @@ describe('lead', () => {
     await clock.advance(BEAT);
     expect(state.active).toBe(1);
     stop.abort();
-    await done;
+    orThrow(collect(await done));
     expect(state.active).toBe(0);
     expect(campaigners[0]?.counters.leadLost).toBe(0);
     expect(table.stats.releases).toBe(1);
@@ -345,8 +350,8 @@ function optionLeaseTable(now: () => number, options: TableOptions = {}) {
   const grantIfFree = (key: Key, req: AcquireRequest): Grant | undefined => {
     if (!free(key)) return undefined;
     fence += 1n;
-    holders.set(key.full, { token: req.token, expiresAt: now() + TTL_MS });
-    return { key, token: req.token, fence, expiresAt: now() + TTL_MS };
+    holders.set(key.full, { token: lockTokenSchema.parse(req.token), expiresAt: now() + TTL_MS });
+    return { key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(fence), expiresAt: now() + TTL_MS };
   };
   const wake = options.wake ?? 'none';
   const store: Store<typeof leaseGuarantees> = {
@@ -393,7 +398,7 @@ function optionLeaseTable(now: () => number, options: TableOptions = {}) {
     store,
     stats,
     occupy(key: Key): void {
-      holders.set(key.full, { token: 'outsider', expiresAt: Number.POSITIVE_INFINITY });
+      holders.set(key.full, { token: lockTokenSchema.parse('outsider'), expiresAt: Number.POSITIVE_INFINITY });
     },
   };
 }
@@ -434,10 +439,10 @@ describe('lead: review regressions', () => {
     // Only the current beat's wait may hold a listener.
     expect(live.size).toBeLessThanOrEqual(1);
     controller.abort();
-    await done;
+    orThrow(await done);
   });
 
-  it('R2: a throwing fn is retried after a beat, not in a hot loop, when waitFor sees the key free', async () => {
+  it('R2: a throwing fn ends the campaign once and never replays effects', async () => {
     const clock = manualScheduler();
     const table = optionLeaseTable(() => clock.now(), { wake: 'free-immediate' });
     const locks = createLocks({ store: table.store, namespace: 'test', scheduler: clock });
@@ -453,7 +458,7 @@ describe('lead: review regressions', () => {
     await clock.advance('10ms'); // far less than one beat (1000 ms)
     expect(calls).toBeLessThanOrEqual(1);
     stop.abort();
-    await done;
+    expect(await done).toMatchObject({ code: 'failure.unexpected_defect', cause: new Error('boom') });
   });
 
   it('R3: lead resolves (never rejects) and leaves no timer when the store waitFor throws synchronously', async () => {
@@ -497,10 +502,10 @@ describe('lead: review regressions', () => {
       ),
     );
     for (let step = 0; step < 300; step++) await clock.advance('100ms');
-    expect(terms).toBeGreaterThan(5);
+    expect(terms).toBe(3);
     expect(overlaps).toBe(0);
     stop.abort();
-    await done;
+    expect((await done).map(outcome => outcome?.code)).toEqual(['lock.lost', 'lock.lost', 'lock.lost']);
     expect(clock.pendingTimers).toBe(0);
   });
 
@@ -523,7 +528,7 @@ describe('lead: review regressions', () => {
     await clock.advance('10ms');
     expect(table.stats.acquires).toBe(1);
     stop.abort();
-    await done;
+    orThrow(await done);
     open();
     await clock.advance('10ms');
     expect(calls).toBe(0);
@@ -543,12 +548,12 @@ describe('lead: review regressions', () => {
     };
     const locks = createLocks({ store: table.store, namespace: 'test', scheduler: clock });
     let calls = 0;
-    await locks.mutex('feed').lead(
+    orThrow(await locks.mutex('feed').lead(
       () => {
         calls += 1;
       },
       { signal: stop.signal },
-    );
+    ));
     expect(calls).toBe(0);
     expect(locks.counters.leadAcquired).toBe(0);
     expect(table.stats.releases).toBe(1);

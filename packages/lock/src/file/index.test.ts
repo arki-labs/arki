@@ -1,3 +1,4 @@
+import { lockTokenSchema } from './../identity-schemas.js';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -93,7 +94,7 @@ describe('file store', () => {
       async ({ signal }) => {
         const deadline = Date.now() + stale * 3;
         while (Date.now() < deadline) {
-          if ((await rival.acquire(target, { token: `rival-${stolen}`, ttlMs: stale })) !== undefined) stolen += 1;
+          if ((await rival.acquire(target, { token: lockTokenSchema.parse(`rival-${stolen}`), ttlMs: stale })) !== undefined) stolen += 1;
           await sleep(20);
         }
         signalAborted = signal.aborted;
@@ -108,26 +109,26 @@ describe('file store', () => {
   it('never lets an old owner remove its successor: removal by path destroyed the new owner lock', async () => {
     const { store, advance } = fakeClockStore(1000);
     const target = key('successor');
-    const old = await store.acquire(target, { token: 'old', ttlMs: 1000 });
+    const old = orThrow(await store.acquire(target, { token: lockTokenSchema.parse('old'), ttlMs: 1000 }));
     await advance(1001);
-    const successor = await store.acquire(target, { token: 'new', ttlMs: 1000 });
+    const successor = orThrow(await store.acquire(target, { token: lockTokenSchema.parse('new'), ttlMs: 1000 }));
     expect(old).toBeDefined();
     expect(successor).toBeDefined();
     if (old === undefined || successor === undefined) return;
     expect(await store.release(old)).toBe('not-owner');
     expect(await store.extend?.(old, 1000)).toBe(false);
     const owner: unknown = JSON.parse(await readFile(nodePath.join(store.lockPath(target), 'owner'), 'utf8'));
-    expect(owner).toMatchObject({ token: 'new' });
+    expect(owner).toMatchObject({ token: lockTokenSchema.parse('new') });
     expect(await store.release(successor)).toBe('released');
   });
 
   it('lets exactly one of many racing takers take over a stale lock', async () => {
     const { store, advance } = fakeClockStore(1000);
     const target = key('reap-race');
-    await store.acquire(target, { token: 'dead', ttlMs: 1000 });
+    orThrow(await store.acquire(target, { token: lockTokenSchema.parse('dead'), ttlMs: 1000 }));
     await advance(1001);
     const grants = await Promise.all(
-      Array.from({ length: 24 }, (_unused, index) => store.acquire(target, { token: `taker-${index}`, ttlMs: 1000 })),
+      Array.from({ length: 24 }, (_unused, index) => store.acquire(target, { token: lockTokenSchema.parse(`taker-${index}`), ttlMs: 1000 })),
     );
     expect(grants.filter(grant => grant !== undefined)).toHaveLength(1);
   });
@@ -135,7 +136,7 @@ describe('file store', () => {
   it('takes any token string: a token with "/" or 300 chars was spliced into a private path and broke acquire', async () => {
     const store = fileStore(dir);
     for (const token of ['a/b', '../../escape', 'x'.repeat(300)]) {
-      const grant = await store.acquire(key(`token-${token.length}`), { token });
+      const grant = orThrow(await store.acquire(key(`token-${token.length}`), { token: lockTokenSchema.parse(token) }));
       expect(grant).toBeDefined();
       if (grant !== undefined) expect(await store.release(grant)).toBe('released');
     }
@@ -146,12 +147,12 @@ describe('file store', () => {
     const store = fileStore(dir, { stale: STALE });
     const target = await staleLock(store, 'ownerless');
     await rm(nodePath.join(store.lockPath(target), 'owner'));
-    expect(await store.acquire(target, { token: 'taker' })).toBeDefined();
+    expect(await store.acquire(target, { token: lockTokenSchema.parse('taker') })).toBeDefined();
   });
 
   it('keeps lock names within file-system limits for a 512-byte key', async () => {
     const store = fileStore(dir);
-    const grant = await store.acquire(createKey('file-test', 'é'.repeat(256)), { token: 't' });
+    const grant = orThrow(await store.acquire(createKey('file-test', 'é'.repeat(256)), { token: lockTokenSchema.parse('t') }));
     expect(grant).toBeDefined();
     const names = await readdir(dir);
     expect(names.every(name => name.length < 200)).toBe(true);
@@ -173,12 +174,12 @@ describe('file store chaos', () => {
     await child.line('ACQUIRED');
     child.process.kill('SIGKILL');
     const store = fileStore(dir, { stale });
-    expect(await store.acquire(target, { token: 'early' })).toBeUndefined();
+    expect(await store.acquire(target, { token: lockTokenSchema.parse('early') })).toBeUndefined();
     const killedAt = Date.now();
-    let taken = await store.acquire(target, { token: 'late' });
+    let taken = orThrow(await store.acquire(target, { token: lockTokenSchema.parse('late') }));
     while (taken === undefined && Date.now() - killedAt < stale * 5) {
       await sleep(25);
-      taken = await store.acquire(target, { token: 'late' });
+      taken = orThrow(await store.acquire(target, { token: lockTokenSchema.parse('late') }));
     }
     expect(taken).toBeDefined();
   });
@@ -224,7 +225,7 @@ describe('file store chaos', () => {
         const taker = startTaker(target.name, step);
         await taker.start();
         await taker.reached();
-        await store.release({ key: target, token: `dead-${target.name}` });
+        orThrow(await store.release({ key: target, token: lockTokenSchema.parse(`dead-${target.name}`) }));
         const rival = await tryAcquire(store, target, `rival-${step}`);
         await taker.resume();
         return holders(store, target, [rival, await taker.done()]);
@@ -245,7 +246,7 @@ describe('file store chaos', () => {
     expect(guard.held).toBe(false);
     expect(guard.signal.reason).toBeInstanceOf(LockError);
     expect(guard.signal.reason).toMatchObject({ code: 'lost' });
-    await guard.release().catch(() => 0);
+    orThrow(await guard.release().catch(() => 0));
   });
 
   it('never lets two processes own the key at once over 2 x 200 contended rounds', async () => {
@@ -284,7 +285,7 @@ describe('file store chaos', () => {
 /** A lock whose holder died long ago: `dead-<name>` owns it and its mtime is far past `stale`. */
 async function staleLock(store: FileStore, name: string): Promise<Key> {
   const target = key(name);
-  await store.acquire(target, { token: `dead-${name}` });
+  orThrow(await store.acquire(target, { token: lockTokenSchema.parse(`dead-${name}`) }));
   const longAgo = (Date.now() - 60_000) / 1000;
   await utimes(store.lockPath(target), longAgo, longAgo);
   return target;
@@ -292,8 +293,8 @@ async function staleLock(store: FileStore, name: string): Promise<Key> {
 
 /** One acquire, reported as a token, `'none'`, or the error code. */
 function tryAcquire(store: FileStore, target: Key, token: string): Promise<string> {
-  return store.acquire(target, { token }).then(
-    grant => grant?.token ?? 'none',
+  return store.acquire(target, { token: lockTokenSchema.parse(token) }).then(
+    grant => orThrow(grant)?.token ?? 'none',
     (error: unknown) => `error ${String(error)}`,
   );
 }
@@ -302,7 +303,7 @@ function tryAcquire(store: FileStore, target: Key, token: string): Promise<strin
 async function holders(store: FileStore, target: Key, outcomes: string[]) {
   const tokens = outcomes.filter(outcome => outcome !== 'none' && !outcome.startsWith('error'));
   const checks = await Promise.all(
-    tokens.map(token => store.extend?.({ key: target, token }, STALE) ?? Promise.resolve(false)),
+    tokens.map(token => store.extend?.({ key: target, token: lockTokenSchema.parse(token) }, STALE) ?? Promise.resolve(false)),
   );
   return {
     granted: tokens.length,

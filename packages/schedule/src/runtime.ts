@@ -260,8 +260,18 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
         },
         { holdAtLeast: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS },
       );
-      // The handler's result is never a failure, so a failure here is the busy lock.
       if (!isFailure(locked)) return locked;
+      // Only explicit contention may skip work. Store failure and lost ownership are never busy.
+      if (locked.code !== 'lock.held') {
+        if (locked.code === 'lock.lost' && finished !== undefined) { lockLost += 1; return finished; }
+        if (locked.code === 'lock.lost') lockLost += 1;
+        else lockFailures += 1;
+        const parsed = lockCodeSchema.safeParse(locked.code.startsWith('lock.') ? locked.code.slice(5) : undefined);
+        const cause = UnexpectedDefect.is(locked) ? locked : parsed.success
+          ? ScheduleLockFailed({ lockCode: parsed.data }, { cause: locked })
+          : UnexpectedDefect({ cause: locked });
+        return { name: schedule.name, status: 'lock-failed', cause };
+      }
       lockContention += 1;
       observe(() =>
         debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {

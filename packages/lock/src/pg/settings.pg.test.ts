@@ -1,3 +1,4 @@
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * The pg fast paths (timeout lift in the attempt CTE, merged wait slice, beat ramp) keep the caller's settings and the hold's timeouts.
  */
@@ -71,7 +72,7 @@ describe('the instant attempt lifts timeouts in its CTE', () => {
         .acquire({ wait: '1s' }),
     );
     expect(await locks.mutex('leak').tryRun(() => 'no')).toMatchObject({ code: 'lock.held' });
-    await holder.release();
+    orThrow(await holder.release());
     expect(await locks.mutex('leak').tryRun(() => 'yes')).toBe('yes');
     const row = await strictDb.execute<{ st: string; idle: string }>(
       sql`select current_setting('statement_timeout') as st, current_setting('idle_in_transaction_session_timeout') as idle`,
@@ -94,7 +95,7 @@ describe('waitSlice reads the old settings before it sets new ones', () => {
       taken = resolve;
     });
     const holder = dbA.transaction(async tx => {
-      await pgTransaction(tx).acquire(key, { token: 'a' });
+      orThrow(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('a') }));
       taken();
       await released;
     });
@@ -104,7 +105,7 @@ describe('waitSlice reads the old settings before it sets new ones', () => {
     await dbB.transaction(async tx => {
       await tx.execute(sql`set local lock_timeout = 7777`);
       await tx.execute(sql`set local statement_timeout = 8888`);
-      expect(await pgTransaction(tx).acquire(key, { token: 'b', waitMs: 3000 })).toBeDefined();
+      expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('b'), waitMs: 3000 })).toBeDefined();
       const row = await tx.execute<{ lt: string; st: string }>(
         sql`select current_setting('lock_timeout') as lt, current_setting('statement_timeout') as st`,
       );
@@ -126,7 +127,7 @@ describe('release latency of a short hold', () => {
       const guard = await orThrow(handle.acquire({ wait: '1s' }));
       await delay(5);
       const started = performance.now();
-      await guard.release();
+      orThrow(await guard.release());
       times.push(performance.now() - started);
     }
     times.sort((a, b) => a - b);

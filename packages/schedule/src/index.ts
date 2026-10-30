@@ -1,3 +1,4 @@
+import type { LockRunFailure } from '@arki/lock';
 import { CronPattern } from 'croner';
 
 import type { Failure } from '@arki/failure';
@@ -72,8 +73,8 @@ export type DefineScheduleOptions<
 /** A number of milliseconds, or a string with unit `ms`, `s`, `m` or `h`: the same shape `@arki/lock` takes. */
 export type LockDuration = number | `${number}${'ms' | 's' | 'm' | 'h'}`;
 
-/** The callback's value, or the `lock.held` failure (`LockHeld` of `@arki/lock`) when another holder had the key. */
-export type LockerRun<T> = T | Failure<'lock.held'>;
+/** The callback value or the lock provider's canonical failure protocol. The runtime distinguishes contention from failed ownership. */
+export type LockerRun<T, F extends Failure = LockRunFailure> = T | F;
 
 /**
  * The lock port, and all a `lock:` schedule needs: `mutex(key).tryRun` runs
@@ -84,12 +85,12 @@ export type LockerRun<T> = T | Failure<'lock.held'>;
  * `namespace` and `store` are optional: when present they put the key space and
  * the store's promises into the manifest text.
  */
-export type Locker = {
+export type Locker<F extends Failure = LockRunFailure> = {
   mutex(key: string): {
     tryRun<T>(
       fn: (lock: ScheduleLock) => T | Promise<T>,
       opts?: { readonly holdAtLeast?: LockDuration },
-    ): Promise<LockerRun<Awaited<T>>>;
+    ): Promise<LockerRun<Awaited<T>, F>>;
   };
   readonly namespace?: string;
   readonly store?: {

@@ -1,3 +1,4 @@
+import { orThrow } from '@arki/failure';
 import { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -73,7 +74,7 @@ describe('redisStore (no server)', () => {
     const client = offlineClient();
     const duplicate = vi.spyOn(client, 'duplicate');
     const store = redisStore(client, { ttl: '30s' });
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
     expect(duplicate).not.toHaveBeenCalled();
   });
 

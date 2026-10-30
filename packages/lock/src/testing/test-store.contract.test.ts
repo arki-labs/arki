@@ -1,3 +1,5 @@
+import { orThrow } from '@arki/failure';
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * `testStore` keeps the promises of the store it stands in for: the shared contract suite runs
  * against it with the guarantees of each production store. A case is skipped only for a
@@ -39,7 +41,7 @@ describeStoreContract('testStore(redisGuarantees)', makeStore(redisGuarantees));
 describe('testStore', () => {
   it('hands out no fence when the guarantees say fence: false, so code that needs one fails in tests too', async () => {
     const store = testStore(pgSessionGuarantees);
-    const grant = await store.acquire(createKey('t', 'k'), { token: 'a' });
+    const grant = orThrow(await store.acquire(createKey('t', 'k'), { token: lockTokenSchema.parse('a') }));
     expect(grant).toBeDefined();
     expect(grant?.fence).toBeUndefined();
   });
@@ -53,7 +55,7 @@ describe('testStore', () => {
     const scheduler = manualScheduler();
     const store = testStore(pgLeasePollGuarantees, { scheduler, ttl: TTL_MS });
     const key = createKey('t', 'lease');
-    const grant = await store.acquire(key, { token: 'a', ttlMs: TTL_MS });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a'), ttlMs: TTL_MS }));
     expect(grant?.expiresAt).toBe(TTL_MS);
     let lost: unknown;
     void grant?.lost?.then(error => {
@@ -63,19 +65,19 @@ describe('testStore', () => {
     expect(lost).toBeUndefined();
     await scheduler.advance(1);
     expect(lost).toMatchObject({ code: 'lost', detectedBy: 'deadline' });
-    expect(await store.acquire(key, { token: 'b', ttlMs: TTL_MS })).toBeDefined();
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('b'), ttlMs: TTL_MS })).toBeDefined();
   });
 
   it('keeps a lease that is extended before it runs out', async () => {
     const scheduler = manualScheduler();
     const store = testStore(pgLeasePollGuarantees, { scheduler, ttl: TTL_MS });
     const key = createKey('t', 'extend');
-    const grant = await store.acquire(key, { token: 'a', ttlMs: TTL_MS });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a'), ttlMs: TTL_MS }));
     if (grant === undefined) throw new Error('expected a grant');
     await scheduler.advance(TTL_MS - 1);
     expect(await store.extend?.(grant, TTL_MS)).toBe(true);
     await scheduler.advance(TTL_MS - 1);
-    expect(await store.acquire(key, { token: 'b', ttlMs: TTL_MS })).toBeUndefined();
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('b'), ttlMs: TTL_MS })).toBeUndefined();
     expect(await store.release(grant)).toBe('released');
   });
 });

@@ -1,3 +1,4 @@
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * SQL shape and state machine of the Postgres stores, without Docker.
  *
@@ -78,27 +79,27 @@ describe('key spaces', () => {
   it('locks the two-int4 pair of the canonical key, so a rename of the format cannot go unnoticed', async () => {
     const { db, statements } = fakeDb(() => acquired(true));
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     const attempt = statements.find(statement => statement.sql.includes('pg_try_advisory_xact_lock'));
     const { hi, lo } = toPgPair(key);
     expect(attempt?.sql).toContain('pg_try_advisory_xact_lock($1::int4, $2::int4)');
     expect(attempt?.params).toEqual([hi, lo]);
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('released');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('released');
   });
 
   it('legacyKeys locks hashtext of "<namespace>:<name>", the key @arki/db locks today, so old and new replicas still exclude', async () => {
     const { db, statements } = fakeDb(() => acquired(true));
     const store = pgSession(db, { legacyKeys: true });
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     const attempt = statements.find(statement => statement.sql.includes('pg_try_advisory_xact_lock'));
     expect(attempt?.sql).toContain('pg_try_advisory_xact_lock(hashtext($1))');
     expect(attempt?.params).toEqual(['app:digest']);
-    await store.release(grant ?? { key, token: 't1' });
+    orThrow(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') }));
   });
 
   it('pgTransaction honours legacyKeys the same way', async () => {
     const { tx, statements } = fakeDb(() => acquired(true));
-    await pgTransaction(tx, { legacyKeys: true }).acquire(key, { token: 't1' });
+    orThrow(await pgTransaction(tx, { legacyKeys: true }).acquire(key, { token: lockTokenSchema.parse('t1') }));
     expect(statements[0]?.sql).toContain('hashtext($1)');
     expect(statements[0]?.params).toEqual(['app:digest']);
   });
@@ -106,11 +107,15 @@ describe('key spaces', () => {
   it('reads the answer from a { rows } result and from a bare array (node-postgres, PGlite, postgres.js)', async () => {
     for (const shape of [acquired(true), [{ acquired: true }]]) {
       const { tx } = fakeDb(() => shape);
-      expect(await pgTransaction(tx).acquire(key, { token: 't' })).toBeDefined();
+      expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t') })).toBeDefined();
     }
-    for (const shape of [acquired(false), [{ acquired: false }], [], undefined]) {
+    for (const shape of [acquired(false), [{ acquired: false }]]) {
       const { tx } = fakeDb(() => shape);
-      expect(await pgTransaction(tx).acquire(key, { token: 't' })).toBeUndefined();
+      expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t') })).toBeUndefined();
+    }
+    for (const shape of [[], undefined]) {
+      const { tx } = fakeDb(() => shape);
+      expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t') })).toHaveProperty('code', 'lock.store');
     }
   });
 });
@@ -119,48 +124,48 @@ describe('pgSession life cycle', () => {
   it('turns off the idle, statement and transaction timeouts first, or the server would end the pinned transaction and drop the lock', async () => {
     const { db, statements } = fakeDb(answerHolding);
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     const first = statements[0]?.sql ?? '';
     expect(first).toContain("set_config(name, '0', true)");
     for (const timeout of ['idle_in_transaction_session_timeout', 'statement_timeout', 'transaction_timeout']) {
       expect(first).toContain(`'${timeout}'`);
     }
-    await store.release(grant ?? { key, token: 't1' });
+    orThrow(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') }));
   });
 
   it('a held key gives undefined and ends the empty transaction, so no pool slot stays pinned', async () => {
     const { db, marks } = fakeDb(() => acquired(false));
-    expect(await pgSession(db).acquire(key, { token: 't1' })).toBeUndefined();
+    expect(await pgSession(db).acquire(key, { token: lockTokenSchema.parse('t1') })).toBeUndefined();
     expect(marks).toEqual(['begin', 'commit']);
   });
 
   it('keeps the transaction open while held, and release commits it exactly once', async () => {
     const { db, marks } = fakeDb(answerHolding);
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     expect(marks).toEqual(['begin']);
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('released');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('released');
     expect(marks).toEqual(['begin', 'commit']);
-    expect(await store.release({ key, token: 't1' })).toBe('not-owner');
+    expect(await store.release({ key, token: lockTokenSchema.parse('t1') })).toBe('not-owner');
   });
 
   it('another owner token cannot release the lock; it stays held', async () => {
     const { db, marks } = fakeDb(answerHolding);
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
-    expect(await store.release({ key, token: 'someone-else' })).toBe('not-owner');
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
+    expect(await store.release({ key, token: lockTokenSchema.parse('someone-else') })).toBe('not-owner');
     expect(marks).toEqual(['begin']);
-    await store.release(grant ?? { key, token: 't1' });
+    orThrow(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') }));
   });
 
   it('keeps a query running on the pinned connection while held, so a dead connection fails a query instead of an idle client', async () => {
     const { db, statements } = fakeDb(answerHolding);
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     const countBeats = (): number => statements.filter(statement => statement.sql.includes('pg_sleep')).length;
     // Polled, not a fixed sleep: a busy machine (a container booting next door) slows the beats down.
     for (let tries = 0; tries < 200 && countBeats() <= 2; tries++) await delay(10);
-    await store.release(grant ?? { key, token: 't1' });
+    orThrow(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') }));
     const beats = statements.filter(statement => statement.sql.includes('pg_sleep'));
     expect(beats.length).toBeGreaterThan(2);
     // Release waits out the beat in flight, so a young hold beats short and long holds settle at the cap.
@@ -181,20 +186,20 @@ describe('pgSession life cycle', () => {
       return acquired(true);
     });
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     if (grant?.lost === undefined) throw new Error('the grant carries no lost promise');
     dead = true;
     const lost = await grant.lost;
     expect(lost).toBeInstanceOf(LockError);
     expect(lost).toMatchObject({ code: 'lost', detectedBy: 'connection' });
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('not-owner');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('not-owner');
   });
 
   it('a release whose COMMIT fails reports "unknown" instead of throwing, so it can never mask the callback\'s own error', async () => {
     const { db } = fakeDb(answerHolding, { commitFails: true });
     const store = pgSession(db);
-    const grant = await store.acquire(key, { token: 't1' });
-    await expect(store.release(grant ?? { key, token: 't1' })).resolves.toBe('unknown');
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
+    await expect(store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).resolves.toBe('unknown');
   });
 
   it('an error while taking the lock is a "store" error that says the lock was not taken', async () => {
@@ -203,10 +208,10 @@ describe('pgSession life cycle', () => {
       return { rows: [] };
     });
     const error = await pgSession(db)
-      .acquire(key, { token: 't1' })
+      .acquire(key, { token: lockTokenSchema.parse('t1') })
       .catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(LockError);
-    expect(error).toMatchObject({ code: 'store', outcome: 'not-acquired', method: 'acquire' });
+    expect(error).toHaveProperty('code', 'lock.store');
+    expect(error).toMatchObject({ code: 'lock.store', data: { outcome: 'not-acquired', method: 'acquire' } });
   });
 
   it('a beat that goes unanswered (silent network) is reported lost, and if the connection answers later the transaction still ends, so no lock is left behind', async () => {
@@ -223,11 +228,11 @@ describe('pgSession life cycle', () => {
           : acquired(true),
       );
       const store = pgSession(db);
-      const grant = await store.acquire(key, { token: 't1' });
+      const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
       await vi.advanceTimersByTimeAsync(HOLD_BEAT_TIMEOUT_MS + 10);
       expect(await grant?.lost).toMatchObject({ code: 'lost', detectedBy: 'connection' });
       expect(marks).toEqual(['begin']);
-      expect(await store.release(grant ?? { key, token: 't1' })).toBe('not-owner');
+      expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('not-owner');
       answerBeat?.();
       await vi.advanceTimersByTimeAsync(10);
       expect(marks).toEqual(['begin', 'commit']);
@@ -239,27 +244,27 @@ describe('pgSession life cycle', () => {
   it('keepAlive: false sends no beats and gives no grant.lost, and release still commits the pinned transaction', async () => {
     const { db, statements, marks } = fakeDb(answerHolding);
     const store = pgSession(db, { keepAlive: false });
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     expect(grant).toBeDefined();
     expect(grant?.lost).toBeUndefined();
     await delay(30);
     expect(statements.some(statement => statement.sql.includes('pg_sleep'))).toBe(false);
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('released');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('released');
     expect(marks).toEqual(['begin', 'commit']);
   });
 
   it('dispose releases every held lock', async () => {
     const { db, marks } = fakeDb(answerHolding);
     const store = pgSession(db);
-    await store.acquire(key, { token: 't1' });
-    await store.acquire(createKey('app', 'other'), { token: 't2' });
-    await store.dispose?.();
+    orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
+    orThrow(await store.acquire(createKey('app', 'other'), { token: lockTokenSchema.parse('t2') }));
+    orThrow(await store.dispose?.());
     expect(marks.filter(mark => mark === 'commit')).toHaveLength(2);
   });
 
   it('an already aborted signal never opens a transaction', async () => {
     const { db, marks } = fakeDb(() => acquired(true));
-    expect(await pgSession(db).acquire(key, { token: 't1', signal: AbortSignal.abort() })).toBeUndefined();
+    expect(await pgSession(db).acquire(key, { token: lockTokenSchema.parse('t1'), signal: AbortSignal.abort() })).toBeUndefined();
     expect(marks).toEqual([]);
   });
 });
@@ -276,7 +281,7 @@ describe('bounded waits', () => {
         return { rows: [{ lock_timeout: '5s', statement_timeout: '300ms' }] };
       return { rows: [] };
     });
-    const grant = await pgTransaction(tx).acquire(key, { token: 't1', waitMs: 5000 });
+    const grant = orThrow(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1'), waitMs: 5000 }));
     expect(grant).toBeDefined();
     const text = texts(statements);
     expect(text.filter(line => line === 'savepoint arki_lock_wait')).toHaveLength(3);
@@ -295,7 +300,7 @@ describe('bounded waits', () => {
       if (statement.sql.includes('pg_advisory_xact_lock(')) throw timeoutError();
       return { rows: [] };
     });
-    expect(await pgTransaction(tx).acquire(key, { token: 't1', waitMs: 30 })).toBeUndefined();
+    expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1'), waitMs: 30 })).toBeUndefined();
     const slices = statements
       .filter(statement => statement.sql.includes("set_config('lock_timeout'"))
       .map(statement => Number.parseInt(String(statement.params[0]), 10));
@@ -313,7 +318,7 @@ describe('bounded waits', () => {
       return { rows: [] };
     });
     expect(
-      await pgTransaction(tx).acquire(key, { token: 't1', waitMs: 60_000, signal: controller.signal }),
+      await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1'), waitMs: 60_000, signal: controller.signal }),
     ).toBeUndefined();
     expect(statements.filter(statement => statement.sql.includes('pg_advisory_xact_lock('))).toHaveLength(1);
   });
@@ -323,9 +328,9 @@ describe('bounded waits', () => {
       if (statement.sql.includes('pg_advisory_xact_lock(')) throw new Error('connection reset');
       return { rows: [] };
     });
-    await expect(pgTransaction(tx).acquire(key, { token: 't1', waitMs: 5000 })).rejects.toMatchObject({
-      code: 'store',
-      outcome: 'not-acquired',
+    await expect(pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1'), waitMs: 5000 })).resolves.toMatchObject({
+      code: 'lock.store',
+      data: { outcome: 'not-acquired' },
     });
   });
 
@@ -338,14 +343,14 @@ describe('bounded waits', () => {
       }
       return { rows: [] };
     });
-    expect(await pgTransaction(tx).acquire(key, { token: 't1', waitMs: 5000 })).toBeDefined();
+    expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1'), waitMs: 5000 })).toBeDefined();
   });
 });
 
 describe('pgTransaction', () => {
   it('opens no transaction and sets no timeouts: the caller owns the transaction', async () => {
     const { tx, statements } = fakeDb(() => acquired(true));
-    await pgTransaction(tx).acquire(key, { token: 't1' });
+    orThrow(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('t1') }));
     expect(texts(statements)).toHaveLength(1);
     expect(statements[0]?.sql).toContain('pg_try_advisory_xact_lock');
   });
@@ -353,11 +358,11 @@ describe('pgTransaction', () => {
   it('release only forgets the grant: it reports released once and issues no SQL, because the transaction ends the lock', async () => {
     const { tx, statements } = fakeDb(() => acquired(true));
     const store = pgTransaction(tx);
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     const before = statements.length;
-    expect(await store.release({ key, token: 'other' })).toBe('not-owner');
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('released');
-    expect(await store.release(grant ?? { key, token: 't1' })).toBe('not-owner');
+    expect(await store.release({ key, token: lockTokenSchema.parse('other') })).toBe('not-owner');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('released');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('t1') })).toBe('not-owner');
     expect(statements).toHaveLength(before);
   });
 });
@@ -430,10 +435,10 @@ describe('PGlite: the SQL is valid on a real engine', () => {
 
   it('keepAlive: false grants carry no lost promise on PGlite: there is no connection to lose', async () => {
     const store = pgSession(db, { keepAlive: false });
-    const grant = await store.acquire(createKey('pglite', 'no-lost'), { token: 'p1' });
+    const grant = orThrow(await store.acquire(createKey('pglite', 'no-lost'), { token: lockTokenSchema.parse('p1') }));
     expect(grant).toBeDefined();
     expect(grant?.lost).toBeUndefined();
-    expect(await store.release(grant ?? { key, token: 'p1' })).toBe('released');
+    expect(await store.release(grant ?? { key, token: lockTokenSchema.parse('p1') })).toBe('released');
   });
 
   it('read and write holds use the shared and the exclusive advisory call, and read/write keys differ from mutex keys of the same name', async () => {
@@ -445,23 +450,23 @@ describe('PGlite: the SQL is valid on a real engine', () => {
     const store = pgSession(db, { keepAlive: false, legacyKeys: true });
     const readKey = createKey('app', 'same', 'readWrite');
     const mutexKey = createKey('app', 'same');
-    const read = await store.shared.acquire(readKey, { token: 'r', mode: 'read' });
-    const write = await store.shared.acquire(readKey, { token: 'w', mode: 'write' });
-    await store.acquire(mutexKey, { token: 'm' });
-    for (const grant of [read, write]) if (grant !== undefined) await store.release(grant);
+    const read = orThrow(await store.shared.acquire(readKey, { token: lockTokenSchema.parse('r'), mode: 'read' }));
+    const write = orThrow(await store.shared.acquire(readKey, { token: lockTokenSchema.parse('w'), mode: 'write' }));
+    orThrow(await store.acquire(mutexKey, { token: lockTokenSchema.parse('m') }));
+    for (const grant of [read, write]) if (grant !== undefined) orThrow(await store.release(grant));
     expect(seen.some(text => text.includes('pg_try_advisory_xact_lock_shared'))).toBe(true);
     // legacyKeys applies to the mutex only: exactly one hashtext call (the mutex), none for read/write.
     expect(seen.filter(text => text.includes('hashtext'))).toHaveLength(1);
     expect(toPgPair(readKey)).not.toEqual(toPgPair(mutexKey));
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 
   it('pgTransaction takes read then write of one key in one transaction: Postgres lets one session hold both, so there is no upgrade check', async () => {
     const result = await db.transaction(async tx => {
       const store = pgTransaction(tx);
       const k = createKey('pglite', 'upgrade', 'readWrite');
-      const read = await store.shared.acquire(k, { token: 'r', mode: 'read' });
-      const write = await store.shared.acquire(k, { token: 'w', mode: 'write' });
+      const read = orThrow(await store.shared.acquire(k, { token: lockTokenSchema.parse('r'), mode: 'read' }));
+      const write = orThrow(await store.shared.acquire(k, { token: lockTokenSchema.parse('w'), mode: 'write' }));
       return [read !== undefined, write !== undefined];
     });
     expect(result).toEqual([true, true]);

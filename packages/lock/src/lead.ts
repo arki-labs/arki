@@ -9,16 +9,21 @@
  *   WAIT      sleep one beat (ttl/3) or until the store's `waitFor` wakes us, then CAMPAIGN.
  * `opts.signal` aborting in any state ends the loop after the step down.
  */
+import type { FailureIn } from '@arki/failure';
+import { partition, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { Scheduler } from './scheduler.js';
+import type { LockOperationFailure } from './errors.js';
+import type { LockContext, Store } from './types.js';
+import { lockFailure } from './errors.js';
 import type { Key } from './types.js';
 import { LockError } from './errors.js';
 
 const log = getLogger('arki:lock');
 
 /** What `fn` receives. Same shape as `LockContext`, wide because the store type is erased here. */
-export type LeadContext = { readonly signal: AbortSignal; readonly fence: bigint | undefined; readonly key: Key };
+export type LeadContext = LockContext<Store>;
 
 /** The part of a guard the loop needs. */
 type LeadGuard = LeadContext & { release(): Promise<void> };
@@ -79,11 +84,11 @@ async function waitBeat(deps: LeadDeps, signal: AbortSignal | undefined, mayWake
  * `fn` should run for as long as it wants leadership: when it returns, the lease is
  * released and the loop campaigns again after a beat.
  */
-export async function lead(
+export async function lead<T>(
   deps: LeadDeps,
-  fn: (ctx: LeadContext) => unknown,
+  fn: (ctx: LeadContext) => T | Promise<T>,
   opts: { readonly signal?: AbortSignal } = {},
-): Promise<void> {
+): Promise<void | FailureIn<Awaited<T>> | LockOperationFailure> {
   const { signal } = opts;
   const { keyField } = deps;
   const aborted = (): boolean => signal?.aborted === true;
@@ -93,7 +98,8 @@ export async function lead(
       guard = await deps.tryAcquire(signal === undefined ? {} : { signal });
     } catch (error) {
       // A store failure or an abort during the attempt: not leader this round.
-      if (!aborted()) log.error(error instanceof Error ? error : new Error(String(error)), { key: keyField });
+      if (aborted()) return;
+      return lockFailure(error);
     }
     // After any term (even a stillborn one) the key is free, so the next wait must not use the store's wake-up hook.
     const gotLease = guard !== undefined;
@@ -104,18 +110,15 @@ export async function lead(
       } catch (error) {
         deps.onReleaseError(error);
       }
-      guard = undefined;
     } else if (guard !== undefined) {
       deps.counts.leadAcquired += 1;
-      log.info('leading {key} (fence {fence})', { key: keyField, fence: guard.fence?.toString() ?? 'none' });
+      log.debug('leading {key} (fence {fence})', { key: keyField, fence: guard.fence?.toString() ?? 'none' });
+      let callbackFailure: FailureIn<Awaited<T>> | ReturnType<typeof UnexpectedDefect> | undefined;
       try {
-        await fn({ signal: guard.signal, fence: guard.fence, key: guard.key });
-      } catch (error) {
-        log.error(error instanceof Error ? error : new Error(String(error)), {
-          key: keyField,
-          note: 'lead callback threw',
-        });
-      }
+        const value = await fn({ signal: guard.signal, fence: guard.fence, key: guard.key });
+        const [, failures] = partition([value]);
+        callbackFailure = failures[0];
+      } catch (error) { callbackFailure = UnexpectedDefect({ cause: error }); }
       const reason: unknown = guard.signal.reason;
       if (reason instanceof LockError && reason.code === 'lost') deps.counts.leadLost += 1;
       try {
@@ -123,8 +126,11 @@ export async function lead(
       } catch (error) {
         deps.onReleaseError(error);
       }
-      log.info('stepped down {key}', { key: keyField });
+      log.debug('stepped down {key}', { key: keyField });
+      if (callbackFailure !== undefined) return callbackFailure;
+      if (reason instanceof LockError && reason.code === 'lost') return lockFailure(reason);
     }
-    await waitBeat(deps, signal, !gotLease);
+    try { await waitBeat(deps, signal, !gotLease); } catch (error) { return lockFailure(error); }
   }
+  return;
 }

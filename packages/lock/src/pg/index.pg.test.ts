@@ -1,3 +1,5 @@
+import { collect } from '@arki/failure';
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * `pgSession` and `pgTransaction` against a real Postgres (container), with two
  * pools standing in for two replicas. These are the cases that need real
@@ -257,7 +259,7 @@ describe('bounded waits on a real server', () => {
     expect(LockHeld.is(error)).toBe(true);
     expect(took).toBeGreaterThanOrEqual(1400);
     expect(took).toBeLessThan(4000);
-    await holder.release();
+    orThrow(await holder.release());
     await until(async () => (await advisoryCount(dbB)) === 0, 4000, 'the waiter to leave no lock behind');
     expect(await locksB.mutex(name).tryRun(() => 'ok')).toBe('ok');
   });
@@ -270,7 +272,7 @@ describe('bounded waits on a real server', () => {
     const waiting = locksB.mutex(name).run(() => 'got it', { wait: '10s' });
     await delay(300);
     const releasedAt = Date.now();
-    await holder.release();
+    orThrow(await holder.release());
     expect(await waiting).toBe('got it');
     expect(Date.now() - releasedAt).toBeLessThan(2500);
   });
@@ -287,8 +289,8 @@ describe('bounded waits on a real server', () => {
       .catch((error_: unknown) => error_);
     await delay(200);
     controller.abort();
-    expect(await waiting).toMatchObject({ code: 'aborted' });
-    await holder.release();
+    expect(await waiting).toMatchObject({ code: 'lock.aborted' });
+    orThrow(await holder.release());
     await until(async () => (await advisoryCount(dbB)) === 0, 4000, 'the aborted waiter to leave no lock behind');
   });
 });
@@ -326,7 +328,7 @@ describe('release speed of a held pgSession lock', () => {
     );
     await delay(500);
     const releasedAt = performance.now();
-    await holder.release();
+    orThrow(await holder.release());
     expect(await waiting).toBeUndefined();
     // The beat in flight at release is at most HOLD_BEAT_SECONDS; the old 200 ms beat plus overhead failed this.
     expect(gotAt - releasedAt).toBeLessThan(HOLD_BEAT_SECONDS * 1000 + 100);
@@ -364,8 +366,8 @@ describe('chaos: the pinned connection dies', () => {
 
     expect(await locksB.mutex(name).tryRun(() => 'B in')).toBe('B in');
     const outcome = await holder;
-    expect(outcome).toBeInstanceOf(LockError);
-    expect(outcome).toMatchObject({ code: 'lost', detectedBy: 'connection' });
+    expect(outcome).toHaveProperty('code', 'lock.lost');
+    expect(outcome).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'connection' } });
   });
 
   it("the callback's own error survives a dead connection: the failed release never masks it (old bug 5)", async () => {
@@ -388,8 +390,8 @@ describe('chaos: the pinned connection dies', () => {
         { wait: '2s' },
       )
       .catch((error_: unknown) => error_);
-    expect(error).toBe(boom);
-    expect(error).toMatchObject({ suppressed: [expect.objectContaining({ code: 'lost' })] });
+    expect(error).toMatchObject({ code: 'failure.unexpected_defect', cause: boom });
+    expect(error).toMatchObject({ cause: { suppressed: [expect.objectContaining({ code: 'lost' })] } });
   });
 
   it('pool.end() mid-callback lets the callback finish and the lock go: the pool waits for its checked-out connection', async () => {
@@ -433,7 +435,7 @@ describe('chaos: the pinned connection dies', () => {
         { wait: '2s' },
       )
       .catch((error_: unknown) => error_);
-    expect(error).toBe(boom);
+    expect(error).toMatchObject({ code: 'failure.unexpected_defect', cause: boom });
   });
 
   it('SIGKILL of a process holding a lock frees it in Postgres within 2 s', async () => {
@@ -512,7 +514,7 @@ describe('chaos: the network goes silent', () => {
       proxy.goDark();
       const reason = await Promise.race([aborted.promise, delay(10_000).then(() => 'signal never aborted')]);
       expect(reason).toMatchObject({ code: 'lost', detectedBy: 'connection' });
-      expect(await holder).toMatchObject({ code: 'lost' });
+      expect(await holder).toMatchObject({ code: 'lock.lost' });
     } finally {
       proxy.close();
     }
@@ -536,7 +538,7 @@ describe('server timeouts set on the role or the pool', () => {
         .catch((error_: unknown) => error_);
       expect(LockHeld.is(error)).toBe(true);
     } finally {
-      await holder.release();
+      orThrow(await holder.release());
     }
   });
 
@@ -577,7 +579,7 @@ describe('server timeouts set on the role or the pool', () => {
       expect(LockHeld.is(await waiting)).toBe(true);
       expect(Date.now() - startedAt).toBeLessThan(2200);
     } finally {
-      await holder.release();
+      orThrow(await holder.release());
     }
   });
 });
@@ -598,7 +600,7 @@ describe('legacyKeys during a rolling deploy', () => {
         .tryRun(() => 'ran');
       return LockHeld.is(second);
     } finally {
-      await first.release();
+      orThrow(await first.release());
     }
   }
 
@@ -643,7 +645,7 @@ describe('pgSession read/write across replicas', () => {
     token: string,
     mode: 'read' | 'write',
     waitMs?: number,
-  ) => store.shared.acquire(key, { token, mode, waitMs });
+  ) => store.shared.acquire(key, { token: lockTokenSchema.parse(token), mode, waitMs }).then(result => orThrow(result));
 
   it('readers on two replicas overlap, and a writer on a third connection waits for both', async () => {
     const storeA = pgSession(dbA);
@@ -657,39 +659,39 @@ describe('pgSession read/write across replicas', () => {
 
     const waiting = take(storeB, key, 'w1', 'write', 5000);
     await new Promise(resolve => setTimeout(resolve, 300));
-    await storeA.shared.release(readerA ?? { key, token: 'ra' });
+    orThrow(await storeA.shared.release(readerA ?? { key, token: lockTokenSchema.parse('ra') }));
     await new Promise(resolve => setTimeout(resolve, 300));
     // One reader is still in: the writer has not been granted.
     expect(await Promise.race([waiting.then(() => 'granted'), Promise.resolve('pending')])).toBe('pending');
-    await storeB.shared.release(readerB ?? { key, token: 'rb' });
+    orThrow(await storeB.shared.release(readerB ?? { key, token: lockTokenSchema.parse('rb') }));
     const writer = await waiting;
     expect(writer).toBeDefined();
-    await storeB.shared.release(writer ?? { key, token: 'w1' });
-    await Promise.all([storeA.dispose?.(), storeB.dispose?.()]);
+    orThrow(await storeB.shared.release(writer ?? { key, token: lockTokenSchema.parse('w1') }));
+    orThrow(collect(await Promise.all([storeA.dispose?.(), storeB.dispose?.()])));
   });
 
   it('read/write keys do not collide with mutex keys of the same name', async () => {
     const store = pgSession(dbA);
     const other = pgSession(dbB);
     const name = lockedNames('collide');
-    const mutex = await store.acquire(createKey('rw', name), { token: 'm' });
+    const mutex = orThrow(await store.acquire(createKey('rw', name), { token: lockTokenSchema.parse('m') }));
     const writer = await take(other, createKey('rw', name, 'readWrite'), 'w', 'write');
     expect(mutex).toBeDefined();
     expect(writer).toBeDefined();
-    await store.release(mutex ?? { key: createKey('rw', name), token: 'm' });
-    await other.shared.release(writer ?? { key: createKey('rw', name, 'readWrite'), token: 'w' });
+    orThrow(await store.release(mutex ?? { key: createKey('rw', name), token: lockTokenSchema.parse('m') }));
+    orThrow(await other.shared.release(writer ?? { key: createKey('rw', name, 'readWrite'), token: lockTokenSchema.parse('w') }));
   });
 
   it('pgTransaction: a reader and a writer in different transactions exclude, and read-then-write inside one transaction is granted', async () => {
     const key = rwKey('tx');
     await dbA.transaction(async txA => {
       const a = pgTransaction(txA);
-      expect(await a.shared.acquire(key, { token: 'r', mode: 'read' })).toBeDefined();
+      expect(await a.shared.acquire(key, { token: lockTokenSchema.parse('r'), mode: 'read' })).toBeDefined();
       // Same session: Postgres lets it take the write lock too (no upgrade check).
-      expect(await a.shared.acquire(key, { token: 'w', mode: 'write' })).toBeDefined();
+      expect(await a.shared.acquire(key, { token: lockTokenSchema.parse('w'), mode: 'write' })).toBeDefined();
       await dbB.transaction(async txB => {
         const b = pgTransaction(txB);
-        expect(await b.shared.acquire(key, { token: 'x', mode: 'read' })).toBeUndefined();
+        expect(await b.shared.acquire(key, { token: lockTokenSchema.parse('x'), mode: 'read' })).toBeUndefined();
       });
     });
   });
@@ -716,18 +718,18 @@ describe('pgTransaction between transactions', () => {
     const holderHasLock = deferred<void>();
     const commit = deferred<void>();
     const holder = inTransaction(dbA, async store => {
-      expect(await store.acquire(key, { token: 'a' })).toBeDefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('a') })).toBeDefined();
       holderHasLock.resolve();
       await commit.promise;
     });
     await holderHasLock.promise;
     await inTransaction(dbB, async store => {
-      expect(await store.acquire(key, { token: 'b' })).toBeUndefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('b') })).toBeUndefined();
     });
     commit.resolve();
     await holder;
     await inTransaction(dbB, async store => {
-      expect(await store.acquire(key, { token: 'b2' })).toBeDefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('b2') })).toBeDefined();
     });
   });
 
@@ -735,7 +737,7 @@ describe('pgTransaction between transactions', () => {
     const holderHasLock = deferred<void>();
     const fail = deferred<void>();
     const holder = inTransaction(dbA, async store => {
-      await store.acquire(key, { token: 'a' });
+      orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
       holderHasLock.resolve();
       await fail.promise;
       throw new Error('abort this transaction');
@@ -744,7 +746,7 @@ describe('pgTransaction between transactions', () => {
     fail.resolve();
     await holder;
     await inTransaction(dbB, async store => {
-      expect(await store.acquire(key, { token: 'b' })).toBeDefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('b') })).toBeDefined();
     });
   });
 
@@ -752,19 +754,19 @@ describe('pgTransaction between transactions', () => {
     const holderHasLock = deferred<void>();
     const commit = deferred<void>();
     const holder = inTransaction(dbA, async store => {
-      await store.acquire(key, { token: 'a' });
+      orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
       holderHasLock.resolve();
       await commit.promise;
     });
     await holderHasLock.promise;
     await dbB.transaction(async tx => {
       const store = pgTransaction(tx);
-      expect(await store.acquire(key, { token: 'b1', waitMs: 1300 })).toBeUndefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('b1'), waitMs: 1300 })).toBeUndefined();
       // Not poisoned: ordinary statements still work, and lock_timeout is back to the caller's value.
       const setting = await tx.execute<{ value: string }>(sql`select current_setting('lock_timeout') as value`);
       expect(setting.rows[0]?.value).toBe('0');
       commit.resolve();
-      expect(await store.acquire(key, { token: 'b2', waitMs: 5000 })).toBeDefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('b2'), waitMs: 5000 })).toBeDefined();
     });
     await holder;
   });
@@ -773,7 +775,7 @@ describe('pgTransaction between transactions', () => {
     const holderHasLock = deferred<void>();
     const commit = deferred<void>();
     const holder = inTransaction(dbA, async store => {
-      await store.acquire(key, { token: 'a' });
+      orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
       holderHasLock.resolve();
       await commit.promise;
     });
@@ -781,7 +783,7 @@ describe('pgTransaction between transactions', () => {
     try {
       await dbB.transaction(async tx => {
         await tx.execute(sql`set local statement_timeout = 300`);
-        expect(await pgTransaction(tx).acquire(key, { token: 'b', waitMs: 1300 })).toBeUndefined();
+        expect(await pgTransaction(tx).acquire(key, { token: lockTokenSchema.parse('b'), waitMs: 1300 })).toBeUndefined();
         const setting = await tx.execute<{ value: string }>(sql`select current_setting('statement_timeout') as value`);
         expect(setting.rows[0]?.value).toBe('300ms');
       });
@@ -796,12 +798,12 @@ describe('pgTransaction between transactions', () => {
     await dbA.transaction(async outer => {
       await outer
         .transaction(async savepoint => {
-          expect(await pgTransaction(savepoint).acquire(name, { token: 'a' })).toBeDefined();
+          expect(await pgTransaction(savepoint).acquire(name, { token: lockTokenSchema.parse('a') })).toBeDefined();
           throw new Error('roll back to the savepoint');
         })
         .catch(swallow);
       await inTransaction(dbB, async store => {
-        expect(await store.acquire(name, { token: 'b' })).toBeDefined();
+        expect(await store.acquire(name, { token: lockTokenSchema.parse('b') })).toBeDefined();
       });
     });
   });
@@ -823,12 +825,12 @@ describe('pgTransaction between transactions', () => {
           .catch((error_: unknown) => error_);
         await delay(200);
         controller.abort();
-        expect(await waiting).toMatchObject({ code: 'aborted' });
+        expect(await waiting).toMatchObject({ code: 'lock.aborted' });
         const after = await tx.execute<{ one: number }>(sql`select 1 as one`);
         expect(after.rows[0]?.one).toBe(1);
       });
     } finally {
-      await holder.release();
+      orThrow(await holder.release());
     }
   });
 });

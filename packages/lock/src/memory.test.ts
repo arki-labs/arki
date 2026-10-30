@@ -1,3 +1,5 @@
+import { isFailure } from '@arki/failure';
+import { lockTokenSchema, lockFenceSchema } from './identity-schemas.js';
 import { describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
@@ -13,7 +15,7 @@ import { ContractSkip, defineCase, storeContract } from './testing/contract.js';
 const key = createKey('t', 'job');
 
 async function grab(store: ReturnType<typeof memoryStore>, token: string) {
-  const grant = await store.acquire(key, { token });
+  const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse(token) }));
   if (grant === undefined) throw new Error(`expected ${token} to get the lock`);
   return grant;
 }
@@ -35,7 +37,7 @@ describe('memoryStore', () => {
     });
     // Let all three reach their wait before the holder lets go.
     await new Promise(resolve => setTimeout(resolve, 20));
-    await holder.release();
+    orThrow(await holder.release());
     await Promise.all(waiters);
     expect(order).toEqual(['a', 'b', 'c']);
   });
@@ -56,8 +58,8 @@ describe('memoryStore', () => {
   it('refuses a second holder and a release by the wrong owner, so only the real owner can free the key', async () => {
     const store = memoryStore();
     const grant = await grab(store, 'owner');
-    expect(await store.acquire(key, { token: 'other' })).toBeUndefined();
-    expect(await store.release({ ...grant, token: 'imposter' })).toBe('not-owner');
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('other') })).toBeUndefined();
+    expect(await store.release({ ...grant, token: lockTokenSchema.parse('imposter') })).toBe('not-owner');
     expect(store.peek(key)?.owner).toBe('owner');
     expect(await store.release(grant)).toBe('released');
     expect(await store.release(grant)).toBe('not-owner');
@@ -69,7 +71,7 @@ describe('memoryStore', () => {
     expect(store.peek(key)).toBeUndefined();
     const grant = await grab(store, 'owner');
     const first = store.peek(key);
-    expect(first).toEqual({ owner: 'owner', fence: grant.fence });
+    expect(first).toEqual({ owner: 'owner', fence: lockFenceSchema.parse(grant.fence) });
     expect(store.peek(key)).not.toBe(first);
   });
 
@@ -87,19 +89,19 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 const semKey = createKey('t', 'pool', 'semaphore');
 const rwKey = createKey('t', 'catalog', 'readWrite');
 
-const req = (token: string, weight: number) => ({ token, limit: 3, weight });
+const req = (token: string, weight: number) => ({ token: lockTokenSchema.parse(token), limit: 3, weight });
 
 describe('memoryStore semaphore', () => {
   it('counts weights against the limit and frees them on release, so the pool never over-commits', async () => {
     const store = memoryStore();
-    const a = await store.permits.acquire(semKey, req('a', 2));
+    const a = orThrow(await store.permits.acquire(semKey, req('a', 2)));
     expect(a).toBeDefined();
     expect(await store.permits.acquire(semKey, req('b', 2))).toBeUndefined();
-    const c = await store.permits.acquire(semKey, req('c', 1));
+    const c = orThrow(await store.permits.acquire(semKey, req('c', 1)));
     expect(c).toBeDefined();
     expect(store.peek(semKey)).toMatchObject({ owner: 'a', permits: 3, holders: 2 });
     if (a === undefined || c === undefined) throw new Error('unreachable');
-    expect(await store.permits.release({ ...a, token: 'imposter' })).toBe('not-owner');
+    expect(await store.permits.release({ ...a, token: lockTokenSchema.parse('imposter') })).toBe('not-owner');
     expect(await store.permits.release(a)).toBe('released');
     expect(await store.permits.release(a)).toBe('not-owner');
     expect(store.peek(semKey)).toMatchObject({ owner: 'c', permits: 1, holders: 1 });
@@ -109,14 +111,14 @@ describe('memoryStore semaphore', () => {
 
   it('remembers the limit only while someone holds, so a conflicting limit fails and a drained key takes a new one', async () => {
     const store = memoryStore();
-    const first = await store.permits.acquire(semKey, { token: 'a', limit: 2, weight: 1 });
-    await expect(store.permits.acquire(semKey, { token: 'b', limit: 3, weight: 1 })).rejects.toMatchObject({
+    const first = orThrow(await store.permits.acquire(semKey, { token: lockTokenSchema.parse('a'), limit: 2, weight: 1 }));
+    await expect(store.permits.acquire(semKey, { token: lockTokenSchema.parse('b'), limit: 3, weight: 1 })).rejects.toMatchObject({
       code: 'config',
     });
-    await expect(store.permits.acquire(semKey, { token: 'b', limit: 3, weight: 1 })).rejects.toBeInstanceOf(LockError);
+    await expect(store.permits.acquire(semKey, { token: lockTokenSchema.parse('b'), limit: 3, weight: 1 })).rejects.toBeInstanceOf(LockError);
     if (first === undefined) throw new Error('unreachable');
     await store.permits.release(first);
-    expect(await store.permits.acquire(semKey, { token: 'b', limit: 3, weight: 3 })).toBeDefined();
+    expect(await store.permits.acquire(semKey, { token: lockTokenSchema.parse('b'), limit: 3, weight: 3 })).toBeDefined();
   });
 
   it('wakes waiters first come, first served', async () => {
@@ -135,7 +137,7 @@ describe('memoryStore semaphore', () => {
       ),
     );
     await sleep(20);
-    await holder.release();
+    orThrow(await holder.release());
     await Promise.all(waiters);
     expect(order).toEqual(['a', 'b', 'c']);
   });
@@ -149,7 +151,7 @@ describe('memoryStore semaphore', () => {
     await sleep(10);
     await orThrow(pool.run(() => void ran.push('light'), { wait: '5s', weight: 1 }));
     expect(ran).toEqual(['light']);
-    await holder.release();
+    orThrow(await holder.release());
     expect(await heavy).toBeUndefined();
     expect(ran).toEqual(['light', 'heavy']);
   });
@@ -158,42 +160,42 @@ describe('memoryStore semaphore', () => {
 describe('memoryStore read/write', () => {
   it('lets readers overlap and makes a writer exclusive, with fences from one counter', async () => {
     const store = memoryStore();
-    const r1 = await store.shared.acquire(rwKey, { token: 'r1', mode: 'read' });
-    const r2 = await store.shared.acquire(rwKey, { token: 'r2', mode: 'read' });
+    const r1 = orThrow(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r1'), mode: 'read' }));
+    const r2 = orThrow(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r2'), mode: 'read' }));
     expect(r1 && r2).toBeTruthy();
     expect(store.peek(rwKey)).toMatchObject({ owner: 'r1', mode: 'read', holders: 2 });
-    expect(await store.shared.acquire(rwKey, { token: 'w', mode: 'write' })).toBeUndefined();
+    expect(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('w'), mode: 'write' })).toBeUndefined();
     if (r1 === undefined || r2 === undefined) throw new Error('unreachable');
     expect(r2.fence).toBeGreaterThan(r1.fence ?? 0n);
     await store.shared.release(r1);
     await store.shared.release(r2);
-    const w = await store.shared.acquire(rwKey, { token: 'w', mode: 'write' });
+    const w = orThrow(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('w'), mode: 'write' }));
     expect(w).toBeDefined();
     expect(store.peek(rwKey)).toMatchObject({ owner: 'w', mode: 'write' });
-    expect(await store.shared.acquire(rwKey, { token: 'r3', mode: 'read' })).toBeUndefined();
+    expect(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r3'), mode: 'read' })).toBeUndefined();
     if (w === undefined) throw new Error('unreachable');
-    expect(await store.shared.release({ ...w, token: 'imposter' })).toBe('not-owner');
+    expect(await store.shared.release({ ...w, token: lockTokenSchema.parse('imposter') })).toBe('not-owner');
     expect(await store.shared.release(w)).toBe('released');
     expect(store.peek(rwKey)).toBeUndefined();
   });
 
   it('reserves the key for a woken writer, so neither a reader nor another writer can slip in between the wake-up and the retry', async () => {
     const store = memoryStore();
-    const reader = await store.shared.acquire(rwKey, { token: 'r1', mode: 'read' });
+    const reader = orThrow(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r1'), mode: 'read' }));
     if (reader === undefined) throw new Error('unreachable');
     const writer = store.shared.waiter(rwKey, 'write');
     const woken = writer.waitFor(new AbortController().signal);
     await store.shared.release(reader);
-    await woken;
+    orThrow(await woken);
     // The key is free and the writer has been woken but has not retried yet.
-    expect(await store.shared.acquire(rwKey, { token: 'r2', mode: 'read' })).toBeUndefined();
-    expect(await store.shared.acquire(rwKey, { token: 'w2', mode: 'write' })).toBeUndefined();
-    const grant = await store.shared.acquire(rwKey, { token: 'w', mode: 'write', waiter: writer });
+    expect(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r2'), mode: 'read' })).toBeUndefined();
+    expect(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('w2'), mode: 'write' })).toBeUndefined();
+    const grant = orThrow(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('w'), mode: 'write', waiter: writer }));
     expect(grant).toBeDefined();
     writer.close();
     if (grant === undefined) throw new Error('unreachable');
     await store.shared.release(grant);
-    expect(await store.shared.acquire(rwKey, { token: 'r3', mode: 'read' })).toBeDefined();
+    expect(await store.shared.acquire(rwKey, { token: lockTokenSchema.parse('r3'), mode: 'read' })).toBeDefined();
   });
 
   it('turns readers away while a writer waits, and lets them in again once it stops waiting', async () => {
@@ -204,10 +206,10 @@ describe('memoryStore read/write', () => {
     await sleep(10);
     // Without writer preference this reader would get in and could starve the writer forever.
     expect(LockHeld.is(await read.tryAcquire())).toBe(true);
-    await first.release();
+    orThrow(await first.release());
     expect(await writing).toBe('wrote');
     const after = await orThrow(read.tryAcquire());
-    await after.release();
+    orThrow(await after.release());
   });
 
   it.each(['its wait runs out', 'its caller aborts'] as const)(
@@ -220,7 +222,7 @@ describe('memoryStore read/write', () => {
       const writing = write
         .run(() => 'wrote', how === 'its caller aborts' ? { wait: '5s', signal: controller.signal } : { wait: '40ms' })
         .then(
-          outcome => (LockHeld.is(outcome) ? 'held' : 'wrote'),
+          outcome => (LockHeld.is(outcome) ? 'held' : isFailure(outcome) ? outcome.code : 'wrote'),
           (error: unknown) => (error instanceof LockError ? error.code : 'other'),
         );
       // A reader that queues behind the waiting writer.
@@ -228,11 +230,11 @@ describe('memoryStore read/write', () => {
       const queued = read.run(() => 'read', { wait: '5s' });
       await sleep(10);
       if (how === 'its caller aborts') controller.abort();
-      expect(await writing).toBe(how === 'its caller aborts' ? 'aborted' : 'held');
+      expect(await writing).toBe(how === 'its caller aborts' ? 'lock.aborted' : 'held');
       expect(await queued).toBe('read');
       const reader = await orThrow(read.tryAcquire());
-      await reader.release();
-      await first.release();
+      orThrow(await reader.release());
+      orThrow(await first.release());
     },
   );
 
@@ -266,14 +268,14 @@ describe('memoryStore primitives are independent', () => {
     const mutex = await orThrow(locks.mutex('x').tryAcquire());
     const pool = await orThrow(locks.semaphore('x', { limit: 1 }).tryAcquire());
     const writer = await orThrow(locks.readWrite('x').write.tryAcquire());
-    await mutex.release();
-    await pool.release();
-    await writer.release();
+    orThrow(await mutex.release());
+    orThrow(await pool.release());
+    orThrow(await writer.release());
   });
 });
 
 const flat = (grant: Grant | undefined): Grant | undefined =>
-  grant === undefined ? undefined : { ...grant, fence: 1n };
+  grant === undefined ? undefined : { ...grant, fence: lockFenceSchema.parse(1n) };
 
 /** A memory store whose semaphore and read/write grants all carry one fence. Breaks "fences grow per grant". */
 function constantFenceStore(): Store {
@@ -295,11 +297,11 @@ describe('memoryStore permits and the contract', () => {
     // The refusal is decided synchronously inside this call; the waiter parks a few microtasks later.
     const waiting = pool.acquire({ wait: '5s' });
     // The permit frees before the waiter parks: a wake-all finds nobody, and `second` still holds.
-    void first.release();
+    void orThrow(first.release());
     const third = await orThrow(waiting);
     const took = performance.now() - started;
-    await third.release();
-    await second.release();
+    orThrow(await third.release());
+    orThrow(await second.release());
     expect(took).toBeLessThan(200);
   });
 
@@ -307,7 +309,7 @@ describe('memoryStore permits and the contract', () => {
     const store = memoryStore();
     const poolKey = createKey('w', 'pool', 'semaphore');
     const hold = async (token: string, weight: number) => {
-      const grant = await store.permits.acquire(poolKey, { token, limit: 3, weight });
+      const grant = orThrow(await store.permits.acquire(poolKey, { token: lockTokenSchema.parse(token), limit: 3, weight }));
       if (grant === undefined) throw new Error(`expected ${token} to be granted`);
       return grant;
     };
@@ -335,12 +337,12 @@ describe('memoryStore permits and the contract', () => {
   it('refuses a weight that is not a positive integer, as it refuses one above the limit, because PermitOps is public', async () => {
     const store = memoryStore();
     const poolKey = createKey('r3', 'pool', 'semaphore');
-    await expect(store.permits.acquire(poolKey, { token: 'neg', limit: 1, weight: -1 })).rejects.toMatchObject({
+    await expect(store.permits.acquire(poolKey, { token: lockTokenSchema.parse('neg'), limit: 1, weight: -1 })).rejects.toMatchObject({
       code: 'config',
     });
     // Had the negative hold been taken, inUse is -1 and two weight-1 holds would now share a limit of 1.
-    const first = await store.permits.acquire(poolKey, { token: 'a', limit: 1, weight: 1 });
-    const second = await store.permits.acquire(poolKey, { token: 'b', limit: 1, weight: 1 });
+    const first = orThrow(await store.permits.acquire(poolKey, { token: lockTokenSchema.parse('a'), limit: 1, weight: 1 }));
+    const second = orThrow(await store.permits.acquire(poolKey, { token: lockTokenSchema.parse('b'), limit: 1, weight: 1 }));
     expect([first, second].filter(grant => grant !== undefined)).toHaveLength(1);
   });
 
@@ -438,9 +440,9 @@ describe('memoryStore hand-off', () => {
     const waiter = store.waiter(key);
     const woken = waiter.waitFor(new AbortController().signal);
     await store.release(holder);
-    await woken;
-    expect(await store.acquire(key, { token: 'newcomer' })).toBeUndefined();
-    const grant = await store.acquire(key, { token: 'waiter', waiter });
+    orThrow(await woken);
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('newcomer') })).toBeUndefined();
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('waiter'), waiter }));
     expect(grant?.token).toBe('waiter');
     waiter.close();
   });
@@ -455,7 +457,7 @@ describe('memoryStore hand-off', () => {
         .mutex('job')
         .run(() => void order.push(name), { wait: '5s', ...(signal === undefined ? {} : { signal }) })
         .then(
-          () => 'ran',
+          outcome => isFailure(outcome) ? outcome.code : 'ran',
           (error: unknown) => (error instanceof LockError ? error.code : 'other'),
         );
     const first = run('a');
@@ -463,8 +465,8 @@ describe('memoryStore hand-off', () => {
     const last = run('c');
     await sleep(10);
     controller.abort();
-    expect(await middle).toBe('aborted');
-    await holder.release();
+    expect(await middle).toBe('lock.aborted');
+    orThrow(await holder.release());
     expect([await first, await last]).toEqual(['ran', 'ran']);
     expect(order).toEqual(['a', 'c']);
   });
@@ -478,9 +480,9 @@ describe('memoryStore hand-off', () => {
     await store.release(holder);
     // The lock is reserved for `first`, which gives up instead of taking it.
     first.close();
-    await secondWoken;
-    expect(await store.acquire(key, { token: 'first', waiter: first })).toBeUndefined();
-    const grant = await store.acquire(key, { token: 'second', waiter: second });
+    orThrow(await secondWoken);
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('first'), waiter: first })).toBeUndefined();
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('second'), waiter: second }));
     expect(grant?.token).toBe('second');
   });
 
@@ -488,12 +490,12 @@ describe('memoryStore hand-off', () => {
     const store = memoryStore();
     const poolKey = createKey('t', 'fit', 'semaphore');
     const take = async (token: string, weight: number, waiter?: ReturnType<typeof store.permits.waiter>) => {
-      const grant = await store.permits.acquire(poolKey, {
-        token,
+      const grant = orThrow(await store.permits.acquire(poolKey, {
+        token: lockTokenSchema.parse(token),
         limit: 3,
         weight,
         ...(waiter === undefined ? {} : { waiter }),
-      });
+      }));
       if (grant === undefined) throw new Error(`expected ${token} to be granted`);
       return grant;
     };
@@ -514,7 +516,7 @@ describe('memoryStore hand-off', () => {
     await settled();
     // 3 free: a2 takes 2, b2 does not fit in the 1 left and keeps its place, c1 takes the last one.
     expect(woken).toEqual(['a2', 'c1']);
-    expect(await store.permits.acquire(poolKey, { token: 'newcomer', limit: 3, weight: 1 })).toBeUndefined();
+    expect(await store.permits.acquire(poolKey, { token: lockTokenSchema.parse('newcomer'), limit: 3, weight: 1 })).toBeUndefined();
     const a2 = await take('a2', 2, waiters.get('a2'));
     const c1 = await take('c1', 1, waiters.get('c1'));
     await store.permits.release(a2);

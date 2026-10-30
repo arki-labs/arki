@@ -1,3 +1,4 @@
+import { isFailure, orThrow } from '@arki/failure';
 /**
  * The store conformance suite. `storeContract` returns plain `{ name, run }`
  * cases that any runner (or none) can execute: it never imports a test
@@ -6,7 +7,9 @@
  */
 import type { Scheduler } from '../scheduler.js';
 import type { Grant, Key, Locks, ReadWriteHandle, SemaphoreConfig, SemaphoreHandle, Store } from '../types.js';
-import { LockError, LockHeld } from '../errors.js';
+import { LockError, LockStoreFailure } from '../errors.js';
+import { lockTokenSchema } from '../identity-schemas.js';
+import type { LockToken } from '../identities.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 
@@ -97,9 +100,9 @@ export function uniqueKey(label: string): Key {
   return createKey('contract', `${label}:${runId}:${counter}`);
 }
 
-export function newToken(): string {
+export function newToken() {
   counter += 1;
-  return `tok-${runId}-${counter}`;
+  return lockTokenSchema.parse(`tok-${runId}-${counter}`);
 }
 
 export function leaseTtl(store: Store, options: ContractOptions): number | undefined {
@@ -112,14 +115,14 @@ export function requestFor(
   store: Store,
   options: ContractOptions,
   overrides: { ttlMs?: number } = {},
-): { token: string; ttlMs?: number } {
+): { token: LockToken; ttlMs?: number } {
   const ttlMs = overrides.ttlMs ?? (store.guarantees.kind === 'lease' ? leaseTtl(store, options) : undefined);
   return ttlMs === undefined ? { token: newToken() } : { token: newToken(), ttlMs };
 }
 
 export async function grab(store: Store, key: Key, options: ContractOptions): Promise<Grant> {
   const grant = await store.acquire(key, requestFor(store, options));
-  check(grant !== undefined, `expected to acquire ${key.name}`);
+  check(grant !== undefined && !isFailure(grant), `expected to acquire ${key.name}`);
   return grant;
 }
 
@@ -163,7 +166,7 @@ export function defineCase(
         await body({ store, locks, options: caseOptions });
       } finally {
         state.over = true;
-        await store.dispose?.();
+        orThrow(await store.dispose?.());
       }
     },
   };
@@ -307,13 +310,13 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
               await until(() => lost >= MUTEX_CALLERS - 1, 20_000, o, store);
               active -= 1;
             });
-            if (LockHeld.is(result)) lost += 1;
+            if (isFailure(result)) lost += 1;
             return result;
           }),
         );
         check(ran === 1 && maxActive === 1, `expected one runner, saw ${ran} (max overlap ${maxActive})`);
         check(
-          results.filter(result => LockHeld.is(result)).length === MUTEX_CALLERS - 1,
+          results.filter(result => isFailure(result)).length === MUTEX_CALLERS - 1,
           `expected ${MUTEX_CALLERS - 1} LockHeld`,
         );
       },
@@ -322,28 +325,28 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
     define('a held key blocks a second tryAcquire', async ({ locks }) => {
       const mutex = locks.mutex(uniqueKey('held').name);
       const guard = await mutex.tryAcquire();
-      check(!LockHeld.is(guard), 'first tryAcquire should win');
-      check(LockHeld.is(await mutex.tryAcquire()), 'second tryAcquire should lose');
-      await guard.release();
+      check(!isFailure(guard), 'first tryAcquire should win');
+      check(isFailure(await mutex.tryAcquire()), 'second tryAcquire should lose');
+      orThrow(await guard.release());
     }),
 
     define('release frees the key', async ({ locks }) => {
       const mutex = locks.mutex(uniqueKey('free').name);
       const guard = await mutex.tryAcquire();
-      check(!LockHeld.is(guard), 'first tryAcquire should win');
-      await guard.release();
+      check(!isFailure(guard), 'first tryAcquire should win');
+      orThrow(await guard.release());
       const again = await mutex.tryAcquire();
-      check(!LockHeld.is(again), 'tryAcquire after release should win');
-      await again.release();
+      check(!isFailure(again), 'tryAcquire after release should win');
+      orThrow(await again.release());
     }),
 
     define('run with wait acquires after the holder releases, within the bound', async ({ locks, options: o }) => {
       const mutex = locks.mutex(uniqueKey('wait').name);
       const holder = await mutex.tryAcquire();
-      check(!LockHeld.is(holder), 'holder should win');
+      check(!isFailure(holder), 'holder should win');
       const waiting = mutex.run(() => 'got-it', { wait: '30s' });
       await new Promise(resolve => setTimeout(resolve, 5));
-      await holder.release();
+      orThrow(await holder.release());
       check((await pump(waiting, o.advanceTime)) === 'got-it', 'waiter should run after release');
     }),
 
@@ -375,7 +378,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       }
     }),
 
-    define('outage surfaces as LockError{code:"store"}, never a value or LockHeld', async ({ store, options: o }) => {
+    define('outage returns canonical store failure, never contention or callback success', async ({ store, options: o }) => {
       const broken: Store = {
         ...store,
         acquire: () => Promise.reject(new Error('simulated outage')),
@@ -385,14 +388,9 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         namespace: 'contract',
         ...(o.scheduler === undefined ? {} : { scheduler: o.scheduler }),
       });
-      let outcome: unknown;
-      try {
-        outcome = await locks.mutex(uniqueKey('outage').name).tryRun(() => 'ran');
-      } catch (error) {
-        check(error instanceof LockError && error.code === 'store', 'outage should throw LockError{code:"store"}');
-        return;
-      }
-      check(false, `outage must not produce a result, got ${JSON.stringify(outcome)}`);
+      const outcome = await locks.mutex(uniqueKey('outage').name).tryRun(() => 'ran');
+      check(LockStoreFailure.is(outcome), 'outage must return the canonical store failure');
+      check(outcome.data.outcome === 'unknown', 'a failed attempt cannot assume the lock is free');
     }),
 
     define('release by another owner reports not-owner and keeps the lock', async ({ store, options: o }) => {
@@ -414,7 +412,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       check((await store.extend?.(grant, ttl)) === false, 'extend after expiry should be false');
       const next = await grab(store, key, o);
       check((await store.extend?.(grant, ttl)) === false, 'extend by the old owner should stay false');
-      await store.release(next);
+      orThrow(await store.release(next));
     }),
 
     define('a stale owner after takeover can neither extend nor release', async ({ store, options: o }) => {
@@ -426,7 +424,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       check((await store.extend?.(stale, ttl)) === false, 'stale extend should be false');
       check((await store.release(stale)) === 'not-owner', 'stale release should be not-owner');
       check((await store.acquire(key, requestFor(store, o))) === undefined, 'new owner should still hold the key');
-      await store.release(fresh);
+      orThrow(await store.release(fresh));
     }),
 
     define('acquire racing release and extend never gives two holders', async ({ store, options: o }) => {
@@ -437,14 +435,14 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         const ttl = leaseTtl(store, o);
         const [released, extended, ...grants] = await Promise.all([
           store.release(holder),
-          store.extend !== undefined && ttl !== undefined ? store.extend(holder, ttl) : Promise.resolve(null),
+          store.extend !== undefined && ttl !== undefined && !isFailure(ttl) ? store.extend(holder, ttl) : Promise.resolve(null),
           ...Array.from({ length: callers }, () => store.acquire(key, requestFor(store, o))),
         ]);
         check(released === 'released', 'holder release should win its own race');
         check(extended === null || typeof extended === 'boolean', 'extend should answer a boolean');
-        const winners = grants.filter(grant => grant !== undefined);
+        const winners = grants.map(grant => orThrow(grant)).filter(grant => grant !== undefined);
         check(winners.length <= 1, `${winners.length} callers won the key at once`);
-        for (const winner of winners) await store.release(winner);
+        for (const winner of winners) orThrow(await store.release(winner));
       }
     }),
 
@@ -458,24 +456,24 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         const grants = await Promise.all(
           Array.from({ length: callers }, () => store.acquire(key, requestFor(store, o))),
         );
-        const winners = grants.filter(grant => grant !== undefined);
+        const winners = grants.map(grant => orThrow(grant)).filter(grant => grant !== undefined);
         check(winners.length === 1, `expected one winner, got ${winners.length}`);
         const [winner] = winners;
         if (winner?.fence !== undefined) {
           check(winner.fence > previous, `fence ${winner.fence} did not grow past ${previous}`);
           previous = winner.fence;
         }
-        if (winner !== undefined) await store.release(winner);
+        if (winner !== undefined && !isFailure(winner)) orThrow(await store.release(winner));
       }
     }),
 
     define('a 30-day ttl is accepted by a lease store', async ({ store, options: o }) => {
       if (store.guarantees.kind !== 'lease') skip('hold store: no ttl');
       const grant = await store.acquire(uniqueKey('ttl30'), requestFor(store, o, { ttlMs: THIRTY_DAYS_MS }));
-      check(grant !== undefined, '30-day acquire should succeed');
+      check(grant !== undefined && !isFailure(grant), '30-day acquire should succeed');
       if (store.extend !== undefined)
         check((await store.extend(grant, THIRTY_DAYS_MS)) === true, '30-day extend should succeed');
-      await store.release(grant);
+      orThrow(await store.release(grant));
     }),
 
     define('keys are case-sensitive, Unicode-exact and up to 512 bytes', async ({ store, options: o }) => {
@@ -493,10 +491,10 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       for (const name of names) {
         const key = createKey('contract', name);
         const grant = await store.acquire(key, requestFor(store, o));
-        check(grant !== undefined, `key ${name.slice(0, 40)} collided with an earlier one`);
+        check(grant !== undefined && !isFailure(grant), `key ${name.slice(0, 40)} collided with an earlier one`);
         grants.push(grant);
       }
-      for (const grant of grants) await store.release(grant);
+      for (const grant of grants) orThrow(await store.release(grant));
     }),
 
     // ---- permits (only stores with guarantees.permits) ----
@@ -527,7 +525,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         );
       });
       const results = await pump(Promise.all(tasks), context.options.advanceTime);
-      for (const result of results) check(!LockHeld.is(result), 'every queued pool task should acquire permits');
+      for (const result of results) check(!isFailure(result), 'every queued pool task should acquire permits');
       check(finished === taskCount, `only ${finished} of ${taskCount} tasks ran`);
       check(maxInUse <= POOL_LIMIT, `${maxInUse} permits were in use at once, the limit is ${POOL_LIMIT}`);
       check(maxInUse >= 2, 'the tasks never overlapped, so the test proved nothing');
@@ -537,16 +535,16 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { semaphore } = needSemaphore(context);
       const pool = semaphore(uniqueKey('weights').name, 3);
       const heavy = await pool.tryAcquire({ weight: 2 });
-      check(!LockHeld.is(heavy), 'weight 2 of 3 should fit');
-      check(LockHeld.is(await pool.tryAcquire({ weight: 2 })), 'a second weight 2 should not fit');
+      check(!isFailure(heavy), 'weight 2 of 3 should fit');
+      check(isFailure(await pool.tryAcquire({ weight: 2 })), 'a second weight 2 should not fit');
       const light = await pool.tryAcquire({ weight: 1 });
-      check(!LockHeld.is(light), 'weight 1 should fit beside weight 2');
-      check(LockHeld.is(await pool.tryAcquire()), 'the pool should be full');
-      await heavy.release();
+      check(!isFailure(light), 'weight 1 should fit beside weight 2');
+      check(isFailure(await pool.tryAcquire()), 'the pool should be full');
+      orThrow(await heavy.release());
       const again = await pool.tryAcquire({ weight: 2 });
-      check(!LockHeld.is(again), 'weight 2 should fit after the heavy hold left');
-      await again.release();
-      await light.release();
+      check(!isFailure(again), 'weight 2 should fit after the heavy hold left');
+      orThrow(await again.release());
+      orThrow(await light.release());
     }),
 
     // `PermitOps` is public, so the contract requires the store to refuse a bad request itself, not only the manager.
@@ -568,8 +566,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
           await expectConfig(ops.acquire(key, { ...requestFor(store, o), limit, weight }), what);
         // Nothing was taken: the whole pool is still free.
         const full = await ops.acquire(key, { ...requestFor(store, o), limit: 2, weight: 2 });
-        check(full !== undefined, 'a refused request must not leave a hold behind');
-        await ops.release(full);
+        check(full !== undefined && !isFailure(full), 'a refused request must not leave a hold behind');
+        orThrow(await ops.release(full));
       },
     ),
 
@@ -579,12 +577,12 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         const { semaphore } = needSemaphore(context);
         const name = uniqueKey('limit').name;
         const first = await semaphore(name, 2).tryAcquire();
-        check(!LockHeld.is(first), 'limit 2 should acquire');
+        check(!isFailure(first), 'limit 2 should acquire');
         await expectConfig(semaphore(name, 3).tryAcquire(), 'limit 3 while held with limit 2');
-        await first.release();
+        orThrow(await first.release());
         const second = await semaphore(name, 3).tryAcquire();
-        check(!LockHeld.is(second), 'a new limit should be accepted once no hold is left');
-        await second.release();
+        check(!isFailure(second), 'a new limit should be accepted once no hold is left');
+        orThrow(await second.release());
       },
     ),
 
@@ -593,7 +591,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { store, options: o } = context;
       const key = createKey('contract', `${uniqueKey('permit-owner').name}`, 'semaphore');
       const grant = await ops.acquire(key, { ...requestFor(store, o), limit: 2, weight: 1 });
-      check(grant !== undefined, 'the first permit should be granted');
+      check(grant !== undefined && !isFailure(grant), 'the first permit should be granted');
       check(
         (await ops.release({ ...grant, token: newToken() })) === 'not-owner',
         'a foreign release should be not-owner',
@@ -612,7 +610,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       let previous = -1n;
       const next = async (): Promise<Grant> => {
         const grant = await ops.acquire(key, { ...requestFor(store, o), limit: 3, weight: 1 });
-        check(grant !== undefined, 'a permit should be granted');
+        check(grant !== undefined && !isFailure(grant), 'a permit should be granted');
         check(
           grant.fence !== undefined && grant.fence > previous,
           `fence ${String(grant.fence)} did not grow past ${previous}`,
@@ -622,8 +620,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       };
       // Overlapping holds, then release and grant again.
       const overlapping = [await next(), await next(), await next()];
-      for (const grant of overlapping) await ops.release(grant);
-      for (let round = 0; round < 3; round++) await ops.release(await next());
+      for (const grant of overlapping) orThrow(await ops.release(grant));
+      for (let round = 0; round < 3; round++) orThrow(await ops.release(await next()));
     }),
 
     define("permits: a crashed holder's permit frees after the ttl", async context => {
@@ -631,7 +629,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { store, options: o } = context;
       const { ttl, advance } = needLeaseClock(store, o);
       const key = createKey('contract', uniqueKey('permit-crash').name, 'semaphore');
-      const request = (): { token: string; ttlMs?: number; limit: number; weight: number } => ({
+      const request = (): { token: LockToken; ttlMs?: number; limit: number; weight: number } => ({
         ...requestFor(store, o),
         limit: 1,
         weight: 1,
@@ -640,8 +638,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       check((await ops.acquire(key, request())) === undefined, 'the permit should be held before the ttl');
       await advance(ttl + 1);
       const after = await ops.acquire(key, request());
-      check(after !== undefined, 'the permit of a crashed holder should free after the ttl');
-      await ops.release(after);
+      check(after !== undefined && !isFailure(after), 'the permit of a crashed holder should free after the ttl');
+      orThrow(await ops.release(after));
     }),
 
     define('permits: extend keeps a permit held past the ttl', async context => {
@@ -649,13 +647,13 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { store, options: o } = context;
       const { ttl, advance } = needLeaseClock(store, o);
       const key = createKey('contract', uniqueKey('permit-extend').name, 'semaphore');
-      const request = (): { token: string; ttlMs?: number; limit: number; weight: number } => ({
+      const request = (): { token: LockToken; ttlMs?: number; limit: number; weight: number } => ({
         ...requestFor(store, o),
         limit: 1,
         weight: 1,
       });
       const grant = await ops.acquire(key, request());
-      check(grant !== undefined, 'the permit should be granted');
+      check(grant !== undefined && !isFailure(grant), 'the permit should be granted');
       if (ops.extend === undefined) skip('this store has no permit extend');
       // 1.5 ttl in total, extended every half ttl: only a real extend survives it.
       for (let beat = 0; beat < 3; beat++) {
@@ -665,8 +663,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       check((await ops.acquire(key, request())) === undefined, 'an extended permit should still be held past the ttl');
       await advance(ttl + 1);
       const after = await ops.acquire(key, request());
-      check(after !== undefined, 'the permit should free once it stops being extended');
-      await ops.release(after);
+      check(after !== undefined && !isFailure(after), 'the permit should free once it stops being extended');
+      orThrow(await ops.release(after));
     }),
 
     // ---- shared (only stores with guarantees.shared) ----
@@ -676,36 +674,36 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { read } = readWrite(uniqueKey('readers').name);
       const first = await read.tryAcquire();
       const second = await read.tryAcquire();
-      check(!LockHeld.is(first) && !LockHeld.is(second), 'two readers should hold at once');
-      await first.release();
-      await second.release();
+      check(!isFailure(first) && !isFailure(second), 'two readers should hold at once');
+      orThrow(await first.release());
+      orThrow(await second.release());
     }),
 
     define('shared: a writer excludes readers and writers, and readers exclude a writer', async context => {
       const { readWrite } = needReadWrite(context);
       const { read, write } = readWrite(uniqueKey('writer').name);
       const writer = await write.tryAcquire();
-      check(!LockHeld.is(writer), 'the first writer should win');
-      check(LockHeld.is(await read.tryAcquire()), 'a reader should lose to a writer');
-      check(LockHeld.is(await write.tryAcquire()), 'a second writer should lose to a writer');
-      await writer.release();
+      check(!isFailure(writer), 'the first writer should win');
+      check(isFailure(await read.tryAcquire()), 'a reader should lose to a writer');
+      check(isFailure(await write.tryAcquire()), 'a second writer should lose to a writer');
+      orThrow(await writer.release());
       const reader = await read.tryAcquire();
-      check(!LockHeld.is(reader), 'a reader should win once the writer left');
-      check(LockHeld.is(await write.tryAcquire()), 'a writer should lose to a reader');
-      await reader.release();
+      check(!isFailure(reader), 'a reader should win once the writer left');
+      check(isFailure(await write.tryAcquire()), 'a writer should lose to a reader');
+      orThrow(await reader.release());
       const again = await write.tryAcquire();
-      check(!LockHeld.is(again), 'a writer should win once the reader left');
-      await again.release();
+      check(!isFailure(again), 'a writer should win once the reader left');
+      orThrow(await again.release());
     }),
 
     define('shared: a waiting writer runs after the readers leave', async context => {
       const { readWrite } = needReadWrite(context);
       const { read, write } = readWrite(uniqueKey('writer-waits').name);
       const reader = await read.tryAcquire();
-      check(!LockHeld.is(reader), 'the reader should win');
+      check(!isFailure(reader), 'the reader should win');
       const waiting = write.run(() => 'wrote', { wait: '30s' });
       await new Promise(resolve => setTimeout(resolve, 5));
-      await reader.release();
+      orThrow(await reader.release());
       check((await pump(waiting, context.options.advanceTime)) === 'wrote', 'the writer should run after the reader');
     }),
 
@@ -714,7 +712,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const { store, options: o } = context;
       const key = createKey('contract', uniqueKey('shared-owner').name, 'readWrite');
       const grant = await ops.acquire(key, { ...requestFor(store, o), mode: 'write' });
-      check(grant !== undefined, 'the writer should be granted');
+      check(grant !== undefined && !isFailure(grant), 'the writer should be granted');
       check(
         (await ops.release({ ...grant, token: newToken() })) === 'not-owner',
         'a foreign release should be not-owner',
@@ -731,7 +729,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       if (context.store.guarantees.writerPreference !== true) skip('this store does not claim writerPreference');
       const { read, write } = readWrite(uniqueKey('preference').name);
       const first = await read.tryAcquire();
-      check(!LockHeld.is(first), 'the first reader should win');
+      check(!isFailure(first), 'the first reader should win');
       const writing = write.run(() => 'wrote', { wait: '30s' });
       // The writer registers after its first refused attempt: poll until a new reader is turned away.
       const deadline = Date.now() + 10_000;
@@ -739,21 +737,21 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       let since = Date.now();
       while (!refused && Date.now() < deadline) {
         const slipped = await read.tryAcquire();
-        if (LockHeld.is(slipped)) refused = true;
+        if (isFailure(slipped)) refused = true;
         else {
-          await slipped.release();
+          orThrow(await slipped.release());
           since = await idle(context.options, leaseTtl(context.store, context.options), since);
         }
       }
       check(refused, 'a new reader got in beside a waiting writer');
-      await first.release();
+      orThrow(await first.release());
       check(
         (await pump(writing, context.options.advanceTime)) === 'wrote',
         'the writer should run once the reader left',
       );
       const after = await read.tryAcquire();
-      check(!LockHeld.is(after), 'readers should be let in again once the writer is done');
-      await after.release();
+      check(!isFailure(after), 'readers should be let in again once the writer is done');
+      orThrow(await after.release());
     }),
 
     define('shared: fence strictly increases across grants', async context => {
@@ -764,7 +762,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       let previous = -1n;
       const take = async (mode: 'read' | 'write'): Promise<Grant> => {
         const grant = await ops.acquire(key, { ...requestFor(store, o), mode });
-        check(grant !== undefined, `a ${mode} hold should be granted`);
+        check(grant !== undefined && !isFailure(grant), `a ${mode} hold should be granted`);
         check(
           grant.fence !== undefined && grant.fence > previous,
           `${mode} fence ${String(grant.fence)} did not grow past ${previous}`,
@@ -774,11 +772,11 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       };
       const first = await take('read');
       const second = await take('read');
-      await ops.release(first);
-      await ops.release(second);
-      await ops.release(await take('write'));
-      await ops.release(await take('read'));
-      await ops.release(await take('write'));
+      orThrow(await ops.release(first));
+      orThrow(await ops.release(second));
+      orThrow(await ops.release(await take('write')));
+      orThrow(await ops.release(await take('read')));
+      orThrow(await ops.release(await take('write')));
     }),
 
     ...(['read', 'write'] as const).flatMap(mode => [
@@ -795,8 +793,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         );
         await advance(ttl + 1);
         const after = await ops.acquire(key, { ...requestFor(store, o), mode: 'write' });
-        check(after !== undefined, `the ${mode} hold of a crashed holder should free after the ttl`);
-        await ops.release(after);
+        check(after !== undefined && !isFailure(after), `the ${mode} hold of a crashed holder should free after the ttl`);
+        orThrow(await ops.release(after));
       }),
 
       define(`shared: extend keeps a ${mode} hold past the ttl`, async context => {
@@ -805,7 +803,7 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         const { ttl, advance } = needLeaseClock(store, o);
         const key = createKey('contract', uniqueKey(`shared-extend-${mode}`).name, 'readWrite');
         const grant = await ops.acquire(key, { ...requestFor(store, o), mode });
-        check(grant !== undefined, `the ${mode} hold should win`);
+        check(grant !== undefined && !isFailure(grant), `the ${mode} hold should win`);
         if (ops.extend === undefined) skip('this store has no shared extend');
         for (let beat = 0; beat < 3; beat++) {
           await advance(Math.ceil(ttl / 2));
@@ -817,8 +815,8 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
         );
         await advance(ttl + 1);
         const after = await ops.acquire(key, { ...requestFor(store, o), mode: 'write' });
-        check(after !== undefined, `the ${mode} hold should free once it stops being extended`);
-        await ops.release(after);
+        check(after !== undefined && !isFailure(after), `the ${mode} hold should free once it stops being extended`);
+        orThrow(await ops.release(after));
       }),
     ]),
 
@@ -829,21 +827,21 @@ export function storeContract(makeStore: MakeStore, options: ContractOptions = {
       const name = uniqueKey('same-name').name;
       const guards = [];
       const mutex = await locks.mutex(name).tryAcquire();
-      check(!LockHeld.is(mutex), 'the mutex should win');
+      check(!isFailure(mutex), 'the mutex should win');
       guards.push(mutex);
       if (store.guarantees.permits && hasSemaphore(locks)) {
         const semaphore = await locks.semaphore(name, { limit: 1 }).tryAcquire();
-        check(!LockHeld.is(semaphore), 'the semaphore should not be blocked by the mutex');
+        check(!isFailure(semaphore), 'the semaphore should not be blocked by the mutex');
         guards.push(semaphore);
       }
       if (store.guarantees.shared && hasReadWrite(locks)) {
         const writer = await locks.readWrite(name).write.tryAcquire();
-        check(!LockHeld.is(writer), 'the writer should not be blocked by the mutex or the semaphore');
+        check(!isFailure(writer), 'the writer should not be blocked by the mutex or the semaphore');
         guards.push(writer);
       }
       if (guards.length === 1) skip('this store has neither permits nor shared locks');
-      check(LockHeld.is(await locks.mutex(name).tryAcquire()), 'the mutex should still be held');
-      for (const guard of guards) await guard.release();
+      check(isFailure(await locks.mutex(name).tryAcquire()), 'the mutex should still be held');
+      for (const guard of guards) orThrow(await guard.release());
     }),
   ];
 }

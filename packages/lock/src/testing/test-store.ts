@@ -1,3 +1,4 @@
+import { orThrow } from '@arki/failure';
 /**
  * `testStore(guarantees)`: an in-memory store that makes the promises of another store, so a
  * test can hand a feature a real lock manager typed exactly like production (`LocksFor<G>`),
@@ -46,14 +47,14 @@ export type TestStoreOptions = {
   readonly ttl?: Duration;
 };
 
-/** What `testStore(guarantees)` returns: a `Store<G>`, with the permits and shared ops when `G` claims them. */
-export type TestStore<G extends Guarantees> = Store<G> & {
+/** What `testStore(guarantees)` returns: a `Store<G, never>`, with the permits and shared ops when `G` claims them. */
+export type TestStore<G extends Guarantees> = Store<G, never> & {
   waitFor(key: Key, signal: AbortSignal): Promise<void>;
-  waiter(key: Key): Waiter;
+  waiter(key: Key): Waiter<never>;
   /** Stops the lease timers. */
   dispose(): Promise<void>;
-} & (G['permits'] extends true ? { readonly permits: PermitOps } : unknown) &
-  (G['shared'] extends true ? { readonly shared: SharedOps } : unknown);
+} & (G['permits'] extends true ? { readonly permits: PermitOps<never> } : unknown) &
+  (G['shared'] extends true ? { readonly shared: SharedOps<never> } : unknown);
 
 const DEFAULT_TTL: Duration = '30s';
 
@@ -94,7 +95,7 @@ export function testStore(
   options: TestStoreOptions = {},
 ): Store & {
   waitFor(key: Key, signal: AbortSignal): Promise<void>;
-  waiter(key: Key): Waiter;
+  waiter(key: Key): Waiter<never>;
   dispose(): Promise<void>;
 } {
   const scheduler = options.scheduler ?? defaultScheduler;
@@ -120,7 +121,7 @@ export function testStore(
         if (lease === undefined) return;
         leases.delete(token);
         // Free the key first, as a real store does; the holder learns of it after.
-        await ops.release(lease.grant);
+        orThrow(await ops.release(lease.grant));
         lease.lose(
           new LockError({
             code: 'lost',
@@ -133,7 +134,7 @@ export function testStore(
 
     const acquire = async (key: Key, req: R): Promise<Grant | undefined> => {
       const granted = await ops.acquire(key, req);
-      if (granted === undefined) return undefined;
+      if (granted === undefined) return granted;
       const fence = guarantees.fence === false || granted.fence === undefined ? {} : { fence: granted.fence };
       if (!leased) return { key: granted.key, token: granted.token, ...fence };
       const leaseMs = req.ttlMs ?? ttlMs;

@@ -1,3 +1,5 @@
+import { orThrow } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 /**
  * A property test over three fake replicas sharing one store and one manual
  * clock. Invariant: at any instant at most one live guard holds a mutex key, and
@@ -10,7 +12,6 @@ import type { Scheduler } from '../scheduler.js';
 import type { Guard, Store } from '../types.js';
 import type { ContractCase, MakeStore } from './contract.js';
 import type { ManualScheduler } from './manual-scheduler.js';
-import { LockHeld } from '../errors.js';
 import { createLocks } from '../locks.js';
 import { check, ContractSkip, hasSemaphore, resolveMade } from './contract.js';
 import { manualScheduler } from './manual-scheduler.js';
@@ -25,7 +26,7 @@ export type ReplicaOptions = {
 };
 
 function isManual(scheduler: Scheduler | undefined): scheduler is ManualScheduler {
-  return scheduler !== undefined && 'advance' in scheduler;
+  return scheduler !== undefined && !isFailure(scheduler) && 'advance' in scheduler;
 }
 
 const REPLICAS = 3;
@@ -57,13 +58,13 @@ export function replicaCases(makeStore: MakeStore, options: ReplicaOptions = {})
   ): ContractCase => ({
     name,
     async run() {
-      if (needs !== undefined) {
+      if (needs !== undefined && !isFailure(needs)) {
         const { store: probe } = resolveMade(await makeStore(), {});
         try {
           const reason = needs(probe);
-          if (reason !== undefined) throw new ContractSkip(reason);
+          if (reason !== undefined && !isFailure(reason)) throw new ContractSkip(reason);
         } finally {
-          await probe.dispose?.();
+          orThrow(await probe.dispose?.());
         }
       }
       await fc.assert(
@@ -77,7 +78,7 @@ export function replicaCases(makeStore: MakeStore, options: ReplicaOptions = {})
           try {
             await run(store, clock, steps);
           } finally {
-            await store.dispose?.();
+            orThrow(await store.dispose?.());
           }
         }),
         { numRuns: options.numRuns ?? 50, ...(options.seed === undefined ? {} : { seed: options.seed }) },
@@ -103,10 +104,10 @@ async function runSteps(store: Store, clock: ManualScheduler, steps: readonly St
   for (const step of steps) {
     if (step.kind === 'acquire') {
       const guard = await replicas[step.replica]?.mutex(KEYS[step.key] ?? 'a').tryAcquire();
-      if (guard !== undefined && !LockHeld.is(guard)) live.push({ key: step.key, guard });
+      if (guard !== undefined && !isFailure(guard) && !isFailure(guard)) live.push({ key: step.key, guard });
     } else if (step.kind === 'release') {
       const [entry] = live.splice(step.pick % Math.max(live.length, 1), 1);
-      await entry?.guard.release();
+      orThrow(await entry?.guard.release());
     } else {
       await clock.advance(step.ms);
     }
@@ -115,7 +116,7 @@ async function runSteps(store: Store, clock: ManualScheduler, steps: readonly St
       check(holders <= 1, `${holders} replicas hold key ${name} at once`);
     }
   }
-  for (const entry of live) await entry.guard.release();
+  for (const entry of live) orThrow(await entry.guard.release());
 }
 
 async function runPermitSteps(store: Store, clock: ManualScheduler, steps: readonly Step[]): Promise<void> {
@@ -127,14 +128,14 @@ async function runPermitSteps(store: Store, clock: ManualScheduler, steps: reado
     if (step.kind === 'acquire') {
       const replica = replicas[step.replica];
       const pool =
-        replica !== undefined && hasSemaphore(replica)
+        replica !== undefined && !isFailure(replica) && hasSemaphore(replica)
           ? replica.semaphore(KEYS[step.key] ?? 'a', { limit: POOL_LIMIT })
           : undefined;
       const guard = await pool?.tryAcquire({ weight: step.weight });
-      if (guard !== undefined && !LockHeld.is(guard)) live.push({ key: step.key, weight: step.weight, guard });
+      if (guard !== undefined && !isFailure(guard) && !isFailure(guard)) live.push({ key: step.key, weight: step.weight, guard });
     } else if (step.kind === 'release') {
       const [entry] = live.splice(step.pick % Math.max(live.length, 1), 1);
-      await entry?.guard.release();
+      orThrow(await entry?.guard.release());
     } else {
       await clock.advance(step.ms);
     }
@@ -145,5 +146,5 @@ async function runPermitSteps(store: Store, clock: ManualScheduler, steps: reado
       check(inUse <= POOL_LIMIT, `${inUse} permits of semaphore ${name} are in use, the limit is ${POOL_LIMIT}`);
     }
   }
-  for (const entry of live) await entry.guard.release();
+  for (const entry of live) orThrow(await entry.guard.release());
 }

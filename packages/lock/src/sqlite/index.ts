@@ -1,3 +1,4 @@
+import { observeLock } from '../telemetry.js';
 /**
  * `sqliteLease`: a lease in a SQLite table, with a durable fence.
  *
@@ -22,13 +23,13 @@ import type {
   Key,
   PermitOps,
   PermitRequest,
-  ReleaseOutcome,
   Store,
 } from '../types.js';
-import { LockError } from '../errors.js';
+import { lockFenceSchema } from '../identity-schemas.js';
+import { LockError, storeFailure } from '../errors.js';
 import { MIN_LEASE_TTL_MS } from '../locks.js';
 import { DEFAULT_LEASE_TABLE, quotedTable, tableIdentifier } from '../pg/lease.sql.js';
-import { limitSchema, weightSchema } from '../types.js';
+import { limitSchema, weightSchema } from '../schemas.js';
 import { parseDuration } from '../wait.js';
 
 export { DEFAULT_LEASE_TABLE } from '../pg/lease.sql.js';
@@ -87,8 +88,15 @@ export function leaseTableSql(table: string): string {
 export const LEASE_TABLE_SQL = leaseTableSql(DEFAULT_LEASE_TABLE);
 
 /** Create the lease table if it is not there. Safe to call at every boot. */
-export async function ensureLockTable(db: SqliteLeaseDb, table: string = DEFAULT_LEASE_TABLE): Promise<void> {
+export async function ensureLockTable(db: SqliteLeaseDb, table: string = DEFAULT_LEASE_TABLE) {
+ return observeLock('store.ddl', async () => {
+      try {
   await db.run(sql.raw(leaseTableSql(table)));
+
+        return;
+      } catch (error) { return storeFailure(error, 'ddl'); }
+
+ });
 }
 
 // SQLite returns integers as numbers and has no boolean: 0 is false.
@@ -108,7 +116,7 @@ async function unlessBusy(attempt: () => Promise<Grant | undefined>): Promise<Gr
   try {
     return await attempt();
   } catch (error) {
-    if (busyErrorSchema.safeParse(error).success) return undefined;
+    if (busyErrorSchema.safeParse(error).success) return;
     throw error;
   }
 }
@@ -140,7 +148,9 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
    * so the capacity test in each statement sees every grant already made.
    */
   const permits: PermitOps = {
-    async acquire(key: Key, req: PermitRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: PermitRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       const { limit, weight, token } = req;
       if (!limitSchema.safeParse(limit).success || !weightSchema.safeParse(weight).success || weight > limit) {
         throw new LockError({
@@ -152,7 +162,7 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
       const leaseMs = req.ttlMs ?? ttlMs;
       const holder = (fence: SQL): SQL =>
         sql`json_object('t', ${token}, 'w', ${int(weight)}, 'f', ${fence}, 'e', ${NOW_MS} + ${int(leaseMs)})`;
-      return unlessBusy(async () => {
+      return await unlessBusy(async () => {
         const [row] = await db.all(sql`
           INSERT INTO ${table} AS l (key, generation, expires_at, permits_limit, holders)
           VALUES (${key.full}, 1, ${NOW_MS} + ${int(leaseMs)}, ${int(limit)}, json_array(${holder(sql`1`)}))
@@ -166,7 +176,7 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
         `);
         if (row !== undefined) {
           const parsed = acquireRowSchema.parse(row);
-          return { key, token, fence: BigInt(parsed.generation), expiresAt: Number(parsed.expires_ms) };
+          return { key, token, fence: lockFenceSchema.parse(BigInt(parsed.generation)), expiresAt: Number(parsed.expires_ms) };
         }
         // Refused: full, or the limit disagrees with the holders'. Only the second is an error.
         const [checked] = await db.all(sql`
@@ -182,8 +192,14 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
         }
         return;
       });
-    },
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       const rows = await db.all(sql`
         UPDATE ${table} AS l
           SET holders = (SELECT json_group_array(json(h.value)) FROM json_each(l.holders) AS h WHERE h.value ->> 't' <> ${grant.token})
@@ -192,8 +208,14 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
           RETURNING key
       `);
       return rows.length > 0 ? 'released' : 'not-owner';
-    },
-    async extend(grant: Grant, extendMs: number): Promise<boolean> {
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
+    async extend(grant: Grant, extendMs: number) {
+ return observeLock('store.extend', async () => {
+      try {
       const rows = await db.all(sql`
         UPDATE ${table} AS l
           SET holders = (
@@ -207,7 +229,11 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
           RETURNING 1 AS ok
       `);
       return rows.length > 0;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
   };
 
   return {
@@ -215,9 +241,11 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
     guarantees: sqliteLeaseGuarantees,
     permits,
     ttlMs,
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       const leaseMs = req.ttlMs ?? ttlMs;
-      return unlessBusy(async () => {
+      return await unlessBusy(async () => {
         const [row] = await db.all(sql`
           INSERT INTO ${table} AS lease (key, token, generation, expires_at)
           VALUES (${key.full}, ${req.token}, 1, ${NOW_MS} + ${int(leaseMs)})
@@ -230,10 +258,16 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
         `);
         if (row === undefined) return;
         const parsed = acquireRowSchema.parse(row);
-        return { key, token: req.token, fence: BigInt(parsed.generation), expiresAt: Number(parsed.expires_ms) };
+        return { key, token: req.token, fence: lockFenceSchema.parse(BigInt(parsed.generation)), expiresAt: Number(parsed.expires_ms) };
       });
-    },
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       // The row stays: `generation` must survive.
       const rows = await db.all(sql`
         UPDATE ${table}
@@ -242,8 +276,14 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
           RETURNING key
       `);
       return rows.length > 0 ? 'released' : 'not-owner';
-    },
-    async extend(grant: Grant, extendMs: number): Promise<boolean> {
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
+    async extend(grant: Grant, extendMs: number) {
+ return observeLock('store.extend', async () => {
+      try {
       const rows = await db.all(sql`
         UPDATE ${table}
           SET expires_at = ${NOW_MS} + ${int(extendMs)}
@@ -251,6 +291,10 @@ export function sqliteLease(db: SqliteLeaseDb, options: SqliteLeaseOptions): Sql
           RETURNING 1 AS ok
       `);
       return rows.length > 0;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
   };
 }

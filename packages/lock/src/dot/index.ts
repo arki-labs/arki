@@ -8,6 +8,7 @@
  * (`testStore` from `@arki/lock/testing`).
  */
 import type { CtxOf, EmptyShape, NeedsShape, NoReservedKeys } from '@arki/dot/unit';
+import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { infra } from '@arki/dot/unit';
 
 import type { CreateLocksOptions, Guarantees, LocksFor, Store } from '../types.js';
@@ -71,7 +72,9 @@ export function locks<G extends Guarantees, TShape extends NeedsShape & NoReserv
       },
     },
     async dispose({ locks: handle }) {
-      await handle.store.dispose?.();
+      // Dot disposal is a foreign void protocol; its supervisor receives canonical evidence.
+      const outcome = await handle.store.dispose?.();
+      if (isFailure(outcome)) throw new UnexpectedFailure(outcome);
     },
   });
 }

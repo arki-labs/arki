@@ -7,7 +7,7 @@ import type { Scheduler } from './scheduler.js';
 import type { Duration } from './types.js';
 import { LockError } from './errors.js';
 import { defaultScheduler } from './scheduler.js';
-import { durationSchema } from './types.js';
+import { durationSchema } from './schemas.js';
 
 function noop(): void {
   // A late result is the caller's to handle; this only keeps it from being reported as unhandled.
@@ -134,6 +134,8 @@ export function withStoreTimeout<T>(
   method: LockMethod,
   scheduler: Scheduler = defaultScheduler,
 ): Promise<T> {
+  // A defective scheduler may fail before its timer exists; the in-flight store still needs a rejection observer.
+  promise.catch(noop);
   return new Promise<T>((resolve, reject) => {
     const timer = scheduler.setTimeout(
       () => {
@@ -153,11 +155,10 @@ export function withStoreTimeout<T>(
     );
     promise.then(
       value => {
-        scheduler.clearTimeout(timer);
-        resolve(value);
+        try { scheduler.clearTimeout(timer); resolve(value); } catch (error) { reject(new Error('Scheduler cleanup failed', { cause: error })); }
       },
       (error: unknown) => {
-        scheduler.clearTimeout(timer);
+        try { scheduler.clearTimeout(timer); } catch (cleanupError) { reject(new Error('Scheduler cleanup failed', { cause: cleanupError })); return; }
         // The store's own reason passes through untouched; callers match on it.
         // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
         reject(error);

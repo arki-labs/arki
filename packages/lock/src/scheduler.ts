@@ -1,3 +1,9 @@
+import { UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
+import { clockValueSchema } from './schemas.js';
+import { z } from 'zod';
+import { is } from '@arki/schema';
+import { report } from './telemetry.js';
+
 /**
  * The one seam for time and timers. Renewal and deadline timers pass
  * `ref: false` (they must not keep a process alive); a `wait` the caller
@@ -18,9 +24,8 @@ export type Scheduler = {
 
 /** Node and Bun timers have `unref()`; browsers and Deno return a number. */
 function unref(timer: unknown): void {
-  if (typeof timer === 'object' && timer !== null && 'unref' in timer && typeof timer.unref === 'function') {
-    timer.unref();
-  }
+  const timerSchema = z.object({ unref: z.custom<() => void>(value => typeof value === 'function') });
+  if (is(timer, timerSchema)) timer.unref();
 }
 
 /**
@@ -45,7 +50,7 @@ function createDefaultScheduler(): Scheduler {
               return;
             }
             pending.delete(id);
-            void cb();
+            report(cb);
           },
           Math.min(left, MAX_TIMER_MS),
         );
@@ -66,3 +71,37 @@ function createDefaultScheduler(): Scheduler {
 
 /** Global timers (unref'd unless `ref: true`) and `performance.now()`. */
 export const defaultScheduler: Scheduler = createDefaultScheduler();
+
+const schedulerHandleShape = z.object({ id: z.number().int() });
+const schedulerHandleSchema = z.custom<SchedulerHandle>(value => is(value, schedulerHandleShape));
+
+/** A caller-provided synchronous scheduler is a foreign boundary, including rejected invalid returns. */
+export function supervisedScheduler(scheduler: Scheduler): Scheduler {
+  return {
+    now() {
+      return readClock(() => scheduler.now());
+    },
+    setTimeout(callback, ms, options) {
+      try {
+        const handle = scheduler.setTimeout(callback, ms, options);
+        report(() => handle);
+        return schedulerHandleSchema.parse(handle);
+      } catch (error) { throw new UnexpectedFailure(UnexpectedDefect({ cause: error })); }
+    },
+    clearTimeout(handle) {
+      const result = scheduler.clearTimeout(handle);
+      report(() => result);
+    },
+  };
+}
+
+/** The synchronous clock protocol is foreign; preserve rejected/throwing provider defects privately. */
+export function readClock(read: Scheduler['now']): number {
+  try {
+    const value = read();
+    report(() => value);
+    return clockValueSchema.parse(value);
+  } catch (error) {
+    throw new UnexpectedFailure(UnexpectedDefect({ cause: error }));
+  }
+}

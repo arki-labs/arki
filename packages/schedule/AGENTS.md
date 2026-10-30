@@ -11,7 +11,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 5. Durable delivery is at least once. A handler with an external effect passes its own idempotency key.
 6. A durable name has no `:`, because BullMQ forbids it in a queue name (`ARKI_SCHEDULE_E001`).
 7. With several replicas, an in-process schedule needs a `lock`. Without one every replica runs every tick.
-8. This package imports no queue and no lock library. `durable` and `lock` are structural ports. `@arki/queue` and `@arki/lock` plug in.
+8. This package imports no queue or lock runtime. `durable` and `lock` are structural ports; lock outcome types come from their canonical definitions. `@arki/queue` and `@arki/lock` plug in.
 9. The main entry stays free of timers and the logger. The runtime lives in `@arki/schedule/runtime`.
 10. Telemetry never replaces a run result and never runs a handler twice. Spans carry no payloads, lock keys or private causes.
 11. A new error code goes in `src/errors.ts` with JSDoc `@fix` and `@verify`.

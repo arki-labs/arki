@@ -1,3 +1,4 @@
+import { lockTokenSchema } from './identity-schemas.js';
 /**
  * The memory hand-off under churn: seeded random mixes of tryRun, waits and aborts never show two holders or strand a reservation.
  */
@@ -58,7 +59,7 @@ describe('memory hand-off under churn', () => {
       }
       const outcomes = await Promise.all(tasks);
       const codes = outcomes.filter(outcome => typeof outcome === 'string');
-      for (const code of codes) expect(code).toBe('aborted');
+      for (const code of codes) expect(code).toBe('lock.aborted');
       expect(maxInside).toBe(1);
       expect(store.peek(createKey('r', 'm'))).toBeUndefined();
       // A stranded reservation would refuse every newcomer forever.
@@ -150,7 +151,7 @@ describe('memory hand-off edges through the manager', () => {
     const patient = locks.mutex('d').run(() => 'patient', { wait: '2s' });
     // A wait that runs out resolves to a LockHeld value; it is not thrown.
     expect(await late).toMatchObject({ code: 'lock.held' });
-    await holder.release();
+    orThrow(await holder.release());
     expect(await patient).toBe('patient');
     expect(await locks.mutex('d').tryRun(() => 'free')).toBe('free');
   });
@@ -169,8 +170,8 @@ describe('memory hand-off edges through the manager', () => {
     // Release reserves for `first`; it aborts before its retry can run.
     const released = holder.release();
     controller.abort();
-    await released;
-    expect(await first).toBe('aborted');
+    orThrow(await released);
+    expect(await first).toMatchObject({ code: 'lock.aborted' });
     expect(await second).toBe('second');
     expect(await locks.mutex('a').tryRun(() => 'free')).toBe('free');
   });
@@ -181,7 +182,7 @@ describe('memory hand-off edges through the manager', () => {
     const holder = await orThrow(locks.mutex('f').acquire());
     const waiting = locks.mutex('f').run(() => 'waiter', { wait: '2s' });
     await sleep(5);
-    await holder.release();
+    orThrow(await holder.release());
     expect(LockHeld.is(await locks.mutex('f').tryRun(() => 'barger'))).toBe(true);
     expect(await waiting).toBe('waiter');
   });
@@ -205,7 +206,7 @@ describe('lazy ctx.signal', () => {
       name: 'lossy',
       guarantees: { ...inner.guarantees, shared: false, permits: false, writerPreference: false },
       async acquire(key, req) {
-        const grant = await inner.acquire(key, { token: req.token });
+        const grant = orThrow(await inner.acquire(key, { token: lockTokenSchema.parse(req.token) }));
         if (grant === undefined) return;
         const lost = Promise.resolve(new LockError({ code: 'lost', message: 'gone', remediation: 'none' }));
         return { ...grant, lost } satisfies Grant;

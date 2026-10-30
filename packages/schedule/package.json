@@ -74,6 +74,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/failure": "workspace:*",
+    "@arki/lock": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",

@@ -2,7 +2,7 @@
   "name": "@arki/lock",
   "version": "0.1.0",
   "private": false,
-  "description": "Distributed locks and semaphores — one API over memory, Postgres, SQLite, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
+  "description": "Distributed locks and semaphores \u2014 one API over memory, Postgres, SQLite, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
   "keywords": [
     "arki",
     "typescript",
@@ -73,7 +73,12 @@
       "import": "./dist/testing/index.js",
       "default": "./dist/testing/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    }
   },
   "files": [
     "dist/**",
@@ -103,9 +108,11 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/clock": "workspace:*",
+    "@arki/contracts": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -119,6 +126,8 @@
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@libsql/client": "^0.18.0",
+    "@opentelemetry/sdk-metrics": "catalog:opentelemetry",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",

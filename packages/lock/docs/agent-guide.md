@@ -6,7 +6,7 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 1. `createLocks({ store, namespace })` returns a manager. `mutex(key)`, `semaphore(key, { limit })` and `readWrite(key)` give lock handles.
 2. Four verbs on a handle: `tryRun`, `run`, `tryAcquire`, `acquire`. `try*` makes one attempt. The others wait up to `wait`.
-3. A busy lock is the returned failure `LockHeld` (`lock.held`). Other problems throw `LockError`.
+3. A busy lock is the returned failure `LockHeld` (`lock.held`). Operational failures are returned; configuration and misuse throw `LockError`. Callback failures retain identity; callback defects become `UnexpectedDefect` with a private cause.
 4. A store lives on its own subpath and declares `guarantees`. The handle types follow them.
 5. A lease renews itself and aborts the callback's `signal` when ownership is lost.
 6. Leases give a fence: a number that only grows. Hand it to the resource you protect.
@@ -83,12 +83,18 @@ export async function grabLastSlice(grab: () => Promise<number>): Promise<string
 | Code             | Meaning                                             | What to do                                                     |
 | ---------------- | --------------------------------------------------- | -------------------------------------------------------------- |
 | `lock.held`      | The lock is busy. A returned failure, status 409.   | Skip the work, retry later, or raise `wait`.                   |
-| `ARKI_LOCK_E002` | The caller's signal aborted the wait.               | Stop. Do not retry with the same signal.                       |
-| `ARKI_LOCK_E003` | Ownership was lost while the callback ran.          | Check what finished. Do not blindly retry.                     |
-| `ARKI_LOCK_E004` | The store failed. Never read as free or held.       | Check the store. Wait out the lease when `outcome` is unknown. |
-| `ARKI_LOCK_E005` | `guard.release()` failed or answered unknown.       | Check the store. A lease store frees the key after `ttl`.      |
+| `lock.aborted` | The caller's signal aborted the wait.               | Stop. Do not retry with the same signal.                       |
+| `lock.lost` | Ownership was lost while the callback ran.          | Check what finished. Do not blindly retry.                     |
+| `lock.store` | The store failed. Never read as free or held.       | Check the store. Wait out the lease when `outcome` is unknown. |
+| `lock.release` | `guard.release()` failed or answered unknown.       | Check the store. A lease store frees the key after `ttl`.      |
 | `ARKI_LOCK_E006` | Bad input or setup.                                 | Fix the call named in the message.                             |
 | `ARKI_LOCK_E007` | A store lacks a capability the types could not see. | Use a store that declares it in `guarantees`.                  |
+
+## Observability and identity
+
+Manager ownership operations and named backend calls emit default OTel spans and bounded `lock.operations` metrics. No SDK is installed; reporting faults cannot replay execution. Default attributes contain no keys, tokens or callback payloads. Pure key functions and in-memory maps need no provider span.
+
+Key, token and fence types have one canonical source each; restoration uses `@arki/lock/zod`. `LOCK_RUN_FAILURES` supplies exact run transport definitions. Manual release returns `LockReleaseFailed`; successful-callback cleanup retains the callback result and reports the failure through counters, telemetry and a supervised observer. AsyncDispose and Dot disposal bridge the foreign void protocol explicitly.
 
 ## Verify
 

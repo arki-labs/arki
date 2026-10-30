@@ -1,3 +1,4 @@
+import { observeLock } from '../telemetry.js';
 /**
  * `pgLease`: a lease in a Postgres table, with a durable fence.
  *
@@ -12,7 +13,6 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
-import { is, recordSchema } from '@arki/schema';
 
 import type {
   AcquireRequest,
@@ -22,13 +22,13 @@ import type {
   Key,
   PermitOps,
   PermitRequest,
-  ReleaseOutcome,
   Store,
   Waiter,
 } from '../types.js';
-import { LockError } from '../errors.js';
+import { lockFenceSchema } from '../identity-schemas.js';
+import { LockError, storeFailure } from '../errors.js';
 import { MIN_LEASE_TTL_MS } from '../locks.js';
-import { limitSchema, weightSchema } from '../types.js';
+import { limitSchema, weightSchema } from '../schemas.js';
 import { parseDuration } from '../wait.js';
 import { DEFAULT_LEASE_TABLE, leaseTableSql, leaseUpgradeSql, tableIdentifier } from './lease.sql.js';
 
@@ -104,10 +104,10 @@ const freeRowSchema = z.object({ free: z.boolean() });
 const timestampRowSchema = z.object({ ts: z.string() });
 const notificationSchema = z.object({ channel: z.string(), payload: z.string().optional() });
 
+const resultRowsSchema = z.union([z.array(z.unknown()), z.object({ rows: z.array(z.unknown()) })]);
 function rowsOf(result: unknown): readonly unknown[] {
-  if (Array.isArray(result)) return result;
-  if (is(result, recordSchema) && Array.isArray(result['rows'])) return result['rows'];
-  return [];
+  const parsed = resultRowsSchema.parse(result);
+  return Array.isArray(parsed) ? parsed : parsed.rows;
 }
 
 const limitRowSchema = z.object({ conflict: z.boolean() });
@@ -141,7 +141,9 @@ async function assertAutocommit(db: LeaseDb): Promise<void> {
 }
 
 /** Create the lease table if it is not there. Safe to call at every boot, from every replica at once. */
-export async function ensureLockTable(db: LeaseDb, table: string = DEFAULT_LEASE_TABLE): Promise<void> {
+export async function ensureLockTable(db: LeaseDb, table: string = DEFAULT_LEASE_TABLE) {
+ return observeLock('store.ddl', async () => {
+      try {
   const ddl = leaseTableSql(table);
   // Two sessions running CREATE TABLE IF NOT EXISTS at once can both miss the
   // table, and one then fails on pg_type. The lock makes the second one wait.
@@ -152,6 +154,11 @@ export async function ensureLockTable(db: LeaseDb, table: string = DEFAULT_LEASE
   ${leaseUpgradeSql(table)}
 END $arki$`),
   );
+
+        return;
+      } catch (error) { return storeFailure(error, 'ddl'); }
+
+ });
 }
 
 export function pgLease(db: LeaseDb, options: PgLeaseOptions): PgLeaseStore<PgLeasePollGuarantees>;
@@ -187,7 +194,9 @@ export function pgLease(
    * it checks the WHERE: the capacity test sees every grant already committed.
    */
   const permits: PermitOps = {
-    async acquire(key: Key, req: PermitRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: PermitRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       const { limit, weight, token } = req;
       if (!limitSchema.safeParse(limit).success || !weightSchema.safeParse(weight).success || weight > limit) {
         throw new LockError({
@@ -216,7 +225,7 @@ export function pgLease(
       const [row] = rowsOf(result);
       if (row !== undefined) {
         const parsed = acquireRowSchema.parse(row);
-        return { key, token, fence: BigInt(parsed.generation), expiresAt: Number(parsed.expires_ms) };
+        return { key, token, fence: lockFenceSchema.parse(BigInt(parsed.generation)), expiresAt: Number(parsed.expires_ms) };
       }
       // Refused: full, or the limit disagrees with the holders'. Only the second is an error.
       const check = await db.execute(sql`
@@ -231,9 +240,15 @@ export function pgLease(
           remediation: 'Declare one limit per semaphore key; a new limit is accepted once no hold is left.',
         });
       }
-      return undefined;
-    },
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+      return;
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       const result = await db.execute(sql`
         WITH released AS (
           UPDATE ${table} AS l
@@ -245,8 +260,14 @@ export function pgLease(
         SELECT pg_notify(${CHANNEL}, key) FROM released
       `);
       return rowsOf(result).length > 0 ? 'released' : 'not-owner';
-    },
-    async extend(grant: Grant, extendMs: number): Promise<boolean> {
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
+    async extend(grant: Grant, extendMs: number) {
+ return observeLock('store.extend', async () => {
+      try {
       const result = await db.execute(sql`
         UPDATE ${table} AS l
           SET holders = (
@@ -260,14 +281,20 @@ export function pgLease(
           RETURNING 1 AS ok
       `);
       return rowsOf(result).length > 0;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
   };
 
   const shared = {
     name: 'pg-lease',
     permits,
     ttlMs,
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       await ensureAutocommit();
       const leaseMs = req.ttlMs ?? ttlMs;
       const result = await db.execute(sql`
@@ -282,11 +309,17 @@ export function pgLease(
                   floor(extract(epoch FROM lease.expires_at) * 1000)::text AS expires_ms
       `);
       const [row] = rowsOf(result);
-      if (row === undefined) return undefined;
+      if (row === undefined) return;
       const parsed = acquireRowSchema.parse(row);
-      return { key, token: req.token, fence: BigInt(parsed.generation), expiresAt: Number(parsed.expires_ms) };
-    },
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+      return { key, token: req.token, fence: lockFenceSchema.parse(BigInt(parsed.generation)), expiresAt: Number(parsed.expires_ms) };
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       // The row stays: `generation` must survive. Notify so waiters wake at once.
       const result = await db.execute(sql`
         WITH released AS (
@@ -298,8 +331,14 @@ export function pgLease(
         SELECT pg_notify(${CHANNEL}, key) FROM released
       `);
       return rowsOf(result).length > 0 ? 'released' : 'not-owner';
-    },
-    async extend(grant: Grant, extendMs: number): Promise<boolean> {
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
+    async extend(grant: Grant, extendMs: number) {
+ return observeLock('store.extend', async () => {
+      try {
       const result = await db.execute(sql`
         UPDATE ${table}
           SET expires_at = clock_timestamp() + ${intervalMs(extendMs)}
@@ -307,7 +346,11 @@ export function pgLease(
           RETURNING 1 AS ok
       `);
       return rowsOf(result).length > 0;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
   };
 
   /** True when `weight` more permits fit on `key` now (no row, no live holder, or room left). */
@@ -346,7 +389,10 @@ export function pgLease(
     permits: withWaiter(waitReady),
     guarantees: pgLeaseWakeGuarantees,
     ...rest,
-    waitFor: (key: Key, signal: AbortSignal) => waitReady(key, signal, () => isFree(key)),
+    waitFor: async (key: Key, signal: AbortSignal) => {
+      try { await waitReady(key, signal, () => isFree(key)); return; }
+      catch (error) { return storeFailure(error, 'waitFor'); }
+    },
   };
 }
 
@@ -389,7 +435,9 @@ function permitWaiter(
   let beat = WAITER_FIRST_BEAT_MS;
   const closed = new AbortController();
   return {
-    async waitFor(signal: AbortSignal): Promise<void> {
+    async waitFor(signal: AbortSignal) {
+ return observeLock('store.waitFor', async () => {
+      try {
       if (signal.aborted || closed.signal.aborted || (await fitsNow())) return;
       const both = new AbortController();
       const stop = (): void => both.abort();
@@ -405,7 +453,12 @@ function permitWaiter(
         signal.removeEventListener('abort', stop);
         closed.signal.removeEventListener('abort', stop);
       }
-    },
+    
+        return;
+      } catch (error) { return storeFailure(error, 'waitFor'); }
+
+ });
+},
     close(): void {
       closed.abort();
     },
@@ -415,7 +468,7 @@ function permitWaiter(
 /** `waitReady` (wait for a release, or until `ready()` holds) and `dispose` over one lazily opened LISTEN connection, shared by every waiter. */
 function listener(connect: () => Promise<ListenClient>): {
   waitReady: (key: Key, signal: AbortSignal, ready: () => Promise<boolean>) => Promise<void>;
-  dispose: () => Promise<void>;
+  dispose: () => Promise<void | import('../errors.js').StoreFailure>;
 } {
   const waiters = new Map<string, Set<() => void>>();
   let connection: Promise<ListenClient> | undefined;
@@ -500,7 +553,9 @@ function listener(connect: () => Promise<ListenClient>): {
       }
       await promise;
     },
-    async dispose(): Promise<void> {
+    async dispose() {
+ return observeLock('store.dispose', async () => {
+      try {
       if (disposed) return;
       disposed = true;
       const pending = connection;
@@ -513,6 +568,11 @@ function listener(connect: () => Promise<ListenClient>): {
       } catch {
         // The connection never opened, or a connection error already released it.
       }
-    },
+    
+        return;
+      } catch (error) { return storeFailure(error, 'dispose'); }
+
+ });
+},
   };
 }

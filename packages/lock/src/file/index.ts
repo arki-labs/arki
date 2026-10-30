@@ -1,3 +1,4 @@
+import { observeLock } from '../telemetry.js';
 /**
  * Lock files for processes on one host. A lock is a directory
  * `<dir>/<name>-<hash>.lock` with an `owner` file inside that holds the
@@ -31,12 +32,16 @@ import nodePath from 'node:path';
 import { pid } from 'node:process';
 import type { FSWatcher } from 'node:fs';
 
+import { z } from 'zod';
+import { is } from '@arki/schema';
+import { lockTokenSchema } from '../identity-schemas.js';
+import type { LockToken } from '../identities.js';
 import { getLogger } from '@arki/log';
 
 import type { Scheduler } from '../scheduler.js';
-import type { AcquireRequest, Grant, Guarantees, Key, ReleaseOutcome, Store } from '../types.js';
-import { LockError } from '../errors.js';
-import { defaultScheduler } from '../scheduler.js';
+import type { AcquireRequest, Grant, Guarantees, Key, Store } from '../types.js';
+import { LockError, storeFailure } from '../errors.js';
+import { defaultScheduler, supervisedScheduler, readClock } from '../scheduler.js';
 
 const log = getLogger('arki:lock');
 
@@ -74,7 +79,10 @@ export type FileStore = Store<FileGuarantees> & {
   lockPath(key: Key): string;
 };
 
-type Owner = { readonly token: string; readonly pid: number; readonly key: string };
+// eslint-disable-next-line unicorn/prefer-top-level-await -- Zod.catch defines synchronous schema fallbacks, not Promise.catch.
+const ownerSchema = z.object({ token: lockTokenSchema, pid: z.number().catch(0), key: z.string().catch('') });
+type Owner = z.output<typeof ownerSchema>;
+const errorCodeSchema = z.object({ code: z.string() });
 
 const DEFAULT_STALE_MS = 10_000;
 const DEFAULT_POLL_MS = 250;
@@ -84,13 +92,7 @@ function ignore(): void {
 }
 
 function hasCode(error: unknown, ...codes: string[]): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    codes.includes(error.code)
-  );
+  return is(error, errorCodeSchema) && codes.includes(error.code);
 }
 
 function digest(text: string, length: number): string {
@@ -110,16 +112,10 @@ function tokenTag(token: string): string {
 
 function parseOwner(text: string): Owner | undefined {
   try {
-    const value: unknown = JSON.parse(text);
-    if (typeof value !== 'object' || value === null) return undefined;
-    if (!('token' in value) || typeof value.token !== 'string') return undefined;
-    return {
-      token: value.token,
-      pid: 'pid' in value && typeof value.pid === 'number' ? value.pid : 0,
-      key: 'key' in value && typeof value.key === 'string' ? value.key : '',
-    };
+    const parsed = ownerSchema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : undefined;
   } catch {
-    return undefined;
+    return;
   }
 }
 
@@ -127,7 +123,7 @@ async function readOwner(path: string): Promise<Owner | undefined> {
   try {
     return parseOwner(await readFile(nodePath.join(path, 'owner'), 'utf8'));
   } catch (error) {
-    if (hasCode(error, 'ENOENT', 'ENOTDIR')) return undefined;
+    if (hasCode(error, 'ENOENT', 'ENOTDIR')) return;
     throw error;
   }
 }
@@ -172,8 +168,9 @@ async function remove(path: string, owner: string, mover: string): Promise<boole
 export function fileStore(dir: string, options: FileStoreOptions = {}): FileStore {
   const staleMs = options.stale ?? DEFAULT_STALE_MS;
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
-  const now = options.now ?? Date.now;
-  const scheduler = options.scheduler ?? defaultScheduler;
+  const clock = options.now ?? Date.now;
+  const now = options.now === undefined ? clock : () => readClock(clock);
+  const scheduler = options.scheduler === undefined ? defaultScheduler : supervisedScheduler(options.scheduler);
   if (!Number.isFinite(staleMs) || staleMs < 1) {
     throw new LockError({
       code: 'config',
@@ -197,7 +194,7 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
       const info = await stat(path);
       return now() - info.mtimeMs;
     } catch (error) {
-      if (hasCode(error, 'ENOENT')) return undefined;
+      if (hasCode(error, 'ENOENT')) return;
       throw error;
     }
   }
@@ -229,8 +226,8 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
     return true;
   }
 
-  async function create(key: Key, path: string, token: string): Promise<Grant | undefined> {
-    if (!(await place(path, { token, pid, key: key.full }))) return undefined;
+  async function create(key: Key, path: string, token: LockToken): Promise<Grant | undefined> {
+    if (!(await place(path, { token, pid, key: key.full }))) return;
     log.debug('file lock created', { store: 'file' });
     return { key, token };
   }
@@ -243,7 +240,7 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
    * gone (no one can need them then: a late taker in one finds a new owner and
    * leaves).
    */
-  async function reap(key: Key, path: string, token: string): Promise<Grant | undefined> {
+  async function reap(key: Key, path: string, token: LockToken): Promise<Grant | undefined> {
     const dead = await readOwner(path);
     const victim = dead?.token ?? '';
     const guards = `${path}.reap-${tokenTag(victim)}`;
@@ -259,7 +256,7 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
       }
       const age = await ageOf(guard);
       // A live taker is on it, or one just finished: either way, look again later.
-      if (age === undefined || age <= staleMs) return undefined;
+      if (age === undefined || age <= staleMs) return;
       passed.push(guard);
     }
   }
@@ -267,17 +264,17 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
   async function takeOver(
     key: Key,
     path: string,
-    token: string,
+    token: LockToken,
     victim: string,
     passed: readonly string[],
   ): Promise<Grant | undefined> {
     // Judge again inside the guard: the lock may be gone, fresh, or already someone else's.
     const age = await ageOf(path);
     if (age === undefined) return create(key, path, token);
-    if (age <= staleMs) return undefined;
+    if (age <= staleMs) return;
     const current = await readOwner(path);
-    if ((current?.token ?? '') !== victim) return undefined;
-    if (!(await remove(path, victim, token))) return undefined;
+    if ((current?.token ?? '') !== victim) return;
+    if (!(await remove(path, victim, token))) return;
     log.debug('file lock taken over after stale', { store: 'file' });
     await Promise.all(passed.map(guard => rm(guard, { recursive: true, force: true })));
     return create(key, path, token);
@@ -289,19 +286,27 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
     ttlMs: staleMs,
     lockPath,
 
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       await ensureDir();
       const path = lockPath(key);
       const created = await create(key, path, req.token);
       if (created !== undefined) return created;
       const age = await ageOf(path);
       // Gone between our mkdir and our stat: the key is free right now, so try again once.
-      if (age === undefined) return create(key, path, req.token);
-      if (age <= staleMs) return undefined;
-      return reap(key, path, req.token);
-    },
+      if (age === undefined) return await create(key, path, req.token);
+      if (age <= staleMs) return;
+      return await reap(key, path, req.token);
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
 
-    async extend(grant: Grant): Promise<boolean> {
+ });
+},
+
+    async extend(grant: Grant) {
+ return observeLock('store.extend', async () => {
+      try {
       const path = lockPath(grant.key);
       const age = await ageOf(path);
       // Expired is expired: a late heartbeat never revives a lease.
@@ -315,9 +320,15 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
         throw error;
       }
       return true;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
 
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+ });
+},
+
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       const path = lockPath(grant.key);
       const owner = await readOwner(path);
       if (owner?.token !== grant.token) return 'not-owner';
@@ -326,12 +337,18 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
       const age = await ageOf(path);
       if (age === undefined || age > staleMs) return 'not-owner';
       return (await remove(path, grant.token, grant.token)) ? 'released' : 'not-owner';
-    },
+    
+      } catch (error) { return storeFailure(error, 'release'); }
 
-    waitFor(key: Key, signal: AbortSignal): Promise<void> {
-      if (signal.aborted) return Promise.resolve();
+ });
+},
+
+    async waitFor(key: Key, signal: AbortSignal) {
+ return observeLock('store.waitFor', async () => {
+      try {
+      if (signal.aborted) return;
       const name = lockName(key);
-      return new Promise<void>(resolve => {
+      return await new Promise<void>(resolve => {
         let watcher: FSWatcher | undefined;
         const done = (): void => {
           signal.removeEventListener('abort', done);
@@ -350,7 +367,10 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
           // No fs.watch here (or the directory is not there yet): the timer alone wakes us.
         }
       });
-    },
+      } catch (error) { return storeFailure(error, 'waitFor'); }
+    
+ });
+},
   };
   return store;
 }

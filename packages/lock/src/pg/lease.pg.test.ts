@@ -1,3 +1,6 @@
+import { collect } from '@arki/failure';
+import { orThrow } from '@arki/failure';
+import { lockTokenSchema, lockFenceSchema } from './../identity-schemas.js';
 /**
  * pgLease on a real Postgres (container), two pools = two replicas.
  * The database clock is the judge, so "time passing" is done two ways:
@@ -42,7 +45,7 @@ beforeAll(async () => {
   poolB = new pg.Pool({ connectionString: container.getConnectionUri(), max: 8 });
   dbA = drizzle({ client: poolA });
   dbB = drizzle({ client: poolB });
-  await ensureLockTable(dbA, TABLE);
+  orThrow(await ensureLockTable(dbA, TABLE));
 }, 120_000);
 
 afterAll(async () => {
@@ -100,7 +103,7 @@ function isolated(build: (table: string) => Store) {
   const make = async (): Promise<CaseStore> => {
     tableCounter += 1;
     const table = `arki_lock_case_${tableCounter}`;
-    await ensureLockTable(dbA, table);
+    orThrow(await ensureLockTable(dbA, table));
     const caseClock = dbBackedScheduler(table);
     return { store: build(table), advanceTime: ms => caseClock.advance(ms), scheduler: caseClock };
   };
@@ -178,23 +181,22 @@ describe('pgLease failure bounds', () => {
 
     await schedulerA.advance(400); // A's first renewal beat: the database answers zero rows
     const error = await running.then(
-      () => 'resolved',
+      outcome => outcome,
       (error_: unknown) => error_,
     );
-    expect(error).toBeInstanceOf(LockError);
-    expect(error).toMatchObject({ code: 'lost', detectedBy: 'renewal' });
+    expect(error).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'renewal' } });
   }, 20_000);
 
   it('the application clock is not consulted: +1 h and -1 h of app skew change nothing', async () => {
     const store = lease(dbA);
     const key = createKey('skew', `k-${Math.random()}`);
-    const grant = await store.acquire(key, { token: 'a' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
     expect(grant).toBeDefined();
     for (const skew of [3_600_000, -3_600_000]) {
       vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + skew });
       try {
-        expect(await store.acquire(key, { token: 'b' }), `app clock ${skew} ms off`).toBeUndefined();
-        expect(await store.extend?.(grant ?? { key, token: 'a' }, 2000)).toBe(true);
+        expect(await store.acquire(key, { token: lockTokenSchema.parse('b') }), `app clock ${skew} ms off`).toBeUndefined();
+        expect(await store.extend?.(grant ?? { key, token: lockTokenSchema.parse('a') }, 2000)).toBe(true);
       } finally {
         vi.useRealTimers();
       }
@@ -205,7 +207,7 @@ describe('pgLease failure bounds', () => {
     const key = createKey('tx', `refused-${Math.random()}`);
     await dbA.transaction(async tx => {
       const error = await pgLease(tx, { ttl: '1s', table: TABLE })
-        .acquire(key, { token: 'a' })
+        .acquire(key, { token: lockTokenSchema.parse('a') })
         .then(
           () => 'acquired',
           (error_: unknown) => error_,
@@ -217,8 +219,8 @@ describe('pgLease failure bounds', () => {
       );
       expect(rows.rows[0]?.n).toBe(0);
     });
-    expect(await lease(dbA).acquire(key, { token: 'b' }), 'a pool handle passes the probe').toMatchObject({
-      fence: 1n,
+    expect(await lease(dbA).acquire(key, { token: lockTokenSchema.parse('b') }), 'a pool handle passes the probe').toMatchObject({
+      fence: lockFenceSchema.parse(1n),
     });
   });
 
@@ -229,7 +231,7 @@ describe('pgLease failure bounds', () => {
     try {
       await longTx.query('BEGIN');
       await longTx.query('SELECT 1'); // now() freezes here
-      const first = await store.acquire(key, { token: 'a' });
+      const first = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
       expect(first).toBeDefined();
       await sleep(2100);
       const view = await longTx.query<{ stale: boolean; held_by_now: boolean; held_by_clock: boolean }>(
@@ -244,7 +246,7 @@ describe('pgLease failure bounds', () => {
         held_by_now: true,
         held_by_clock: false,
       });
-      const second = await store.acquire(key, { token: 'b' });
+      const second = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('b') }));
       expect(second?.fence).toBe((first?.fence ?? 0n) + 1n);
     } finally {
       await longTx.query('ROLLBACK');
@@ -273,10 +275,10 @@ describe('pgLease durable fence', () => {
     const key = createKey('fence', `cycles-${Math.random()}`);
     let previous = 0n;
     for (let cycle = 0; cycle < 1000; cycle++) {
-      const grant = await store.acquire(key, { token: `t${cycle}` });
+      const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse(`t${cycle}`) }));
       expect(grant?.fence, `cycle ${cycle}`).toBeGreaterThan(previous);
       previous = grant?.fence ?? previous;
-      if (cycle % 2 === 0) await store.release(grant ?? { key, token: `t${cycle}` });
+      if (cycle % 2 === 0) orThrow(await store.release(grant ?? { key, token: lockTokenSchema.parse(`t${cycle}`) }));
       else await shift(3_600_000, key.full); // lost: the lease aged out without a release
     }
     expect(previous).toBe(1000n);
@@ -285,23 +287,23 @@ describe('pgLease durable fence', () => {
   it('release then re-acquire gives generation + 1 and the row survives (would fail with DELETE)', async () => {
     const store = lease(dbA);
     const key = createKey('fence', `release-${Math.random()}`);
-    const first = await store.acquire(key, { token: 'a' });
+    const first = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('a') }));
     expect(first?.fence).toBe(1n);
-    expect(await store.release(first ?? { key, token: 'a' })).toBe('released');
+    expect(await store.release(first ?? { key, token: lockTokenSchema.parse('a') })).toBe('released');
     const row = await dbA.execute<{ token: string | null; generation: string }>(
       sql`SELECT token, generation::text FROM ${sql.identifier(TABLE)} WHERE key = ${key.full}`,
     );
     expect(row.rows).toEqual([{ token: null, generation: '1' }]);
-    const second = await store.acquire(key, { token: 'b' });
+    const second = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('b') }));
     expect(second?.fence).toBe(2n);
   });
 
   it('two replicas racing for one key: exactly one wins and the generation moves by one', async () => {
     const key = createKey('fence', `race-${Math.random()}`);
     const results = await Promise.all(
-      Array.from({ length: 20 }, (_, index) => lease(index % 2 === 0 ? dbA : dbB).acquire(key, { token: `r${index}` })),
+      Array.from({ length: 20 }, (_, index) => lease(index % 2 === 0 ? dbA : dbB).acquire(key, { token: lockTokenSchema.parse(`r${index}`) })),
     );
-    const winners = results.filter(grant => grant !== undefined);
+    const winners = results.map(result => orThrow(result)).filter(grant => grant !== undefined);
     expect(winners).toHaveLength(1);
     expect(winners[0]?.fence).toBe(1n);
   });
@@ -317,16 +319,16 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
     const waiter = leaseWithListen(dbA, poolA);
     const holder = lease(dbB);
     const key = createKey('listen', `wake-${Math.random()}`);
-    const grant = await holder.acquire(key, { token: 'h' });
+    const grant = orThrow(await holder.acquire(key, { token: lockTokenSchema.parse('h') }));
     const controller = new AbortController();
     try {
       const waiting = waiter.waitFor?.(key, controller.signal) ?? Promise.reject(new Error('no waitFor'));
       expect(await settledWithin(waiting, 300), 'must not wake while the key is held').toBe(false);
-      await holder.release(grant ?? { key, token: 'h' });
+      orThrow(await holder.release(grant ?? { key, token: lockTokenSchema.parse('h') }));
       expect(await settledWithin(waiting, 1500)).toBe(true);
     } finally {
       controller.abort();
-      await waiter.dispose?.();
+      orThrow(await waiter.dispose?.());
     }
   });
 
@@ -340,7 +342,7 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
       controller.abort();
       expect(await settledWithin(waiting, 1000)).toBe(true);
     } finally {
-      await waiter.dispose?.();
+      orThrow(await waiter.dispose?.());
     }
   });
 
@@ -355,16 +357,16 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
       },
     });
     const key = createKey('listen', `slow-open-${Math.random()}`);
-    const grant = await holder.acquire(key, { token: 'h' });
+    const grant = orThrow(await holder.acquire(key, { token: lockTokenSchema.parse('h') }));
     const controller = new AbortController();
     try {
       const waiting = waiter.waitFor?.(key, controller.signal) ?? Promise.reject(new Error('no waitFor'));
       await sleep(50);
-      await holder.release(grant ?? { key, token: 'h' });
+      orThrow(await holder.release(grant ?? { key, token: lockTokenSchema.parse('h') }));
       expect(await settledWithin(waiting, 1500)).toBe(true);
     } finally {
       controller.abort();
-      await waiter.dispose?.();
+      orThrow(await waiter.dispose?.());
     }
   });
 
@@ -377,7 +379,7 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
     const waiter = pgLease(dbA, { ttl: TTL, table: TABLE, listen: () => pool.connect() });
     const holder = lease(dbB);
     const key = createKey('listen', `one-backend-${Math.random()}`);
-    const grant = await holder.acquire(key, { token: 'h' });
+    const grant = orThrow(await holder.acquire(key, { token: lockTokenSchema.parse('h') }));
     try {
       for (let index = 0; index < 3; index++) {
         const controller = new AbortController();
@@ -391,8 +393,8 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
       );
       expect(listening.rows[0]?.n).toBe(1);
     } finally {
-      await waiter.dispose?.();
-      await holder.release(grant ?? { key, token: 'h' });
+      orThrow(await waiter.dispose?.());
+      orThrow(await holder.release(grant ?? { key, token: lockTokenSchema.parse('h') }));
       await pool.end();
     }
   });
@@ -401,7 +403,7 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
     const waiter = leaseWithListen(dbA, poolA);
     const holder = lease(dbB);
     const key = createKey('listen', `reconnect-${Math.random()}`);
-    const grant = await holder.acquire(key, { token: 'h' });
+    const grant = orThrow(await holder.acquire(key, { token: lockTokenSchema.parse('h') }));
     const controller = new AbortController();
     try {
       const first = waiter.waitFor?.(key, controller.signal) ?? Promise.reject(new Error('no waitFor'));
@@ -411,11 +413,11 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
 
       const second = waiter.waitFor?.(key, controller.signal) ?? Promise.reject(new Error('no waitFor'));
       await sleep(200);
-      await holder.release(grant ?? { key, token: 'h' });
+      orThrow(await holder.release(grant ?? { key, token: lockTokenSchema.parse('h') }));
       expect(await settledWithin(second, 1500)).toBe(true);
     } finally {
       controller.abort();
-      await waiter.dispose?.();
+      orThrow(await waiter.dispose?.());
     }
   });
 });
@@ -423,7 +425,7 @@ describe('pgLease LISTEN/NOTIFY wake-up', () => {
 // --- permits: one row per semaphore key, holders inside it ------------------
 
 const semaphoreKey = (name: string) => createKey('permits', `${name}-${Math.random()}`, 'semaphore');
-const request = (token: string, limit: number, weight = 1) => ({ token, limit, weight });
+const request = (token: string, limit: number, weight = 1) => ({ token: lockTokenSchema.parse(token), limit, weight });
 
 describe('pgLease permits', () => {
   it('two replicas racing 40 weight-1 acquires on a limit of 5 grant exactly 5, because the key row is locked before capacity is read', async () => {
@@ -435,7 +437,7 @@ describe('pgLease permits', () => {
         (index % 2 === 0 ? storeA : storeB).permits.acquire(key, request(`t${index}`, 5)),
       ),
     );
-    const granted = grants.filter(grant => grant !== undefined);
+    const granted = grants.map(result => orThrow(result)).filter(grant => grant !== undefined);
     expect(granted).toHaveLength(5);
     const fences = granted.map(grant => grant.fence);
     expect(new Set(fences).size).toBe(5);
@@ -444,37 +446,37 @@ describe('pgLease permits', () => {
   it('a conflicting limit while live holders exist is a config error; once they drain a new limit is accepted', async () => {
     const store = lease(dbA);
     const key = semaphoreKey('limit');
-    const first = await store.permits.acquire(key, request('a', 2));
+    const first = orThrow(await store.permits.acquire(key, request('a', 2)));
     expect(first).toBeDefined();
     await expect(store.permits.acquire(key, request('b', 3))).rejects.toMatchObject({ code: 'config' });
-    await store.permits.release(first ?? { key, token: 'a' });
+    orThrow(await store.permits.release(first ?? { key, token: lockTokenSchema.parse('a') }));
     expect(await store.permits.acquire(key, request('c', 3))).toBeDefined();
   });
 
   it('a crashed holder frees its capacity after the ttl, by the database clock, and the next grant gets a higher fence', async () => {
     const store = lease(dbA, '1s');
     const key = semaphoreKey('crash');
-    const lost = await store.permits.acquire(key, request('lost', 1));
+    const lost = orThrow(await store.permits.acquire(key, request('lost', 1)));
     expect(await store.permits.acquire(key, request('early', 1))).toBeUndefined();
     await sleep(1200);
-    const next = await store.permits.acquire(key, request('next', 1));
+    const next = orThrow(await store.permits.acquire(key, request('next', 1)));
     expect(next?.fence).toBeGreaterThan(lost?.fence ?? 0n);
     // The crashed holder cannot extend or release its way back in.
-    expect(await store.permits.extend?.(lost ?? { key, token: 'lost' }, 5000)).toBe(false);
-    expect(await store.permits.release(lost ?? { key, token: 'lost' })).toBe('not-owner');
+    expect(await store.permits.extend?.(lost ?? { key, token: lockTokenSchema.parse('lost') }, 5000)).toBe(false);
+    expect(await store.permits.release(lost ?? { key, token: lockTokenSchema.parse('lost') })).toBe('not-owner');
   });
 
   it('extend keeps a holder alive but never revives an expired one', async () => {
     const store = lease(dbA, '1s');
     const key = semaphoreKey('extend');
-    const held = await store.permits.acquire(key, request('held', 1));
-    expect(await store.permits.extend?.(held ?? { key, token: 'held' }, 5000)).toBe(true);
+    const held = orThrow(await store.permits.acquire(key, request('held', 1)));
+    expect(await store.permits.extend?.(held ?? { key, token: lockTokenSchema.parse('held') }, 5000)).toBe(true);
     await sleep(1200);
     expect(await store.permits.acquire(key, request('other', 1))).toBeUndefined();
-    await store.permits.release(held ?? { key, token: 'held' });
-    const short = await store.permits.acquire(key, { ...request('short', 1), ttlMs: 1000 });
+    orThrow(await store.permits.release(held ?? { key, token: lockTokenSchema.parse('held') }));
+    const short = orThrow(await store.permits.acquire(key, { ...request('short', 1), ttlMs: 1000 }));
     await sleep(1200);
-    expect(await store.permits.extend?.(short ?? { key, token: 'short' }, 5000)).toBe(false);
+    expect(await store.permits.extend?.(short ?? { key, token: lockTokenSchema.parse('short') }, 5000)).toBe(false);
     expect(await store.permits.acquire(key, request('after', 1))).toBeDefined();
   });
 
@@ -482,18 +484,18 @@ describe('pgLease permits', () => {
     const waiter = leaseWithListen(dbA, poolA);
     const holder = lease(dbB);
     const key = semaphoreKey('wake');
-    const grant = await holder.permits.acquire(key, request('h', 1));
+    const grant = orThrow(await holder.permits.acquire(key, request('h', 1)));
     const controller = new AbortController();
     try {
       const startedAt = Date.now();
       const waiting = waiter.waitFor?.(key, controller.signal) ?? Promise.reject(new Error('no waitFor'));
       await sleep(200);
-      await holder.permits.release(grant ?? { key, token: 'h' });
-      await waiting;
+      orThrow(await holder.permits.release(grant ?? { key, token: lockTokenSchema.parse('h') }));
+      orThrow(await waiting);
       expect(Date.now() - startedAt).toBeLessThan(1500);
     } finally {
       controller.abort();
-      await waiter.dispose?.();
+      orThrow(await waiter.dispose?.());
     }
   });
 
@@ -501,7 +503,7 @@ describe('pgLease permits', () => {
     await dbA.execute(
       sql`CREATE TABLE IF NOT EXISTS arki_lock_old (key text PRIMARY KEY, token text, generation bigint NOT NULL DEFAULT 0, expires_at timestamptz NOT NULL DEFAULT clock_timestamp(), permits_limit integer)`,
     );
-    await Promise.all([ensureLockTable(dbA, 'arki_lock_old'), ensureLockTable(dbB, 'arki_lock_old')]);
+    orThrow(collect(await Promise.all([ensureLockTable(dbA, 'arki_lock_old'), ensureLockTable(dbB, 'arki_lock_old')])));
     const store = pgLease(dbA, { ttl: TTL, table: 'arki_lock_old' });
     expect(await store.permits.acquire(semaphoreKey('old'), request('a', 1))).toBeDefined();
   });
@@ -520,11 +522,11 @@ describe('pgLease permits (review proofs)', () => {
     const holderStore = pgLease(dbB, { ttl: '5s', table: TABLE });
     const name = `spin-${Math.random()}`;
     // 1 of 2 permits held: a weight-2 waiter cannot fit until it is released.
-    const held = await holderStore.permits.acquire(createKey('rev', name, 'semaphore'), {
-      token: 'holder',
+    const held = orThrow(await holderStore.permits.acquire(createKey('rev', name, 'semaphore'), {
+      token: lockTokenSchema.parse('holder'),
       limit: 2,
       weight: 1,
-    });
+    }));
     expect(held).toBeDefined();
     const locks = createLocks({ store: waiterStore, namespace: 'rev' });
     try {
@@ -534,14 +536,14 @@ describe('pgLease permits (review proofs)', () => {
       // Without a wake-up, a wait of 1.5 s makes a handful of attempts (backoff tops out at 1 s).
       expect(statements).toBeLessThan(40);
     } finally {
-      await waiterStore.dispose?.();
+      orThrow(await waiterStore.dispose?.());
     }
   });
 
   it('R2: ensureLockTable on an up-to-date table does not queue an ACCESS EXCLUSIVE lock that stalls every lease', async () => {
     const store = pgLease(dbA, { ttl: '5s', table: TABLE });
     const reader = await poolB.connect();
-    let ensure: Promise<void> | undefined;
+    let ensure: ReturnType<typeof ensureLockTable> | undefined;
     try {
       // Any open transaction that has read the table (a report, pg_dump, a slow query).
       await reader.query('BEGIN');
@@ -549,13 +551,13 @@ describe('pgLease permits (review proofs)', () => {
       // A replica boots while that transaction is open. The holders column is already there.
       ensure = ensureLockTable(dbA, TABLE);
       await sleep(300);
-      const acquired = store.acquire(createKey('rev', `ddl-${Math.random()}`), { token: 'boot' });
+      const acquired = store.acquire(createKey('rev', `ddl-${Math.random()}`), { token: lockTokenSchema.parse('boot') });
       const outcome = await Promise.race([acquired.then(() => 'acquired'), sleep(1500).then(() => 'stalled')]);
       expect(outcome).toBe('acquired');
     } finally {
       await reader.query('ROLLBACK');
       reader.release();
-      await ensure;
+      orThrow(await ensure);
     }
   });
 
@@ -567,13 +569,13 @@ describe('pgLease permits (review proofs)', () => {
       const weights = Array.from({ length: 30 }, (_, index) => (index % 3) + 1);
       const grants = await Promise.all(
         weights.map((weight, index) =>
-          (index % 2 === 0 ? storeA : storeB).permits.acquire(key, { token: `t${index}`, limit: 5, weight }),
+          (index % 2 === 0 ? storeA : storeB).permits.acquire(key, { token: lockTokenSchema.parse(`t${index}`), limit: 5, weight }),
         ),
       );
       const total = grants.reduce((sum, grant, index) => sum + (grant === undefined ? 0 : (weights[index] ?? 0)), 0);
       expect(total).toBeLessThanOrEqual(5);
       expect(total).toBeGreaterThan(0);
-      const fences = grants.flatMap(grant => (grant?.fence === undefined ? [] : [grant.fence]));
+      const fences = grants.map(result => orThrow(result)).flatMap(grant => (grant?.fence === undefined ? [] : [grant.fence]));
       expect(new Set(fences).size).toBe(fences.length);
     }
   });
@@ -581,7 +583,7 @@ describe('pgLease permits (review proofs)', () => {
   it('R4: a limit past int4 is refused as config, not as a raw database error', async () => {
     const store = pgLease(dbA, { ttl: '5s', table: TABLE });
     const key = createKey('rev', `big-${Math.random()}`, 'semaphore');
-    await expect(store.permits.acquire(key, { token: 'big', limit: 2 ** 31, weight: 1 })).rejects.toMatchObject({
+    await expect(store.permits.acquire(key, { token: lockTokenSchema.parse('big'), limit: 2 ** 31, weight: 1 })).rejects.toMatchObject({
       code: 'config',
     });
   });

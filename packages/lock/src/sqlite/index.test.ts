@@ -1,3 +1,5 @@
+import { orThrow } from '@arki/failure';
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * `sqliteLease` on real libSQL files.
  *
@@ -91,7 +93,7 @@ function dbBackedScheduler(db: LibSQLDatabase): ManualScheduler {
 /** A fresh database file and a manual clock per case, so no case can age another's leases. */
 async function freshCase(): Promise<CaseStore> {
   const db = open(newFile());
-  await ensureLockTable(db);
+  orThrow(await ensureLockTable(db));
   const clock = dbBackedScheduler(db);
   return { store: sqliteLease(db, { ttl: TTL }), advanceTime: ms => clock.advance(ms), scheduler: clock };
 }
@@ -103,12 +105,12 @@ describeStoreContract('sqliteLease', freshCase);
 describe('sqliteLease', () => {
   it('hands out fences that grow across holders and survive release: the row is never deleted', async () => {
     const db = open(newFile());
-    await ensureLockTable(db);
+    orThrow(await ensureLockTable(db));
     const store = sqliteLease(db, { ttl: TTL });
     const key = createKey('fences', 'job');
     const fences: bigint[] = [];
     for (const token of ['a', 'b', 'c']) {
-      const grant = await store.acquire(key, { token });
+      const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse(token) }));
       if (grant === undefined) throw new Error(`holder ${token} should get the free key`);
       fences.push(grant.fence ?? 0n);
       expect(await store.release(grant)).toBe('released');
@@ -122,7 +124,7 @@ describe('sqliteLease', () => {
     const url = newFile();
     const first = open(url);
     const second = open(url);
-    await ensureLockTable(first);
+    orThrow(await ensureLockTable(first));
     const a = createLocks({ store: sqliteLease(first, { ttl: TTL }), namespace: 'shared' });
     const b = createLocks({ store: sqliteLease(second, { ttl: TTL }), namespace: 'shared' });
 
@@ -136,13 +138,13 @@ describe('sqliteLease', () => {
       await sleep(50);
       inside -= 1;
     };
-    const held = await a.mutex('job').tryAcquire();
+    const held = orThrow(await a.mutex('job').tryAcquire());
     if (LockHeld.is(held)) throw new Error('the first client should get the free key');
     expect(LockHeld.is(await b.mutex('job').tryAcquire())).toBe(true);
     const waiting = b.mutex('job').run(work('b'), { wait: '5s' });
     await sleep(100);
     expect(order).toEqual([]);
-    await held.release();
+    orThrow(await held.release());
     expect(LockHeld.is(await waiting)).toBe(false);
     expect(order).toEqual(['b']);
 
@@ -160,57 +162,58 @@ describe('sqliteLease', () => {
     const url = newFile();
     const first = open(url);
     const second = open(url);
-    await ensureLockTable(first);
+    orThrow(await ensureLockTable(first));
     const key = createKey('crash', 'job');
-    const crashed = await sqliteLease(first, { ttl: '1s' }).acquire(key, { token: 'gone' });
+    const crashed = orThrow(await sqliteLease(first, { ttl: '1s' }).acquire(key, { token: lockTokenSchema.parse('gone') }));
     const survivor = sqliteLease(second, { ttl: '1s' });
     expect(crashed).toBeDefined();
-    expect(await survivor.acquire(key, { token: 'next' })).toBeUndefined();
+    expect(await survivor.acquire(key, { token: lockTokenSchema.parse('next') })).toBeUndefined();
     await sleep(1100);
-    const taken = await survivor.acquire(key, { token: 'next' });
+    const taken = orThrow(await survivor.acquire(key, { token: lockTokenSchema.parse('next') }));
     expect(taken?.fence).toBe(2n);
   });
 
   it('reads SQLITE_BUSY from another process as "not acquired now", not as an error', async () => {
     const url = newFile();
     const db = open(url);
-    await ensureLockTable(db);
+    orThrow(await ensureLockTable(db));
     const store = sqliteLease(db, { ttl: TTL });
     const key = createKey('busy', 'job');
     const other = createClient({ url });
     clients.push(other);
     const writing = await other.transaction('write');
     try {
-      expect(await store.acquire(key, { token: 't' })).toBeUndefined();
-      expect(await store.permits.acquire(key, { token: 't', limit: 2, weight: 1 })).toBeUndefined();
+      expect(await store.acquire(key, { token: lockTokenSchema.parse('t') })).toBeUndefined();
+      expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('t'), limit: 2, weight: 1 })).toBeUndefined();
     } finally {
       await writing.commit();
     }
-    const after = await store.acquire(key, { token: 't' });
+    const after = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t') }));
     expect(after?.fence).toBe(1n);
   });
 
-  it('still throws an error that is not SQLITE_BUSY: a missing table is a real fault', async () => {
+  it('returns a store failure that is not SQLITE_BUSY: a missing table is a real fault', async () => {
     const store = sqliteLease(open(newFile()), { ttl: TTL });
-    await expect(store.acquire(createKey('x', 'y'), { token: 't' })).rejects.toMatchObject({
-      cause: { code: 'SQLITE_ERROR', message: expect.stringContaining('no such table') },
+    await expect(store.acquire(createKey('x', 'y'), { token: lockTokenSchema.parse('t') })).resolves.toMatchObject({
+      code: 'lock.store',
+      cause: { cause: { code: 'SQLITE_ERROR', message: expect.stringContaining('no such table') } },
     });
   });
 
   it('refuses a semaphore acquire under a different limit while the key is held', async () => {
     const db = open(newFile());
-    await ensureLockTable(db);
+    orThrow(await ensureLockTable(db));
     const store = sqliteLease(db, { ttl: TTL });
     const key = createKey('sem', 'job');
-    expect(await store.permits.acquire(key, { token: 'a', limit: 2, weight: 1 })).toBeDefined();
-    await expect(store.permits.acquire(key, { token: 'b', limit: 3, weight: 1 })).rejects.toThrow(LockError);
+    expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('a'), limit: 2, weight: 1 })).toBeDefined();
+    await expect(store.permits.acquire(key, { token: lockTokenSchema.parse('b'), limit: 3, weight: 1 })).rejects.toThrow(LockError);
   });
 
   it('uses a named table, and refuses a name that is not a plain identifier', async () => {
     const db = open(newFile());
-    await ensureLockTable(db, 'app_locks');
-    await sqliteLease(db, { ttl: TTL, table: 'app_locks' }).acquire(createKey('t', 'k'), { token: 't' });
-    expect(await db.all(sql`SELECT token FROM app_locks`)).toEqual([{ token: 't' }]);
+    orThrow(await ensureLockTable(db, 'app_locks'));
+    orThrow(await sqliteLease(db, { ttl: TTL, table: 'app_locks' }).acquire(createKey('t', 'k'), { token: lockTokenSchema.parse('t') }));
+    expect(await db.all(sql`SELECT token FROM app_locks`)).toEqual([{ token: lockTokenSchema.parse('t') }]);
     expect(() => sqliteLease(db, { ttl: TTL, table: 'locks; DROP TABLE users' })).toThrow(LockError);
   });
 

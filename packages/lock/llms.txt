@@ -31,6 +31,7 @@
 
 ## Rules that bite
 - A busy lock is the returned `LockHeld` failure. Check `LockHeld.is(result)`.
-- Other problems throw `LockError`. Match on `code`.
+- Operational failures are returned. Configuration/misuse throw `LockError`; callback defects return `UnexpectedDefect` with private cause.
+- Completed callback results survive cleanup failure; manual release returns `LockReleaseFailed`. Never infer replay safety from loss or cleanup uncertainty.
 - Pass `ctx.signal` to your work. Loss of the lock aborts it.
 - Fence irreversible writes. The lock alone does not stop a late write.

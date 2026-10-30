@@ -13,13 +13,13 @@
  */
 import type { Key } from './types.js';
 import { LockError } from './errors.js';
-import { keyNameSchema } from './types.js';
+import { lockKeySchema } from './identity-schemas.js';
+import { MAX_NAME_BYTES } from './types.js';
+import { keyNameSchema } from './schemas.js';
 
 /** Which lock family a key names. Part of the encoding, so families never share a lock. */
-export type Primitive = 'mutex' | 'semaphore' | 'readWrite';
-
-const PRIMITIVE_TAGS = { mutex: '1', semaphore: '1s', readWrite: '1rw' } as const satisfies Record<Primitive, string>;
-const MAX_NAME_BYTES = 512;
+const PRIMITIVE_TAGS = { mutex: '1', semaphore: '1s', readWrite: '1rw' } as const;
+export type Primitive = keyof typeof PRIMITIVE_TAGS;
 
 /**
  * The UTF-8 length of a valid part, or -1 when `keyNameSchema` would refuse it (empty, a
@@ -63,7 +63,7 @@ export function createKey(namespace: string, name: string, primitive: Primitive 
   const nsLength = checkedPart('namespace', namespace);
   const nameLength = checkedPart('name', name);
   const full = `${PRIMITIVE_TAGS[primitive]}:${nsLength}:${namespace}:${nameLength}:${name}`;
-  return { namespace, name, full };
+  return { namespace, name, full: lockKeySchema.parse(full) };
 }
 
 const FNV64_OFFSET = 0xCB_F2_9C_E4_84_22_23_25n;

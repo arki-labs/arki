@@ -1,3 +1,4 @@
+import { observeLock } from '../telemetry.js';
 /**
  * `@arki/lock/redis`: a lease store on one Redis (ioredis).
  *
@@ -27,14 +28,14 @@ import type {
   Guarantees,
   Key,
   PermitOps,
-  ReleaseOutcome,
   SharedOps,
   Store,
   Waiter,
 } from '../types.js';
 import type { Script } from './scripts.js';
-import { LockError } from '../errors.js';
-import { limitSchema, weightSchema } from '../types.js';
+import { lockFenceSchema } from '../identity-schemas.js';
+import { LockError, storeFailure } from '../errors.js';
+import { limitSchema, weightSchema } from '../schemas.js';
 import { backoffDelay, parseDuration } from '../wait.js';
 import {
   acquireScript,
@@ -62,28 +63,16 @@ export type RedisStoreOptions = {
   readonly wake?: 'pubsub' | 'poll';
 };
 
-export type RedisGuarantees = {
-  readonly kind: 'lease';
-  readonly scope: 'cluster';
-  /** `'wake'` while pub/sub works, `'poll'` once it has failed or was switched off. */
-  readonly wait: 'wake' | 'poll';
-  readonly shared: true;
-  readonly permits: true;
-  readonly fence: 'best-effort';
-  readonly releasedOnCrash: 'after-ttl';
-  readonly clock: 'store';
-  readonly poolerSafe: true;
-  readonly runtimes: readonly ('node' | 'bun' | 'deno')[];
-};
+const REDIS_WAIT_MODES = ['wake', 'poll'] as const;
 
 /**
  * What `redisStore` promises, with `wait: 'wake'` (the default `wake: 'pubsub'`). The store's own
  * `guarantees.wait` reads `'poll'` once pub/sub has failed or was switched off. The type keeps both.
  */
-export const redisGuarantees: RedisGuarantees = {
+export const redisGuarantees = {
   kind: 'lease',
   scope: 'cluster',
-  wait: 'wake',
+  wait: REDIS_WAIT_MODES[0],
   shared: true,
   permits: true,
   fence: 'best-effort',
@@ -91,13 +80,16 @@ export const redisGuarantees: RedisGuarantees = {
   clock: 'store',
   poolerSafe: true,
   runtimes: ['node', 'bun', 'deno'],
-} satisfies Guarantees;
+} as const satisfies Guarantees;
+
+/** Runtime wait support changes only between the canonical Redis modes. */
+export type RedisGuarantees = Omit<typeof redisGuarantees, 'wait'> & { readonly wait: (typeof REDIS_WAIT_MODES)[number] };
 
 export type RedisStore = Store<RedisGuarantees> & {
   readonly permits: PermitOps;
   readonly shared: SharedOps;
   /** Resolves when the key looks free, or when `signal` aborts. */
-  waitFor(key: Key, signal: AbortSignal): Promise<void>;
+  waitFor(key: Key, signal: AbortSignal): Promise<void | import('../errors.js').StoreFailure>;
 };
 
 /**
@@ -251,7 +243,9 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
     }
   }
 
-  async function waitFor(key: Key, signal: AbortSignal): Promise<void> {
+  async function waitFor(key: Key, signal: AbortSignal) {
+ return observeLock('store.waitFor', async () => {
+    try {
     if (signal.aborted) return;
     const { lock, channel } = redisKeys(key);
     if (mode === 'poll') return pollUntilFree(lock, signal);
@@ -279,7 +273,11 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
       signal.removeEventListener('abort', wake);
       leave(channel, wake);
     }
-  }
+    return;
+    } catch (error) { return storeFailure(error, 'waitFor'); }
+  
+ });
+}
 
   /**
    * One caller's wait on a semaphore or read/write key. It subscribes once, then every `waitFor`
@@ -312,6 +310,8 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
 
     return {
       async waitFor(signal) {
+ return observeLock('store.waitFor', async () => {
+      try {
         if (closed || isAborted(signal)) return;
         if (mode === 'poll') return pollOnce(signal);
         const aborted = new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
@@ -338,7 +338,12 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
         } finally {
           nudge = noop;
         }
-      },
+      
+        return;
+      } catch (error) { return storeFailure(error, 'waitFor'); }
+
+ });
+},
       close() {
         if (closed) return;
         closed = true;
@@ -364,6 +369,8 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
 
   const permits: PermitOps = {
     async acquire(key, req) {
+ return observeLock('store.acquire', async () => {
+      try {
       assertOpen();
       validatePermit(key, req.limit, req.weight);
       const { lock, meta, fence } = redisKeys(key);
@@ -380,18 +387,34 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
         });
       }
       if (fenceValue === 0) return;
-      return { key, token: req.token, fence: BigInt(fenceValue), expiresAt: nowMs + lease };
-    },
+      return { key, token: req.token, fence: lockFenceSchema.parse(BigInt(fenceValue)), expiresAt: nowMs + lease };
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
     async release(grant) {
+ return observeLock('store.release', async () => {
+      try {
       const { lock, meta, channel } = redisKeys(grant.key);
       return flagReply.parse(await run(permitReleaseScript, [lock, meta], [grant.token, channel])) === 1
         ? 'released'
         : 'not-owner';
-    },
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
     async extend(grant, leaseMs) {
+ return observeLock('store.extend', async () => {
+      try {
       const { lock, meta } = redisKeys(grant.key);
       return flagReply.parse(await run(permitExtendScript, [lock, meta], [grant.token, leaseMs])) === 1;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
     waiter(key, weight) {
       const { lock, meta } = redisKeys(key);
       return waiterFor(key, async () => flagReply.parse(await run(permitFitsScript, [lock, meta], [weight])) === 1);
@@ -400,6 +423,8 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
 
   const shared: SharedOps = {
     async acquire(key, req) {
+ return observeLock('store.acquire', async () => {
+      try {
       assertOpen();
       const { readers, writer, fence, readerFences } = redisKeys(key);
       const lease = req.ttlMs ?? ttlMs;
@@ -407,22 +432,38 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
         await run(sharedAcquireScript, [readers, writer, fence, readerFences], [req.token, lease, req.mode]),
       );
       if (fenceValue === 0) return;
-      return { key, token: req.token, fence: BigInt(fenceValue), expiresAt: nowMs + lease };
-    },
+      return { key, token: req.token, fence: lockFenceSchema.parse(BigInt(fenceValue)), expiresAt: nowMs + lease };
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
     async release(grant) {
+ return observeLock('store.release', async () => {
+      try {
       const { readers, writer, channel, readerFences } = redisKeys(grant.key);
       return flagReply.parse(
         await run(sharedReleaseScript, [readers, writer, readerFences], [grant.token, channel]),
       ) === 1
         ? 'released'
         : 'not-owner';
-    },
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
     async extend(grant, leaseMs) {
+ return observeLock('store.extend', async () => {
+      try {
       const { readers, writer, readerFences } = redisKeys(grant.key);
       return (
         flagReply.parse(await run(sharedExtendScript, [readers, writer, readerFences], [grant.token, leaseMs])) === 1
       );
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
     // A waiter here only fixes missed wake-ups. It does not hold back new readers: no writer preference in v1.
     waiter(key, waitMode) {
       const { readers, writer } = redisKeys(key);
@@ -437,26 +478,46 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
     name: 'redis',
     guarantees,
     ttlMs,
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
+    async acquire(key: Key, req: AcquireRequest) {
+ return observeLock('store.acquire', async () => {
+      try {
       assertOpen();
       const { lock, fence } = redisKeys(key);
       const lease = req.ttlMs ?? ttlMs;
       const [fenceValue, nowMs] = acquireReply.parse(await run(acquireScript, [lock, fence], [req.token, lease]));
-      if (fenceValue === 0) return undefined;
-      return { key, token: req.token, fence: BigInt(fenceValue), expiresAt: nowMs + lease };
-    },
-    async release(grant: Grant): Promise<ReleaseOutcome> {
+      if (fenceValue === 0) return;
+      return { key, token: req.token, fence: lockFenceSchema.parse(BigInt(fenceValue)), expiresAt: nowMs + lease };
+    
+      } catch (error) { return storeFailure(error, 'acquire'); }
+
+ });
+},
+    async release(grant: Grant) {
+ return observeLock('store.release', async () => {
+      try {
       const { lock, channel } = redisKeys(grant.key);
       return flagReply.parse(await run(releaseScript, [lock], [grant.token, channel])) === 1 ? 'released' : 'not-owner';
-    },
-    async extend(grant: Grant, leaseMs: number): Promise<boolean> {
+    
+      } catch (error) { return storeFailure(error, 'release'); }
+
+ });
+},
+    async extend(grant: Grant, leaseMs: number) {
+ return observeLock('store.extend', async () => {
+      try {
       const { lock } = redisKeys(grant.key);
       return flagReply.parse(await run(extendScript, [lock], [grant.token, leaseMs])) === 1;
-    },
+    
+      } catch (error) { return storeFailure(error, 'extend'); }
+
+ });
+},
     permits,
     shared,
     waitFor,
-    dispose(): Promise<void> {
+    async dispose() {
+ return observeLock('store.dispose', async () => {
+      try {
       const sub = subscriber;
       subscriber = undefined;
       channels.clear();
@@ -465,7 +526,10 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
         sub.disconnect();
         log.debug('redis lock subscriber closed');
       }
-      return Promise.resolve();
-    },
+      return;
+      } catch (error) { return storeFailure(error, 'dispose'); }
+    
+ });
+},
   };
 }

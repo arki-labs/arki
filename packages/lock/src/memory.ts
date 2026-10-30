@@ -30,6 +30,8 @@
  * The three primitives live in separate tables; the key already carries the primitive
  * (see `key.ts`), so one name can be a mutex, a semaphore and a read/write lock at once.
  */
+import type { LockToken, LockFence, LockKey } from './identities.js';
+import { lockFenceSchema } from './identity-schemas.js';
 import type {
   AcquireRequest,
   Grant,
@@ -66,9 +68,9 @@ export type MemoryGuarantees = typeof memoryGuarantees;
 /** What `peek` shows about a held key. A copy: changing it changes nothing. */
 export type MemoryEntry = {
   /** Mutex: the holder. Semaphore and readers: the earliest holder. */
-  readonly owner: string;
+  readonly owner: LockToken;
   /** The newest fence handed out for this key. */
-  readonly fence: bigint;
+  readonly fence: LockFence;
   readonly expiresAt?: number;
   /** Read/write keys: what the holders hold. */
   readonly mode?: 'read' | 'write';
@@ -78,13 +80,13 @@ export type MemoryEntry = {
   readonly holders?: number;
 };
 
-export type MemoryStore = Store<MemoryGuarantees> & {
+export type MemoryStore = Store<MemoryGuarantees, never> & {
   /** Resolves when the key is free (any primitive), or when `signal` aborts. */
   waitFor(key: Key, signal: AbortSignal): Promise<void>;
   /** A mutex waiter: queued now, handed the lock by a release. */
-  waiter(key: Key): Waiter;
-  readonly permits: PermitOps & { waiter(key: Key, weight: number): Waiter };
-  readonly shared: SharedOps & { waiter(key: Key, mode: 'read' | 'write'): Waiter };
+  waiter(key: Key): Waiter<never>;
+  readonly permits: PermitOps<never> & { waiter(key: Key, weight: number): Waiter<never> };
+  readonly shared: SharedOps<never> & { waiter(key: Key, mode: 'read' | 'write'): Waiter<never> };
   /** The current holder of `key`, if any. A lock reserved for a woken waiter has none yet. For tests and debugging. */
   peek(key: Key): MemoryEntry | undefined;
 };
@@ -97,9 +99,9 @@ const notOwner: Promise<ReleaseOutcome> = Promise.resolve('not-owner');
 /** Which wait a waiter is: a mutex, a semaphore, or one side of a read/write key. */
 type WaitKind = 'mutex' | 'permits' | 'read' | 'write';
 
-type Hold = { readonly owner: string; readonly fence: bigint };
+type Hold = { readonly owner: LockToken; readonly fence: LockFence };
 
-type MutexState = { holder: Hold | undefined; reserved: Waiter | undefined };
+type MutexState = { holder: Hold | undefined; reserved: Waiter<never> | undefined };
 
 type Pool = {
   readonly limit: number;
@@ -108,41 +110,41 @@ type Pool = {
   /** Permits reserved for woken waiters that have not taken them yet. */
   reserved: number;
   /** In acquisition order. */
-  readonly holders: Map<string, { readonly weight: number; readonly fence: bigint }>;
+  readonly holders: Map<LockToken, { readonly weight: number; readonly fence: LockFence }>;
 };
 
 type Shared = {
   /** In acquisition order. */
-  readonly readers: Map<string, bigint>;
+  readonly readers: Map<LockToken, LockFence>;
   writer: Hold | undefined;
   /** Woken readers that have not taken their hold yet. */
   reservedReaders: number;
   /** A woken writer that has not taken its hold yet. */
-  reservedWriter: Waiter | undefined;
+  reservedWriter: Waiter<never> | undefined;
 };
 
 export function memoryStore(): MemoryStore {
-  const mutexes = new Map<string, MutexState>();
-  const pools = new Map<string, Pool>();
-  const shareds = new Map<string, Shared>();
+  const mutexes = new Map<LockKey, MutexState>();
+  const pools = new Map<LockKey, Pool>();
+  const shareds = new Map<LockKey, Shared>();
   /** Queued mutex, semaphore and writer waiters, per key. */
-  const lines = new Map<string, Line>();
+  const lines = new Map<LockKey, Line>();
   /** Queued readers, per key: a separate line, so finding the first writer never walks past readers. */
-  const readerLines = new Map<string, Line>();
+  const readerLines = new Map<LockKey, Line>();
   /** Plain `waitFor` callers, per key. */
-  const watchers = new Map<string, Set<() => void>>();
+  const watchers = new Map<LockKey, Set<() => void>>();
   let lastFence = 0n;
 
-  function nextFence(): bigint {
+  function nextFence() {
     lastFence += 1n;
-    return lastFence;
+    return lockFenceSchema.parse(lastFence);
   }
 
   type Line = { head: Session | undefined; tail: Session | undefined; size: number };
 
   /** One caller's wait (see the file header). A doubly linked node, so leaving the middle of a line is O(1). */
-  class Session implements Waiter {
-    readonly full: string;
+  class Session implements Waiter<never> {
+    readonly full: LockKey;
     readonly kind: WaitKind;
     readonly weight: number;
     state: 'idle' | 'queued' | 'reserved' = 'idle';
@@ -152,7 +154,7 @@ export function memoryStore(): MemoryStore {
     /** Resolves the pending `waitFor`, if any. */
     wake: (() => void) | undefined;
 
-    constructor(full: string, kind: WaitKind, weight: number) {
+    constructor(full: LockKey, kind: WaitKind, weight: number) {
       this.full = full;
       this.kind = kind;
       this.weight = weight;
@@ -191,7 +193,7 @@ export function memoryStore(): MemoryStore {
     }
   }
 
-  function lineMap(session: Session): Map<string, Line> {
+  function lineMap(session: Session): Map<LockKey, Line> {
     return session.kind === 'read' ? readerLines : lines;
   }
 
@@ -259,7 +261,7 @@ export function memoryStore(): MemoryStore {
   }
 
   /** The attempt's own waiter, when it comes to take the reservation made for it. */
-  function redeeming(req: AcquireRequest, full: string, kind: WaitKind, weight: number): Session | undefined {
+  function redeeming(req: AcquireRequest, full: LockKey, kind: WaitKind, weight: number): Session | undefined {
     const waiter = req.waiter;
     return waiter instanceof Session &&
       waiter.state === 'reserved' &&
@@ -271,7 +273,7 @@ export function memoryStore(): MemoryStore {
   }
 
   /** A refused attempt by a waiter that is not in line yet (it was free when it registered) joins the line now. */
-  function queueRefused(req: AcquireRequest, full: string, kind: WaitKind, weight: number): Promise<Grant | undefined> {
+  function queueRefused(req: AcquireRequest, full: LockKey, kind: WaitKind, weight: number): Promise<Grant | undefined> {
     const waiter = req.waiter;
     if (
       waiter instanceof Session &&
@@ -286,7 +288,7 @@ export function memoryStore(): MemoryStore {
     return refused;
   }
 
-  function wakeWatchers(full: string): void {
+  function wakeWatchers(full: LockKey): void {
     const waiting = watchers.get(full);
     if (waiting === undefined) return;
     watchers.delete(full);
@@ -295,7 +297,7 @@ export function memoryStore(): MemoryStore {
 
   // ---- mutex ----
 
-  function dispatchMutex(full: string): void {
+  function dispatchMutex(full: LockKey): void {
     const state = mutexes.get(full);
     if (state?.holder !== undefined || state?.reserved !== undefined) return;
     const head = lines.get(full)?.head;
@@ -312,7 +314,7 @@ export function memoryStore(): MemoryStore {
 
   // ---- permits ----
 
-  function dispatchPermits(full: string): void {
+  function dispatchPermits(full: LockKey): void {
     const pool = pools.get(full);
     if (pool !== undefined) {
       // Grant as we go, in queue order, while permits are left. A waiter that does not fit keeps its place.
@@ -390,7 +392,7 @@ export function memoryStore(): MemoryStore {
       dispatchPermits(grant.key.full);
       return released;
     },
-    waiter(key: Key, weight: number): Waiter {
+    waiter(key: Key, weight: number): Waiter<never> {
       const session = new Session(key.full, 'permits', weight);
       const pool = pools.get(key.full);
       // No pool: the key is free, so the next attempt takes it (or, if someone got there first, joins the line).
@@ -409,7 +411,7 @@ export function memoryStore(): MemoryStore {
 
   // ---- read/write ----
 
-  function dispatchShared(full: string): void {
+  function dispatchShared(full: LockKey): void {
     const state = shareds.get(full);
     if (state?.writer !== undefined || state?.reservedWriter !== undefined) return;
     const writer = lines.get(full)?.head;
@@ -444,7 +446,7 @@ export function memoryStore(): MemoryStore {
   }
 
   /** Whether a new `mode` hold is refused now. A read is refused while any writer holds, is reserved or waits. */
-  function sharedBlocked(state: Shared | undefined, full: string, mode: 'read' | 'write'): boolean {
+  function sharedBlocked(state: Shared | undefined, full: LockKey, mode: 'read' | 'write'): boolean {
     if (state?.writer !== undefined || state?.reservedWriter !== undefined) return true;
     if (mode === 'read') return lines.has(full);
     return state !== undefined && (state.readers.size > 0 || state.reservedReaders > 0);
@@ -477,7 +479,7 @@ export function memoryStore(): MemoryStore {
       dispatchShared(grant.key.full);
       return released;
     },
-    waiter(key: Key, mode: 'read' | 'write'): Waiter {
+    waiter(key: Key, mode: 'read' | 'write'): Waiter<never> {
       const full = key.full;
       const session = new Session(full, mode, 1);
       const state = shareds.get(full);
@@ -495,7 +497,7 @@ export function memoryStore(): MemoryStore {
     },
   };
 
-  const isFree = (full: string): boolean => {
+  const isFree = (full: LockKey): boolean => {
     const mutex = mutexes.get(full);
     if (mutex?.holder !== undefined || mutex?.reserved !== undefined || pools.has(full)) return false;
     const state = shareds.get(full);
@@ -531,7 +533,7 @@ export function memoryStore(): MemoryStore {
       dispatchMutex(grant.key.full);
       return released;
     },
-    waiter(key: Key): Waiter {
+    waiter(key: Key): Waiter<never> {
       const session = new Session(key.full, 'mutex', 1);
       const state = mutexes.get(key.full);
       if (state?.holder !== undefined || state?.reserved !== undefined) {
@@ -590,8 +592,8 @@ export function memoryStore(): MemoryStore {
   };
 }
 
-function newest(fences: Iterable<bigint>): bigint {
-  let latest = 0n;
+function newest(fences: Iterable<LockFence>): LockFence {
+  let latest = lockFenceSchema.parse(0n);
   for (const fence of fences) if (fence > latest) latest = fence;
   return latest;
 }

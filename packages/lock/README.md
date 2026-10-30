@@ -113,9 +113,9 @@ Every lock handle has the same four verbs. `mutex`, `semaphore` and `readWrite` 
 | Verb                   | What it does                                                                | Result                                                                          |
 | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `tryRun(fn, opts?)`    | One attempt. Runs `fn` if the lock is free, releases after.                 | the value of `fn`, or `LockHeld`                                                |
-| `run(fn, opts?)`       | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after.    | the value of `fn`, or `LockHeld` when still busy after `wait`; throws `aborted` |
+| `run(fn, opts?)`       | Waits up to `wait`, or until `signal` aborts. Runs `fn`, releases after.    | the value of `fn`, or `LockHeld` when still busy after `wait`; returns `LockAborted` |
 | `tryAcquire(opts?)`    | One attempt. You release yourself.                                          | a `Guard`, or `LockHeld`                                                        |
-| `acquire(opts?)`       | Waits like `run`. You release yourself.                                     | a `Guard`, or `LockHeld` when still busy after `wait`; throws `aborted`         |
+| `acquire(opts?)`       | Waits like `run`. You release yourself.                                     | a `Guard`, or `LockHeld` when still busy after `wait`; returns `LockAborted`         |
 | `lead(fn, { signal })` | Campaigns until `signal` aborts. Runs `fn` while leader. Lease stores only. | settles when `signal` aborts                                                    |
 
 Call options:
@@ -123,7 +123,7 @@ Call options:
 | Option        | Applies to       | Meaning                                                                                                                                                                                                                                                   |
 | ------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `wait`        | `run`, `acquire` | How long to wait. Optional on a process-scope store, where no `wait` means wait forever. On any other scope you must pass `wait` or `signal` (the types enforce it).                                                                                      |
-| `signal`      | all              | Aborts the wait. On `tryRun` and `tryAcquire` it aborts the attempt, and they throw `aborted` if the signal is already aborted or aborts during the store call. A caller's signal also aborts `ctx.signal`, with the caller's reason (not a `LockError`). |
+| `signal`      | all              | Aborts the wait. On `tryRun` and `tryAcquire` it aborts the attempt, and they return `LockAborted` if the signal is already aborted or aborts during the store call. A caller's signal also aborts `ctx.signal`, with the caller's reason (not a `LockError`). |
 | `holdAtLeast` | all              | Keep the lock at least this long after it was taken, even if `fn` is quicker. Closes the gap where a replica with a slow clock reruns a sub-second job. `run` resolves after the release, so after the hold.                                              |
 | `onLost`      | all              | `'abort'` (default) or `'ignore'`. What `run` does when the lock was lost but `fn` returned. See [failure behaviour](#failure-behaviour).                                                                                                                 |
 | `weight`      | semaphore only   | Permits to take. A positive integer up to the limit. Default 1.                                                                                                                                                                                           |
@@ -133,6 +133,7 @@ A duration is a number of milliseconds, or a string with the unit `ms`, `s`, `m`
 ### Mutex
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
@@ -155,13 +156,13 @@ if (LockHeld.is(total)) console.info(total.remediation, total.data.waitedMs);
 
 // Hold the guard yourself. `await using` releases at the end of the block.
 const guard = await locks.mutex('export').acquire({ wait: '5s' });
-if (!LockHeld.is(guard)) {
+if (!isFailure(guard)) {
   await using held = guard;
   console.info(held.held, held.key.name);
 }
 ```
 
-A guard has `key`, `signal`, `held`, `fence` and `release()`. On a lease store it also has `expiresAt` and `extend()`. `held` turns false when the lock is released, lost, or when the local deadline passes, even before any timer fires. `release()` is safe to call twice and checks the owner. `extend()` logs and resolves when the store errors or times out; it rejects only with `lost`. A resolved `extend()` does not prove the lease was extended.
+A guard has `key`, `signal`, `held`, `fence` and `release()`. On a lease store it also has `expiresAt` and `extend()`. `held` turns false when the lock is released, lost, or when the local deadline passes, even before any timer fires. `release()` is safe to call twice and checks the owner. `extend()` returns `LockLost` for lost ownership and `LockStoreFailure` for a failed manual renewal. Background renewal retries transient store failures until its existing deadline.
 
 ### Semaphore
 
@@ -405,64 +406,43 @@ console.info(locks.store.guarantees.scope); // 'host'
 
 ## Failure behaviour
 
-Locks return a failure for contention and throw for everything else. A busy lock is not an error. `tryRun`, `run`, `tryAcquire` and `acquire` return the `LockHeld` failure (from `@arki/failure`) when the lock is busy:
+Operational failures are returned as direct values. `LockHeld` retains its original definition and data. Callback failures are returned by identity, including when cleanup also fails. Match canonical codes with their definition's `.is` or `isFailure` from `@arki/failure`.
 
-| Code        | Status | Data                                                                                                               | Returned by                                                               |
-| ----------- | ------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| `lock.held` | 409    | `waitedMs` (0 for `tryRun` and `tryAcquire`), and `key` (the full key) only when `createLocks` got `logKeys: true` | `tryRun`, `tryAcquire`, and `run`, `acquire` when still busy after `wait` |
+| Code | Meaning | Returned by |
+| --- | --- | --- |
+| `lock.held` | Refused acquisition; `waitedMs` is zero for a single attempt. Raw `key` appears only with `logKeys: true`. | acquire and run verbs |
+| `lock.aborted` | The caller cancelled before callback execution. | acquire and run verbs |
+| `lock.store` | Backend failure; `data.outcome` explicitly distinguishes `not-acquired` from `unknown`. Includes method and optional timeout. | manager operations, named stores, DDL and disposal |
+| `lock.lost` | Ownership ended after work may have produced effects; `data.detectedBy` identifies renewal, deadline or connection loss. | run, manual extend and lead |
+| `lock.release` | Release could not be confirmed; ownership is unknown. | manual release and cleanup observer |
+| `contracts.random_source_unavailable` | Secure owner-token generation could not finish; no acquisition was sent. | acquire and run verbs |
+| `failure.unexpected_defect` | An owned callback, clock or scheduler failed unexpectedly. Its cause is private and never serialized. | supervised operations |
 
-Check it with `LockHeld.is(result)`, or handle it with `match` from `@arki/failure`.
+`LOCK_RUN_FAILURES` and `LOCK_FAILURES` contain the canonical definitions for transport. `LockError` is the internal control-flow and thrown configuration/misuse protocol; its stable `ARKI_LOCK_E00*` ids are not renumbered.
 
-Every other failure on purpose is a thrown `LockError` with a stable `code`. Match on `code`, never on the message. `errorCode` is the stable id, and `remediation` is one sentence on what to do. `ARKI_LOCK_E001` was `held`; it is not reused.
+Callbacks run once per accepted attempt. A returned callback failure keeps its identity. A thrown callback defect becomes `UnexpectedDefect` whose private cause is the original error; concurrent loss or cleanup evidence is attached when possible. A lost lock returns `LockLost` by default; `onLost: 'ignore'` accepts a completed callback value. No failure authorizes automatic replay of work that may have produced effects. Leadership stops after ownership loss, a returned callback failure or a callback defect; successful terms may campaign again as documented.
 
-| `code`        | `errorCode`      | When                                                                                                                              | Thrown by                                |
-| ------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `aborted`     | `ARKI_LOCK_E002` | Your `signal` aborted the wait or the attempt. The callback never ran.                                                            | `run`, `acquire`, `tryRun`, `tryAcquire` |
-| `lost`        | `ARKI_LOCK_E003` | Ownership was lost while the callback ran. The callback may have had side effects. Nothing retries it.                            | `run`, `tryRun`                          |
-| `store`       | `ARKI_LOCK_E004` | The backend failed. It is never read as free or as held.                                                                          | any                                      |
-| `release`     | `ARKI_LOCK_E005` | `guard.release()` failed or answered `unknown`.                                                                                   | `guard.release()` only                   |
-| `config`      | `ARKI_LOCK_E006` | Bad input or setup: empty key, bad duration, ttl below 1 s, conflicting semaphore limit, a transaction handle given to `pgLease`. | any                                      |
-| `unsupported` | `ARKI_LOCK_E007` | Reserved: a store lacks a capability the types could not see. Nothing throws it today.                                            | any                                      |
+After a completed callback, release uncertainty preserves that callback result. It increments `locks.counters.releaseErrors`, records the release span and counter, logs the failure and calls `onReleaseError` with `LockReleaseFailed`. The observer's synchronous throw or rejected promise cannot replace the result or rerun the callback. Manual `guard.release()` returns the canonical failure. ECMAScript async disposal and Dot lifecycle disposal are foreign void protocols: their explicit `UnexpectedFailure` bridge retains canonical evidence for the owning supervisor.
 
-Extra fields: `outcome` on `store` (`'not-acquired'` or `'unknown'`, meaning ownership may exist remotely), `detectedBy` on `lost` (`'renewal'`, `'deadline'` or `'connection'`), `method` (which store call failed), `timeoutMs`, and `suppressed`.
-
-The rules:
-
-1. **Contention is a value.** Every verb returns `LockHeld` for a busy lock; none throws for it. If your `fn` can itself return `LockHeld` (it calls another lock), the caller cannot tell which lock was busy: handle the inner one inside `fn`. Any other failure your `fn` returns comes back as the value, and `LockHeld.is` is false for it.
-2. **Your error wins.** If your callback throws, that error is what the caller sees. A loss or a failed release that happened at the same time is attached to it as `suppressed`.
-3. **Loss aborts `signal`.** When the manager learns the lock is gone (a refused renewal, a passed local deadline, a closed connection), it aborts `ctx.signal` with the `LockError` as the reason. Pass `signal` to the work you do.
-4. **A callback that returns after loss.** `run` and `tryRun` throw `lost` by default. This includes a loss during the `holdAtLeast` wait after `fn` finished. Pass `onLost: 'ignore'` to get the value anyway.
-5. **A failed release after a successful callback is not thrown.** The callback did its job, so you get its value. The failure is logged at error level, counted in `locks.counters.releaseErrors`, and passed to the `onReleaseError` hook you can give `createLocks`. On a lease store the key frees itself after `ttl`.
-6. **A slow store is bounded.** Store calls have a time limit, `storeTimeout`, default `'10s'`. `pgTransaction` is the exception: its acquire has no timer, so a silent connection can hang it. On `pgSession` (native wait) the bound for an acquire is `storeTimeout` plus your `wait`. A call that exceeds it is a `store` error with `outcome: 'unknown'`. It is never `LockHeld`. A grant that arrives after the limit is given back, so a late answer cannot leave a lock behind. Set `storeTimeout` above the slowest healthy answer of your store.
+Store calls remain bounded by `storeTimeout` (default `10s`). A timeout has unknown ownership; a late grant is returned with its original token. `pgTransaction` awaits the caller's transaction statement before returning, so cancellation cannot hand a connection back while a statement still runs. Raw provider query/client handles remain foreign APIs. Every named store owns its returned acquire/release/extend/wait/dispose outcomes; contention stays `undefined` in the low-level store protocol.
 
 ```ts
-import { createLocks, LockError } from '@arki/lock';
+import { isFailure } from '@arki/failure';
+import { createLocks, LockLost } from '@arki/lock';
 import { memoryStore } from '@arki/lock/memory';
 
-const locks = createLocks({
-  store: memoryStore(),
-  namespace: 'billing',
-  storeTimeout: '5s',
-  onReleaseError: error => console.warn('release failed', error.errorCode, error.remediation),
-});
-
-try {
-  await locks.mutex('payout').run(async ({ signal }) => {
-    signal.throwIfAborted();
-    return 'paid';
-  });
-} catch (error) {
-  if (error instanceof LockError && error.code === 'lost') {
-    // The job may have run in part. Check the outcome; do not blindly retry.
-    console.error(error.detectedBy);
-  } else {
-    throw error;
-  }
+const locks = createLocks({ store: memoryStore(), namespace: 'billing' });
+const result = await locks.mutex('payout').tryRun(() => 'paid');
+if (LockLost.is(result)) {
+  // Reconcile effects before another payout attempt.
+} else if (isFailure(result)) {
+  // Handle the canonical outcome at the application boundary.
 }
-console.info(locks.counters.releaseErrors);
 ```
 
-`locks.counters` has `releaseErrors`, `leadAcquired` and `leadLost`. Raw keys stay out of logs unless you pass `logKeys: true` to `createLocks` (the Dot unit has no such option).
+Default OpenTelemetry spans cover manager acquisition/run/lead/release/extend and named backend operations, including DDL and disposal. `lock.operations` counts bounded operation/outcome dimensions. Raw keys, tokens, fences and callback payloads never become default attributes. Instrumentation runs safely without an SDK and cannot replay an effect. Pure key helpers and memory-map operations need no provider span. Libraries never configure global telemetry.
+
+Keys, owner tokens and fences have separate nominal types. Their canonical schemas live at `@arki/lock/zod`; parsing preserves existing persisted bytes. A fence remains scoped to the issuing backend's declared guarantee.
 
 ### Using the fence
 
@@ -617,7 +597,7 @@ Read this before you ship a lock to production.
 - **Missed ticks are not caught up.** A lock does not make up for a job that did not run. Write jobs that do what is due now, not what one tick means.
 - **Pass `signal` downstream.** The signal aborts when the lock is lost. Give it to `fetch`, to queries and to child work, so they stop.
 - **Fence irreversible writes.** For a write you cannot undo, put the fence in the same statement as the write (see [Using the fence](#using-the-fence)). Without a fence, a process that paused longer than its lease can still write after another process took over.
-- **Alert on `lost`.** Watch for `LockError{code:'lost'}` and for `lockLost` on schedules. Frequent loss means your `ttl` is too short or your event loop stalls.
+- **Alert on `lost`.** Watch for `LockLost` and for `lockLost` on schedules. Frequent loss means your `ttl` is too short or your event loop stalls.
 - **Alert on `releaseErrors`.** It stays at zero when things are healthy.
 - **Shut down in this order:** stop new work, drain running callbacks, release locks, dispose the store. The Dot unit does this for you.
 - **Redis:** turn on persistence if you want locks to survive a restart, and set `maxmemory-policy noeviction`. A Redis restart or failover can lose locks and reset the best-effort fence.
@@ -742,6 +722,7 @@ You do not need three processes to test three replicas. Make three managers on o
 - `memoryStore().peek(key)` shows the current holder, for assertions.
 
 ```ts
+import { lockKeySchema } from '@arki/lock/zod';
 import { expect, it } from 'vitest';
 
 import { createLocks } from '@arki/lock';
@@ -753,7 +734,7 @@ it('keeps two replicas apart, and frees the key when the first one finishes', as
   const clock = manualScheduler();
   const a = createLocks({ store, namespace: 'jobs', scheduler: clock });
   const b = createLocks({ store, namespace: 'jobs', scheduler: clock });
-  const key = { namespace: 'jobs', name: 'report', full: '1:4:jobs:6:report' };
+  const key = { namespace: 'jobs', name: 'report', full: lockKeySchema.parse('1:4:jobs:6:report') };
 
   let finish!: () => void;
   const gate = new Promise<void>(resolve => {
@@ -775,6 +756,7 @@ it('keeps two replicas apart, and frees the key when the first one finishes', as
 To test that a lease survives a long run, use a lease store that takes its clock from your test. `fileStore` does: give it `now` and `scheduler`.
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import nodePath from 'node:path';
@@ -793,7 +775,7 @@ it('renews through a five minute run', async () => {
   const b = createLocks({ store: store(), namespace: 'jobs', scheduler: clock });
 
   const guard = await a.mutex('long').acquire({ wait: '1s' });
-  if (LockHeld.is(guard)) throw new Error('the lock was busy');
+  if (isFailure(guard)) throw new Error(guard.message, { cause: guard });
   await clock.advance('5m'); // the renewal timer fires every second of fake time
   expect(guard.held).toBe(true);
   expect(await b.mutex('long').tryRun(() => 'b')).toMatchObject({ code: 'lock.held' });

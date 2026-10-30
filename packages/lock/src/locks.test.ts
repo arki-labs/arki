@@ -1,3 +1,6 @@
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+import type { LockOperationFailure, ReleaseFailure } from './errors.js';
+import { lockTokenSchema, lockFenceSchema, lockKeySchema } from './identity-schemas.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineFailure, orThrow } from '@arki/failure';
@@ -147,7 +150,7 @@ function scriptedStore(guarantees: Guarantees, ttlMs = 30_000): ScriptedStore<Gu
   let inFlight = 0;
   let maxInFlight = 0;
   const script: Script = {
-    acquire: (key, req) => Promise.resolve({ key, token: req.token, fence: 7n }),
+    acquire: (key, req) => Promise.resolve({ key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(7n) }),
     release: () => Promise.resolve('released'),
     extend: () => Promise.resolve(true),
   };
@@ -179,7 +182,7 @@ function scriptedStore(guarantees: Guarantees, ttlMs = 30_000): ScriptedStore<Gu
 
 function setup<G extends Guarantees>(
   guarantees: G,
-  extra: { ttlMs?: number; storeTimeout?: Duration; onReleaseError?: (e: LockError) => void } = {},
+  extra: { ttlMs?: number; storeTimeout?: Duration; onReleaseError?: (e: ReleaseFailure) => unknown } = {},
 ) {
   const clock = manualScheduler();
   const fake = scriptedStore(guarantees, extra.ttlMs);
@@ -193,14 +196,15 @@ function setup<G extends Guarantees>(
   return { clock, locks, ...fake };
 }
 
-async function failure(promise: Promise<unknown>): Promise<LockError> {
+async function failure(promise: Promise<unknown>) {
   try {
-    await promise;
+    const result = await promise;
+    if (isFailure(result)) return result;
   } catch (error) {
     if (error instanceof LockError) return error;
     throw error;
   }
-  throw new Error('expected the call to reject with a LockError');
+  throw new Error('expected a canonical failure or a configuration defect');
 }
 
 // ---------------------------------------------------------------------------
@@ -208,12 +212,13 @@ async function failure(promise: Promise<unknown>): Promise<LockError> {
 // ---------------------------------------------------------------------------
 
 type Mutex = ReturnType<ReturnType<typeof setup<typeof holdProcess>>['locks']['mutex']>;
-type Outcome = 'ran' | 'busy';
+type Outcome = 'ran' | 'busy' | LockOperationFailure;
 type Call = (mutex: Mutex, opts: { wait?: Duration; signal?: AbortSignal }) => Promise<Outcome>;
 
 async function viaGuard(guard: Awaited<ReturnType<Mutex['tryAcquire']>>): Promise<Outcome> {
   if (LockHeld.is(guard)) return 'busy';
-  await guard.release();
+  if (isFailure(guard)) return guard;
+  orThrow(await guard.release());
   return 'ran';
 }
 
@@ -223,7 +228,7 @@ const verbs: readonly { name: string; waits: boolean; call: Call }[] = [
     waits: false,
     call: async (mutex, opts) => {
       const result = await mutex.tryRun(() => 1, opts.signal ? { signal: opts.signal } : {});
-      return LockHeld.is(result) ? 'busy' : 'ran';
+      return LockHeld.is(result) ? 'busy' : isFailure(result) ? result : 'ran';
     },
   },
   {
@@ -231,7 +236,7 @@ const verbs: readonly { name: string; waits: boolean; call: Call }[] = [
     waits: true,
     call: async (mutex, opts) => {
       const result = await mutex.run(() => 1, opts);
-      return LockHeld.is(result) ? 'busy' : 'ran';
+      return LockHeld.is(result) ? 'busy' : isFailure(result) ? result : 'ran';
     },
   },
   {
@@ -268,7 +273,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     const controller = new AbortController();
     controller.abort();
     const error = await failure(call(t.locks.mutex('k'), { signal: controller.signal }));
-    expect(error.code).toBe('aborted');
+    expect(error.code).toBe('lock.aborted');
     expect(t.calls.acquire).toHaveLength(0);
   });
 
@@ -281,10 +286,10 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     await flush();
     controller.abort();
     const aborted = await pending;
-    expect(aborted.code).toBe('aborted');
+    expect(aborted.code).toBe('lock.aborted');
     const sent = t.calls.acquire[0];
     if (sent === undefined) throw new Error('the attempt was never sent');
-    slow.resolve({ key: { namespace: 'test', name: 'k', full: 'x' }, token: sent.token, fence: 1n });
+    slow.resolve({ key: { namespace: 'test', name: 'k', full: lockKeySchema.parse('1:1:t:1:k') }, token: lockTokenSchema.parse(sent.token), fence: lockFenceSchema.parse(1n) });
     await flush();
     expect(t.calls.release.map(grant => grant.token)).toEqual([sent.token]);
   });
@@ -301,7 +306,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
       await flush();
       const sent = t.calls.acquire[0];
       if (sent === undefined) throw new Error('the attempt was never sent');
-      slow.resolve({ key: { namespace: 'test', name: 'k', full: 'x' }, token: sent.token, fence: 1n });
+      slow.resolve({ key: { namespace: 'test', name: 'k', full: lockKeySchema.parse('1:1:t:1:k') }, token: lockTokenSchema.parse(sent.token), fence: lockFenceSchema.parse(1n) });
       for (let i = 0; i < ticks; i++) await Promise.resolve();
       controller.abort();
       await pending;
@@ -315,7 +320,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     const t = setup(holdProcess);
     t.script.acquire = () => Promise.reject(new Error('connection reset'));
     const error = await failure(call(t.locks.mutex('k'), { wait: '1s' }));
-    expect(error).toMatchObject({ code: 'store', method: 'acquire', outcome: 'unknown' });
+    expect(error).toMatchObject({ code: 'lock.store', data: { method: 'acquire', outcome: 'unknown' } });
     expect(t.calls.release).toHaveLength(0);
   });
 
@@ -324,7 +329,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     t.script.acquire = () => neverSettles();
     const pending = failure(call(t.locks.mutex('k'), { wait: '1s' }));
     await t.clock.advance(1000);
-    expect(await pending).toMatchObject({ code: 'store', method: 'acquire', outcome: 'unknown', timeoutMs: 1000 });
+    expect(await pending).toMatchObject({ code: 'lock.store', data: { method: 'acquire', outcome: 'unknown', timeoutMs: 1000 } });
   });
 
   if (waits) {
@@ -336,7 +341,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
       await t.clock.advance(30);
       controller.abort();
       const error = await pending;
-      expect(error.code).toBe('aborted');
+      expect(error.code).toBe('lock.aborted');
     });
 
     it('retries within the wait and takes the key once it frees, so short contention does not fail callers', async () => {
@@ -385,7 +390,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
     expect(signal.aborted).toBe(true);
     expect(signal.reason).toMatchObject({ code: 'lost', detectedBy: 'renewal' });
     work.resolve('done');
-    await pending;
+    expect(await pending).toMatchObject({ code: 'lock.lost' });
   });
 
   it("rejects with lost even though the callback succeeded when onLost is 'abort', because its side effects are unprotected", async () => {
@@ -396,7 +401,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
     await flush();
     await t.clock.advance(10_000);
     work.resolve('done');
-    expect(await pending).toMatchObject({ code: 'lost', detectedBy: 'renewal' });
+    expect(await pending).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'renewal' } });
     expect(t.calls.release).toHaveLength(0);
   });
 
@@ -432,7 +437,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
     const pending = failure(Promise.resolve(start(t, () => work.promise)));
     await t.clock.advance(30_000);
     work.resolve('done');
-    expect(await pending).toMatchObject({ code: 'lost', detectedBy: 'deadline' });
+    expect(await pending).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'deadline' } });
   });
 
   it('lets a callback error win over a lock-side error and carries the lost error on suppressed, so the real failure is not hidden', async () => {
@@ -444,8 +449,8 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
     await t.clock.advance(10_000);
     work.reject(new LockError({ code: 'config', message: 'boom', remediation: 'none' }));
     const error = await pending;
-    expect(error.code).toBe('config');
-    expect(error.suppressed?.map(e => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
+    expect(UnexpectedDefect.is(error)).toBe(true);
+    expect(error.cause).toMatchObject({ code: 'config', suppressed: [{ code: 'lost' }] });
   });
 });
 
@@ -459,7 +464,7 @@ describe('lease guard', () => {
     expect(guard.signal.aborted).toBe(true);
     expect(guard.signal.reason).toMatchObject({ code: 'lost', detectedBy: 'renewal' });
     expect(guard.held).toBe(false);
-    await guard.release();
+    orThrow(await guard.release());
     expect(t.calls.release).toHaveLength(0);
   });
 
@@ -477,7 +482,7 @@ describe('lease guard', () => {
     await t.clock.advance(35_000);
     expect(t.calls.extend.length).toBeGreaterThanOrEqual(3);
     expect(guard.held).toBe(true);
-    await guard.release();
+    orThrow(await guard.release());
   });
 
   it('renews at once when the grant arrives with less than ttl/3 left, because waiting a beat would let it lapse', async () => {
@@ -582,7 +587,7 @@ describe('lease guard', () => {
     const advancing = t.clock.advance(10_000);
     await flush();
     expect(t.calls.extend).toHaveLength(1);
-    await guard.release();
+    orThrow(await guard.release());
     slow.resolve(true);
     await advancing;
     expect(t.calls.release).toHaveLength(2);
@@ -592,21 +597,21 @@ describe('lease guard', () => {
     const t = setup(leaseCluster);
     const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
     await t.clock.advance(5000);
-    await guard.extend();
+    orThrow(await guard.extend());
     // One chain: the extend at 5 s, then beats at 15 s and 25 s.
     await t.clock.advance(20_000);
     expect(t.calls.extend).toHaveLength(3);
-    await guard.release();
+    orThrow(await guard.release());
     expect(t.clock.pending()).toBe(0);
   });
 
   it('extend() renews on demand and rejects with lost once the store refuses', async () => {
     const t = setup(leaseCluster);
     const guard = await orThrow(t.locks.mutex('k').acquire({ wait: '1s' }));
-    await guard.extend();
+    orThrow(await guard.extend());
     expect(t.calls.extend).toHaveLength(1);
     t.script.extend = () => Promise.resolve(false);
-    expect(await failure(guard.extend())).toMatchObject({ code: 'lost', detectedBy: 'renewal' });
+    expect(await failure(guard.extend())).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'renewal' } });
   });
 
   it('allows one in-flight remote attempt per key per process, so a burst of callers cannot stampede the store', async () => {
@@ -635,24 +640,24 @@ describe('release', () => {
   it.each(['tryRun', 'run'] as const)(
     '%s returns the value and calls onReleaseError when release reports unknown, because the work already happened',
     async verb => {
-      const seen: LockError[] = [];
+      const seen: ReleaseFailure[] = [];
       const t = setup(holdProcess, { onReleaseError: e => seen.push(e) });
       t.script.release = () => Promise.resolve('unknown');
       const result =
         verb === 'tryRun' ? await t.locks.mutex('k').tryRun(() => 42) : await t.locks.mutex('k').run(() => 42);
       expect(result).toBe(42);
       expect(seen).toHaveLength(1);
-      expect(seen[0]).toMatchObject({ code: 'release', method: 'release' });
+      expect(seen[0]).toMatchObject({ code: 'lock.release', data: { outcome: 'unknown' } });
       expect(t.locks.counters.releaseErrors).toBe(1);
     },
   );
 
   it('also returns the value when release throws, with the same reporting', async () => {
-    const seen: LockError[] = [];
+    const seen: ReleaseFailure[] = [];
     const t = setup(holdProcess, { onReleaseError: e => seen.push(e) });
     t.script.release = () => Promise.reject(new Error('gone'));
     expect(await t.locks.mutex('k').run(() => 'v')).toBe('v');
-    expect(seen.map(e => e.code)).toEqual(['release']);
+    expect(seen.map(e => e.code)).toEqual(['lock.release']);
   });
 
   it('keeps going if onReleaseError itself throws, because a faulty hook must not turn success into failure', async () => {
@@ -669,14 +674,14 @@ describe('release', () => {
     const t = setup(holdProcess);
     t.script.release = () => Promise.resolve('unknown');
     const guard = await orThrow(t.locks.mutex('k').acquire());
-    expect(await failure(guard.release())).toMatchObject({ code: 'release', outcome: 'unknown' });
+    expect(await failure(guard.release())).toMatchObject({ code: 'lock.release', data: { outcome: 'unknown' } });
   });
 
   it('is idempotent, so disposing twice never frees a lock someone else now holds', async () => {
     const t = setup(holdProcess);
     const guard = await orThrow(t.locks.mutex('k').acquire());
-    await guard.release();
-    await guard.release();
+    orThrow(await guard.release());
+    orThrow(await guard.release());
     await guard[Symbol.asyncDispose]();
     expect(t.calls.release).toHaveLength(1);
     expect(guard.held).toBe(false);
@@ -699,7 +704,8 @@ describe('release', () => {
         throw boom;
       })
       .catch((error_: unknown) => error_);
-    expect(error).toBe(boom);
+    expect(UnexpectedDefect.is(error)).toBe(true);
+    expect(error).toMatchObject({ cause: boom });
     expect(Object.getOwnPropertyDescriptor(boom, 'suppressed')?.value).toHaveLength(1);
   });
 
@@ -727,7 +733,7 @@ describe('native waits', () => {
     await t.clock.advance(5999);
     await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
     await t.clock.advance(1);
-    expect(await pending).toMatchObject({ code: 'store', timeoutMs: 6000 });
+    expect(await pending).toMatchObject({ code: 'lock.store', data: { timeoutMs: 6000 } });
     expect(t.calls.acquire[0]?.waitMs).toBe(5000);
   });
 });
@@ -738,7 +744,7 @@ describe("a store that runs on the caller's transaction (releasedBy: 'transactio
   it("an abort waits until the store is done with the caller's connection, then hands back a grant that landed late and rejects aborted", async () => {
     const t = setup(onCallersTx, { storeTimeout: '1s' });
     const storeDone = deferred<void>();
-    t.script.acquire = (key, req) => storeDone.promise.then(() => ({ key, token: req.token }));
+    t.script.acquire = (key, req) => storeDone.promise.then(() => ({ key, token: lockTokenSchema.parse(req.token) }));
     const controller = new AbortController();
     let ran = false;
     const pending = failure(
@@ -755,7 +761,7 @@ describe("a store that runs on the caller's transaction (releasedBy: 'transactio
     await t.clock.advance(10_000);
     await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
     storeDone.resolve();
-    expect(await pending).toMatchObject({ code: 'aborted' });
+    expect(await pending).toMatchObject({ code: 'lock.aborted' });
     expect(t.calls.release).toHaveLength(1);
     expect(t.calls.release[0]?.token).toBe(t.calls.acquire[0]?.token);
     expect(ran).toBe(false);
@@ -770,7 +776,7 @@ describe("a store that runs on the caller's transaction (releasedBy: 'transactio
     await t.clock.advance(0);
     controller.abort();
     storeDone.resolve();
-    expect(await pending).toMatchObject({ code: 'aborted' });
+    expect(await pending).toMatchObject({ code: 'lock.aborted' });
     expect(t.calls.release).toHaveLength(0);
   });
 });
@@ -786,7 +792,7 @@ describe('lease ttl', () => {
     expect(t.calls.extend).toHaveLength(1);
     t.clock.jump(150_000);
     expect(guard.held).toBe(true);
-    await guard.release();
+    orThrow(await guard.release());
   });
 
   it('refuses a lease store whose ttl is below the renewal floor, because it would renew faster than a round trip can be trusted', () => {
@@ -884,7 +890,7 @@ describe('a busy lock is a value, not a throw', () => {
 function lossyStore() {
   const t = setup(holdNative);
   const lost = deferred<LockError>();
-  t.script.acquire = (key, req) => Promise.resolve({ key, token: req.token, lost: lost.promise });
+  t.script.acquire = (key, req) => Promise.resolve({ key, token: lockTokenSchema.parse(req.token), lost: lost.promise });
   const reason = new LockError({
     code: 'lost',
     message: 'connection ended',
@@ -915,7 +921,7 @@ describe('a hold store that reports a lost connection through grant.lost', () =>
     expect(signal.aborted).toBe(true);
     expect(signal.reason).toMatchObject({ code: 'lost', detectedBy: 'connection' });
     work.resolve('done');
-    expect(await pending).toMatchObject({ code: 'lost', detectedBy: 'connection' });
+    expect(await pending).toMatchObject({ code: 'lock.lost', data: { detectedBy: 'connection' } });
     expect(t.calls.release).toHaveLength(0);
   });
 
@@ -928,8 +934,8 @@ describe('a hold store that reports a lost connection through grant.lost', () =>
     await flush();
     work.reject(new LockError({ code: 'config', message: 'boom', remediation: 'none' }));
     const error = await pending;
-    expect(error.code).toBe('config');
-    expect(error.suppressed?.map(e => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
+    expect(UnexpectedDefect.is(error)).toBe(true);
+    expect(error.cause).toMatchObject({ code: 'config', suppressed: [{ code: 'lost' }] });
   });
 });
 
@@ -955,9 +961,9 @@ function opsSetup(opts: { storeTimeout?: Duration } = {}) {
   };
   const script = {
     permitAcquire: (key: Key, req: PermitRequest): Promise<Grant | undefined> =>
-      Promise.resolve({ key, token: req.token, fence: 1n }),
+      Promise.resolve({ key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(1n) }),
     sharedAcquire: (key: Key, req: SharedRequest): Promise<Grant | undefined> =>
-      Promise.resolve({ key, token: req.token, fence: 1n }),
+      Promise.resolve({ key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(1n) }),
   };
   const store: Store<typeof holdOps> = {
     name: 'ops',
@@ -1041,7 +1047,7 @@ describe('semaphore', () => {
     const seen: string[] = [];
     t.script.permitAcquire = (key, req) => {
       seen.push(key.full);
-      return Promise.resolve({ key, token: req.token });
+      return Promise.resolve({ key, token: lockTokenSchema.parse(req.token) });
     };
     await orThrow(t.locks.semaphore('x', { limit: 1 }).tryRun(() => 1));
     expect(seen).toEqual(['1s:4:test:1:x']);
@@ -1081,10 +1087,10 @@ describe('semaphore', () => {
     };
     const pending = failure(t.locks.semaphore('pdf', { limit: 2 }).tryAcquire({ weight: 2 }));
     await t.clock.advance(1000);
-    expect(await pending).toMatchObject({ code: 'store', method: 'acquire', outcome: 'unknown' });
+    expect(await pending).toMatchObject({ code: 'lock.store', data: { method: 'acquire', outcome: 'unknown' } });
     const sent = t.calls.permitAcquire[0];
     if (asked === undefined || sent === undefined) throw new Error('the permits ops were never asked');
-    slow.resolve({ key: asked, token: sent.token });
+    slow.resolve({ key: asked, token: lockTokenSchema.parse(sent.token) });
     await flush();
     expect(t.calls.permitRelease.map(grant => grant.token)).toEqual([sent.token]);
     expect(t.calls.mutexRelease).toHaveLength(0);
@@ -1111,7 +1117,7 @@ describe('semaphore', () => {
       acquire: () => busy(),
       release: () => Promise.resolve('released'),
       permits: {
-        acquire: (key, req) => Promise.resolve({ key, token: req.token, fence: 1n }),
+        acquire: (key, req) => Promise.resolve({ key, token: lockTokenSchema.parse(req.token), fence: lockFenceSchema.parse(1n) }),
         release(grant) {
           released.push(grant);
           return Promise.resolve('released');
@@ -1126,7 +1132,7 @@ describe('semaphore', () => {
     const guard = await orThrow(locks.semaphore('pdf', { limit: 2 }).acquire({ wait: '1s' }));
     await clock.advance(10_000);
     expect(extended).toHaveLength(1);
-    await guard.release();
+    orThrow(await guard.release());
     expect(released).toHaveLength(1);
     expect(clock.pending()).toBe(0);
   });
@@ -1169,7 +1175,7 @@ describe('readWrite', () => {
     const seen: string[] = [];
     t.script.sharedAcquire = (key, req) => {
       seen.push(key.full);
-      return Promise.resolve({ key, token: req.token });
+      return Promise.resolve({ key, token: lockTokenSchema.parse(req.token) });
     };
     const rw = t.locks.readWrite('catalog');
     await orThrow(rw.read.tryRun(() => 1));
@@ -1201,13 +1207,13 @@ describe('readWrite', () => {
       .readWrite('catalog')
       .read.run(() => 1, { wait: '3s', ...(how === 'caller aborts' ? { signal: controller.signal } : {}) })
       .then(
-        outcome => (LockHeld.is(outcome) ? 'held' : 'ran'),
+        outcome => (LockHeld.is(outcome) ? 'held' : isFailure(outcome) ? outcome.code : 'ran'),
         (error: unknown) => (error instanceof LockError ? error.code : 'other'),
       );
     await t.clock.advance(30);
     if (how === 'caller aborts') controller.abort();
     else await t.clock.advance(5000);
-    expect(await pending).toBe(how === 'caller aborts' ? 'aborted' : 'held');
+    expect(await pending).toBe(how === 'caller aborts' ? 'lock.aborted' : 'held');
     expect(t.calls.waiters).toEqual([{ mode: 'read', open: false }]);
   });
 

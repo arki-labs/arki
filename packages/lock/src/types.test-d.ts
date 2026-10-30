@@ -2,7 +2,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
 import type { fileStore } from './file/index.js';
-import type { FenceOf, Guarantees, Guard, LockContext, LockHeld, Locks, Store } from './index.js';
+import type { FenceOf, Guarantees, Guard, LockContext, LockHeld, Locks, Store, LockOperationFailure, ReleaseFailure, LockFence } from './index.js';
 import type { memoryStore } from './memory.js';
 import type { pgSession, pgTransaction } from './pg/index.js';
 import type { pgLease } from './pg/lease.js';
@@ -60,7 +60,7 @@ describe('createLocks', () => {
       storeTimeout: '10s',
       logKeys: true,
       onReleaseError: error => {
-        expectTypeOf(error).toEqualTypeOf<LockError>();
+        expectTypeOf(error).toEqualTypeOf<ReleaseFailure>();
       },
       scheduler: { now: () => 0, setTimeout: () => ({ id: 0 }), clearTimeout: noop },
     });
@@ -70,7 +70,7 @@ describe('createLocks', () => {
 describe('wait bound (Decision 2)', () => {
   it('run(fn) compiles without options on a process-scope store', () => {
     const mutex = createLocks({ store: processHold, namespace: 'a' }).mutex('k');
-    expectTypeOf(mutex.run(work)).toEqualTypeOf<Promise<number | LockHeld>>();
+    expectTypeOf(mutex.run(work)).toEqualTypeOf<Promise<number | LockHeld | LockOperationFailure>>();
     void mutex.run(work, { wait: '1s' });
     void mutex.acquire();
   });
@@ -101,10 +101,10 @@ describe('wait bound (Decision 2)', () => {
   it('the try verbs never need a bound, on any store', () => {
     const mutex = createLocks({ store: clusterHold, namespace: 'a' }).mutex('k');
     // A busy lock is a LockHeld value the caller branches on, not a wrapper and not undefined.
-    expectTypeOf(mutex.tryRun(work)).toEqualTypeOf<Promise<number | LockHeld>>();
-    expectTypeOf(mutex.tryAcquire()).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld>>();
-    expectTypeOf(mutex.run(work, { wait: '1s' })).toEqualTypeOf<Promise<number | LockHeld>>();
-    expectTypeOf(mutex.acquire({ wait: '1s' })).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld>>();
+    expectTypeOf(mutex.tryRun(work)).toEqualTypeOf<Promise<number | LockHeld | LockOperationFailure>>();
+    expectTypeOf(mutex.tryAcquire()).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld | LockOperationFailure>>();
+    expectTypeOf(mutex.run(work, { wait: '1s' })).toEqualTypeOf<Promise<number | LockHeld | LockOperationFailure>>();
+    expectTypeOf(mutex.acquire({ wait: '1s' })).toEqualTypeOf<Promise<Guard<ClusterHold> | LockHeld | LockOperationFailure>>();
     // tryRun never waits, so it takes no `wait`.
     // @ts-expect-error no wait on a try verb
     void mutex.tryRun(work, { wait: '1s' });
@@ -184,7 +184,7 @@ describe('capability gating', () => {
   it('extend is never on a hold store and a function on a lease store', () => {
     expectTypeOf<Guard<ClusterHold>['extend']>().toBeNever();
     expectTypeOf<Guard<ProcessHold>['extend']>().toBeNever();
-    expectTypeOf<Guard<ClusterLease>['extend']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<Guard<ClusterLease>['extend']>().toEqualTypeOf<() => Promise<void | LockOperationFailure>>();
     expectTypeOf<Guard<ClusterHold>['expiresAt']>().toBeUndefined();
     expectTypeOf<Guard<ClusterLease>['expiresAt']>().toBeNumber();
   });
@@ -197,7 +197,7 @@ describe('capability gating', () => {
 
     const lease = createLocks({ store: clusterLease, namespace: 'a' }).mutex('k');
     expectTypeOf(lease).toHaveProperty('lead');
-    expectTypeOf(lease.lead(noop, { signal })).toEqualTypeOf<Promise<void>>();
+    expectTypeOf(lease.lead(noop, { signal })).toEqualTypeOf<Promise<void | LockOperationFailure>>();
     // @ts-expect-error lead takes only a signal
     void lease.lead(noop, { wait: '1s' });
   });
@@ -226,10 +226,10 @@ describe('holdAtLeast', () => {
 
 describe('callback context and guard', () => {
   it('fence is bigint when the store has fences and undefined when it has none', () => {
-    expectTypeOf<FenceOf<ClusterLease>>().toEqualTypeOf<bigint>();
-    expectTypeOf<FenceOf<ProcessHold>>().toEqualTypeOf<bigint>();
+    expectTypeOf<FenceOf<ClusterLease>>().toEqualTypeOf<LockFence>();
+    expectTypeOf<FenceOf<ProcessHold>>().toEqualTypeOf<LockFence>();
     expectTypeOf<FenceOf<ClusterHold>>().toEqualTypeOf<undefined>();
-    expectTypeOf<LockContext<ClusterLease>['fence']>().toEqualTypeOf<bigint>();
+    expectTypeOf<LockContext<ClusterLease>['fence']>().toEqualTypeOf<LockFence>();
     expectTypeOf<LockContext<ClusterHold>['signal']>().toEqualTypeOf<AbortSignal>();
   });
 
@@ -238,19 +238,19 @@ describe('callback context and guard', () => {
     const run = mutex.run(
       ({ signal: lost, fence, key }) => {
         expectTypeOf(lost).toEqualTypeOf<AbortSignal>();
-        expectTypeOf(fence).toEqualTypeOf<bigint>();
+        expectTypeOf(fence).toEqualTypeOf<LockFence>();
         expectTypeOf(key.full).toBeString();
         return 'done' as const;
       },
       { wait: '1s' },
     );
-    expectTypeOf(run).toEqualTypeOf<Promise<'done' | LockHeld>>();
+    expectTypeOf(run).toEqualTypeOf<Promise<'done' | LockHeld | LockOperationFailure>>();
   });
 
   it('a guard has a boolean held flag and a signal', () => {
     expectTypeOf<Guard<ClusterHold>['held']>().toEqualTypeOf<boolean>();
     expectTypeOf<Guard<ClusterHold>['signal']>().toEqualTypeOf<AbortSignal>();
-    expectTypeOf<Guard<ClusterHold>['release']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<Guard<ClusterHold>['release']>().toEqualTypeOf<() => Promise<void | ReleaseFailure>>();
   });
 });
 
@@ -290,7 +290,7 @@ describe('guards of transaction-owned locks', () => {
 
   it('pgSession guards keep release and asyncDispose', () => {
     expectTypeOf<Guard<SessionStore>>().toHaveProperty('release');
-    expectTypeOf<Guard<SessionStore>['release']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<Guard<SessionStore>['release']>().toEqualTypeOf<() => Promise<void | ReleaseFailure>>();
     expectTypeOf<Guard<SessionStore>>().toHaveProperty(Symbol.asyncDispose);
   });
 });

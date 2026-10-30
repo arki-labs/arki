@@ -1,3 +1,6 @@
+import { collect } from '@arki/failure';
+import { orThrow } from '@arki/failure';
+import { lockTokenSchema, lockFenceSchema } from './../identity-schemas.js';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
@@ -63,7 +66,7 @@ const tick = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 describe('pgLease SQL shape', () => {
   it('acquire is one INSERT ... ON CONFLICT ... RETURNING on the database clock, so two replicas cannot both win', async () => {
     const { db, statements } = recordingDb([{ generation: '3', expires_ms: '1000' }]);
-    const grant = await pgLease(db, { ttl: '5s' }).acquire(key, { token: 't1' });
+    const grant = orThrow(await pgLease(db, { ttl: '5s' }).acquire(key, { token: lockTokenSchema.parse('t1') }));
     expect(statements).toHaveLength(1);
     const text = statements[0]?.text ?? '';
     expect(text).toMatch(/INSERT INTO "arki_lock" AS lease/);
@@ -71,16 +74,16 @@ describe('pgLease SQL shape', () => {
     expect(text).toMatch(/generation = lease\.generation \+ 1/);
     expect(text).toMatch(/WHERE lease\.token IS NULL OR lease\.expires_at <= clock_timestamp\(\)/);
     expect(text).toMatch(/RETURNING/);
-    expect(grant).toMatchObject({ token: 't1', fence: 3n, expiresAt: 1000 });
+    expect(grant).toMatchObject({ token: lockTokenSchema.parse('t1'), fence: lockFenceSchema.parse(3n), expiresAt: 1000 });
   });
 
   it('never uses now() and never DELETE: now() is the caller transaction start, DELETE would restart the fence', async () => {
     const { db, statements } = recordingDb([{ generation: '1', expires_ms: '1' }]);
     const store = pgLease(db, { ttl: '5s' });
-    const grant = await store.acquire(key, { token: 't1' });
+    const grant = orThrow(await store.acquire(key, { token: lockTokenSchema.parse('t1') }));
     if (grant === undefined) throw new Error('expected a grant');
-    await store.extend?.(grant, 5000);
-    await store.release(grant);
+    orThrow(await store.extend?.(grant, 5000));
+    orThrow(await store.release(grant));
     expect(statements).toHaveLength(3);
     for (const { text } of statements) {
       expect(text).not.toMatch(/\bnow\s*\(/i);
@@ -92,7 +95,7 @@ describe('pgLease SQL shape', () => {
   it('release keeps the row and clears the token, so the generation survives', async () => {
     const { db, statements } = recordingDb([{ pg_notify: '' }]);
     const store = pgLease(db, { ttl: '5s' });
-    const outcome = await store.release({ key, token: 't1' });
+    const outcome = await store.release({ key, token: lockTokenSchema.parse('t1') });
     expect(outcome).toBe('released');
     expect(statements[0]?.text).toMatch(/SET token = NULL, expires_at = clock_timestamp\(\)/);
     expect(statements[0]?.text).toMatch(/pg_notify/);
@@ -100,19 +103,19 @@ describe('pgLease SQL shape', () => {
 
   it('a release that matches no row reports not-owner, so a stale holder cannot free a new holder', async () => {
     const { db } = recordingDb([]);
-    expect(await pgLease(db, { ttl: '5s' }).release({ key, token: 'stale' })).toBe('not-owner');
+    expect(await pgLease(db, { ttl: '5s' }).release({ key, token: lockTokenSchema.parse('stale') })).toBe('not-owner');
   });
 
   it('extend checks owner and not-expired, so an expired lease is never revived', async () => {
     const { db, statements } = recordingDb([]);
-    const ok = await pgLease(db, { ttl: '5s' }).extend?.({ key, token: 't1' }, 5000);
+    const ok = await pgLease(db, { ttl: '5s' }).extend?.({ key, token: lockTokenSchema.parse('t1') }, 5000);
     expect(ok).toBe(false);
     expect(statements[0]?.text).toMatch(/WHERE key = \$\d+ AND token = \$\d+ AND expires_at > clock_timestamp\(\)/);
   });
 
   it('a custom or schema-qualified table is quoted into the SQL', async () => {
     const { db, statements } = recordingDb([]);
-    await pgLease(db, { ttl: '5s', table: 'app.locks' }).acquire(key, { token: 't' });
+    orThrow(await pgLease(db, { ttl: '5s', table: 'app.locks' }).acquire(key, { token: lockTokenSchema.parse('t') }));
     expect(statements[0]?.text).toMatch(/INSERT INTO "app"\."locks" AS lease/);
   });
 });
@@ -121,12 +124,12 @@ describe('pgLease autocommit probe', () => {
   it('concurrent first acquires probe once (two statements), so a busy boot does not multiply the check', async () => {
     const { db, counts } = recordingDb([{ generation: '1', expires_ms: '1' }]);
     const store = pgLease(db, { ttl: '5s' });
-    await Promise.all([
-      store.acquire(key, { token: 'a' }),
-      store.acquire(key, { token: 'b' }),
-      store.acquire(key, { token: 'c' }),
-    ]);
-    await store.acquire(key, { token: 'd' });
+    orThrow(collect(await Promise.all([
+      store.acquire(key, { token: lockTokenSchema.parse('a') }),
+      store.acquire(key, { token: lockTokenSchema.parse('b') }),
+      store.acquire(key, { token: lockTokenSchema.parse('c') }),
+    ])));
+    orThrow(await store.acquire(key, { token: lockTokenSchema.parse('d') }));
     expect(counts.probes).toBe(2);
   });
 
@@ -135,8 +138,8 @@ describe('pgLease autocommit probe', () => {
       Promise.resolve({ rows: [{ ts: 'same' }] }),
     );
     const store = pgLease(db, { ttl: '5s' });
-    await expect(store.acquire(key, { token: 'a' })).rejects.toMatchObject({ code: 'config' });
-    await expect(store.acquire(key, { token: 'b' })).rejects.toMatchObject({ code: 'config' });
+    await expect(store.acquire(key, { token: lockTokenSchema.parse('a') })).rejects.toMatchObject({ code: 'config' });
+    await expect(store.acquire(key, { token: lockTokenSchema.parse('b') })).rejects.toMatchObject({ code: 'config' });
     expect(statements).toEqual([]);
   });
 
@@ -148,9 +151,9 @@ describe('pgLease autocommit probe', () => {
       return down ? Promise.reject(new Error('connection refused')) : Promise.resolve({ rows: [{ ts: `t${tick}` }] });
     });
     const store = pgLease(db, { ttl: '5s' });
-    await expect(store.acquire(key, { token: 'a' })).rejects.toThrow('connection refused');
+    await expect(store.acquire(key, { token: lockTokenSchema.parse('a') })).resolves.toMatchObject({ code: 'lock.store', cause: new Error('connection refused') });
     down = false;
-    expect(await store.acquire(key, { token: 'b' })).toMatchObject({ fence: 1n });
+    expect(await store.acquire(key, { token: lockTokenSchema.parse('b') })).toMatchObject({ fence: lockFenceSchema.parse(1n) });
     expect(counts.probes).toBe(3);
   });
 });
@@ -216,8 +219,8 @@ describe('pgLease LISTEN connection', () => {
     await tick();
     expect(listen.state.connects).toBe(1);
     for (const controller of [...controllers, later]) controller.abort();
-    await Promise.all([...waits, another]);
-    await store.dispose?.();
+    orThrow(collect(await Promise.all([...waits, another])));
+    orThrow(await store.dispose?.());
     expect(listen.state.released).toBe(1);
   });
 
@@ -227,14 +230,14 @@ describe('pgLease LISTEN connection', () => {
     const listen = countingListen(() => (fail ? Promise.reject(new Error('down')) : Promise.resolve()));
     const store = pgLease(db, { ttl: '5s', listen: listen.connect });
     const controller = new AbortController();
-    await expect(store.waitFor?.(key, controller.signal)).rejects.toThrow('down');
+    await expect(store.waitFor?.(key, controller.signal)).resolves.toMatchObject({ code: 'lock.store', data: { method: 'waitFor' } });
     fail = false;
     const waiting = store.waitFor?.(key, controller.signal);
     await tick();
     expect(listen.state.connects).toBe(2);
     controller.abort();
-    await waiting;
-    await store.dispose?.();
+    orThrow(await waiting);
+    orThrow(await store.dispose?.());
   });
 
   it('an abort settles the wait even while the LISTEN connection is still opening, so a cancelled caller never hangs', async () => {
@@ -270,7 +273,7 @@ describe('lease table DDL', () => {
 
   it('ensureLockTable runs the DDL for the chosen table', async () => {
     const { db, statements } = recordingDb();
-    await ensureLockTable(db, 'my_locks');
+    orThrow(await ensureLockTable(db, 'my_locks'));
     expect(statements[0]?.text).toContain('"my_locks"');
   });
 });

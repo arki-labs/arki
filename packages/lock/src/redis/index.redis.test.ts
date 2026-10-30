@@ -1,3 +1,4 @@
+import { lockTokenSchema } from './../identity-schemas.js';
 /**
  * The Redis store against a real Redis 7 in a container.
  * Why a real server: Lua atomicity, `PX` expiry, pub/sub and a dropped
@@ -14,7 +15,7 @@ import { orThrow } from '@arki/failure';
 
 import type { Store } from '../types.js';
 import type { RedisStore } from './index.js';
-import { LockError, LockHeld } from '../errors.js';
+import { LockHeld } from '../errors.js';
 import { createKey } from '../key.js';
 import { createLocks } from '../locks.js';
 import { chaos, describeCases, describeStoreContract, replicaCases } from '../testing/index.js';
@@ -121,8 +122,8 @@ describe('redisStore against a real server', () => {
       .mutex(uniqueName('drop-acquire'))
       .tryRun(() => 'resolved')
       .catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(LockError);
-    expect(error).toMatchObject({ code: 'store', method: 'acquire', outcome: 'not-acquired' });
+    expect(error).toHaveProperty('code', 'lock.store');
+    expect(error).toMatchObject({ code: 'lock.store', data: { method: 'acquire', outcome: 'not-acquired' } });
   });
 
   it('reports a connection cut while acquire is in flight as a store error, never as a result, so the caller does not guess whether the job ran', async () => {
@@ -131,8 +132,8 @@ describe('redisStore against a real server', () => {
     const attempt = locks.mutex(uniqueName('cut-acquire')).tryRun(() => 'resolved');
     broken.disconnect();
     const error = await attempt.catch((error_: unknown) => error_);
-    expect(error).toBeInstanceOf(LockError);
-    expect(error).toMatchObject({ code: 'store', method: 'acquire' });
+    expect(error).toHaveProperty('code', 'lock.store');
+    expect(error).toMatchObject({ code: 'lock.store', data: { method: 'acquire' } });
   });
 
   it('reports a dropped connection during release as a release error, so a lock that may still be held is never called released', async () => {
@@ -140,7 +141,7 @@ describe('redisStore against a real server', () => {
     const locks = createLocks({ store: redisStore(broken, { ttl: TTL_MS }), namespace: 'it' });
     const guard = await orThrow(locks.mutex(uniqueName('drop-release')).acquire({ wait: '2s' }));
     broken.disconnect();
-    await expect(guard.release()).rejects.toMatchObject({ code: 'release' });
+    await expect(guard.release()).resolves.toMatchObject({ code: 'lock.release', data: { outcome: 'unknown' } });
   });
 
   it('frees the key by itself when renewals are blocked, so a stuck or partitioned holder cannot block everyone forever', async () => {
@@ -153,7 +154,7 @@ describe('redisStore against a real server', () => {
     await sleep(TTL_MS + 150);
     const taken = await orThrow(rival.tryAcquire());
     expect(holder.held).toBe(false);
-    await taken.release();
+    orThrow(await taken.release());
   });
 
   it('wakes a waiter within 50 ms of the release through pub/sub, so handoff is not a polling delay', async () => {
@@ -172,13 +173,13 @@ describe('redisStore against a real server', () => {
       'the waiter to subscribe',
     );
     const releasedAt = Date.now();
-    await holder.release();
+    orThrow(await holder.release());
     const ranAt = await orThrow(waiter);
     // A pub/sub wake lands in a few ms; a poll wake lands anywhere up to the 1 s backoff cap.
     // 100 ms tells them apart without failing on a busy host (52 ms was seen under load).
     expect(ranAt - releasedAt).toBeLessThan(100);
     expect(store.guarantees.wait).toBe('wake');
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 
   it('wakes a waiter within one backoff step when polling is forced, so the fallback is still prompt', async () => {
@@ -189,7 +190,7 @@ describe('redisStore against a real server', () => {
     const waiter = locks.mutex(name).run(() => Date.now(), { wait: '10s' });
     await sleep(20);
     const releasedAt = Date.now();
-    await holder.release();
+    orThrow(await holder.release());
     const ranAt = await orThrow(waiter);
     // The backoff step is 50 ms, then 100 ms; one missed poll costs at most the second.
     expect(ranAt - releasedAt).toBeLessThan(300);
@@ -213,7 +214,7 @@ describe('redisStore against a real server', () => {
     const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => 'ran', { wait: '10s' });
     await sleep(50);
-    await holder.release();
+    orThrow(await holder.release());
     expect(await waiter).toBe('ran');
     expect(store.guarantees.wait).toBe('poll');
   });
@@ -234,9 +235,9 @@ describe('redisStore against a real server', () => {
     const holder = await orThrow(locks.mutex(name).acquire({ wait: '2s' }));
     const waiter = locks.mutex(name).run(() => 'ran', { wait: '10s' });
     await eventually(() => subscribers.length === 1, 3000, 'the subscriber to open');
-    await holder.release();
+    orThrow(await holder.release());
     expect(await waiter).toBe('ran');
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
     await eventually(() => subscribers[0]?.status === 'end', 3000, 'the subscriber to close');
     expect(owner.status).toBe('ready');
     expect(await owner.ping()).toBe('PONG');
@@ -292,12 +293,12 @@ describe('redisStore against a real server', () => {
     await eventually(() => store.guarantees.wait === 'wake' && prefixed.status === 'ready', 3000, 'the client');
     await sleep(100);
     const releasedAt = Date.now();
-    await holder.release();
+    orThrow(await holder.release());
     const ranAt = await orThrow(waiter);
     // A pub/sub wake lands in a few ms; a poll wake lands anywhere up to the 1 s backoff cap.
     // 100 ms tells them apart without failing on a busy host (52 ms was seen under load).
     expect(ranAt - releasedAt).toBeLessThan(100);
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 
   it('resolves waitFor as soon as the signal aborts even while the subscribe is stuck, so waits do not pile up during a pub/sub outage', async () => {
@@ -313,7 +314,7 @@ describe('redisStore against a real server', () => {
     controller.abort();
     const outcome = await Promise.race([waited, sleep(500).then(() => 'still waiting')]);
     expect(outcome).toBe('resolved');
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 });
 
@@ -327,20 +328,20 @@ describe('redis semaphore and read/write against a real server', () => {
     const first = await orThrow(locks.semaphore(name, { limit: 2 }).tryAcquire());
     expect(first).toBeDefined();
     await expect(locks.semaphore(name, { limit: 3 }).tryAcquire()).rejects.toMatchObject({ code: 'config' });
-    await first.release();
+    orThrow(await first.release());
     const second = await orThrow(locks.semaphore(name, { limit: 3 }).tryAcquire());
     expect(second).toBeDefined();
-    await second.release();
+    orThrow(await second.release());
   });
 
   it('gives a crashed holder permits back after the ttl, and leaves no key behind', async () => {
     const store = makeStore();
     const key = createKey('it', uniqueName('crash'), 'semaphore');
-    const held = await store.permits.acquire(key, { token: 'a', ttlMs: SHORT_MS, limit: 1, weight: 1 });
+    const held = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('a'), ttlMs: SHORT_MS, limit: 1, weight: 1 }));
     expect(held?.fence).toBeTypeOf('bigint');
-    expect(await store.permits.acquire(key, { token: 'b', ttlMs: SHORT_MS, limit: 1, weight: 1 })).toBeUndefined();
+    expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('b'), ttlMs: SHORT_MS, limit: 1, weight: 1 })).toBeUndefined();
     await sleep(SHORT_MS + 80);
-    const next = await store.permits.acquire(key, { token: 'c', ttlMs: SHORT_MS, limit: 2, weight: 2 });
+    const next = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('c'), ttlMs: SHORT_MS, limit: 2, weight: 2 }));
     expect(next).toBeDefined();
     expect(next?.fence).toBeGreaterThan(held?.fence ?? 0n);
     await sleep(SHORT_MS + 80);
@@ -351,31 +352,31 @@ describe('redis semaphore and read/write against a real server', () => {
   it('never revives an expired permit or reader on extend, and release says not-owner', async () => {
     const store = makeStore();
     const permitKey = createKey('it', uniqueName('revive'), 'semaphore');
-    const permit = await store.permits.acquire(permitKey, { token: 'a', ttlMs: SHORT_MS, limit: 1, weight: 1 });
+    const permit = orThrow(await store.permits.acquire(permitKey, { token: lockTokenSchema.parse('a'), ttlMs: SHORT_MS, limit: 1, weight: 1 }));
     const readKey = createKey('it', uniqueName('revive'), 'readWrite');
-    const reader = await store.shared.acquire(readKey, { token: 'r', ttlMs: SHORT_MS, mode: 'read' });
+    const reader = orThrow(await store.shared.acquire(readKey, { token: lockTokenSchema.parse('r'), ttlMs: SHORT_MS, mode: 'read' }));
     if (permit === undefined || reader === undefined) throw new Error('both should be granted');
     expect(await store.permits.extend?.(permit, 5000)).toBe(true);
-    await store.permits.release(permit);
+    orThrow(await store.permits.release(permit));
     await sleep(SHORT_MS + 80);
     expect(await store.permits.extend?.(permit, 5000)).toBe(false);
     expect(await store.shared.extend?.(reader, 5000)).toBe(false);
     expect(await store.shared.release(reader)).toBe('not-owner');
-    expect(await store.permits.acquire(permitKey, { token: 'b', ttlMs: SHORT_MS, limit: 1, weight: 1 })).toBeDefined();
+    expect(await store.permits.acquire(permitKey, { token: lockTokenSchema.parse('b'), ttlMs: SHORT_MS, limit: 1, weight: 1 })).toBeDefined();
   });
 
   it('admits a writer once a crashed reader expires, and blocks it while the reader is live', async () => {
     const store = makeStore();
     const key = createKey('it', uniqueName('writer'), 'readWrite');
-    const reader = await store.shared.acquire(key, { token: 'r', ttlMs: SHORT_MS, mode: 'read' });
+    const reader = orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r'), ttlMs: SHORT_MS, mode: 'read' }));
     expect(reader).toBeDefined();
-    expect(await store.shared.acquire(key, { token: 'w1', ttlMs: SHORT_MS, mode: 'write' })).toBeUndefined();
+    expect(await store.shared.acquire(key, { token: lockTokenSchema.parse('w1'), ttlMs: SHORT_MS, mode: 'write' })).toBeUndefined();
     await sleep(SHORT_MS + 80);
-    const writer = await store.shared.acquire(key, { token: 'w2', ttlMs: SHORT_MS, mode: 'write' });
+    const writer = orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('w2'), ttlMs: SHORT_MS, mode: 'write' }));
     expect(writer).toBeDefined();
-    expect(await store.shared.acquire(key, { token: 'r2', ttlMs: SHORT_MS, mode: 'read' })).toBeUndefined();
+    expect(await store.shared.acquire(key, { token: lockTokenSchema.parse('r2'), ttlMs: SHORT_MS, mode: 'read' })).toBeUndefined();
     await sleep(SHORT_MS + 80);
-    expect(await store.shared.acquire(key, { token: 'r3', ttlMs: SHORT_MS, mode: 'read' })).toBeDefined();
+    expect(await store.shared.acquire(key, { token: lockTokenSchema.parse('r3'), ttlMs: SHORT_MS, mode: 'read' })).toBeDefined();
   });
 
   it('wakes a waiting writer through pub/sub when the last reader releases', async () => {
@@ -386,9 +387,9 @@ describe('redis semaphore and read/write against a real server', () => {
     const writing = write.run(() => Date.now(), { wait: '10s' });
     await sleep(100);
     const releasedAt = Date.now();
-    await reader.release();
+    orThrow(await reader.release());
     expect((await orThrow(writing)) - releasedAt).toBeLessThan(100);
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 });
 
@@ -396,10 +397,10 @@ describe('redis semaphore and read/write: review proofs', () => {
   it('R1: a resent semaphore acquire (same token, as ioredis resends after a lost reply) must keep its own fence, not take another live holder fence', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('fence'), 'semaphore');
-    const a = await store.permits.acquire(key, { token: 'a', limit: 3, weight: 1 });
-    const b = await store.permits.acquire(key, { token: 'b', limit: 3, weight: 1 });
+    const a = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('a'), limit: 3, weight: 1 }));
+    const b = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('b'), limit: 3, weight: 1 }));
     // The reply to `a` was lost; ioredis resends the same EVALSHA.
-    const resent = await store.permits.acquire(key, { token: 'a', limit: 3, weight: 1 });
+    const resent = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('a'), limit: 3, weight: 1 }));
     expect(b?.fence).not.toBe(a?.fence);
     // Two live grants must never carry the same fence.
     expect(resent?.fence).not.toBe(b?.fence);
@@ -409,9 +410,9 @@ describe('redis semaphore and read/write: review proofs', () => {
   it('R2: a resent reader acquire must keep its own fence, not take another live reader fence', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('fence'), 'readWrite');
-    await store.shared.acquire(key, { token: 'r1', mode: 'read' });
-    const r2 = await store.shared.acquire(key, { token: 'r2', mode: 'read' });
-    const resent = await store.shared.acquire(key, { token: 'r1', mode: 'read' });
+    orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r1'), mode: 'read' }));
+    const r2 = orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r2'), mode: 'read' }));
+    const resent = orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r1'), mode: 'read' }));
     expect(resent?.fence).not.toBe(r2?.fence);
     expect(resent?.fence).toBeDefined();
   });
@@ -440,8 +441,8 @@ describe('redis semaphore and read/write: review proofs', () => {
         () => 'settled',
       );
     await Promise.all([semaphoreWait, mutexWait]);
-    await holder.release();
-    await mutexHolder.release();
+    orThrow(await holder.release());
+    orThrow(await mutexHolder.release());
     const counts = { semaphore: permitCalls.mock.calls.length, mutex: mutexCalls.mock.calls.length };
     // Same 1.5 s wait: the semaphore should not cost several times the mutex's round trips.
     expect(counts.semaphore, JSON.stringify(counts)).toBeLessThanOrEqual(Math.max(10, counts.mutex * 2));
@@ -450,11 +451,11 @@ describe('redis semaphore and read/write: review proofs', () => {
   it('R4: a semaphore waiter resolves when a permit is already free (release landed before the subscribe)', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('missed'), 'semaphore');
-    const a = await store.permits.acquire(key, { token: 'a', limit: 2, weight: 1 });
-    await store.permits.acquire(key, { token: 'b', limit: 2, weight: 1 });
+    const a = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('a'), limit: 2, weight: 1 }));
+    orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('b'), limit: 2, weight: 1 }));
     // Caller's attempt was refused; then `a` releases before the caller subscribes.
     if (a === undefined) throw new Error('a should hold');
-    await store.permits.release(a);
+    orThrow(await store.permits.release(a));
     const waiter = store.permits.waiter?.(key, 1);
     if (waiter === undefined) throw new Error('redis permits should offer a waiter');
     const controller = new AbortController();
@@ -463,7 +464,7 @@ describe('redis semaphore and read/write: review proofs', () => {
     controller.abort();
     await waited;
     waiter.close();
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
     expect(outcome).toBe('resolved');
   });
 });
@@ -472,39 +473,39 @@ describe('redis semaphore and read/write: attacks that held', () => {
   it('ok: extending a short-ttl permit past the key TTL keeps the holder, its weight and the limit', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('ext'), 'semaphore');
-    await store.permits.acquire(key, { token: 'long', ttlMs: 400, limit: 2, weight: 1 });
-    const short = await store.permits.acquire(key, { token: 'short', ttlMs: 100, limit: 2, weight: 1 });
+    orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('long'), ttlMs: 400, limit: 2, weight: 1 }));
+    const short = orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('short'), ttlMs: 100, limit: 2, weight: 1 }));
     if (short === undefined) throw new Error('short should hold');
     expect(await store.permits.extend?.(short, 1200)).toBe(true);
     await sleep(600);
     const { lock, meta } = redisKeys(key);
     expect(await client.zscore(lock, 'short')).not.toBeNull();
     expect(await client.hget(meta, 'w:short')).toBe('1');
-    await expect(store.permits.acquire(key, { token: 'x', limit: 5, weight: 1 })).rejects.toMatchObject({
+    await expect(store.permits.acquire(key, { token: lockTokenSchema.parse('x'), limit: 5, weight: 1 })).rejects.toMatchObject({
       code: 'config',
     });
-    expect(await store.permits.acquire(key, { token: 'y', limit: 2, weight: 1 })).toBeDefined();
-    expect(await store.permits.acquire(key, { token: 'z', limit: 2, weight: 1 })).toBeUndefined();
+    expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('y'), limit: 2, weight: 1 })).toBeDefined();
+    expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('z'), limit: 2, weight: 1 })).toBeUndefined();
   });
 
   it('ok: extending a reader past the readers TTL keeps it, so a writer stays out', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('rext'), 'readWrite');
-    await store.shared.acquire(key, { token: 'r-long', ttlMs: 300, mode: 'read' });
-    const r = await store.shared.acquire(key, { token: 'r', ttlMs: 100, mode: 'read' });
+    orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r-long'), ttlMs: 300, mode: 'read' }));
+    const r = orThrow(await store.shared.acquire(key, { token: lockTokenSchema.parse('r'), ttlMs: 100, mode: 'read' }));
     if (r === undefined) throw new Error('r should hold');
     expect(await store.shared.extend?.(r, 1000)).toBe(true);
     await sleep(500);
-    expect(await store.shared.acquire(key, { token: 'w', mode: 'write' })).toBeUndefined();
+    expect(await store.shared.acquire(key, { token: lockTokenSchema.parse('w'), mode: 'write' })).toBeUndefined();
   });
 
   it('ok: a crashed heavy holder gives its weight back; no orphan weight field survives', async () => {
     const store = makeStore();
     const key = createKey('rv', uniqueName('crash'), 'semaphore');
-    await store.permits.acquire(key, { token: 'heavy', ttlMs: 100, limit: 3, weight: 2 });
-    await store.permits.acquire(key, { token: 'light', ttlMs: 2000, limit: 3, weight: 1 });
+    orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('heavy'), ttlMs: 100, limit: 3, weight: 2 }));
+    orThrow(await store.permits.acquire(key, { token: lockTokenSchema.parse('light'), ttlMs: 2000, limit: 3, weight: 1 }));
     await sleep(200);
-    expect(await store.permits.acquire(key, { token: 'new', limit: 3, weight: 2 })).toBeDefined();
+    expect(await store.permits.acquire(key, { token: lockTokenSchema.parse('new'), limit: 3, weight: 2 })).toBeDefined();
     expect(Object.keys(await client.hgetall(redisKeys(key).meta)).toSorted()).toEqual([
       'f:light',
       'f:new',
@@ -519,11 +520,11 @@ describe('redis semaphore and read/write: attacks that held', () => {
     const sem = createKey('rv', uniqueName('ttl'), 'semaphore');
     const rw = createKey('rv', uniqueName('ttl'), 'readWrite');
     const rw2 = createKey('rv', uniqueName('ttl'), 'readWrite');
-    await store.permits.acquire(sem, { token: 'a', limit: 2, weight: 1 });
-    const b = await store.permits.acquire(sem, { token: 'b', limit: 2, weight: 1 });
-    if (b !== undefined) await store.permits.release(b);
-    await store.shared.acquire(rw, { token: 'r', mode: 'read' });
-    await store.shared.acquire(rw2, { token: 'w', mode: 'write' });
+    orThrow(await store.permits.acquire(sem, { token: lockTokenSchema.parse('a'), limit: 2, weight: 1 }));
+    const b = orThrow(await store.permits.acquire(sem, { token: lockTokenSchema.parse('b'), limit: 2, weight: 1 }));
+    if (b !== undefined) orThrow(await store.permits.release(b));
+    orThrow(await store.shared.acquire(rw, { token: lockTokenSchema.parse('r'), mode: 'read' }));
+    orThrow(await store.shared.acquire(rw2, { token: lockTokenSchema.parse('w'), mode: 'write' }));
     for (const k of [redisKeys(sem).lock, redisKeys(sem).meta, redisKeys(rw).readers, redisKeys(rw2).writer]) {
       expect(await client.pttl(k), k).toBeGreaterThan(0);
     }
@@ -539,9 +540,9 @@ describe('redis semaphore and read/write: attacks that held', () => {
     const waiting = sem.run(() => Date.now(), { wait: '5s' });
     await sleep(150);
     const at = Date.now();
-    await held.release();
+    orThrow(await held.release());
     expect((await orThrow(waiting)) - at).toBeLessThan(150);
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 
   it('ok: concurrent weighted holders never exceed the limit, readers and a writer never overlap', async () => {
@@ -589,7 +590,7 @@ describe('redis semaphore and read/write: attacks that held', () => {
       ),
     );
     expect(overlap).toBe(false);
-    await store.dispose?.();
+    orThrow(await store.dispose?.());
   });
 });
 
@@ -605,7 +606,7 @@ describe('redis semaphore: store-side checks', () => {
       [0, 1],
       [1.5, 1],
     ] as const) {
-      await expect(store.permits.acquire(key, { token: 't', limit, weight })).rejects.toMatchObject({ code: 'config' });
+      await expect(store.permits.acquire(key, { token: lockTokenSchema.parse('t'), limit, weight })).rejects.toMatchObject({ code: 'config' });
     }
     expect(await client.exists(redisKeys(key).lock)).toBe(0);
   });

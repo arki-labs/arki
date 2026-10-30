@@ -1,3 +1,4 @@
+import { orThrow } from '@arki/failure';
 // Speed of @arki/lock against the lock libraries most projects use.
 // Run: `bun run bench` (explore) or `bun run bench --profile publish --write-readme`.
 //
@@ -81,7 +82,7 @@ const db = drizzle({ client: pgClient });
 const listenPool = new pg.Pool({ connectionString: pgUri, max: 4 });
 
 const LEASE_TABLE = 'bench_lease';
-await ensureLockTable(db, LEASE_TABLE);
+orThrow(await ensureLockTable(db, LEASE_TABLE));
 await db.execute(
   sql`CREATE TABLE IF NOT EXISTS bench_raw_lease (key text PRIMARY KEY, token text NOT NULL, expires_at timestamptz NOT NULL)`,
 );

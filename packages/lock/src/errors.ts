@@ -1,12 +1,14 @@
 /**
  * A busy lock is an answer the caller branches on, so it is returned as the
- * {@link LockHeld} failure. Everything else `@arki/lock` raises on purpose is a
- * thrown {@link LockError} with a stable `code`. Match on `code` (or
- * `errorCode`), never on the message.
+ * {@link LockHeld} failure. Operational outcomes are canonical returned failures;
+ * LockError remains the internal protocol and the thrown misuse/configuration error.
  */
 import { z } from 'zod';
 
-import { defineFailure } from '@arki/failure';
+import { ID_GENERATION_FAILURES, RandomSourceUnavailable } from '@arki/contracts';
+
+import type { FailureOf } from '@arki/failure';
+import { defineFailure, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 
 /**
  * The lock was busy: the one attempt was refused, or the wait ended with the
@@ -85,11 +87,11 @@ export type LockErrorInit = {
   readonly remediation: string;
   readonly cause?: unknown;
   /** On `store`: whether ownership might exist remotely. */
-  readonly outcome?: 'not-acquired' | 'unknown';
+  readonly outcome?: ReturnType<typeof LockStoreFailure>['data']['outcome'];
   /** On `lost`: the store refused a renewal, the local deadline passed, or the pinned connection closed. */
-  readonly detectedBy?: 'renewal' | 'deadline' | 'connection';
+  readonly detectedBy?: ReturnType<typeof LockLost>['data']['detectedBy'];
   /** On `store` and `release`: which store call failed. */
-  readonly method?: 'acquire' | 'release' | 'extend' | 'waitFor' | 'permits' | 'shared';
+  readonly method?: Exclude<ReturnType<typeof LockStoreFailure>['data']['method'], 'ddl' | 'dispose'>;
   /** On `store`: set when `storeTimeout` fired. */
   readonly timeoutMs?: number;
   /** Lock-side errors that rode along with a callback error (the `using` convention). */
@@ -125,3 +127,97 @@ export class LockError extends Error {
     if (init.suppressed !== undefined) this.suppressed = init.suppressed;
   }
 }
+
+/** Cancellation ended acquisition before callback execution.
+ * @fix Stop waiting; do not replay work with the same cancelled signal.
+ * @verify bun run test -- src/outcomes.test.ts
+ */
+export const LockAborted = defineFailure('lock.aborted', {
+  status: 499,
+  message: 'Lock acquisition was cancelled before work started.',
+  remediation: 'Stop waiting or start a new operation with a fresh signal.',
+});
+
+/** Ownership ended after work may have started. This never authorizes replay.
+ * @fix Reconcile side effects and enforce fences before another attempt.
+ * @verify bun run test -- src/locks.test.ts
+ */
+export const LockLost = defineFailure('lock.lost', {
+  status: 409,
+  data: z.object({ detectedBy: z.enum(['renewal', 'deadline', 'connection']) }),
+  message: 'Lock ownership was lost; work may already have produced effects.',
+  remediation: 'Reconcile work before replay and enforce the fence at the protected resource.',
+});
+
+/** A backend operation failed with explicit ownership uncertainty.
+ * @fix Reconcile unknown ownership before assuming the key is free.
+ * @verify bun run test -- src/outcomes.test.ts
+ */
+export const LockStoreFailure = defineFailure('lock.store', {
+  status: 503,
+  data: z.object({
+    method: z.enum(['acquire', 'release', 'extend', 'waitFor', 'permits', 'shared', 'dispose', 'ddl']),
+    outcome: z.enum(['not-acquired', 'unknown']),
+    timeoutMs: z.number().optional(),
+  }),
+  message: 'The lock backend could not confirm the operation.',
+  remediation: 'Check the backend and reconcile unknown ownership before proceeding.',
+});
+
+/** Release was not confirmed. Successful callback work must never be replayed on this evidence.
+ * @fix Reconcile ownership or wait for the lease or connection to end.
+ * @verify bun run test -- src/outcomes.test.ts
+ */
+export const LockReleaseFailed = defineFailure('lock.release', {
+  status: 503,
+  data: z.object({ outcome: z.literal('unknown') }),
+  message: 'The lock release was not confirmed.',
+  remediation: 'Reconcile ownership; callback effects may already be complete.',
+});
+
+/** Normalize an owned operation once; causes remain private failure metadata. */
+export function lockFailure(error: unknown) {
+  if (error instanceof UnexpectedFailure) error = error.failure;
+  if (RandomSourceUnavailable.is(error)) return error;
+  if (LockAborted.is(error) || LockLost.is(error) || LockStoreFailure.is(error) || UnexpectedDefect.is(error)) return error;
+  if (error instanceof LockError) {
+    if (error.code === 'config' || error.code === 'unsupported') throw error;
+    if (error.code === 'aborted') return LockAborted({ cause: error });
+    if (error.code === 'lost') return LockLost({ detectedBy: error.detectedBy ?? 'connection' }, { cause: error });
+    if (LockStoreFailure.is(error.cause)) return error.cause;
+    return LockStoreFailure({
+      method: error.method ?? 'acquire',
+      outcome: error.outcome ?? 'unknown',
+      ...(error.timeoutMs === undefined ? {} : { timeoutMs: error.timeoutMs }),
+    }, { cause: error });
+  }
+  return UnexpectedDefect({ cause: error });
+}
+
+/** A named store owns its provider rejection, including unknown remote effects. */
+export function storeFailure(error: unknown, method: ReturnType<typeof LockStoreFailure>['data']['method']) {
+  if (error instanceof UnexpectedFailure && UnexpectedDefect.is(error.failure)) return error.failure;
+  if (error instanceof LockError && (error.code === 'config' || error.code === 'unsupported')) throw error;
+  if (LockStoreFailure.is(error)) return error;
+  return LockStoreFailure({
+    method,
+    outcome: error instanceof LockError ? (error.outcome ?? 'unknown') : 'unknown',
+  }, { cause: error });
+}
+
+/** Every canonical operation outcome, with the original LockHeld definition retained. */
+export const LOCK_RUN_FAILURES = [LockHeld, LockAborted, LockLost, LockStoreFailure, ...ID_GENERATION_FAILURES] as const;
+export const LOCK_FAILURES = [...LOCK_RUN_FAILURES, LockReleaseFailed] as const;
+export type LockOperationFailure = ReturnType<typeof lockFailure>;
+export type StoreFailure = ReturnType<typeof storeFailure>;
+export type ReleaseFailure = ReturnType<typeof releaseFailure>;
+
+/** Manual release exposes uncertainty without converting completed work into a replay request. */
+export function releaseFailure(error: unknown) {
+  if (LockReleaseFailed.is(error)) return error;
+  if (error instanceof LockError && LockReleaseFailed.is(error.cause)) return error.cause;
+  return LockReleaseFailed({ outcome: 'unknown' }, { cause: error });
+}
+
+/** Exact run outcomes from their canonical definition source. */
+export type LockRunFailure = FailureOf<(typeof LOCK_RUN_FAILURES)[number]>;
