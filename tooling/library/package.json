@@ -39,7 +39,11 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@babel/core": "^7",
+    "@babel/runtime": "^7",
+    "@types/babel__core": "^7.20.5",
     "@types/bun": "catalog:",
+    "babel-preset-expo": "57.0.14",
     "vitest": "catalog:"
   },
   "peerDependencies": {

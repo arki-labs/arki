@@ -11,7 +11,8 @@
  *            `bun build --target=node` bundle
  *   browser  that bundle in headless Chromium (Playwright)
  *   hermes   an ESM bundle (react-native condition, wrapped for top-level await,
- *            with the host shims of `hermes-host.ts`) under `$HERMES_BIN`
+ *            with the host shims of `hermes-host.ts`), run through React Native's
+ *            Babel step, under `$HERMES_BIN`
  *
  * A missing engine prints `INCOMPLETE: <leg> (<reason>)`. That is not a
  * failure unless `--require-all` is given. Any real failure exits 1 and names the leg.
@@ -24,10 +25,18 @@
  * `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in README.md. Engines not run
  * in this invocation (`--only`) keep their existing row.
  *
- * To get a Hermes binary matching React Native 0.86 (Hermes V1):
- *   git clone --depth 1 --branch hermes-v250829098.0.17 https://github.com/facebook/hermes
- *   cmake -S hermes -B hermes-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHERMES_ENABLE_INTL=ON
- *   ninja -C hermes-build hermes      # then HERMES_BIN=hermes-build/bin/hermes
+ * The Hermes leg mirrors an Expo release build (iOS, Hermes V1), because that is how
+ * our apps ship: the script goes through `babel-preset-expo` with the caller Metro
+ * passes, before Hermes runs it. That preset fixes three Hermes V1 bugs
+ * (250829098.0.17): an async arrow with non-simple (destructured or default)
+ * parameters resolves to `undefined`, a class inside `finally` breaks, and `super`
+ * in an object accessor breaks. It also compiles class static blocks, which Hermes
+ * rejects. A bare React Native app on `@react-native/babel-preset` still rejects
+ * class static blocks.
+ *
+ * To get a Hermes V1 runner: download the official `hermes-ios` Maven artifact and
+ * build the small JSI runner around it; steps in `hermes-runner/README.md`.
+ * Then `HERMES_BIN=<path to run>`.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -35,6 +44,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { expectImportPure } from '@arki/ts/testing';
+import { transformAsync } from '@babel/core';
+import { build } from 'esbuild';
 
 import type { Manifest, Runtime } from './manifest';
 import { isAdapterSubpath } from './adapters';
@@ -118,6 +129,16 @@ class Incomplete extends Error {}
 
 /** Runtime-specific bundling for the Hermes leg. */
 export const HERMES_BUNDLE_ARGS = ['--format=esm', '--conditions=react-native'] as const;
+
+/** What Metro passes Babel for a release iOS build on Hermes V1. Babel's `TransformCaller` type lists only a few keys, so this is a variable, not a fresh literal. */
+const METRO_RELEASE_CALLER = {
+  name: 'metro',
+  bundler: 'metro',
+  platform: 'ios',
+  isDev: false,
+  engine: 'hermes',
+  unstable_transformProfile: 'hermes-stable',
+};
 
 const SUMMARY = /smoke checks passed/;
 const SMOKE = 'scripts/smoke.mjs';
@@ -252,7 +273,7 @@ async function browser(context: Context): Promise<void> {
   say(`  ${summary}`);
 }
 
-function hermes(context: Context): void {
+async function hermes(context: Context): Promise<void> {
   const binary = process.env['HERMES_BIN'] ?? 'hermes';
   if (spawnSync(binary, ['-version'], { stdio: 'ignore' }).status !== 0) {
     throw new Incomplete('no Hermes binary; set HERMES_BIN');
@@ -261,7 +282,35 @@ function hermes(context: Context): void {
   // Hermes has no ES modules, no `console` and no top-level `await`: run the ESM bundle inside an async function.
   const script = `${OUT}/hermes-run.js`;
   mkdirSync(path.join(context.cwd, OUT), { recursive: true });
-  writeFileSync(path.join(context.cwd, script), hermesScript(readFileSync(path.join(context.cwd, file), 'utf8')));
+  const source = hermesScript(readFileSync(path.join(context.cwd, file), 'utf8'));
+  // Same step Metro runs for a release build; see the header for why Hermes needs it.
+  const transformed = await transformAsync(source, {
+    babelrc: false,
+    configFile: false,
+    compact: false,
+    sourceType: 'script',
+    presets: ['babel-preset-expo'],
+    caller: METRO_RELEASE_CALLER,
+    filename: path.join(context.cwd, script),
+    comments: false,
+    sourceMaps: false,
+    envName: 'production',
+    cwd: context.cwd,
+  });
+  if (transformed?.code == null) throw new Error('Babel produced no output for the Hermes script');
+  // Babel leaves `require('@babel/runtime/helpers/...')` calls (Metro bundles them); inline them from this package.
+  const inlined = await build({
+    stdin: { contents: transformed.code, resolveDir: import.meta.dirname, sourcefile: 'hermes-run.js' },
+    bundle: true,
+    format: 'iife',
+    platform: 'neutral',
+    target: 'esnext',
+    write: false,
+    logLevel: 'silent',
+  });
+  const [output] = inlined.outputFiles;
+  if (!output) throw new Error('esbuild produced no output for the Hermes script');
+  writeFileSync(path.join(context.cwd, script), output.text);
   smoke(binary, [script], context.cwd, HERMES_FAILURE_MARKER);
 }
 
