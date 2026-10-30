@@ -13,6 +13,29 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 1 — Foundation (foundation) @ abaa697 (2026-10-30)
+
+<!-- candidate: foundation-abaa697 -->
+
+**Packages shipped** (4, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/async | 0.3.0 | 1 |
+| @arki/log | 0.4.0 | 2 |
+| @arki/date | 0.5.0 | 3 |
+| @arki/string | 0.5.0 | 4 |
+
+**Source commit**: `abaa697341a4b9e7e6b9bcff0adab07564caae48`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (4 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` deferred, `demo:faultline` deferred, `docs:@arki/async` success, `docs:@arki/date` success, `docs:@arki/log` success, `docs:@arki/string` success, `published:@arki/async` success, `published:@arki/date` success, `published:@arki/log` success, `published:@arki/string` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/foundation-abaa697/candidate.json`.
+
+---
+
 ## Wave 1 — Foundation (foundation) @ bc952ff (2026-10-30)
 
 <!-- candidate: foundation-bc952ff -->
