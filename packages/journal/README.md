@@ -8,7 +8,7 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-**Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
+**Agents: start at [`llms.txt`](llms.txt).** For constants, error codes and the event graph helpers, see the [API reference](docs/api-reference.md). Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
 | Task                                                                                          | Read                                                                                                                       |
 | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |

@@ -15,6 +15,7 @@
 - [Agent guide](docs/agent-guide.md): the model, the three objects, the task map, the rules, the error table. Read it first.
 - [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): the long overview and the examples.
+- [API reference](docs/api-reference.md): constants, error code tables, the webhook error class and the event graph helpers.
 
 ## By task
 - [Add an event and react in the same transaction](docs/agent-guide.md#add-an-event-and-react-in-the-same-transaction)
