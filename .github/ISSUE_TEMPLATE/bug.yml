@@ -1,0 +1,29 @@
+name: Bug report
+description: Something in an @arki package does not work as documented.
+labels: [bug]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: "@arki/date 0.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest reproduction
+      description: Code we can run. A StackBlitz or a gist link is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime
+      placeholder: "Node 26.1 / Bun 1.4 / Deno 2.5 / Chrome 140"

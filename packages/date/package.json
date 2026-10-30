@@ -177,6 +177,7 @@
     "@types/react": "catalog:react",
     "date-fns": "catalog:utilities",
     "dayjs": "^1.11.23",
+    "happy-dom": "catalog:",
     "jsdom": "catalog:text-processing",
     "luxon": "^3.7.2",
     "react": "catalog:react",

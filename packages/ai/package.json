@@ -242,6 +242,7 @@
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.25",
     "@ai-sdk/react": "catalog:ai",
+    "@arki/clock": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",

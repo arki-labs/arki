@@ -6,6 +6,13 @@ description: End-to-end release pipeline for the `@arki/*` npm scope and the `ar
 
 # arki-release
 
+> **Changed 2026-10-30: this repo is now `arki-labs/arki` itself.** The source
+> moved out of the private monorepo, so `arki-labs/arki` is no longer a mirror
+> of `.release/arki-public/`. Until `tooling/arki-release` drops that target:
+> never run `sync --apply` for the `arki-labs/arki` repo, and push source
+> changes with plain `git push`. The ship phases, the scorecard, npm publishing
+> and the per-package mirrors (`arki-labs/<name>`) work as described below.
+
 ## When to invoke
 
 - User says: "ship arki", "publish a new arki package", "promote @arki/X to public", "release Wave 2", "update arki-labs/arki", "I need to push the arki tree".

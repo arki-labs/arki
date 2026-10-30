@@ -1,0 +1,21 @@
+name: Feature request
+description: Propose a new API or package.
+labels: [enhancement]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package
+      placeholder: "@arki/http, or a new package"
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: A code sample of how you would like to use it.

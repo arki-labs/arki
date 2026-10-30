@@ -1,0 +1,361 @@
+{
+  "$schema": "https://turborepo.org/schema.json",
+  "ui": "tui",
+  "globalDependencies": [
+    "**/.env",
+    ".env",
+    "**/.env.development",
+    "**/.env.production",
+    "**/.env.local"
+  ],
+  "globalEnv": [
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_PUBLISHABLE_KEY",
+    "ALLOWED_ORIGINS",
+    "ARKI_DB_CRDB",
+    "CI",
+    "DEBUG",
+    "NODE_ENV",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "PORT",
+    "SKIP_ENV_VALIDATION",
+    "AUTH_DEBUG",
+    "AUTH_SECRET",
+    "APPLE_CLIENT_ID",
+    "APPLE_CLIENT_SECRET",
+    "APPLE_APP_BUNDLE_IDENTIFIER",
+    "DISCORD_CLIENT_ID",
+    "DISCORD_CLIENT_SECRET",
+    "FACEBOOK_CLIENT_ID",
+    "FACEBOOK_CLIENT_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "LINKEDIN_CLIENT_ID",
+    "LINKEDIN_CLIENT_SECRET",
+    "MODE",
+    "TWITTER_CLIENT_ID",
+    "TWITTER_CLIENT_SECRET",
+    "DATABASE_URL",
+    "DB_URL",
+    "DB_DIRECT_URL",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+    "PGSSLMODE",
+    "DB_POOL_MIN",
+    "DB_POOL_MAX",
+    "DB_POOL_IDLE_TIMEOUT",
+    "DB_POOL_CONNECTION_TIMEOUT",
+    "DB_LOGGING",
+    "DB_SCHEMA",
+    "DB_MIGRATIONS_FOLDER",
+    "DB_STATEMENT_TIMEOUT",
+    "DB_QUERY_TIMEOUT",
+    "DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT",
+    "DB_SEED_ON_START",
+    "DB_DROP_ON_START",
+    "KV_URL",
+    "KV_NAMESPACE",
+    "REDIS_HOST",
+    "REDIS_PORT",
+    "REDIS_USERNAME",
+    "REDIS_PASSWORD",
+    "REDIS_DB",
+    "REDIS_TLS",
+    "REDIS_URL",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "RATE_LIMIT_REDIS_URL",
+    "RATE_LIMIT_PREFIX",
+    "CACHE_TTL_DEFAULT",
+    "CACHE_TTL_LONG",
+    "CACHE_TTL_SHORT",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_WORKSPACE_ID",
+    "COHERE_API_KEY",
+    "JINA_API_KEY",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_HOST",
+    "VOYAGE_API_KEY",
+    "GOOGLE_API_KEYS",
+    "GOOGLE_GENERATIVE_AI_API_KEY",
+    "GROQ_API_KEY",
+    "LLM_MODEL",
+    "LLM_PROVIDER",
+    "AI_TELEMETRY",
+    "MISTRAL_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "QDRANT_API_KEY",
+    "QDRANT_URL",
+    "EMAIL_FROM",
+    "RESEND_API_KEY",
+    "UNOSEND_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_REGION",
+    "AWS_S3_BUCKET_NAME",
+    "AWS_S3_PATH_PREFIX",
+    "AWS_ENDPOINT_URL",
+    "R2_ACCOUNT_ID",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
+    "R2_PUBLIC_URL",
+    "VITE_SENTRY_DSN",
+    "VITE_SENTRY_DSN",
+    "ALLOWED_ORIGINS",
+    "APP_KEY",
+    "APP_NAME",
+    "BASE_URL",
+    "VITE_URL",
+    "PRODUCTION_URL",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_EMAIL_API_TOKEN",
+    "VITE_GOOGLE_MAPS_API_KEY",
+    "WEBHOOK_SECRET",
+    "CRON_SECRET",
+    "FOREMAN_TOKEN",
+    "MICROSOFT_CLIENT_ID",
+    "MICROSOFT_CLIENT_SECRET"
+  ],
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "CI",
+    "npm_lifecycle_event",
+    "DOTENV_PRIVATE_KEY*"
+  ],
+  "boundaries": {
+    "tags": {
+      "foundation": {
+        "dependencies": {
+          "allow": [
+            "foundation",
+            "tooling"
+          ],
+          "deny": [
+            "@arki/dot"
+          ]
+        }
+      },
+      "kernel": {
+        "dependencies": {
+          "allow": [
+            "foundation",
+            "kernel",
+            "tooling"
+          ]
+        }
+      },
+      "platform": {
+        "dependencies": {
+          "allow": [
+            "foundation",
+            "kernel",
+            "platform",
+            "tooling"
+          ]
+        }
+      },
+      "web": {
+        "dependencies": {
+          "allow": [
+            "foundation",
+            "kernel",
+            "platform",
+            "web",
+            "tooling"
+          ],
+          "deny": [
+            "@arki/db",
+            "@arki/kv",
+            "@arki/queue",
+            "@arki/fs",
+            "@arki/mail"
+          ]
+        }
+      },
+      "features": {
+        "dependencies": {
+          "allow": [
+            "foundation",
+            "kernel",
+            "platform",
+            "web",
+            "features",
+            "tooling"
+          ]
+        }
+      }
+    }
+  },
+  "tasks": {
+    "topo": {
+      "dependsOn": [
+        "^topo"
+      ]
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".output/**"
+      ]
+    },
+    "dev": {
+      "persistent": true,
+      "cache": false
+    },
+    "preview": {
+      "persistent": true,
+      "cache": false
+    },
+    "format": {
+      "outputs": [
+        ".cache/.prettiercache"
+      ],
+      "outputLogs": "new-only"
+    },
+    "test": {
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "src/**/*.tsx",
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "test/**/*.tsx"
+      ],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": [
+        "^topo",
+        "//#layers",
+        "//#library-check",
+        "@arki/failure#build"
+      ],
+      "inputs": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mts",
+        "**/*.mjs",
+        "eslint.config.*",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "$TURBO_ROOT$/eslint.config.js"
+      ],
+      "outputs": [
+        ".cache/.eslintcache"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^topo"
+      ],
+      "outputs": []
+    },
+    "test:runtimes": {
+      "dependsOn": [
+        "build"
+      ],
+      "passThroughEnv": [
+        "HERMES_BIN"
+      ],
+      "cache": false
+    },
+    "test:docs": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": false
+    },
+    "test:e2e": {
+      "cache": false,
+      "persistent": false
+    },
+    "clean": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:studio": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:migrations:generate": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:migrations:run": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:schema:push": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:schema:pull": {
+      "cache": false,
+      "persistent": true
+    },
+    "pages:build": {
+      "cache": false,
+      "persistent": true
+    },
+    "pages:deploy": {
+      "cache": false,
+      "persistent": true
+    },
+    "pages:dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "pages:preview": {
+      "cache": false,
+      "persistent": true
+    },
+    "pages:watch": {
+      "cache": false,
+      "persistent": true
+    },
+    "tasks:deploy": {
+      "cache": false,
+      "persistent": true
+    },
+    "tasks:dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "tasks:logs": {
+      "cache": false,
+      "persistent": true
+    },
+    "auth:generate": {
+      "cache": false,
+      "persistent": true
+    },
+    "up": {
+      "cache": false,
+      "persistent": true
+    },
+    "//#clean": {
+      "cache": false
+    },
+    "//#layers": {
+      "cache": false
+    },
+    "//#library-check": {
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,83 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 4a3f015fc32847cfcd6a6eb38aad1d096e5e4011..84f1bfcfce82ed269b38e5842f7d25e5f4474735 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -5857,9 +5857,12 @@ function PasswordInput({
+           disabled,
+           size: "icon",
+           type: "button",
++          "aria-label": isVisible ? "Hide password" : "Show password",
++          "aria-controls": props.id,
++          "aria-pressed": isVisible,
+           variant: "ghost",
+           onClick: () => setIsVisible(!isVisible),
+-          children: isVisible ? /* @__PURE__ */ _jsxruntime.jsx.call(void 0, _lucidereact.EyeIcon, {}) : /* @__PURE__ */ _jsxruntime.jsx.call(void 0, _lucidereact.EyeOffIcon, {})
++          children: isVisible ? /* @__PURE__ */ _jsxruntime.jsx.call(void 0, _lucidereact.EyeOffIcon, {}) : /* @__PURE__ */ _jsxruntime.jsx.call(void 0, _lucidereact.EyeIcon, {})
+         }
+       ),
+       /* @__PURE__ */ _jsxruntime.jsx.call(void 0, "style", { children: `
+@@ -8472,6 +8475,7 @@ function SignInForm({
+               /* @__PURE__ */ _jsxruntime.jsx.call(void 0, FormControl, { children: /* @__PURE__ */ _jsxruntime.jsx.call(void 0, 
+                 PasswordInput,
+                 {
++                    enableToggle: true,
+                   autoComplete: "current-password",
+                   className: classNames == null ? void 0 : classNames.input,
+                   placeholder: localization.PASSWORD_PLACEHOLDER,
+diff --git a/dist/index.js b/dist/index.js
+index 135cbffb51236e54eb3d17b2e8a9a26ff151b91c..14ff13ef396aab9cc7bc2c89aed9f3a4b0ffeda2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -5857,9 +5857,12 @@ function PasswordInput({
+           disabled,
+           size: "icon",
+           type: "button",
++          "aria-label": isVisible ? "Hide password" : "Show password",
++          "aria-controls": props.id,
++          "aria-pressed": isVisible,
+           variant: "ghost",
+           onClick: () => setIsVisible(!isVisible),
+-          children: isVisible ? /* @__PURE__ */ jsx53(EyeIcon, {}) : /* @__PURE__ */ jsx53(EyeOffIcon, {})
++          children: isVisible ? /* @__PURE__ */ jsx53(EyeOffIcon, {}) : /* @__PURE__ */ jsx53(EyeIcon, {})
+         }
+       ),
+       /* @__PURE__ */ jsx53("style", { children: `
+@@ -8472,6 +8475,7 @@ function SignInForm({
+               /* @__PURE__ */ jsx75(FormControl, { children: /* @__PURE__ */ jsx75(
+                 PasswordInput,
+                 {
++                    enableToggle: true,
+                   autoComplete: "current-password",
+                   className: classNames == null ? void 0 : classNames.input,
+                   placeholder: localization.PASSWORD_PLACEHOLDER,
+diff --git a/src/components/auth/forms/sign-in-form.tsx b/src/components/auth/forms/sign-in-form.tsx
+index 50b6151458eb3536a20be12b41e925c803c23238..1964c7d36a168d7da6d2c851264758c5e30674af 100644
+--- a/src/components/auth/forms/sign-in-form.tsx
++++ b/src/components/auth/forms/sign-in-form.tsx
+@@ -252,6 +252,7 @@ export function SignInForm({
+ 
+                             <FormControl>
+                                 <PasswordInput
++                                    enableToggle
+                                     autoComplete="current-password"
+                                     className={classNames?.input}
+                                     placeholder={
+diff --git a/src/components/password-input.tsx b/src/components/password-input.tsx
+index 96153ba967d1f06773bc7d191a6a3d7451bcc305..50b162930c5dca0a9a5c9ddc26bc987e61d70bad 100644
+--- a/src/components/password-input.tsx
++++ b/src/components/password-input.tsx
+@@ -35,10 +35,13 @@ export function PasswordInput({
+                         disabled={disabled}
+                         size="icon"
+                         type="button"
++                        aria-label={isVisible ? "Hide password" : "Show password"}
++                        aria-controls={props.id}
++                        aria-pressed={isVisible}
+                         variant="ghost"
+                         onClick={() => setIsVisible(!isVisible)}
+                     >
+-                        {isVisible ? <EyeIcon /> : <EyeOffIcon />}
++                        {isVisible ? <EyeOffIcon /> : <EyeIcon />}
+                     </Button>
+ 
+                     <style>{`

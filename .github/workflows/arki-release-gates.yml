@@ -2,7 +2,7 @@ name: ARKI Release Gates
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'packages/**'
       - 'tooling/**'
@@ -10,7 +10,7 @@ on:
       - '.changeset/**'
       - '.github/workflows/arki-release-gates.yml'
   push:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'packages/**'
       - 'tooling/**'
@@ -108,7 +108,7 @@ jobs:
         run: |
           bun -e '
             const sh = (cmd) => new TextDecoder().decode(Bun.spawnSync(cmd).stdout);
-            const changed = sh(["git", "diff", "--name-only", "origin/master...HEAD"]).split("\n").filter(Boolean);
+            const changed = sh(["git", "diff", "--name-only", "origin/main...HEAD"]).split("\n").filter(Boolean);
             const inventory = JSON.parse(sh(["bun", "run", "release:arki", "inventory", "--json"]));
             const names = inventory.items
               .filter((pkg) => pkg.status === "candidate")
@@ -254,7 +254,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Test docs for affected packages
-        run: bun run turbo run test:docs --filter='...[origin/master]'
+        run: bun run turbo run test:docs --filter='...[origin/main]'
 
   runtimes:
     name: Runtimes (affected)
@@ -280,7 +280,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Test runtimes for affected packages
-        run: bun run turbo run test:runtimes --filter='...[origin/master]'
+        run: bun run turbo run test:runtimes --filter='...[origin/main]'
 
   smoke:
     name: Candidate smoke (affected)
@@ -310,7 +310,7 @@ jobs:
         run: |
           bun -e '
             const sh = (cmd) => new TextDecoder().decode(Bun.spawnSync(cmd).stdout);
-            const changed = sh(["git", "diff", "--name-only", "origin/master...HEAD"]).split("\n").filter(Boolean);
+            const changed = sh(["git", "diff", "--name-only", "origin/main...HEAD"]).split("\n").filter(Boolean);
             const inventory = JSON.parse(sh(["bun", "run", "release:arki", "inventory", "--json"]));
             const names = inventory.items
               .filter((pkg) => pkg.status === "candidate")
@@ -325,7 +325,7 @@ jobs:
         id: candidate
         if: steps.affected.outputs.count != '0'
         run: |
-          bun run release:arki candidate --affected origin/master --json > candidate-out.json
+          bun run release:arki candidate --affected origin/main --json > candidate-out.json
           dir=$(jq -r '.summary.directory' candidate-out.json)
           echo "directory=$dir" >> "$GITHUB_OUTPUT"
 

@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.md linguist-documentation=false
+**/CHANGELOG.md linguist-generated=true
+bun.lock linguist-generated=true
