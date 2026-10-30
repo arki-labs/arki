@@ -64,7 +64,6 @@ export const config: ReleaseConfig = {
         '@arki/date',
         '@arki/string',
         '@arki/clock',
-        '@arki/math',
         '@arki/async',
       ],
     },
@@ -127,7 +126,7 @@ export const config: ReleaseConfig = {
       // come from `@arki/contracts`).
       // `@arki/expr` and `@arki/cas` joined 2026-10-15 (formula parsing and
       // evaluation on `@arki/math`, and the bounded CAS on top of expr).
-      packages: ['@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
+      packages: ['@arki/math', '@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
     },
     {
       id: 'ai',
