@@ -15,6 +15,7 @@ import {
   TransactionRejected,
   TransactionUnavailable,
 } from './errors.js';
+import { observeDbOperation } from './runtime-local-telemetry.js';
 import { findDatabaseError } from './sql-state.js';
 import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
 
@@ -109,9 +110,11 @@ function bridgedTransactionFailure(error: unknown): TransactionFailure | undefin
 }
 
 /** Preserve the caller's isolation/savepoint policy and execute exactly once. */
-export async function runTransactionOnce<Tx, T>(db: TransactionalDb<Tx>, work: (tx: Tx) => Promise<T>) {
-  const result = await transactionAttempt(db, work);
-  return 'value' in result ? result.value : result.failure;
+export function runTransactionOnce<Tx, T>(db: TransactionalDb<Tx>, work: (tx: Tx) => Promise<T>) {
+  return observeDbOperation('db.transaction.once', async () => {
+    const result = await transactionAttempt(db, work);
+    return 'value' in result ? result.value : result.failure;
+  });
 }
 
 export function classifyTransactionFailure(

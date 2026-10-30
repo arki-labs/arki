@@ -12,8 +12,10 @@
  *
  * Typed by shape, so this file imports no driver.
  */
+import { defineFailure, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
+import { observeDbOperation } from './runtime-local-telemetry.js';
 import { unrefTimer } from './timers.js';
 
 /** Enable with `DEBUG=arki:db:listen`. */
@@ -42,6 +44,20 @@ export type ListenOptions = {
   /** `ready` after every successful `LISTEN` (the first one included); `disconnected` when the client is lost. Not called after stop. */
   readonly onState?: (state: 'ready' | 'disconnected') => void;
 };
+
+/**
+ * The first connection or `LISTEN` of a listener failed (no free client, permission denied, no `LISTEN` support).
+ * Nothing retries: the start rejects with an `UnexpectedFailure` whose `failure` is this value and whose
+ * `cause` is the raw pool error. (`WakeListener` in `@arki/journal` is `Unlisten | Promise<Unlisten>`, so the
+ * start cannot return a failure without changing that contract.)
+ * @fix Check the pool, the credentials and that the server supports `LISTEN`, then start the listener again.
+ * @verify bun run test -- src/pg-listen.test.ts
+ */
+export const ListenUnavailable = defineFailure('db.listen_unavailable', {
+  status: 503,
+  message: 'The Postgres listener could not start.',
+  remediation: 'Inspect the private cause: check the pool, the credentials and that the server supports LISTEN.',
+});
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -72,7 +88,16 @@ export function listenOnPool(
   const onState = options?.onState;
   const quoted = `"${channel.replaceAll('"', '""')}"`;
 
-  return async onMessage => {
+  /** A state observer is the caller's code: if it throws, the listener goes on and the throw is only logged. */
+  const notify = (state: 'ready' | 'disconnected'): void => {
+    try {
+      onState?.(state);
+    } catch (error) {
+      debugListen.debug('{channel}: onState({state}) threw: {reason}', { channel, state, reason: toError(error).message });
+    }
+  };
+
+  return onMessage => observeDbOperation('db.listen.start', async () => {
     let stopped = false;
     let current: { readonly client: ListenClient; readonly drop: (error?: Error) => boolean } | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -109,7 +134,7 @@ export function listenOnPool(
         const wasListening = current?.client === client;
         if (!drop(error) || !wasListening || stopped) return;
         debugListen.debug('{channel}: connection lost: {reason}', { channel, reason: error.message });
-        onState?.('disconnected');
+        notify('disconnected');
         schedule();
       };
 
@@ -152,15 +177,14 @@ export function listenOnPool(
       unrefTimer(clientState.health);
 
       debugListen.debug('{channel}: listening', { channel });
-      try {
-        onState?.('ready');
-      } catch (error) {
-        drop(toError(error));
-        throw error;
-      }
+      notify('ready');
     };
 
-    await connect();
+    try {
+      await connect();
+    } catch (error) {
+      throw new UnexpectedFailure(ListenUnavailable({ cause: error }));
+    }
     return async () => {
       stopped = true;
       if (retry !== undefined) clearTimeout(retry);
@@ -176,5 +200,5 @@ export function listenOnPool(
       }
       debugListen.debug('{channel}: stopped', { channel });
     };
-  };
+  });
 }

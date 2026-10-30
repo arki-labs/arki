@@ -11,8 +11,10 @@
  *
  * Both columns declare Drizzle's `:string` codecs, so every driver (node-postgres,
  * postgres.js, PGlite, Bun SQL) hands back Postgres text and one strict parser
- * covers them all. Values Temporal cannot hold (`infinity`, BC dates) throw a
- * `RangeError` instead of becoming a wrong date.
+ * covers them all. Values Temporal cannot hold (`infinity`, BC dates, malformed text)
+ * cannot become a wrong date. Drizzle's `fromDriver` cannot return a failure, so the
+ * codec throws an `UnexpectedFailure` whose `failure` is `StoredValueUnreadable`
+ * (`db.stored_value_unreadable`); never a raw `RangeError`.
  *
  * A raw `sql` selection mapped with `.mapWith(column)` skips the codec, and Bun
  * SQL then returns a `Date`. That is accepted too: Bun reads `timestamptz` as
@@ -27,12 +29,16 @@ import { customType } from 'drizzle-orm/pg-core';
 
 import type { Instant, PlainDate } from '@arki/date/types';
 import { Temporal } from '@arki/date/types';
+import { UnexpectedFailure } from '@arki/failure';
+
+import { StoredValueUnreadable } from './errors.js';
 
 /** Ends with the UTC offset Postgres prints for `timestamptz` (`+03`, `+05:30`, `+01:44:24`) or `Z`. */
 const HAS_OFFSET = /(?:[+-]\d{2}(?::?\d{2}){0,2}|Z)$/i;
 
-function unsupported(kind: string, text: string): RangeError {
-  return new RangeError(`@arki/db/temporal: cannot read ${kind} "${text}" (infinity and BC values are not supported)`);
+/** Drizzle's `fromDriver` cannot return a failure, so the codec throws the typed failure, never a raw `RangeError`. */
+function unsupported(kind: 'date' | 'timestamp', text: string, cause: unknown): UnexpectedFailure {
+  return new UnexpectedFailure(StoredValueUnreadable({ kind }, { cause: new RangeError(`cannot read ${kind} "${text}"`, { cause }) }));
 }
 
 /** `PlainDate` → `YYYY-MM-DD`. */
@@ -51,8 +57,8 @@ export function plainDateFromDriver(text: string | Date): PlainDate {
   }
   try {
     return Temporal.PlainDate.from(text);
-  } catch {
-    throw unsupported('date', text);
+  } catch (error) {
+    throw unsupported('date', text, error);
   }
 }
 
@@ -73,8 +79,8 @@ export function instantFromDriver(text: string | Date): Instant {
   try {
     if (HAS_OFFSET.test(iso)) return Temporal.Instant.from(iso);
     return Temporal.PlainDateTime.from(iso).toZonedDateTime('UTC').toInstant();
-  } catch {
-    throw unsupported('timestamp', text);
+  } catch (error) {
+    throw unsupported('timestamp', text, error);
   }
 }
 

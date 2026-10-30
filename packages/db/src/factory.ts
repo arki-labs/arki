@@ -28,11 +28,9 @@ export function createDb<TRelations extends AnyRelations>({
 }) {
   debugFactory.debug('[factory] Creating database from environment configuration');
 
+  // `env.DB_URL` is validated (a URL) on first read, so a missing one throws the env validation error
+  // naming `DB_URL` before this line returns. There is no separate "not configured" case.
   const connectionUrl = url ?? env.DB_URL;
-  if (!connectionUrl) {
-    debugFactory.debug('[factory] Database creation failed: DB_URL not configured');
-    throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
-  }
 
   const connectionOptions = { ...getPoolOptions(), connectionString: connectionUrl };
 

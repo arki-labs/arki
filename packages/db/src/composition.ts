@@ -3,6 +3,7 @@ import type { SQLiteTransactionConfig } from 'drizzle-orm/sqlite-core';
 
 import type { TransactionFailure } from './transaction.js';
 import { runTransactionOnce } from './owned-transaction.js';
+import { observeDbOperation } from './runtime-local-telemetry.js';
 
 export const DB_COMPOSITION_ERROR_CODES = {
   /**
@@ -128,12 +129,14 @@ export function createUnitOfWork<TTransaction, const TFactories extends Record<s
 ): UnitOfWork<{
   readonly [K in keyof TFactories]: ReturnType<TFactories[K]>;
 }> {
-  return async fn =>
-    runTransactionOnce(db, async tx => {
-      const scopes: Record<string, unknown> = {};
-      for (const [name, factory] of Object.entries(factories)) {
-        scopes[name] = factory(tx);
-      }
-      return fn(scopes as { readonly [K in keyof TFactories]: ReturnType<TFactories[K]> });
-    });
+  return fn =>
+    observeDbOperation('db.unit_of_work', () =>
+      runTransactionOnce(db, async tx => {
+        const scopes: Record<string, unknown> = {};
+        for (const [name, factory] of Object.entries(factories)) {
+          scopes[name] = factory(tx);
+        }
+        return fn(scopes as { readonly [K in keyof TFactories]: ReturnType<TFactories[K]> });
+      }),
+    );
 }

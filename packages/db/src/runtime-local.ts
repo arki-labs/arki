@@ -13,8 +13,6 @@ import { acquireOwnerLock, classifyLocalRuntimeFailure, lockableDataDir } from '
 import { LocalRuntimeCleanupFailed } from './runtime-local-failures.js';
 import { observeDbOperation } from './runtime-local-telemetry.js';
 
-export { DB_RUNTIME_LOCAL_ERROR_CODES, DbRuntimeLocalError } from './owner-lock.js';
-export type { DbRuntimeLocalErrorCode } from './owner-lock.js';
 export * from './runtime-local-failures.js';
 
 export type PgliteInitOptions = {

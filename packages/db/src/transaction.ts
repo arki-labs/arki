@@ -25,6 +25,7 @@ import type { TransactionFailure } from './errors.js';
 import { isTransaction } from './dialect.js';
 import { TransactionCancelled, TransactionConflict, TransactionDefect } from './errors.js';
 import { assertSafeDriver, classifyTransactionFailure, transactionAttempt } from './owned-transaction.js';
+import { observeDbOperation } from './runtime-local-telemetry.js';
 import { findDatabaseError } from './sql-state.js';
 import { DB_TRANSACTION_ERROR_CODES, DbTransactionError } from './transaction-errors.js';
 import { transactionSettings } from './transaction-settings.js';
@@ -118,10 +119,18 @@ function assertTransactionRoot(db: object): void {
  * External effects must remain outside the callback because an attempt may rerun.
  * Static configuration misuse still throws DbTransactionError.
  */
-export async function runTransaction<Tx, T>(
+export function runTransaction<Tx, T>(
   db: TransactionalDb<Tx>,
   work: (tx: Tx, attempt: number) => Promise<T>,
   options: TransactionOptions = {},
+): Promise<T | TransactionFailure> {
+  return observeDbOperation('db.transaction', () => runTransactionUnobserved(db, work, options));
+}
+
+async function runTransactionUnobserved<Tx, T>(
+  db: TransactionalDb<Tx>,
+  work: (tx: Tx, attempt: number) => Promise<T>,
+  options: TransactionOptions,
 ): Promise<T | TransactionFailure> {
   const { clock, signal, ...settings } = options;
   const { isolation, retries } = parseTransactionSettings(settings);

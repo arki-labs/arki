@@ -80,6 +80,31 @@ describe('local key confinement', () => {
     expect(StorageRejected.is(await storage.getMetadata('child'))).toBe(true);
   });
 
+  it('refuses a put whose base path is a regular file instead of reporting an unexpected defect', async () => {
+    const { directory } = await fixture();
+    const storage = createLocalStorageAdapter({
+      provider: 'local',
+      basePath: path.join(directory, 'sentinel'),
+      baseUrl: 'https://audit.invalid',
+    });
+    expect(StorageRejected.is(await storage.put('child', Buffer.from('x')))).toBe(true);
+  });
+
+  it('leaves the old bytes in place when an overwrite fails, and leaves no temp file behind', async () => {
+    const { base, storage } = await fixture();
+    orThrow(await storage.put('doc', Buffer.from('old')));
+    const aborted = new AbortController();
+    const slow = Buffer.alloc(8 * 1024 * 1024, 1);
+    const pending = storage.put('doc', slow, { signal: aborted.signal });
+    aborted.abort();
+    // Either outcome is valid: the file must never be torn.
+    // eslint-disable-next-line failure/must-use -- either outcome is valid here
+    await pending;
+    const kept = await readFile(path.join(base, 'doc'));
+    expect(kept.equals(Buffer.from('old')) || kept.equals(slow)).toBe(true);
+    expect(await storage.list('')).toEqual(['doc']);
+  });
+
   it('keeps intentional missing values and confirmed local writes unwrapped', async () => {
     const { storage } = await fixture();
     expect(await storage.get('missing')).toBeNull();

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ListenClient, ListenPool } from './pg-listen.js';
-import { listenOnPool } from './pg-listen.js';
+import { listenOnPool, ListenUnavailable } from './pg-listen.js';
 
 type Notification = { readonly channel: string; readonly payload?: string };
 
@@ -199,14 +199,27 @@ describe('listenOnPool', () => {
     const first = scriptedClient(() => Promise.reject(new Error('permission denied')));
     const pool = scriptedPool(first, scriptedClient());
     const states: string[] = [];
-    await expect(listenOnPool(pool, 'ch', { onState: state => states.push(state) })(ignorePayload)).rejects.toThrow(
-      'permission denied',
-    );
+    const started = listenOnPool(pool, 'ch', { onState: state => states.push(state) })(ignorePayload);
+    await expect(started).rejects.toMatchObject({ code: ListenUnavailable.code });
+    await expect(started).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'permission denied' }) });
     first.fail(new Error('late'));
     await vi.advanceTimersByTimeAsync(5000);
     expect(first.releases).toEqual([new Error('permission denied')]);
     expect(pool.connects()).toBe(1);
     expect(states).toEqual([]);
+  });
+
+  it('a throwing onState observer neither rejects the start nor drops the client', async () => {
+    const first = scriptedClient();
+    const pool = scriptedPool(first, scriptedClient());
+    const stop = await listenOnPool(pool, 'ch', {
+      onState: () => {
+        throw new Error('observer bug');
+      },
+    })(ignorePayload);
+    expect(first.releases).toEqual([]);
+    first.fail(new Error('lost'));
+    await stop();
   });
 
   it('stop unlistens and closes the client (never hands it back), then reports nothing more', async () => {

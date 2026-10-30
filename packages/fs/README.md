@@ -335,9 +335,9 @@ The sweep returns an exact failure when deletion cannot be confirmed. Its claim 
 cleanup duty with backoff; earlier confirmed deletions stay confirmed. A successful `CleanupResult` has
 `failed: 0`. A returned failure never implies that no earlier rows changed.
 
-Static bad configuration still throws `FileStorageError` (`ARKI_FS_E001` or `ARKI_FS_E006`). The legacy
-`ARKI_FS_E007` constructor remains available for explicit foreign integrations; owned storage operations
-return the canonical outcomes above and never mark an unconfirmed write as retryable success.
+Static bad configuration still throws `FileStorageError` (`ARKI_FS_E001` or `ARKI_FS_E006`); match it with the
+`fileStorageError` schema. Owned storage operations return the canonical outcomes above and never mark an
+unconfirmed write as retryable success.
 
 ### Local filesystem and foreign bridges
 

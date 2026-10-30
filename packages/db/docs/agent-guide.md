@@ -268,7 +268,7 @@ Never silence it with an alias or `as`: the effect still runs twice.
 - `onState('ready')` runs after every successful `LISTEN`. `onState('disconnected')` runs once per lost client: an `error`, an `end`, or a `select 1` health check with no answer within `healthMs`.
 - A lost client is released once (destroyed, never reused) and replaced every `retryMs`. Notifications sent in between are lost. Treat `disconnected` as a gap.
 - Stop runs `UNLISTEN` and closes the client. It never hands it back: its handlers stay on it.
-- If the first `LISTEN` fails, the start rejects and nothing retries.
+- If the first connection or `LISTEN` fails, the start rejects with an `UnexpectedFailure` whose `failure` is `ListenUnavailable` (`db.listen_unavailable`; the raw pool error is its `cause`) and nothing retries. A throwing `onState` observer is logged at DEBUG and never rejects the start or drops the client.
 - Tests: `src/pg-listen.test.ts` (scripted pool), `src/pg-listen.pg.test.ts` (Postgres 16).
 
 ## Verify

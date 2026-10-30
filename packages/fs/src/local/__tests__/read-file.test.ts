@@ -1,25 +1,16 @@
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import path from 'node:path';
 import { encode } from 'iconv-lite';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { readFile } from '../read-file';
 
-const FIXTURES_DIR = join(import.meta.dirname, 'fixtures');
+const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');
 
 describe('readFile', () => {
-  beforeAll(() => {
-    // Suppress console.debug output during tests
-    vi.spyOn(console, 'debug').mockImplementation(() => {});
-  });
-
-  afterAll(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('UTF-8 encoding', () => {
     it('reads a UTF-8 file correctly', () => {
-      const filePath = join(FIXTURES_DIR, 'utf8.txt');
+      const filePath = path.join(FIXTURES_DIR, 'utf8.txt');
       const content = readFile(filePath, 'utf8');
 
       expect(content).toContain('Hello, World!');
@@ -28,7 +19,7 @@ describe('readFile', () => {
     });
 
     it('uses buffer.toString() for utf8 encoding', () => {
-      const filePath = join(FIXTURES_DIR, 'utf8.txt');
+      const filePath = path.join(FIXTURES_DIR, 'utf8.txt');
       const content = readFile(filePath, 'utf8');
 
       expect(typeof content).toBe('string');
@@ -37,7 +28,7 @@ describe('readFile', () => {
   });
 
   describe('non-UTF-8 encodings', () => {
-    const latin1FilePath = join(FIXTURES_DIR, 'latin1.txt');
+    const latin1FilePath = path.join(FIXTURES_DIR, 'latin1.txt');
     const latin1Content = 'Héllo Wörld! Ñoño';
 
     beforeAll(() => {
@@ -60,7 +51,7 @@ describe('readFile', () => {
   });
 
   describe('Windows encodings', () => {
-    const win1252FilePath = join(FIXTURES_DIR, 'win1252.txt');
+    const win1252FilePath = path.join(FIXTURES_DIR, 'win1252.txt');
     const win1252Content = 'Windows encoding: "smart quotes" and €';
 
     beforeAll(() => {
@@ -78,7 +69,7 @@ describe('readFile', () => {
 
   describe('edge cases', () => {
     it('handles empty files', () => {
-      const emptyFilePath = join(FIXTURES_DIR, 'empty.txt');
+      const emptyFilePath = path.join(FIXTURES_DIR, 'empty.txt');
       writeFileSync(emptyFilePath, '');
 
       const content = readFile(emptyFilePath, 'utf8');
@@ -87,7 +78,7 @@ describe('readFile', () => {
     });
 
     it('throws an error for non-existent files', () => {
-      const nonExistentPath = join(FIXTURES_DIR, 'non-existent.txt');
+      const nonExistentPath = path.join(FIXTURES_DIR, 'non-existent.txt');
 
       expect(() => readFile(nonExistentPath, 'utf8')).toThrow();
     });

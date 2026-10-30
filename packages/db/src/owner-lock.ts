@@ -38,41 +38,6 @@ import {
   OwnerLockContended,
 } from './runtime-local-failures.js';
 
-/** Stable error codes of `@arki/db/runtime-local`. Match on them, never on the message. */
-export const DB_RUNTIME_LOCAL_ERROR_CODES = {
-  /**
-   * The PGlite data directory is open in a live process, or already open in this one.
-   *
-   * @fix Stop the other process, or give this one its own data directory.
-   * @verify bun run test -- src/owner-lock.test.ts
-   */
-  dataDirInUse: 'ARKI_DB_LOCAL_E001',
-} as const;
-
-export type DbRuntimeLocalErrorCode = (typeof DB_RUNTIME_LOCAL_ERROR_CODES)[keyof typeof DB_RUNTIME_LOCAL_ERROR_CODES];
-
-/** Historical thrown diagnostic. Owned runtime operations now return canonical failures. */
-export class DbRuntimeLocalError extends Error {
-  readonly code: DbRuntimeLocalErrorCode;
-  /** How to fix it. */
-  readonly remediation: string;
-  /** The pid that holds the data directory. */
-  readonly pid: number;
-
-  constructor(args: {
-    readonly code: DbRuntimeLocalErrorCode;
-    readonly message: string;
-    readonly remediation: string;
-    readonly pid: number;
-  }) {
-    super(args.message);
-    this.name = 'DbRuntimeLocalError';
-    this.code = args.code;
-    this.remediation = args.remediation;
-    this.pid = args.pid;
-  }
-}
-
 const LOCK_FILE = '.arki-owner';
 /** How often to look again while another process holds the reclaim lock. */
 const RECLAIM_WAIT_MS = 20;

@@ -16,10 +16,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defineId } from '@arki/contracts';
 import { pgColumns } from '@arki/db/pg';
 import { isFailure, orThrow } from '@arki/failure';
+import { is } from '@arki/schema';
 
 import type { FileId } from '../files/index.js';
 import type { FilesDb, FileStorage } from './index.js';
-import { FileWrongState, isFileStorageError } from '../files/index.js';
+import { FileWrongState, fileStorageError } from '../files/index.js';
 import { memoryUploadAdapter } from '../testing.js';
 import { filesTable, fileStorage } from './index.js';
 
@@ -143,7 +144,7 @@ describe('confirm races', () => {
       );
       const confirm = storageA.confirmUpload(alice, id).then(
         value => (isFailure(value) ? value.code : 'won'),
-        (error: unknown) => (isFileStorageError(error) ? error.code : error),
+        (error: unknown) => (is(error, fileStorageError) ? error.code : error),
       );
       // Wait until confirm's UPDATE is queued on the row lock.
       for (let tries = 0; tries < 100; tries += 1) {
@@ -173,7 +174,7 @@ describe('confirm races', () => {
     const confirms = ids.map(id =>
       storageA.confirmUpload(alice, id).then(
         value => (isFailure(value) ? value.code : 'won'),
-        (error: unknown) => (isFileStorageError(error) ? error.code : error),
+        (error: unknown) => (is(error, fileStorageError) ? error.code : error),
       ),
     );
     const sweep = (async () => {

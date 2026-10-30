@@ -42,8 +42,8 @@ A failed lock removal can be retried. A failed close that may leave a live
 database keeps ownership. Raw `pglite.close()` remains PGlite's foreign
 `Promise<void>` API and can reject; use owned `close()` for the Arki contract.
 
-`DbRuntimeLocalError` and `DB_RUNTIME_LOCAL_ERROR_CODES` remain exported for
-existing diagnostic integrations; new initialization outcomes use the canonical
+`DbRuntimeLocalError` and `DB_RUNTIME_LOCAL_ERROR_CODES` were removed: nothing
+constructed them since `DataDirInUse` is returned. Use the canonical
 definitions above. Tests and terminal process startup may explicitly use
 `orThrow`; reusable services should propagate failures.
 

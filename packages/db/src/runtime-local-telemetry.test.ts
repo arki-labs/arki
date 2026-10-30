@@ -10,7 +10,10 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+
+import { createUnitOfWork } from './composition.js';
+import { runTransaction, runTransactionOnce } from './transaction.js';
 
 import { ownerId } from './owner-lock.js';
 import { observeDbOperation, observeDbSyncOperation } from './runtime-local-telemetry.js';
@@ -290,5 +293,28 @@ describe('local runtime observer isolation', () => {
     const run = vi.fn(() => failure);
     expect(await observeDbOperation('db.local.init', run)).toBe(failure);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('transaction telemetry', () => {
+  it('emits one span per runTransaction, runTransactionOnce and unit of work, with the failure code of a rolled-back outcome', async () => {
+    const exporter = installTelemetry();
+    const opened = await orThrow(initDbRuntimeLocal({ memory: true }, { relations: {} }));
+    closes.push(opened.close);
+    const refused = defineFailure('test.refused', { status: 409, message: 'refused' });
+    orThrow(await runTransaction(opened.db, () => Promise.resolve('committed')));
+    expect(await runTransaction(opened.db, () => Promise.resolve(refused()))).toMatchObject({ code: 'test.refused' });
+    orThrow(await runTransactionOnce(opened.db, () => Promise.resolve('once')));
+    orThrow(await createUnitOfWork(opened.db, { scope: tx => tx })(() => Promise.resolve('uow')));
+    const spans = exporter.getFinishedSpans().filter(span => span.name.startsWith('db.') && !span.name.startsWith('db.local'));
+    expect(spans.map(span => span.name)).toEqual([
+      'db.transaction',
+      'db.transaction',
+      'db.transaction.once',
+      'db.transaction.once',
+      'db.unit_of_work',
+    ]);
+    expect(spans[1]?.attributes['failure.code']).toBe('test.refused');
+    expect(spans[0]?.attributes).toEqual({});
   });
 });

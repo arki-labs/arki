@@ -17,6 +17,8 @@ const REFUSED = new Set([
   'EPERM',
   'EROFS',
   'ENOTDIR',
+  // mkdir -p on a base path that is a regular file.
+  'EEXIST',
   'EISDIR',
   'ELOOP',
   'EINVAL',

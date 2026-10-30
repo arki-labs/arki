@@ -1,4 +1,4 @@
-import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, metrics, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
@@ -27,8 +27,11 @@ export async function observeDbOperation<T>(name: string, run: () => T | Promise
     if (active !== undefined) return context.with(active, execute);
     return;
   });
-  const failed = (code: string) => {
-    report(() => span?.setAttribute('failure.code', code));
+  const started = performance.now();
+  let code: string | undefined;
+  const failed = (failure: string) => {
+    code = failure;
+    report(() => span?.setAttribute('failure.code', failure));
     report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
   };
   try {
@@ -40,6 +43,13 @@ export async function observeDbOperation<T>(name: string, run: () => T | Promise
     throw error;
   } finally {
     report(() => span?.end());
+    // Metrics share the bounded operation names and failure codes of the spans; no private data.
+    report(() => {
+      const meter = metrics.getMeter('@arki/db');
+      const attributes = { operation: name, 'failure.code': code ?? 'none' };
+      meter.createCounter('db.operations').add(1, attributes);
+      meter.createHistogram('db.operation.duration', { unit: 's' }).record((performance.now() - started) / 1000, attributes);
+    });
   }
 }
 

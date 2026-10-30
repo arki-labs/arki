@@ -1,6 +1,7 @@
 /** Local storage requires an application-owned base directory. Descendant symlinks are refused. */
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -78,16 +79,26 @@ export class LocalStorageAdapter implements StorageAdapter {
         const checked = await this.filePath(key);
         if (isFailure(checked)) return checked;
         if (options?.signal?.aborted) return StorageCancelled({ cause: options.signal.reason });
-        // O_NOFOLLOW rejects a leaf swapped for a symlink after validation.
+        // Write beside the target, then rename: a failed or cancelled overwrite leaves the old bytes untouched.
+        // O_EXCL | O_NOFOLLOW means the temp name is ours alone; rename replaces a swapped-in leaf symlink instead of following it.
         dispatched = true;
-        const handle = await fs.open(
-          checked,
-          constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
-        );
+        const temporary = `${checked}.${randomUUID()}.tmp`;
         try {
-          await handle.writeFile(data, { signal: options?.signal });
-        } finally {
-          await handle.close();
+          const handle = await fs.open(
+            temporary,
+            constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+          );
+          try {
+            await handle.writeFile(data, { signal: options?.signal });
+          } finally {
+            await handle.close();
+          }
+          await fs.rename(temporary, checked);
+        } catch (error) {
+          await fs.rm(temporary, { force: true }).catch(() => {
+            /* The original write error is the one to report. */
+          });
+          throw error;
         }
         return {
           key,

@@ -295,10 +295,22 @@ function createPgPlugin<TRelations extends AnyRelations>(options: PgDbDotOptions
       const pgHandle = handle as NodePgDatabase<TRelations> & {
         $client?: { end: () => Promise<void> };
       };
+      // End both pools even when the first `end()` rejects, then report every failure.
+      const failures: unknown[] = [];
       if (pgHandle.$client !== undefined) {
-        await pgHandle.$client.end();
+        try {
+          await pgHandle.$client.end();
+        } catch (error) {
+          failures.push(error);
+        }
       }
-      await sessionPool.end();
+      try {
+        await sessionPool.end();
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, 'db: closing the query pool and the session pool both failed');
     },
   });
 }
@@ -326,8 +338,9 @@ function createLibsqlPlugin<TRelations extends AnyRelations>(options: LibsqlDbDo
       },
     },
     dispose() {
-      close?.();
+      const closing = close;
       close = undefined;
+      closing?.();
     },
   });
 }

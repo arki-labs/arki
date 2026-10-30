@@ -103,6 +103,20 @@ export const TransactionDefect = defineFailure('db.transaction_defect', {
   remediation: 'Inspect the private cause and fix the operation.',
 });
 
+/**
+ * A stored value cannot be read as the column's type: Postgres `infinity`, a BC date, malformed text, or
+ * SQLite milliseconds that are NaN or out of range. Drizzle's `fromDriver` cannot return a failure, so the
+ * column codecs throw this as an `UnexpectedFailure` (`error.failure` is this value); the raw `RangeError` is its `cause`.
+ * @fix Repair or remove the stored value, or read the column as text and handle the special value yourself.
+ * @verify bun run test -- src/temporal.test.ts
+ */
+export const StoredValueUnreadable = defineFailure('db.stored_value_unreadable', {
+  status: 500,
+  data: z.object({ kind: z.enum(['date', 'timestamp', 'sqlite_instant']) }),
+  message: 'A stored {kind} value cannot be read.',
+  remediation: 'Repair or remove the stored value; infinity, BC dates and malformed text are not supported.',
+});
+
 /** One source for transaction failures, native contract maps and exact result unions. */
 export const TRANSACTION_FAILURES = [
   TransactionConflict,

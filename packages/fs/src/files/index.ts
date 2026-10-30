@@ -3,7 +3,7 @@
  * error codes, failures and the browser upload helper. Runs on Node, Bun, Deno,
  * browsers and Hermes.
  */
-export { FILE_ERROR_CODES, FileStorageError, isFileStorageError } from './errors.js';
+export { FILE_ERROR_CODES, FileStorageError, fileStorageError } from './errors.js';
 export type { FileErrorCode } from './errors.js';
 export {
   CREATE_UPLOAD_FAILURES,

@@ -13,12 +13,13 @@ import type { Dialect } from '@arki/db/columns';
 import { defineId, RandomSourceUnavailable } from '@arki/contracts';
 import { InvalidInput, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { fakeLog } from '@arki/log/testing';
+import { is } from '@arki/schema';
 
 import type { FileId } from '../files/types.js';
 import type { SignedUploadAdapter } from '../storage/types.js';
 import type { FileStorage, FileStorageOptions } from './storage.js';
 import type { FileRow, FilesTable } from './table.js';
-import { FILE_ERROR_CODES, isFileStorageError } from '../files/errors.js';
+import { FILE_ERROR_CODES, fileStorageError } from '../files/errors.js';
 import { FileUnavailable, FileWrongState, UploadMismatch, UploadPending } from '../files/failures.js';
 import { fileRecord } from '../files/schemas.js';
 import { fileId } from '../files/types.js';
@@ -65,7 +66,7 @@ async function codeOf(promise: Promise<unknown>) {
     const value = await promise;
     return isFailure(value) ? value.code : 'resolved';
   } catch (error) {
-    return isFileStorageError(error) ? error.code : error;
+    return is(error, fileStorageError) ? error.code : error;
   }
 }
 

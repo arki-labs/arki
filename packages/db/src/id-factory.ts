@@ -138,6 +138,9 @@ export function idColumns<TSchema extends z.ZodType & z.core.$ZodType<string>>(
  * (browser-safe, type written once) and get its columns with
  * {@link idColumns}. This factory stays for the ids declared the old way.
  *
+ * @deprecated The id type is derived from the prefix alone, so two kinds with the same prefix are
+ * interchangeable. `defineId(prefix)` from `@arki/contracts` with {@link idColumns} gives each id its own type.
+ *
  * @param prefix - The prefix for the ID type (e.g., 'pt', 'usr', 'ant')
  * @returns An object with create function, schema, and column helpers
  *

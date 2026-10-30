@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { defineApp, rename } from '@arki/dot/unit';
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { db, DB_PLUGIN_ERROR_CODES, dbMigrations } from './dot.js';
 
@@ -196,6 +196,16 @@ describe('@arki/db/dot', () => {
       } finally {
         await orThrow(app.dispose());
       }
+    });
+
+    it('still ends the session pool when the query pool end() rejects, and reports the failure', async () => {
+      const app = await orThrow(defineApp('db-session-dispose-fail').infra(db({ relations, url: () => neonDirect })).boot());
+      const queryEnd = vi.spyOn(queryPoolOf(app.services.db), 'end').mockRejectedValue(new Error('query pool end failed'));
+      const sessionEnd = vi.spyOn(app.services.sessionPool, 'end').mockImplementation(() => Promise.resolve());
+      const outcome = await app.dispose();
+      expect(queryEnd).toHaveBeenCalledOnce();
+      expect(sessionEnd).toHaveBeenCalledOnce();
+      expect(isFailure(outcome)).toBe(true);
     });
 
     it('ends the session pool on dispose, after the query pool', async () => {

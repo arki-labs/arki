@@ -10,7 +10,7 @@ import {
   FILE_ERROR_CODES,
   fileId,
   FileStorageError,
-  isFileStorageError,
+  fileStorageError,
   UploadPending,
   uploadRequest,
   uploadTicket,
@@ -45,8 +45,8 @@ check(
   !uploadRequest.safeParse({ mime: 'text/plain; charset=utf-8', size: 1 }).success,
 );
 
-const error = new FileStorageError(FILE_ERROR_CODES.storage, 'store down');
-check('errors carry a stable code', isFileStorageError(error) && error.code === 'ARKI_FS_E007' && error.retryable);
+const error = new FileStorageError(FILE_ERROR_CODES.invalid, 'bad input');
+check('errors carry a stable code', fileStorageError.safeParse(error).success && error.code === 'ARKI_FS_E001');
 
 const pending = UploadPending({ fileId: id });
 check(

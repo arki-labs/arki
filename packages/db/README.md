@@ -326,7 +326,7 @@ export const bookings = pgTable('bookings', {
 ```
 
 - The SQL types are exactly Drizzle's own, so switching an existing `timestamp(name)` column to `instant(name, { withTimezone: false })` changes the TypeScript type and nothing in the database. Diff `drizzle-kit export` before and after to confirm.
-- Both columns ask Drizzle for Postgres text on every driver (node-postgres, postgres.js, PGlite, Bun SQL), so one strict parser reads them all. `infinity` and BC values throw instead of becoming a wrong date.
+- Both columns ask Drizzle for Postgres text on every driver (node-postgres, postgres.js, PGlite, Bun SQL), so one strict parser reads them all. `infinity`, BC values and malformed text never become a wrong date: Drizzle's `fromDriver` cannot return a failure, so the codec throws an `UnexpectedFailure` whose `failure` is `StoredValueUnreadable` (`db.stored_value_unreadable`), never a raw `RangeError`. The SQLite `instant` does the same for `NaN` or out-of-range milliseconds.
 - There is no zoned column: Postgres stores no zone. Store the zone in a `text` column and read with `zoned(instant, zone)`.
 - Tables owned by an auth library (Better Auth) keep `Date` columns: the library writes and reads them itself.
 

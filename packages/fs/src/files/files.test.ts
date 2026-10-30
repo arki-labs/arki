@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { is } from '@arki/schema';
 
 import type { toFileRecord } from '../lifecycle/record.js';
 import type { FileId, FileRecord, UploadRequest, UploadTicket } from './index.js';
@@ -10,7 +11,7 @@ import {
   FILE_ERROR_CODES,
   fileId,
   FileStorageError,
-  isFileStorageError,
+  fileStorageError,
   uploadFile,
   uploadRequest,
   uploadTicket,
@@ -52,14 +53,13 @@ describe('uploadRequest', () => {
 });
 
 describe('FileStorageError', () => {
-  it('marks only "retry later" codes retryable', () => {
-    const retryable = Object.values(FILE_ERROR_CODES).filter(code => new FileStorageError(code, 'x').retryable);
-    expect(retryable).toEqual([FILE_ERROR_CODES.storage]);
+  it('keeps only the codes something throws: E007 is retired', () => {
+    expect(Object.values(FILE_ERROR_CODES)).toEqual(['ARKI_FS_E001', 'ARKI_FS_E006']);
   });
 
-  it('is recognised by isFileStorageError, plain errors are not', () => {
-    expect(isFileStorageError(new FileStorageError(FILE_ERROR_CODES.invalid, 'x'))).toBe(true);
-    expect(isFileStorageError(new Error('x'))).toBe(false);
+  it('is recognised by the fileStorageError schema, plain errors are not', () => {
+    expect(is(new FileStorageError(FILE_ERROR_CODES.invalid, 'x'), fileStorageError)).toBe(true);
+    expect(is(new Error('x'), fileStorageError)).toBe(false);
   });
 });
 

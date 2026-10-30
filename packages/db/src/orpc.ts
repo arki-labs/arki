@@ -138,6 +138,7 @@ function isAsyncIterable(value: unknown): boolean {
  *   Dot feature's `ctx.db`). A transaction as root is refused (`ARKI_DB_TX_E006`).
  * - `options.repos`: picks the repository source; the handler gets
  *   `source.withTx(tx)` as `context.repos`.
+ * - Each request is one `db.transaction` span (from `runTransaction`), carrying the failure code of a rolled-back outcome.
  * - `options.isolation` (`'serializable'`, the default and only level) and
  *   `options.retries` (default 3, at most 10) are checked now: bad values throw
  *   `ARKI_DB_TX_E002` here, not on the first request.

@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant as toInstant, plainDate as toPlainDate } from '@arki/date/core';
 
+import { UnexpectedFailure } from '@arki/failure';
+
+import { StoredValueUnreadable } from './errors.js';
 import { instant, instantFromDriver, plainDate, plainDateFromDriver } from './temporal.js';
 
 describe('driver text parsing', () => {
@@ -28,9 +31,24 @@ describe('driver text parsing', () => {
     expect(plainDateFromDriver(new Date('2026-03-29T00:00:00.000Z')).toString()).toBe('2026-03-29');
   });
 
-  it('refuses values Temporal cannot hold instead of guessing', () => {
-    expect(() => instantFromDriver('infinity')).toThrow(/cannot read timestamp "infinity"/);
-    expect(() => plainDateFromDriver('0044-03-15 BC')).toThrow(/cannot read date/);
+  it('refuses values Temporal cannot hold with the typed StoredValueUnreadable failure, never a raw RangeError', () => {
+    for (const read of [
+      () => instantFromDriver('infinity'),
+      () => instantFromDriver('garbage'),
+      () => plainDateFromDriver('0044-03-15 BC'),
+      () => plainDateFromDriver('infinity'),
+    ]) {
+      let thrown: unknown;
+      try {
+        read();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(UnexpectedFailure);
+      expect(thrown).not.toBeInstanceOf(RangeError);
+      expect(thrown).toMatchObject({ code: StoredValueUnreadable.code });
+    }
+    expect(StoredValueUnreadable.is((() => { try { return instantFromDriver('infinity'); } catch (error) { return error instanceof UnexpectedFailure ? error.failure : error; } })())).toBe(true);
   });
 });
 

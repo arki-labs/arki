@@ -18,12 +18,13 @@ import { z } from 'zod';
 
 import { InvalidEnvelope } from '@arki/failure';
 import { errorMap, orThrowRpc, reviveRpcError } from '@arki/failure/orpc';
+import { is } from '@arki/schema';
 
 import type { FileErrorCode } from './files/errors.js';
 import type { UploadClient } from './files/upload-file.js';
 import type { FileStorage } from './lifecycle/storage.js';
 import type { FilesTable, OwnerOf } from './lifecycle/table.js';
-import { FILE_ERROR_CODES, isFileStorageError } from './files/errors.js';
+import { FILE_ERROR_CODES, fileStorageError } from './files/errors.js';
 import {
   CONFIRM_UPLOAD_FAILURES,
   CREATE_UPLOAD_FAILURES,
@@ -60,7 +61,6 @@ export type FilesContract = typeof filesContract;
 const ORPC_CODES = {
   [FILE_ERROR_CODES.invalid]: 'BAD_REQUEST',
   [FILE_ERROR_CODES.unsupported]: 'INTERNAL_SERVER_ERROR',
-  [FILE_ERROR_CODES.storage]: 'INTERNAL_SERVER_ERROR',
 } as const satisfies Record<FileErrorCode, string>;
 
 /** Runs one storage call; a thrown `FileStorageError` becomes the matching `ORPCError`, with the `ARKI_FS_E00x` code in `data`. */
@@ -68,10 +68,10 @@ async function answer<R>(call: () => Promise<R>): Promise<R> {
   try {
     return await call();
   } catch (error) {
-    if (!isFileStorageError(error)) throw error;
+    if (!is(error, fileStorageError)) throw error;
     throw new ORPCError(ORPC_CODES[error.code], {
       message: error.message,
-      data: { code: error.code, retryable: error.retryable },
+      data: { code: error.code },
       cause: error,
     });
   }
