@@ -811,7 +811,7 @@ export function workflowsModule<
         throw stepNotDead(runId, `The run is ${detail.run.state}, so no undo is waiting`);
       }
       const node = nodes.find(candidate => candidate.name === path);
-      if (phase === 'do' && detail.run.state === 'parked' && (node?.kind === 'child' || node?.kind === 'map')) {
+      if (phase === 'do' && detail.run.state === 'parked' && (node?.kind === 'child' || node?.kind === 'map' || node?.kind === 'parallel')) {
         const failed = failedChildren(detail.children, path);
         if (failed > 0) {
           return {
@@ -1002,7 +1002,7 @@ export function workflowsModule<
         }
       }
       const running = nodes.flatMap(node => {
-        if (node.kind !== 'child' && node.kind !== 'map') return [];
+        if (node.kind !== 'child' && node.kind !== 'map' && node.kind !== 'parallel') return [];
         const live = detail.children.filter(child => child.parentPath === node.name && child.finishedAt === null);
         if (live.length === 0) return [];
         return [

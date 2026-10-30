@@ -1044,6 +1044,7 @@ The other nodes:
 - `.sleep(name, '24h')` or `.sleep(name, ctx => date)` parks the run until that time. `.sleep(name, until, { next })` loops back as a step's `next` does: an earlier node, `'next'`, or a function of `{ runId, input, results }` that picks one.
 - `.child(name, def, { input })` starts another workflow and waits for it. The result is the child's output.
 - `.map(name, def, { items, input, wait?, concurrency? })` starts one child per item. The result is the outputs in item order. With `wait: 'any'` the first child to finish wins, and the others are cancelled.
+- `.parallel(name, { [branch]: b => b.step(...).finish() }, { wait: 'all' | 'any' })` runs branches side by side. See [Parallel branches](#parallel-branches).
 - `.finish(fn?)` works out the output. Without `fn` the output is the last node's result. With an `output` schema, `fn` must return that schema's output, or it does not compile.
 
 ```ts continue
@@ -1401,6 +1402,30 @@ const thanked = orThrow(await welcome.read(db, 'welcome:ord_1'));
 if (thanked?.run.output !== 'thanks for 500') throw new Error('the order started the run');
 await client.close();
 ```
+
+## Parallel branches
+
+`.parallel` runs branches side by side and joins them. Each branch is a function that gets a builder and returns its finished definition.
+
+```ts skip="fragment: part of a workflow definition"
+.parallel(
+  'checks',
+  {
+    stock: b => b.step('reserve', ({ input }) => reserve(input)).finish(),
+    payment: b => b.waitFor('paid', { signal: 'payment.settled', schema: settled }).finish(({ results }) => results.paid),
+  },
+  { wait: 'all' },
+)
+```
+
+- **A branch is a child run.** It runs its own definition, named `<parent>/<node>/<branch>`, at the parent's version, with the parent's limits. It starts from a snapshot of the parent's input and results when the node starts. Branch node names must differ from the earlier nodes of the parent.
+- **`wait: 'all'`**: the result is an object, one key per branch, holding each branch's output. A branch that fails or is cancelled fails the node.
+- **`wait: 'any'`**: the result is `{ branch, result }` of the first branch to complete, and `branch` narrows `result`. The other branches are cancelled, and the node completes once each has stopped. A failed branch does not end the node while another may still complete. If none can, the node fails with `no branch of parallel '<name>' completed`.
+- **Signals.** `def.signal(name)` with the parent's run id reaches every branch that waits for that name. Each branch gets its own delivery (`deliveryId:branch`), so a repeat changes nothing. Two waits for one name, in any branches, must share one schema object; types refuse a clash and name the signal.
+- **Event waits.** A wait in a branch counts events from the parent's start, as a wait in the main line does. Moving a wait into a branch never changes what it sees.
+- **Transitions.** Each branch run counts its own transitions against `limits.transitions`. The parent counts the node as one.
+- **Versions.** A branch run is pinned to the parent's version. A new parent version has its own branch definitions, and running parallels finish on the old code.
+- **Reading.** A branch can start with `b.output(schema)`, as a workflow has an `output`. The branch run checks its output with it when it finishes, and `finish` must return it. When every branch has one, `def.read` types the node (`all`: an object by branch; `any`: `{ branch, result }`, where `branch` narrows `result`) and checks the stored value with those schemas, so a stored value that no longer fits is `WorkflowReadMismatch`. If any branch has none, the read is `unknown`.
 
 ### Command nodes
 

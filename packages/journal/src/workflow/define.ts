@@ -125,12 +125,71 @@ export function resultSchemaOf(
   if (node.kind === 'child' && typeof node.def !== 'function' && node.def.output !== undefined) {
     return { schema: node.def.output, nullable: false };
   }
+  // A parallel is read with the branches' schemas, when every branch has one.
+  if (node.kind === 'parallel') {
+    const schema = branchesSchema(node);
+    return schema === undefined ? undefined : { schema, nullable: false };
+  }
   if (node.kind === 'map' && node.def.output !== undefined) {
     return node.wait === 'all'
       ? { schema: node.def.output, nullable: false, each: true }
       : { schema: node.def.output, nullable: false };
   }
   return;
+}
+
+type ParallelNode_ = Extract<WorkflowNode, { readonly kind: 'parallel' }>;
+type IssuePath = readonly (PropertyKey | StandardSchemaV1.PathSegment)[];
+const issue = (message: string, path: IssuePath = []): StandardSchemaV1.Issue => ({ message, path });
+
+/**
+ * The schema that checks a stored parallel result: for `all`, an object with one key per branch, each checked by its
+ * branch's `output` schema; for `any`, `{ branch, result }` with `result` checked by the named branch's schema.
+ * `undefined` unless every branch has an `output` schema.
+ */
+function branchesSchema(node: ParallelNode_): StandardSchemaV1 | undefined {
+  const outputs = new Map<string, StandardSchemaV1>();
+  for (const branch of node.branches) {
+    if (branch.def.output === undefined) return undefined;
+    outputs.set(branch.name, branch.def.output);
+  }
+  const check = async (
+    schema: StandardSchemaV1,
+    value: unknown,
+    path: IssuePath,
+  ): Promise<{ readonly value: unknown } | { readonly issues: readonly StandardSchemaV1.Issue[] }> => {
+    const result = await schema['~standard'].validate(value);
+    if (result.issues === undefined) return { value: result.value };
+    return { issues: result.issues.map(found => issue(found.message, [...path, ...(found.path ?? [])])) };
+  };
+  const validate = async (value: unknown): Promise<StandardSchemaV1.Result<unknown>> => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { issues: [issue('expected an object')] };
+    }
+    if (node.wait === 'any') {
+      const { branch, result } = Object.fromEntries(Object.entries(value));
+      const schema = typeof branch === 'string' ? outputs.get(branch) : undefined;
+      if (schema === undefined) return { issues: [issue('expected the name of a branch', ['branch'])] };
+      const checked = await check(schema, result, ['result']);
+      if ('issues' in checked) return { issues: checked.issues };
+      return { value: { branch, result: checked.value } };
+    }
+    const given = new Map(Object.entries(value));
+    const issues: StandardSchemaV1.Issue[] = [];
+    const entries: [string, unknown][] = [];
+    for (const [name, schema] of outputs) {
+      if (!given.has(name)) {
+        issues.push(issue('missing', [name]));
+        continue;
+      }
+      const checked = await check(schema, given.get(name), [name]);
+      if ('issues' in checked) issues.push(...checked.issues);
+      else entries.push([name, checked.value]);
+    }
+    for (const name of given.keys()) if (!outputs.has(name)) issues.push(issue('not a branch', [name]));
+    return issues.length > 0 ? { issues } : { value: Object.fromEntries(entries) };
+  };
+  return { '~standard': { version: 1, vendor: 'arki-journal', validate } };
 }
 
 /** A stored body. Bivariant so a body typed for one workflow fits the erased slot without a cast. */
@@ -252,6 +311,15 @@ export type WorkflowNode =
       readonly concurrency?: number;
     }
   | {
+      readonly kind: 'parallel';
+      readonly name: string;
+      readonly undo: false;
+      /** One definition per branch, built with the parent's name, version and limits. See `branchDefs`. */
+      readonly branches: readonly { readonly name: string; readonly def: WorkflowDef }[];
+      /** `'all'`: every branch completes. `'any'`: the first to complete wins and the others are cancelled. */
+      readonly wait: 'all' | 'any';
+    }
+  | {
       readonly kind: 'command';
       readonly name: string;
       readonly undo: boolean;
@@ -324,6 +392,12 @@ export type WorkflowDef<
   /** What runs when a run of this version ends, if anything. See `LifecycleHooks`. */
   readonly on: ErasedLifecycleHooks | undefined;
   readonly nodes: readonly WorkflowNode[];
+  /**
+   * The nodes of the parent that came before a `parallel` node, for the definition of one of its branches; empty
+   * anywhere else. The branch run starts with the parent's results, and these say how to read them (an event wait's
+   * event, an accepted failure).
+   */
+  readonly inherited: readonly WorkflowNode[];
   /** Without a body, the run's output is the last node's result. */
   readonly finish: BivariantFn<[ctx: Pick<ErasedContext, 'runId' | 'input' | 'results'>], unknown> | undefined;
   /** `readOutput` and `results` are what `def.read` gives after its checks; see `CheckedRead`. */
@@ -590,6 +664,105 @@ type ChildNode<
   ): WorkflowBuilder<Input, Add<Results, Name, OutputOf<Def>>, N, Declared, OutputOf<Def>, Where, Ext, Signals, Checked>;
 };
 
+/** The builder a branch of a `parallel` node gets: the parent's input and results, and results of its own. */
+type BranchBuilder<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Where extends Host,
+> = WorkflowBuilder<Input, Results, N, undefined, never, Where> & {
+  /**
+   * Gives the branch an `output` schema, as a workflow has one: the branch run checks its output with it when it
+   * finishes, and `finish` must return its output. Call it first. When every branch has one, `def.read` types and
+   * checks the node's result with them.
+   */
+  output<Output extends StandardSchemaV1>(
+    schema: Output,
+  ): WorkflowBuilder<Input, Results, N, Output, never, Where>;
+};
+/**
+ * The branches of a `parallel` node: each one builds its definition from the builder it is given. Written over the
+ * definitions it builds (`Defs`), so a branch's `finish()` is typed by its own nodes and not by this type's bound.
+ */
+type BranchSet<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Where extends Host,
+  Defs extends Readonly<Record<string, WorkflowDef>>,
+> = { readonly [B in keyof Defs]: (builder: BranchBuilder<Input, Results, N, Where>) => Defs[B] };
+/** `wait: 'all'`: the output of every branch, by branch name. */
+type ParallelAll<Defs extends Readonly<Record<string, WorkflowDef>>> = {
+  readonly [B in keyof Defs & string]: OutputOf<Defs[B]>;
+};
+/** `wait: 'any'`: the winner, by branch name, with its output. Narrowing `branch` types `result`. */
+type ParallelAny<Defs extends Readonly<Record<string, WorkflowDef>>> = {
+  [B in keyof Defs & string]: { readonly branch: B; readonly result: OutputOf<Defs[B]> };
+}[keyof Defs & string];
+type ParallelResult<Defs extends Readonly<Record<string, WorkflowDef>>, Wait> = Wait extends 'any'
+  ? ParallelAny<Defs>
+  : ParallelAll<Defs>;
+/** `def.read` of a parallel node: typed by the branches' `output` schemas when every branch has one, else `unknown`. */
+type ParallelRead<Defs extends Readonly<Record<string, WorkflowDef>>, Wait> = true extends {
+  [B in keyof Defs]: unknown extends ReadOutputOfDef<Defs[B]> ? true : false;
+}[keyof Defs]
+  ? unknown
+  : Wait extends 'any'
+    ? {
+        [B in keyof Defs & string]: { readonly branch: B; readonly result: ReadOutputOfDef<Defs[B]> };
+      }[keyof Defs & string]
+    : { readonly [B in keyof Defs & string]: ReadOutputOfDef<Defs[B]> };
+/** The signal maps of the parent and of every branch. */
+type SignalMaps<Signals extends AnySignals, Defs extends Readonly<Record<string, WorkflowDef>>> =
+  | Signals
+  | (Defs[keyof Defs] extends infer Def ? (Def extends WorkflowDef ? NonNullable<Def['types']>['signals'] : never) : never);
+type SignalNames<Maps> = Maps extends unknown ? keyof Maps & string : never;
+/** The schemas one signal name has across the maps: more than one type is a clash. */
+type SignalSchemas<Maps, Name extends string> = Maps extends unknown ? (Name extends keyof Maps ? Maps[Name] : never) : never;
+type IsUnion<T, All = T> = T extends unknown ? ([All] extends [T] ? false : true) : never;
+/** The signal names that two waits use with payloads of different types. */
+type SignalClashes<Maps> = {
+  [Name in SignalNames<Maps>]: IsUnion<SignalSchemas<Maps, Name>> extends false ? never : Name;
+}[SignalNames<Maps>];
+type MergedSignals<Maps> = { readonly [Name in SignalNames<Maps>]: Extract<SignalSchemas<Maps, Name>, StandardSchemaV1> };
+/** The error a clashing signal gives: the message names the signal. */
+export type SignalClash<Name extends string> =
+  `branches wait for signal '${Name}' with payloads of different types; share one schema object`;
+type SignalGuard<Clashes extends string> = [Clashes] extends [never]
+  ? unknown
+  : { readonly signalClash: SignalClash<Clashes> };
+
+/** `.parallel(name, branches, { wait })`: see `WorkflowBuilder.parallel`. */
+type ParallelNode<
+  Input extends StandardSchemaV1,
+  Results extends AnyResults,
+  N extends Needs,
+  Declared extends StandardSchemaV1 | undefined,
+  Where extends Host,
+  Ext extends DefExtension,
+  Signals extends AnySignals,
+  Checked extends AnyResults,
+> = <Name extends string, Defs extends Readonly<Record<string, WorkflowDef>>, Wait extends 'all' | 'any'>(
+  name: Fresh<Results, Name>,
+  branches: BranchSet<Input, Results, N, Where, Defs>,
+  options: {
+    /** `'all'`: the node completes when every branch has. `'any'`: when the first has, and the others are cancelled. */
+    readonly wait: Wait;
+    /** What happens to the branches that lost an `'any'`: they are cancelled, and the node completes once each has stopped. */
+    readonly losers?: 'cancel';
+  } & SignalGuard<SignalClashes<SignalMaps<Signals, Defs>>>,
+) => WorkflowBuilder<
+  Input,
+  Add<Results, Name, ParallelResult<Defs, Wait>>,
+  N,
+  Declared,
+  ParallelResult<Defs, Wait>,
+  Where,
+  Ext,
+  MergedSignals<SignalMaps<Signals, Defs>>,
+  Add<Checked, Name, ParallelRead<Defs, Wait>>
+>;
+
 export type WorkflowBuilder<
   Input extends StandardSchemaV1,
   Results extends AnyResults,
@@ -686,6 +859,19 @@ export type WorkflowBuilder<
    * definition at run time, there is no schema to check with, so `def.read` gives `unknown`.
    */
   child: ChildNode<Input, Results, N, Declared, Where, Ext, Signals, Checked>;
+
+  /**
+   * Runs branches side by side and joins them. Each branch is a function that gets a builder and returns its finished
+   * definition; it runs as a child run of its own, on a snapshot of this run's input and results when the node
+   * starts, and its nodes may wait for signals and events. `wait: 'all'`: the result is the output of every branch,
+   * by branch name, and a branch that fails or is cancelled fails the node. `wait: 'any'`: the result is
+   * `{ branch, result }` of the first branch to complete, the others are cancelled, and the node completes once each
+   * has stopped; it fails only when no branch can complete. A branch's node names must differ from the nodes before
+   * the parallel. A signal for this run reaches every branch that waits for it, and two waits for one signal name must
+   * share the same schema object. An event wait in a branch counts from this run's start, as in the main line. Each
+   * branch run counts its own transitions against `limits.transitions`.
+   */
+  parallel: ParallelNode<Input, Results, N, Declared, Where, Ext, Signals, Checked>;
 
   map<Name extends string, Item, Def extends WorkflowDef, Wait extends 'all' | 'any' = 'all'>(
     name: Fresh<Results, Name>,
@@ -1048,6 +1234,9 @@ function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
             })),
           }
         : {}),
+      ...(node.kind === 'parallel'
+        ? { wait: node.wait, branches: node.branches.map(branch => ({ name: branch.name, shape: branch.def.shape })) }
+        : {}),
       ...(node.kind === 'command' ? { command: node.command.name } : {}),
       ...(node.kind === 'command' && node.options.undo !== undefined
         ? { undoCommand: node.options.undo.command.name }
@@ -1061,7 +1250,11 @@ function shapeOf(nodes: readonly WorkflowNode[]): WorkflowShape {
  * changing either is a shape change. Every other kind keeps exactly these three fields: its hash must not move, or
  * running workflows strand.
  */
-const hashedFields = (entry: WorkflowShape['nodes'][number]) => {
+const hashedFields = (entry: WorkflowShape['nodes'][number]): unknown[] => {
+  if (entry.kind === 'parallel') {
+    const branches = (entry.branches ?? []).map(branch => [branch.name, branch.shape.nodes.map(hashedFields)]);
+    return [entry.name, entry.kind, entry.undo, entry.wait ?? null, branches];
+  }
   if (entry.kind === 'command') return [entry.name, entry.kind, entry.undo, entry.command, entry.undoCommand ?? null];
   if (entry.kind === 'eventWait') return [entry.name, entry.kind, entry.undo, entry.on ?? null];
   return [entry.name, entry.kind, entry.undo];
@@ -1133,6 +1326,24 @@ function checkWaitSources(workflowName: string, name: string, on: readonly Erase
     }
   }
 }
+
+/**
+ * Every signal the nodes wait for, with its schema and where the wait is. The waits inside the branches of a `parallel`
+ * node count: the parent's signal door reaches them.
+ */
+export function signalWaits(
+  nodes: readonly WorkflowNode[],
+  prefix = '',
+): readonly { readonly signal: string; readonly schema: StandardSchemaV1; readonly at: string }[] {
+  return nodes.flatMap(node => {
+    if (node.kind === 'waitFor') return [{ signal: node.signal, schema: node.schema, at: `${prefix}${node.name}` }];
+    if (node.kind !== 'parallel') return [];
+    return node.branches.flatMap(branch => signalWaits(branch.def.nodes, `${prefix}${node.name}.${branch.name}.`));
+  });
+}
+
+/** A branch name is part of a run id and a definition name, so it is a plain key. */
+const BRANCH_NAME = /^[A-Za-z0-9_-]+$/;
 
 /** Adds a node after checking the rules that need no types. */
 function withNode<Input extends StandardSchemaV1, Ext extends DefExtension>(
@@ -1278,13 +1489,13 @@ function makeBuilder<
         );
       }
       if (options.signal === '') refuse(state.name, `waitFor '${name}' needs a signal name`);
-      const sharing = state.nodes.find(
-        node => node.kind === 'waitFor' && node.signal === options.signal && node.schema !== options.schema,
+      const sharing = signalWaits(state.nodes).find(
+        wait => wait.signal === options.signal && wait.schema !== options.schema,
       );
       if (sharing !== undefined) {
         refuse(
           state.name,
-          `waitFor '${name}' and '${sharing.name}' both wait for signal '${options.signal}' with different schemas; one signal name has one payload schema, so share the schema object`,
+          `waitFor '${name}' and '${sharing.at}' both wait for signal '${options.signal}' with different schemas; one signal name has one payload schema, so share the schema object`,
         );
       }
       return makeBuilder(
@@ -1338,6 +1549,69 @@ function makeBuilder<
           concurrency: options.concurrency,
         }),
       );
+    },
+    parallel: (name, branches, options) => {
+      if (options.wait !== 'all' && options.wait !== 'any') {
+        refuse(state.name, `parallel '${name}' needs wait: 'all' or 'any'`);
+      }
+      const entries = Object.entries(branches);
+      if (entries.length === 0) refuse(state.name, `parallel '${name}' needs at least one branch`);
+      const earlier = new Set(state.nodes.map(node => node.name));
+      // The signals the node's waits already use, with the first place each is waited for.
+      const signals = new Map(signalWaits(state.nodes).map(wait => [wait.signal, wait]));
+      const defs = entries.map(([branch, build]) => {
+        if (!BRANCH_NAME.test(branch)) {
+          refuse(state.name, `parallel '${name}': branch '${branch}' must be letters, digits, '-' and '_'`);
+        }
+        const branchName = `${state.name}/${name}/${branch}`;
+        const branchState: BuilderState<Input, NoExtension> = {
+          attach: () => ({}),
+          name: branchName,
+          nodes: [],
+          // A branch is a run of the parent's version with the parent's limits: its own transitions count against them.
+          header: {
+            ...state.header,
+            name: branchName,
+            output: undefined,
+            deadline: undefined,
+            concurrency: undefined,
+            startOn: undefined,
+            on: undefined,
+            inherited: state.nodes,
+          },
+        };
+        const built = build({
+          ...makeBuilder<Input, Results, N, undefined, never, Where, NoExtension, NoSignals, NoResults>(branchState),
+          output: <Output extends StandardSchemaV1>(schema: Output) =>
+            makeBuilder<Input, Results, N, Output, never, Where, NoExtension, NoSignals, NoResults>({
+              ...branchState,
+              header: { ...branchState.header, output: schema },
+            }),
+        });
+        if (built.name !== branchName) {
+          refuse(state.name, `parallel '${name}': branch '${branch}' must return the definition its builder finished`);
+        }
+        for (const node of built.nodes) {
+          if (earlier.has(node.name)) {
+            refuse(
+              state.name,
+              `parallel '${name}': branch '${branch}' has a node '${node.name}', which an earlier node of the workflow has too; a branch reads the earlier results, so its names must differ`,
+            );
+          }
+        }
+        for (const wait of signalWaits(built.nodes, `${name}.${branch}.`)) {
+          const other = signals.get(wait.signal);
+          if (other !== undefined && other.schema !== wait.schema) {
+            refuse(
+              state.name,
+              `parallel '${name}': '${wait.at}' and '${other.at}' both wait for signal '${wait.signal}' with different schemas; one signal name has one payload schema, so share the schema object`,
+            );
+          }
+          signals.set(wait.signal, wait);
+        }
+        return { name: branch, def: built };
+      });
+      return makeBuilder(withNode(state, { kind: 'parallel', name, undo: false, branches: defs, wait: options.wait }));
     },
     command: (name, command, input, options) =>
       makeBuilder(
@@ -1466,6 +1740,7 @@ export function workflowWith<
       needs: options.needs ?? {},
       startOn,
       on: options.on,
+      inherited: [],
     },
   });
 }

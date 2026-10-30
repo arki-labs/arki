@@ -12,6 +12,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import type { JournalDefinitions } from '../api.js';
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, TransactionSource } from '../types.js';
+import type { WorkflowShape } from './shape.js';
 import type { StepPhase, StepStatus } from './states.js';
 import { changedMetadata } from './run-fields.js';
 import { metadataChangeSchema } from './run-field-schemas.js';
@@ -20,38 +21,45 @@ import { LIMIT_BUSY_REASONS, SKIP_CAUSES, STEP_PHASES } from './states.js';
 const at = z.iso.datetime();
 const phase = z.enum(STEP_PHASES);
 const nodePath = z.string().min(1);
-/** Checks a stored `WorkflowShape`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
-export const shapeSchema = z
+/** The branches of a `parallel` node. The nested shape is typed by `WorkflowShape` so the schema can refer to itself. */
+type BranchesSchema = z.ZodOptional<
+  z.ZodReadonly<
+    z.ZodArray<z.ZodReadonly<z.ZodObject<{ name: z.ZodString; shape: z.ZodType<WorkflowShape> }>>>
+  >
+>;
+const shapeNodeSchema = z
   .object({
-    nodes: z
+    name: z.string().min(1),
+    kind: z.enum(['step', 'waitFor', 'eventWait', 'sleep', 'child', 'map', 'command', 'parallel']),
+    undo: z.boolean(),
+    onCancel: z.enum(['cancel', 'detach']).optional(),
+    signal: z.string().min(1).optional(),
+    command: z.string().min(1).optional(),
+    undoCommand: z.string().min(1).optional(),
+    on: z
       .array(
         z
           .object({
-            name: z.string().min(1),
-            kind: z.enum(['step', 'waitFor', 'eventWait', 'sleep', 'child', 'map', 'command']),
-            undo: z.boolean(),
-            onCancel: z.enum(['cancel', 'detach']).optional(),
-            signal: z.string().min(1).optional(),
-            command: z.string().min(1).optional(),
-            undoCommand: z.string().min(1).optional(),
-            on: z
-              .array(
-                z
-                  .object({
-                    label: z.string().min(1),
-                    entity: z.string().min(1),
-                    events: z.array(z.string().min(1)).readonly(),
-                  })
-                  .readonly(),
-              )
-              .readonly()
-              .optional(),
+            label: z.string().min(1),
+            entity: z.string().min(1),
+            events: z.array(z.string().min(1)).readonly(),
           })
           .readonly(),
       )
-      .readonly(),
+      .readonly()
+      .optional(),
+    wait: z.enum(['all', 'any']).optional(),
+    // A branch holds the nodes of its own definition, which may hold a `parallel` again: the schema refers to itself.
+    get branches(): BranchesSchema {
+      return z
+        .array(z.object({ name: z.string().min(1), shape: shapeSchema }).readonly())
+        .readonly()
+        .optional();
+    },
   })
   .readonly();
+/** Checks a stored `WorkflowShape`. The type is the source; `schemas.test-d.ts` locks this schema to it both ways. */
+export const shapeSchema = z.object({ nodes: z.array(shapeNodeSchema).readonly() }).readonly();
 /** When the run row is pruned; null keeps it. Resolved by the runner from `retention.workflows`. */
 const keepUntil = z.iso.datetime().nullable();
 /** Who asked, why, and from which Foreman execution, on an event an operator verb wrote. The run's events are the audit. */
@@ -99,6 +107,8 @@ export function workflowMachine<
       limits: z.array(z.string().min(1)).readonly().optional(),
       // Set by `startOn` only: the seq of the event that started the run. An event wait counts events after it.
       triggerSeq: z.int().positive().optional(),
+      // Set for the run of a `parallel` branch only: the results of the parent's nodes, which the branch's nodes read.
+      results: z.record(z.string(), z.unknown()).readonly().optional(),
       // Set by `startBatch` and by `replay` only; `replay` also records its operator.
       batchId: z.string().optional(),
       replayOf: z.string().optional(),
@@ -185,13 +195,19 @@ export function workflowMachine<
    * run parks until they end. `base` is the node path with the visit of a loop appended (`fan`, `fan:2`); every child's
    * `parentPath` is it. Children that wait for a free slot (`concurrency`) are started later, from this list.
    */
+  /** The workflow a child runs: its name and version. */
+  const childDefSchema = z.object({ name: z.string().min(1), version: z.int().positive() });
+  /** One child to start. `def` is set by a `parallel` node only: a branch is a run of its own definition. Without it the child runs the plan's `def`. */
+  const childPlanSchema = z.object({ id: z.string().min(1), input: z.unknown(), def: childDefSchema.optional() });
   const ChildrenPlanned = j.event(
     'ChildrenPlanned',
     z.object({
       path: nodePath,
       base: z.string().min(1),
-      def: z.object({ name: z.string().min(1), version: z.int().positive() }),
-      children: z.array(z.object({ id: z.string().min(1), input: z.unknown() })).min(1),
+      def: childDefSchema,
+      children: z.array(childPlanSchema).min(1),
+      // Set by a `parallel` node only: where the parent's event waits began to count, which its branches count from too.
+      start: z.int().positive().optional(),
       at,
       ...byOperator,
     }),
@@ -268,7 +284,7 @@ export function workflowMachine<
       shapeHash: e.data.shapeHash,
       input: e.data.input,
       state: 'running',
-      results: {},
+      results: { ...e.data.results },
       deadlineAt: e.data.deadlineAt === null ? null : new Date(e.data.deadlineAt),
       parentId: e.data.parentId,
       parentPath: e.data.parentPath,

@@ -115,7 +115,7 @@ import { isPlainObject, sameValue } from '../storage.js';
 import { withJournalSpan } from '../telemetry.js';
 import { defaultEffectRetry } from '../worker.js';
 import { storedEventRowSchema } from '../zod.js';
-import { isCheckedRead, resultSchemaOf, taskOf, workflowWith } from './define.js';
+import { isCheckedRead, resultSchemaOf, signalWaits, taskOf, workflowWith } from './define.js';
 import { LIMIT_BOUNDS, LIMIT_KEY_TTL, workflowLimitName } from './limit-types.js';
 import { createLimitGate, expiredKeys, limitLockId, limitMachine, lockExclusive } from './limits.js';
 import { workflowMachine } from './machine.js';
@@ -183,6 +183,9 @@ const startChildSchema = z.object({
     rootId: z.string().min(1),
     scope: z.string().min(1).nullable(),
   }),
+  /** A `parallel` branch only: the parent's results the branch starts with, and where its event waits begin to count. */
+  results: z.record(z.string(), z.unknown()).optional(),
+  trigger: z.int().positive().optional(),
 });
 
 /** The operator verbs. Internal: `journal.workflows` runs them. */
@@ -469,9 +472,22 @@ const childrenPlanSchema = z.object({
   /** The node path, with the visit of a loop appended (`fan`, `fan:2`): the `parentPath` of every child. */
   base: z.string().min(1),
   def: z.object({ name: z.string().min(1), version: z.int().positive() }),
-  children: z.array(z.object({ id: z.string().min(1), input: z.unknown() })).min(1),
+  /** `def` is set by a `parallel` node only, for each branch: a child without one runs the plan's `def`. */
+  children: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        input: z.unknown(),
+        def: z.object({ name: z.string().min(1), version: z.int().positive() }).optional(),
+      }),
+    )
+    .min(1),
+  /** Set by a `parallel` node only: where the parent's event waits began to count, which its branches count from too. */
+  start: z.int().positive().optional(),
 });
 type ChildrenPlan = z.infer<typeof childrenPlanSchema>;
+/** What a `parallel` node stores as the input of a branch: the parent's input and results when the node started. */
+const branchInputSchema = z.object({ input: z.unknown(), results: z.record(z.string(), z.unknown()) });
 const nodeCheckpointSchema = z.object({
   runId: z.string().min(1),
   path: z.string().min(1),
@@ -670,7 +686,8 @@ function liveWaitResult(node: EventWaitNode, stored: unknown, decode: DecodeEven
  */
 function liveResults(def: WorkflowDef, runId: string, stored: AnyResults, decode: DecodeEvent): AnyResults {
   const live = { ...stored };
-  for (const node of def.nodes) {
+  // A branch of a `parallel` node starts with its parent's results, which are read as the parent's nodes say.
+  for (const node of [...def.inherited, ...def.nodes]) {
     if (node.kind === 'eventWait' && is(stored[node.name], storedWaitResultSchema)) {
       const result = liveWaitResult(node, stored[node.name], decode);
       if (isFailure(result)) throw new JournalError('REPLAY_FAILED', 'workflow', runId, reasonText(result));
@@ -778,7 +795,11 @@ function remainingUndos(
     def.nodes.some(
       node =>
         node.name === path &&
-        (node.kind === 'step' || node.kind === 'child' || node.kind === 'map' || node.kind === 'command'),
+        (node.kind === 'step' ||
+          node.kind === 'child' ||
+          node.kind === 'map' ||
+          node.kind === 'parallel' ||
+          node.kind === 'command'),
     );
   const see = (path: string, completed: boolean, result: unknown) => {
     const visit = (visits.get(path) ?? 0) + 1;
@@ -823,6 +844,29 @@ function jumpTarget(def: WorkflowDef, index: number, target: string, runId: stri
   return targetIndex;
 }
 
+/** The definitions and every branch definition of their `parallel` nodes, branches of branches included. */
+function withBranches(defs: readonly WorkflowDef[]): WorkflowDef[] {
+  return defs.flatMap(def => [
+    def,
+    ...withBranches(
+      def.nodes.flatMap(node => (node.kind === 'parallel' ? node.branches.map(branch => branch.def) : [])),
+    ),
+  ]);
+}
+
+/** How much a delivery did, strongest last. A signal for a `parallel` run reports the strongest of its deliveries. */
+const SIGNAL_STRENGTH: Readonly<Record<SignalStatus, number>> = {
+  'no-run': 0,
+  finished: 1,
+  duplicate: 2,
+  kept: 3,
+  woke: 4,
+};
+
+/** A node that runs child runs: a child, a map, a parallel. */
+type FanNode = Extract<WorkflowNode, { readonly kind: 'child' | 'map' | 'parallel' }>;
+const isFanNode = (node: WorkflowNode): node is FanNode =>
+  node.kind === 'child' || node.kind === 'map' || node.kind === 'parallel';
 const isDetached = (node: WorkflowNode | undefined) => node?.kind === 'child' && node.onCancel === 'detach';
 /** The step key of a run's first node: its first visit, so a promoted queued run gets the key a start would give it. */
 const firstKeyOf = (runId: string, path: string) => `${runId}:${path}:do`;
@@ -1209,6 +1253,7 @@ export function createWorkflows<
     tx
       .select({
         id: workflowRuns.id,
+        name: workflowRuns.name,
         state: workflowRuns.state,
         parentPath: workflowRuns.parentPath,
         finishedAt: workflowRuns.finishedAt,
@@ -1300,7 +1345,7 @@ export function createWorkflows<
         );
         return out;
       }
-      if (node?.kind === 'child' || node?.kind === 'map') {
+      if (node?.kind === 'child' || node?.kind === 'map' || node?.kind === 'parallel') {
         if (isDetached(node)) {
           out.push(
             events.NodeSkipped({
@@ -1551,6 +1596,14 @@ export function createWorkflows<
   const waitStartOf = async (tx: Tx, runId: string, node: string, taken: readonly TakenEvent[]) => {
     const own = taken.findLast(event => event.node === node);
     if (own !== undefined) return own.seq;
+    return runStartOf(tx, runId);
+  };
+
+  /**
+   * Where a run's event waits begin to count: after the event that started it, or after `RunStarted` for a run with no
+   * such event. A `parallel` node hands this to its branches, so a wait in a branch counts from the parent's start.
+   */
+  const runStartOf = async (tx: Pick<Tx, 'select'>, runId: string) => {
     const [startedRun] = await tx
       .select({ seq: tables.events.seq, data: tables.events.data })
       .from(tables.events)
@@ -1842,16 +1895,37 @@ export function createWorkflows<
       .from(workflowRuns)
       .where(and(eq(workflowRuns.parentId, parent.id), inArray(workflowRuns.id, [...ids])));
     const outputOf = new Map(stored.map(kid => [kid.id, kid.output]));
-    const childDef = started.get(`${plan.def.name}@${plan.def.version}`);
+    const node = def.nodes[index];
     try {
       const checked: unknown[] = [];
+      // The branches of a `parallel` node that gave an output, by name, in the order of `ids`.
+      const branchNames: string[] = [];
       for (const id of ids) {
+        // A branch runs its own definition; any other child runs the plan's.
+        const childRef = plan.children.find(child => child.id === id)?.def ?? plan.def;
+        const childDef = started.get(`${childRef.name}@${childRef.version}`);
         const raw = outputOf.get(id);
         const parsed = childDef?.output === undefined ? raw : await parseAsync(childDef.output, raw);
         if (isFailure(parsed)) return deadNode(tx, def, parent, plan.path, reasonText(parsed), at);
         checked.push(parsed);
+        if (node?.kind === 'parallel') {
+          const branch = node.branches.find(candidate => candidate.def.name === childRef.name);
+          if (branch === undefined) {
+            throw new JournalError('BAD_DEFINITION', 'workflow', parent.id, `parallel '${node.name}' has no branch "${childRef.name}"`);
+          }
+          branchNames.push(branch.name);
+        }
       }
-      const kept = storable(list ? checked : checked[0], def.limits.payload, `the result of '${plan.path}'`, parent.id);
+      // `all`: the outputs by branch name. `any`: the winner's name and output. Neither can be shaped like a stored refusal.
+      const result =
+        node?.kind !== 'parallel'
+          ? list
+            ? checked
+            : checked[0]
+          : node.wait === 'all'
+            ? Object.fromEntries(branchNames.map((name, at) => [name, checked[at]]))
+            : { branch: branchNames[0], result: checked[0] };
+      const kept = storable(result, def.limits.payload, `the result of '${plan.path}'`, parent.id);
       if (kept instanceof JournalError) return deadNode(tx, def, parent, plan.path, reasonText(kept), at);
       return completeWait(tx, def, index, parent, kept.value, at);
     } catch (error) {
@@ -1880,7 +1954,7 @@ export function createWorkflows<
     if (plan === undefined || plan.base !== base || parent.node !== plan.path) return [];
     const index = def.nodes.findIndex(candidate => candidate.name === plan.path);
     const node = def.nodes[index];
-    if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
+    if (node === undefined || !isFanNode(node)) {
       throw new JournalError('BAD_DEFINITION', 'workflow', parent.id, `"${def.name}" has no child node '${plan.path}'`);
     }
     // A node that is dead already waits for an operator: a later child end changes nothing.
@@ -1907,13 +1981,14 @@ export function createWorkflows<
     };
     const describe = (kid: (typeof kids)[number]) => `child run ${kid.id} ${kid.state}`;
 
-    if (node.kind === 'map' && node.wait === 'any') {
+    if ((node.kind === 'map' || node.kind === 'parallel') && node.wait === 'any') {
       const winner = ended
         .filter(kid => kid.state === 'completed')
         .sort((a, b) => (a.finishedAt?.getTime() ?? 0) - (b.finishedAt?.getTime() ?? 0) || a.id.localeCompare(b.id))[0];
       if (winner === undefined) {
         if (unfinished.length === 0 && pending.length === 0) {
-          return deadNode(tx, def, parent, plan.path, `no child of map '${plan.path}' completed`, at);
+          const what = node.kind === 'map' ? 'child' : 'branch';
+          return deadNode(tx, def, parent, plan.path, `no ${what} of ${node.kind} '${plan.path}' completed`, at);
         }
         return startNext();
       }
@@ -1990,7 +2065,7 @@ export function createWorkflows<
       .orderBy(asc(tables.events.seq));
     const [top] = remainingUndos(def, settled);
     const node = def.nodes.find(candidate => candidate.name === top?.path);
-    if (top === undefined || (node?.kind !== 'child' && node?.kind !== 'map') || isDetached(node)) return;
+    if (top === undefined || node === undefined || !isFanNode(node) || isDetached(node)) return;
     if (node.kind === 'child' && node.undo) return;
     const base = childBase(top.path, top.visit);
     for (const kid of kids.filter(candidate => candidate.parentPath === base && candidate.state === 'completed')) {
@@ -2096,11 +2171,14 @@ export function createWorkflows<
     let attached = false;
     for (const child of children) {
       // A child belongs to its parent's tenant and to the tree its parent is in: the root is the run with no parent.
+      // A branch of a `parallel` node runs its own definition, on a snapshot of its parent.
+      const branch = child.def === undefined ? undefined : ensure(child.input, branchInputSchema);
       const startedRun = await ctx.run(startChild, {
-        def: plan.def,
+        def: child.def ?? plan.def,
         id: child.id,
-        input: child.input,
+        input: branch === undefined ? child.input : branch.input,
         parent: { id: parentId, path: plan.base, rootId: parent.rootId ?? parentId, scope: parent.scope },
+        ...(branch === undefined ? {} : { results: branch.results, trigger: plan.start }),
       });
       if (CommandConflict.is(startedRun) || WorkflowBusy.is(startedRun) || CommandInvalid.is(startedRun)) {
         ctx.accept(startedRun);
@@ -2240,7 +2318,7 @@ export function createWorkflows<
           case 'children': {
             if (row.state === 'parked') return [];
             const node = def.nodes.find(candidate => candidate.name === path);
-            if (node === undefined || (node.kind !== 'child' && node.kind !== 'map')) {
+            if (node === undefined || !isFanNode(node)) {
               throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `"${def.name}" has no child node '${path}'`);
             }
             const dropped = events.NodeSkipped({
@@ -2547,8 +2625,10 @@ export function createWorkflows<
         readonly scope: string | null;
       };
       readonly refusal?: AdmissionRefusal;
-      /** The seq of the event that started the run, for a `startOn` start. */
-      readonly trigger?: number;
+      /** The seq of the event that started the run, for a `startOn` start, or the parent's start for a `parallel` branch. */
+      readonly trigger?: number | undefined;
+      /** The results a `parallel` branch starts with: its parent's, when the node started. */
+      readonly results?: Readonly<Record<string, unknown>> | undefined;
     } = {},
   ): Promise<
     | { readonly runId: string; readonly created: boolean }
@@ -2557,7 +2637,7 @@ export function createWorkflows<
     | CommandInvalid
     | CommandFailure
   > => {
-    const { parent, refusal = 'refuse', trigger } = how;
+    const { parent, refusal = 'refuse', trigger, results } = how;
     if (!started.has(`${def.name}@${def.version}`)) {
       throw new JournalError(
         'WORKFLOW_UNKNOWN',
@@ -2635,6 +2715,7 @@ export function createWorkflows<
           // Left out when unset, so a plain start's event stays as it was before batches, replays and limits.
           ...(sharedLimits.length === 0 ? {} : { limits: sharedLimits }),
           ...(trigger === undefined ? {} : { triggerSeq: trigger }),
+          ...(results === undefined ? {} : { results }),
           ...(args.batchId === undefined ? {} : { batchId: args.batchId }),
           ...(args.replayOf === undefined ? {} : { replayOf: args.replayOf }),
           ...args.by,
@@ -2797,7 +2878,12 @@ export function createWorkflows<
           `no registered workflow "${args.def.name}" v${args.def.version}`,
         );
       }
-      return startRun(def, context, { input: args.input, id: args.id }, { parent: args.parent });
+      return startRun(
+        def,
+        context,
+        { input: args.input, id: args.id },
+        { parent: args.parent, results: args.results, trigger: args.trigger },
+      );
     },
   );
 
@@ -2819,6 +2905,8 @@ export function createWorkflows<
   ): Promise<SignalOutcome | CommandFailure> {
     const { write } = context;
     const result: { status: SignalStatus } = { status: 'kept' };
+    // The live branch runs of a `parallel` node that wait for this signal: they get it after the run's own delivery.
+    const branches: { readonly runId: string; readonly branch: string }[] = [];
     const before = { parked: false };
     const written = await write(run, args.runId, async (row, inside) => {
       if (workflowName !== null && (row === null || row.name !== workflowName)) {
@@ -2833,20 +2921,39 @@ export function createWorkflows<
       }
       // The run's own version handles the signal, whichever version's `signal` command the caller used.
       const own = definitionOf(row);
-      const ownWait = own.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
-      if (ownWait === undefined || ownWait.kind !== 'waitFor') {
+      // A wait of the run itself, or of a branch of its `parallel` node: the run's door reaches both.
+      const [waited] = signalWaits(own.nodes).filter(wait => wait.signal === name);
+      if (waited === undefined) {
         return CommandConflict({
           detail: `run "${args.runId}" is v${row.workflowVersion}, which has no wait for signal '${name}'`,
         });
       }
+      const ownWait = own.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
+      if (own.nodes.some(node => node.kind === 'parallel')) {
+        const kids = await kidsOf(inside.tx, row.id);
+        for (const node of own.nodes) {
+          if (node.kind !== 'parallel') continue;
+          for (const branch of node.branches) {
+            if (!signalWaits(branch.def.nodes).some(wait => wait.signal === name)) continue;
+            for (const kid of kids) {
+              if (kid.name === branch.def.name && kid.finishedAt === null) branches.push({ runId: kid.id, branch: branch.name });
+            }
+          }
+        }
+      }
       // A payload the wait would refuse is refused at the door, so a bad webhook cannot fail the run.
       const stored = storable(args.payload, own.limits.payload, `the payload of signal '${name}'`, args.runId);
       if (stored instanceof JournalError) return CommandInvalid({ detail: stored.message });
-      const parsed = await parseAsync(ownWait.schema, stored.value);
+      const parsed = await parseAsync(waited.schema, stored.value);
       if (InvalidInput.is(parsed)) {
         return CommandInvalid({ detail: `signal '${name}' payload: ${reasonText(parsed)}` });
       }
       if (ValidatorDefect.is(parsed)) return parsed;
+      // Only a branch waits for it: nothing is kept for this run, and the branches get it below.
+      if (ownWait === undefined) {
+        result.status = 'finished';
+        return [];
+      }
       const signalId = workflowSignalId();
       if (isFailure(signalId)) return signalId;
       const [inserted] = await inside.tx
@@ -2891,6 +2998,19 @@ export function createWorkflows<
     if (isFailure(written)) return written;
     const settlement = await settle(context, args.runId, written, before.parked);
     if (isFailure(settlement)) return settlement;
+    // Each branch gets its own delivery, so a repeat of the sender's delivery changes nothing, branch by branch.
+    // The status is the strongest of them.
+    for (const target of branches) {
+      const delivered = await deliverSignal(
+        context,
+        { runId: target.runId, deliveryId: `${args.deliveryId}:${target.branch}`, payload: args.payload },
+        name,
+        null,
+        operator,
+      );
+      if (isFailure(delivered)) return delivered;
+      if (SIGNAL_STRENGTH[delivered.status] > SIGNAL_STRENGTH[result.status]) result.status = delivered.status;
+    }
     return result;
   }
 
@@ -2948,8 +3068,9 @@ export function createWorkflows<
   const signalCommandFor = <Signals extends AnySignals>(def: WorkflowDef<StandardSchemaV1, unknown, Signals>) =>
     function signal<Name extends keyof Signals & string>(name: Name) {
       // One signal name has one payload schema, which `define` enforces: the first node that waits for it has it.
-      const waiting = def.nodes.find(node => node.kind === 'waitFor' && node.signal === name);
-      if (waiting === undefined || waiting.kind !== 'waitFor') {
+      // A wait inside a branch of a `parallel` node counts: the signal reaches it.
+      const waiting = signalWaits(def.nodes).find(wait => wait.signal === name);
+      if (waiting === undefined) {
         throw new JournalError('BAD_DEFINITION', 'workflow', def.name, `no waitFor node waits for signal '${name}'`);
       }
       return j.command(
@@ -3357,7 +3478,7 @@ export function createWorkflows<
           throw new JournalError('STEP_NOT_DEAD', 'workflow', row.id, `the run is ${row.state}, so no undo is waiting`);
         }
         const node = code.nodes.find(candidate => candidate.name === args.path);
-        const plan = node?.kind === 'child' || node?.kind === 'map' ? await plannedOf(inside.tx, row.id) : undefined;
+        const plan = node !== undefined && isFanNode(node) ? await plannedOf(inside.tx, row.id) : undefined;
         // A child or map node that failed after its children were planned: the failed children start again.
         if (args.phase === 'do' && row.state === 'parked' && plan !== undefined && plan.path === args.path) {
           const known = await kidsOf(inside.tx, row.id);
@@ -3365,11 +3486,21 @@ export function createWorkflows<
           const children = plan.children.map(child => {
             const kid = kids.get(child.id);
             const failed = kid !== undefined && kid.finishedAt !== null && kid.state !== 'completed';
-            return failed ? { id: retriedChildId(row.id, child.id), input: child.input } : child;
+            return failed ? { ...child, id: retriedChildId(row.id, child.id) } : child;
           });
           moved.how = 'childrenRestarted';
           moved.base = plan.base;
-          return [events.ChildrenPlanned({ path: args.path, base: plan.base, def: plan.def, children, at, ...by })];
+          return [
+            events.ChildrenPlanned({
+              path: args.path,
+              base: plan.base,
+              def: plan.def,
+              children,
+              ...(plan.start === undefined ? {} : { start: plan.start }),
+              at,
+              ...by,
+            }),
+          ];
         }
         if (step.key === null) {
           throw new JournalError(
@@ -4161,17 +4292,19 @@ export function createWorkflows<
    * Registers the definitions: the step effect that runs their nodes, and the projection that keeps `workflow_steps`.
    * `meta` is the actor recorded on every checkpoint the library commits.
    */
-  function register(defs: readonly WorkflowDef[], meta: SchemaInput<Meta>) {
+  function register(declared: readonly WorkflowDef[], meta: SchemaInput<Meta>) {
     // The commands (`start`, `signal`, `cancel`) find a run's code in `started`, the worker in this compose's
     // registry: one compose with workflows per `initJournal()` keeps the two the same.
     if (started.size > 0) {
       throw new JournalError(
         'BAD_DEFINITION',
         'workflow',
-        defs[0]?.name ?? 'workflows',
+        declared[0]?.name ?? 'workflows',
         'this initJournal() already composed a journal with workflows; compose workflows once per initJournal()',
       );
     }
+    // The branches of a `parallel` node are definitions the parent's checkpoint starts runs of: they register with it.
+    const defs = withBranches(declared);
     const registry = new Map<string, WorkflowDef>();
     for (const def of defs) {
       const id = `${def.name}@${def.version}`;
@@ -4216,7 +4349,7 @@ export function createWorkflows<
         );
       }
     }
-    registerLimits(defs);
+    registerLimits(declared);
     const needs: Needs = Object.fromEntries(defs.flatMap(def => Object.entries(def.needs)));
 
     /**
@@ -4535,7 +4668,6 @@ export function createWorkflows<
       }
     }
 
-    type FanNode = Extract<WorkflowNode, { readonly kind: 'child' | 'map' }>;
 
     /**
      * The work of a child or map node: which workflow, and the id and checked input of each child run. Nothing is
@@ -4550,6 +4682,7 @@ export function createWorkflows<
       event: NodeScheduledEvent,
       ctx: StepEffectContext,
     ): Promise<Verdict> {
+      if (node.kind === 'parallel') return attemptBranches(def, node, row, ctx);
       const { data } = event;
       const context: ErasedContext = {
         ...ctx,
@@ -4639,6 +4772,83 @@ export function createWorkflows<
       } catch (error) {
         // A limit, a schema or a definition that is wrong will be wrong again: no retry.
         return failed(error, !(error instanceof JournalError || InvalidInput.is(error)));
+      }
+    }
+
+    /**
+     * The work of a `parallel` node: one child run per branch, each of its own definition. A branch starts from a
+     * snapshot of the parent when the node starts: the input, and the results of the earlier nodes with each event
+     * wait's event read from the log, so the branch sees what the main line sees. The plan also carries where the
+     * parent's event waits began to count, because a wait in a branch counts from there too.
+     */
+    async function attemptBranches(
+      def: WorkflowDef,
+      node: Extract<WorkflowNode, { readonly kind: 'parallel' }>,
+      row: Row,
+      ctx: StepEffectContext,
+    ): Promise<Verdict> {
+      try {
+        for (const branch of node.branches) {
+          if (!started.has(`${branch.def.name}@${branch.def.version}`)) {
+            throw new JournalError(
+              'WORKFLOW_UNKNOWN',
+              'workflow',
+              row.id,
+              `parallel '${node.name}' runs branch "${branch.def.name}" v${branch.def.version}, which is not registered`,
+            );
+          }
+        }
+        if (node.branches.length > def.limits.children) {
+          throw new JournalError(
+            'WORKFLOW_LIMIT',
+            'workflow',
+            row.id,
+            `parallel '${node.name}' has ${node.branches.length} branches; limits.children is ${def.limits.children}`,
+          );
+        }
+        if ((await ancestorsOf(ctx.db, row)) >= MAX_CHILD_DEPTH) {
+          throw new JournalError(
+            'WORKFLOW_LIMIT',
+            'workflow',
+            row.id,
+            `parallel '${node.name}' would nest runs deeper than ${MAX_CHILD_DEPTH} levels`,
+          );
+        }
+        const base = childBase(node.name, await visitOf(ctx.db, row.id, node.name));
+        const stem = `${row.id}/${base}`;
+        // The stored form: `row.results` is live here (a kept failure is a real failure), and a branch reads it as stored.
+        const [held] = await ctx.db
+          .select({ results: workflowRuns.results })
+          .from(workflowRuns)
+          .where(eq(workflowRuns.id, row.id));
+        const snapshot = {
+          input: row.input,
+          results: await withWaitEvents(ctx.db, tables, row.id, def.nodes, held?.results ?? {}),
+        };
+        const children: { id: string; input: unknown; def: { name: string; version: number } }[] = [];
+        for (const branch of node.branches) {
+          const id = `${stem}[${branch.name}]`;
+          if (id.length > MAX_RUN_ID_LENGTH) {
+            throw new JournalError(
+              'WORKFLOW_LIMIT',
+              'workflow',
+              row.id,
+              `the child run id "${id}" is longer than ${MAX_RUN_ID_LENGTH} characters`,
+            );
+          }
+          const kept = storable(snapshot, branch.def.limits.payload, `the input of branch run ${id}`, row.id);
+          if (kept instanceof JournalError) throw kept;
+          children.push({ id, input: kept.value, def: { name: branch.def.name, version: branch.def.version } });
+        }
+        const [first] = children;
+        if (first === undefined) throw new JournalError('BAD_DEFINITION', 'workflow', row.id, `parallel '${node.name}' has no branch`);
+        return {
+          kind: 'children',
+          plan: { base, def: first.def, children, start: await runStartOf(ctx.db, row.id) },
+        };
+      } catch (error) {
+        // A limit or a definition that is wrong will be wrong again: no retry.
+        return failed(error, !(error instanceof JournalError));
       }
     }
 
@@ -4775,7 +4985,7 @@ export function createWorkflows<
             data.resolution === undefined
               ? await attemptNode(def, index, node, row, event, ctx)
               : await routeResolved(def, index, node, row, event, ctx, data.resolution.result);
-        } else if (node.kind === 'child' || node.kind === 'map') {
+        } else if (isFanNode(node)) {
           verdict = await attemptChildren(def, index, node, row, event, ctx);
         } else verdict = await attemptWait(def, index, node, row, event, ctx);
       }
