@@ -91,3 +91,10 @@ describe('capitalize / uncapitalize', () => {
     expect(uncapitalize('')).toBe('');
   });
 });
+
+describe('malformed locale tags', () => {
+  it('fall back to locale-independent casing instead of throwing', () => {
+    expect(camelCase('hello world', { locale: 'xx_yy' })).toBe('helloWorld');
+    expect(capitalize('hello', { locale: 'not a locale!' })).toBe('Hello');
+  });
+});

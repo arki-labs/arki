@@ -50,6 +50,7 @@ import {
 } from './edit.js';
 import { escapeHtml, escapeRegExp } from './escape.js';
 import { collapseWhitespace, dedent, excerpt, initials, squish, truncate, wrapText } from './format.js';
+import { lower, upper } from './internal/locale.js';
 import { findLiteral, hasPrefix, hasSuffix } from './internal/search.js';
 import { interpolate } from './interpolate.js';
 import { after, before, between, containsAny, indexOf } from './search.js';
@@ -132,10 +133,10 @@ export class StringValue {
     return str(this.#value.trimEnd());
   }
   upper(locale?: string): StringValue {
-    return str(locale === undefined ? this.#value.toUpperCase() : this.#value.toLocaleUpperCase(locale));
+    return str(upper(this.#value, locale));
   }
   lower(locale?: string): StringValue {
-    return str(locale === undefined ? this.#value.toLowerCase() : this.#value.toLocaleLowerCase(locale));
+    return str(lower(this.#value, locale));
   }
   normalize(form: NormalizationForm = 'NFC'): StringValue {
     return str(this.#value.normalize(form));

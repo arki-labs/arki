@@ -136,3 +136,12 @@ describe('intervalSchema', () => {
     expectTypeOf<z.input<typeof schema>>().toEqualTypeOf<{ start: unknown; end: unknown }>();
   });
 });
+
+describe('issue messages for long input', () => {
+  it('copy a bounded part of the input, never all of it', () => {
+    const huge = 'x'.repeat(100_000);
+    for (const result of [plainDateSchema().safeParse(huge), timeZoneSchema().safeParse(huge)]) {
+      expect(firstMessage(result).length).toBeLessThan(400);
+    }
+  });
+});

@@ -347,3 +347,14 @@ describe('formatRange on an engine without Intl.DateTimeFormat#formatRange (Herm
     }
   });
 });
+
+describe('malformed locale tags', () => {
+  it('format, formatIntl and formatRange fall back to en-US instead of throwing', () => {
+    const day = plainDate('2026-05-20');
+    const bad = { locale: 'not a locale!' };
+    expect(format(day, 'MMMM d, yyyy', bad)).toBe(format(day, 'MMMM d, yyyy'));
+    expect(formatIntl(day, { ...bad, dateStyle: 'long' })).toBe(formatIntl(day, { dateStyle: 'long' }));
+    const end = plainDate('2026-05-24');
+    expect(formatRange(day, end, { ...bad, dateStyle: 'medium' })).toBe(formatRange(day, end, { dateStyle: 'medium' }));
+  });
+});

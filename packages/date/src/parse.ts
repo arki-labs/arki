@@ -43,15 +43,15 @@ import type { DateTextOperation, DateTextReason, UnknownTimeZone } from './failu
 import type { PlainDate, PlainDateTime, ZonedDateTime } from './types.js';
 import { boundedInput, InvalidDateText, unknownTimeZone } from './failures.js';
 import { format } from './format.js';
+import { resolveLocale } from './internal/locale.js';
 import { Temporal } from './types.js';
 import { isValidTimeZone } from './zone.js';
 
 /** Locale (BCP 47, default `'en-US'`) whose month, weekday and AM/PM words are accepted. */
 export type ParseOptions = Readonly<{ locale?: string }>;
 
-const DEFAULT_LOCALE = 'en-US';
 
-type Operation = Exclude<DateTextOperation, 'parseISO'>;
+type Operation = Exclude<DateTextOperation, 'parseISO' | 'parseDuration'>;
 
 /** Raised inside the readers for text the pattern refuses; the public doors turn it into a returned failure. */
 class TextProblem extends Error {
@@ -322,7 +322,7 @@ function unquote(chunk: string): string {
 }
 
 function compile(operation: Operation, pattern: string, options: ParseOptions | undefined): Plan {
-  const locale = options?.locale ?? DEFAULT_LOCALE;
+  const locale = resolveLocale(options?.locale);
   const matchers: Matcher[] = [];
   const letters = new Set<string>();
   for (const chunk of pattern.match(TOKENS) ?? []) {

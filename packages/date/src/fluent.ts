@@ -67,6 +67,7 @@ import {
 } from './compare.js';
 import { zoned } from './core.js';
 import { format, formatIntl } from './format.js';
+import { resolveLocale } from './internal/locale.js';
 import { systemTimeZone, toDate } from './interop.js';
 import {
   add,
@@ -427,7 +428,7 @@ export class DateValue {
 function settingsFor(options: DateContextOptions | undefined, fallbackZone?: string): Settings {
   return {
     timeZone: options?.timeZone ?? fallbackZone ?? systemTimeZone(),
-    locale: options?.locale ?? 'en-US',
+    locale: resolveLocale(options?.locale),
     week: options?.week ?? ISO_WEEK,
     clock: options?.clock ?? new SystemClock(),
   };

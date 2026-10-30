@@ -23,7 +23,9 @@ import type {
   ZonedDateTime,
 } from './types.js';
 import { toDuration } from './internal/amount.js';
+import { boundedInput, InvalidDateText } from './failures.js';
 import { durationFormat, hasDurationFormat, listFormat, numberFormat } from './internal/intl.js';
+import { resolveLocale } from './internal/locale.js';
 import { isPlainDate, Temporal } from './types.js';
 
 /** The anchor Temporal needs to measure calendar units (months have 28–31 days, days 23–25 hours). */
@@ -32,10 +34,28 @@ export type RelativeToOptions = Readonly<{ relativeTo?: PlainDate | ZonedDateTim
 // ---------------------------------------------------------------------------
 // construction
 
-/** A `Duration` from an ISO 8601 string (`P1DT2H`), an `Amount` (quarters become 3 months) or a `Duration` (returned as-is). */
+/**
+ * A `Duration` from an ISO 8601 string (`P1DT2H`), an `Amount` (quarters become 3 months) or a `Duration` (returned as-is).
+ * A bad string throws `RangeError`: read text from outside with {@link parseDuration} instead.
+ */
 export function duration(input: string | Amount | Duration): Duration {
   if (typeof input === 'string') return Temporal.Duration.from(input);
   return toDuration(input);
+}
+
+/**
+ * A `Duration` read from outside ISO 8601 text such as `P1DT2H`, or an `InvalidDateText` failure
+ * (`data.operation` `'parseDuration'`, `data.reason` `'invalid_duration'`) when the text is not a duration.
+ */
+export function parseDuration(text: string): Duration | InvalidDateText {
+  try {
+    return Temporal.Duration.from(text);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return InvalidDateText({ operation: 'parseDuration', reason: 'invalid_duration', ...boundedInput(text) });
+    }
+    throw error;
+  }
 }
 
 /** `n` years. `n` must be an integer. */
@@ -384,7 +404,7 @@ function joinList(locale: string, pieces: readonly string[]): string {
  * absolute text prefixed with `-`; a zero duration prints 0 of the smallest unit.
  */
 export function humanizeDuration(d: Duration, options?: HumanizeOptions): string {
-  const locale = options?.locale ?? 'en-US';
+  const locale = resolveLocale(options?.locale);
   const units = options?.units ?? HUMANIZE_UNITS;
   const maximumUnits = options?.maximumUnits;
   if (maximumUnits !== undefined && (!Number.isSafeInteger(maximumUnits) || maximumUnits < 1)) {
@@ -421,7 +441,8 @@ export function formatDurationIntl(d: Duration, options?: DurationIntlOptions): 
       'formatDurationIntl: Intl.DurationFormat is not available in this runtime; use humanizeDuration',
     );
   }
-  const { locale = 'en-US', ...intl } = options ?? {};
+  const { locale: requested, ...intl } = options ?? {};
+  const locale = resolveLocale(requested);
   return durationFormat(locale, intl).format({
     years: d.years,
     months: d.months,

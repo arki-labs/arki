@@ -78,6 +78,10 @@ function assertCount(count: number, operation: string): void {
  */
 function walk<T extends Civil>(value: T, count: number, calendar: BusinessCalendar): T {
   if (count === 0) return value;
+  // A hand-built calendar can skip `businessCalendar()`; with all seven weekdays off the walk below never ends.
+  if (new Set(calendar.weekend).size >= 7) {
+    throw new RangeError('business days: a weekend of all seven days leaves no business days');
+  }
   const direction = Math.sign(count);
   const hasHolidays = calendar.holidays.size > 0;
   let day = epochDay(plainDate(value));

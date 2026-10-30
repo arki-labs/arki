@@ -107,3 +107,11 @@ describe('relative without Intl.RelativeTimeFormat (Hermes V1)', () => {
     }
   });
 });
+
+describe('relative with a malformed locale tag', () => {
+  it('falls back to en-US instead of throwing', () => {
+    const from = instant('2026-05-20T10:00:00Z');
+    const to = instant('2026-05-23T10:00:00Z');
+    expect(relative(to, from, { locale: 'not a locale!' })).toBe(relative(to, from));
+  });
+});

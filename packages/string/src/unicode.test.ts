@@ -213,3 +213,9 @@ describe('fold', () => {
     expect(fold('Привет 👋')).toBe('привет 👋');
   });
 });
+
+describe('fold with a malformed locale tag', () => {
+  it('falls back to locale-independent lowercasing instead of throwing', () => {
+    expect(fold('Émile Zola', { locale: 'xx_yy' })).toBe('emile zola');
+  });
+});

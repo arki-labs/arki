@@ -126,7 +126,7 @@ describe('parseISO — failure codes', () => {
 
   it('bounds the copy of long bad text', () => {
     const failure = parseISOResult('9'.repeat(300));
-    expect(InvalidDateText.is(failure) && failure.data.input.length).toBe(64);
+    expect(InvalidDateText.is(failure) ? failure.data.input.length : undefined).toBe(64);
     expect(InvalidDateText.is(failure) && failure.data.truncated).toBe(true);
   });
 });

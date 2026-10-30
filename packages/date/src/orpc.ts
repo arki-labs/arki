@@ -77,6 +77,12 @@ const CODECS: readonly Codec[] = [
   },
 ];
 
+/**
+ * Wire text to a Temporal value. Bad wire text throws `TypeError` or `RangeError`.
+ * This is a foreign boundary: the oRPC and SuperJSON `deserialize` hooks have no
+ * failure channel, so the framework turns the throw into its own error for the
+ * caller. Text read from a user belongs in `parseISO`, `parseDate` or `parseDuration`, which return failures.
+ */
 function decode(codec: Codec, serialized: unknown): TemporalValue {
   if (typeof serialized !== 'string') {
     throw new TypeError(`${codec.name}: expected ISO text on the wire, received ${typeof serialized}`);

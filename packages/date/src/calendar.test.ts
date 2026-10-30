@@ -144,3 +144,9 @@ describe('weekRulesFor', () => {
     expect(weekRulesFor('en-US', SUNDAY_WEEK).startsOn).toBe(7);
   });
 });
+
+describe('weekRulesFor with a malformed tag', () => {
+  it('reads it as the default locale instead of throwing', () => {
+    expect(weekRulesFor('not a locale!')).toEqual(weekRulesFor('en-US'));
+  });
+});

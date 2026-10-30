@@ -59,3 +59,10 @@ describe('languages', () => {
     expect(STOP_WORDS.de).toContain('und');
   });
 });
+
+describe('keywords with a malformed locale tag', () => {
+  it('matches the default result instead of throwing', () => {
+    const text = 'Cats chase mice and cats chase birds';
+    expect(keywords(text, { locale: 'xx_yy' })).toEqual(keywords(text));
+  });
+});

@@ -4,6 +4,7 @@
 
 import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { boundaryIfLonger, graphemeBoundaries } from './internal/graphemes.js';
+import { upper } from './internal/locale.js';
 import { assertNeedle, findLiteral } from './internal/search.js';
 import { sentenceEnds } from './internal/sentences.js';
 import { wordSpans } from './internal/words.js';
@@ -78,7 +79,7 @@ export function initials(text: string, options: InitialsOptions = {}): string {
   }
   if (components.length === 1 && singleWord > 1) {
     const leading = take(components[0] ?? '', singleWord);
-    return options.locale === undefined ? leading.toUpperCase() : leading.toLocaleUpperCase(options.locale);
+    return upper(leading, options.locale);
   }
 
   const picked =
@@ -88,7 +89,7 @@ export function initials(text: string, options: InitialsOptions = {}): string {
 
   return picked
     .map(component => at(component, 0) ?? '')
-    .map(initial => (options.locale === undefined ? initial.toUpperCase() : initial.toLocaleUpperCase(options.locale)))
+    .map(initial => upper(initial, options.locale))
     .join('');
 }
 
@@ -134,8 +135,23 @@ export function truncate(text: string, maxLength: number, options: TruncateOptio
 function backUpToWord(text: string, cut: string, cutOffset: number): string {
   const next = text.charAt(cutOffset);
   if (next === '' || /^\s$/u.test(next)) return cut;
-  const lastSpace = cut.search(/\s+\S*$/u);
+  const lastSpace = startOfLastWhitespaceRun(cut);
   return lastSpace > 0 ? cut.slice(0, lastSpace) : cut;
+}
+
+const WHITESPACE = /^\s$/u;
+
+/**
+ * Index of the first character of the last whitespace run that is followed only by non-whitespace, or -1.
+ * A backward scan: a regex such as `/\s+\S*$/` retries from every start inside a long run of spaces
+ * (quadratic).
+ */
+function startOfLastWhitespaceRun(text: string): number {
+  let index = text.length;
+  while (index > 0 && !WHITESPACE.test(text.charAt(index - 1))) index--;
+  if (index === 0) return -1;
+  while (index > 0 && WHITESPACE.test(text.charAt(index - 1))) index--;
+  return index;
 }
 
 /** Context around the first match of `needle`, or `undefined` when absent. */

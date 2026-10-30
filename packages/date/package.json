@@ -160,6 +160,7 @@
   "dependencies": {
     "@arki/clock": "workspace:*",
     "@arki/failure": "workspace:*",
+    "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "temporal-polyfill": "catalog:utilities"
   },

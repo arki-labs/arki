@@ -22,6 +22,7 @@ import { toISO } from './core.js';
 import { remember } from './internal/cache.js';
 import { civilFromDays, dayOfYearOf, daysFromCivil, isoWeekOf, MS_PER_DAY, weekdayOfDays } from './internal/civil.js';
 import { dateTimeFormat } from './internal/intl.js';
+import { resolveLocale } from './internal/locale.js';
 import { offsetAt } from './internal/offsets.js';
 import { systemTimeZone } from './interop.js';
 import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
@@ -31,8 +32,6 @@ export type FormatOptions = Readonly<{ locale?: string; timeZone?: string }>;
 
 /** `Intl.DateTimeFormat` options plus this package's `locale` / `timeZone`. */
 export type FormatIntlOptions = Readonly<Intl.DateTimeFormatOptions> & FormatOptions;
-
-const DEFAULT_LOCALE = 'en-US';
 
 type Subject = PlainDate | PlainDateTime | ZonedDateTime;
 
@@ -572,7 +571,7 @@ function unquote(chunk: string): string {
  * throw `RangeError`.
  */
 export function format(value: Point | Date, pattern: string, options?: FormatOptions): string {
-  const locale = options?.locale ?? DEFAULT_LOCALE;
+  const locale = resolveLocale(options?.locale);
   const compiled = compilePattern(pattern);
   const fields = toFields(value, options?.timeZone, compiled.nanos);
   let text = '';
@@ -608,7 +607,8 @@ const TIME_OPTIONS = [
  * A `timeZone` option on a `PlainDate`/`PlainDateTime` throws.
  */
 export function formatIntl(value: Point | Date, options?: FormatIntlOptions): string {
-  const { locale = DEFAULT_LOCALE, timeZone, ...intl } = options ?? {};
+  const { locale: requested, timeZone, ...intl } = options ?? {};
+  const locale = resolveLocale(requested);
   const subject = toSubject(value, timeZone, 'formatIntl');
   if (isZonedDateTime(subject)) {
     return dateTimeFormat(locale, { ...intl, timeZone: subject.timeZoneId }).format(subject.epochMilliseconds);
@@ -641,7 +641,8 @@ function rangeFormatter(formatter: Intl.DateTimeFormat): Intl.DateTimeFormat {
  * Engines without `formatRange` (Hermes V1) throw a `RangeError`.
  */
 export function formatRange(start: Point | Date, end: Point | Date, options?: FormatIntlOptions): string {
-  const { locale = DEFAULT_LOCALE, timeZone, ...intl } = options ?? {};
+  const { locale: requested, timeZone, ...intl } = options ?? {};
+  const locale = resolveLocale(requested);
   const from = toSubject(start, timeZone, 'formatRange');
   const to = toSubject(end, timeZone, 'formatRange');
   if (isZonedDateTime(from) && isZonedDateTime(to)) {

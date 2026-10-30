@@ -151,3 +151,25 @@ describe('dedent', () => {
     expect(dedent('')).toBe('');
   });
 });
+
+describe('truncate on long whitespace', () => {
+  it('word-before and sentence cuts finish fast on 200,000 spaces', () => {
+    const text = `${' '.repeat(200_000)}a bc`;
+    for (const boundary of ['word-before', 'sentence'] as const) {
+      const started = performance.now();
+      const result = truncate(text, 200_003, { boundary });
+      expect(performance.now() - started).toBeLessThan(500);
+      expect(result.endsWith('…')).toBe(true);
+    }
+  });
+  it('still backs up to the last whole word', () => {
+    expect(truncate('one two three four', 12, { boundary: 'word-before' })).toBe('one two…');
+    expect(truncate('one  two   three', 12, { boundary: 'word-before' })).toBe('one  two…');
+  });
+});
+
+describe('malformed locale tags', () => {
+  it('initials ignores the tag and keeps locale-independent casing', () => {
+    expect(initials('ada lovelace', { locale: 'xx_yy' })).toBe(initials('ada lovelace'));
+  });
+});

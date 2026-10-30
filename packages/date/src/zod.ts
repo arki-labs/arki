@@ -12,15 +12,23 @@ import { z } from 'zod';
 import type { Interval } from './interval.js';
 import type { Duration, Instant, PlainDate, PlainDateTime, Point, ZonedDateTime } from './types.js';
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
+import { boundedInput } from './failures.js';
 import { interval } from './interval.js';
 import { isDuration, isInstant, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
 
 function describe(value: unknown): string {
-  return typeof value === 'string' ? `"${value}"` : Object.prototype.toString.call(value);
+  if (typeof value !== 'string') return Object.prototype.toString.call(value);
+  const { input, truncated } = boundedInput(value);
+  return truncated ? `"${input}…"` : `"${input}"`;
 }
 
+/** Longest copy of a builder's error message an issue keeps; builders echo the whole bad input in theirs. */
+const MAX_REASON_LENGTH = 160;
+
 function reason(error: unknown): string {
-  return error instanceof Error ? ` (${error.message})` : '';
+  if (!(error instanceof Error)) return '';
+  const text = error.message.length > MAX_REASON_LENGTH ? `${error.message.slice(0, MAX_REASON_LENGTH)}…` : error.message;
+  return ` (${text})`;
 }
 
 /** A string-or-value schema: `build` turns the input into the Temporal value or throws. */

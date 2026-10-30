@@ -148,3 +148,10 @@ it('fluent codecs preserve canonical failures and require narrowing before chain
   if (isFailure(value)) throw new Error(value.code);
   expect(value.upper().value()).toBe('HI');
 });
+
+describe('StringValue casing with a malformed locale tag', () => {
+  it('falls back to locale-independent casing instead of throwing', () => {
+    expect(str('abc').upper('xx_yy').toString()).toBe('ABC');
+    expect(str('ABC').lower('not a locale!').toString()).toBe('abc');
+  });
+});

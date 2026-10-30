@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { plainDate, zoned } from './core.js';
+import { InvalidDateText } from './failures.js';
+import { Temporal } from './types.js';
 import {
   absDuration,
   addDuration,
@@ -16,6 +18,7 @@ import {
   milliseconds,
   minutes,
   months,
+  parseDuration,
   multiplyDuration,
   negateDuration,
   normalizeDuration,
@@ -214,5 +217,34 @@ describe('formatDurationIntl', () => {
   it.skipIf(!hasDurationFormat())('prints locale text through Intl.DurationFormat', () => {
     expect(formatDurationIntl(d('PT1H30M'), { style: 'short' })).toMatch(/1 hr.*30 min/);
     expect(formatDurationIntl(d('P1DT2H'), { locale: 'ro-RO' })).toMatch(/1 zi.*2 ore/);
+  });
+});
+
+describe('parseDuration', () => {
+  it('reads ISO duration text', () => {
+    const result = parseDuration('P1DT2H');
+    expect(InvalidDateText.is(result)).toBe(false);
+    expect(result instanceof Temporal.Duration && result.toString()).toBe('P1DT2H');
+  });
+
+  it('returns InvalidDateText for text from outside instead of throwing, with a bounded copy of the text', () => {
+    const result = parseDuration('two days');
+    expect(InvalidDateText.is(result) && result.data).toEqual({
+      operation: 'parseDuration',
+      reason: 'invalid_duration',
+      input: 'two days',
+      truncated: false,
+    });
+    const long = parseDuration(`P${'9'.repeat(5000)}`);
+    expect(InvalidDateText.is(long) && long.data.truncated).toBe(true);
+  });
+});
+
+describe('locale text from outside', () => {
+  it('falls back to en-US for a malformed locale tag instead of throwing', () => {
+    expect(humanizeDuration(d('P1DT2H'), { locale: 'not a locale!' })).toBe(humanizeDuration(d('P1DT2H')));
+    if (hasDurationFormat()) {
+      expect(formatDurationIntl(d('PT1H30M'), { locale: 'xx_yy' })).toBe(formatDurationIntl(d('PT1H30M')));
+    }
   });
 });

@@ -36,6 +36,19 @@ describe('businessCalendar', () => {
   });
 });
 
+describe('a hand-built calendar with seven weekend days', () => {
+  it('throws instead of looping forever, with or without holidays', () => {
+    const allOff = [1, 2, 3, 4, 5, 6, 7] as const;
+    const withHolidays: BusinessCalendar = { weekend: allOff, holidays: new Set(['2026-12-25']) };
+    const withoutHolidays: BusinessCalendar = { weekend: allOff, holidays: new Set() };
+    const start = plainDate('2026-05-20');
+    expect(() => nextBusinessDay(start, withHolidays)).toThrow(RangeError);
+    expect(() => addBusinessDays(start, 3, withoutHolidays)).toThrow(RangeError);
+    expect(() => subBusinessDays(start, 3, withHolidays)).toThrow(RangeError);
+    expect(() => previousBusinessDay(start, withHolidays)).toThrow(RangeError);
+  });
+});
+
 describe('isBusinessDay', () => {
   it('excludes weekends and holidays, judging zoned values by their own date', () => {
     expect(isBusinessDay(plainDate('2026-10-09'))).toBe(true); // Friday
