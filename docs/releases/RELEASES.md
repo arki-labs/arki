@@ -13,6 +13,47 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 2 — DOT Kernel (dot-kernel) @ ddc44d3 (2026-10-31)
+
+<!-- candidate: dot-kernel-ddc44d3 -->
+
+**Packages shipped** (2, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/cli | 0.2.0 | 1 |
+| @arki/env | 0.2.0 | 2 |
+
+**Source commit**: `ddc44d32f53ae163c7a0b8a24dbdad03b5d80bcc`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (2 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/cli` success, `docs:@arki/env` success, `published:@arki/cli` success, `published:@arki/env` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/dot-kernel-ddc44d3/candidate.json`.
+
+---
+
+## Wave 1 — Foundation (foundation) @ ddc44d3 (2026-10-31)
+
+<!-- candidate: foundation-ddc44d3 -->
+
+**Packages shipped** (1, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/contracts | 0.4.1 | 1 |
+
+**Source commit**: `ddc44d32f53ae163c7a0b8a24dbdad03b5d80bcc`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (1 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/contracts` success, `published:@arki/contracts` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/foundation-ddc44d3/candidate.json`.
+
+---
+
 ## Wave 1 — Foundation (foundation) @ abaa697 (2026-10-30)
 
 <!-- candidate: foundation-abaa697 -->
