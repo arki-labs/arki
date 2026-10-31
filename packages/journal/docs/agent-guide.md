@@ -225,7 +225,7 @@ Rules:
 
 - Pass `tx`, never `db`. The root database is a compile error and a runtime error (`OUTBOX_E001`).
 - Pass `ctx.job.id` on to external systems as the idempotency key. The job runs at least once. The id is the row id and stays the same across retries.
-- Job args are plain JSON. A `Date`, a `Map` or a class instance is rejected (`OUTBOX_E003`).
+- Job args are plain JSON, at most 256 KiB. A `Date`, a `Map`, a `bigint` or a class instance returns `schema.invalid_input`.
 - A worker without `jobs` never claims a queue row. List queue rows with `journal.jobs(db, { job })` (it returns `{ jobs, next }`). Find stranded ones with `journal.strandedJobs(db, { jobs })`.
 - After a migration, run `drizzle-kit generate`. Roll out migrate, then workers, then producers.
 
