@@ -17,14 +17,17 @@ pnpm add @arki/kv
 Open a store, write a value with a TTL, read it back, and close.
 
 ```ts
+import { isFailure } from '@arki/failure';
 import { KV } from '@arki/kv';
+import { z } from '@arki/contracts';
 
 export async function demo(): Promise<string | undefined> {
   const kv = new KV('redis://localhost:6379', 'pizzeria');
   await kv.set('oven:temperature', '240', 60); // forgotten after 60 seconds
-  const value = await kv.get<string>('oven:temperature');
+  // `get` checks the stored value with the schema. A failure means Redis was down or the value did not match.
+  const value = await kv.get('oven:temperature', z.string());
   await kv.close();
-  return value; // '240'
+  return isFailure(value) ? undefined : value; // '240'
 }
 ```
 
@@ -48,11 +51,12 @@ Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which nee
 
 ```ts
 import { KV } from '@arki/kv';
+import { z } from '@arki/contracts';
 
 const kv = new KV('redis://localhost:6379', 'pizzeria');
 
 await kv.set('oven:temperature', '240', 60); // forgotten after 60 seconds
-const value = await kv.get('oven:temperature'); // '240'
+const value = await kv.get('oven:temperature', z.string()); // '240', or a failure
 await kv.delete('oven:temperature');
 
 await kv.close();

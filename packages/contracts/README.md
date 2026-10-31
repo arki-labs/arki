@@ -289,6 +289,8 @@ Drizzle entry, `@arki/contracts/drizzle`:
 
 Static definition misuse throws `ContractsError`, a `TypeError`. ID generation and cursor codecs return canonical failures; check them with their definitions or `isFailure`. Match on code, never on message.
 
+Zod and `zod-form-data` are re-exported unchanged, so their `.parse()` throws a raw `ZodError` on bad input. For outside values (a request, a stored payload, user text) use `parse` or `safeParse` from `@arki/schema`, which return an `InvalidInput` failure, or Zod's own `.safeParse()`. The Arki functions here (`defineId().is`, the keyset cursor decoder, `operationAt`) never throw on outside values.
+
 ```ts run expect
 import { CONTRACTS_ERROR_CODES, ContractsError, defineId } from '@arki/contracts';
 
