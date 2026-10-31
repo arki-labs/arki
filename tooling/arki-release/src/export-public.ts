@@ -771,7 +771,8 @@ const MIT_LICENSE_TEXT = [
  * a substantial "what is DOT?" section with a real `defineApp` example
  * showing typed services + the 5-hook lifecycle, then the composition
  * problem the framework exists to solve, then the package list, then
- * the doctrine. Voice rules from `apps/arki/docs/sitemap/_design-context.md`:
+ * the doctrine. Voice rules from the arki.dev site's design context (in the
+ * private workspace repo):
  * no exclamation marks, no "magic" / "blazing" / "revolutionary", no
  * marketing puff. Show, don't promise.
  */

@@ -1,8 +1,0 @@
-{
-  "$schema": "https://inlang.com/schema/inlang-message-format",
-  "common_home": "Home",
-  "common_about": "About",
-  "common_posts": "Posts",
-  "common_changelog": "Changelog",
-  "common_feedback": "Feedback"
-}

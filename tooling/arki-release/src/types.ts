@@ -28,7 +28,7 @@ import type { ReadinessResult } from './readiness';
  *   - smoke              (T1.2): install a candidate's tarballs into a clean consumer and import every export
  *   - impact             (T1.4): docs-impact and demo-impact for the packages a wave releases
  *   - ship               (T1.6): one command from a wave to a founder packet, then `--finish`
- *   - site               (T3.1): package docs + data files for apps/arki/start, from npm or the candidate
+ *   - site               (T3.1): package docs + data files for the arki.dev site (`--out`), from npm or the candidate
  *   - demo-check         (T4.2): one demo installed, typechecked, tested and built against a candidate
  *   - demo               (T4.4): `demo issues` turns a demo's open lib-gaps rows into GitHub issues
  */

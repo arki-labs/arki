@@ -44,7 +44,7 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 
 ## The `git add -A` parent-walk trap
 
-**Symptom:** Running `git add -A` inside `.release/arki-public/` (or any folder without its own `.git/`) stages files from the parent monorepo (`apps/<x>/`, `tooling/<y>/`, `.claude/`). `git status` shows paths like `../../apps/avocabo/...`.
+**Symptom:** Running `git add -A` inside `.release/arki-public/` (or any folder without its own `.git/`) stages files from the parent monorepo (`packages/<x>/`, `tooling/<y>/`, `.claude/`). `git status` shows paths like `../../apps/avocabo/...`.
 
 **Root cause:** the export folder never has a `.git/` (`export-public`'s `removeDirectory(outputPath)` wipes it). Never do git work there. Git walks UP looking for a `.git/`, finds this repo's, and operates against THAT. Package mirror git work belongs in `.release/package-mirrors/<name>/`, which `sync --prepare` creates with its own `.git/`.
 

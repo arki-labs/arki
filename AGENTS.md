@@ -12,12 +12,16 @@ releases them.
 packages/<name>/   one npm package each (@arki/<name>)
 tooling/           shared configs (@arki/tsconfig, eslint, vitest, prettier),
                    library checks (@arki/library-tooling), release tool
-apps/arki/         arki.dev, the docs and marketing site
+docs/releases/     the release ledger (RELEASES.md)
 docs/arki/         principles, decisions, glossary
 docs/rfcs/         design proposals
 .agents/skills/    agent skills (also linked at .claude/skills)
 .changeset/        pending version bumps
 ```
+
+The arki.dev site is not in this repo. It lives in the private workspace
+repo (`apps/arki`). `bun release:arki site --out <its start dir>` writes the
+package docs, the data files and a zod-only copy of their schemas into it.
 
 ## Before you write code
 

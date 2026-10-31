@@ -8,8 +8,8 @@ configuration for the public `@arki/*` release pipeline.
 Only packages in **`packages/`** whose `package.json` has `private: false`
 AND that appear in a release wave (see `arki.release.config.ts`) are
 candidates for npm publication. Changesets respects each package's
-`private` flag automatically — all internal packages (`apps/`,
-`tooling/`, anything still flagged `private: true`) are never published.
+`private` flag automatically — all internal packages (`tooling/`,
+anything still flagged `private: true`) are never published.
 
 The canonical release waves (active set — see `arki.release.config.ts`
 for the source of truth; trimmed for stable v1 per the doctrine
