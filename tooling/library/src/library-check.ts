@@ -51,7 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 
-import type { ErrorEntry } from './error-index';
+import type { ErrorEntry } from './error-index-schema';
 import { checkContractEntry } from './contract-entry';
 import { checkDocs, checkSource } from './docs';
 import { buildErrorIndex, checkErrorDocs, duplicateErrorCodes, ERR_RULES } from './error-index';

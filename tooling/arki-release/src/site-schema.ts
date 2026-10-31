@@ -1,10 +1,12 @@
 /**
- * Shapes of what `site` writes for `apps/arki/start`.
+ * Shapes of what `site` writes for the arki.dev site app (`--out`).
  *
  * Each generated file is declared here once, as a Zod schema. `site` parses
- * every file through its schema before it writes it, and the start app infers
- * its types from these schemas with `import type` (types only, so no node code
- * reaches the browser bundle).
+ * every file through its schema before it writes it. The site lives in another
+ * repo, so `site` also writes a self-contained copy of this module (plus the
+ * schema modules it imports) to `src/generated/site-schema.ts`, and the app
+ * infers its types from that copy (see `./site-schema-copy`). Import only `zod`
+ * and zod-only schema modules here, or the copy fails to render.
  *
  *   src/content/packages/<short>/<version|next>/snapshot.json  -> snapshotMetaSchema
  *   src/generated/packages.json                                -> packagesFileSchema
@@ -16,9 +18,9 @@
 
 import { z } from 'zod';
 
-import { errorEntrySchema } from '@arki/library-tooling/src/error-index';
+import { errorEntrySchema } from '@arki/library-tooling/error-index-schema';
 
-import { docExamplesReportSchema } from './docs-fresh';
+import { docExamplesReportSchema } from './doc-examples-report-schema';
 
 /** `published`: an npm version, immutable once written. `next`: the newest candidate, rewritten each run. */
 export const SITE_CHANNELS = ['published', 'next'] as const;

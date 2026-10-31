@@ -20,7 +20,7 @@ import { buildErrorIndex } from '@arki/library-tooling/src/error-index';
 import debugFactory from 'debug';
 import { z } from 'zod';
 
-import { docExamplesReportSchema } from './docs-fresh';
+import { docExamplesReportSchema } from './doc-examples-report-schema';
 import { exportPublicTree } from './export-public';
 import { discoverManifests } from './inventory';
 import { createEnvelope } from './json-output';

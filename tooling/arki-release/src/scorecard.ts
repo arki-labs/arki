@@ -59,6 +59,7 @@ import {
   type TarballContents,
 } from './candidate';
 import { demosUsing, evaluateDemoLag, loadDemos, type DemoRegistry, type DemoUse } from './demos';
+import type { DocExamplesReport } from './doc-examples-report-schema';
 import {
   evaluateBenchFresh,
   evaluateDocsFresh,
@@ -66,7 +67,6 @@ import {
   FRESH_ERROR_CODES,
   loadDocsFiles,
   unmentionedExports,
-  type DocExamplesReport,
   type DocsFreshFiles,
 } from './docs-fresh';
 import { runDotProbe } from './dot-probe';

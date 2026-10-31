@@ -1,6 +1,8 @@
 /**
- * The `site` command: copies package docs from published bytes into
- * `apps/arki/start` and writes the data files the site reads.
+ * The `site` command: copies package docs from published bytes into the
+ * arki.dev site app and writes the data files the site reads. The site lives
+ * in the private workspace repo, so `--out <dir>` names its start app (the
+ * folder that holds `src/`); every path below is relative to it.
  *
  *   site --channel published
  *     For each admitted package and each npm version with no folder yet under
@@ -16,7 +18,9 @@
  *
  * Both channels then regenerate `src/generated/{packages,errors,examples,demos}.json`
  * from the snapshot folders on disk, each parsed through its schema in
- * `./site-schema`. Only docs files are copied: never `dist/` code or `src/`.
+ * `./site-schema`, and `src/generated/site-schema.ts`, the self-contained copy
+ * of those schemas the app reads its types from (`./site-schema-copy`). Only
+ * docs files are copied: never `dist/` code or `src/`.
  */
 
 import { createHash } from 'node:crypto';
@@ -26,7 +30,7 @@ import path from 'node:path';
 import debugFactory from 'debug';
 import { z } from 'zod';
 
-import { errorIndexSchema } from '@arki/library-tooling/src/error-index';
+import { errorIndexSchema } from '@arki/library-tooling/error-index-schema';
 
 import type { Candidate, CandidatePackage } from './candidate';
 import type { ExecRunner, NpmRunner } from './runners';
@@ -57,6 +61,7 @@ import {
   packagesFileSchema,
   snapshotMetaSchema,
 } from './site-schema';
+import { renderSiteSchemaCopy, SITE_SCHEMA_COPY_FILE } from './site-schema-copy';
 
 const debug = debugFactory('arki:release:site');
 
@@ -77,11 +82,11 @@ export const SITE_ERROR_CODES = {
   repoDocMissing: 'SITE_E007',
 } as const;
 
-/** Where `site` writes, relative to the repo root. */
-export const SITE_CONTENT_DIR = path.join('apps', 'arki', 'start', 'src', 'content', 'packages');
-export const SITE_GENERATED_DIR = path.join('apps', 'arki', 'start', 'src', 'generated');
+/** Where `site` writes, relative to `--out` (the site's start app). */
+export const SITE_CONTENT_DIR = path.join('src', 'content', 'packages');
+export const SITE_GENERATED_DIR = path.join('src', 'generated');
 export const SNAPSHOT_META_FILE = 'snapshot.json';
-export const SITE_APP_CONTENT_DIR = path.join('apps', 'arki', 'start', 'src', 'content');
+export const SITE_APP_CONTENT_DIR = path.join('src', 'content');
 
 /**
  * Repo docs the site shows, copied into the app's content folder. The Docker image is built from `turbo prune`
@@ -103,7 +108,10 @@ const MIRROR_ORG = 'https://github.com/arki-labs';
 export const DOT_NEW_TEMPLATES = ['minimal', 'stack'] as const;
 
 export interface SiteOptions {
+  /** The arki repo root: config, candidates, readiness baseline and repo docs are read from here. */
   readonly cwd: string;
+  /** The site's start app, the folder that holds `src/`; resolved against `cwd`. Everything is written under it. */
+  readonly outDir: string;
   readonly config: ReleaseConfig;
   readonly channel: SiteChannel;
   /** `next` only: copy from this candidate alone instead of the newest per wave. */
@@ -706,10 +714,10 @@ async function writeGenerated(
 }
 
 /** Copies `REPO_DOC_COPIES` into the app; returns how many were written. */
-async function copyRepoDocs(cwd: string, errors: ReleaseError[]): Promise<number> {
+async function copyRepoDocs(cwd: string, outRoot: string, errors: ReleaseError[]): Promise<number> {
   let written = 0;
   for (const doc of REPO_DOC_COPIES) {
-    const target = path.join(cwd, SITE_APP_CONTENT_DIR, doc.to);
+    const target = path.join(outRoot, SITE_APP_CONTENT_DIR, doc.to);
     const text = await readFile(path.join(cwd, doc.from), 'utf8').catch(() => null);
     if (text === null) {
       if (doc.optional) {
@@ -737,8 +745,9 @@ async function copyRepoDocs(cwd: string, errors: ReleaseError[]): Promise<number
 // ---------------------------------------------------------------------------
 
 export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
-  const contentRoot = path.join(options.cwd, SITE_CONTENT_DIR);
-  const generatedRoot = path.join(options.cwd, SITE_GENERATED_DIR);
+  const outRoot = path.resolve(options.cwd, options.outDir);
+  const contentRoot = path.join(outRoot, SITE_CONTENT_DIR);
+  const generatedRoot = path.join(outRoot, SITE_GENERATED_DIR);
   const items: SiteItem[] = [];
   const errors: ReleaseError[] = [];
   let missing: readonly string[] = [];
@@ -775,7 +784,8 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
 
   items.push(...(await pruneRetired(options, contentRoot)));
   const counts = await writeGenerated(options, contentRoot, generatedRoot, errors);
-  const repoDocs = await copyRepoDocs(options.cwd, errors);
+  const repoDocs = await copyRepoDocs(options.cwd, outRoot, errors);
+  await writeFile(path.join(outRoot, SITE_SCHEMA_COPY_FILE), renderSiteSchemaCopy());
   const count = (action: SiteItem['action']): number => items.filter(i => i.action === action).length;
   const status = errors.some(e => e.severity === 'error') ? 'failure' : errors.length > 0 ? 'warning' : 'success';
   const created = count('created');

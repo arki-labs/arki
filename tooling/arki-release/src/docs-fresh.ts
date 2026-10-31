@@ -14,8 +14,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { z } from 'zod';
-
+import type { DocExamplesReport } from './doc-examples-report-schema';
 import type { GitRunner } from './runners';
 import type { ReleaseError, ScorecardDimensionResult, ScorecardStatus } from './types';
 
@@ -40,18 +39,6 @@ export const FRESH_ERROR_CODES = {
 
 export const FRESH_DIMENSIONS = ['docs-fresh', 'bench-fresh'] as const;
 export type FreshDimension = (typeof FRESH_DIMENSIONS)[number];
-
-/** The `arki-doc-examples --json` report, as a consumer reads it. */
-export const docExamplesReportSchema = z.object({
-  examples: z.number(),
-  modules: z.number(),
-  compiled: z.number(),
-  ran: z.number(),
-  skipped: z.number(),
-  skippedBlocks: z.array(z.object({ file: z.string(), line: z.number(), reason: z.string() })),
-  failures: z.array(z.object({ file: z.string(), line: z.number(), rule: z.string(), message: z.string() })),
-});
-export type DocExamplesReport = z.infer<typeof docExamplesReportSchema>;
 
 function error(code: string, severity: ReleaseError['severity'], pkg: string, message: string, remediation: string): ReleaseError {
   return { code, severity, message: `${pkg}: ${message}`, remediation, target: pkg };

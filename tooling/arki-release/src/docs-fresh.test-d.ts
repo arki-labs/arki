@@ -7,6 +7,6 @@ import { expectTypeOf } from 'vitest';
 
 import type { ExamplesReport } from '@arki/library-tooling/src/doc-examples';
 
-import type { DocExamplesReport } from './docs-fresh';
+import type { DocExamplesReport } from './doc-examples-report-schema';
 
 expectTypeOf<keyof ExamplesReport>().toEqualTypeOf<keyof DocExamplesReport>();

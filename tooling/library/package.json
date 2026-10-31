@@ -7,6 +7,9 @@
     "./api-index-schema": {
       "default": "./src/api-index-schema.ts"
     },
+    "./error-index-schema": {
+      "default": "./src/error-index-schema.ts"
+    },
     "./src/*": {
       "default": "./src/*.ts"
     }

@@ -8,10 +8,10 @@ import {
   checkErrorDocs,
   duplicateErrorCodes,
   errorDocsUrl,
-  errorIndexSchema,
   missingErrorDocs,
   readErrorEntries,
 } from './error-index';
+import { errorIndexSchema } from './error-index-schema';
 
 const REGISTRY = `
 export const DEMO_ERROR_CODES = {

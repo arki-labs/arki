@@ -19,20 +19,9 @@ import { parseArgs } from 'node:util';
 import ts from 'typescript';
 import { z } from 'zod';
 
+import type { ErrorEntry } from './error-index-schema';
+import { errorIndexSchema } from './error-index-schema';
 import { complain, say } from './report';
-
-export const errorEntrySchema = z.object({
-  code: z.string().min(1),
-  package: z.string().min(1),
-  kind: z.enum(['thrown', 'failure']),
-  what: z.string(),
-  fix: z.string().nullable(),
-  verify: z.string().nullable(),
-  /** `src/file.ts:line`, relative to the package. */
-  source: z.string().regex(/^.+:\d+$/),
-});
-export const errorIndexSchema = z.array(errorEntrySchema);
-export type ErrorEntry = z.infer<typeof errorEntrySchema>;
 
 /** Base of the public page of one code. Dotted failure codes are used as they are. */
 export const ERROR_DOCS_URL = 'https://arki.dev/errors';

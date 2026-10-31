@@ -38,7 +38,7 @@ import {
 } from './candidate';
 import { demoCheckId, runDemoCheck } from './demo-check';
 import { demosUsing, loadDemos } from './demos';
-import { docExamplesReportSchema } from './docs-fresh';
+import { docExamplesReportSchema } from './doc-examples-report-schema';
 import { checkBumps, loadChangesets } from './impact';
 import { discoverManifests, type ParsedManifest } from './inventory';
 import { createEnvelope } from './json-output';

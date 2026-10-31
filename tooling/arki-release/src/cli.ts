@@ -7,6 +7,7 @@
  * subcommand is an honest stub that returns `status: 'pending'` — the real
  * logic lands in Tasks 2-7.
  */
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -149,7 +150,7 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'site',
     task: 'T3.1',
     description:
-      'Docs + data for apps/arki/start: --channel published | --channel next [--candidate <dir>] | --check-links [--base-url <url>].',
+      'Docs + data for the arki.dev site (private workspace repo): --channel published --out <start dir> | --channel next --out <start dir> [--candidate <dir>] | --check-links [--base-url <url>].',
   },
   {
     name: 'demo-check',
@@ -776,8 +777,9 @@ async function runShipHandler(args: ParsedCliArgs): Promise<number> {
  * `args.rest`. Minimal — we only need a handful of options for now.
  */
 /**
- * `site --channel published`: npm versions not yet on disk become immutable snapshots.
- * `site --channel next [--candidate <dir>]`: the newest candidate per wave (or `<dir>`) into `<name>/next/`.
+ * `site --channel published --out <dir>`: npm versions not yet on disk become immutable snapshots.
+ * `site --channel next --out <dir> [--candidate <dir>]`: the newest candidate per wave (or `<dir>`) into `<name>/next/`.
+ * `--out` is the site's start app (the folder that holds `src/`), e.g. `~/Developer/workspace/apps/arki/start`.
  * `site --check-links [--base-url <url>]`: crawls the running site and fails on a link that does not resolve.
  */
 async function runSiteHandler(args: ParsedCliArgs): Promise<number> {
@@ -789,10 +791,14 @@ async function runSiteHandler(args: ParsedCliArgs): Promise<number> {
   }
   const channel = extractOption(args.rest, 'channel');
   const candidateDir = extractOption(args.rest, 'candidate');
+  const outDir = extractOption(args.rest, 'out');
   if (channel !== 'published' && channel !== 'next') return usageError('site', 'site needs `--channel published` or `--channel next`.', args.json);
   if (channel === 'published' && candidateDir !== null) return usageError('site', '`--candidate` belongs to `--channel next`.', args.json);
+  if (outDir === null) return usageError('site', 'site needs `--out <dir>`: the site\'s start app, the folder that holds `src/`.', args.json);
+  if (!existsSync(path.join(path.resolve(outDir), 'src')))
+    return usageError('site', `\`--out ${outDir}\` has no \`src/\` folder; point it at the site's start app (e.g. apps/arki/start).`, args.json);
   return withConfig('site', args.json, async config => {
-    const envelope = await runSite({ cwd: process.cwd(), config, channel, ...(candidateDir === null ? {} : { candidateDir }) });
+    const envelope = await runSite({ cwd: process.cwd(), outDir: path.resolve(outDir), config, channel, ...(candidateDir === null ? {} : { candidateDir }) });
     emitEnvelope(envelope, { json: args.json });
     return envelope.status === 'failure' ? 1 : 0;
   });
