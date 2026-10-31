@@ -163,7 +163,7 @@ describe('canonical auth boundaries', () => {
 });
 
 describe('resolvePrincipal on the error a principal source throws', () => {
-  const failWith = (error: unknown) => resolvePrincipal({ principal: () => Promise.reject(error) }, new Headers());
+  const failWith = (error: Error) => resolvePrincipal({ principal: () => Promise.reject(error) }, new Headers());
 
   it('a store outage is auth.unavailable (503) and keeps its private cause off the failure data', async () => {
     const outage = new AuthError(AUTH_ERROR_CODES.storeUnavailable, 'pg host db-7 refused');

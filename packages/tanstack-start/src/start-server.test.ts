@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { defineApp, infra } from '@arki/dot';
+import { defineFailure } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
 import { tanstackStart } from './dot';
@@ -54,7 +55,9 @@ describe('startServer() boot failure', () => {
     const body = await response.text();
     expect(response.status).toBe(503);
     expect(body).not.toContain('hunter2');
-    expect(JSON.parse(body)).toEqual({ error: 'Service temporarily unavailable' });
+    expect(JSON.parse(body)).toEqual({
+      error: { code: 'tanstack_start.unavailable', message: 'Service temporarily unavailable' },
+    });
     expect(handled).toBe(0);
   });
 });
@@ -239,5 +242,49 @@ describe('startServer() hot replace', () => {
     expect(events).toEqual(['start:a', 'dispose:a', 'start:b']);
     const stale = await first.fetch(page());
     expect(stale.status).toBe(503);
+  });
+});
+
+describe('startServer() identity lookups', () => {
+  const Refused = defineFailure('test.refused', { status: 401, message: 'Sign in to continue.' });
+  const serverWhere = (lookup: () => never) => {
+    const { authn } = makeAuthn();
+    const { gateway } = makeGateway();
+    const start = tanstackStart({
+      needs: { auth: authn.provides.auth },
+      session: () => null,
+      rpc: lookup,
+    });
+    let handled = 0;
+    const server = startServer(defineApp('shop').infra(authn).infra(gateway).entrypoints(start), {
+      handler: () => {
+        handled += 1;
+        return ok();
+      },
+    });
+    return { server, handled: () => handled };
+  };
+
+  it('answers a failure thrown by an identity lookup with its own status and code', async () => {
+    const { server, handled } = serverWhere(() => {
+      // A failure is a value, not an Error: this proves a lookup that throws one is still answered by its status.
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw Refused();
+    });
+    const response = await server.fetch(page());
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: { code: 'test.refused', message: 'Sign in to continue.' } });
+    expect(handled()).toBe(0);
+  });
+
+  it('masks any other throw as a typed 500', async () => {
+    const { server } = serverWhere(() => {
+      throw new Error('session store at redis://:hunter2@kv is down');
+    });
+    const response = await server.fetch(page());
+    const text = await response.text();
+    expect(response.status).toBe(500);
+    expect(text).not.toContain('hunter2');
+    expect(JSON.parse(text)).toEqual({ error: { code: 'tanstack_start.internal', message: 'Internal Server Error' } });
   });
 });

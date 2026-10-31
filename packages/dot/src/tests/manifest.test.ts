@@ -13,7 +13,7 @@ import { orThrow } from '@arki/failure';
 import { defineApp } from '../define-app.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import type { JsonObject } from '../manifest.js';
-import { toJsonObject } from '../manifest.js';
+import { DOT_MANIFEST_ERROR_CODE, toJsonObject } from '../manifest.js';
 import { infra, service } from '../unit-contract.js';
 
 describe('DOT manifest', () => {
@@ -221,6 +221,22 @@ describe('DOT manifest', () => {
       properties: { id: { type: 'string' } },
     });
     expect(() => toJsonObject({ value: Number.POSITIVE_INFINITY })).toThrow(/JSON-serializable/);
+  });
+
+  it.each([
+    ['a Date', { at: new Date(0) }],
+    ['an undefined field', { gone: undefined }],
+    ['a class instance', { box: new (class Box {})() }],
+    ['a nested NaN', { deep: [{ n: Number.NaN }] }],
+    ['a non-object', 'text'],
+  ])('rejects %s with ARKI_DOT_E032, never coerces it', (_name, value) => {
+    expect(() => toJsonObject(value)).toThrow(expect.objectContaining({ code: DOT_MANIFEST_ERROR_CODE }));
+  });
+
+  it('rejects a cycle with ARKI_DOT_E032', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    expect(() => toJsonObject(cyclic)).toThrow(expect.objectContaining({ code: DOT_MANIFEST_ERROR_CODE }));
   });
 
   it('lifecycle entries include every hook the unit participates in', async () => {

@@ -10,6 +10,12 @@ import type { RPCHandlerOptions } from '@orpc/server/fetch';
 import { createRouterClient } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 
+import { getLogger } from '@arki/log';
+
+import { thrownResponse } from '../failures.js';
+
+const log = getLogger('arki:tanstack-start');
+
 export type ORPCServerConfig<TRouter extends AnyRouter> = {
   /**
    * The oRPC router (plain object of procedures)
@@ -71,7 +77,14 @@ export function createORPCHandler<TRouter extends AnyRouter>(config: ORPCServerC
    * Returns the procedure's response, or a 404 if no procedure matched.
    */
   async function handleRequest(request: Request): Promise<Response> {
-    const context = await createContext(request);
+    let context: InferRouterInitialContext<TRouter>;
+    try {
+      context = await createContext(request);
+    } catch (error) {
+      // A thrown failure answers with its own status (such as 401); anything else is a masked 500 and stays in the log.
+      log.error('createContext failed', { error: error instanceof Error ? error : String(error) });
+      return thrownResponse(error);
+    }
 
     const { matched, response } = await rpcHandler.handle(request, {
       prefix,

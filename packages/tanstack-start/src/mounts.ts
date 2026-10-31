@@ -14,6 +14,7 @@
  */
 import { getLogger } from '@arki/log';
 
+import { thrownResponse } from './failures.js';
 import type { MountedService, MountName } from './request-context.js';
 
 const log = getLogger('arki:tanstack-start');
@@ -60,7 +61,7 @@ async function serveRpc({ request, context }: MountArgs<'rpc'>): Promise<Respons
     response = served.response ?? notFound();
   } catch (error) {
     log.error('Unhandled RPC error', { error: error instanceof Error ? error : String(error) });
-    response = new Response('Internal Server Error', { status: 500 });
+    response = thrownResponse(error);
   }
   return withCors(response, request, start);
 }

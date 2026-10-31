@@ -26,7 +26,8 @@ import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { defineApp, DotLifecycleError } from '@arki/dot';
+import { defineApp } from '@arki/dot';
+import { UnexpectedDefect } from '@arki/failure';
 import { infra } from '@arki/dot/unit';
 
 import type { LiveFeed, LiveHub, LiveLimits, LiveManifest, LiveMeta, TableTag } from '../index.js';
@@ -504,9 +505,9 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
           authorize: () => Promise.resolve({}),
         }),
       );
-    const failure = await app.boot().catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(DotLifecycleError);
-    expect(failure).toMatchObject({ cause: { code: LIVE_ERROR_CODES.triggers } });
+    const failure = await app.boot();
+    expect(UnexpectedDefect.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: UnexpectedDefect.code, cause: { code: LIVE_ERROR_CODES.triggers } });
     expect(listened).toBe(0);
 
     // A view has no trigger: the writer touches it in the same transaction, and it is published at commit.

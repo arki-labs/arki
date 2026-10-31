@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
 import { DotUnitError } from '@arki/dot/unit';
-import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
+import { InvalidInput, isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { makeAuthn, makeGateway } from './__fixtures__/start-app';
 import { TANSTACK_START_PLUGIN_ERROR_CODES, tanstackStart } from './dot';
@@ -132,11 +132,11 @@ describe('tanstackStart() configure', () => {
   });
 
   it('rejects two mounts at one path, since one route file would shadow the other', () => {
-    expect(isFailure(makeApp({ rpcAt: '/api/x', authAt: '/api/x' }).app.configure())).toBe(true);
+    expect(makeApp({ rpcAt: '/api/x', authAt: '/api/x' }).app.configure()).toMatchObject({ code: InvalidInput.code });
   });
 
   it('rejects a mount path with a trailing slash, which would mount at a double slash', () => {
-    expect(isFailure(makeApp({ rpcAt: '/api/rpc/' }).app.configure())).toBe(true);
+    expect(makeApp({ rpcAt: '/api/rpc/' }).app.configure()).toMatchObject({ code: InvalidInput.code });
   });
 });
 

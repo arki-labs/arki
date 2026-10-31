@@ -12,7 +12,10 @@
  * but never missing.
  */
 
-import { is, plainObjectSchema } from '@arki/schema';
+import { z } from 'zod';
+
+import { isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type { DotLifecycleHook } from './lifecycle.js';
 import type { UnitRole } from './unit-contract.js';
@@ -40,8 +43,9 @@ export class DotManifestError extends TypeError {
   }
 }
 
-function jsonRoundTrip(value: unknown): unknown {
-  let serialized: string;
+/** Rejects a cycle or a BigInt before the schema walks the value: a cycle would never end. */
+function assertSerializable(value: unknown): void {
+  let serialized: string | undefined;
   try {
     serialized = JSON.stringify(value);
   } catch (error) {
@@ -50,52 +54,28 @@ function jsonRoundTrip(value: unknown): unknown {
   if (serialized === undefined) {
     throw new DotManifestError('Value must be a JSON-serializable object.');
   }
-  return JSON.parse(serialized) as unknown;
 }
 
-function isJsonPrimitive(value: unknown): value is string | number | boolean | null {
-  return value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number';
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (isJsonPrimitive(value)) return typeof value !== 'number' || Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(item => isJsonValue(item));
-  if (!is(value, plainObjectSchema)) return false;
-  return Object.values(value).every(item => isJsonValue(item));
-}
-
-function isJsonObject(value: unknown): value is JsonObject {
-  return is(value, plainObjectSchema) && Object.values(value).every(item => isJsonValue(item));
-}
-
-function jsonDeepEqual(left: unknown, right: unknown): boolean {
-  if (isJsonPrimitive(left) || isJsonPrimitive(right)) return Object.is(left, right);
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
-    return left.every((value, index) => jsonDeepEqual(value, right[index]));
-  }
-  if (!is(left, plainObjectSchema) || !is(right, plainObjectSchema)) return false;
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) return false;
-  for (const [key, value] of leftEntries) {
-    if (!Object.hasOwn(right, key) || !jsonDeepEqual(value, right[key])) return false;
-  }
-  return true;
-}
+/**
+ * Plain JSON only: no `undefined`, `NaN`, `Infinity`, `Date`, function or class instance.
+ * Zod's `z.json()` has the same shape as {@link JsonValue}.
+ */
+const jsonObjectSchema = z.record(z.string(), z.json());
 
 /**
  * Validate and narrow unknown adapter data into manifest JSON metadata.
  *
- * The check intentionally compares the original value against a
- * JSON.stringify/parse round trip. Dates, functions, undefined fields, NaN,
+ * A schema checks the value itself, so dates, functions, undefined fields, NaN,
  * Infinity, class instances, and cycles fail instead of being silently
  * coerced in `dot explain --json`.
  */
 export function toJsonObject(value: unknown): JsonObject {
-  const parsed = jsonRoundTrip(value);
-  if (!isJsonObject(parsed) || !jsonDeepEqual(value, parsed)) {
-    throw new DotManifestError('Value must be a JSON-serializable object without lossy coercions.');
+  assertSerializable(value);
+  const parsed = parse(jsonObjectSchema, value);
+  if (isFailure(parsed)) {
+    throw new DotManifestError('Value must be a JSON-serializable object without lossy coercions.', {
+      cause: parsed,
+    });
   }
   return parsed;
 }

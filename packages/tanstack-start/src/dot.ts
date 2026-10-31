@@ -50,6 +50,8 @@ import { InvalidInput, isFailure } from '@arki/failure';
 import { cronErrorBody } from '@arki/schedule/orpc';
 import { formatIssues, parse } from '@arki/schema';
 
+import { CronUnauthenticated, failureResponse } from './failures.js';
+
 import type {
   CorsOptions,
   CorsPolicy,
@@ -230,17 +232,12 @@ function sameSecret(provided: string, expected: string): boolean {
   return timingSafeEqual(digest(provided), digest(expected));
 }
 
-/** The 401 bodies cron hosts and on-call already rely on. */
+/** Every refusal is the same {@link CronUnauthenticated} envelope: the answer never says which check failed. */
 function cronAuthError(request: Request, secret: string): Response | undefined {
   const header = request.headers.get('Authorization');
-  if (header === null) return Response.json({ error: 'Missing Authorization header' }, { status: 401 });
-  if (!header.startsWith('Bearer ')) {
-    return Response.json({ error: 'Authorization header must use Bearer scheme' }, { status: 401 });
-  }
-  if (!sameSecret(header.slice('Bearer '.length), secret)) {
-    return Response.json({ error: 'Invalid cron secret' }, { status: 401 });
-  }
-  return undefined;
+  const presented = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
+  if (presented !== undefined && sameSecret(presented, secret)) return undefined;
+  return failureResponse(CronUnauthenticated());
 }
 
 function cronMount<Needs>(cron: NonNullable<MountOptions<Needs>['cron']>, needs: Needs): MountHandles['cron'] {

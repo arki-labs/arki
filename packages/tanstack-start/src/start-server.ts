@@ -31,6 +31,7 @@ import { createAppRuntime } from '@arki/dot/runtime';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
+import { ApplicationUnavailable, failureResponse, thrownResponse } from './failures.js';
 import type { StartRequestContext, StartServices, WithStart } from './request-context.js';
 
 export { withForwardedProto } from './forwarded-proto.js';
@@ -132,7 +133,7 @@ async function clientFile(request: Request, client: URL): Promise<Response | und
 /** The boot failure stays in the logs; the client only learns to retry. */
 function unavailable(failure: Failure): Response {
   log.error('Application unavailable', { code: failure.code, failure });
-  return Response.json({ error: 'Service temporarily unavailable' }, { status: 503 });
+  return failureResponse(ApplicationUnavailable());
 }
 
 /** Start's own handler, typed for any app's context. */
@@ -168,7 +169,14 @@ export function startServer<Services extends ServiceRecord, Rpc, Session>(
       if (file !== undefined) return file;
       const started = await runtime.get();
       if (isFailure(started)) return unavailable(started);
-      const own = await started.services.tanstackStart.context(request, request.signal);
+      let own: Awaited<ReturnType<typeof started.services.tanstackStart.context>>;
+      try {
+        own = await started.services.tanstackStart.context(request, request.signal);
+      } catch (error) {
+        // Identity lookups return `null` or a failure for expected outcomes. A throw is a refusal failure or a crash.
+        log.error('Request context failed', { error: error instanceof Error ? error : String(error) });
+        return thrownResponse(error);
+      }
       return handler(request, { context: { services: started.services, ...own } });
     },
   };

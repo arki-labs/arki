@@ -98,6 +98,32 @@ describe('the preflight process', () => {
     expect(events).toContainEqual({ kind: 'preflight', status: 'failure', codes: ['app.configure_refused'] });
   });
 
+  it('refuses an app export that is already configured, with the exact dev_app_started code', async () => {
+    const appFile = path.join(workDir, 'started.ts');
+    await writeFile(
+      appFile,
+      `import { defineApp } from '${DEFINE_APP_PATH}';
+import { infra } from '${UNIT_CONTRACT_PATH}';
+export const dev = defineApp('started').infra(infra({ name: 'serving' })).configure();
+`,
+    );
+    const { result, events } = await session({ app: appFile });
+    expect(await result).toMatchObject({
+      code: 'dot.dev_app_started',
+      data: { exportName: 'dev', filePath: appFile },
+    });
+    expect(events).toContainEqual({ kind: 'preflight', status: 'failure', codes: ['dot.dev_app_started'] });
+  });
+
+  it('answers dot.dev_port_in_use when something already listens on the app port, and starts no runner', async () => {
+    const appFile = path.join(workDir, 'app.ts');
+    await writeFile(appFile, versionedApp('v1'));
+    const { result, events } = await session({ app: appFile, once: false, run: 'echo unreachable', probe: () => Promise.resolve(true) });
+    const done = await result;
+    expect(isFailure(done) && done.code).toBe('dot.dev_port_in_use');
+    expect(events.some(event => event.kind === 'runner')).toBe(false);
+  }, 60_000);
+
   it('sees an edit to the app file made between two restarts', async () => {
     const appFile = path.join(workDir, 'app.ts');
     await writeFile(appFile, versionedApp('v1'));

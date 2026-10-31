@@ -103,7 +103,7 @@ const checks = [
   ['the coded error carries a remediation', duplicate.remediation.length > 0, true],
   ['the coded error links its docs', duplicate.docsUrl.endsWith('#arki_dot_e011'), true],
   ['non-JSON manifest data is a coded error', manifestCode, DOT_MANIFEST_ERROR_CODE],
-  ['./unit re-exports the same infra()', unitFromSubpath === unit, true],
+  ['./unit re-exports the same infra()', unitFromSubpath === infra, true],
   ['./feature loads', typeof defineFeature, 'function'],
   ['./log loads', typeof log, 'function'],
   ['./runtime starts one app for concurrent callers', runtimeSharesOneApp, true],

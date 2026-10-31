@@ -144,7 +144,9 @@ describe('rpcHandlers()', () => {
     const { context, dispose } = await startedApp();
     const response = await handlers.POST({ request: rpcRequest('/boom', { method: 'POST' }), context });
     expect(response.status).toBe(500);
-    expect(await response.text()).not.toContain('password');
+    const body = await response.json();
+    expect(body).toEqual({ error: { code: 'tanstack_start.internal', message: 'Internal Server Error' } });
+    expect(JSON.stringify(body)).not.toContain('password');
     orThrow(await dispose());
   });
 });
@@ -159,7 +161,9 @@ describe('cronHandlers()', () => {
     const wrongScheme = await handlers.POST({ request: cronRequest('send-digest', 'Basic x'), context });
     const wrong = await handlers.POST({ request: cronRequest('send-digest', 'Bearer nope'), context });
     expect([missing.status, wrongScheme.status, wrong.status]).toEqual([401, 401, 401]);
-    expect(await wrong.json()).toEqual({ error: 'Invalid cron secret' });
+    // One envelope for every cause: the answer never says which check failed.
+    const bodies = await Promise.all([missing, wrongScheme, wrong].map(async response => response.json()));
+    expect(bodies).toEqual(Array.from({ length: 3 }).fill({ error: { code: 'tanstack_start.unauthenticated', message: 'Sign in to continue.' } }));
     expect(triggered).toEqual([]);
     orThrow(await dispose());
   });

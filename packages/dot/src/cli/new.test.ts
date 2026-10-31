@@ -333,6 +333,32 @@ describe('runNew (real run)', () => {
     expect(after).toBe('{"existing": true}');
   });
 
+  it('returns dot.template_missing when the template folder has no files', async () => {
+    const { mkdir } = await import('node:fs/promises');
+    const emptyTemplate = join(workDir, 'empty-template');
+    await mkdir(emptyTemplate, { recursive: true });
+    const result = await runNew({ name: 'fixture', cwd: workDir, templateRoot: emptyTemplate });
+
+    expect(result).toMatchObject({ code: 'dot.template_missing', data: { templateRoot: emptyTemplate } });
+    await expect(stat(join(workDir, 'fixture'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('returns dot.write_failed, listing what failed and what was written, when a path is blocked', async () => {
+    const target = join(workDir, 'fixture');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(target, { recursive: true });
+    // A file named `src` blocks the directory `src/` the template needs.
+    await writeFile(join(target, 'src'), 'in the way');
+    const result = await runNew({ name: 'fixture', cwd: workDir, templateRoot: TEMPLATE_ROOT, force: true });
+
+    expect(result).toMatchObject({ code: 'dot.write_failed', data: { target } });
+    if (!isFailure(result)) throw new Error('expected dot.write_failed');
+    const failedPaths = (result.data as { failed: { path: string }[] }).failed.map(entry => entry.path);
+    expect(failedPaths).toContain('src/app.ts');
+    expect(failedPaths).not.toContain('package.json');
+    expect(await readFile(join(target, 'package.json'), 'utf-8')).toContain('"name": "fixture"');
+  });
+
   it('overwrites existing files with --force', async () => {
     const target = join(workDir, 'fixture');
     const { mkdir } = await import('node:fs/promises');
