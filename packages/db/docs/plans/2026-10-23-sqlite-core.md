@@ -10,7 +10,7 @@ An app keeps its own tables on SQLite through `@arki/db`. It connects through th
 
 **Done when:**
 
-1. `db({ driver: 'libsql', relations, url })` boots and publishes a Drizzle `LibSQLDatabase`.
+1. `db({ relations, url })` from `@arki/db/libsql/dot` boots and publishes a Drizzle `LibSQLDatabase`.
 2. Concurrent transactions and plain writes on one local libSQL file all succeed: no `SQLITE_BUSY` within a process.
 3. A SQLite unique violation reads as `23505`, and `SQLITE_BUSY` (another process holds the lock) is retried by `runTransaction`.
 4. `migrateDb` and `pendingMigrations` work on libSQL.
@@ -22,7 +22,7 @@ An app keeps its own tables on SQLite through `@arki/db`. It connects through th
 - **Errors are translated at the existing seam.** `findDatabaseError` (`src/sql-state.ts`) already returns a SQL-standard SQLSTATE that `isUniqueViolation`, `retryableSqlState` and `classifyTransactionFailure` read. It gains a SQLite reader that maps SQLite's extended result code to the standard SQLSTATE. Everything downstream works unchanged, and the public failure shapes (`TransactionConflict.data.sqlState`, `TransactionRejected.data.sqlState`) stay as they are. This replaces the design's separate `classifyError()`: one seam, not two.
 - **`SQLITE_BUSY` maps to `40001`.** It means "the lock was taken; nothing ran; try again", which is what class `40` asks of the caller. Within one process the write queue (below) prevents it, so it only appears when another process writes the same file.
 - **The write queue is a client decorator, not a mutex around `transaction()`.** The Tier 1 spike follow-up (2026-10-23) showed that `createClient({ timeout })` does not help at any value: every pooled connection runs on the one JavaScript thread, so a connection waiting for the lock blocks the transaction that holds it. And plain `db.insert()` outside a transaction also hits `SQLITE_BUSY` while a transaction is open. Only an open transaction holds a lock across an `await`, so the decorator makes every other client call wait while one is open. Queries inside the transaction run on the transaction object and never wait. It applies to local URLs (`file:`, `:memory:`); a remote libSQL server does its own locking.
-- **The dialect is in the type, so the driver is named.** `db({ driver: 'libsql' })`, not URL sniffing: `services.db`'s type must be known at compile time, and the URL is read at boot. A URL whose scheme does not match the driver (`postgres://` with `libsql`, `file:` with `pg`) fails at boot with a coded error. This refines D-4.
+- **The dialect is in the type, so the driver is named.** The libSQL plugin is its own entry, `@arki/db/libsql/dot`, not URL sniffing: `services.db`'s type must be known at compile time, and the URL is read at boot. A URL whose scheme does not match the plugin (`postgres://` to the libSQL plugin, `file:` to `pg`) fails at boot with a coded error. This refines D-4.
 - **Deferred, with reasons:**
   - `Db<D>`, `AnyDb` and the capability record have no consumer until package tables (Tier 2) and capabilities (Tier 3).
   - The journal and queue `is(tx, PgAsyncTransaction)` checks stay: journal is Postgres-only until Tier 3, and another session is editing it.
@@ -107,18 +107,20 @@ Files: modify `packages/db/src/migrate.ts`; create `packages/db/src/migrate.sqli
 - `migrateDb` branches on `dialectOf`: pg → the pg-core `migrate` (unchanged); sqlite → the SQLite migrator for an in-memory list (`migrate`/`migrateAsync` in `drizzle-orm/sqlite-core`; check the exported name). `migrationsSchema` does not apply on SQLite (no schemas); ignore it there and say so in the JSDoc.
 - `pendingMigrations` on SQLite checks `sqlite_master` for the table, then reads its rows with the same `appliedRowSchema`.
 
-Tests: a two-step SQLite migration folder built in a temp dir (as `migrate.test.ts` does): two pending → apply → none pending → a second apply is a no-op. `dbMigrations()` boots on a `driver: 'libsql'` app.
+Tests: a two-step SQLite migration folder built in a temp dir (as `migrate.test.ts` does): two pending → apply → none pending → a second apply is a no-op. `dbMigrations()` boots on an app that uses `@arki/db/libsql/dot`.
 
-## Task 6: `db({ driver: 'libsql' })`
+## Task 6: `db()` from `@arki/db/libsql/dot`
 
-Files: modify `packages/db/src/dot.ts`, `packages/db/src/dot.test.ts`, `packages/db/src/dot.test-d.ts`.
+Files: `packages/db/src/libsql/dot.ts`, `packages/db/src/libsql/dot.test.ts`, `packages/db/src/libsql/dot.test-d.ts`; the shared URL check and error codes in `packages/db/src/dot-errors.ts`.
 
-- `LibsqlDbDotOptions`: `driver: 'libsql'`, `url?: () => string | undefined` (falls back to `DB_URL`), `authToken?: () => string | undefined`.
-- The provider imports `./libsql.js` dynamically, as the PGlite path imports its runtime, so a pg app never loads `@libsql/client`. `dispose` closes the client.
-- `DbServices<R, 'libsql'>` is `{ db: LibSQLDatabase<R> }`. No `sessionPool`: SQLite has no LISTEN.
+Changed 2026-10-31: this first shipped as `db({ driver: 'libsql' })` in `@arki/db/dot`, with a dynamic `import('./libsql.js')`. Vite and Nitro bundle a dynamic import too, so every app on `@arki/db/dot` failed to build without `@libsql/client`. The plugin now has its own entry (A-42: one module per backend, as `drizzle-orm/libsql` sits next to `drizzle-orm/node-postgres`), and `@arki/db/dot` never reaches `@libsql/client`.
+
+- `LibsqlDbDotOptions`: `relations`, `logger?`, `url?: () => string | undefined` (falls back to `DB_URL`), `authToken?: () => string | undefined`.
+- The plugin imports `createLibsqlDb` statically. `dispose` closes the client.
+- `services.db` is `LibSQLDatabase<R>`. No `sessionPool`: SQLite has no LISTEN.
 - New `DB_PLUGIN_ERROR_CODES.driverUrlMismatch` (`ARKI_DB_PLUGIN_E005`). Thrown at boot when the URL's scheme does not fit the driver: libsql takes `file:`, `libsql:`, `http(s):`, `ws(s):`; pg takes `postgres:`/`postgresql:`. The message names both.
 
-Tests: boot on a temp `file:` URL, round-trip a query, dispose. `postgres://` with `driver: 'libsql'` → E005, and `file:` with the pg driver → E005. Type test: `Provided<typeof libsqlDb.provides.db>` is `LibSQLDatabase<typeof relations>`, and `sessionPool` is absent.
+Tests: boot on a temp `file:` URL, round-trip a query, dispose. `postgres://` to the libSQL plugin → E005, and `file:` with the pg driver → E005. Type test: `Provided<typeof libsqlDb.provides.db>` is `LibSQLDatabase<typeof relations>`, and `sessionPool` is absent.
 
 ## Task 7: `idColumns` for SQLite
 
@@ -133,7 +135,7 @@ Files: modify `packages/db/README.md` (runtime-support rows for `@arki/db/libsql
 
 The section covers:
 
-- setup through `db({ driver: 'libsql' })` and through `createLibsqlDb`;
+- setup through `db()` from `@arki/db/libsql/dot` and through `createLibsqlDb`;
 - one write transaction at a time per process, and why (link the spike);
 - errors read as SQLSTATE, with no constraint names;
 - refused drivers and why;

@@ -90,6 +90,11 @@
       "import": "./dist/libsql.js",
       "default": "./dist/libsql.js"
     },
+    "./libsql/dot": {
+      "types": "./dist/libsql/dot.d.ts",
+      "import": "./dist/libsql/dot.js",
+      "default": "./dist/libsql/dot.js"
+    },
     "./sqlite": {
       "types": "./dist/sqlite.d.ts",
       "import": "./dist/sqlite.js",

@@ -56,13 +56,13 @@ For a real Postgres, use `createDb` from `@arki/db/init`. It reads `DB_URL`. See
 
 ## Runtime support
 
-| Entry                                   | Node | Bun                                   | Deno | Browser | Hermes  |
-| --------------------------------------- | ---- | ------------------------------------- | ---- | ------- | ------- |
-| `@arki/db/transaction`, `@arki/db/orpc` | yes  | yes                                   | yes  | yes     | blocked |
-| `@arki/db/init` (node-postgres)         | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no      |
-| `@arki/db/runtime-local` (PGlite)       | yes  | yes                                   | no   | no      | no      |
-| `@arki/db/libsql` (SQLite)              | yes  | yes                                   | no   | no      | no      |
-| `@arki/db/sqlite` (tables, `idColumns`) | yes  | yes                                   | no   | no      | no      |
+| Entry                                             | Node | Bun                                   | Deno | Browser | Hermes  |
+| ------------------------------------------------- | ---- | ------------------------------------- | ---- | ------- | ------- |
+| `@arki/db/transaction`, `@arki/db/orpc`           | yes  | yes                                   | yes  | yes     | blocked |
+| `@arki/db/init` (node-postgres)                   | yes  | yes (Bun SQL via the `bun` condition) | no   | no      | no      |
+| `@arki/db/runtime-local` (PGlite)                 | yes  | yes                                   | no   | no      | no      |
+| `@arki/db/libsql`, `@arki/db/libsql/dot` (SQLite) | yes  | yes                                   | no   | no      | no      |
+| `@arki/db/sqlite` (tables, `idColumns`)           | yes  | yes                                   | no   | no      | no      |
 
 `@arki/db/transaction` and `@arki/db/orpc` are portable: no driver. `bun run test:runtimes` runs them on each runtime. The driver entries need a server runtime with sockets or a file system.
 
@@ -104,13 +104,15 @@ Without Dot, `resolveDirectUrl({ url, directUrl })` from `@arki/db/pg` returns t
 
 ## SQLite (libSQL)
 
-An app can keep its own tables in SQLite: a local file, `:memory:`, or a Turso / libSQL server. Install the optional peer `@libsql/client`, then pick the driver:
+An app can keep its own tables in SQLite: a local file, `:memory:`, or a Turso / libSQL server. Install the optional peer `@libsql/client`, then use the libSQL plugin from its own entry:
 
-```ts skip="needs @libsql/client and a Dot app; see src/dot.test.ts"
-import { db } from '@arki/db/dot';
+```ts skip="needs @libsql/client and a Dot app; see src/libsql/dot.test.ts"
+import { db } from '@arki/db/libsql/dot';
 
-export const database = db({ driver: 'libsql', relations, url: () => env.DB_URL }); // DB_URL=file:./data/app.db
+export const database = db({ relations, url: () => env.DB_URL }); // DB_URL=file:./data/app.db
 ```
+
+`@arki/db/libsql/dot` is a separate entry, so `@arki/db/dot` never loads `@libsql/client`: a Postgres app builds without it. Pass `authToken: () => env.DB_AUTH_TOKEN` for a Turso server. `dbMigrations()` still comes from `@arki/db/dot`.
 
 Without Dot, `createLibsqlDb({ url, relations })` from `@arki/db/libsql` returns `{ db, close }`. Tables come from `@arki/db/sqlite`, which re-exports `drizzle-orm/sqlite-core` and adds `idColumns`. Then `runTransaction`, `createUnitOfWork`, `isUniqueViolation`, `migrateDb` and `dbMigrations()` work as they do on Postgres.
 
@@ -862,7 +864,7 @@ These are less common. Each has one job.
 - `@arki/db/runtime-local` — PGlite-backed embedded runtime.
 - `@arki/db/env` — validated env object.
 - `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers, and `idColumns(defineId(...))`.
-- `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()` for Dot apps.
+- `@arki/db/dot` — `db()` (Postgres: the `pg` and `pglite` drivers), `dbMigrations()`, `repos()`, `reader()` for Dot apps.
 - `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
 - `@arki/db/transaction` — `runTransaction`, `runTransactionOnce`, `TRANSACTION_FAILURES`: typed rollback outcomes and serializable retry on `40001` / `40P01`. Portable.
 - `@arki/db/contract` — browser-safe, for oRPC contracts. `TRANSACTION_FAILURES`, the six transaction failures and the type `TransactionFailure`. Never loads drizzle-orm or a Postgres driver.
@@ -871,6 +873,7 @@ These are less common. Each has one job.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers, plus `mergeRelations`.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`, plus `pgColumns(schema?)`, the Postgres column kit.
 - `@arki/db/libsql` — `createLibsqlDb`: a libSQL database with writes queued per process. Needs the optional peer `@libsql/client`.
+- `@arki/db/libsql/dot` — `db({ relations, url?, authToken?, logger? })`: the Dot plugin for libSQL. Needs the optional peer `@libsql/client`.
 - `@arki/db/sqlite` — re-export of `drizzle-orm/sqlite-core`, plus `idColumns`, `instant` (integer milliseconds), `sqliteNowMs` (the database clock in milliseconds, SQLite's `now()`) and `sqliteColumns({ prefix? })`, the SQLite column kit.
 - `@arki/db/columns` — `ColumnKit`, `ColumnSpec` and `TableOf`: the types a package writes its tables against.
 - `@arki/db/dialect` — `dialectOf(db)` (`'pg' | 'sqlite'`, read from the Drizzle database's class), `isTransaction`, `isLibsql`, `DIALECTS`. Portable: loads only `drizzle-orm`.

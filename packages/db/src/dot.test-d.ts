@@ -1,5 +1,4 @@
 /** Entrypoint overloads retain their service factories and lifecycle outcomes at app mounting. */
-import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { defineRelations } from 'drizzle-orm';
@@ -29,12 +28,9 @@ expectTypeOf<typeof database.factories>().toEqualTypeOf<{
   readonly sessionPool: (ctx: never) => SessionPool;
 }>();
 expectTypeOf<Provided<typeof database.provides.sessionPool>>().toEqualTypeOf<SessionPool>();
-const onSqlite = db({ driver: 'libsql', relations });
-expectTypeOf<Provided<typeof onSqlite.provides.db>>().toEqualTypeOf<LibSQLDatabase<typeof relations>>();
-// SQLite has no LISTEN, so the libsql driver publishes no session pool.
-// @ts-expect-error -- the libsql driver has no sessionPool
-void onSqlite.provides.sessionPool;
-defineApp('libsql-types').infra(onSqlite);
+// SQLite has its own entry, so this db() takes no libsql driver.
+// @ts-expect-error -- the libsql driver moved to @arki/db/libsql/dot
+db({ driver: 'libsql', relations });
 // PGlite listens through `client.listen`, so only the pg driver publishes a session pool.
 // @ts-expect-error -- the embedded driver has no sessionPool
 void embedded.provides.sessionPool;

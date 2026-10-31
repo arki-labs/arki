@@ -9,19 +9,15 @@
  *   - multi-instance mount via rename()
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-
-import { defineRelations, sql } from 'drizzle-orm';
+import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { defineApp, rename } from '@arki/dot/unit';
 import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
-import { db, DB_PLUGIN_ERROR_CODES, dbMigrations } from './dot.js';
+import { db, DB_PLUGIN_ERROR_CODES } from './dot.js';
 
 const widgets = pgTable('widgets', {
   id: text('id').primaryKey(),
@@ -226,68 +222,13 @@ describe('@arki/db/dot', () => {
     });
   });
 
-  describe("driver: 'libsql'", () => {
-    let dir: string;
-
-    beforeEach(() => {
-      dir = mkdtempSync(path.join(tmpdir(), 'arki-db-dot-libsql-'));
-    });
-
-    afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
-    });
-
-    it('boots a SQLite file, runs a query, and closes it on dispose', async () => {
-      const url = `file:${path.join(dir, 'app.db')}`;
-      const app = await orThrow(defineApp('db-libsql').infra(db({ driver: 'libsql', relations, url: () => url })).boot());
-      try {
-        await app.services.db.run(sql`create table notes (id text primary key)`);
-        await app.services.db.run(sql`insert into notes values ('n1')`);
-        expect(await app.services.db.all(sql`select id from notes`)).toEqual([{ id: 'n1' }]);
-      } finally {
-        await orThrow(app.dispose());
-      }
-    });
-
-    it('migrates at boot with dbMigrations(), the same plugin Postgres apps use', async () => {
-      const migrationsFolder = path.join(dir, 'migrations');
-      mkdirSync(path.join(migrationsFolder, '20260101000000_notes'), { recursive: true });
-      writeFileSync(
-        path.join(migrationsFolder, '20260101000000_notes', 'migration.sql'),
-        'CREATE TABLE `notes` (`id` text PRIMARY KEY);\n',
-      );
-      const url = `file:${path.join(dir, 'app.db')}`;
-      const app = await orThrow(
-        defineApp('db-libsql-migrate')
-          .infra(db({ driver: 'libsql', relations, url: () => url }))
-          .infra(dbMigrations({ migrationsFolder }))
-          .boot(),
-      );
-      try {
-        expect(app.services.migrations.pending).toEqual(['20260101000000_notes']);
-        expect(await app.services.db.all(sql`select name from sqlite_master where name = 'notes'`)).toHaveLength(1);
-      } finally {
-        await orThrow(app.dispose());
-      }
-    });
-
-    it('refuses a postgres:// URL for the libsql driver, naming the mix-up', async () => {
-      // Without the check, libSQL fails later with an unrelated "unsupported URL" error.
-      const caught = await defineApp('db-libsql-pg-url')
-        .infra(db({ driver: 'libsql', relations, url: () => 'postgres://app:pw@localhost:5432/app' }))
-        .boot();
-      if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
-      expect(caught.cause).toMatchObject({ code: DB_PLUGIN_ERROR_CODES.driverUrlMismatch });
-    });
-
-    it('refuses a SQLite URL for the pg driver, so a missing driver option is caught at boot', async () => {
-      // The likeliest slip: a file: URL with the default (pg) driver.
-      const caught = await defineApp('db-pg-file-url')
-        .infra(db({ relations, url: () => `file:${path.join(dir, 'app.db')}` }))
-        .boot();
-      if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
-      expect(caught.cause).toMatchObject({ code: DB_PLUGIN_ERROR_CODES.driverUrlMismatch });
-    });
+  it('refuses a SQLite URL for the pg driver, so a SQLite app on the wrong entry fails at boot', async () => {
+    // The likeliest slip: a file: URL given to @arki/db/dot instead of @arki/db/libsql/dot.
+    const caught = await defineApp('db-pg-file-url')
+      .infra(db({ relations, url: () => 'file:./app.db' }))
+      .boot();
+    if (!UnexpectedDefect.is(caught)) throw new Error('boot should return UnexpectedDefect');
+    expect(caught.cause).toMatchObject({ code: DB_PLUGIN_ERROR_CODES.driverUrlMismatch });
   });
 
   it('mounts a second db scope via rename()', async () => {

@@ -8,7 +8,7 @@ Only SQLSTATE `40001` and `40P01` are retried. Effects inside a transaction run 
 
 <!-- llms:start -->
 - `@arki/db`: Open a node-postgres pool and wrap it in Drizzle: `initDb`. `DB_COMPOSITION_ERROR_CODES`, `DbCompositionError`, `composeSchema`, `createDb`, `createUnitOfWork`, `getDbConnectionOptions`, `getDbConnectionParams`, `initDb`, `initDbWithOptions`; types `ComposedSchema`, `TransactionalDb`, `UnitOfWork`; and 1 more.
-- one path each: `@arki/db/env`, `@arki/db/init`, `@arki/db/factory`, `@arki/db/builder`, `@arki/db/client`, `@arki/db/runtime-local`, `@arki/db/id`, `@arki/db/id-factory`, `@arki/db/orm`, `@arki/db/pg`, `@arki/db/libsql`, `@arki/db/sqlite`, `@arki/db/columns`, `@arki/db/dialect`, `@arki/db/temporal`, `@arki/db/bun`, `@arki/db/dot`, `@arki/db/migrate`, `@arki/db/pagination`, `@arki/db/transaction`, `@arki/db/errors`, `@arki/db/contract`, `@arki/db/orpc`, `@arki/db/eslint`.
+- one path each: `@arki/db/env`, `@arki/db/init`, `@arki/db/factory`, `@arki/db/builder`, `@arki/db/client`, `@arki/db/runtime-local`, `@arki/db/id`, `@arki/db/id-factory`, `@arki/db/orm`, `@arki/db/pg`, `@arki/db/libsql`, `@arki/db/libsql/dot`, `@arki/db/sqlite`, `@arki/db/columns`, `@arki/db/dialect`, `@arki/db/temporal`, `@arki/db/bun`, `@arki/db/dot`, `@arki/db/migrate`, `@arki/db/pagination`, `@arki/db/transaction`, `@arki/db/errors`, `@arki/db/contract`, `@arki/db/orpc`, `@arki/db/eslint`.
 <!-- llms:end -->
 
 ## Start here

@@ -34,7 +34,7 @@ export function assertSafeDriver(db: object): void {
     code: DB_TRANSACTION_ERROR_CODES.unsafeSqliteDriver,
     message:
       '[db] this SQLite driver commits when an async callback returns, so a throw after an await keeps its writes.',
-    remediation: "Open the database with createLibsqlDb from '@arki/db/libsql', or db({ driver: 'libsql' }).",
+    remediation: "Open the database with createLibsqlDb from '@arki/db/libsql', or db() from '@arki/db/libsql/dot'.",
   });
 }
 
