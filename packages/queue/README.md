@@ -172,7 +172,9 @@ const ship = q.job
     const attempt = ctx.job.attemptsMade + 1;
     console.log(`claimed ${data.orderId}, attempt ${attempt}`);
     // The first claim never settles, like a worker killed in the middle of the job.
-    if (attempt === 1) await new Promise<never>(() => {});
+    if (attempt === 1) await new Promise<never>(() => {
+      /* never settles: this attempt hangs until the process is stopped */
+    });
     console.log(`shipped ${data.orderId}`);
     finished.resolve();
     return { shipped: true };

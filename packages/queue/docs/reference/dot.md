@@ -43,6 +43,9 @@ defineApp('shop-worker')
   client, and builds the job context once at start. It starts in the
   background unless `blocking: true`; a failed background start leaves the
   app running without workers.
+  The failure is logged at error level and kept. The worker's `stop()` returns
+  it as `QueueWorkerStartFailed` (`queue.worker_start_failed`), with the error in
+  `cause`. Use `blocking: true` to make `app.start()` fail instead.
 - The manifest splits the same way: a feature's `jobs(...)` slice declares the
   producer actions (`<job>.produce`), and the worker declares the consumer
   actions (`<job>.consume`, `<schedule>.fire`). An API process never claims to
