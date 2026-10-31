@@ -17,10 +17,9 @@ import type {
   EntrypointServices,
   EntrypointServicesOf,
   ProvidesDeps,
-  requestServices,
 } from '../feature.js';
 import type { KernelCtx, Provided } from '../unit-contract.js';
-import { defineFeature, domainService, entrypointOnly, providesOf, servicesOf } from '../feature.js';
+import { defineFeature, domainService, entrypointOnly, providesOf, requestServices, servicesOf } from '../feature.js';
 import { infra } from '../index.js';
 
 /** One object type out of an intersection, so an exact equality compares keys and values, not intersection shape. */
@@ -95,6 +94,12 @@ expectTypeOf<Flat<DepsOf<typeof logic>>>().toEqualTypeOf<Flat<Services>>();
 const _shop = logic.entrypoints();
 type Published = Provided<ReturnType<typeof requestServices<readonly [typeof _shop]>>['provides']['shop.services']>;
 expectTypeOf<Flat<Published>>().toEqualTypeOf<Flat<Services>>();
+
+// (4b) A gateway with no converted features yet (only legacy routers) still composes: no handles, and `providesOf`
+// takes the unit. Before, `unknown` came back and `providesOf` refused it.
+const noFeatures = requestServices([]);
+expectTypeOf(noFeatures.provides).toEqualTypeOf<Readonly<Record<never, never>>>();
+expectTypeOf(providesOf([noFeatures])).toEqualTypeOf<Readonly<Record<never, never>>>();
 
 // (5) `handles` (what `bind(logic)` types a handler's context from) has only `db` and `usecases`.
 expectTypeOf<keyof typeof logic.handles>().toEqualTypeOf<'db' | 'usecases'>();

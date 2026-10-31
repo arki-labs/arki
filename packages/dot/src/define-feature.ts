@@ -1404,8 +1404,11 @@ type ServicesHandlesIn<Units> = Units extends readonly (infer U)[]
     : never
   : never;
 /** What a gateway needs to serve these features' requests: their public handles, and every node's `<name>.services`. */
-export type RequestHandles<T extends readonly AnyDefinedFeature[]> = UnionToIntersection<T[number]['provides']> &
-  UnionToIntersection<ServicesHandlesIn<ReturnType<T[number]['units']>>>;
+export type RequestHandles<T extends readonly AnyDefinedFeature[]> = [T[number]] extends [never]
+  ? // No features yet (an app that mounts only legacy routers): no handles. `UnionToIntersection<never>` is `unknown`,
+    // which is not a record, so `providesOf` would refuse the gateway's units.
+    Readonly<Record<never, never>>
+  : UnionToIntersection<T[number]['provides']> & UnionToIntersection<ServicesHandlesIn<ReturnType<T[number]['units']>>>;
 
 /**
  * The handles a gateway needs to serve requests for these features, as one
