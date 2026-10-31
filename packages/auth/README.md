@@ -408,6 +408,10 @@ Transport guards use canonical failures: `auth.unauthenticated` (401, including 
 
 `resolvePrincipal`, `requirePrincipal`, `checkPrincipal` and `authorizePolicy` return values or their exact inferred canonical failures. `AUTH_PRINCIPAL_FAILURES` and `AUTH_POLICY_FAILURES` provide narrower declaration sets. Missing and hidden subjects use the same `ResourceMissing` definition, message and data. `isAuthBoundaryFailure(value)` is a type guard for exactly those canonical failures. Use it on the result of a guard so the success type stays narrow instead of widening to `Failure`.
 
+`SignInRefused` is the failure a refused sign-in returns (401, `auth.sign_in_refused`); its data is `{ reason }` and nothing else from the server.
+
+`SIGN_IN_FAILURE_REASONS` lists every `reason`: `credentials`, `unverified`, `rateLimited` and `unknown`.
+
 Ownership assertions require the handler's declared `errors`: `assertFound(row, errors)`, `assertOwnedOrNotFound(row, actorId, errors)`, and `assertOwnedOrForbidden(row, actorId, errors)`. The former label argument was removed. Read assertions require `ResourceMissing`; mutation assertions also require `AccessDenied`. Declare those canonical definitions with `errorMap` before calling the helper.
 
 ```ts run
