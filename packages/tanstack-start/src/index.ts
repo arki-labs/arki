@@ -9,5 +9,3 @@
 export { createAppConfig, type AppConfig } from './app.config.js';
 export { createRouter, type RouterConfig } from './router.js';
 export { AnalyticsScript, type AnalyticsConfig } from './scripts.js';
-export { RootErrorComponent } from './error.js';
-export { DevTools, type DevToolsProps } from './devtools.js';

@@ -46,6 +46,8 @@ ID generators return their inferred ID or `IdGenerationFailure` from `@arki/cont
 
 Every other entry is Node and Bun.
 
+`./react` and `./react/templates` are the exception. They load only inside a bundler, because they render `@arki/ui` source. `package.json` lists them in `arki.bundlerOnly`, so the release smoke checks them with a Vite build, not a plain Node import.
+
 ## Recipes
 
 Five tasks cover most apps. Each one builds on the one before.

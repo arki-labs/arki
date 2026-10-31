@@ -4,7 +4,7 @@
 
 ## Import paths
 <!-- llms:start -->
-- `@arki/tanstack-start`: @arki/tanstack-start. `AnalyticsScript`, `DevTools`, `RootErrorComponent`, `createAppConfig`, `createRouter`; types `AnalyticsConfig`, `AppConfig`, `DevToolsProps`, `RouterConfig`.
+- `@arki/tanstack-start`: @arki/tanstack-start. `AnalyticsScript`, `createAppConfig`, `createRouter`; types `AnalyticsConfig`, `AppConfig`, `RouterConfig`.
 - `@arki/tanstack-start/config`: TanStack Start App Configuration. `createAppConfig`, `defineConfig`; types `AppConfig`.
 - `@arki/tanstack-start/vite`: `fleetVite`, `oneChunkPerRoute`, `zodCompiled`.
 - `@arki/tanstack-start/server`: `startServer(app, { hot })` — the server entry of a Dot app on TanStack Start. `startServer`, `withForwardedProto`; types `StartHandler`, `StartServer`, `StartServerOptions`.

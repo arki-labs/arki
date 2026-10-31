@@ -42,31 +42,33 @@ The entries are split by where they run, as the `exports` map says.
 | build time (Vite) | `./vite`, `./pwa`                                                                                                                     |
 | anywhere          | `./sentry/bridge`                                                                                                                     |
 
+`./error`, `./devtools` and `./pwa/sw` load only inside a bundler or a service worker. `package.json` lists them in `arki.bundlerOnly`, so the release smoke checks them with a Vite build, not a plain Node import. The root entry does not re-export `RootErrorComponent` or `DevTools`, so `@arki/tanstack-start` imports in plain Node. Import them from `./error` and `./devtools`.
+
 The devtools render nothing in production. `useKeysetQuery` and `useOptimisticMutation` need React and TanStack Query.
 
 ## Public imports
 
-| Entry point                                 | What it has                                                                             |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `@arki/tanstack-start`                      | `createAppConfig`, `createRouter`, `AnalyticsScript`, `RootErrorComponent`, `DevTools`. |
-| `@arki/tanstack-start/config`               | `createAppConfig`: a Vite config wired with the TanStack Start and React plugins.       |
-| `@arki/tanstack-start/router`               | `createRouter`.                                                                         |
-| `@arki/tanstack-start/server`               | `startServer`, `withForwardedProto`.                                                    |
-| `@arki/tanstack-start/dot`                  | `tanstackStart()`: the entrypoint plugin for a Dot app, with its mounts.                |
-| `@arki/tanstack-start/orpc/client`          | `createOrpcUtils`, `createORPCReact`, `getORPCUrl`, `createORPCClient`, `RPCLink`.      |
-| `@arki/tanstack-start/orpc/query`           | `useKeysetQuery`, `keysetOptions`, `keysetKey`, `useOptimisticMutation`.                |
-| `@arki/tanstack-start/orpc/server`          | The oRPC server setup for TanStack Start.                                               |
-| `@arki/tanstack-start/vite`                 | `zodCompiled`, `oneChunkPerRoute`, `fleetVite`.                                         |
-| `@arki/tanstack-start/scripts`              | `AnalyticsScript`.                                                                      |
-| `@arki/tanstack-start/error`                | `RootErrorComponent`.                                                                   |
-| `@arki/tanstack-start/devtools`             | `DevTools`.                                                                             |
-| `@arki/tanstack-start/sentry/client`        | `initSentryClient`: opt-in by DSN.                                                      |
-| `@arki/tanstack-start/sentry/server`        | `initSentryServer`: opt-in by DSN.                                                      |
-| `@arki/tanstack-start/sentry/bridge`        | `captureException` without importing `@sentry/*`.                                       |
-| `@arki/tanstack-start/server-error-overlay` | `withServerErrorOverlay`.                                                               |
-| `@arki/tanstack-start/pwa`                  | `createPwaPlugin`: the `vite-plugin-pwa` setup.                                         |
-| `@arki/tanstack-start/pwa/sw`               | The shared service worker base and `setupOfflineNavigation`.                            |
-| `@arki/tanstack-start/pwa/client`           | `registerPwa`.                                                                          |
+| Entry point                                 | What it has                                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `@arki/tanstack-start`                      | `createAppConfig`, `createRouter`, `AnalyticsScript`.                              |
+| `@arki/tanstack-start/config`               | `createAppConfig`: a Vite config wired with the TanStack Start and React plugins.  |
+| `@arki/tanstack-start/router`               | `createRouter`.                                                                    |
+| `@arki/tanstack-start/server`               | `startServer`, `withForwardedProto`.                                               |
+| `@arki/tanstack-start/dot`                  | `tanstackStart()`: the entrypoint plugin for a Dot app, with its mounts.           |
+| `@arki/tanstack-start/orpc/client`          | `createOrpcUtils`, `createORPCReact`, `getORPCUrl`, `createORPCClient`, `RPCLink`. |
+| `@arki/tanstack-start/orpc/query`           | `useKeysetQuery`, `keysetOptions`, `keysetKey`, `useOptimisticMutation`.           |
+| `@arki/tanstack-start/orpc/server`          | The oRPC server setup for TanStack Start.                                          |
+| `@arki/tanstack-start/vite`                 | `zodCompiled`, `oneChunkPerRoute`, `fleetVite`.                                    |
+| `@arki/tanstack-start/scripts`              | `AnalyticsScript`.                                                                 |
+| `@arki/tanstack-start/error`                | `RootErrorComponent`.                                                              |
+| `@arki/tanstack-start/devtools`             | `DevTools`.                                                                        |
+| `@arki/tanstack-start/sentry/client`        | `initSentryClient`: opt-in by DSN.                                                 |
+| `@arki/tanstack-start/sentry/server`        | `initSentryServer`: opt-in by DSN.                                                 |
+| `@arki/tanstack-start/sentry/bridge`        | `captureException` without importing `@sentry/*`.                                  |
+| `@arki/tanstack-start/server-error-overlay` | `withServerErrorOverlay`.                                                          |
+| `@arki/tanstack-start/pwa`                  | `createPwaPlugin`: the `vite-plugin-pwa` setup.                                    |
+| `@arki/tanstack-start/pwa/sw`               | The shared service worker base and `setupOfflineNavigation`.                       |
+| `@arki/tanstack-start/pwa/client`           | `registerPwa`.                                                                     |
 
 ## oRPC client: `@arki/tanstack-start/orpc/client`
 

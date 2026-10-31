@@ -255,6 +255,10 @@
     "access": "public"
   },
   "arki": {
+    "bundlerOnly": [
+      "./react",
+      "./react/templates"
+    ],
     "runtimes": [
       "node",
       "bun",

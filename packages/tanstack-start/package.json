@@ -222,5 +222,12 @@
     "nitro": {
       "optional": true
     }
+  },
+  "arki": {
+    "bundlerOnly": [
+      "./error",
+      "./devtools",
+      "./pwa/sw"
+    ]
   }
 }

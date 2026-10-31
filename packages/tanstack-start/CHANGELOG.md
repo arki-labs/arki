@@ -12,6 +12,7 @@
 
 - a900ccc: `@arki/tanstack-start/vite` gains three build-time helpers: `reactCompiler()` runs the React Compiler on every component and hook (Babel plugin through `@rolldown/plugin-babel`); `zodCompiled()` makes every Zod schema the server constructs parse through a compiled validator by loading `zod/compile` first in the server bundle; `oneChunkPerRoute` is the `codeSplittingOptions` that keeps a route's loader in the route's own chunk instead of the entry.
 - 2ef7e3a: Breaking: `reactCompiler()` is removed from `@arki/tanstack-start/vite`, with its Babel dependencies (`@babel/core`, `@rolldown/plugin-babel`, `babel-plugin-react-compiler`). Use `@vitejs/plugin-react`'s own option instead: `viteReact({ compiler: true })`, which runs the Rust React Compiler (`oxc-transform-react`; add it as a dev dependency of the app). It is much cheaper at build time than the Babel plugin, and it has to live in `viteReact()` because it replaces that plugin's JSX and Fast Refresh step.
+- Breaking: the root entry `@arki/tanstack-start` no longer re-exports `RootErrorComponent` and `DevTools`, so it imports in plain Node. Import them from `@arki/tanstack-start/error` and `@arki/tanstack-start/devtools`. `./error`, `./devtools` and `./pwa/sw` are listed in `arki.bundlerOnly`; the release smoke checks them with a Vite build.
 
 ### Patch Changes
 

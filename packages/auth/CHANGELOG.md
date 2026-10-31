@@ -22,6 +22,7 @@
 
 ### Patch Changes
 
+- `package.json` lists `./react` and `./react/templates` in `arki.bundlerOnly`: they render `@arki/ui` source, so they load only inside a bundler. The release smoke checks them with a Vite build instead of a plain Node import.
 - ff85471: Go to Definition works on mapped keys again. Handle maps (`unit.provides.x`, feature handles), `PolicyTree`, `SessionValues`, `CronPolicy.respond`, `ChartConfig.theme`, `Operations` and the oRPC utils tree now map `[K in keyof T as K & string]` instead of `[K in keyof T & string]`. The old form cut the link from each key back to its declaration, so the editor found no definition. Types are otherwise unchanged.
 - 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
 
