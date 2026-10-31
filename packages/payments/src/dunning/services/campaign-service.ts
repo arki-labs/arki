@@ -1,12 +1,12 @@
 import type { SQL } from 'drizzle-orm';
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import { ensure } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
@@ -39,7 +39,14 @@ import type {
 import type { CommunicationOrchestrationService } from './communication-service.js';
 import { fromMinorColumn, toMinorColumn } from '../../core/money.js';
 import { analyticsRowId, DEFAULT_ANALYTICS_CURRENCY } from '../analytics-money.js';
-import { DunningCampaignNotActive, DunningCampaignNotFound, DunningCampaignWithoutSteps } from '../failures.js';
+import type { DunningTickReport } from '../failures.js';
+import {
+  DunningCampaignNotActive,
+  DunningCampaignNotFound,
+  DunningCampaignWithoutSteps,
+  DunningTemplateInUse,
+  tickFault,
+} from '../failures.js';
 import {
   createDunningCampaignRepository,
   createDunningExecutionRepository,
@@ -145,9 +152,7 @@ export class DunningCampaignService {
         createdBy,
       });
 
-      if (!campaignModel) {
-        throw new Error('Failed to create campaign');
-      }
+      invariant(campaignModel, 'the campaign insert returned no row');
 
       const templates = [];
       for (const templateInput of input.templates) {
@@ -174,15 +179,13 @@ export class DunningCampaignService {
    * When `input.templates` is given it is the complete new set of steps (replace semantics, like create).
    * Steps are matched by `stepNumber`: a matching step is updated in place (its id, and so the history
    * that points at it, survives), a new number is inserted, and a number that is gone is deleted.
-   * A step that already sent a communication cannot be deleted (the database refuses), so the whole
-   * update fails and nothing changes. Omit `templates` to leave the steps alone.
+   * A step that already sent a communication cannot be deleted: the update returns
+   * `DunningTemplateInUse` and nothing changes. Returns `null` for an unknown campaign.
+   * Omit `templates` to leave the steps alone.
    */
-  async updateCampaign(
-    campaignId: DunningCampaignId,
-    input: UpdateDunningCampaignInput,
-    updatedBy: string,
-  ): Promise<(DunningCampaign & { templates: DunningTemplate[] }) | null> {
+  async updateCampaign(campaignId: DunningCampaignId, input: UpdateDunningCampaignInput, updatedBy: string) {
     const { templates: nextTemplates, ...campaignFields } = input;
+    const { dunningCommunications } = this.tables;
 
     return this.db.transaction(async tx => {
       const campaignRepo = createDunningCampaignRepository(tx, {
@@ -191,18 +194,30 @@ export class DunningCampaignService {
       });
       const templateRepo = createDunningTemplateRepository(tx, { dunningTemplates: this.tables.dunningTemplates });
 
+      const existing = nextTemplates ? await templateRepo.findByCampaignId(campaignId) : [];
+      const keptSteps = new Set(nextTemplates?.map(template => template.stepNumber));
+      const removed = existing.filter(template => !keptSteps.has(template.stepNumber));
+
+      // A sent communication keeps its step (the foreign key restricts the delete): refuse before any write
+      if (removed.length > 0) {
+        const [used] = await tx
+          .select({ templateId: dunningCommunications.templateId })
+          .from(dunningCommunications)
+          .where(inArray(dunningCommunications.templateId, removed.map(template => template.id)))
+          .limit(1);
+        const usedTemplate = used && removed.find(template => template.id === used.templateId);
+        if (usedTemplate) {
+          return DunningTemplateInUse({ templateId: usedTemplate.id, stepNumber: usedTemplate.stepNumber });
+        }
+      }
+
       const campaignModel = await campaignRepo.update(campaignId, { ...campaignFields, updatedBy });
       if (!campaignModel) {
         return null;
       }
 
       if (nextTemplates) {
-        const existing = await templateRepo.findByCampaignId(campaignId);
-        const keptSteps = new Set(nextTemplates.map(template => template.stepNumber));
-
-        for (const template of existing) {
-          if (!keptSteps.has(template.stepNumber)) await templateRepo.delete(template.id);
-        }
+        for (const template of removed) await templateRepo.delete(template.id);
         for (const next of nextTemplates) {
           const current = existing.find(template => template.stepNumber === next.stepNumber);
           if (current) {
@@ -506,10 +521,12 @@ export class DunningCampaignService {
   }
 
   /**
-   * Process scheduled executions
+   * Run the scheduled executions that are due. Returns how many ran and each one that threw (it is
+   * marked `failed`); a fault that stops the whole tick is thrown.
    */
-  async processScheduledExecutions(limit = 100): Promise<void> {
+  async processScheduledExecutions(limit = 100): Promise<DunningTickReport> {
     const scheduledExecutions = await this.executionRepo.findScheduledExecutions(limit);
+    const report: DunningTickReport = { processed: scheduledExecutions.length, failed: [] };
 
     for (const executionDb of scheduledExecutions) {
       try {
@@ -520,6 +537,7 @@ export class DunningCampaignService {
           executionId: executionDb.id,
           error: error instanceof Error ? error.message : String(error),
         });
+        report.failed.push(tickFault(executionDb.id, error));
         await this.executionRepo.updateStatus(
           executionDb.id,
           'failed',
@@ -528,6 +546,7 @@ export class DunningCampaignService {
         );
       }
     }
+    return report;
   }
 
   /**
@@ -1000,10 +1019,11 @@ export class DunningCampaignService {
    * Retry failed executions with exponential backoff
    * This method finds executions that are ready to retry (nextRetryAt is in the past)
    * and attempts to execute them again. If they fail again, it schedules the next retry
-   * with exponential backoff.
+   * with exponential backoff. Returns how many were retried and each retry that threw again.
    */
-  async retryFailedExecutions(limit = 50): Promise<void> {
+  async retryFailedExecutions(limit = 50): Promise<DunningTickReport> {
     const retryableExecutions = await this.executionRepo.findRetryableExecutions(limit);
+    const report: DunningTickReport = { processed: retryableExecutions.length, failed: [] };
 
     for (const executionDb of retryableExecutions) {
       try {
@@ -1021,6 +1041,7 @@ export class DunningCampaignService {
           executionId: executionDb.id,
           error: error instanceof Error ? error.message : String(error),
         });
+        report.failed.push(tickFault(executionDb.id, error));
 
         // If max retries reached, mark as permanently failed
         if (executionDb.retryCount >= 3) {
@@ -1032,6 +1053,7 @@ export class DunningCampaignService {
         }
       }
     }
+    return report;
   }
 
   /**
@@ -1044,7 +1066,12 @@ export class DunningCampaignService {
 
 export type DunningCampaignServiceTables = Pick<
   DunningTables,
-  'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningExecutions' | 'customerRiskProfiles'
+  | 'dunningCampaigns'
+  | 'dunningCampaignAnalytics'
+  | 'dunningTemplates'
+  | 'dunningExecutions'
+  | 'dunningCommunications'
+  | 'customerRiskProfiles'
 > &
   Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
 

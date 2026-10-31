@@ -2,12 +2,12 @@ import type { Instant } from '@arki/date';
 import type { SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { fromDate, now, toDate } from '@arki/date';
-import { isFailure, unreachable } from '@arki/failure';
+import { isFailure, unreachable, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
 import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts.js';
-import type { NotificationProviderFailure } from '../failures.js';
+import type { DunningTickReport, NotificationProviderFailure } from '../failures.js';
 import type {
   CommunicationStatus as CommStatus,
   CommunicationChannel,
@@ -24,12 +24,15 @@ import type {
   DunningExecution,
   DunningTemplate,
 } from '../types.js';
+import { PaymentsConfigurationInvalid } from '../../core/failures.js';
 import { observePayments } from '../../core/telemetry.js';
 import {
   NotificationChannelUnavailable,
   NotificationProviderRejected,
   NotificationProviderResponseInvalid,
   NotificationProviderTimeout,
+  NotificationWebhookHostNotAllowed,
+  tickFault,
 } from '../failures.js';
 import { createDunningCommunicationRepository } from '../repository.js';
 
@@ -75,8 +78,35 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 /** The channel and provider name a provider call is about: the bounded span attributes and failure data. */
 type ProviderTarget = { channel: CommunicationChannel; provider: string };
 
-/** One provider answer: its status and its body text, read in full under the same timeout. */
-type ProviderReply = { status: number; ok: boolean; statusText: string; headers: Headers; body: string };
+/** One provider answer: its status and its body text (at most {@link MAX_PROVIDER_BODY_BYTES}), read under the same timeout. */
+type ProviderReply = { status: number; ok: boolean; body: string };
+
+/** The most of a provider's body that is read. A documented Resend or Twilio answer is far smaller; the rest is cancelled. */
+export const MAX_PROVIDER_BODY_BYTES = 64 * 1024;
+
+/** The body's first {@link MAX_PROVIDER_BODY_BYTES} bytes as text. A longer body is cut there and the rest is cancelled. */
+async function readCappedBody(response: Response): Promise<string> {
+  const stream = response.body;
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  try {
+    while (bytes < MAX_PROVIDER_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+      const room = MAX_PROVIDER_BODY_BYTES - bytes;
+      const chunk = value.byteLength > room ? value.subarray(0, room) : value;
+      bytes += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
+    }
+    await reader.cancel();
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 /** Text that must be JSON; the value is then checked by the schema it is piped into. */
 const jsonTextSchema = z.string().transform((text, context) => {
@@ -96,22 +126,25 @@ const providerErrorBodySchema = jsonTextSchema.pipe(z.looseObject({ message: z.s
 const providerDateSchema = z.string().pipe(z.coerce.date());
 
 /**
- * One HTTP call to a provider, its body read in full, under `timeoutMs`. A call that does not
- * finish in time returns `NotificationProviderTimeout`; a provider that cannot be reached at all
- * throws, with the network error as its cause.
+ * One HTTP call to a provider under `timeoutMs`. With `body: 'read'` the body's first
+ * {@link MAX_PROVIDER_BODY_BYTES} bytes are read; with `body: 'discard'` it is cancelled unread and
+ * `body` is `''`. A call that does not finish in time returns `NotificationProviderTimeout`; a
+ * provider that cannot be reached at all throws, with the network error as its cause.
  */
-async function callProvider(target: ProviderTarget, url: string, init: RequestInit, timeoutMs: number) {
+async function callProvider(
+  target: ProviderTarget,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  body: 'read' | 'discard' = 'read',
+) {
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: timeout });
-    const body = await response.text();
-    const reply: ProviderReply = {
-      status: response.status,
-      ok: response.ok,
-      statusText: response.statusText,
-      headers: response.headers,
-      body,
-    };
+    let text = '';
+    if (body === 'read') text = await readCappedBody(response);
+    else await response.body?.cancel();
+    const reply: ProviderReply = { status: response.status, ok: response.ok, body: text };
     return reply;
   } catch (error) {
     if (timeout.aborted) return NotificationProviderTimeout({ ...target, timeoutMs }, { cause: error });
@@ -406,101 +439,82 @@ export class SMSProvider implements CommunicationProvider {
   }
 }
 
+/** One in-app notification, as the in-app channel hands it to the app's store. */
+export type InAppNotification = {
+  /** The customer id the notification is for. */
+  recipient: string;
+  title: string;
+  content: string;
+  /** The execution, campaign and customer the notification belongs to. */
+  trackingData: Record<string, unknown>;
+};
+
+/** What the app's store holds about one in-app notification: when it was stored, and when the customer read it. */
+export type StoredInAppNotification = { id: string; createdAt: Instant; readAt: Instant | null };
+
 /**
- * In-app notification provider with database storage
+ * Where the app keeps in-app notifications. The package has no notifications table: the app owns it
+ * and shows the notifications in its UI. `save` stores one and returns its row; `find` reads one back
+ * (or `null` when the app has no notification with that id).
  */
+export type InAppNotificationStore = {
+  save(notification: InAppNotification): Promise<StoredInAppNotification>;
+  find(id: string): Promise<StoredInAppNotification | null>;
+};
+
+/** In-app notifications, stored through the app's {@link InAppNotificationStore}. */
 export class InAppProvider implements CommunicationProvider {
   readonly channel = 'in_app' as const;
+  private readonly target: ProviderTarget = { channel: 'in_app', provider: 'in_app' };
 
   constructor(
     private config: {
       appUrl: string;
+      store: InAppNotificationStore;
     },
-    private db: DunningDatabase,
   ) {}
 
   async send(request: CommunicationRequest): Promise<CommunicationSent> {
-    const processedContent = applyPersonalizations(request.content, request.personalizations);
-    const processedSubject = request.subject
+    const title = request.subject
       ? applyPersonalizations(request.subject, request.personalizations)
       : 'Payment Notice';
-
-    // Store notification in database (assuming notifications table exists)
-    const notificationId = `inapp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-
-    // Since we don't have a notifications table schema yet, we'll simulate storing it
-    // In a real implementation, you would:
-    // 1. Insert into a notifications table
-    // 2. Potentially trigger real-time updates via WebSocket/Server-Sent Events
-    // 3. Store it in a way that can be queried by the user's dashboard
-
-    logger.info('Creating in-app notification', {
-      userId: request.recipient,
-      subject: processedSubject,
-      contentPreview: processedContent.slice(0, 100),
+    const stored = await this.config.store.save({
+      recipient: request.recipient,
+      title,
+      content: applyPersonalizations(request.content, request.personalizations),
+      trackingData: request.trackingData ?? {},
     });
 
-    // Here you would typically:
-    // await this.db.insert(notifications).values({
-    //   id: notificationId,
-    //   userId: request.recipient,
-    //   title: processedSubject,
-    //   content: processedContent,
-    //   type: 'payment_reminder',
-    //   category: 'dunning',
-    //   isRead: false,
-    //   metadata: request.trackingData,
-    //   createdAt: now(),
-    // });
-
-    // For now, we'll simulate success
     return {
-      messageId: notificationId,
+      messageId: stored.id,
       providerResponse: {
         provider: 'in_app',
-        timestamp: now().toString(),
-        recipient: request.recipient,
-        notificationId,
-        appUrl: `${this.config.appUrl}/notifications/${notificationId}`,
+        timestamp: stored.createdAt.toString(),
+        notificationId: stored.id,
+        appUrl: `${this.config.appUrl}/notifications/${stored.id}`,
       },
     };
   }
 
   async validateConfiguration(): Promise<boolean> {
-    try {
-      // Check if database connection is working and app URL is valid
-      return !!this.config.appUrl && !!this.db;
-    } catch {
-      return false;
-    }
+    return URL.canParse(this.config.appUrl);
   }
 
-  async getDeliveryStatus(messageId: string): Promise<CommunicationDeliveryStatus> {
-    try {
-      // Query database for notification read status
-      // In a real implementation:
-      // const notification = await this.db.query.notifications.findFirst({
-      //   where: eq(notifications.id, messageId),
-      // });
-
-      // For now, simulate checking if the notification was "read"
-      return {
-        status: 'delivered', // In-app notifications are considered delivered when created
-        timestamp: now(),
-        metadata: {
-          messageId,
-          readAt: null, // Would be filled if user has read the notification
-        },
-      };
-    } catch (error) {
-      logger.error('Failed to get in-app notification status', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return {
-        status: 'delivered',
-        timestamp: now(),
-      };
+  /**
+   * What the store holds: `opened` once the customer read it, else `delivered` (stored is shown).
+   * A notification the store does not have is `NotificationProviderRejected` with status 404.
+   */
+  async getDeliveryStatus(messageId: string) {
+    const stored = await this.config.store.find(messageId);
+    if (!stored) {
+      return NotificationProviderRejected({ ...this.target, upstreamStatus: 404, upstreamMessage: null });
     }
+    const status: CommunicationDeliveryStatus = {
+      status: stored.readAt ? 'opened' : 'delivered',
+      timestamp: stored.readAt ?? stored.createdAt,
+      metadata: { messageId, readAt: stored.readAt?.toString() ?? null },
+    };
+    return status;
   }
 }
 
@@ -513,27 +527,62 @@ const webhookPayloadSchema = jsonTextSchema.pipe(z.record(z.string(), z.unknown(
 /** A metadata object inside a webhook payload; anything else is replaced. */
 const payloadMetadataSchema = z.record(z.string(), z.unknown());
 
+/** An `allowedHosts` entry: a bare hostname, the way URL parsing writes it (no scheme, port or path). */
+const allowedHostSchema = z
+  .string()
+  .refine(host => URL.canParse(`http://${host}`) && new URL(`http://${host}`).hostname === host.toLowerCase(), {
+    message: 'must be a bare hostname such as hooks.example.com',
+  });
+
 /**
- * Webhook communication provider for external integrations. Each send runs in a
- * `payments.notification.send` span (channel and provider only, never the URL).
+ * Webhook communication provider for external integrations. The URL comes from customer metadata,
+ * so a send reaches only a host on the operator's `allowedHosts` list, and the reply's body is
+ * never read or kept: only its HTTP status. Each send runs in a `payments.notification.send` span
+ * (channel and provider only, never the URL).
  */
 export class WebhookProvider implements CommunicationProvider {
   readonly channel = 'webhook' as const;
   private readonly target: ProviderTarget = { channel: 'webhook', provider: 'webhook' };
+  private readonly allowedHosts: ReadonlySet<string>;
 
+  /** Throws `payments.configuration_invalid` for an empty `allowedHosts` or an entry that is not a bare hostname. */
   constructor(
     private config: {
+      /** The hostnames a webhook may reach, compared exactly (lowercased) with the URL's host. Never empty. */
+      allowedHosts: readonly string[];
       defaultHeaders: Record<string, string>;
       /** How long one webhook call may take. */
       timeoutMs: number;
     },
-  ) {}
+  ) {
+    if (config.allowedHosts.length === 0) {
+      throw new UnexpectedFailure(
+        PaymentsConfigurationInvalid({
+          setting: 'webhook.allowedHosts',
+          problem: 'the webhook channel is enabled with no allowed hosts',
+        }),
+      );
+    }
+    for (const host of config.allowedHosts) {
+      if (!allowedHostSchema.safeParse(host).success) {
+        throw new UnexpectedFailure(
+          PaymentsConfigurationInvalid({
+            setting: 'webhook.allowedHosts',
+            problem: `${JSON.stringify(host)} is not a bare hostname`,
+          }),
+        );
+      }
+    }
+    this.allowedHosts = new Set(config.allowedHosts.map(host => host.toLowerCase()));
+  }
 
   async send(request: CommunicationRequest) {
     return observePayments('notification.send', this.target, async () => {
       // For webhook communications, the recipient is the webhook URL (stored customer metadata)
       const webhookUrl = parse(webhookUrlSchema, request.recipient);
       if (isFailure(webhookUrl)) return webhookUrl;
+      const host = new URL(webhookUrl).hostname.toLowerCase();
+      if (!this.allowedHosts.has(host)) return NotificationWebhookHostNotAllowed({ host });
 
       // Process template variables in content (webhook payload)
       const processedContent = applyPersonalizations(request.content, request.personalizations);
@@ -557,6 +606,8 @@ export class WebhookProvider implements CommunicationProvider {
         webhookUrl,
         {
           method: 'POST',
+          // A redirect is answered as it is, never followed: an allowed host must not lead to one that is not
+          redirect: 'manual',
           headers: {
             'Content-Type': 'application/json',
             'User-Agent': 'Strophie-Dunning/1.0',
@@ -565,13 +616,12 @@ export class WebhookProvider implements CommunicationProvider {
           body: JSON.stringify(payload),
         },
         this.config.timeoutMs,
+        // The receiver is not a provider we know: its reply body is never read or kept, only its status
+        'discard',
       );
       if (isFailure(reply)) return reply;
-      if (!reply.ok) return rejected(this.target, reply);
-
-      const responseHeaders: Record<string, string> = {};
-      for (const [key, value] of reply.headers.entries()) {
-        responseHeaders[key] = value;
+      if (!reply.ok) {
+        return NotificationProviderRejected({ ...this.target, upstreamStatus: reply.status, upstreamMessage: null });
       }
 
       const sent: CommunicationSent = {
@@ -581,7 +631,6 @@ export class WebhookProvider implements CommunicationProvider {
           timestamp: now().toString(),
           recipient: webhookUrl,
           status: reply.status,
-          headers: responseHeaders,
         },
       };
       return sent;
@@ -589,8 +638,8 @@ export class WebhookProvider implements CommunicationProvider {
   }
 
   async validateConfiguration(): Promise<boolean> {
-    // Basic validation - webhook URLs are validated per-request
-    return !!this.config.timeoutMs && this.config.timeoutMs > 0;
+    // The allowed hosts were checked when the provider was built; each URL is checked per request
+    return this.config.timeoutMs > 0;
   }
 }
 
@@ -723,16 +772,21 @@ export class CommunicationOrchestrationService {
   }
 
   /**
-   * Process pending communications
+   * Send the pending communications. Returns how many were handled and each one that was not sent:
+   * a channel with no provider, a provider failure (the row is marked `failed`), or a thrown error.
    */
-  async processPendingCommunications(limit = 100): Promise<void> {
+  async processPendingCommunications(limit = 100): Promise<DunningTickReport> {
     const pendingCommunications = await this.communicationRepo.findPendingCommunications(limit);
+    const report: DunningTickReport = { processed: pendingCommunications.length, failed: [] };
 
     for (const communication of pendingCommunications) {
       try {
         const provider = this.providers.get(communication.channel);
         if (!provider) {
           logger.error('No provider configured for channel', { channel: communication.channel });
+          report.failed.push(
+            tickFault(communication.id, NotificationChannelUnavailable({ channel: communication.channel })),
+          );
           continue;
         }
 
@@ -752,6 +806,11 @@ export class CommunicationOrchestrationService {
         });
 
         if (isFailure(result)) {
+          logger.warn('Communication {communicationId} was not sent: {code}', {
+            communicationId: communication.id,
+            code: result.code,
+          });
+          report.failed.push(tickFault(communication.id, result));
           await this.communicationRepo.updateStatus(communication.id, 'failed', { failureReason: result.message });
         } else {
           await this.communicationRepo.updateStatus(communication.id, 'sent', {
@@ -765,11 +824,13 @@ export class CommunicationOrchestrationService {
           communicationId: communication.id,
           error: error instanceof Error ? error.message : String(error),
         });
+        report.failed.push(tickFault(communication.id, error));
         await this.communicationRepo.updateStatus(communication.id, 'failed', {
           failureReason: error instanceof Error ? error.message : 'Unknown error',
         });
       }
     }
+    return report;
   }
 
   /**
@@ -902,10 +963,8 @@ export class CommunicationOrchestrationService {
     return provider.getDeliveryStatus(communication.providerMessageId);
   }
 
-  /**
-   * Retry failed communications
-   */
-  async retryFailedCommunications(limit = 50): Promise<void> {
+  /** Put the failed communications back to pending and send them again: the report of that send. */
+  async retryFailedCommunications(limit = 50): Promise<DunningTickReport> {
     const failedCommunications = await this.communicationRepo.findMany({
       limit,
       offset: 0,
@@ -914,6 +973,7 @@ export class CommunicationOrchestrationService {
       sortOrder: 'desc',
     });
 
+    const resetFaults: DunningTickReport['failed'] = [];
     for (const communication of failedCommunications) {
       try {
         // Reset status to pending for retry
@@ -923,11 +983,13 @@ export class CommunicationOrchestrationService {
           communicationId: communication.id,
           error: error instanceof Error ? error.message : String(error),
         });
+        resetFaults.push(tickFault(communication.id, error));
       }
     }
 
     // Process the retried communications
-    await this.processPendingCommunications(limit);
+    const sent = await this.processPendingCommunications(limit);
+    return { processed: sent.processed, failed: [...resetFaults, ...sent.failed] };
   }
 }
 
@@ -948,8 +1010,13 @@ export type CommunicationOrchestrationConfig = {
   };
   inApp?: {
     appUrl: string;
+    /** Where the app keeps in-app notifications: the channel stores through it and reads delivery status back. */
+    store: InAppNotificationStore;
   };
+  /** The webhook channel. Omit it to leave the channel off. */
   webhook?: {
+    /** The hostnames a customer's `webhookUrl` may point at. Required and never empty: an empty list fails at boot. */
+    allowedHosts: readonly string[];
     defaultHeaders?: Record<string, string>;
     timeoutMs?: number;
     sourceHeader?: string;
@@ -999,17 +1066,20 @@ export function createCommunicationOrchestrationService(
   }
 
   if (config.inApp) {
-    service.registerProvider(new InAppProvider({ appUrl: config.inApp.appUrl }, db));
+    service.registerProvider(new InAppProvider({ appUrl: config.inApp.appUrl, store: config.inApp.store }));
   }
 
-  service.registerProvider(
-    new WebhookProvider({
-      defaultHeaders: config.webhook?.defaultHeaders ?? {
-        'X-Source': config.webhook?.sourceHeader ?? 'dunning-system',
-      },
-      timeoutMs: config.webhook?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
-    }),
-  );
+  if (config.webhook) {
+    service.registerProvider(
+      new WebhookProvider({
+        allowedHosts: config.webhook.allowedHosts,
+        defaultHeaders: config.webhook.defaultHeaders ?? {
+          'X-Source': config.webhook.sourceHeader ?? 'dunning-system',
+        },
+        timeoutMs: config.webhook.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+      }),
+    );
+  }
 
   return service;
 }

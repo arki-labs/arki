@@ -52,6 +52,21 @@ export const ReferenceNotFound = defineFailure('payments.reference_not_found', {
 });
 
 /**
+ * The provider price a plan row points at is not a flat recurring price (a tiered, metered or
+ * one-time price), so it has no single amount and interval to read a plan from. The price comes
+ * from the provider, so this is outside data, not a bug. Returned by `getPlan`, `updatePlan` and `listPlans`.
+ *
+ * @fix Point the plan at a flat recurring price in the provider dashboard, or remove the price's `planId` metadata.
+ * @verify bun run test -- src/core/providers
+ */
+export const PlanPriceNotFlat = /* @__PURE__ */ defineFailure('payments.plan_price_not_flat', {
+  status: 422,
+  data: z.object({ priceId: z.string() }),
+  message: 'Provider price {priceId} is not a flat recurring price, so it is not a plan',
+  remediation: 'Point the plan at a flat recurring price, or remove the price planId metadata.',
+});
+
+/**
  * A webhook delivery's signature does not match the body and the webhook secret: it was not sent
  * by the provider, the body changed after signing, the signature header is missing or malformed, or
  * the signature timestamp is outside the tolerance. Returned by `StripeProvider.constructWebhookEvent`.

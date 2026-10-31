@@ -1,9 +1,10 @@
 import type { Instant } from '@arki/date';
 import type { KV } from '@arki/kv';
 import type { Money } from '@arki/money';
-import { now } from '@arki/date';
+import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 
+import type { PaymentRepository } from '../repository.js';
 import { observePayments } from '../telemetry.js';
 
 const logger = getLogger('arki:payments:monitor');
@@ -61,15 +62,21 @@ type PaymentSystemHealth = {
   payments: {
     successRate: number;
     avgProcessingTime: number;
+    /** Subscriptions whose stored status is `active`. */
     activeSubscriptions: number;
   };
   webhooks: {
     avgProcessingTime: number;
     successRate: number;
   };
-  providers: Record<string, boolean>;
   lastUpdated: Instant;
 }
+
+/** The stored counts the monitor reads. A `PaymentRepository` fits. */
+type MonitorReads = Pick<PaymentRepository, 'getActiveSubscriptionCount' | 'countPaymentsCreatedBetween'>;
+
+/** How many past hours the payment volume of the last hour is compared with. */
+const VOLUME_HISTORY_HOURS = 24;
 
 /**
  * Counts payment, webhook, subscription and refund outcomes in memory (the last hour) and in KV,
@@ -82,6 +89,7 @@ export class PaymentMonitoringService {
 
   constructor(
     private kv: KV,
+    private reads: MonitorReads,
     private alertingService?: AlertingService,
   ) {
     this.initializeThresholds();
@@ -330,11 +338,17 @@ export class PaymentMonitoringService {
     const nowMs = Date.now();
     const oneHour = 60 * 60 * 1000;
 
-    // Detect unusual payment volumes
-    const currentHourVolume = await this.getHourlyVolume(nowMs);
-    const historicalAverage = await this.getHistoricalAverageVolume();
+    // Detect unusual payment volumes: the payments stored in the last hour against the hourly average
+    // of the hours before. With no history there is nothing to compare with.
+    const current = now();
+    const hourAgo = sub(current, { hours: 1 });
+    const [currentHourVolume, historyVolume] = await Promise.all([
+      this.reads.countPaymentsCreatedBetween(hourAgo, current),
+      this.reads.countPaymentsCreatedBetween(sub(hourAgo, { hours: VOLUME_HISTORY_HOURS }), hourAgo),
+    ]);
+    const historicalAverage = historyVolume / VOLUME_HISTORY_HOURS;
 
-    if (currentHourVolume > historicalAverage * 3) {
+    if (historicalAverage > 0 && currentHourVolume > historicalAverage * 3) {
       anomalies.push({
         type: 'unusual_volume',
         severity: 'warning',
@@ -386,14 +400,11 @@ export class PaymentMonitoringService {
       payments: {
         successRate: paymentSuccessRate,
         avgProcessingTime: avgPaymentProcessingTime,
-        activeSubscriptions: await this.getActiveSubscriptionCount(),
+        activeSubscriptions: await this.reads.getActiveSubscriptionCount(),
       },
       webhooks: {
         avgProcessingTime: avgWebhookProcessingTime,
         successRate: webhookSuccessRate,
-      },
-      providers: {
-        stripe: true, // Would check actual provider health
       },
       lastUpdated: now(),
     };
@@ -456,24 +467,6 @@ export class PaymentMonitoringService {
     return factors.reduce((sum, f) => sum + f, 0) / factors.length;
   }
 
-  private async getHourlyVolume(timestamp: number): Promise<number> {
-    const oneHour = 60 * 60 * 1000;
-    const values = await this.getMetricValues('payment_attempts_total', timestamp - oneHour);
-    return values.reduce((sum, v) => sum + v.value, 0);
-  }
-
-  private async getHistoricalAverageVolume(): Promise<number> {
-    // Would calculate from historical data
-    // For now, return a placeholder
-    return 100;
-  }
-
-  private async getActiveSubscriptionCount(): Promise<number> {
-    // Would get from database
-    // For now, return a placeholder
-    return 1000;
-  }
-
   private cleanupOldMetrics(): void {
     const cutoff = Date.now() - METRIC_RETENTION_MS;
 
@@ -486,6 +479,6 @@ export class PaymentMonitoringService {
 }
 
 // Factory function
-export function createPaymentMonitoringService(kv: KV, alertingService?: AlertingService) {
-  return new PaymentMonitoringService(kv, alertingService);
+export function createPaymentMonitoringService(kv: KV, reads: MonitorReads, alertingService?: AlertingService) {
+  return new PaymentMonitoringService(kv, reads, alertingService);
 }

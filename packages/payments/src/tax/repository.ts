@@ -5,7 +5,7 @@ import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizz
 
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
@@ -54,11 +54,9 @@ export class TaxConfigurationRepository {
   }
 
   async createConfiguration(data: NewTaxConfig): Promise<TaxConfig> {
-    const result = await this.db.insert(this.taxConfigurations).values(data).returning();
-    if (!result[0]) {
-      throw new Error('Failed to create tax configuration');
-    }
-    return result[0];
+    const [created] = await this.db.insert(this.taxConfigurations).values(data).returning();
+    invariant(created, 'the tax configuration insert returned no row');
+    return created;
   }
 
   async findConfigurationById(id: TaxConfigId): Promise<TaxConfig | null> {
@@ -140,11 +138,9 @@ export class TaxJurisdictionRepository {
   }
 
   async createJurisdiction(data: NewTaxJurisdiction): Promise<TaxJurisdiction> {
-    const result = await this.db.insert(this.taxJurisdictions).values(data).returning();
-    if (!result || !Array.isArray(result) || !result[0]) {
-      throw new Error('Failed to create tax jurisdiction');
-    }
-    return result[0];
+    const [created] = await this.db.insert(this.taxJurisdictions).values(data).returning();
+    invariant(created, 'the tax jurisdiction insert returned no row');
+    return created;
   }
 
   async findJurisdictionById(id: TaxJurisdictionId): Promise<TaxJurisdiction | null> {
@@ -254,9 +250,7 @@ export class TaxExemptionRepository {
     if (isFailure(target)) return target;
 
     const [created] = await this.db.insert(this.taxExemptions).values(data).returning();
-    if (!created) {
-      throw new Error('Failed to create tax exemption');
-    }
+    invariant(created, 'the tax exemption insert returned no row');
     return created;
   }
 
@@ -497,7 +491,7 @@ export class TaxAuditRepository {
 
   async record(entry: NewTaxAuditRow): Promise<TaxAuditRow> {
     const [row] = await this.db.insert(this.taxAuditEntries).values(entry).returning();
-    if (!row) throw new Error('Failed to record tax audit entry');
+    invariant(row, 'the tax audit insert returned no row');
 
     return row;
   }

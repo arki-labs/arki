@@ -1,12 +1,15 @@
 import type { Instant } from '@arki/date';
 import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import type { Failure } from '@arki/failure';
+import { z } from '@arki/contracts';
+import { isFailure, UnexpectedFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentId, SubscriptionId } from '../types.js';
+import { PaymentsConfigurationInvalid } from '../failures.js';
 import { paymentAmount } from '../money.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 
@@ -60,9 +63,63 @@ export type DunningStats = {
   recoveredPayments: number;
   recoveryRate: number;
   subscriptionsInDunning: number;
-  averageRecoveryTime: number; // days
   revenueAtRisk: number;
-  revenueRecovered: number;
+}
+
+/** The email an `email` step sends: the customer's address, the step's template, and what it is about. */
+export type DunningEmail = {
+  to: string;
+  template: string;
+  subscriptionId: SubscriptionId;
+  paymentId: PaymentId | undefined;
+  userId: string;
+};
+
+/** The call a `webhook` step makes: the step's own config, and the subscription, payment and user it is about. */
+export type DunningWebhookCall = {
+  eventId: string;
+  subscriptionId: SubscriptionId;
+  paymentId: PaymentId | undefined;
+  userId: string;
+  config: Record<string, unknown>;
+};
+
+/**
+ * How the app delivers the steps the package cannot send itself. Each returns `undefined` once
+ * delivered, or a failure when the transport refused (logged, and the step counts as done); a
+ * thrown error leaves the step scheduled for the next run. A rule whose step needs a sender that is
+ * missing fails when the service is built.
+ */
+export type DunningSenders = {
+  sendEmail?: (email: DunningEmail) => Promise<Failure | undefined>;
+  sendWebhook?: (call: DunningWebhookCall) => Promise<Failure | undefined>;
+};
+
+/** An `email` step's config: the template the app's mailer sends. */
+const emailStepConfigSchema = z.looseObject({ template: z.string().min(1) });
+
+/**
+ * Throws `payments.configuration_invalid` when an enabled rule needs a sender the app did not pass,
+ * or an `email` rule names no template. Runs when the service is built and when its rules change.
+ */
+function checkRulesHaveSenders(rules: readonly DunningRule[], senders: DunningSenders): void {
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    const { type, config } = rule.action;
+    if (type === 'email') {
+      if (!senders.sendEmail) throw misconfigured('senders.sendEmail', `rule ${rule.id} sends email`);
+      if (!emailStepConfigSchema.safeParse(config).success) {
+        throw misconfigured(`rules.${rule.id}.action.config.template`, 'an email step needs a template name');
+      }
+    }
+    if (type === 'webhook' && !senders.sendWebhook) {
+      throw misconfigured('senders.sendWebhook', `rule ${rule.id} calls a webhook`);
+    }
+  }
+}
+
+function misconfigured(setting: string, problem: string) {
+  return new UnexpectedFailure(PaymentsConfigurationInvalid({ setting, problem }));
 }
 
 const DEFAULT_DUNNING_CONFIG: DunningConfiguration = {
@@ -163,7 +220,7 @@ type DunningProvider = Pick<BasePaymentProvider, 'confirmPayment' | 'pauseSubscr
 /** The repository reads dunning makes. A `PaymentRepository` fits. */
 type DunningReads = Pick<
   PaymentRepository,
-  'findPaymentById' | 'findSubscriptionById' | 'getPaymentStats' | 'getSubscriptionStats'
+  'findPaymentById' | 'findSubscriptionById' | 'findCustomerById' | 'getPaymentStats' | 'getSubscriptionStats'
 >;
 
 /**
@@ -174,13 +231,16 @@ export class DunningService {
   private config: DunningConfiguration;
   private dunningEvents = new Map<string, DunningEvent>();
 
+  /** Throws `payments.configuration_invalid` when an enabled rule needs a sender that `senders` lacks. */
   constructor(
     private readonly paymentProvider: DunningProvider,
     private readonly paymentRepository: DunningReads,
     private readonly writes: CoreWrites,
     config: Partial<DunningConfiguration> = {},
+    private readonly senders: DunningSenders = {},
   ) {
     this.config = { ...DEFAULT_DUNNING_CONFIG, ...config };
+    checkRulesHaveSenders(this.config.rules, senders);
   }
 
   /**
@@ -274,8 +334,7 @@ export class DunningService {
 
     switch (action.type) {
       case 'email': {
-        await this.sendDunningEmail(event, action.config);
-        break;
+        return this.sendDunningEmail(event, action.config);
       }
 
       case 'retry_payment': {
@@ -293,8 +352,7 @@ export class DunningService {
       }
 
       case 'webhook': {
-        await this.triggerWebhook(event, action.config);
-        break;
+        return this.triggerWebhook(event, action.config);
       }
 
       default: {
@@ -305,25 +363,27 @@ export class DunningService {
   }
 
   /**
-   * Send dunning email to customer
+   * Send the step's email to the subscription's customer through the app's `sendEmail`. Nothing, the
+   * sender's failure, or `ReferenceNotFound` when the subscription or its customer is gone.
    */
-  private async sendDunningEmail(event: DunningEvent, config: Record<string, unknown>): Promise<void> {
-    // In a real implementation, this would integrate with your email service
-    logger.warn('Dunning email step for subscription {subscriptionId} has no mail sender; nothing was sent', {
-      subscriptionId: event.subscriptionId,
-      template: String(config['template']),
-    });
+  private async sendDunningEmail(event: DunningEvent, config: Record<string, unknown>) {
+    const { sendEmail } = this.senders;
+    // Checked when the rules were set: an enabled email rule always has a sender and a template
+    const step = emailStepConfigSchema.safeParse(config);
+    if (!sendEmail || !step.success) throw misconfigured('senders.sendEmail', 'an email step ran without a sender');
 
-    // Example email integration:
-    // await emailService.sendTemplate({
-    //   to: subscription.customer.email,
-    //   template: config.template as string,
-    //   data: {
-    //     subscriptionId: event.subscriptionId,
-    //     amount: payment.amount,
-    //     retryDate: nextRetryDate,
-    //   }
-    // });
+    const subscription = await this.paymentRepository.findSubscriptionById(event.subscriptionId);
+    if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: event.subscriptionId, missing: 'row' });
+    const customer = await this.paymentRepository.findCustomerById(subscription.customerId);
+    if (!customer) return ReferenceNotFound({ kind: 'customer', id: subscription.customerId, missing: 'row' });
+
+    return sendEmail({
+      to: customer.email,
+      template: step.data.template,
+      subscriptionId: event.subscriptionId,
+      paymentId: event.paymentId,
+      userId: event.userId,
+    });
   }
 
   /**
@@ -449,14 +509,18 @@ export class DunningService {
     });
   }
 
-  /**
-   * Trigger external webhook for custom dunning logic
-   */
-  private async triggerWebhook(event: DunningEvent, config: Record<string, unknown>): Promise<void> {
-    // In a real implementation, this would call an external webhook
-    logger.warn('Dunning webhook step {eventId} has no webhook sender; nothing was sent', {
+  /** Hand the step to the app's `sendWebhook`. Nothing, or the sender's failure. */
+  private async triggerWebhook(event: DunningEvent, config: Record<string, unknown>) {
+    const { sendWebhook } = this.senders;
+    // Checked when the rules were set: an enabled webhook rule always has a sender
+    if (!sendWebhook) throw misconfigured('senders.sendWebhook', 'a webhook step ran without a sender');
+
+    return sendWebhook({
       eventId: event.id,
-      configKeys: Object.keys(config),
+      subscriptionId: event.subscriptionId,
+      paymentId: event.paymentId,
+      userId: event.userId,
+      config,
     });
   }
 
@@ -486,7 +550,7 @@ export class DunningService {
     const recoveryEvent: DunningEvent = {
       id: `recovery_${subscriptionId}_${Date.now()}`,
       subscriptionId,
-      userId: '', // Would need to get from subscription
+      userId: activated.userId,
       eventType: 'subscription_recovered',
       data: { recoveredAt: now() },
       createdAt: now(),
@@ -518,19 +582,13 @@ export class DunningService {
     const recoveryRate = totalFailedPayments > 0 ? (recoveredPayments / totalFailedPayments) * 100 : 0;
 
     const revenueAtRisk = failedPayments.reduce((sum, p) => sum + paymentAmount(p).toNumber(), 0);
-    const revenueRecovered = recoveredPayments * (revenueAtRisk / totalFailedPayments || 0);
-
-    // Calculate average recovery time (simplified)
-    const averageRecoveryTime = recoveryEvents.length > 0 ? 5 : 0; // Days - would calculate from actual data
 
     return {
       totalFailedPayments,
       recoveredPayments,
       recoveryRate: Math.round(recoveryRate * 100) / 100,
       subscriptionsInDunning: pastDueSubscriptions.length,
-      averageRecoveryTime,
       revenueAtRisk: Math.round(revenueAtRisk * 100) / 100,
-      revenueRecovered: Math.round(revenueRecovered * 100) / 100,
     };
   }
 
@@ -546,8 +604,11 @@ export class DunningService {
   /**
    * Update dunning configuration
    */
+  /** Throws `payments.configuration_invalid`, and keeps the old rules, when a new rule needs a missing sender. */
   updateConfiguration(config: Partial<DunningConfiguration>): void {
-    this.config = { ...this.config, ...config };
+    const next = { ...this.config, ...config };
+    checkRulesHaveSenders(next.rules, this.senders);
+    this.config = next;
   }
 
   /**
@@ -563,6 +624,7 @@ export function createDunningService(
   paymentRepository: PaymentRepository,
   writes: CoreWrites,
   config?: Partial<DunningConfiguration>,
+  senders?: DunningSenders,
 ) {
-  return new DunningService(paymentProvider, paymentRepository, writes, config);
+  return new DunningService(paymentProvider, paymentRepository, writes, config, senders);
 }

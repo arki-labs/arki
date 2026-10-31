@@ -8,7 +8,7 @@
 import type { Instant } from '@arki/date';
 import type { Failure } from '@arki/failure';
 import { instant } from '@arki/date';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
 /** Event data is stored as JSON, so a time travels as an ISO string. */
@@ -92,9 +92,7 @@ export async function writtenRow(
   if (isFailure(written)) return written;
 
   const { row } = written;
-  if (!row) {
-    throw new Error(`[@arki/payments] ${what}: the journal returned no row`);
-  }
+  invariant(row, () => `[@arki/payments] ${what}: the journal returned no row`);
 
   const { version, ...rest } = row;
   void version;

@@ -20,7 +20,7 @@ import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
 import { updateDunningCampaignInputSchema } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
-import { DunningCampaignNotFound, DunningCampaignWithoutSteps } from './failures.js';
+import { DunningCampaignNotFound, DunningCampaignWithoutSteps, DunningTemplateInUse } from './failures.js';
 import { createDunningCampaignId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
@@ -40,6 +40,7 @@ const tables = {
   dunningCampaignAnalytics: dunning.dunningCampaignAnalytics,
   dunningTemplates: dunning.dunningTemplates,
   dunningExecutions: dunning.dunningExecutions,
+  dunningCommunications: dunning.dunningCommunications,
 };
 
 const relations = defineRelations(tables, () => ({}));
@@ -149,7 +150,8 @@ describe('updateCampaign templates', () => {
     const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
     const [first, second] = created.templates;
 
-    const updated = await service.updateCampaign(
+    const updated = orThrow(
+      await service.updateCampaign(
       created.id,
       {
         templates: [
@@ -158,7 +160,7 @@ describe('updateCampaign templates', () => {
         ],
       },
       'usr_admin',
-    );
+    ));
 
     expect(updated?.templates.map(template => [template.stepNumber, template.communication.channel])).toEqual([
       [1, 'sms'],
@@ -172,10 +174,42 @@ describe('updateCampaign templates', () => {
   it('leaves the steps alone when templates is omitted', async () => {
     const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
 
-    const updated = await service.updateCampaign(created.id, { name: 'Renamed' }, 'usr_admin');
+    const updated = orThrow(await service.updateCampaign(created.id, { name: 'Renamed' }, 'usr_admin'));
 
     expect(updated?.name).toBe('Renamed');
     expect(updated?.templates.map(template => template.id)).toEqual(created.templates.map(template => template.id));
+  });
+
+  it('refuses to drop a step that already sent a communication, and changes nothing', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Before' }, 'usr_admin');
+    const [first, second] = created.templates;
+    if (!first || !second) throw new Error('campaign needs two steps');
+    const sent = await execution(created.id, 'completed');
+    await db.insert(tables.dunningCommunications).values({
+      executionId: sent.id,
+      customerId,
+      templateId: second.id,
+      channel: 'email',
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'sent',
+    });
+
+    const result = await service.updateCampaign(
+      created.id,
+      {
+        name: 'After',
+        templates: [{ name: 'Step 1', stepNumber: 1, delayHours: 0, communication: { channel: 'email', subject: 'Payment failed', content: 'Please update your card', variables: [] } }],
+      },
+      'usr_admin',
+    );
+
+    expect(DunningTemplateInUse.is(result)).toBe(true);
+    if (!DunningTemplateInUse.is(result)) return;
+    expect(result.data).toEqual({ templateId: second.id, stepNumber: 2 });
+    const after = await service.getCampaign(created.id);
+    expect(after?.name).toBe('Before');
+    expect(after?.templates?.map(template => template.id)).toEqual([first.id, second.id]);
   });
 
   it('rejects an empty set and duplicate step numbers at the contract', () => {
@@ -192,7 +226,7 @@ async function createdCampaign(
   trigger?: CreateDunningCampaignInput['trigger'],
 ): Promise<DunningCampaignId> {
   const created = await service.createCampaign({ ...campaignInput([0], trigger), name }, 'usr_admin');
-  await service.updateCampaign(created.id, { status }, 'usr_admin');
+  orThrow(await service.updateCampaign(created.id, { status }, 'usr_admin'));
 
   return created.id;
 }
@@ -541,6 +575,61 @@ describe('a scheduled execution in a named schema', () => {
       .from(tables.dunningCampaignAnalytics)
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
     expect(row).toMatchObject({ paymentsRecovered: 1, currency: 'EUR', revenueRecoveredMinor: 1999 });
+  });
+});
+
+describe('a tick reports the executions whose run threw', () => {
+  /**
+   * A succeeded payment in a currency that does not exist makes the post-send payment check throw.
+   * The send itself is never reached with a fault: a bad timezone or a failing sender is caught inside.
+   */
+  async function throwingExecution(label: string, row: Partial<typeof tables.dunningExecutions.$inferInsert>) {
+    const buyer = await newCustomer(label);
+    const campaignId = await createdCampaign(`Tick: ${label}`);
+    const campaign = await service.getCampaign(campaignId);
+    const templateId = campaign?.templates[0]?.id;
+    await db.insert(core.payments).values({
+      id: orThrow(createPaymentId()),
+      userId: buyer.owner,
+      customerId: buyer.id,
+      providerPaymentId: `pi_${label}`,
+      amountMinor: 1999,
+      currency: 'ZZZ',
+      status: 'succeeded',
+      createdAt: now(),
+    });
+    const [inserted] = await db
+      .insert(tables.dunningExecutions)
+      .values({ campaignId, templateId, customerId: buyer.id, triggerType: 'manual', triggerData: {}, scheduledAt: sub(now(), { minutes: 1 }), ...row })
+      .returning();
+    if (!inserted) throw new Error('execution not inserted');
+
+    return inserted.id;
+  }
+
+  it('processScheduledExecutions lists the execution that threw, with its message and no code', async () => {
+    const id = await throwingExecution('tick-scheduled', { status: 'scheduled' });
+
+    const report = await service.processScheduledExecutions(1000);
+
+    expect(report.processed).toBeGreaterThanOrEqual(1);
+    const fault = report.failed.find(entry => entry.id === id);
+    expect(fault?.code).toBeNull();
+    expect(fault?.message).toMatch(/\S/);
+    const [row] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, id));
+    expect(row?.status).toBe('failed');
+    expect(row?.errorMessage).toBe(fault?.message);
+  });
+
+  it('retryFailedExecutions lists the retry that threw again', async () => {
+    const id = await throwingExecution('tick-retry', { status: 'failed', retryCount: 0, nextRetryAt: sub(now(), { minutes: 1 }) });
+
+    const report = await service.retryFailedExecutions(1000);
+
+    expect(report.processed).toBeGreaterThanOrEqual(1);
+    const fault = report.failed.find(entry => entry.id === id);
+    expect(fault?.code).toBeNull();
+    expect(fault?.message).toMatch(/\S/);
   });
 });
 

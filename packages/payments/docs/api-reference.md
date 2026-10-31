@@ -85,9 +85,9 @@ These are the inputs of the journal commands behind the services. A command retu
 
 - `createSubscriptionManager`: create, update, pause, resume, reactivate and cancel subscriptions against the provider, preview a change, sync with the provider, handle trials ending and past-due subscriptions, and check access.
 - `createPaymentRetryService`: schedules and runs retries of failed payments by named strategies, and reports retry analytics. You can add or change strategies.
-- `createDunningService` (core): rule-based handling of failed payments. A rule has a trigger (`payment_failed`, `invoice_payment_failed` or `subscription_past_due`), a delay in days and an action (email, retry, pause, cancel or webhook). Do not mix it up with the campaign-based dunning in `@arki/payments/dunning`.
+- `createDunningService` (core): rule-based handling of failed payments. A rule has a trigger (`payment_failed`, `invoice_payment_failed` or `subscription_past_due`), a delay in days and an action (email, retry, pause, cancel or webhook). Email and webhook steps go out through the app's `DunningSenders` (`sendEmail`, `sendWebhook`); an enabled rule whose sender is missing throws `payments.configuration_invalid` when the service is built. Do not mix it up with the campaign-based dunning in `@arki/payments/dunning`.
 - `ProrationService` and `createProrationService`: previews the charge or credit of a plan change.
-- `PaymentMonitoringService` and `createPaymentMonitoringService`: you record payment attempts, webhook runs, subscription events and refunds. It detects anomalies, reports system health and sends alerts.
+- `PaymentMonitoringService` and `createPaymentMonitoringService`: you record payment attempts, webhook runs, subscription events and refunds. It reads stored counts through a `PaymentRepository` (active subscriptions, payment volume), detects anomalies, reports system health and sends alerts.
 
 ## Webhooks and provider helpers
 
@@ -117,7 +117,7 @@ These are the inputs of the journal commands behind the services. A command retu
 - `CustomerSegmentationService` and `createCustomerSegmentationService`: segments, customer classification and risk scoring.
 - `DunningIntegrationService` and `createDunningIntegrationService`: connects campaigns, segments and communications into one flow.
 - `CommunicationOrchestrationService` and `createCommunicationOrchestrationService`: sends messages through the channels you configure. Apps pass the channel config in, so the package never reads `env`.
-- Channel providers: `EmailProvider` (Resend), `SMSProvider` (Twilio), `InAppProvider` (database storage), `WebhookProvider` (external endpoints).
+- Channel providers: `EmailProvider` (Resend), `SMSProvider` (Twilio), `InAppProvider` (stored through the app's `InAppNotificationStore`), `WebhookProvider` (only hosts on the operator's `allowedHosts`; an empty list fails at boot; the reply body is never read or kept). Provider bodies are read up to 64 KiB. The scheduled ticks return a `DunningTickReport` listing each item that failed.
 - `readCustomerRiskProfile`: gives a `customer_risk_profiles` row the types its columns claim. Postgres returns the jsonb dates as ISO text, so every read passes through here.
 - `valueList`: builds `(a, b, c)` with one bound parameter per value, for `column IN ${valueList(...)}`. An empty list matches nothing.
 - Campaign and segment procedure inputs: `createDunningCampaignInputSchema`, `updateDunningCampaignInputSchema`, `getCampaignInputSchema`, `updateCampaignWrapperInputSchema`, `deleteCampaignInputSchema`, `updateCampaignStatusInputSchema`, `executeCampaignInputSchema`, `bulkExecuteCampaignInputSchema`, `campaignAnalyticsInputSchema`, `getCampaignAnalyticsInputSchema`, `createDunningTemplateInputSchema`, `updateDunningTemplateInputSchema`, `createCustomerSegmentInputSchema`, `updateCustomerSegmentInputSchema`, `getSegmentInputSchema`, `updateSegmentWrapperInputSchema`, `deleteSegmentInputSchema`, `getSegmentCustomersInputSchema`, `updateSegmentCustomerCountInputSchema`.

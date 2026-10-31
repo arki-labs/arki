@@ -9,12 +9,13 @@
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
 import { instant, isInstant } from '@arki/date';
+import { AssertError } from '@arki/schema';
 
 import type { CustomerRiskProfile } from './types.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
@@ -131,5 +132,18 @@ describe('customer risk profile dates in jsonb', () => {
     expect(row?.engagementMetrics.lastActivity).toBeUndefined();
     expect(row?.paymentHistory.streakDays).toBe(5);
     expect(row?.riskScore.overall).toBe(40);
+  });
+
+  it('throws the schema assert error, not a raw ZodError, for a stored date that is not an instant', async () => {
+    // Corrupt the stored jsonb the way a bad migration or a hand edit would; the row comes back as Postgres holds it
+    const { riskScore } = dunning.customerRiskProfiles;
+    const [corrupt] = await db
+      .update(dunning.customerRiskProfiles)
+      .set({ riskScore: sql`jsonb_set(${riskScore}, '{lastCalculated}', '"not a date"')` })
+      .where(eq(dunning.customerRiskProfiles.customerId, customerId))
+      .returning();
+    if (!corrupt) throw new Error('the risk profile row was not stored');
+
+    expect(() => readCustomerRiskProfile(corrupt)).toThrow(AssertError);
   });
 });

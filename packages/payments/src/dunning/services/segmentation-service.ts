@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
-import { isFailure } from '@arki/failure';
+import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
@@ -21,7 +21,8 @@ import type {
   SegmentCriteria,
 } from '../types.js';
 import { toMinorColumn } from '../../core/money.js';
-import { CustomerSegmentNotFound } from '../failures.js';
+import type { DunningTickReport } from '../failures.js';
+import { CustomerSegmentNotFound, tickFault } from '../failures.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
 import { valueList } from '../sql-list.js';
 
@@ -83,9 +84,7 @@ export class CustomerSegmentationService {
       createdBy,
     });
 
-    if (!dbSegment) {
-      throw new Error('Failed to create segment');
-    }
+    invariant(dbSegment, 'the segment insert returned no row');
 
     const segment = dbSegment;
 
@@ -783,12 +782,11 @@ export class CustomerSegmentationService {
    */
   private async getCustomerEngagementMetrics(customerId: CustomerId): Promise<StoredEngagementMetrics> {
     // Get customer information for engagement calculation
-    const customerQuery = this.db.query as unknown as {
-      customers: { findFirst: (config: { where: { id: CustomerId } }) => Promise<Customer | undefined> };
-    };
-    const customer = await customerQuery.customers.findFirst({
-      where: { id: customerId },
-    });
+    const [customer] = await this.db
+      .select({ id: this.customers.id })
+      .from(this.customers)
+      .where(eq(this.customers.id, customerId))
+      .limit(1);
 
     if (!customer) {
       return {
@@ -917,9 +915,7 @@ export class CustomerSegmentationService {
     };
 
     const dbProfile = await this.riskProfileRepo.upsert(profileData);
-    if (!dbProfile) {
-      throw new Error(`Failed to upsert risk profile for customer ${customerId}`);
-    }
+    invariant(dbProfile, () => `the risk profile upsert for customer ${customerId} returned no row`);
     return dbProfile;
   }
 
@@ -927,12 +923,11 @@ export class CustomerSegmentationService {
    * Get segments that a customer belongs to
    */
   async getCustomerSegments(customerId: CustomerId): Promise<CustomerSegmentId[] | MoneyFailure> {
-    const customerQuery = this.db.query as unknown as {
-      customers: { findFirst: (config: { where: { id: CustomerId } }) => Promise<Customer | undefined> };
-    };
-    const customer = await customerQuery.customers.findFirst({
-      where: { id: customerId },
-    });
+    const [customer] = await this.db
+      .select({ id: this.customers.id })
+      .from(this.customers)
+      .where(eq(this.customers.id, customerId))
+      .limit(1);
 
     if (!customer) return [];
 
@@ -994,10 +989,12 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Bulk update all customer risk profiles with enhanced error handling
+   * Recalculate the risk profile of up to `limit` customers. Returns how many were tried and each
+   * customer whose profile was not updated (a stored range money refuses, or a thrown error).
    */
-  async bulkUpdateRiskProfiles(limit = 100): Promise<void> {
+  async bulkUpdateRiskProfiles(limit = 100): Promise<DunningTickReport> {
     const customerIds = await this.db.select({ id: this.customers.id }).from(this.customers).limit(limit);
+    const report: DunningTickReport = { processed: customerIds.length, failed: [] };
 
     const results = {
       success: 0,
@@ -1017,6 +1014,7 @@ export class CustomerSegmentationService {
           // A stored segment with a spend range that is not valid money: counted as failed, never as updated
           results.failed++;
           results.errors.push(`Customer ${id}: ${updated.code}`);
+          report.failed.push(tickFault(id, updated));
           logger.error('Failed to update risk profile', { customerId: id, error: updated.code });
           continue;
         }
@@ -1034,6 +1032,7 @@ export class CustomerSegmentationService {
         results.failed++;
         const errorMessage = `Customer ${id}: ${error instanceof Error ? error.message : 'Unknown error'}`;
         results.errors.push(errorMessage);
+        report.failed.push(tickFault(id, error));
         logger.error('Failed to update risk profile', {
           customerId: id,
           error: error instanceof Error ? error.message : String(error),
@@ -1053,13 +1052,13 @@ export class CustomerSegmentationService {
         firstFiveErrors: results.errors.slice(0, 5),
       });
     }
+    return report;
   }
 
-  /**
-   * Process auto-update segments
-   */
-  async processAutoUpdateSegments(): Promise<void> {
+  /** Recount the auto-update segments. Returns how many were tried and each segment that was not counted. */
+  async processAutoUpdateSegments(): Promise<DunningTickReport> {
     const segments = await this.segmentRepo.findSegmentsForAutoUpdate();
+    const report: DunningTickReport = { processed: segments.length, failed: [] };
 
     for (const segment of segments) {
       try {
@@ -1069,14 +1068,17 @@ export class CustomerSegmentationService {
             segmentId: segment.id,
             code: counted.code,
           });
+          report.failed.push(tickFault(segment.id, counted));
         }
       } catch (error) {
         logger.error('Failed to update segment', {
           segmentId: segment.id,
           error: error instanceof Error ? error.message : String(error),
         });
+        report.failed.push(tickFault(segment.id, error));
       }
     }
+    return report;
   }
 
   /**

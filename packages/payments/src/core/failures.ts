@@ -167,3 +167,18 @@ export const NotificationFailed = /* @__PURE__ */ defineFailure('payments.notifi
       : `The ${channel} ${notification.replaceAll('_', ' ')} was not sent: the server answered ${status}`,
   remediation: 'Check the transport or the Slack webhook URL, then send the notification again.',
 });
+
+/**
+ * The host app's setup of a payments service cannot work: a capability a configured step needs was
+ * not passed, or a setting is empty or malformed. Thrown when the service is built (at boot), never
+ * returned later as a silent no-op.
+ *
+ * @fix Pass the capability or setting that `setting` names when the app builds the service.
+ * @verify bun run test -- src/core/services/dunning-service.test.ts src/dunning/communication-service.test.ts
+ */
+export const PaymentsConfigurationInvalid = /* @__PURE__ */ defineFailure('payments.configuration_invalid', {
+  status: 500,
+  data: z.object({ setting: z.string(), problem: z.string() }),
+  message: 'Payments setting {setting} is invalid: {problem}',
+  remediation: 'Pass the capability or setting it names when the app builds the service.',
+});

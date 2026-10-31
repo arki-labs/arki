@@ -21,12 +21,20 @@ import type {
   SubscriptionStatus,
   WebhookValidationResult,
 } from '../types.js';
-import type { CardDeclined, IdempotencyConflict, PaymentMethodRequired, ReferenceNotFound } from './provider-error.js';
+import type {
+  CardDeclined,
+  IdempotencyConflict,
+  PaymentMethodRequired,
+  PlanPriceNotFlat,
+  ReferenceNotFound,
+} from './provider-error.js';
 
 type Declined = FailureOf<typeof CardDeclined>;
 type Conflict = FailureOf<typeof IdempotencyConflict>;
 type NotFound = FailureOf<typeof ReferenceNotFound>;
 type NoPaymentMethod = FailureOf<typeof PaymentMethodRequired>;
+/** A plan row whose provider price is not a flat recurring price (`payments.plan_price_not_flat`). */
+type NotFlat = FailureOf<typeof PlanPriceNotFlat>;
 /**
  * An amount `@arki/money` refuses at the provider boundary: in a provider answer, an unknown currency or units
  * off the provider's rule; in a request, an amount the provider cannot take (`money.provider_amount`: negative,
@@ -97,7 +105,7 @@ export abstract class BasePaymentProvider {
   }): Promise<Result<Plan, IdGenerationFailure | BadAmount>>;
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no provider price. */
-  abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | BadAmount>>;
+  abstract getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | NotFlat | BadAmount>>;
 
   abstract updatePlan(
     planId: PlanId,
@@ -105,11 +113,11 @@ export abstract class BasePaymentProvider {
       name?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Result<Plan, NotFound | BadAmount>>;
+  ): Promise<Result<Plan, NotFound | NotFlat | BadAmount>>;
 
   abstract deletePlan(planId: PlanId): Promise<Result<undefined, NotFound>>;
 
-  abstract listPlans(): Promise<Result<Plan[], BadAmount>>;
+  abstract listPlans(): Promise<Result<Plan[], NotFlat | BadAmount>>;
 
   // Subscription Management
   abstract createSubscription(params: {

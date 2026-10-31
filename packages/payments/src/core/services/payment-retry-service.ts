@@ -2,12 +2,14 @@ import type { Instant } from '@arki/date';
 import { add, isAfter, isBefore, isSameOrBefore, now, toMillis } from '@arki/date';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+import { MoneyBag } from '@arki/money/bag';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { Payment, PaymentId, Subscription, SubscriptionId } from '../types.js';
 import { PaymentWithoutSubscription } from '../failures.js';
+import { paymentAmount } from '../money.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 
 const logger = getLogger('arki:payments:retry');
@@ -45,7 +47,8 @@ export type RetryAnalytics = {
   averageRetryTime: number;
   retrySuccessByAttempt: Record<number, number>;
   commonFailureReasons: Record<string, number>;
-  revenueRecovered: number;
+  /** The stored amounts of the payments a retry recovered, each payment once, one balance per currency. */
+  revenueRecovered: MoneyBag;
 };
 
 const DEFAULT_RETRY_STRATEGIES: RetryStrategy[] = [
@@ -428,7 +431,14 @@ export class PaymentRetryService {
       commonFailureReasons[reason] = (commonFailureReasons[reason] || 0) + 1;
     }
 
-    const revenueRecovered = successfulRetries * 50;
+    // Each recovered payment counts once, at the amount stored on its row; a deleted payment adds nothing
+    const recoveredIds = new Set(filteredRetries.filter(r => r.status === 'succeeded').map(r => r.paymentId));
+    const recoveredPayments = await Promise.all(
+      [...recoveredIds].map(paymentId => this.paymentRepository.findPaymentById(paymentId)),
+    );
+    const revenueRecovered = MoneyBag.of(
+      ...recoveredPayments.flatMap(payment => (payment ? [paymentAmount(payment)] : [])),
+    );
 
     return {
       totalRetryAttempts,

@@ -7,17 +7,17 @@
  * fake HTTP layer.
  */
 import type { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
-import { InvalidInput, orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, FailureError, InvalidInput, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
 
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
-import { customerId, openDb, schema } from '../test-support.js';
+import { customerId, openDb, rejectionOf, schema } from '../test-support.js';
 import { createExemptionSchema, createJurisdictionSchema } from './contracts.js';
 import { TaxReferenceNotFound } from './failures.js';
 import { createTaxConfigId, createTaxExemptionId, createTaxJurisdictionId } from './primitives.js';
@@ -401,5 +401,26 @@ describe('calculateTax with exemptions', () => {
     expect(owns(alameda, countyLine)).toBe(true);
     expect(owns(alameda, otherCounty)).toBe(false);
     expect(owns(alameda, sameCountyOtherState)).toBe(false);
+  });
+});
+
+describe('an insert that returns no row', () => {
+  it('createConfiguration fails with the invariant failure code', async () => {
+    await db.execute(
+      sql`CREATE FUNCTION pay.skip_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`,
+    );
+    await db.execute(
+      sql`CREATE TRIGGER skip_tax_config_insert BEFORE INSERT ON pay.tax_configurations FOR EACH ROW EXECUTE FUNCTION pay.skip_row()`,
+    );
+
+    try {
+      const error = await rejectionOf(repos.configurations.createConfiguration({ name: 'Skipped' }));
+
+      expect(error).toBeInstanceOf(FailureError);
+      expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+    } finally {
+      await db.execute(sql`DROP TRIGGER skip_tax_config_insert ON pay.tax_configurations`);
+      await db.execute(sql`DROP FUNCTION pay.skip_row()`);
+    }
   });
 });

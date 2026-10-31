@@ -5,7 +5,7 @@
  */
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { z } from '@arki/contracts';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, isFailure } from '@arki/failure';
 
 import { communicationChannelValues, dunningCampaignStatusValues } from './primitives.js';
 
@@ -59,6 +59,20 @@ export const CustomerSegmentNotFound = /* @__PURE__ */ defineFailure('payments.c
   data: z.object({ segmentId: z.string() }),
   message: 'Customer segment {segmentId} not found',
   remediation: 'Check the segment id; list the segments to find it.',
+});
+
+/**
+ * A campaign update removes a step that already sent a communication. The sent message keeps its
+ * step (its history points at it), so the update was refused and nothing changed.
+ *
+ * @fix Keep the step in `templates` (change its content or delay instead), or deactivate the campaign and create a new one.
+ * @verify bun run test -- src/dunning/campaign-service.test.ts
+ */
+export const DunningTemplateInUse = /* @__PURE__ */ defineFailure('payments.dunning_template_in_use', {
+  status: 409,
+  data: z.object({ templateId: z.string(), stepNumber: z.number() }),
+  message: 'Step {stepNumber} ({templateId}) already sent a communication, so it cannot be removed',
+  remediation: 'Keep the step in templates and change its content or delay, or deactivate the campaign.',
 });
 
 /**
@@ -129,6 +143,23 @@ export const NotificationProviderResponseInvalid = /* @__PURE__ */ defineFailure
 );
 
 /**
+ * A webhook recipient URL names a host that is not on the operator's `allowedHosts` list. Nothing
+ * was sent. The URL comes from customer metadata, so only hosts the operator listed may be reached.
+ *
+ * @fix Add the host to `webhook.allowedHosts` if the operator trusts it, or correct the customer's `webhookUrl`.
+ * @verify bun run test -- src/dunning/communication-service.test.ts
+ */
+export const NotificationWebhookHostNotAllowed = /* @__PURE__ */ defineFailure(
+  'payments.notification_webhook_host_not_allowed',
+  {
+    status: 403,
+    data: z.object({ host: z.string() }),
+    message: 'Webhook host {host} is not on the allowed hosts list',
+    remediation: "Add the host to webhook.allowedHosts if the operator trusts it, or correct the customer's webhookUrl.",
+  },
+);
+
+/**
  * What a notification provider call can return instead of its result. A recipient that is not a
  * valid address for the channel (a webhook URL that is not http or https) is a `SchemaFailure`.
  */
@@ -136,4 +167,21 @@ export type NotificationProviderFailure =
   | FailureOf<typeof NotificationProviderRejected>
   | FailureOf<typeof NotificationProviderTimeout>
   | FailureOf<typeof NotificationProviderResponseInvalid>
+  | FailureOf<typeof NotificationWebhookHostNotAllowed>
   | SchemaFailure;
+
+/** One item a scheduled tick could not handle: its id, the failure code (`null` for a thrown error) and the message. */
+export type DunningTickFault = { id: string; code: string | null; message: string };
+
+/**
+ * What one scheduled tick did: how many items it handled, and each item it could not handle. A tick
+ * logs every fault too; the report is what the scheduler sees. A fault that stops the whole tick
+ * (the database is down) is thrown, not listed.
+ */
+export type DunningTickReport = { processed: number; failed: DunningTickFault[] };
+
+/** The tick fault for one item: a returned failure keeps its code, a thrown error has none. */
+export function tickFault(id: string, fault: unknown): DunningTickFault {
+  if (isFailure(fault)) return { id, code: fault.code, message: fault.message };
+  return { id, code: null, message: fault instanceof Error ? fault.message : String(fault) };
+}

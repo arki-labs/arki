@@ -15,13 +15,13 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { isInstant } from '@arki/date';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedFailure } from '@arki/failure';
 import { CommandConflict } from '@arki/journal';
 
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
 import type { Payment, PaymentStatus } from '../types.js';
-import type { DunningRule } from './dunning-service.js';
+import type { DunningEmail, DunningRule, DunningSenders, DunningWebhookCall } from './dunning-service.js';
 import {
   coreReads,
   runnerOn,
@@ -30,7 +30,7 @@ import {
   subscriptionRow,
   unexpectedCall,
 } from '../../service-test-support.js';
-import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
+import { countEvents, eventTypesOf, openDb, typed, userId } from '../../test-support.js';
 import { createPaymentId, createSubscriptionId } from '../primitives.js';
 import { CardDeclined, ReferenceNotFound } from '../providers/provider-error.js';
 import { DunningService } from './dunning-service.js';
@@ -49,8 +49,32 @@ function ruleDoing(type: DunningRule['action']['type']): DunningRule {
     name: `Test ${type}`,
     enabled: true,
     trigger: { event: 'payment_failed', delayDays: 0 },
-    action: { type, config: {} },
+    action: { type, config: type === 'email' ? { template: 'payment_failed_template' } : {} },
   };
+}
+
+/** What the app's mailer and webhook client were handed, in order. */
+const sentEmails: DunningEmail[] = [];
+const webhookCalls: DunningWebhookCall[] = [];
+
+/** The app's senders: they deliver by recording what they were handed. */
+const senders: DunningSenders = {
+  async sendEmail(email) {
+    sentEmails.push(email);
+  },
+  async sendWebhook(call) {
+    webhookCalls.push(call);
+  },
+};
+
+/** The code of the configuration failure building or reconfiguring the service throws. */
+function bootFailureCode(build: () => unknown): string | undefined {
+  try {
+    build();
+  } catch (error) {
+    return error instanceof UnexpectedFailure ? error.code : undefined;
+  }
+  return undefined;
 }
 
 /** A provider where a retried payment ends in `retryStatus`, and pause and cancel go through. */
@@ -81,7 +105,7 @@ function providerWhereRetryEnds(retryStatus: PaymentStatus): Provider {
 }
 
 function dunningWith(rule: DunningRule, retryStatus: PaymentStatus = 'succeeded') {
-  return new DunningService(providerWhereRetryEnds(retryStatus), reads, writes, { rules: [rule] });
+  return new DunningService(providerWhereRetryEnds(retryStatus), reads, writes, { rules: [rule] }, senders);
 }
 
 /** A subscription whose payment just failed, with dunning started. */
@@ -294,6 +318,17 @@ describe('handleSubscriptionRecovery', () => {
     ]);
   });
 
+  it('the recovery note names the user who owns the subscription', async () => {
+    const service = dunningWith(ruleDoing('email'));
+    const id = await failedPaymentOn(service);
+
+    await orThrow(service.handleSubscriptionRecovery(id));
+
+    expect(service.getPendingEventsForSubscription(id)).toEqual([
+      expect.objectContaining({ eventType: 'subscription_recovered', userId }),
+    ]);
+  });
+
   it('a subscription that is already active writes no event', async () => {
     const service = dunningWith(ruleDoing('email'));
     const { id } = await seedSubscription(writes, 'active');
@@ -325,7 +360,7 @@ describe('what dunning does not own', () => {
       pauseSubscription: unexpectedCall('pauseSubscription'),
       cancelSubscription: unexpectedCall('cancelSubscription'),
     };
-    const service = new DunningService(provider, reads, writes, { rules: [ruleDoing('email')] });
+    const service = new DunningService(provider, reads, writes, { rules: [ruleDoing('email')] }, senders);
     const id = await failedPaymentOn(service);
     const eventsBefore = await countEvents(db);
 
@@ -333,5 +368,87 @@ describe('what dunning does not own', () => {
 
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'past_due' });
+  });
+});
+
+describe('steps the app delivers', () => {
+  it('an email step sends its template to the customer address through sendEmail', async () => {
+    const service = dunningWith(ruleDoing('email'));
+    const subscriptionId = await failedPaymentOn(service);
+    sentEmails.length = 0;
+
+    await service.processDunningEvents();
+
+    expect(sentEmails).toEqual([
+      expect.objectContaining({
+        to: 'buyer@example.com',
+        template: 'payment_failed_template',
+        subscriptionId,
+        userId,
+      }),
+    ]);
+    expect(service.getPendingEventsForSubscription(subscriptionId)).toHaveLength(0);
+  });
+
+  it('a webhook step hands the step config and its subscription to sendWebhook', async () => {
+    const rule = ruleDoing('webhook');
+    const service = dunningWith({ ...rule, action: { type: 'webhook', config: { endpoint: 'billing-events' } } });
+    const subscriptionId = await failedPaymentOn(service);
+    webhookCalls.length = 0;
+
+    await service.processDunningEvents();
+
+    expect(webhookCalls).toEqual([
+      expect.objectContaining({ subscriptionId, userId, config: { endpoint: 'billing-events' } }),
+    ]);
+  });
+});
+
+describe('a step that needs a sender the app did not pass fails at boot', () => {
+  const provider = () => providerWhereRetryEnds('succeeded');
+
+  it('an email rule without sendEmail, the default rules without senders, or a webhook rule without sendWebhook', () => {
+    expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [ruleDoing('email')] }))).toBe(
+      'payments.configuration_invalid',
+    );
+    expect(bootFailureCode(() => new DunningService(provider(), reads, writes))).toBe('payments.configuration_invalid');
+    expect(
+      bootFailureCode(
+        () => new DunningService(provider(), reads, writes, { rules: [ruleDoing('webhook')] }, { sendEmail: senders.sendEmail }),
+      ),
+    ).toBe('payments.configuration_invalid');
+  });
+
+  it('an email rule with no template name', () => {
+    const noTemplate: DunningRule = { ...ruleDoing('email'), action: { type: 'email', config: {} } };
+
+    expect(bootFailureCode(() => new DunningService(provider(), reads, writes, { rules: [noTemplate] }, senders))).toBe(
+      'payments.configuration_invalid',
+    );
+  });
+
+  it('updateConfiguration refuses a rule it has no sender for and keeps the old rules', () => {
+    const service = new DunningService(provider(), reads, writes, { rules: [ruleDoing('pause_subscription')] });
+
+    expect(bootFailureCode(() => service.updateConfiguration({ rules: [ruleDoing('email')] }))).toBe(
+      'payments.configuration_invalid',
+    );
+    expect(service.getConfiguration().rules.map(rule => rule.action.type)).toEqual(['pause_subscription']);
+  });
+});
+
+describe('getDunningStats', () => {
+  it('reports only what the stored payments and subscriptions hold: no recovery time and no recovered revenue', async () => {
+    const service = dunningWith(ruleDoing('email'));
+
+    const stats = await service.getDunningStats();
+
+    expect(Object.keys(stats).toSorted()).toEqual([
+      'recoveredPayments',
+      'recoveryRate',
+      'revenueAtRisk',
+      'subscriptionsInDunning',
+      'totalFailedPayments',
+    ]);
   });
 });

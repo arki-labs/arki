@@ -1,7 +1,9 @@
-import type { AnyColumn, AnyRelations, SQL, SQLWrapper } from 'drizzle-orm';
+import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
+
+import { invariant } from '@arki/failure';
 
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
@@ -44,87 +46,14 @@ import { readCustomerRiskProfile } from './stored-risk-profile.js';
 
 /**
  * Structural database type accepted by the dunning repositories. See the
- * `PaymentDatabase` doc in `../core/repository` — same contract: the host's
- * relations graph MUST register the dunning tables (`dunningCampaigns`,
- * `dunningTemplates`, `dunningExecutions`, `dunningCommunications`,
- * `customerSegments`, `customerRiskProfiles`) for the relational query
- * builder calls below to work at runtime. PGlite is accepted so the package
- * can run these queries in its own tests.
+ * `PaymentDatabase` doc in `../core/repository`: the repositories only use
+ * `select / insert / update / delete`, so no relations graph is needed. PGlite
+ * is accepted so the package can run these queries in its own tests.
  */
 export type DunningDatabase =
   | NodePgDatabase<AnyRelations>
   | NodePgTransaction<AnyRelations>
   | PgliteDatabase<AnyRelations>;
-
-type FieldFilter<T> =
-  | T
-  | {
-      eq?: T;
-      ne?: T;
-      gt?: T;
-      gte?: T;
-      lt?: T;
-      lte?: T;
-      in?: T[];
-      notIn?: T[];
-      like?: string;
-      notLike?: string;
-      ilike?: string;
-      notIlike?: string;
-      isNull?: boolean;
-      isNotNull?: boolean;
-    };
-
-/**
- * The table a relational query hands to its `RAW` and `orderBy` callbacks. The
- * query builder gives the table an alias (`d0`), so raw SQL must read columns
- * from this argument. A column object taken from the schema renders with the
- * real table name, which Postgres rejects ("invalid reference to FROM-clause
- * entry").
- */
-type AliasedTable<T> = { [K in keyof T]: AnyColumn };
-
-type WhereClause<T> = { [K in keyof T]?: FieldFilter<T[K]> } & {
-  RAW?: SQL | SQLWrapper | ((table: AliasedTable<T>) => SQL);
-};
-
-type OrderByReturn = SQL | SQLWrapper | (SQL | SQLWrapper)[];
-
-type FindFirst<TResult> = (config: {
-  where?: WhereClause<TResult>;
-  columns?: Record<string, boolean>;
-}) => Promise<TResult | undefined>;
-
-type FindMany<TResult> = (config: {
-  where?: WhereClause<TResult>;
-  columns?: Record<string, boolean>;
-  orderBy?: (
-    table: AliasedTable<TResult>,
-    helpers: { desc: (col: AnyColumn) => SQL; asc: (col: AnyColumn) => SQL },
-  ) => OrderByReturn;
-  limit?: number;
-  offset?: number;
-}) => Promise<TResult[]>;
-
-type DunningDbInternal = {
-  query: {
-    dunningCampaigns: { findFirst: FindFirst<DunningCampaign>; findMany: FindMany<DunningCampaign> };
-    dunningTemplates: { findFirst: FindFirst<DunningTemplate>; findMany: FindMany<DunningTemplate> };
-    dunningExecutions: { findFirst: FindFirst<DunningExecution>; findMany: FindMany<DunningExecution> };
-    dunningCommunications: {
-      findFirst: FindFirst<DunningCommunication>;
-      findMany: FindMany<DunningCommunication>;
-    };
-    customerSegments: {
-      findFirst: FindFirst<DunningTables['customerSegments']['$inferSelect']>;
-      findMany: FindMany<DunningTables['customerSegments']['$inferSelect']>;
-    };
-    customerRiskProfiles: {
-      findFirst: FindFirst<CustomerRiskProfile>;
-      findMany: FindMany<CustomerRiskProfile>;
-    };
-  };
-};
 
 type CampaignTables = Pick<
   DunningTables,
@@ -133,36 +62,42 @@ type CampaignTables = Pick<
 
 export class DunningCampaignRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly dunningCampaigns: DunningTables['dunningCampaigns'];
   private readonly dunningCampaignAnalytics: DunningTables['dunningCampaignAnalytics'];
 
   constructor(db: DunningDatabase, tables: CampaignTables) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.dunningCampaigns = tables.dunningCampaigns;
     this.dunningCampaignAnalytics = tables.dunningCampaignAnalytics;
   }
 
   async findById(id: DunningCampaignId): Promise<DunningCampaign | null> {
-    const result = await this.q.dunningCampaigns.findFirst({ where: { id } });
+    const [result] = await this.db
+      .select()
+      .from(this.dunningCampaigns)
+      .where(eq(this.dunningCampaigns.id, id))
+      .limit(1);
     return result ?? null;
   }
 
   async findMany(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
     const { limit, offset, type, status, search, sortBy, sortOrder } = query;
 
+    const sortColumn = this.dunningCampaigns[sortBy];
 
-    return this.q.dunningCampaigns.findMany({
-      where: {
-        ...(type && { type }),
-        ...(status && { status }),
-        ...(search && { name: { ilike: `%${search}%` } }),
-      },
-      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
-      limit,
-      offset,
-    });
+    return this.db
+      .select()
+      .from(this.dunningCampaigns)
+      .where(
+        and(
+          type ? eq(this.dunningCampaigns.type, type) : undefined,
+          status ? eq(this.dunningCampaigns.status, status) : undefined,
+          search ? ilike(this.dunningCampaigns.name, `%${search}%`) : undefined,
+        ),
+      )
+      .orderBy(sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn))
+      .limit(limit)
+      .offset(offset);
   }
 
   async create(input: CreateDunningCampaignInput & { createdBy: string }): Promise<DunningCampaign> {
@@ -179,9 +114,7 @@ export class DunningCampaignRepository {
       })
       .returning();
 
-    if (!campaign) {
-      throw new Error('Failed to create dunning campaign');
-    }
+    invariant(campaign, 'Failed to create dunning campaign');
 
     return campaign;
   }
@@ -204,7 +137,10 @@ export class DunningCampaignRepository {
   }
 
   async findByType(type: DunningCampaignType): Promise<DunningCampaign[]> {
-    return this.q.dunningCampaigns.findMany({ where: { type, status: 'active' } });
+    return this.db
+      .select()
+      .from(this.dunningCampaigns)
+      .where(and(eq(this.dunningCampaigns.type, type), eq(this.dunningCampaigns.status, 'active')));
   }
 
   async findActiveForTrigger(
@@ -216,22 +152,24 @@ export class DunningCampaignRepository {
     // structured-filter equivalent and stay as RAW.
     const hasSegments = customerSegmentIds && customerSegmentIds.length > 0;
 
-    return this.q.dunningCampaigns.findMany({
-      where: {
-        status: 'active',
-        RAW: table => {
-          const triggerTypePredicate = sql`${table.trigger}->>'type' = ${triggerType}`;
+    const table = this.dunningCampaigns;
+    const triggerTypePredicate = sql`${table.trigger}->>'type' = ${triggerType}`;
 
-          return hasSegments
+    return this.db
+      .select()
+      .from(table)
+      .where(
+        and(
+          eq(table.status, 'active'),
+          hasSegments
             ? and(
                 triggerTypePredicate,
                 sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(${table.targetSegments}) AS segment WHERE segment IN ${customerSegmentIds})`,
-              )!
-            : triggerTypePredicate;
-        },
-      },
-      orderBy: table => desc(sql`${table.settings}->>'priority'`),
-    });
+              )
+            : triggerTypePredicate,
+        ),
+      )
+      .orderBy(desc(sql`${table.settings}->>'priority'`));
   }
 
   async updateStatus(
@@ -316,9 +254,7 @@ export class DunningCampaignRepository {
       .where(inRange);
 
     // An aggregate without GROUP BY always answers one row
-    if (!counters) {
-      throw new Error('Campaign analytics aggregate returned no row');
-    }
+    invariant(counters, 'Campaign analytics aggregate returned no row');
 
     // Money is summed per currency: rows of different currencies never add up.
     const recovered = await this.db
@@ -336,25 +272,28 @@ export class DunningCampaignRepository {
 
 export class DunningTemplateRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly dunningTemplates: DunningTables['dunningTemplates'];
 
   constructor(db: DunningDatabase, tables: Pick<DunningTables, 'dunningTemplates'>) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.dunningTemplates = tables.dunningTemplates;
   }
 
   async findById(id: DunningTemplateId): Promise<DunningTemplate | null> {
-    const result = await this.q.dunningTemplates.findFirst({ where: { id } });
+    const [result] = await this.db
+      .select()
+      .from(this.dunningTemplates)
+      .where(eq(this.dunningTemplates.id, id))
+      .limit(1);
     return result ?? null;
   }
 
   async findByCampaignId(campaignId: DunningCampaignId): Promise<DunningTemplate[]> {
-    return this.q.dunningTemplates.findMany({
-      where: { campaignId },
-      orderBy: (t) => t.stepNumber,
-    });
+    return this.db
+      .select()
+      .from(this.dunningTemplates)
+      .where(eq(this.dunningTemplates.campaignId, campaignId))
+      .orderBy(this.dunningTemplates.stepNumber);
   }
 
   async create(input: CreateDunningTemplateInput): Promise<DunningTemplate> {
@@ -371,9 +310,7 @@ export class DunningTemplateRepository {
       })
       .returning();
 
-    if (!template) {
-      throw new Error('Failed to create dunning template');
-    }
+    invariant(template, 'Failed to create dunning template');
 
     return template;
   }
@@ -396,10 +333,11 @@ export class DunningTemplateRepository {
   }
 
   async findActiveTemplates(campaignId: DunningCampaignId): Promise<DunningTemplate[]> {
-    return this.q.dunningTemplates.findMany({
-      where: { campaignId, isActive: true },
-      orderBy: (t) => t.stepNumber,
-    });
+    return this.db
+      .select()
+      .from(this.dunningTemplates)
+      .where(and(eq(this.dunningTemplates.campaignId, campaignId), eq(this.dunningTemplates.isActive, true)))
+      .orderBy(this.dunningTemplates.stepNumber);
   }
 
   async updateStatus(
@@ -418,17 +356,19 @@ export class DunningTemplateRepository {
 
 export class DunningExecutionRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly dunningExecutions: DunningTables['dunningExecutions'];
 
   constructor(db: DunningDatabase, tables: Pick<DunningTables, 'dunningExecutions'>) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.dunningExecutions = tables.dunningExecutions;
   }
 
   async findById(id: DunningExecutionId): Promise<DunningExecution | null> {
-    const result = await this.q.dunningExecutions.findFirst({ where: { id } });
+    const [result] = await this.db
+      .select()
+      .from(this.dunningExecutions)
+      .where(eq(this.dunningExecutions.id, id))
+      .limit(1);
     return result ?? null;
   }
 
@@ -436,25 +376,23 @@ export class DunningExecutionRepository {
     const { limit, offset, campaignId, customerId, status, scheduledAfter, scheduledBefore, sortBy, sortOrder } =
       query;
 
-    const scheduledAt =
-      scheduledAfter || scheduledBefore
-        ? {
-            ...(scheduledAfter && { gte: scheduledAfter }),
-            ...(scheduledBefore && { lte: scheduledBefore }),
-          }
-        : undefined;
+    const sortColumn = this.dunningExecutions[sortBy];
 
-    return this.q.dunningExecutions.findMany({
-      where: {
-        ...(campaignId && { campaignId }),
-        ...(customerId && { customerId }),
-        ...(status && { status }),
-        ...(scheduledAt && { scheduledAt }),
-      },
-      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
-      limit,
-      offset,
-    });
+    return this.db
+      .select()
+      .from(this.dunningExecutions)
+      .where(
+        and(
+          campaignId ? eq(this.dunningExecutions.campaignId, campaignId) : undefined,
+          customerId ? eq(this.dunningExecutions.customerId, customerId) : undefined,
+          status ? eq(this.dunningExecutions.status, status) : undefined,
+          scheduledAfter ? gte(this.dunningExecutions.scheduledAt, scheduledAfter) : undefined,
+          scheduledBefore ? lte(this.dunningExecutions.scheduledAt, scheduledBefore) : undefined,
+        ),
+      )
+      .orderBy(sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn))
+      .limit(limit)
+      .offset(offset);
   }
 
   async create(
@@ -482,9 +420,7 @@ export class DunningExecutionRepository {
       })
       .returning();
 
-    if (!execution) {
-      throw new Error('Failed to create dunning execution');
-    }
+    invariant(execution, 'Failed to create dunning execution');
 
     return execution;
   }
@@ -539,25 +475,21 @@ export class DunningExecutionRepository {
   }
 
   async findScheduledExecutions(limit = 100): Promise<DunningExecution[]> {
-    return this.q.dunningExecutions.findMany({
-      where: {
-        status: 'scheduled',
-        scheduledAt: { lte: now() },
-      },
-      orderBy: (t) => t.scheduledAt,
-      limit,
-    });
+    return this.db
+      .select()
+      .from(this.dunningExecutions)
+      .where(and(eq(this.dunningExecutions.status, 'scheduled'), lte(this.dunningExecutions.scheduledAt, now())))
+      .orderBy(this.dunningExecutions.scheduledAt)
+      .limit(limit);
   }
 
   async findRetryableExecutions(limit = 50): Promise<DunningExecution[]> {
-    return this.q.dunningExecutions.findMany({
-      where: {
-        status: 'failed',
-        nextRetryAt: { lte: now() },
-      },
-      orderBy: (t) => t.nextRetryAt,
-      limit,
-    });
+    return this.db
+      .select()
+      .from(this.dunningExecutions)
+      .where(and(eq(this.dunningExecutions.status, 'failed'), lte(this.dunningExecutions.nextRetryAt, now())))
+      .orderBy(this.dunningExecutions.nextRetryAt)
+      .limit(limit);
   }
 
   async incrementRetryCount(
@@ -584,30 +516,35 @@ export class DunningExecutionRepository {
   ): Promise<DunningExecution[]> {
     const since = sub(now(), { hours });
 
-    return this.q.dunningExecutions.findMany({
-      where: {
-        customerId,
-        campaignId,
-        createdAt: { gte: since },
-      },
-      orderBy: (t, helpers) => helpers.desc(t.createdAt),
-    });
+    return this.db
+      .select()
+      .from(this.dunningExecutions)
+      .where(
+        and(
+          eq(this.dunningExecutions.customerId, customerId),
+          eq(this.dunningExecutions.campaignId, campaignId),
+          gte(this.dunningExecutions.createdAt, since),
+        ),
+      )
+      .orderBy(desc(this.dunningExecutions.createdAt));
   }
 }
 
 export class DunningCommunicationRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly dunningCommunications: DunningTables['dunningCommunications'];
 
   constructor(db: DunningDatabase, tables: Pick<DunningTables, 'dunningCommunications'>) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.dunningCommunications = tables.dunningCommunications;
   }
 
   async findById(id: DunningCommunicationId): Promise<DunningCommunication | null> {
-    const result = await this.q.dunningCommunications.findFirst({ where: { id } });
+    const [result] = await this.db
+      .select()
+      .from(this.dunningCommunications)
+      .where(eq(this.dunningCommunications.id, id))
+      .limit(1);
     return result ?? null;
   }
 
@@ -615,26 +552,24 @@ export class DunningCommunicationRepository {
     const { limit, offset, executionId, customerId, channel, status, sentAfter, sentBefore, sortBy, sortOrder } =
       query;
 
-    const sentAt =
-      sentAfter || sentBefore
-        ? {
-            ...(sentAfter && { gte: sentAfter }),
-            ...(sentBefore && { lte: sentBefore }),
-          }
-        : undefined;
+    const sortColumn = this.dunningCommunications[sortBy];
 
-    return this.q.dunningCommunications.findMany({
-      where: {
-        ...(executionId && { executionId }),
-        ...(customerId && { customerId }),
-        ...(channel && { channel }),
-        ...(status && { status }),
-        ...(sentAt && { sentAt }),
-      },
-      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
-      limit,
-      offset,
-    });
+    return this.db
+      .select()
+      .from(this.dunningCommunications)
+      .where(
+        and(
+          executionId ? eq(this.dunningCommunications.executionId, executionId) : undefined,
+          customerId ? eq(this.dunningCommunications.customerId, customerId) : undefined,
+          channel ? eq(this.dunningCommunications.channel, channel) : undefined,
+          status ? eq(this.dunningCommunications.status, status) : undefined,
+          sentAfter ? gte(this.dunningCommunications.sentAt, sentAfter) : undefined,
+          sentBefore ? lte(this.dunningCommunications.sentAt, sentBefore) : undefined,
+        ),
+      )
+      .orderBy(sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn))
+      .limit(limit)
+      .offset(offset);
   }
 
   async create(
@@ -663,9 +598,7 @@ export class DunningCommunicationRepository {
       })
       .returning();
 
-    if (!communication) {
-      throw new Error('Failed to create dunning communication');
-    }
+    invariant(communication, 'Failed to create dunning communication');
 
     return communication;
   }
@@ -698,17 +631,23 @@ export class DunningCommunicationRepository {
   }
 
   async findPendingCommunications(limit = 100): Promise<DunningCommunication[]> {
-    return this.q.dunningCommunications.findMany({
-      where: { status: 'pending' },
-      orderBy: (t) => t.createdAt,
-      limit,
-    });
+    return this.db
+      .select()
+      .from(this.dunningCommunications)
+      .where(eq(this.dunningCommunications.status, 'pending'))
+      .orderBy(this.dunningCommunications.createdAt)
+      .limit(limit);
   }
 
   async findByProviderMessageId(
     providerMessageId: string,
   ): Promise<DunningCommunication | undefined> {
-    return this.q.dunningCommunications.findFirst({ where: { providerMessageId } });
+    const [communication] = await this.db
+      .select()
+      .from(this.dunningCommunications)
+      .where(eq(this.dunningCommunications.providerMessageId, providerMessageId))
+      .limit(1);
+    return communication;
   }
 
   async getMetricsForExecution(executionId: DunningExecutionId) {
@@ -732,33 +671,40 @@ type CustomerSegmentRow = DunningTables['customerSegments']['$inferSelect'];
 
 export class CustomerSegmentRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly customerSegments: DunningTables['customerSegments'];
 
   constructor(db: DunningDatabase, tables: Pick<DunningTables, 'customerSegments'>) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.customerSegments = tables.customerSegments;
   }
 
   async findById(id: CustomerSegmentId): Promise<CustomerSegmentRow | undefined> {
-    return this.q.customerSegments.findFirst({ where: { id } });
+    const [segment] = await this.db
+      .select()
+      .from(this.customerSegments)
+      .where(eq(this.customerSegments.id, id))
+      .limit(1);
+    return segment;
   }
 
   async findMany(query: ListCustomerSegmentsQuery): Promise<CustomerSegmentRow[]> {
     const { limit, offset, type, isActive, search, sortBy, sortOrder } = query;
 
+    const sortColumn = this.customerSegments[sortBy];
 
-    return this.q.customerSegments.findMany({
-      where: {
-        ...(type && { type }),
-        ...(isActive !== undefined && { isActive }),
-        ...(search && { name: { ilike: `%${search}%` } }),
-      },
-      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
-      limit,
-      offset,
-    });
+    return this.db
+      .select()
+      .from(this.customerSegments)
+      .where(
+        and(
+          type ? eq(this.customerSegments.type, type) : undefined,
+          isActive === undefined ? undefined : eq(this.customerSegments.isActive, isActive),
+          search ? ilike(this.customerSegments.name, `%${search}%`) : undefined,
+        ),
+      )
+      .orderBy(sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn))
+      .limit(limit)
+      .offset(offset);
   }
 
   async create(
@@ -821,30 +767,35 @@ export class CustomerSegmentRepository {
     // boolean filters.
     // A raw `sql` parameter bypasses the column codec, so it stays a `Date`.
     const current = new Date();
-    return this.q.customerSegments.findMany({
-      where: {
-        isActive: true,
-        autoUpdate: true,
-        RAW: table =>
-          sql`${table.lastCalculated} IS NULL OR ${table.lastCalculated} + INTERVAL '1 hour' * ${table.updateFrequency} <= ${current}`,
-      },
-    });
+    const table = this.customerSegments;
+    return this.db
+      .select()
+      .from(table)
+      .where(
+        and(
+          eq(table.isActive, true),
+          eq(table.autoUpdate, true),
+          sql`(${table.lastCalculated} IS NULL OR ${table.lastCalculated} + INTERVAL '1 hour' * ${table.updateFrequency} <= ${current})`,
+        ),
+      );
   }
 }
 
 export class CustomerRiskProfileRepository {
   private readonly db: DunningDatabase;
-  private readonly q: DunningDbInternal['query'];
   private readonly customerRiskProfiles: DunningTables['customerRiskProfiles'];
 
   constructor(db: DunningDatabase, tables: Pick<DunningTables, 'customerRiskProfiles'>) {
     this.db = db;
-    this.q = db.query as unknown as DunningDbInternal['query'];
     this.customerRiskProfiles = tables.customerRiskProfiles;
   }
 
   async findByCustomerId(customerId: CustomerId): Promise<CustomerRiskProfile | undefined> {
-    const profile = await this.q.customerRiskProfiles.findFirst({ where: { customerId } });
+    const [profile] = await this.db
+      .select()
+      .from(this.customerRiskProfiles)
+      .where(eq(this.customerRiskProfiles.customerId, customerId))
+      .limit(1);
 
     return profile && readCustomerRiskProfile(profile);
   }
@@ -895,11 +846,13 @@ export class CustomerRiskProfileRepository {
   }
 
   async findByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
-    const profiles = await this.q.customerRiskProfiles.findMany({
-      where: { RAW: table => sql`${table.riskScore}->>'category' = ${category}` },
-      orderBy: table => desc(sql`(${table.riskScore}->>'overall')::numeric`),
-      limit,
-    });
+    const table = this.customerRiskProfiles;
+    const profiles = await this.db
+      .select()
+      .from(table)
+      .where(sql`${table.riskScore}->>'category' = ${category}`)
+      .orderBy(desc(sql`(${table.riskScore}->>'overall')::numeric`))
+      .limit(limit);
 
     return profiles.map(profile => readCustomerRiskProfile(profile));
   }
@@ -908,12 +861,12 @@ export class CustomerRiskProfileRepository {
     segmentId: CustomerSegmentId,
     limit = 100,
   ): Promise<CustomerRiskProfile[]> {
-    const profiles = await this.q.customerRiskProfiles.findMany({
-      where: {
-        RAW: table => sql`${table.segmentIds} @> ${JSON.stringify([segmentId])}`,
-      },
-      limit,
-    });
+    const table = this.customerRiskProfiles;
+    const profiles = await this.db
+      .select()
+      .from(table)
+      .where(sql`${table.segmentIds} @> ${JSON.stringify([segmentId])}`)
+      .limit(limit);
 
     return profiles.map(profile => readCustomerRiskProfile(profile));
   }

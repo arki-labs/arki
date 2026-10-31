@@ -13,7 +13,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { add } from '@arki/date';
+import { add, now, sub } from '@arki/date';
 import { orThrow } from '@arki/failure';
 
 import type { AppDb } from '../../test-support.js';
@@ -222,5 +222,19 @@ describe('getRetryAnalytics', () => {
 
     expect(inside.totalRetryAttempts).toBe(1);
     expect(after.totalRetryAttempts).toBe(0);
+  });
+
+  it('sums the stored amount of each payment a retry recovered', async () => {
+    const service = new PaymentRetryService(providerWhereRetryEnds('succeeded'), reads, writes, [oneRetryNow]);
+    const subscription = await seedSubscription(writes, 'active');
+    const payment = await seedPayment(writes, subscription.id, '19.99', 'USD');
+    await orThrow(service.scheduleRetries(payment.id, 'card_declined'));
+    await service.processRetries();
+
+    const analytics = await service.getRetryAnalytics(sub(now(), { hours: 1 }));
+
+    expect(analytics.successfulRetries).toBe(1);
+    expect(analytics.revenueRecovered.get('USD').toString()).toBe('1999/100 USD');
+    expect(analytics.revenueRecovered.currencies().map(currency => currency.code)).toEqual(['USD']);
   });
 });

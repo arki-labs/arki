@@ -43,6 +43,7 @@ import {
   InvalidWebhookSignature,
   PaymentMethodRequired,
   PaymentProviderError,
+  PlanPriceNotFlat,
   ReferenceNotFound,
   TaxAddressIncomplete,
   cardDeclinedOf,
@@ -408,13 +409,9 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Our plan row, refreshed with the price and product Stripe holds now. */
-  private toPlan(row: Plan, price: Stripe.Price, productName?: string): Plan | MoneyFailure {
-    if (price.unit_amount === null || !price.recurring) {
-      throw new PaymentProviderError(
-        'unknown',
-        `Stripe price ${price.id} is not a flat recurring price, so it is not a plan`,
-      );
-    }
+  private toPlan(row: Plan, price: Stripe.Price, productName?: string) {
+    // The price is Stripe's answer, not ours: a tiered, metered or one-time price is outside data
+    if (price.unit_amount === null || !price.recurring) return PlanPriceNotFlat({ priceId: price.id });
     const amount = fromStripeAmount(price.unit_amount, price.currency);
     if (isFailure(amount)) return amount;
     return {
@@ -554,7 +551,7 @@ export class StripeProvider extends BasePaymentProvider {
    * The active plans Stripe sells that this package created: prices carrying our `planId` in their
    * metadata, whose row still exists. Prices made in the Stripe dashboard have no row here and are left out.
    */
-  async listPlans(): Promise<Plan[] | MoneyFailure> {
+  async listPlans() {
     const references = this.requireReferences();
     const prices = await this.call('stripe.prices.list', () =>
       this.stripe.prices

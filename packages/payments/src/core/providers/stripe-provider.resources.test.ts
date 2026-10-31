@@ -16,6 +16,7 @@ import type { Customer, Payment, Plan, Subscription } from '../types.js';
 import type { RecordedStripeRequest } from './stripe-test-support.js';
 import { createRefundId } from '../../refunds/primitives.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId } from '../primitives.js';
+import { PlanPriceNotFlat } from './provider-error.js';
 import { StripeProvider } from './stripe-provider.js';
 import { createFakeStripeHttp } from './stripe-test-support.js';
 
@@ -303,6 +304,20 @@ describe('plans', () => {
     expect(UnknownCurrency.is(await single.stripe.getPlan(planId))).toBe(true);
     expect(UnknownCurrency.is(await single.stripe.updatePlan(planId, { metadata: { badge: 'new' } }))).toBe(true);
     expect(UnknownCurrency.is(await stripe.listPlans())).toBe(true);
+  });
+
+  it('getPlan, updatePlan and listPlans return PlanPriceNotFlat for a price that is not flat recurring', async () => {
+    const tiered = stripePrice({ unit_amount: null });
+    const oneTime = stripePrice({ recurring: null });
+
+    for (const price of [tiered, oneTime]) {
+      const single = provider(() => ({ body: price }));
+      const many = provider(() => ({ body: list([price]) }));
+
+      expect(PlanPriceNotFlat.is(await single.stripe.getPlan(planId))).toBe(true);
+      expect(PlanPriceNotFlat.is(await single.stripe.updatePlan(planId, { metadata: { badge: 'new' } }))).toBe(true);
+      expect(PlanPriceNotFlat.is(await many.stripe.listPlans())).toBe(true);
+    }
   });
 
   it('getPayment, confirmPayment and cancelPayment return the money failure for an amount off Stripe rules', async () => {
