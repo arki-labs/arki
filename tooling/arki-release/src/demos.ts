@@ -147,8 +147,8 @@ export type DemoUse = {
   readonly demo: string;
   readonly via: readonly ('import' | 'proof')[];
   readonly scenarios: readonly string[];
-  /** Pinned version; absent when the demo is missing or does not pin it. */
-  readonly pinned?: string;
+  /** Pinned version; `null` when the demo links it from source; absent when the demo is missing or does not pin it. */
+  readonly pinned?: string | null;
 };
 
 const SOURCE_DIRS_SKIP = new Set(['node_modules', 'dist', '.git']);
@@ -291,7 +291,7 @@ export function demosUsing(registry: DemoRegistry, pkg: string): DemoUse[] {
     const proofs = (registry.proofs[pkg] ?? []).filter(p => p.demo === demo.entry.name);
     if (proofs.length > 0) via.push('proof');
     if (via.length === 0) continue;
-    const pinned = demo.pins.get(pkg)?.pinned ?? undefined;
+    const pinned = demo.pins.get(pkg)?.pinned;
     uses.push({
       demo: demo.entry.name,
       via,
@@ -344,7 +344,8 @@ export function evaluateDemoLag(input: DemoLagInput): ScorecardDimensionResult {
   const rows = uses.map(use => ({
     demo: use.demo,
     pinned: use.pinned,
-    lag: use.pinned === undefined ? undefined : computeLag(use.pinned, candidateVersion),
+    // A demo that links the package from source runs the candidate itself: it cannot lag.
+    lag: use.pinned === undefined ? undefined : use.pinned === null ? { majorsBehind: 0, minorsBehind: 0 } : computeLag(use.pinned, candidateVersion),
   }));
   const known = rows.flatMap(r => (r.lag === undefined || r.pinned === undefined ? [] : [{ ...r, lag: r.lag, pinned: r.pinned }]));
   if (known.length === 0) {
@@ -366,7 +367,7 @@ export function evaluateDemoLag(input: DemoLagInput): ScorecardDimensionResult {
   const worst = known.reduce((a, b) => (severity(b.lag) > severity(a.lag) || (severity(b.lag) === severity(a.lag) && b.lag.minorsBehind > a.lag.minorsBehind) ? b : a));
   const level = severity(worst.lag);
   const behind = worst.lag.majorsBehind > 0 ? `${worst.lag.majorsBehind} major(s)` : `${worst.lag.minorsBehind} minor(s)`;
-  const summary = `${worst.demo} pins ${pkg} ${worst.pinned}, ${behind} behind ${candidateVersion}`;
+  const summary = `${worst.demo} pins ${pkg} ${worst.pinned ?? '(linked from source)'}, ${behind} behind ${candidateVersion}`;
 
   if (level === 0) {
     return { status: 'pass', details: `${summary}; within tolerance.`, evidence: [] };

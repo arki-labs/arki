@@ -78,7 +78,7 @@ describe('loadDemos', () => {
     const registry = await loadDemos(root, config);
     expect(registry.errors).toEqual([]);
     expect(registry.demos[0]?.pins.get('@arki/ai')).toEqual({ pinned: null, sourceVersion: '0.1.0' });
-    expect(demosUsing(registry, '@arki/ai')).toEqual([{ demo: 'shop', via: ['import'], scenarios: [] }]);
+    expect(demosUsing(registry, '@arki/ai')).toEqual([{ demo: 'shop', via: ['import'], scenarios: [], pinned: null }]);
     expect(demosUsing(registry, '@arki/dot')[0]?.pinned).toBe('0.4.1');
   });
 });
@@ -156,6 +156,19 @@ describe('evaluateDemoLag', () => {
     });
     expect(result.status).toBe('fail');
     expect(result.details).toContain('old');
+  });
+
+  it('passes a demo that links the package from source (a null pin)', () => {
+    // Why: a package's first release is linked from source by every demo. Reading that as
+    // "lag unknown" warned, and the stable gate blocks on warnings, so no first release could ship.
+    const result = evaluateDemoLag({
+      pkg: '@arki/cli',
+      candidateVersion: '0.2.0',
+      uses: [{ demo: 'shop', via: ['proof'], scenarios: ['s'], pinned: null }],
+      blocking: true,
+    });
+    expect(result.status).toBe('pass');
+    expect(result.details).toContain('linked from source');
   });
 
   it('warns, not passes, when a using demo has no readable pin', () => {
