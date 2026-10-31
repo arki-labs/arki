@@ -105,8 +105,8 @@ it('preserves synchronous success when telemetry cannot classify the returned ob
   const result = withOutcomeSpan(undefined, run, duration);
   expect(result).toBe(value);
   expect(calls).toBe(1);
-  // A classification failure must not manufacture a successful metric sample.
-  expect(duration).not.toHaveBeenCalled();
+  // isFailure (since 11c5bc28) answers false for an opaque object: it cannot carry the failure brand, so it is a success.
+  expect(duration.mock.calls).toEqual([['ok']]);
 });
 
 it('preserves promise identity and settlement when telemetry cannot classify the resolved object', async () => {
@@ -123,7 +123,7 @@ it('preserves promise identity and settlement when telemetry cannot classify the
   expect(result).toBe(promise);
   expect(await result).toBe(value);
   expect(calls).toBe(1);
-  expect(duration).not.toHaveBeenCalled();
+  expect(duration.mock.calls).toEqual([['ok']]);
 });
 
 it('preserves thrown and rejected causes even when exception inspection fails', async () => {

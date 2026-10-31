@@ -1,6 +1,10 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+import { getLogger } from '@arki/log';
+
+const log = getLogger('arki:tanstack-start');
+
 /**
  * Register the app's service worker.
  *
@@ -42,9 +46,18 @@ export function registerPwa(options: RegisterPwaOptions = {}): void {
   if (!('serviceWorker' in navigator)) return;
   // `virtual:pwa-register` exists only inside a Vite build. Loading it here,
   // not at the top of the module, lets this entry import outside Vite too.
-  void import('virtual:pwa-register').then(({ registerSW }) => {
-    registerSW({ immediate: true, ...options });
-  });
+  // A failed load (offline first visit, blocked chunk, build without the PWA
+  // plugin) must not become an unhandled rejection: the app works without
+  // offline support, so log a warning and carry on.
+  void import('virtual:pwa-register')
+    .then(({ registerSW }) => {
+      registerSW({ immediate: true, ...options });
+    })
+    .catch((error: unknown) => {
+      log.warn('Service worker registration skipped: virtual:pwa-register failed to load: {error}', {
+        error: error instanceof Error ? error : String(error),
+      });
+    });
 }
 
 /**
