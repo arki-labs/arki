@@ -25,6 +25,7 @@ export const SITE_SCHEMA_COPY_FILE = path.join('src', 'generated', 'site-schema.
 
 /** The source modules of the copy, in dependency order: a module may import only `zod` and modules above it. */
 export const SITE_SCHEMA_SOURCES: readonly string[] = [
+  createRequire(import.meta.url).resolve('@arki/library-tooling/api-index-schema'),
   createRequire(import.meta.url).resolve('@arki/library-tooling/error-index-schema'),
   path.join(here, 'doc-examples-report-schema.ts'),
   path.join(here, 'site-schema.ts'),
