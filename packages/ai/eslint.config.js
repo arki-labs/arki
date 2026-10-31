@@ -1,21 +1,27 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 import failure from '@arki/failure/eslint';
 
-/** @type {import('typescript-eslint').Config} */
 export default [
-  {
-    ignores: ['dist/**'],
-  },
-  ...baseConfig,
+  // These files read the process environment or use Node builtins on purpose (Node-only server code);
+  // the portable-source rules do not apply to them.
+  ...library({
+    adapters: [
+      'src/ai-service/ollama-service.ts',
+      'src/ai-service/telemetry.ts',
+      'src/capabilities/podhop.ts',
+      'src/dot/**',
+      'src/utils/secure-config.ts',
+    ],
+  }),
   // `failure/must-use` and `failure/no-blind-accept`: a returned failure is never thrown away or accepted unchecked.
   failure.configs.recommended,
   {
-    // Copy, then sort or reverse: ES2023 `toSorted`/`toReversed` are missing on Hermes V1 and in the
-    // ES2022 lib this package compiles against (the same choice as `@arki/eslint-config/library`).
+    // Tests: the ES2022 lib this package compiles against has no `toSorted`, so copy-then-sort stays; and an
+    // explicit `undefined` argument is often what the callee's type needs (`mockResolvedValue(undefined)`)
+    // or what the test is about (`retryAfterMs(undefined)`).
+    files: ['src/**/*.test.ts'],
     rules: {
       'unicorn/no-array-sort': 'off',
-      'unicorn/no-array-reverse': 'off',
-      // An explicit `undefined` argument is often required by the callee's type (`mockResolvedValue(undefined)`).
       'unicorn/no-useless-undefined': ['error', { checkArguments: false }],
     },
   },

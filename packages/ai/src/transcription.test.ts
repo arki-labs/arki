@@ -1,4 +1,6 @@
-import { afterEach, expect, expectTypeOf, test, vi } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { afterAll, afterEach, beforeAll, expect, expectTypeOf, test, vi } from 'vitest';
 
 import type { z } from '@arki/contracts';
 import { isFailure, orThrow } from '@arki/failure';
@@ -8,8 +10,16 @@ import { transcribeDiarizedAudio } from './transcription';
 import type { diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
 
 const originalFetch = globalThis.fetch;
+const exporter = new InMemorySpanExporter();
+beforeAll(() => {
+  trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+});
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  exporter.reset();
+});
+afterAll(() => {
+  trace.disable();
 });
 const raw = (end = 10) => ({
   metadata: { duration: 10 },
@@ -112,4 +122,28 @@ test('the options and the transcript are exactly what the schemas take and retur
   >();
   expectTypeOf<DiarizedTranscript>().toEqualTypeOf<z.output<typeof diarizedTranscriptSchema>>();
   expectTypeOf<Exclude<Awaited<ReturnType<typeof transcribeDiarizedAudio>>, TranscriptionFailure>>().toEqualTypeOf<DiarizedTranscript>();
+});
+
+test('records an ai.transcribe span for a transcription', async () => {
+  globalThis.fetch = Object.assign(
+    vi.fn(async () => Response.json(raw())),
+    {},
+  );
+  orThrow(await transcribeDiarizedAudio(new Uint8Array([1]), options));
+
+  const [span] = exporter.getFinishedSpans();
+  expect(span?.name).toBe('ai.transcribe');
+  expect(span?.instrumentationScope.name).toBe('@arki/ai');
+  expect(span?.attributes['ai.provider']).toBe('deepgram');
+  expect(span?.status.code).not.toBe(2);
+});
+
+test('marks the ai.transcribe span failed with the code of the returned failure', async () => {
+  // WHY: a refused call is returned, not thrown; the span must still show it as failed.
+  respond(() => new Response('{}', { status: 429 }));
+  expect(isFailure(await transcribeDiarizedAudio(new Uint8Array([1]), options))).toBe(true);
+
+  const [span] = exporter.getFinishedSpans();
+  expect(span?.status.code).toBe(2);
+  expect(span?.attributes['failure.code']).toBe('ai.rate_limited');
 });

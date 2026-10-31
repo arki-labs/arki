@@ -1,5 +1,7 @@
 import type { EmbeddingSpace } from '@arki/embeddings';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VectorSearchError } from '../../../errors';
 import { QdrantVectorProvider } from '../qdrant';
@@ -173,5 +175,39 @@ describe('QdrantVectorProvider — outages are not "not found" (F11)', () => {
 
   it('a url that is not a URL fails when the provider is built, as a VectorSearchError', () => {
     expect(() => new QdrantVectorProvider({ ...config, url: 'not a url' }, { space })).toThrow(VectorSearchError);
+  });
+});
+
+describe('QdrantVectorProvider — spans', () => {
+  const exporter = new InMemorySpanExporter();
+  beforeAll(() => {
+    trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+  });
+  beforeEach(() => {
+    exporter.reset();
+  });
+  afterAll(() => {
+    trace.disable();
+  });
+
+  it('records an ai.vector.upsert span with the collection', async () => {
+    const p = new QdrantVectorProvider(config, { space });
+    await p.upsertVector('a', [1, 0, 0, 0], { userId: 'u1', kind: 'item' });
+
+    const span = exporter.getFinishedSpans().find(finished => finished.name === 'ai.vector.upsert');
+    expect(span?.instrumentationScope.name).toBe('@arki/ai');
+    expect(span?.attributes['ai.vector.collection']).toBe('c');
+    expect(span?.status.code).not.toBe(2);
+  });
+
+  it('marks the span failed with ai.vector_store_unavailable when Qdrant errors, and still throws the error', async () => {
+    // WHY: the Qdrant client throws raw errors; the span is where an outage becomes visible.
+    const p = new QdrantVectorProvider(config, { space });
+    client.retrieve.mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(p.getDocument('a')).rejects.toThrow('fetch failed');
+
+    const span = exporter.getFinishedSpans().find(finished => finished.name === 'ai.vector.retrieve');
+    expect(span?.status.code).toBe(2);
+    expect(span?.attributes['failure.code']).toBe('ai.vector_store_unavailable');
   });
 });

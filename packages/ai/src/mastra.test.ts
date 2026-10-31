@@ -1,7 +1,9 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { APICallError, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { describe, expect, it } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as v from 'valibot';
 import { z } from 'zod';
 
@@ -226,5 +228,49 @@ describe('createMastraRuntime terminal failures', () => {
     const last = events.at(-1);
     expect(last?.type).toBe('run:error');
     expect(last?.type === 'run:error' ? last.failure.code : undefined).toBe('ai.unauthorized');
+  });
+});
+
+describe('createMastraRuntime spans', () => {
+  const exporter = new InMemorySpanExporter();
+  beforeAll(() => {
+    trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+  });
+  afterEach(() => {
+    exporter.reset();
+  });
+  afterAll(() => {
+    trace.disable();
+  });
+
+  it('records an ai.mastra.run_tool_loop span for a run', async () => {
+    await collect(createMastraRuntime({ model: textOnlyModel() }).runToolLoop({ prompt: 'x' }));
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.name).toBe('ai.mastra.run_tool_loop');
+    expect(span?.instrumentationScope.name).toBe('@arki/ai');
+    expect(span?.status.code).not.toBe(2);
+  });
+
+  it('marks the span failed with the code of the run:error failure', async () => {
+    // WHY: the loop reports a failure as an event, not a throw; the span must still show it.
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<LanguageModelV4StreamPart>({
+          chunks: [
+            { type: 'stream-start', warnings: [] },
+            {
+              type: 'error',
+              error: new APICallError({ message: 'status 401', url: 'https://x', requestBodyValues: {}, statusCode: 401 }),
+            },
+          ],
+        }),
+      }),
+    });
+    await collect(createMastraRuntime({ model }).runToolLoop({ prompt: 'x' }));
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.status.code).toBe(2);
+    expect(span?.attributes['failure.code']).toBe('ai.unauthorized');
   });
 });

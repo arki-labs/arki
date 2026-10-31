@@ -57,6 +57,7 @@ export {
   ProviderUnavailable,
   RateLimited,
   UngroundedOutput,
+  VectorStoreUnavailable,
 } from './failures';
 export type { ProviderFailure } from './failures';
 
@@ -96,6 +97,7 @@ export {
   type VectorIndex,
   type VectorIndexOptions,
   type MismatchedRow,
+  type OrUnavailable,
   type ReconcileCaps,
   type ReconcileCounts,
   type ReconcileDeps,

@@ -260,6 +260,18 @@ export const FlowNodeFailed = /* @__PURE__ */ defineFailure('ai.flow_node_failed
 });
 export type FlowNodeFailed = ReturnType<typeof FlowNodeFailed>;
 
+/** The vector index, or the database behind it, could not be reached or refused the call. `reason` is the underlying message.
+ * @fix Check that the vector store (Qdrant) is up and reachable; the reconciler tries again on its next run.
+ * @verify bun run test -- src/vector-search/reconcile.test.ts
+ */
+export const VectorStoreUnavailable = /* @__PURE__ */ defineFailure('ai.vector_store_unavailable', {
+  status: 503,
+  data: z.object({ operation: z.string(), reason: z.string() }),
+  message: '{operation} failed because the vector store is unavailable: {reason}',
+  remediation: 'Check that the vector store is up and reachable; the reconciler tries again on its next run.',
+});
+export type VectorStoreUnavailable = ReturnType<typeof VectorStoreUnavailable>;
+
 /**
  * Every failure a provider call returns: the refusals above plus `UnexpectedDefect` for a throw
  * this package does not know (a bug, never an expected outcome).

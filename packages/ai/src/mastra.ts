@@ -9,6 +9,7 @@ import { finishFailure, providerFailure } from './ai-service/provider-failure';
 import { debugRuntime } from './debug';
 import { Cancelled, ContentFiltered } from './failures';
 import { requireJsonSchema } from './input-json-schema';
+import { observeAiStream } from './observe';
 import { runAgentTool } from './runtime/tool';
 
 /**
@@ -98,115 +99,121 @@ export function toMastraTools(
 export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime {
   const defaultMaxSteps = options.defaultMaxSteps ?? 8;
 
-  return {
-    async *runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
-      const { signal } = input;
-      const maxSteps = input.maxSteps ?? defaultMaxSteps;
-      debugRuntime.debug('mastra runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
-        maxSteps,
-        tools: input.tools?.length ?? 0,
+  async function* runLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
+    const { signal } = input;
+    const maxSteps = input.maxSteps ?? defaultMaxSteps;
+    debugRuntime.debug('mastra runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
+      maxSteps,
+      tools: input.tools?.length ?? 0,
+    });
+    yield { type: 'run:start' };
+    if (signal?.aborted) {
+      yield { type: 'run:error', failure: Cancelled({ cause: signal.reason }) };
+      return;
+    }
+
+    // Tool calls whose tool returned a failure, by call id: their result becomes `tool:failure`.
+    const failures = new Map<string, ToolFailure>();
+    // The names a failure carries, filled in from the resolved model once the agent exists.
+    let call: ProviderCall = { provider: 'mastra', model: 'unknown', signal };
+    try {
+      const agentName = options.name ?? 'arki-runtime-agent';
+      const agent = new Agent({
+        id: agentName,
+        name: agentName,
+        instructions: input.system ?? options.instructions ?? 'You are a helpful assistant.',
+        model: options.model,
+        tools: toMastraTools(input.tools, (toolCallId, toolFailure) => failures.set(toolCallId, toolFailure)),
       });
-      yield { type: 'run:start' };
-      if (signal?.aborted) {
-        yield { type: 'run:error', failure: Cancelled({ cause: signal.reason }) };
-        return;
-      }
+      const model = await agent.getModel();
+      call = { provider: model.provider, model: model.modelId, signal };
 
-      // Tool calls whose tool returned a failure, by call id: their result becomes `tool:failure`.
-      const failures = new Map<string, ToolFailure>();
-      // The names a failure carries, filled in from the resolved model once the agent exists.
-      let call: ProviderCall = { provider: 'mastra', model: 'unknown', signal };
-      try {
-        const agentName = options.name ?? 'arki-runtime-agent';
-        const agent = new Agent({
-          id: agentName,
-          name: agentName,
-          instructions: input.system ?? options.instructions ?? 'You are a helpful assistant.',
-          model: options.model,
-          tools: toMastraTools(input.tools, (toolCallId, toolFailure) => failures.set(toolCallId, toolFailure)),
-        });
-        const model = await agent.getModel();
-        call = { provider: model.provider, model: model.modelId, signal };
+      const stream = await agent.stream(input.prompt, { maxSteps, abortSignal: signal });
 
-        const stream = await agent.stream(input.prompt, { maxSteps, abortSignal: signal });
+      let text = '';
+      let usage: RuntimeUsage | undefined;
+      // The one terminal failure of the run, if any: the loop stops at the first one.
+      let failure: RuntimeFailure | undefined;
 
-        let text = '';
-        let usage: RuntimeUsage | undefined;
-        // The one terminal failure of the run, if any: the loop stops at the first one.
-        let failure: RuntimeFailure | undefined;
-
-        for await (const chunk of stream.fullStream) {
-          if (signal?.aborted) {
-            failure = Cancelled({ cause: signal.reason });
+      for await (const chunk of stream.fullStream) {
+        if (signal?.aborted) {
+          failure = Cancelled({ cause: signal.reason });
+          break;
+        }
+        switch (chunk.type) {
+          case 'text-delta': {
+            text += chunk.payload.text;
+            yield { type: 'text:delta', delta: chunk.payload.text };
             break;
           }
-          switch (chunk.type) {
-            case 'text-delta': {
-              text += chunk.payload.text;
-              yield { type: 'text:delta', delta: chunk.payload.text };
-              break;
-            }
-            case 'tool-call': {
-              yield { type: 'tool:start', tool: chunk.payload.toolName, args: chunk.payload.args };
-              break;
-            }
-            case 'tool-result': {
-              const toolFailure = failures.get(chunk.payload.toolCallId);
-              yield toolFailure === undefined
-                ? { type: 'tool:result', tool: chunk.payload.toolName, result: chunk.payload.result }
-                : { type: 'tool:failure', tool: chunk.payload.toolName, failure: toolFailure };
-              break;
-            }
-            case 'tool-error': {
-              yield {
-                type: 'tool:error',
-                tool: chunk.payload.toolName ?? '',
-                error: errorMessage(chunk.payload.error),
-              };
-              break;
-            }
-            case 'finish': {
-              const u = chunk.payload.output.usage;
-              usage = {
-                inputTokens: u.inputTokens,
-                outputTokens: u.outputTokens,
-                totalTokens: u.totalTokens,
-              };
-              // The last step's finish: `tool-calls` here means the step cap cut the run before an answer.
-              failure = mastraFinishFailure(chunk.payload.stepResult.reason, call);
-              break;
-            }
-            case 'error': {
-              failure = providerFailure(chunk.payload.error, call);
-              break;
-            }
-            case 'abort': {
-              failure = Cancelled({ cause: signal?.reason });
-              break;
-            }
-            default: {
-              break;
-            }
+          case 'tool-call': {
+            yield { type: 'tool:start', tool: chunk.payload.toolName, args: chunk.payload.args };
+            break;
           }
-          if (failure) break;
+          case 'tool-result': {
+            const toolFailure = failures.get(chunk.payload.toolCallId);
+            yield toolFailure === undefined
+              ? { type: 'tool:result', tool: chunk.payload.toolName, result: chunk.payload.result }
+              : { type: 'tool:failure', tool: chunk.payload.toolName, failure: toolFailure };
+            break;
+          }
+          case 'tool-error': {
+            yield {
+              type: 'tool:error',
+              tool: chunk.payload.toolName ?? '',
+              error: errorMessage(chunk.payload.error),
+            };
+            break;
+          }
+          case 'finish': {
+            const u = chunk.payload.output.usage;
+            usage = {
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              totalTokens: u.totalTokens,
+            };
+            // The last step's finish: `tool-calls` here means the step cap cut the run before an answer.
+            failure = mastraFinishFailure(chunk.payload.stepResult.reason, call);
+            break;
+          }
+          case 'error': {
+            failure = providerFailure(chunk.payload.error, call);
+            break;
+          }
+          case 'abort': {
+            failure = Cancelled({ cause: signal?.reason });
+            break;
+          }
+          default: {
+            break;
+          }
         }
-
-        if (!failure && signal?.aborted) failure = Cancelled({ cause: signal.reason });
-        if (failure) {
-          debugRuntime.debug('mastra runToolLoop failed ({code})', { code: failure.code });
-          yield { type: 'run:error', failure };
-          return;
-        }
-        debugRuntime.debug('mastra runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
-          chars: text.length,
-          totalTokens: usage?.totalTokens,
-        });
-        yield { type: 'run:finish', text, usage };
-      } catch (error) {
-        const thrown = providerFailure(error, call);
-        debugRuntime.debug('mastra runToolLoop failed ({code})', { code: thrown.code });
-        yield { type: 'run:error', failure: thrown };
+        if (failure) break;
       }
+
+      if (!failure && signal?.aborted) failure = Cancelled({ cause: signal.reason });
+      if (failure) {
+        debugRuntime.debug('mastra runToolLoop failed ({code})', { code: failure.code });
+        yield { type: 'run:error', failure };
+        return;
+      }
+      debugRuntime.debug('mastra runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
+        chars: text.length,
+        totalTokens: usage?.totalTokens,
+      });
+      yield { type: 'run:finish', text, usage };
+    } catch (error) {
+      const thrown = providerFailure(error, call);
+      debugRuntime.debug('mastra runToolLoop failed ({code})', { code: thrown.code });
+      yield { type: 'run:error', failure: thrown };
+    }
+  }
+
+  return {
+    runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
+      return observeAiStream('ai.mastra.run_tool_loop', runLoop(input), event =>
+        event.type === 'run:error' ? event.failure : undefined,
+      );
     },
   };
 }

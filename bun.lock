@@ -17,7 +17,7 @@
     },
     "packages/admin": {
       "name": "@arki/admin",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/contracts": "workspace:*",
@@ -70,6 +70,7 @@
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "@qdrant/js-client-rest": "catalog:",
         "ai": "catalog:ai",
         "ai-sdk-ollama": "catalog:ai",
@@ -88,7 +89,6 @@
         "@electric-sql/pglite": "catalog:",
         "@libsql/client": "^0.18.0",
         "@mastra/core": "catalog:",
-        "@opentelemetry/api": "catalog:opentelemetry",
         "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
         "@types/node": "catalog:node",
         "arktype": "catalog:",
@@ -129,7 +129,7 @@
     },
     "packages/async": {
       "name": "@arki/async",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -164,7 +164,7 @@
     },
     "packages/auth": {
       "name": "@arki/auth",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@arki/contracts": "workspace:*",
         "@arki/db": "workspace:*",
@@ -317,7 +317,7 @@
     },
     "packages/cli": {
       "name": "@arki/cli",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
@@ -480,9 +480,11 @@
       "dependencies": {
         "@arki/content": "workspace:*",
         "@arki/date": "workspace:*",
+        "@arki/failure": "workspace:*",
         "@arki/icons": "workspace:*",
         "@arki/intl": "workspace:*",
         "@arki/math": "workspace:*",
+        "@arki/schema": "workspace:*",
         "@arki/ui": "workspace:*",
         "@content-collections/mdx": "catalog:next",
         "nuqs": "catalog:",
@@ -492,13 +494,21 @@
         "remark-rehype": "catalog:content",
         "unified": "catalog:",
         "use-intl": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/eslint-config": "workspace:*",
-        "@arki/failure": "workspace:*",
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
+        "@arki/vitest-config": "workspace:*",
+        "@testing-library/react": "catalog:testing",
+        "@types/react": "catalog:react",
+        "@types/react-dom": "catalog:react",
+        "@vitejs/plugin-react": "catalog:",
+        "jsdom": "catalog:text-processing",
         "react": "catalog:react",
+        "react-dom": "catalog:react",
+        "vitest": "catalog:",
       },
       "peerDependencies": {
         "react": "^18 || ^19",
@@ -540,7 +550,7 @@
     },
     "packages/date": {
       "name": "@arki/date",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -590,7 +600,7 @@
     },
     "packages/db": {
       "name": "@arki/db",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/contracts": "workspace:*",
@@ -656,7 +666,7 @@
     },
     "packages/dot": {
       "name": "@arki/dot",
-      "version": "0.7.0",
+      "version": "0.9.0",
       "bin": {
         "dot": "./bin/dot.js",
       },
@@ -754,7 +764,7 @@
     },
     "packages/env": {
       "name": "@arki/env",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/schema": "workspace:*",
@@ -952,7 +962,7 @@
     },
     "packages/http": {
       "name": "@arki/http",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@arki/contracts": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -999,7 +1009,7 @@
     },
     "packages/icons": {
       "name": "@arki/icons",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
         "@iconify-icon/react": "catalog:",
         "@iconify/json": "catalog:",
@@ -1057,7 +1067,7 @@
     },
     "packages/journal": {
       "name": "@arki/journal",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@arki/async": "workspace:*",
         "@arki/contracts": "workspace:*",
@@ -1115,7 +1125,7 @@
     },
     "packages/kv": {
       "name": "@arki/kv",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@arki/contracts": "workspace:*",
         "@arki/env": "workspace:*",
@@ -1154,7 +1164,7 @@
     },
     "packages/live": {
       "name": "@arki/live",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
@@ -1227,7 +1237,7 @@
     },
     "packages/lock": {
       "name": "@arki/lock",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/contracts": "workspace:*",
@@ -1285,7 +1295,7 @@
     },
     "packages/log": {
       "name": "@arki/log",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "devDependencies": {
         "@arki/bench": "workspace:*",
         "@arki/eslint-config": "workspace:*",
@@ -1315,7 +1325,7 @@
     },
     "packages/mail": {
       "name": "@arki/mail",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
@@ -1585,6 +1595,7 @@
         "@arki/log": "workspace:*",
         "@arki/money": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "@t3-oss/env-core": "catalog:env",
         "drizzle-orm": "catalog:drizzle",
         "stripe": "catalog:",
@@ -1596,6 +1607,7 @@
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
         "@electric-sql/pglite": "catalog:",
+        "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
         "@types/node": "catalog:node",
         "drizzle-kit": "catalog:drizzle",
         "typescript": "catalog:",
@@ -1664,7 +1676,7 @@
     },
     "packages/queue": {
       "name": "@arki/queue",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/async": "workspace:*",
         "@arki/contracts": "workspace:*",
@@ -1713,7 +1725,7 @@
     },
     "packages/resilience": {
       "name": "@arki/resilience",
-      "version": "0.2.0",
+      "version": "0.3.1",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -1747,7 +1759,7 @@
     },
     "packages/schedule": {
       "name": "@arki/schedule",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/lock": "workspace:*",
@@ -1851,7 +1863,7 @@
     },
     "packages/string": {
       "name": "@arki/string",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
@@ -1873,7 +1885,7 @@
     },
     "packages/tanstack-start": {
       "name": "@arki/tanstack-start",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/contracts": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -1950,7 +1962,7 @@
     },
     "packages/testing": {
       "name": "@arki/testing",
-      "version": "0.1.3",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/date": "workspace:*",
         "@arki/db": "workspace:*",
@@ -2016,7 +2028,7 @@
     },
     "packages/ui": {
       "name": "@arki/ui",
-      "version": "0.1.6",
+      "version": "0.2.0",
       "dependencies": {
         "@arki/date": "workspace:*",
         "@arki/icons": "workspace:*",

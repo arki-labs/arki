@@ -8,10 +8,13 @@
  * acknowledged only against a durable index, and a point whose row stopped
  * being current while it was upserted is deleted again.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ModelUnavailable, spaceId } from '@arki/embeddings';
 
+import { VectorStoreUnavailable } from '../failures';
 import type { MismatchedRow, ReconcileDeps, ReconcileRow, ReconcileStore } from './reconcile';
 import { runVectorReconciliation } from './reconcile';
 
@@ -25,6 +28,9 @@ type Payload = {
   sourceId?: string;
 };
 type TombstoneId = `vtmb_${string}`;
+
+/** The outage a dep returns when its backend cannot be reached. */
+const outage = (reason: string) => VectorStoreUnavailable({ operation: 'test', reason });
 
 const MODEL = 'qwen3-embedding:0.6b';
 const SPACE = {
@@ -96,7 +102,7 @@ describe('runVectorReconciliation — Phase A (tombstone drain)', () => {
   it('stops the run on a dead index: tombstones retained, no embedding work', async () => {
     const listMismatched = vi.fn();
     const deps = makeDeps({
-      deletePoints: vi.fn().mockRejectedValue(new Error('qdrant down')),
+      deletePoints: vi.fn().mockResolvedValue(outage('qdrant down')),
       stores: [makeStore({ listMismatched })],
     });
     deps.tombstones.list.mockResolvedValue([{ id: 'vtmb_1', pointId: 'citm_gone' }]);
@@ -112,7 +118,7 @@ describe('runVectorReconciliation — Phase A (tombstone drain)', () => {
       reembedded: 0,
       reupserted: 0,
       failed: 1,
-      phaseAError: 'qdrant down',
+      phaseAError: 'test failed because the vector store is unavailable: qdrant down',
     });
   });
 
@@ -233,14 +239,11 @@ describe('runVectorReconciliation — Phase B1 (dimension migration)', () => {
     expect(counts).toMatchObject({ reembedded: 1, failed: 1 });
   });
 
-  it('counts a failing row and keeps reconciling the rest', async () => {
+  it('counts an upsert outage as a failed row and keeps reconciling the rest', async () => {
     const bad = mismatchedRow({ pointId: 'citm_bad' });
     const good = mismatchedRow({ pointId: 'citm_good' });
     const deps = makeDeps({
-      embedText: vi
-        .fn()
-        .mockRejectedValueOnce(new Error('embed failed'))
-        .mockResolvedValue({ vector: [0.1, 0.2, 0.3, 0.4], space: SPACE }),
+      upsertPoint: vi.fn().mockResolvedValueOnce(outage('timeout')).mockResolvedValue(null),
       stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([bad, good]) })],
     });
 
@@ -248,6 +251,26 @@ describe('runVectorReconciliation — Phase B1 (dimension migration)', () => {
 
     expect(counts).toMatchObject({ reembedded: 1, failed: 1 });
     expect(deps.upsertPoint).toHaveBeenCalledWith('citm_good', expect.anything(), expect.anything());
+  });
+
+  it('does not swallow a dep that throws: a bug ends the run instead of counting as an outage', async () => {
+    // WHY: a thrown error is a defect. Counting it as `failed` would hide a bug behind an outage counter.
+    const deps = makeDeps({
+      upsertPoint: vi.fn().mockRejectedValue(new TypeError('undefined is not a function')),
+      stores: [makeStore({ listMismatched: vi.fn().mockResolvedValue([mismatchedRow()]) })],
+    });
+
+    await expect(runVectorReconciliation(deps)).rejects.toThrow('undefined is not a function');
+  });
+
+  it('skips a store whose rows cannot be listed (outage) and reconciles the next store', async () => {
+    const down = makeStore({ name: 'down', listMismatched: vi.fn().mockResolvedValue(outage('db down')) });
+    const up = makeStore({ name: 'up', listMismatched: vi.fn().mockResolvedValue([mismatchedRow()]) });
+    const deps = makeDeps({ stores: [down, up] });
+
+    const counts = await runVectorReconciliation(deps);
+
+    expect(counts).toMatchObject({ reembedded: 1, failed: 1 });
   });
 });
 
@@ -295,7 +318,7 @@ describe('runVectorReconciliation — Phase B2 (missing-point re-upsert)', () =>
       vector: [0, 0, 0, 1],
       payload: { userId: 'u_1', kind: 'highlight', model: MODEL, dimensions: 4 },
     }));
-    const stillCurrent = vi.fn().mockRejectedValue(new Error('connection reset'));
+    const stillCurrent = vi.fn().mockResolvedValue(outage('connection reset'));
     const deps = makeDeps({ stores: [makeStore({ listCurrent: vi.fn().mockResolvedValue(rows), stillCurrent })] });
 
     const counts = await runVectorReconciliation(deps);
@@ -346,5 +369,57 @@ describe('runVectorReconciliation — row budget', () => {
     expect(counts.reembedded).toBe(2);
     expect(counts.reupserted).toBe(1);
     expect(listCurrentSecond).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('runVectorReconciliation — spans', () => {
+  const exporter = new InMemorySpanExporter();
+  beforeAll(() => {
+    trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+  });
+  afterEach(() => {
+    exporter.reset();
+  });
+  afterAll(() => {
+    trace.disable();
+  });
+
+  it('records an ai.reconcile span with the counts of the run', async () => {
+    const row: ReconcileRow<Payload> = {
+      pointId: 'hlgt_a',
+      vector: [0, 0, 0, 1],
+      payload: { userId: 'u_1', kind: 'highlight', model: MODEL, dimensions: 4 },
+    };
+    const deps = makeDeps({ stores: [makeStore({ listCurrent: vi.fn().mockResolvedValue([row]) })] });
+
+    await runVectorReconciliation(deps);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.name).toBe('ai.reconcile');
+    expect(span?.instrumentationScope.name).toBe('@arki/ai');
+    expect(span?.attributes['ai.reconcile.reupserted']).toBe(1);
+    expect(span?.status.code).not.toBe(2);
+  });
+
+  it('marks the span failed with the outage code when the index is down', async () => {
+    const deps = makeDeps({ deletePoints: vi.fn().mockResolvedValue(outage('qdrant down')) });
+    deps.tombstones.list.mockResolvedValue([{ id: 'vtmb_1', pointId: 'citm_gone' }]);
+
+    await runVectorReconciliation(deps);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.status.code).toBe(2);
+    expect(span?.attributes['failure.code']).toBe('ai.vector_store_unavailable');
+  });
+
+  it('marks the span failed as a defect and rethrows when a dep throws', async () => {
+    const deps = makeDeps();
+    deps.tombstones.list.mockRejectedValue(new TypeError('bug'));
+
+    await expect(runVectorReconciliation(deps)).rejects.toThrow('bug');
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.status.code).toBe(2);
+    expect(span?.attributes['failure.code']).toBe('failure.unexpected_defect');
   });
 });

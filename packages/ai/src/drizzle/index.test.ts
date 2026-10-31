@@ -6,6 +6,7 @@
  * with tens of thousands of points stays under the bind-parameter ceiling.
  * Ids keep the table's brands end to end.
  */
+import { orThrow } from '@arki/failure';
 import { PGlite } from '@electric-sql/pglite';
 import { generateDrizzleJson, generateMigration } from 'drizzle-kit/payload/sqlite';
 import { defineRelations, sql } from 'drizzle-orm';
@@ -196,12 +197,12 @@ describeTombstoneOutbox('Postgres', {
   write: (userId, pointIds) => pgOutbox.write(pgDb, userId, pointIds),
   clear: pointIds => pgOutbox.clear(pgDb, pointIds),
   list: async limit => {
-    const rows = await pgStore.list(limit);
+    const rows = orThrow(await pgStore.list(limit));
     expectTypeOf<(typeof rows)[number]['id']>().toEqualTypeOf<`vtmb_${string}`>();
     return rows;
   },
   remove: async ids => {
-    await pgStore.remove(ids.map(id => pgTombstoneId.schema.parse(id)));
+    orThrow(await pgStore.remove(ids.map(id => pgTombstoneId.schema.parse(id))));
   },
   makeOlder: async pointId => {
     await pgClient.query(
@@ -274,12 +275,12 @@ describeTombstoneOutbox('SQLite', {
   write: (userId, pointIds) => sqliteOutbox.write(sqliteDb, userId, pointIds),
   clear: pointIds => sqliteOutbox.clear(sqliteDb, pointIds),
   list: async limit => {
-    const rows = await sqliteStore.list(limit);
+    const rows = orThrow(await sqliteStore.list(limit));
     expectTypeOf<(typeof rows)[number]['id']>().toEqualTypeOf<`vtmb_${string}`>();
     return rows;
   },
   remove: async ids => {
-    await sqliteStore.remove(ids.map(id => sqliteTombstoneId.schema.parse(id)));
+    orThrow(await sqliteStore.remove(ids.map(id => sqliteTombstoneId.schema.parse(id))));
   },
   makeOlder: async pointId => {
     await sqliteDb.run(sql`UPDATE vector_tombstones SET created_at = created_at - 3600000 WHERE point_id = ${pointId}`);

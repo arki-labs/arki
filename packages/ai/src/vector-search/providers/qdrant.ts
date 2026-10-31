@@ -11,6 +11,8 @@ import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { debugVector } from '../../debug.ts';
 import { getErrorMessage, VectorSearchError } from '../../errors';
+import { VectorStoreUnavailable } from '../../failures';
+import { observeAi } from '../../observe';
 
 /**
  * Qdrant only accepts point IDs that are an unsigned integer or a UUID. Callers, however, use
@@ -136,6 +138,17 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         url: config.url,
       },
     );
+  }
+
+  /**
+   * One Qdrant call inside an `ai.vector.<operation>` span. A client error is a store problem, so a
+   * throw marks the span with `ai.vector_store_unavailable`; the error itself is thrown on unchanged.
+   */
+  private observe<T>(operation: string, call: () => Promise<T>): Promise<T> {
+    return observeAi(`ai.vector.${operation}`, call, {
+      attributes: { 'ai.vector.collection': this.collectionName },
+      thrownCode: VectorStoreUnavailable.code,
+    });
   }
 
   private async getClient(): Promise<QdrantClient> {
@@ -320,7 +333,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         indexedAt: new Date().toISOString(),
       },
     };
-    await client.upsert(this.collectionName, { points: [point], wait: true });
+    await this.observe('upsert', () => client.upsert(this.collectionName, { points: [point], wait: true }));
     debugVector.debug('[Qdrant] Vector upserted successfully: {successfully}', { successfully: id });
   }
 
@@ -344,13 +357,15 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     const qdrantFilter = this.flatFilter(filter);
 
-    const { points: searchResult } = await client.query(this.collectionName, {
-      query: vector,
-      limit,
-      filter: qdrantFilter,
-      with_payload: true,
-      score_threshold: 0, // caller filters by score
-    });
+    const { points: searchResult } = await this.observe('search', () =>
+      client.query(this.collectionName, {
+        query: vector,
+        limit,
+        filter: qdrantFilter,
+        with_payload: true,
+        score_threshold: 0, // caller filters by score
+      }),
+    );
 
     debugVector.debug('[Qdrant] searchByVector completed (results: {results})', { results: searchResult.length });
     return this.toResults(searchResult);
@@ -368,13 +383,15 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       hasFilter: !!filter,
     });
     const client = await this.getClient();
-    const { points } = await client.query(this.collectionName, {
-      query,
-      using: SPARSE_VECTOR_NAME,
-      limit,
-      filter: this.flatFilter(filter),
-      with_payload: true,
-    });
+    const { points } = await this.observe('search_sparse', () =>
+      client.query(this.collectionName, {
+        query,
+        using: SPARSE_VECTOR_NAME,
+        limit,
+        filter: this.flatFilter(filter),
+        with_payload: true,
+      }),
+    );
     debugVector.debug('[Qdrant] searchBySparseVector completed (results: {results})', { results: points.length });
     return this.toResults(points);
   }
@@ -397,13 +414,16 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       hasOffset: offset !== undefined,
     });
     const client = await this.getClient();
-    const page = await client.scroll(this.collectionName, {
-      filter: this.flatFilter(filter),
-      limit,
-      ...(offset === undefined ? {} : { offset: await toPointId(offset) }),
-      with_payload: true,
-      with_vector: false,
-    });
+    const pointOffset = offset === undefined ? {} : { offset: await toPointId(offset) };
+    const page = await this.observe('scroll', () =>
+      client.scroll(this.collectionName, {
+        filter: this.flatFilter(filter),
+        limit,
+        ...pointOffset,
+        with_payload: true,
+        with_vector: false,
+      }),
+    );
     const items = page.points.map(point => ({ id: sourceId(point), metadata: point.payload as TMetadata }));
     const next = page.next_page_offset;
     return typeof next === 'string' || typeof next === 'number' ? { items, next: String(next) } : { items };
@@ -413,10 +433,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     debugVector.debug('[Qdrant] Deleting document (id: {id})', { id });
     const client = await this.getClient();
 
-    await client.delete(this.collectionName, {
-      points: [await toPointId(id)],
-      wait: true,
-    });
+    const point = await toPointId(id);
+    await this.observe('delete', () => client.delete(this.collectionName, { points: [point], wait: true }));
     debugVector.debug('[Qdrant] Document deleted successfully: {successfully}', { successfully: id });
   }
 
@@ -424,10 +442,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     debugVector.debug('[Qdrant] Deleting documents batch (count: {count})', { count: ids.length });
     const client = await this.getClient();
 
-    await client.delete(this.collectionName, {
-      points: await Promise.all(ids.map(id => toPointId(id))),
-      wait: true,
-    });
+    const points = await Promise.all(ids.map(id => toPointId(id)));
+    await this.observe('delete_batch', () => client.delete(this.collectionName, { points, wait: true }));
     debugVector.debug('[Qdrant] Batch deletion completed (count: {count})', { count: ids.length });
   }
 
@@ -538,11 +554,10 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   async getDocument(id: string): Promise<TMetadata | null> {
     debugVector.debug('[Qdrant] Getting document by ID: {ID}', { ID: id });
     const client = await this.getClient();
-    const points = await client.retrieve(this.collectionName, {
-      ids: [await toPointId(id)],
-      with_payload: true,
-      with_vector: false,
-    });
+    const pointId = await toPointId(id);
+    const points = await this.observe('retrieve', () =>
+      client.retrieve(this.collectionName, { ids: [pointId], with_payload: true, with_vector: false }),
+    );
     const result = (points[0]?.payload as TMetadata | undefined) ?? null;
     debugVector.debug('[Qdrant] Document retrieved: {retrieved} (found: {found})', {
       retrieved: id,

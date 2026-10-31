@@ -23,6 +23,7 @@ export {
   runVectorReconciliation,
   TOMBSTONE_CAP_PER_RUN,
   type MismatchedRow,
+  type OrUnavailable,
   type ReconcileCaps,
   type ReconcileCounts,
   type ReconcileDeps,

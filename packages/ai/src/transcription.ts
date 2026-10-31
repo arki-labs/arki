@@ -4,6 +4,7 @@ import { formatIssues, parse } from '@arki/schema';
 
 import { retryAfterMs } from './ai-service/provider-failure';
 import { Cancelled, InvalidOutput, ProviderFailed, ProviderUnauthorized, RateLimited } from './failures';
+import { observeAi } from './observe';
 import { deepgramResponseSchema, diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
 
 /** Deepgram settings for one transcription. `transcriptionModel` defaults to `nova-3`. */
@@ -115,7 +116,17 @@ function check<Output>(schema: StandardSchemaV1<unknown, Output>, value: unknown
  * Transcribe audio with Deepgram, speaker-diarized. Returns the transcript, or a
  * {@link TranscriptionFailure}; it never throws for bad input or a Deepgram refusal.
  */
-export async function transcribeDiarizedAudio(
+export function transcribeDiarizedAudio(
+  bytes: Uint8Array,
+  input: TranscriptionOptions,
+  signal?: AbortSignal,
+): Promise<DiarizedTranscript | TranscriptionFailure> {
+  return observeAi('ai.transcribe', () => transcribe(bytes, input, signal), {
+    attributes: { 'ai.provider': 'deepgram' },
+  });
+}
+
+async function transcribe(
   bytes: Uint8Array,
   input: TranscriptionOptions,
   signal?: AbortSignal,
