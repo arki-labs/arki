@@ -1,5 +1,18 @@
 # @arki/journal
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [fac706c]
+- Updated dependencies [7c8ab60]
+- Updated dependencies [7be13e9]
+  - @arki/dot@0.10.0
+  - @arki/admin@0.3.0
+  - @arki/db@0.5.1
+  - @arki/http@0.4.1
+  - @arki/resilience@0.3.2
+
 ## 0.4.0
 
 ### Minor Changes

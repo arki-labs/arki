@@ -1,5 +1,18 @@
 # @arki/auth
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [fac706c]
+- Updated dependencies [7c8ab60]
+- Updated dependencies [7be13e9]
+  - @arki/dot@0.10.0
+  - @arki/kv@0.5.0
+  - @arki/mail@0.4.0
+  - @arki/db@0.5.1
+  - @arki/http@0.4.1
+
 ## 0.3.0
 
 ### Minor Changes

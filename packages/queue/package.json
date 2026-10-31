@@ -1,6 +1,6 @@
 {
   "name": "@arki/queue",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Typed background jobs for TypeScript: BullMQ on Redis, pg-boss on PGlite, or a database row that commits with your transaction.",
   "repository": {
     "type": "git",

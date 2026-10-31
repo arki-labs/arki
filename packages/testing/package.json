@@ -1,6 +1,6 @@
 {
   "name": "@arki/testing",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Test tooling for TypeScript backends: testcontainers Postgres and Redis, an integration tester, typed factories, assertions, MSW mocking and AI judges.",
   "keywords": [
     "arki",

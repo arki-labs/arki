@@ -1,5 +1,14 @@
 # @arki/schedule
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [fac706c]
+- Updated dependencies [7be13e9]
+  - @arki/dot@0.10.0
+  - @arki/lock@0.2.1
+
 ## 0.1.0
 
 ### Minor Changes

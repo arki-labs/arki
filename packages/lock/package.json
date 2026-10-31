@@ -1,6 +1,6 @@
 {
   "name": "@arki/lock",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "description": "Distributed locks and semaphores \u2014 one API over memory, Postgres, SQLite, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
   "keywords": [
