@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReceiptStore, StoredReceipt } from '@arki/admin/receipts';
 import { createForemanClient, generateForemanKeyPair } from '@arki/admin/client';
 import { withCoreModules } from '@arki/admin/core';
-import { describeModule } from '@arki/admin/module';
+import { AdminModuleRefused, describeModule } from '@arki/admin/module';
 import { createForemanHandler } from '@arki/admin/server';
 
 import type { FailedJobRecord, FailedJobSource } from './index.ts';
@@ -104,13 +104,17 @@ describe('T(queue-foreman-wire)', () => {
         { queue: 'main', jobId: 'job_1' },
         { scopes: ['queue:write'], permit: claim('exe_1', 'r1') },
       ),
-    ).rejects.toMatchObject({ code: QUEUE_FOREMAN_ERROR_CODES.staleRevision, status: 409 });
+    ).resolves.toMatchObject({
+      code: AdminModuleRefused.code,
+      data: { code: QUEUE_FOREMAN_ERROR_CODES.staleRevision, httpStatus: 409 },
+    });
     expect(statuses.at(-1)).toBe(409);
 
     await expect(
       client.preview('queue.retryJob', { queue: 'nope', jobId: 'job_1' }, ['queue:write']),
-    ).rejects.toMatchObject({
-      code: QUEUE_FOREMAN_ERROR_CODES.unknownQueue,
+    ).resolves.toMatchObject({
+      code: AdminModuleRefused.code,
+      data: { code: QUEUE_FOREMAN_ERROR_CODES.unknownQueue, httpStatus: 404 },
     });
     expect(statuses.at(-1)).toBe(404);
   });
