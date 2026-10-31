@@ -35,7 +35,7 @@ const isDev = import.meta.env.DEV;
 type JotaiStore = ReturnType<typeof createStore>;
 
 const LazyDevToolsImpl = isDev
-  ? lazy(() => import('./devtools.impl').then((mod) => ({ default: mod.DevToolsImpl })))
+  ? lazy(() => import('./devtools.impl.js').then((mod) => ({ default: mod.DevToolsImpl })))
   : null;
 
 type TriggerPosition =

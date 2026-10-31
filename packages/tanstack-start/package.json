@@ -25,20 +25,19 @@
   },
   "license": "MIT",
   "sideEffects": [
-    "./src/pwa/sw.ts",
     "./dist/src/pwa/sw.js"
   ],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "browser": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "browser": "./dist/src/index.js"
     },
     "./config": {
       "types": "./dist/src/app.config.d.ts",
-      "import": "./src/app.config.ts",
-      "node": "./src/app.config.ts"
+      "import": "./dist/src/app.config.js",
+      "node": "./dist/src/app.config.js"
     },
     "./vite": {
       "types": "./dist/src/vite.d.ts",
@@ -46,68 +45,68 @@
     },
     "./server": {
       "types": "./dist/src/start-server.d.ts",
-      "import": "./src/start-server.ts",
-      "node": "./src/start-server.ts"
+      "import": "./dist/src/start-server.js",
+      "node": "./dist/src/start-server.js"
     },
     "./dot": {
       "types": "./dist/src/dot.d.ts",
-      "import": "./src/dot.ts",
-      "node": "./src/dot.ts"
+      "import": "./dist/src/dot.js",
+      "node": "./dist/src/dot.js"
     },
     "./router": {
       "types": "./dist/src/router.d.ts",
-      "import": "./src/router.ts",
-      "browser": "./src/router.ts"
+      "import": "./dist/src/router.js",
+      "browser": "./dist/src/router.js"
     },
     "./orpc/client": {
       "types": "./dist/src/orpc/client.d.ts",
-      "import": "./src/orpc/client.ts",
-      "browser": "./src/orpc/client.ts"
+      "import": "./dist/src/orpc/client.js",
+      "browser": "./dist/src/orpc/client.js"
     },
     "./orpc/query": {
       "types": "./dist/src/orpc/query.d.ts",
-      "import": "./src/orpc/query.ts",
-      "browser": "./src/orpc/query.ts"
+      "import": "./dist/src/orpc/query.js",
+      "browser": "./dist/src/orpc/query.js"
     },
     "./orpc/server": {
       "types": "./dist/src/orpc/server.d.ts",
-      "import": "./src/orpc/server.ts",
-      "node": "./src/orpc/server.ts"
+      "import": "./dist/src/orpc/server.js",
+      "node": "./dist/src/orpc/server.js"
     },
     "./scripts": {
       "types": "./dist/src/scripts.d.ts",
-      "import": "./src/scripts.ts",
-      "browser": "./src/scripts.ts"
+      "import": "./dist/src/scripts.js",
+      "browser": "./dist/src/scripts.js"
     },
     "./error": {
       "types": "./dist/src/error.d.ts",
-      "import": "./src/error.tsx",
-      "browser": "./src/error.tsx"
+      "import": "./dist/src/error.js",
+      "browser": "./dist/src/error.js"
     },
     "./devtools": {
       "types": "./dist/src/devtools.d.ts",
-      "import": "./src/devtools.tsx",
-      "browser": "./src/devtools.tsx"
+      "import": "./dist/src/devtools.js",
+      "browser": "./dist/src/devtools.js"
     },
     "./sentry/client": {
       "types": "./dist/src/sentry-client.d.ts",
-      "import": "./src/sentry-client.ts",
-      "browser": "./src/sentry-client.ts"
+      "import": "./dist/src/sentry-client.js",
+      "browser": "./dist/src/sentry-client.js"
     },
     "./sentry/server": {
       "types": "./dist/src/sentry-server.d.ts",
-      "import": "./src/sentry-server.ts",
-      "node": "./src/sentry-server.ts"
+      "import": "./dist/src/sentry-server.js",
+      "node": "./dist/src/sentry-server.js"
     },
     "./sentry/bridge": {
       "types": "./dist/src/sentry-bridge.d.ts",
-      "import": "./src/sentry-bridge.ts",
-      "default": "./src/sentry-bridge.ts"
+      "import": "./dist/src/sentry-bridge.js",
+      "default": "./dist/src/sentry-bridge.js"
     },
     "./server-error-overlay": {
       "types": "./dist/src/server-error-overlay.d.ts",
-      "import": "./src/server-error-overlay.ts",
-      "node": "./src/server-error-overlay.ts"
+      "import": "./dist/src/server-error-overlay.js",
+      "node": "./dist/src/server-error-overlay.js"
     },
     "./pwa": {
       "types": "./dist/src/pwa/index.d.ts",
@@ -115,18 +114,18 @@
     },
     "./pwa/sw": {
       "types": "./dist/src/pwa/sw.d.ts",
-      "import": "./src/pwa/sw.ts",
-      "browser": "./src/pwa/sw.ts"
+      "import": "./dist/src/pwa/sw.js",
+      "browser": "./dist/src/pwa/sw.js"
     },
     "./pwa/client": {
       "types": "./dist/src/pwa/client.d.ts",
-      "import": "./src/pwa/client.ts",
-      "browser": "./src/pwa/client.ts"
+      "import": "./dist/src/pwa/client.js",
+      "browser": "./dist/src/pwa/client.js"
     },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.pwa.json",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",

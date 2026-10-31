@@ -15,6 +15,7 @@
 
 ### Patch Changes
 
+- Every entry now ships compiled JavaScript from `dist/` instead of TypeScript source, so the server entries import in plain Node. `./pwa/client` loads `virtual:pwa-register` inside `registerPwa()`, and `./pwa/sw` precaches only inside a service worker, so both import outside Vite without throwing.
 - 5a20a58: `@arki/tanstack-start/pwa/client` adds `clearCachesOnUserChange(userId)` and `useClearCachesOnUserChange(userId)`. They delete the service worker's user-tied caches (every cache but the Workbox precache of built files) when the signed-in user differs from the one the caches were filled for: a sign-out, a deleted account, or a new session that replaced another user's. Who filled the caches is one Cache Storage entry holding only the user id. `clearCachesOnUserChange` resolves `true` when the caches belonged to another known user, so the app can drop that user's other offline data (such as a persisted query cache) on the same decision; pass `undefined` to the hook while the session is loading or failed to load, so an offline reload never reads as a sign-out.
 - a07bccc: Remove the retired Clock abort exception code; cancellation remains the canonical SleepCancelled value. Preserve prototype-shaped operation keys in TanStack client utilities, and run Contracts native/provider inspections through identity-preserving source schemas. Forged array methods no longer bypass operation identity validation.
 

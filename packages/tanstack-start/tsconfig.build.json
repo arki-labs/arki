@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /**
+     * Emit JavaScript and declarations for every entry. Bundler resolution, like the React half
+     * of `@arki/auth`: `@arki/ui` and `@arki/icons` publish their types for bundlers only. Every
+     * relative import names its `.js` file, so the emitted `dist/` loads as plain ESM.
+     */
+    "emitDeclarationOnly": false,
+    "allowImportingTsExtensions": false
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.test-d.ts",
+    "**/__fixtures__/**"
+  ]
+}

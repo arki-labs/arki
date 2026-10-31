@@ -30,7 +30,11 @@ import { NetworkFirst } from 'workbox-strategies';
 
 declare const self: ServiceWorkerGlobalScope;
 
-precacheAndRoute(self.__WB_MANIFEST);
+// Precache only inside a service worker. Anywhere else (an SSR pass, a test, a
+// plain `import` in Node or Bun) there is no build manifest and no worker scope.
+if (typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope) {
+  precacheAndRoute(self.__WB_MANIFEST);
+}
 
 export type OfflineNavigationOptions = {
   /**

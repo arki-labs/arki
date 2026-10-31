@@ -6,8 +6,8 @@
  * full-stack React applications with TanStack Start and Bun.
  */
 
-export { createAppConfig, type AppConfig } from './app.config';
-export { createRouter, type RouterConfig } from './router';
-export { AnalyticsScript, type AnalyticsConfig } from './scripts';
-export { RootErrorComponent } from './error';
-export { DevTools, type DevToolsProps } from './devtools';
+export { createAppConfig, type AppConfig } from './app.config.js';
+export { createRouter, type RouterConfig } from './router.js';
+export { AnalyticsScript, type AnalyticsConfig } from './scripts.js';
+export { RootErrorComponent } from './error.js';
+export { DevTools, type DevToolsProps } from './devtools.js';

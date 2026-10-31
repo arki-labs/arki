@@ -26,7 +26,7 @@
  * export default { fetch: withServerErrorOverlay(inner) };
  * ```
  */
-import { captureException } from './sentry-bridge';
+import { captureException } from './sentry-bridge.js';
 
 /** A fetch handler; whatever follows the request (Start's `{ context }`) passes through untouched. */
 type FetchHandler<Rest extends readonly unknown[]> = (request: Request, ...rest: Rest) => Promise<Response> | Response;

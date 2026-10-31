@@ -58,12 +58,12 @@ import type {
   MountPrefix,
   RpcServed,
   StartService,
-} from './request-context';
-import { corsSchema } from './cors';
+} from './request-context.js';
+import { corsSchema } from './cors.js';
 
-export { authHandlers, cronHandlers, healthHandlers, rpcHandlers } from './mounts';
-export type { RequestContextOf } from './request-context';
-export type { CorsOptions } from './request-context';
+export { authHandlers, cronHandlers, healthHandlers, rpcHandlers } from './mounts.js';
+export type { RequestContextOf } from './request-context.js';
+export type { CorsOptions } from './request-context.js';
 
 const atSchema = z
   .string()

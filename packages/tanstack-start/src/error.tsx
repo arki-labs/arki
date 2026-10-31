@@ -16,7 +16,7 @@ import { ArrowClockwiseIcon, BugIcon, HouseSimpleIcon, WarningIcon } from '@arki
 import { Button } from '@arki/ui/button';
 import { cn } from '@arki/ui/utils';
 
-import { captureException } from './sentry-bridge';
+import { captureException } from './sentry-bridge.js';
 
 type RootErrorComponentProps = ErrorComponentProps<unknown> & {
   /**

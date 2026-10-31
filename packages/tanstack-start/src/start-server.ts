@@ -31,9 +31,9 @@ import { createAppRuntime } from '@arki/dot/runtime';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
-import type { StartRequestContext, StartServices, WithStart } from './request-context';
+import type { StartRequestContext, StartServices, WithStart } from './request-context.js';
 
-export { withForwardedProto } from './forwarded-proto';
+export { withForwardedProto } from './forwarded-proto.js';
 
 const log = getLogger('arki:tanstack-start');
 

@@ -19,8 +19,6 @@
  * ```
  */
 
-import { registerSW } from 'virtual:pwa-register';
-
 export { clearCachesOnUserChange, useClearCachesOnUserChange } from './user-caches.js';
 
 export type RegisterPwaOptions = {
@@ -42,7 +40,11 @@ export function registerPwa(options: RegisterPwaOptions = {}): void {
   // (e.g. private browsing, unsupported browsers), so register it first.
   registerStaleChunkReload();
   if (!('serviceWorker' in navigator)) return;
-  registerSW({ immediate: true, ...options });
+  // `virtual:pwa-register` exists only inside a Vite build. Loading it here,
+  // not at the top of the module, lets this entry import outside Vite too.
+  void import('virtual:pwa-register').then(({ registerSW }) => {
+    registerSW({ immediate: true, ...options });
+  });
 }
 
 /**

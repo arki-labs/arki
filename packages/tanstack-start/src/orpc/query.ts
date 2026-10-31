@@ -7,7 +7,7 @@
  *
  * Both take any oRPC `ProcedureUtils`; types come from the procedure.
  */
-export type { KeysetOptions, KeysetResult, KeysetStatus, KeysetUtils, OptionalContext, PagedInput } from './keyset';
-export { keysetKey, keysetOptions, useKeysetQuery } from './keyset';
-export type { Cache, OptimisticContext, OptimisticOptions } from './optimistic';
-export { optimisticMutationOptions, useOptimisticMutation } from './optimistic';
+export type { KeysetOptions, KeysetResult, KeysetStatus, KeysetUtils, OptionalContext, PagedInput } from './keyset.js';
+export { keysetKey, keysetOptions, useKeysetQuery } from './keyset.js';
+export type { Cache, OptimisticContext, OptimisticOptions } from './optimistic.js';
+export { optimisticMutationOptions, useOptimisticMutation } from './optimistic.js';

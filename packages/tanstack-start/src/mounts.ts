@@ -14,7 +14,7 @@
  */
 import { getLogger } from '@arki/log';
 
-import type { MountedService, MountName } from './request-context';
+import type { MountedService, MountName } from './request-context.js';
 
 const log = getLogger('arki:tanstack-start');
 

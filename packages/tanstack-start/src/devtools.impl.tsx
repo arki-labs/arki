@@ -19,9 +19,9 @@ import { TanStackDevtools } from '@tanstack/react-devtools';
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 
-import type { DevToolsProps } from './devtools';
-import { EnvironmentPanel } from './devtools-environment';
-import { JotaiPanel } from './devtools-jotai';
+import type { DevToolsProps } from './devtools.js';
+import { EnvironmentPanel } from './devtools-environment.js';
+import { JotaiPanel } from './devtools-jotai.js';
 
 const ENVIRONMENT_PLUGIN: TanStackDevtoolsReactPlugin = {
   name: 'Environment',

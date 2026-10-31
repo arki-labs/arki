@@ -15,8 +15,8 @@
 import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/react';
 
-import { registerSentryCapture } from './sentry-bridge';
-import { sentryDataCollection } from './sentry-data-collection';
+import { registerSentryCapture } from './sentry-bridge.js';
+import { sentryDataCollection } from './sentry-data-collection.js';
 
 export type InitSentryClientOptions = {
   /**

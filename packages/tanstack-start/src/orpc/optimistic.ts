@@ -28,8 +28,8 @@ import type { GeneralUtils, ProcedureUtils } from '@orpc/tanstack-query';
 
 import type { Page } from '@arki/contracts';
 
-import type { KeysetUtils, OptionalContext, PagedInput } from './keyset';
-import { keysetKey } from './keyset';
+import type { KeysetUtils, OptionalContext, PagedInput } from './keyset.js';
+import { keysetKey } from './keyset.js';
 
 /** Typed cache edits. `apply` records them; the mutation executes them. */
 export type Cache = {
