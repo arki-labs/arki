@@ -133,6 +133,7 @@ and never throws for bad text:
 | -------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
 | `math.invalid_number`      | `InvalidNumber`    | the text is not a number in the parser's syntax, locale or base                            |
 | `math.number_out_of_range` | `NumberOutOfRange` | past 10 000 digits, an exponent or scale past ±10 000, or past the float range of a number |
+| `math.invalid_currency`    | `InvalidCurrency`  | a currency code given to `formatCurrency` or `formatCompact` is not three ASCII letters    |
 
 ```ts
 import { isFailure } from '@arki/failure';

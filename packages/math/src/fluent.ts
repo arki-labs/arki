@@ -5,6 +5,7 @@
  * when a result must be exact. Extract with `.value()`.
  */
 
+import type { InvalidCurrencyFailure } from './errors.js';
 import type { CompactOptions, CurrencyOptions, FormatOptions } from './format.js';
 import type { Bounds } from './number.js';
 import type { RoundingMode } from './rounding.js';
@@ -111,7 +112,8 @@ export class NumberValue {
     return formatNumber(this.#value, options);
   }
 
-  formatCurrency(currency: string, options?: CurrencyOptions): string {
+  /** A malformed currency code returns `InvalidCurrency`. */
+  formatCurrency(currency: string, options?: CurrencyOptions): string | InvalidCurrencyFailure {
     return formatCurrency(this.#value, currency, options);
   }
 
@@ -120,8 +122,11 @@ export class NumberValue {
     return formatPercent(this.#value, options);
   }
 
-  formatCompact(options?: CompactOptions): string {
-    return formatCompact(this.#value, options);
+  formatCompact(options?: CompactOptions & { currency?: undefined }): string;
+  /** With `currency` the result is compact money, and a malformed code returns `InvalidCurrency`. */
+  formatCompact(options: CompactOptions): string | InvalidCurrencyFailure;
+  formatCompact(options?: CompactOptions): string | InvalidCurrencyFailure {
+    return options === undefined ? formatCompact(this.#value) : formatCompact(this.#value, options);
   }
 
   // Extraction ---------------------------------------------------------------

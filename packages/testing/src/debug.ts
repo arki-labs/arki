@@ -49,6 +49,7 @@ export type DebugOptions = {
   logger?: (message: string, ...args: unknown[]) => void;
 };
 
+// eslint-disable-next-line turbo/no-undeclared-env-vars -- opt-in test debug switch, not a build input
 let debugEnabled = process.env.DEBUG_TESTS === 'true';
 let debugLogger: (message: string, ...args: unknown[]) => void = console.log;
 

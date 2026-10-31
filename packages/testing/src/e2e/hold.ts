@@ -17,7 +17,9 @@ export type RequestHold = {
 export async function holdRequests(page: Page, paths: readonly string[]): Promise<RequestHold> {
   let released = false;
   const waiting: (() => void)[] = [];
-  let markArrived: () => void = () => undefined;
+  let markArrived: () => void = () => {
+    // replaced when the route handler first runs
+  };
   const arrived = new Promise<void>(resolve => {
     markArrived = resolve;
   });
@@ -26,7 +28,9 @@ export async function holdRequests(page: Page, paths: readonly string[]): Promis
     async route => {
       markArrived();
       if (!released) await new Promise<void>(resolve => waiting.push(resolve));
-      if (!page.isClosed()) await route.continue().catch(() => undefined);
+      if (!page.isClosed()) await route.continue().catch(() => {
+        // the page closed while the request was held
+      });
     },
   );
   return {

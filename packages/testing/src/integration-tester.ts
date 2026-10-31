@@ -584,6 +584,7 @@ export class IntegrationTester<
     }
 
     for (const table of tables) {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
       await this._db.delete(table);
     }
   }
@@ -607,6 +608,7 @@ export class IntegrationTester<
     );
 
     for (const table of tables) {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
       await this._db.delete(table);
     }
   }
@@ -634,6 +636,7 @@ export class IntegrationTester<
       .map(([, table]) => table);
 
     for (const table of tables) {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
       await this._db.delete(table);
     }
   }
@@ -660,6 +663,7 @@ export class IntegrationTester<
     );
 
     for (const table of tables) {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
       await this._db.delete(table);
     }
   }
@@ -987,16 +991,7 @@ export class IntegrationTester<
         }
         return;
       }
-      // Suppress connection errors during rollback - they're expected when using the throw-to-rollback pattern
-      if (
-        error instanceof Error &&
-        (error.message.includes('server closed the connection') ||
-          error.message.includes('Connection terminated') ||
-          error.message.includes('connection is closed'))
-      ) {
-        debugTester.debug('[tester] Connection closed during rollback (expected)');
-        return;
-      }
+      // A lost connection is not teardown noise here: the transaction never finished, so the test must fail.
       throw error;
     }
   }

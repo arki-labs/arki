@@ -23,6 +23,7 @@ formatNumber(2.5, { maximumFractionDigits: 0, rounding: 'halfEven' }); // '2'
 formatCurrency(1234.5, 'EUR', { locale: 'de-DE' }); // '1.234,50 €'
 formatCurrency(-5, 'USD', { accounting: true }); // '($5.00)'
 formatCurrency(decimal('0.1').plus('0.2'), 'USD'); // '$0.30' — exact in, exact out
+formatCurrency(1, 'XX'); // InvalidCurrency (math.invalid_currency), not a thrown RangeError
 formatPercent(0.125); // '12.5%'  — input is a fraction, as in Intl
 formatCompact(1230000); // '1.2M'
 formatCompact(1230000, { display: 'long' }); // '1.2 million'
@@ -35,6 +36,8 @@ const ro = createFormatter({ locale: 'ro-RO', currency: 'RON' });
 ro.formatCurrency(25); // '25,00 RON'
 ro.formatPercent(0.07); // '7 %'
 ```
+
+A currency code that is not three ASCII letters (`'XX'`, `''`) returns the `InvalidCurrency` failure (`math.invalid_currency`) from `formatCurrency`, `formatCompact` with `currency`, and the formatter's `formatCurrency`. The result type is `string | InvalidCurrencyFailure`; check it with `InvalidCurrency.is(result)` or `isFailure`. A well-formed but unknown code such as `'XYZ'` is formatted.
 
 There is no global "current locale": the default is `en-US`, every call
 takes `{ locale }`, and `createFormatter` binds defaults for an app or a

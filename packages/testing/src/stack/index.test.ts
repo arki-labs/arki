@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { defineStack, readManifest, service } from './index.js';
+import { isFailure, orThrow } from '@arki/failure';
+
+import { defineStack, readManifest, service, StackManifestInvalid, StackNotStarted } from './index.js';
 
 /** Counts what is up, so a test can say "nothing is left". */
 function counted() {
@@ -61,7 +63,7 @@ describe('defineStack', () => {
       env: ({ shared }) => ({ RUN: shared.id }),
     });
     const running = await stack.start({ runId: 'r2' });
-    const manifest = readManifest(JSON.stringify(running.manifest));
+    const manifest = orThrow(readManifest(JSON.stringify(running.manifest)));
     const slice = await stack.attach(manifest).worker(3);
     expect(slice.values.perWorker.port).toBe(9003);
     expect(slice.envFor('http://x').RUN).toBe('r2');
@@ -76,8 +78,63 @@ describe('defineStack', () => {
     expect([...live]).toEqual([]);
   });
 
-  it('names the problem when the manifest is missing or malformed', () => {
-    expect(() => readManifest()).toThrow(/STACK_NOT_STARTED/);
-    expect(() => readManifest('{"runId":1}')).toThrow(/STACK_MANIFEST_INVALID/);
+  it('returns StackNotStarted for an empty env and StackManifestInvalid for any text that is not a manifest', () => {
+    expect(StackNotStarted.is(readManifest(''))).toBe(true);
+    expect(StackNotStarted.is(readManifest())).toBe(true);
+    for (const text of ['{not json', '{"runId":1}', '[]', 'null', '{"runId":"r","run":[]}', '{"runId":"r","run":{"a":1e999}}']) {
+      expect(StackManifestInvalid.is(readManifest(text)), text).toBe(true);
+    }
+    const good = readManifest('{"runId":"r","run":{"pg":{"url":"x","ports":[1,2]}}}');
+    expect(isFailure(good)).toBe(false);
+  });
+
+  it('keeps stopping the other services when one stop rejects, then reports the error', async () => {
+    const stopped: string[] = [];
+    const mk = (name: string, fails: boolean) =>
+      service<{ readonly name: string }>({
+        name,
+        scope: 'run',
+        async start() {
+          return {
+            value: { name },
+            stop: async () => {
+              stopped.push(name);
+              if (fails) throw new Error(`${name} stuck`);
+            },
+          };
+        },
+      });
+    const stack = defineStack({ services: { a: mk('a', false), b: mk('b', true), c: mk('c', false) }, env: () => ({}) });
+    const running = await stack.start({ runId: 'r4' });
+    await expect(running.stop()).rejects.toThrow('b stuck');
+    expect(stopped).toEqual(['c', 'b', 'a']);
+  });
+
+  it('stops every service even when several reject, and a failed start stops the ones already up', async () => {
+    const stopped: string[] = [];
+    const mk = (name: string, failStart = false) =>
+      service<{ readonly name: string }>({
+        name,
+        scope: 'run',
+        async start() {
+          if (failStart) throw new Error('cannot start');
+          return {
+            value: { name },
+            stop: async () => {
+              stopped.push(name);
+              throw new Error(`${name} stuck`);
+            },
+          };
+        },
+      });
+    const both = defineStack({ services: { a: mk('a'), b: mk('b') }, env: () => ({}) });
+    const running = await both.start({ runId: 'r5' });
+    await expect(running.stop()).rejects.toBeInstanceOf(AggregateError);
+    expect(stopped).toEqual(['b', 'a']);
+
+    stopped.length = 0;
+    const failing = defineStack({ services: { a: mk('a'), b: mk('b'), c: mk('c', true) }, env: () => ({}) });
+    await expect(failing.start({ runId: 'r6' })).rejects.toThrow('cannot start');
+    expect(stopped).toEqual(['b', 'a']);
   });
 });

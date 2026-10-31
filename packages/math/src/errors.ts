@@ -39,6 +39,23 @@ export const NumberOutOfRange = /* @__PURE__ */ defineFailure('math.number_out_o
     'Keep values within 10 000 digits and an exponent of 10 000, or use parseDecimal for values past the float range.',
 });
 
+/**
+ * A currency code is not well formed: it must be three ASCII letters (`'USD'`). `formatCurrency` and the other
+ * formatters that take a currency return this failure instead of throwing the `RangeError` that `Intl` throws.
+ * The code is not checked against the ISO 4217 list; an unknown but well-formed code such as `'XYZ'` is formatted.
+ *
+ * @fix Check the currency code the caller passed: three ASCII letters such as `'USD'`, and not an empty string.
+ * @verify cd packages/math && bun run vitest run src/format.test.ts
+ */
+export const InvalidCurrency = /* @__PURE__ */ defineFailure('math.invalid_currency', {
+  status: 400,
+  message: 'Currency code is not three ASCII letters.',
+  remediation: 'Pass an ISO 4217 style code of three letters, such as USD or EUR.',
+});
+
+/** A failure value returned by a formatter when the currency code is malformed. */
+export type InvalidCurrencyFailure = FailureOf<typeof InvalidCurrency>;
+
 /** Every failure a `@arki/math` parser returns. The one list; {@link MathParseFailure} is derived from it. */
 export const MATH_PARSE_FAILURES = [InvalidNumber, NumberOutOfRange] as const;
 

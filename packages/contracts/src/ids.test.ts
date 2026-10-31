@@ -88,6 +88,15 @@ describe('defineId', () => {
   it.each([null, {}, { kind: 42 }, { kind: '' }])('rejects malformed static domain options %j', options => {
     expect(() => Reflect.apply(defineId, null, ['id_', options])).toThrow('ARKI_CONTRACTS_E009');
   });
+
+  it('is() accepts any value, never throws, and is true only for an id with the prefix', () => {
+    const postId = defineId('post_');
+    for (const value of [null, undefined, 1n, Symbol('x'), Object.create(null), [], () => 1, 'post_', 'x']) {
+      expect(() => postId.is(value)).not.toThrow();
+    }
+    expect(postId.is('post_abc')).toBe(true);
+    expect(postId.is('abc')).toBe(false);
+  });
 });
 
 describe('assertUniqueIdPrefixes', () => {

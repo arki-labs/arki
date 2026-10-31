@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
-import { isNotNull } from 'drizzle-orm';
+import { isNotNull, sql } from 'drizzle-orm';
 import { pgTable, serial, text } from 'drizzle-orm/pg-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -131,6 +131,18 @@ describe('callers inside withTransaction', () => {
     ).rejects.toBe(failure);
 
     expect(await countWidgets()).toBe(0);
+  });
+
+  it('rethrows a lost connection instead of passing a test whose transaction never finished', async () => {
+    await expect(
+      tester.withTransaction(async () => {
+        const [row] = await tester.currentDb.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`).then(r => r.rows);
+        // Another connection ends the transaction's backend, so the rollback that follows has no connection.
+        await tester.db.execute(sql`select pg_terminate_backend(${row?.pid})`);
+      }),
+    ).rejects.toThrow(/rollback/);
+    // The pool may hand out the dead client once more; let that query fail here, not in afterEach.
+    await Promise.allSettled([tester.db.execute(sql`select 1`)]);
   });
 
   it('leaves no transaction open after a rollback', async () => {

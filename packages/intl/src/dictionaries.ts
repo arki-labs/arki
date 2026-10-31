@@ -29,11 +29,13 @@ export const loadMessagesFromMultipleDictionaries = async (
   const dictionaries = [generalDictionaries, ...featureDictionaries];
 
   for (const dictionary of dictionaries) {
-    if (locale in dictionary) {
-      messages = deepMerge(messages, await dictionary[locale as keyof typeof dictionary]());
-    } else if (defaultLocale in dictionary) {
-      messages = deepMerge(messages, await dictionary[defaultLocale as keyof typeof dictionary]());
-    }
+    // Own keys only: the locale is outside text, and `'__proto__'` or `'toString'` must not match a prototype member.
+    const load = Object.hasOwn(dictionary, locale)
+      ? dictionary[locale as keyof typeof dictionary]
+      : Object.hasOwn(dictionary, defaultLocale)
+        ? dictionary[defaultLocale as keyof typeof dictionary]
+        : undefined;
+    if (load !== undefined) messages = deepMerge(messages, await load());
   }
 
   return messages;

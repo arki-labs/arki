@@ -2,6 +2,7 @@
  * The shipped scorers. `shape` and `containsFacts` are plain code and may run anywhere.
  * `grounded` and `rubric` ask a judge; `similarTo` asks an embedder.
  */
+import { isFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { formatIssues } from '@arki/schema';
 
@@ -68,11 +69,13 @@ export const grounded = <TOutput extends string = string, TInput = unknown, TExp
       const source = resolveFromSample(options.source, sample);
       const atLeast = options.atLeast ?? 0.9;
       const maxClaims = options.maxClaims ?? 12;
-      const { claims } = await judge.extract({
+      const answer = await judge.extract({
         system: `${GROUNDED_SYSTEM} List at most ${maxClaims} claims.`,
         prompt: `SOURCE:\n${source}\n\nOUTPUT:\n${sample.output}`,
         schema: claimsSchema,
       });
+      if (isFailure(answer)) return unscorable('grounded', `the judge could not answer: ${answer.message}`);
+      const { claims } = answer;
       const listed = claims.slice(0, maxClaims);
       if (listed.length === 0) return unscorable('grounded', 'the judge found no checkable claims in the output');
       const normalizedSource = normalizeText(source);
@@ -145,7 +148,9 @@ export const similarTo = <TOutput extends string = string, TInput = unknown, TEx
     async score(sample, tools) {
       const embedder = requireEmbedder(tools, 'similarTo');
       const reference = resolveFromSample(expected, sample);
-      const [outputVector, referenceVector] = await embedder.embed([sample.output, reference]);
+      const vectors = await embedder.embed([sample.output, reference]);
+      if (isFailure(vectors)) return unscorable('similarTo', `the embedder could not answer: ${vectors.message}`);
+      const [outputVector, referenceVector] = vectors;
       if (outputVector === undefined || referenceVector === undefined)
         return unscorable('similarTo', 'the embedder returned no vectors');
       const value = cosine(outputVector, referenceVector);
@@ -169,6 +174,7 @@ export const rubric = <TOutput extends string = string, TInput = unknown, TExpec
     async score(sample, tools) {
       const judge = requireJudge(tools, 'rubric');
       const verdict = await judge.verdict({ rubric: resolveFromSample(criterion, sample), output: sample.output });
+      if (isFailure(verdict)) return unscorable('rubric', `the judge could not answer: ${verdict.message}`);
       return scored('rubric', verdict.pass ? 1 : 0, verdict.pass, verdict.reason);
     },
   });

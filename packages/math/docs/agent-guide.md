@@ -34,7 +34,7 @@ total.times('0.19').toScale(2, 'halfEven').toString(); // '11.45'
 
 ### Format and parse numbers
 
-1. Show with `formatNumber`, `formatCurrency` or `formatPercent` from `@arki/math/format`.
+1. Show with `formatNumber`, `formatCurrency` or `formatPercent` from `@arki/math/format`. `formatCurrency` returns `InvalidCurrency` for a code that is not three letters.
 2. Read locale text with `parseNumber` or `parseDecimal` from `@arki/math/parse`. They return the value or a failure (`InvalidNumber`, `NumberOutOfRange`); check with `isFailure` from `@arki/failure`.
 
 ### Statistics, distributions and roots

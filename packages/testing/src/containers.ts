@@ -76,42 +76,72 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   process.env.AUTH_SECRET = 'test-secret-key-for-testing-only';
   process.env.VITE_URL = 'http://localhost:3000';
 
-  console.log('🚀 Starting shared PostgreSQL container...');
-  const pgStart = Date.now();
-  sharedPostgresContainer = await startPostgresContainer(options?.postgresImage);
-  const postgresUri = sharedPostgresContainer.getConnectionUri();
-  Reflect.set(globalThis, POSTGRES_GLOBAL_KEY, postgresUri);
+  try {
+    console.log('🚀 Starting shared PostgreSQL container...');
+    const pgStart = Date.now();
+    sharedPostgresContainer = await startPostgresContainer(options?.postgresImage);
+    const postgresUri = sharedPostgresContainer.getConnectionUri();
+    Reflect.set(globalThis, POSTGRES_GLOBAL_KEY, postgresUri);
 
-  // Set database environment variables
-  debugContainers.debug('[containers] Setting database environment variables');
-  process.env.DB_URL = postgresUri;
+    // Set database environment variables
+    debugContainers.debug('[containers] Setting database environment variables');
+    process.env.DB_URL = postgresUri;
 
-  const pgElapsed = ((Date.now() - pgStart) / 1000).toFixed(2);
-  debugContainers.debug('[containers] PostgreSQL setup completed in {pgElapsed}s', { pgElapsed });
-  console.log(`✓ Shared PostgreSQL container started in ${pgElapsed}s`);
-  console.log(`  Connection: ${postgresUri}`);
+    const pgElapsed = ((Date.now() - pgStart) / 1000).toFixed(2);
+    debugContainers.debug('[containers] PostgreSQL setup completed in {pgElapsed}s', { pgElapsed });
+    console.log(`✓ Shared PostgreSQL container started in ${pgElapsed}s`);
+    console.log(`  Connection: ${postgresUri}`);
 
-  console.log('🚀 Starting shared Redis container...');
-  const redisStart = Date.now();
-  sharedRedisContainer = await startRedisContainer(options?.redisImage);
-  const redisHost = sharedRedisContainer.getHost();
-  const redisPort = sharedRedisContainer.getMappedPort(6379);
-  const redisUrl = `redis://${redisHost}:${redisPort}`;
-  Reflect.set(globalThis, REDIS_GLOBAL_KEY, redisUrl);
+    console.log('🚀 Starting shared Redis container...');
+    const redisStart = Date.now();
+    sharedRedisContainer = await startRedisContainer(options?.redisImage);
+    const redisHost = sharedRedisContainer.getHost();
+    const redisPort = sharedRedisContainer.getMappedPort(6379);
+    const redisUrl = `redis://${redisHost}:${redisPort}`;
+    Reflect.set(globalThis, REDIS_GLOBAL_KEY, redisUrl);
 
-  // Set Redis environment variables
-  debugContainers.debug('[containers] Setting Redis environment variables');
-  process.env.REDIS_URL = redisUrl;
-  process.env.KV_URL = redisUrl;
+    // Set Redis environment variables
+    debugContainers.debug('[containers] Setting Redis environment variables');
+    process.env.REDIS_URL = redisUrl;
+    process.env.KV_URL = redisUrl;
 
-  const redisElapsed = ((Date.now() - redisStart) / 1000).toFixed(2);
-  debugContainers.debug('[containers] Redis setup completed in {redisElapsed}s', { redisElapsed });
-  console.log(`✓ Shared Redis container started in ${redisElapsed}s`);
-  console.log(`  Connection: ${redisUrl}`);
+    const redisElapsed = ((Date.now() - redisStart) / 1000).toFixed(2);
+    debugContainers.debug('[containers] Redis setup completed in {redisElapsed}s', { redisElapsed });
+    console.log(`✓ Shared Redis container started in ${redisElapsed}s`);
+    console.log(`  Connection: ${redisUrl}`);
+
+  } catch (error) {
+    // A later step failed: stop what already started, and forget its connection strings.
+    debugContainers.debug('[containers] Setup failed, stopping the containers already started');
+    await Promise.allSettled([stopSharedContainers()]);
+    Reflect.deleteProperty(globalThis, POSTGRES_GLOBAL_KEY);
+    Reflect.deleteProperty(globalThis, REDIS_GLOBAL_KEY);
+    delete process.env.DB_URL;
+    delete process.env.REDIS_URL;
+    delete process.env.KV_URL;
+    throw error;
+  }
 
   const totalElapsed = ((Date.now() - totalStartTime) / 1000).toFixed(2);
   debugContainers.debug('[containers] All shared containers setup completed in {totalElapsed}s', { totalElapsed });
   console.log(`\n✨ All shared containers started in ${totalElapsed}s`);
+}
+
+/**
+ * Stops the shared Postgres and Redis containers, both even when the first stop rejects. One
+ * rejection is rethrown as it is; both are thrown together as an `AggregateError`.
+ */
+async function stopSharedContainers(): Promise<void> {
+  const postgres = sharedPostgresContainer;
+  const redis = sharedRedisContainer;
+  sharedPostgresContainer = undefined;
+  sharedRedisContainer = undefined;
+  const stopped = await Promise.allSettled([postgres?.stop(), redis?.stop()]);
+  const errors: unknown[] = stopped.flatMap(result => (result.status === 'rejected' ? [result.reason] : []));
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'Several shared containers failed to stop.');
+  if (postgres) console.log('✓ Shared PostgreSQL container stopped');
+  if (redis) console.log('✓ Shared Redis container stopped');
 }
 
 export async function teardownGlobalTestContainers(): Promise<void> {
@@ -125,28 +155,12 @@ export async function teardownGlobalTestContainers(): Promise<void> {
   debugContainers.debug('[containers] Waiting for connections to close...');
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  if (sharedPostgresContainer) {
-    debugContainers.debug('[containers] Stopping PostgreSQL container');
-    await sharedPostgresContainer.stop();
-    sharedPostgresContainer = undefined;
-    debugContainers.debug('[containers] PostgreSQL container stopped');
-    console.log('✓ Shared PostgreSQL container stopped');
-  } else {
-    debugContainers.debug('[containers] No PostgreSQL container to stop');
+  try {
+    await stopSharedContainers();
+  } finally {
+    debugContainers.debug('[containers] Clearing global connection strings');
+    Reflect.deleteProperty(globalThis, POSTGRES_GLOBAL_KEY);
+    Reflect.deleteProperty(globalThis, REDIS_GLOBAL_KEY);
   }
-
-  if (sharedRedisContainer) {
-    debugContainers.debug('[containers] Stopping Redis container');
-    await sharedRedisContainer.stop();
-    sharedRedisContainer = undefined;
-    debugContainers.debug('[containers] Redis container stopped');
-    console.log('✓ Shared Redis container stopped');
-  } else {
-    debugContainers.debug('[containers] No Redis container to stop');
-  }
-
-  debugContainers.debug('[containers] Clearing global connection strings');
-  Reflect.deleteProperty(globalThis, POSTGRES_GLOBAL_KEY);
-  Reflect.deleteProperty(globalThis, REDIS_GLOBAL_KEY);
   debugContainers.debug('[containers] Teardown complete');
 }

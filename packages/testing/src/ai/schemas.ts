@@ -76,3 +76,64 @@ export const claimsSchema = schemaOf<{ readonly claims: readonly CheckedClaim[] 
   },
   '{ claims: { claim: string, supported: boolean, quote: string }[] }',
 );
+
+/** What `GET /api/tags` returns that the kit reads: each installed model's name and digest. */
+export const tagsAnswerSchema = schemaOf<{ readonly models: readonly { readonly name: string; readonly digest: string }[] }>(
+  {
+    type: 'object',
+    properties: {
+      models: {
+        type: 'array',
+        items: { type: 'object', properties: { name: { type: 'string' }, digest: { type: 'string' } } },
+      },
+    },
+  },
+  value => {
+    if (!is(value, recordSchema)) return null;
+    const listed: unknown = value['models'] ?? [];
+    if (!Array.isArray(listed)) return null;
+    const models: { readonly name: string; readonly digest: string }[] = [];
+    const items: readonly unknown[] = listed;
+    for (const item of items) {
+      if (!is(item, recordSchema)) return null;
+      // A model without a name or a digest cannot be matched, so it is left out rather than failing the list.
+      if (typeof item['name'] === 'string' && typeof item['digest'] === 'string')
+        models.push({ name: item['name'], digest: item['digest'] });
+    }
+    return { models };
+  },
+  '{ models?: { name: string, digest: string }[] }',
+);
+
+/** What `POST /api/chat` returns that the judge reads: the text of the answer. */
+export const chatAnswerSchema = schemaOf<{ readonly content: string }>(
+  { type: 'object', properties: { message: { type: 'object', properties: { content: { type: 'string' } } } } },
+  value => {
+    if (!is(value, recordSchema)) return null;
+    const message: unknown = value['message'];
+    return is(message, recordSchema) && typeof message['content'] === 'string' ? { content: message['content'] } : null;
+  },
+  '{ message: { content: string } }',
+);
+
+/** What `POST /api/embed` returns that the embedder reads: one vector of numbers per text. */
+export const embedAnswerSchema = schemaOf<{ readonly embeddings: readonly (readonly number[])[] }>(
+  { type: 'object', properties: { embeddings: { type: 'array', items: { type: 'array', items: { type: 'number' } } } } },
+  value => {
+    if (!is(value, recordSchema) || !Array.isArray(value['embeddings'])) return null;
+    const embeddings: (readonly number[])[] = [];
+    const vectors: readonly unknown[] = value['embeddings'];
+    for (const vector of vectors) {
+      if (!Array.isArray(vector)) return null;
+      const numbers: readonly unknown[] = vector;
+      const checked: number[] = [];
+      for (const entry of numbers) {
+        if (typeof entry !== 'number') return null;
+        checked.push(entry);
+      }
+      embeddings.push(checked);
+    }
+    return { embeddings };
+  },
+  '{ embeddings: number[][] }',
+);

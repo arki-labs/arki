@@ -16,6 +16,7 @@ import type {
 import { test as base } from '@playwright/test';
 import type { TestType } from '@playwright/test';
 
+import { orThrow } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { MailpitWorker, Mailbox, MailSummary, ReceivedMail } from '../services/mailpit.js';
@@ -26,7 +27,7 @@ import { truncateAll } from '../services/postgres.js';
 import { flushRedis } from '../services/redis.js';
 import { expect } from '../ai/playwright.js';
 import { readManifest } from '../stack/index.js';
-import { freePort, startServer } from './server.js';
+import { serveWorker } from './server.js';
 
 const log = getLogger('arki:testing:e2e');
 
@@ -120,18 +121,12 @@ export function e2eTest<M extends E2EServices, TServices, TUser, TFactories>(
     server: [
       // eslint-disable-next-line no-empty-pattern -- Playwright reads a fixture's needs from the destructured first argument
       async ({}, use, workerInfo) => {
-        const slice = await options.stack.attach(readManifest()).worker(workerInfo.parallelIndex);
-        const port = await freePort();
-        const env = slice.envFor(`http://localhost:${port}`);
-        const started = performance.now();
-        const running = await startServer({ serve: options.serve, env, port });
-        log.debug('Server of worker {worker} ready in {ms} ms', {
-          worker: workerInfo.parallelIndex,
-          ms: Math.round(performance.now() - started),
+        await serveWorker({
+          stack: options.stack.attach(orThrow(readManifest())),
+          workerIndex: workerInfo.parallelIndex,
+          serve: options.serve,
+          use,
         });
-        await use(Object.assign(running, { env, values: slice.values }));
-        await running.stop();
-        await slice.stop();
       },
       { scope: 'worker' },
     ],

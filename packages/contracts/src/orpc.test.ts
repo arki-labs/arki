@@ -80,6 +80,13 @@ describe('operationAt', () => {
     expect(operationAt(contract, ['posts', 'missing'])).toBeUndefined();
     expect(operationAt(contract, ['posts'])).toBeUndefined();
   });
+
+  it('is undefined for a path that is too deep, unknown at the root, or empty, and names the operation it finds', () => {
+    expect(operationAt(contract, ['posts', 'create', 'deeper'])).toBeUndefined();
+    expect(operationAt(contract, ['nope', 'create'])).toBeUndefined();
+    expect(operationAt(contract, [])).toBeUndefined();
+    expect(operationAt(contract, ['posts', 'create'])?.name).toBe('posts.create');
+  });
 });
 
 describe('operationOf', () => {

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { decimal } from './decimal.js';
-import { InvalidArgumentError, NumberFormatError, NumericRangeError } from './errors.js';
+import type { InvalidCurrencyFailure } from './errors.js';
+import { InvalidArgumentError, InvalidCurrency, NumberFormatError, NumericRangeError } from './errors.js';
 import {
   createFormatter,
   formatCompact,
@@ -11,6 +12,12 @@ import {
   formatPercent,
   RUNTIME_LOCALE,
 } from './format.js';
+
+/** The formatted text, failing the test when a failure came back. */
+function textOf(result: string | InvalidCurrencyFailure): string {
+  if (typeof result !== 'string') throw new Error(`expected text, got failure ${result.code}`);
+  return result;
+}
 
 describe('formatNumber', () => {
   it('formats a Decimal exactly, with no float noise', () => {
@@ -52,7 +59,7 @@ describe('formatNumber', () => {
 
 describe('formatCurrency', () => {
   it('uses locale conventions', () => {
-    expect(formatCurrency(1234.5, 'EUR', { locale: 'de-DE' }).replaceAll('\u00A0', ' ')).toBe('1.234,50 €');
+    expect(textOf(formatCurrency(1234.5, 'EUR', { locale: 'de-DE' })).replaceAll('\u00A0', ' ')).toBe('1.234,50 €');
   });
 
   it('supports accounting negatives', () => {
@@ -137,6 +144,27 @@ describe('formatFileSize', () => {
     expect(() => formatFileSize(-1)).toThrow(InvalidArgumentError);
     expect(() => formatFileSize(-1n)).toThrow(InvalidArgumentError);
     expect(() => formatFileSize(Infinity)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('malformed currency codes return math.invalid_currency instead of the Intl RangeError', () => {
+  it.each(['XX', '', 'US1', 'USDX', 'u$d'])('formatCurrency(1, %j) returns the failure', code => {
+    expect(InvalidCurrency.is(formatCurrency(1, code))).toBe(true);
+  });
+
+  it('formatCompact with a malformed currency returns the failure; without currency it is still a string', () => {
+    expect(InvalidCurrency.is(formatCompact(1_250_000, { currency: 'XX' }))).toBe(true);
+    expect(formatCompact(1_250_000)).toBe('1.3M');
+  });
+
+  it('a formatter returns the failure for a bad bound or explicit currency and still formats good codes', () => {
+    expect(InvalidCurrency.is(createFormatter({ currency: 'XX' }).formatCurrency(1))).toBe(true);
+    expect(InvalidCurrency.is(createFormatter({ currency: 'USD' }).formatCurrency(1, ''))).toBe(true);
+    expect(createFormatter({ currency: 'USD' }).formatCurrency(1)).toBe('$1.00');
+  });
+
+  it('lower-case three-letter codes are well formed', () => {
+    expect(formatCurrency(1, 'usd')).toBe('$1.00');
   });
 });
 

@@ -1,16 +1,8 @@
 import type { ReactNode } from 'react';
 
-import deMessages from '../../dictionaries/de';
-import enMessages from '../../dictionaries/en';
-
+import { builtinMessagesFor } from './builtin-messages';
+import type { MessageBag } from './builtin-messages';
 import { LocaleProvider } from './context';
-
-type MessageBag = Record<string, unknown>;
-
-const BUILTIN_MESSAGES: Record<string, MessageBag> = {
-  en: enMessages,
-  de: deMessages,
-};
 
 /**
  * Drop-in intl provider for TanStack Start apps.
@@ -40,7 +32,7 @@ export const AppLocaleProvider = ({
   timeZone?: string;
   children: ReactNode;
 }) => {
-  const baseMessages = BUILTIN_MESSAGES[locale] ?? BUILTIN_MESSAGES.en!;
+  const baseMessages = builtinMessagesFor(locale);
   const merged = messages ? { ...baseMessages, ...messages } : baseMessages;
 
   return (

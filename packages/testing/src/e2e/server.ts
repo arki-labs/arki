@@ -10,6 +10,8 @@ import path from 'node:path';
 
 import { getLogger } from '@arki/log';
 
+import type { AttachedStack, Env, ServiceMap, WorkerValues } from '../stack/index.js';
+
 const log = getLogger('arki:testing:e2e');
 
 export type ServerOptions = {
@@ -178,4 +180,40 @@ export async function startServer(options: {
     logs: () => lines.join('\n'),
     stop: halt,
   };
+}
+
+/**
+ * Takes this worker's slice of the stack, starts the app server against it and hands both to `use`.
+ * The server and the slice are stopped on every path (a failed port, a server that never gets ready,
+ * a test that throws), and a stop that rejects does not stop the other one from running.
+ */
+export async function serveWorker<M extends ServiceMap>(options: {
+  readonly stack: AttachedStack<M>;
+  readonly workerIndex: number;
+  readonly serve: ServerOptions['serve'];
+  use(server: RunningServer & { readonly env: Env; readonly values: WorkerValues<M> }): Promise<void>;
+}): Promise<void> {
+  const slice = await options.stack.worker(options.workerIndex);
+  let running: RunningServer | undefined;
+  let failed = false;
+  try {
+    const port = await freePort();
+    const env = slice.envFor(`http://localhost:${port}`);
+    const started = performance.now();
+    running = await startServer({ serve: options.serve, env, port });
+    log.debug('Server of worker {worker} ready in {ms} ms', {
+      worker: options.workerIndex,
+      ms: Math.round(performance.now() - started),
+    });
+    await options.use(Object.assign(running, { env, values: slice.values }));
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    const stops = await Promise.allSettled([running?.stop(), slice.stop()]);
+    const errors: unknown[] = stops.flatMap(stop => (stop.status === 'rejected' ? [stop.reason] : []));
+    // The first error is the one worth seeing; a stop error is thrown only when nothing else went wrong.
+    // eslint-disable-next-line no-unsafe-finally -- throws only when the body succeeded, so no other error is replaced
+    if (!failed && errors.length > 0) throw errors.length === 1 ? errors[0] : new AggregateError(errors, 'Stopping the worker server failed.');
+  }
 }

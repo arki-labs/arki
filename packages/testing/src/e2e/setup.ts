@@ -24,22 +24,37 @@ export function stackSetup<M extends ServiceMap>(stack: Stack<M>, options: Pick<
   return async function globalSetup(): Promise<() => Promise<void>> {
     const runId = `e${Date.now().toString(36)}${randomBytes(2).toString('hex')}`;
     const begin = performance.now();
-    const [running, built] = await Promise.all([stack.start({ runId }), ensureBuilt(options.build)]);
+    // Both run together to save time, and both are settled before anything is decided: a build that
+    // fails while the stack is still starting must not leave the stack's containers behind.
+    const [started, built] = await Promise.allSettled([stack.start({ runId }), ensureBuilt(options.build)]);
+    if (started.status === 'rejected') throw started.reason;
+    const running = started.value;
+    const root = await mkdtemp(path.join(tmpdir(), `arki-e2e-${runId}-`)).catch(async error => {
+      await Promise.allSettled([running.stop()]);
+      throw error;
+    });
+    try {
+      if (built.status === 'rejected') throw built.reason;
+      // The run serves its own copy of the build: another build in the same working tree (a teammate's
+      // `vite build`, the next run's rebuild) replaces `.output` while this run's servers read from it.
+      const outputName = path.relative(options.build.cwd, path.dirname(path.dirname(options.build.output)));
+      await cp(path.dirname(path.dirname(options.build.output)), path.join(root, outputName), { recursive: true });
+    } catch (error) {
+      await Promise.allSettled([running.stop(), rm(root, { recursive: true, force: true })]);
+      throw error;
+    }
     process.env[STACK_ENV_KEY] = JSON.stringify(running.manifest);
-    // The run serves its own copy of the build: another build in the same working tree (a teammate's
-    // `vite build`, the next run's rebuild) replaces `.output` while this run's servers read from it.
-    const root = await mkdtemp(path.join(tmpdir(), `arki-e2e-${runId}-`));
-    const outputName = path.relative(options.build.cwd, path.dirname(path.dirname(options.build.output)));
-    await cp(path.dirname(path.dirname(options.build.output)), path.join(root, outputName), { recursive: true });
     process.env[SERVER_ROOT_ENV_KEY] = root;
     log.debug('Stack {runId} ready in {ms} ms (built: {built})', {
       runId,
       ms: Math.round(performance.now() - begin),
-      built,
+      built: built.value,
     });
     return async () => {
-      await running.stop();
-      await rm(root, { recursive: true, force: true });
+      // The folder is removed even when a service refuses to stop.
+      const [stopped, removed] = await Promise.allSettled([running.stop(), rm(root, { recursive: true, force: true })]);
+      if (stopped.status === 'rejected') throw stopped.reason;
+      if (removed.status === 'rejected') throw removed.reason;
     };
   };
 }

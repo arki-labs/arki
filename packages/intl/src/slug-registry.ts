@@ -37,7 +37,7 @@ export class SlugRegistry {
     // Try scoped lookup first; fall back to unscoped
     return (
       this.bySlug.get(this.key(locale, slug, scope)) ??
-      this.bySlug.get(this.key(locale, slug, undefined))
+      this.bySlug.get(this.key(locale, slug))
     );
   }
 
@@ -58,12 +58,12 @@ export class SlugRegistry {
     const toolSlug = this.getSlug(resourceId, targetLocale);
     if (!toolSlug) return englishUrl;
     // Strip leading/trailing slashes, split segments
-    const segments = englishUrl.replace(/^\/|\/$/g, '').split('/');
+    const segments = englishUrl.replaceAll(/^\/|\/$/g, '').split('/');
     segments[segments.length - 1] = toolSlug;
     return `/${targetLocale}/${segments.join('/')}/`;
   }
 
-  private key(locale: string, slug: string, scope: string | undefined): string {
+  private key(locale: string, slug: string, scope?: string): string {
     return `${locale}:${scope ?? ''}:${slug}`;
   }
 }

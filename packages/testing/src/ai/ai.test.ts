@@ -4,6 +4,8 @@
  */
 import { describe, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import { ollama } from '../services/ollama.js';
 import { cosine, createEmbedder, createJudge } from './judge.js';
 import { UnscorableError } from './matcher.js';
@@ -120,11 +122,13 @@ describe('similarTo', { timeout: 180_000 }, () => {
   it('separates a paraphrase from an unrelated text, and is documented as gist only', async () => {
     const embedder = await createEmbedder({ model: EMBEDDING });
     const anchor = 'Streets with 30 percent tree canopy were 4 degrees cooler at noon.';
-    const [a, paraphrase, unrelated] = await embedder.embed([
+    const vectors = await embedder.embed([
       anchor,
       'At midday, streets whose canopy covered 30% were cooler by four degrees.',
       'Posten cut Saturday letter delivery in 2016.',
     ]);
+    if (isFailure(vectors)) throw new Error(vectors.message);
+    const [a, paraphrase, unrelated] = vectors;
     if (a === undefined || paraphrase === undefined || unrelated === undefined)
       throw new Error('embedder returned too few vectors');
     const close = cosine(a, paraphrase);

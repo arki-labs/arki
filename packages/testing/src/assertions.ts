@@ -230,6 +230,7 @@ export async function assertNoError(callback: () => Promise<unknown>): Promise<v
   } catch (error) {
     throw new Error(
       `Expected function not to throw an error, but it threw: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }
@@ -404,7 +405,7 @@ function compareValues(a: unknown, b: unknown, field: PropertyKey): number {
  */
 export function assertOneOf<T>(value: T, expectedValues: T[], label = 'value'): void {
   if (!expectedValues.includes(value)) {
-    throw new Error(`Expected ${label} to be one of [${expectedValues.join(', ')}], got ${value}`);
+    throw new Error(`Expected ${label} to be one of [${expectedValues.join(', ')}], got ${String(value)}`);
   }
 }
 

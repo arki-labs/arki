@@ -3,14 +3,47 @@
  * temperature 0 so the same input gives the same answer. A judge is built from a model name and
  * refuses to be the model under test.
  */
+import type { FailureOf } from '@arki/failure';
 import type { SchemaWithJson } from '@arki/schema';
-import { orThrow } from '@arki/failure';
+import { defineFailure, isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
 import type { Verdict } from './schemas.js';
-import { verdictSchema } from './schemas.js';
+import { chatAnswerSchema, embedAnswerSchema, tagsAnswerSchema, verdictSchema } from './schemas.js';
 
 export type { Verdict } from './schemas.js';
+
+/**
+ * Ollama did not answer: it is not running, the call timed out, or it answered with an error status.
+ * A scorer turns it into an `unscorable` score, so a missing judge is never read as a pass or a zero.
+ *
+ * @fix Start the daemon with `ollama serve`, check the model is pulled, or raise `timeoutMs`.
+ * @verify cd packages/testing && bun run vitest run src/ai/judge.test.ts
+ */
+export const OllamaUnavailable = /* @__PURE__ */ defineFailure('testing.ollama_unavailable', {
+  status: 503,
+  message: 'Ollama did not answer the call.',
+  remediation: 'Start it with `ollama serve`, check the model is pulled, or raise timeoutMs.',
+});
+
+/**
+ * Ollama answered, but not in the shape the call asked for: the chat text is not JSON, it does not match the
+ * schema, or the embed answer is not one vector per text.
+ *
+ * @fix Use a stronger judge model, or shorten the text so the answer is not cut off at `maxTokens`.
+ * @verify cd packages/testing && bun run vitest run src/ai/judge.test.ts
+ */
+export const OllamaAnswerInvalid = /* @__PURE__ */ defineFailure('testing.ollama_answer_invalid', {
+  status: 502,
+  message: 'Ollama answered in a shape the call cannot use.',
+  remediation: 'Use a stronger model, or raise maxTokens so the answer is not cut off.',
+});
+
+/** Every failure a judge or an embedder call returns. */
+export const OLLAMA_FAILURES = [OllamaUnavailable, OllamaAnswerInvalid] as const;
+
+/** A failure value returned by a judge or an embedder call. */
+export type OllamaFailure = FailureOf<(typeof OLLAMA_FAILURES)[number]>;
 
 export type Judge = {
   readonly model: string;
@@ -22,18 +55,18 @@ export type Judge = {
     readonly output: string;
     readonly input?: string;
     readonly source?: string;
-  }): Promise<Verdict>;
+  }): Promise<Verdict | OllamaFailure>;
   /** Structured extraction for scorers where the judge extracts and code decides. */
   extract<TOutput>(input: {
     readonly system: string;
     readonly prompt: string;
     readonly schema: SchemaWithJson<unknown, TOutput>;
-  }): Promise<TOutput>;
+  }): Promise<TOutput | OllamaFailure>;
 };
 
 export type Embedder = {
   readonly model: string;
-  embed(texts: readonly string[]): Promise<readonly (readonly number[])[]>;
+  embed(texts: readonly string[]): Promise<readonly (readonly number[])[] | OllamaFailure>;
 };
 
 export type JudgeOptions = {
@@ -48,31 +81,58 @@ export type JudgeOptions = {
   readonly seed?: number;
   /** Tokens the judge may write per call. Default 1500. */
   readonly maxTokens?: number;
+  /** How long a chat or embed call may take before it is `OllamaUnavailable`. Default 120 000. */
+  readonly timeoutMs?: number;
 };
 
 const DEFAULT_URL = 'http://127.0.0.1:11434';
 
-type TagsAnswer = { readonly models?: readonly { readonly name?: string; readonly digest?: string }[] };
-type ChatAnswer = { readonly message?: { readonly content?: string } };
-type EmbedAnswer = { readonly embeddings?: readonly (readonly number[])[] };
+const DEFAULT_TIMEOUT_MS = 120_000;
 
-async function post(url: string, path: string, body: Readonly<Record<string, unknown>>): Promise<unknown> {
-  const response = await fetch(`${url}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok)
-    throw new Error(`OLLAMA_REQUEST_FAILED: ${path} answered ${response.status}: ${await response.text()}`);
-  return response.json();
+/** POSTs to Ollama and returns the JSON answer, or `OllamaUnavailable` when it cannot be reached or refuses. */
+async function post(
+  url: string,
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  timeoutMs: number,
+): Promise<unknown> {
+  try {
+    const response = await fetch(`${url}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      return OllamaUnavailable({
+        cause: new Error(`${path} answered ${response.status}: ${await response.text()}`),
+      });
+    }
+    return (await response.json());
+  } catch (error) {
+    return OllamaUnavailable({ cause: error });
+  }
 }
 
-/** The digest of an installed model, or `undefined` when Ollama does not list it (a cloud model, say). */
+/**
+ * The digest of an installed model, or `undefined` when Ollama does not list it (a cloud model, say).
+ * Throws `OLLAMA_NOT_RUNNING` when nothing answers: a run cannot start without its daemon.
+ */
 export async function digestOf(url: string, model: string): Promise<string | undefined> {
-  const response = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) });
-  // Erasure seam: /api/tags has a fixed shape; only `models[].name` and `.digest` are read.
-  const answer = (await response.json()) as TagsAnswer;
-  return answer.models?.find(entry => entry.name === model)?.digest;
+  let json: unknown;
+  try {
+    const response = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    json = await response.json();
+  } catch (error) {
+    throw new Error(`OLLAMA_NOT_RUNNING: nothing answered at ${url}. Start it with \`ollama serve\`.`, {
+      cause: error,
+    });
+  }
+  const answer = parse(tagsAnswerSchema, json);
+  if (isFailure(answer)) {
+    throw new Error(`OLLAMA_NOT_RUNNING: ${url}/api/tags did not answer like Ollama: ${answer.message}`);
+  }
+  return answer.models.find(entry => entry.name === model)?.digest;
 }
 
 const JUDGE_SYSTEM =
@@ -93,36 +153,44 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
     }
   }
   const seed = options.seed ?? 7;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function extract<TOutput>(input: {
     readonly system: string;
     readonly prompt: string;
     readonly schema: SchemaWithJson<unknown, TOutput>;
-  }): Promise<TOutput> {
+  }): Promise<TOutput | OllamaFailure> {
     const { $schema: _draft, ...format } = input.schema['~standard'].jsonSchema.output({ target: 'draft-2020-12' });
-    const answer = (await post(url, '/api/chat', {
-      model: options.model,
-      stream: false,
-      think: false,
-      keep_alive: '10m',
-      format,
-      options: { temperature: 0, seed, num_predict: options.maxTokens ?? 1500 },
-      messages: [
-        { role: 'system', content: `${JUDGE_SYSTEM} ${input.system}` },
-        { role: 'user', content: input.prompt },
-      ],
-      // Erasure seam: /api/chat has a fixed shape; only `message.content` is read.
-    })) as ChatAnswer;
+    const raw = await post(
+      url,
+      '/api/chat',
+      {
+        model: options.model,
+        stream: false,
+        think: false,
+        keep_alive: '10m',
+        format,
+        options: { temperature: 0, seed, num_predict: options.maxTokens ?? 1500 },
+        messages: [
+          { role: 'system', content: `${JUDGE_SYSTEM} ${input.system}` },
+          { role: 'user', content: input.prompt },
+        ],
+      },
+      timeoutMs,
+    );
+    if (OllamaUnavailable.is(raw)) return raw;
+    const answer = parse(chatAnswerSchema, raw);
+    if (isFailure(answer)) return OllamaAnswerInvalid({ cause: answer });
     let json: unknown;
     try {
-      json = JSON.parse(answer.message?.content ?? '');
+      json = JSON.parse(answer.content);
     } catch (error) {
-      throw new Error(
-        `JUDGE_ANSWER_INVALID: ${options.model} did not answer with JSON: ${answer.message?.content ?? ''}`,
-        { cause: error },
-      );
+      return OllamaAnswerInvalid({
+        cause: new Error(`${options.model} did not answer with JSON: ${answer.content}`, { cause: error }),
+      });
     }
-    return orThrow(parse(input.schema, json));
+    const checked = parse(input.schema, json);
+    return isFailure<unknown>(checked) ? OllamaAnswerInvalid({ cause: checked }) : checked;
   }
 
   return {
@@ -144,24 +212,30 @@ export async function createJudge(options: JudgeOptions): Promise<Judge> {
   };
 }
 
-export async function createEmbedder(options: { readonly url?: string; readonly model: string }): Promise<Embedder> {
+export async function createEmbedder(options: {
+  readonly url?: string;
+  readonly model: string;
+  /** How long an embed call may take before it is `OllamaUnavailable`. Default 120 000. */
+  readonly timeoutMs?: number;
+}): Promise<Embedder> {
   const url = options.url ?? DEFAULT_URL;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if ((await digestOf(url, options.model)) === undefined) {
     throw new Error(`OLLAMA_MODEL_MISSING: ${options.model}. Pull with \`ollama pull ${options.model}\`.`);
   }
   return {
     model: options.model,
     async embed(texts) {
-      // Erasure seam: /api/embed has a fixed shape; only `embeddings` is read.
-      const answer = (await post(url, '/api/embed', {
-        model: options.model,
-        input: texts,
-        keep_alive: '10m',
-      })) as EmbedAnswer;
-      const vectors = answer.embeddings ?? [];
-      if (vectors.length !== texts.length)
-        throw new Error(`EMBEDDING_COUNT_MISMATCH: asked for ${texts.length} vectors, got ${vectors.length}.`);
-      return vectors;
+      const raw = await post(url, '/api/embed', { model: options.model, input: texts, keep_alive: '10m' }, timeoutMs);
+      if (OllamaUnavailable.is(raw)) return raw;
+      const answer = parse(embedAnswerSchema, raw);
+      if (isFailure(answer)) return OllamaAnswerInvalid({ cause: answer });
+      if (answer.embeddings.length !== texts.length) {
+        return OllamaAnswerInvalid({
+          cause: new Error(`asked for ${texts.length} vectors, got ${answer.embeddings.length}`),
+        });
+      }
+      return answer.embeddings;
     },
   };
 }
