@@ -86,6 +86,7 @@ import {
   evaluateDemoImpact,
   evaluateDocsImpact,
   loadChangesets,
+  releaseChangesets,
   resolveBase,
   withBumpErrors,
   type Changeset,
@@ -705,6 +706,8 @@ async function evaluateReleaseDimensions(
     git: inputs.git,
   });
 
+  const impact = releasing ? await impactBaseFor(item.name, dir, published, opts.cwd, inputs) : null;
+
   const readiness = evaluateReadiness({
     config: opts.config,
     dir: packageDir,
@@ -716,10 +719,10 @@ async function evaluateReleaseDimensions(
     dimensions: {
       'docs-fresh': docsFresh,
       'docs-impact': withBumpErrors(
-        releasing ? await evaluateDocsImpactFor(item.name, dir, published, opts.cwd, inputs) : notReleasing,
+        impact === null ? notReleasing : await evaluateDocsImpactFor(item.name, dir, impact, opts.cwd, inputs),
         inputs.bumpErrors.filter(e => e.target === item.name),
       ),
-      'demo-impact': releasing ? evaluateDemoImpactFor(item.name, uses, checks, inputs) : notReleasing,
+      'demo-impact': impact === null ? notReleasing : evaluateDemoImpactFor(item.name, uses, checks, impact.changesets, inputs),
       'demo-lag': demoLag,
       'bench-fresh': benchFresh,
       readiness: readiness.dimension,
@@ -728,34 +731,55 @@ async function evaluateReleaseDimensions(
   };
 }
 
-async function evaluateDocsImpactFor(
+/**
+ * The last release of a package, resolved once for docs-impact and
+ * demo-impact, and the changesets they judge it by (pending plus those
+ * `changeset version` consumed since that release).
+ */
+type ImpactBase =
+  | { readonly kind: 'deferred'; readonly details: string; readonly changesets: readonly Changeset[] }
+  | { readonly kind: 'base'; readonly base: string | null; readonly changesets: readonly Changeset[] };
+
+async function impactBaseFor(
   pkg: string,
   dir: string,
   published: readonly string[] | null,
   cwd: string,
   inputs: ReleaseInputs,
-): Promise<ScorecardDimensionResult> {
+): Promise<ImpactBase> {
   const lastShippedCommit = inputs.lastShipped.get(pkg) ?? null;
   if (published === null && lastShippedCommit === null) {
-    return { status: 'deferred', details: 'npm view failed: no last release to diff the docs against', evidence: [] };
+    return { kind: 'deferred', details: 'npm view failed: no last release to diff the docs against', changesets: inputs.changesets };
   }
   const npmVersion = published?.at(-1) ?? null;
   const base = await resolveBase({ root: cwd, dir, npmVersion, lastShippedCommit, git: inputs.git });
   if (npmVersion !== null && base === null) {
-    return { status: 'deferred', details: `git found no commit that set version ${npmVersion}`, evidence: [] };
+    return { kind: 'deferred', details: `git found no commit that set version ${npmVersion}`, changesets: inputs.changesets };
   }
-  const changedFiles = base === null ? null : await changedSince(cwd, base, dir, inputs.git);
-  return evaluateDocsImpact({ pkg, dir, changedFiles, changesets: inputs.changesets });
+  return { kind: 'base', base, changesets: await releaseChangesets(cwd, base, inputs.changesets, inputs.git) };
+}
+
+async function evaluateDocsImpactFor(
+  pkg: string,
+  dir: string,
+  impact: ImpactBase,
+  cwd: string,
+  inputs: ReleaseInputs,
+): Promise<ScorecardDimensionResult> {
+  if (impact.kind === 'deferred') return { status: 'deferred', details: impact.details, evidence: [] };
+  const changedFiles = impact.base === null ? null : await changedSince(cwd, impact.base, dir, inputs.git);
+  return evaluateDocsImpact({ pkg, dir, changedFiles, changesets: impact.changesets });
 }
 
 function evaluateDemoImpactFor(
   pkg: string,
   uses: readonly DemoUse[],
   checks: Candidate['checks'],
+  changesets: readonly Changeset[],
   inputs: ReleaseInputs,
 ): ScorecardDimensionResult {
   const demos = uses.map(u => u.demo);
-  const result = evaluateDemoImpact({ pkg, demos, candidateChecks: checks, changesets: inputs.changesets });
+  const result = evaluateDemoImpact({ pkg, demos, candidateChecks: checks, changesets });
   // Demo checks live in candidate.json; without one they are unknown, not failed.
   if (result.status === 'fail' && demos.length > 0 && inputs.candidate === null) {
     return { status: 'deferred', details: `demo checks unknown for ${demos.join(', ')}: pass --candidate <dir>`, evidence: [] };

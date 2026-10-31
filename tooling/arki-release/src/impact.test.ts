@@ -1,17 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   checkBumps,
   evaluateDemoImpact,
   evaluateDocsImpact,
+  loadChangesets,
   parseChangeset,
+  releaseChangesets,
   resolveBase,
   runImpact,
   withBumpErrors,
   type Changeset,
 } from './impact';
-import type { GitRunner } from './runners';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { defaultGitRunner, type GitRunner } from './runners';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -182,5 +185,92 @@ describe('base and runImpact', () => {
     expect(result.status).toBe('fail');
     expect(result.evidence.map(e => e.code)).toEqual(['IMPACT_E004']);
     expect(withBumpErrors(passing, [])).toBe(passing);
+  });
+});
+
+describe('changesets consumed by `changeset version`', () => {
+  let repo: string;
+  const run = (...args: string[]): string =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, encoding: 'utf8' }).trim();
+  const write = (relative: string, text: string): void => {
+    mkdirSync(path.dirname(path.join(repo, relative)), { recursive: true });
+    writeFileSync(path.join(repo, relative), text);
+  };
+  const commitAll = (message: string): string => {
+    run('add', '-A');
+    run('commit', '-q', '--allow-empty', '-m', message);
+    return run('rev-parse', 'HEAD');
+  };
+  const reasons = "---\n'@arki/math': minor\n---\n\nChange.\n\nno docs impact: only the parser internals changed\nno demo impact: the demos call no function that changed\n";
+  // Phase 1 of `ship`: `changeset version` deletes the changeset and the orchestrator commits the deletion.
+  const consume = (file: string): void => {
+    rmSync(path.join(repo, '.changeset', file));
+    write('packages/math/package.json', '{"name":"@arki/math","version":"0.5.0"}\n');
+    commitAll('version packages');
+  };
+  const score = (lastShippedCommit: string) =>
+    runImpact({
+      root: repo,
+      packages: [{ name: '@arki/math', dir: 'math', version: '0.5.0', npmVersion: '0.4.0', lastShippedCommit }],
+      git: defaultGitRunner,
+      demosUsing: () => ['calculator'],
+      candidateChecks: {},
+    });
+
+  beforeEach(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'impact-consumed-'));
+    run('init', '-q', '-b', 'main');
+    write('.changeset/README.md', 'Changesets.\n');
+    write('packages/math/package.json', '{"name":"@arki/math","version":"0.4.0"}\n');
+    write('packages/math/src/a.ts', 'export const a = 1;\n');
+  });
+  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+  it('accepts a reason from a changeset that phase 1 consumed', async () => {
+    // Why: the scorecard runs at freeze (phase 2), after `changeset version`
+    // deleted the changeset. Reading only pending files made the documented
+    // `no ... impact:` remedy impossible exactly where the gate runs.
+    const release = commitAll('release 0.4.0');
+    write('packages/math/src/a.ts', 'export const a = 2;\n');
+    write('.changeset/brave-fox.md', reasons);
+    commitAll('feat: change a');
+    consume('brave-fox.md');
+    const env = await score(release);
+    expect(env.items[0]?.dimensions['docs-impact']).toMatchObject({ status: 'pass', details: 'no docs impact: only the parser internals changed' });
+    expect(env.items[0]?.dimensions['demo-impact']).toMatchObject({ status: 'pass', details: 'no demo impact: the demos call no function that changed' });
+  });
+
+  it('ignores a changeset consumed before the last release', async () => {
+    // Why: a reason belongs to the release it was written for. Reusing an old
+    // one would let every later release skip its docs and demos forever.
+    write('.changeset/old-owl.md', reasons);
+    commitAll('feat: old change');
+    consume('old-owl.md');
+    const release = commitAll('release 0.5.0');
+    write('packages/math/src/a.ts', 'export const a = 3;\n');
+    commitAll('feat: change a again');
+    const env = await score(release);
+    expect(env.items[0]?.dimensions['docs-impact'].status).toBe('fail');
+    expect(env.items[0]?.dimensions['demo-impact'].status).toBe('fail');
+  });
+
+  it('reads pending and consumed changesets together, each once', async () => {
+    // Why: a wave can hold a consumed docs reason and a still-pending demo
+    // reason; both must count. A file that is pending again (same name) is
+    // judged by its current text, not by the consumed copy.
+    const release = commitAll('release 0.4.0');
+    write('packages/math/src/a.ts', 'export const a = 2;\n');
+    write('.changeset/docs-reason.md', "---\n'@arki/math': minor\n---\n\nno docs impact: only the parser internals changed\n");
+    write('.changeset/again.md', "---\n'@arki/math': patch\n---\n\nno demo impact: n/a\n");
+    commitAll('feat: change a');
+    consume('docs-reason.md');
+    rmSync(path.join(repo, '.changeset', 'again.md'));
+    commitAll('drop again');
+    write('.changeset/again.md', "---\n'@arki/math': patch\n---\n\nno demo impact: the demos call no function that changed\n");
+    const env = await score(release);
+    expect(env.items[0]?.dimensions['docs-impact'].status).toBe('pass');
+    const demo = env.items[0]?.dimensions['demo-impact'];
+    expect(demo?.status).toBe('pass');
+    expect(await releaseChangesets(repo, release, (await loadChangesets(repo)).changesets, defaultGitRunner)).toHaveLength(2);
   });
 });

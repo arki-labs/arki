@@ -2,9 +2,11 @@
  * Docs and demo impact gate (founder decision A-27).
  *
  * Every package release must update its docs and its demos, unless a
- * pending changeset says why not with a line `no docs impact: <reason>` /
+ * changeset says why not with a line `no docs impact: <reason>` /
  * `no demo impact: <reason>`. A precise reason is the point: a vague one
- * ("n/a") hides exactly the drift this gate exists to catch.
+ * ("n/a") hides exactly the drift this gate exists to catch. The changeset
+ * may be pending or already consumed by `changeset version` since the
+ * package's last release (see `releaseChangesets`).
  *
  * Everything with an effect (git, the demo registry, candidate checks) is
  * injected, so the evaluators are pure and the loaders are testable.
@@ -287,6 +289,52 @@ export async function changedSince(root: string, base: string, dir: string, git:
   return out.stdout.split('\n').map(l => l.trim()).filter(l => l !== '');
 }
 
+/**
+ * The changesets that `changeset version` consumed since `base`: every
+ * `.changeset/*.md` (not the README) deleted in `base..HEAD`, read back from
+ * the commit before the deleting one. `ship` runs `changeset version` in
+ * phase 1 and the scorecard runs in phase 2, so a `no ... impact:` reason
+ * lives only in these by then. Newest deletion first. A file git cannot read
+ * back or parse is skipped: `changeset version` already parsed it, and the
+ * pending changesets stay the ones that report parse errors.
+ */
+export async function consumedChangesets(root: string, base: string, git: GitRunner): Promise<Changeset[]> {
+  const out = await git(['log', '--diff-filter=D', '--name-only', '--format=commit %H', `${base}..HEAD`, '--', '.changeset'], { cwd: root });
+  if (out.code !== 0) return [];
+  const changesets: Changeset[] = [];
+  let commit: string | null = null;
+  for (const line of out.stdout.split('\n').map(l => l.trim())) {
+    if (line.startsWith('commit ')) {
+      commit = line.slice('commit '.length);
+      continue;
+    }
+    const name = path.posix.basename(line);
+    if (commit === null || path.posix.dirname(line) !== '.changeset' || !name.endsWith('.md') || name === 'README.md') continue;
+    const shown = await git(['show', `${commit}^:${line}`], { cwd: root });
+    if (shown.code !== 0) continue;
+    const parsed = parseChangeset(name, shown.stdout);
+    if (parsed.ok) changesets.push(parsed.changeset);
+  }
+  return changesets;
+}
+
+/**
+ * The changesets a package's release is judged by: the pending ones, plus
+ * those consumed since `base` (its last release). A first release (`base`
+ * null) has only pending ones. A file both pending and consumed counts once,
+ * as its pending text.
+ */
+export async function releaseChangesets(root: string, base: string | null, pending: readonly Changeset[], git: GitRunner): Promise<Changeset[]> {
+  if (base === null) return [...pending];
+  const seen = new Set(pending.map(c => c.file));
+  const consumed = (await consumedChangesets(root, base, git)).filter(c => {
+    if (seen.has(c.file)) return false;
+    seen.add(c.file);
+    return true;
+  });
+  return [...pending, ...consumed];
+}
+
 export type ImpactPackage = {
   readonly name: string;
   readonly dir: string;
@@ -323,11 +371,12 @@ export async function runImpact(options: ImpactOptions): Promise<ImpactEnvelope>
   for (const pkg of options.packages) {
     const base = await resolveBase({ root: options.root, dir: pkg.dir, npmVersion: pkg.npmVersion, lastShippedCommit: pkg.lastShippedCommit, git: options.git });
     const changedFiles = base === null ? null : await changedSince(options.root, base, pkg.dir, options.git);
+    const judged = await releaseChangesets(options.root, base, changesets, options.git);
     const docs = withBumpErrors(
-      evaluateDocsImpact({ pkg: pkg.name, dir: pkg.dir, changedFiles, changesets }),
+      evaluateDocsImpact({ pkg: pkg.name, dir: pkg.dir, changedFiles, changesets: judged }),
       bumpErrors.filter(e => e.target === pkg.name),
     );
-    const demo = evaluateDemoImpact({ pkg: pkg.name, demos: options.demosUsing(pkg.name), candidateChecks: options.candidateChecks, changesets });
+    const demo = evaluateDemoImpact({ pkg: pkg.name, demos: options.demosUsing(pkg.name), candidateChecks: options.candidateChecks, changesets: judged });
     errors.push(...docs.evidence, ...demo.evidence);
     items.push({ name: pkg.name, dimensions: { 'docs-impact': docs, 'demo-impact': demo } });
   }
