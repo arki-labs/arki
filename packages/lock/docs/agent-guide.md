@@ -27,12 +27,13 @@ import { memoryStore } from '@arki/lock/memory';
 const locks = createLocks({ store: memoryStore(), namespace: 'pizzeria' });
 
 /** Grab the last slice unless someone else is already reaching for it. */
-export async function grabLastSlice(grab: () => Promise<number>): Promise<string> {
+export async function grabLastSlice(grab: () => Promise<number>) {
   const result = await locks.mutex('last-slice').tryRun(async ({ signal }) => {
     signal.throwIfAborted(); // aborts if the lock is lost
     return grab();
   });
   if (LockHeld.is(result)) return 'skipped: someone else already has the last slice';
+  if (isFailure(result)) return result;
   return `sent ${result}`;
 }
 ```

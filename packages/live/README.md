@@ -364,7 +364,7 @@ export function NewPost() {
 }
 ```
 
-`awaitTxId` resolves when a `change` frame names the receipt (also when one already did, among the last 1024) or a reset refetched every live query; it resolves a `live.receipt_timeout` failure after `timeoutMs` (default 10 000) and rejects with E001 when no provider is mounted for that client.
+`awaitTxId` resolves when a `change` frame names the receipt (also when one already did, among the last 1024) or a reset refetched every live query; it resolves a `ReceiptTimeout` failure (`live.receipt_timeout`) after `timeoutMs` (default 10 000) and rejects with E001 when no provider is mounted for that client.
 
 ### TanStack DB
 

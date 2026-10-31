@@ -7,14 +7,14 @@ Match errors on `error.code`, never on the message. Output is only as narrow as 
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/http`: typed HTTP for ARKI. `HTTP_CLIENT_FAILURES`, `HTTP_ERROR_CODES`, `HTTP_SERVER_FAILURES`, `HttpConfigError`, `HttpError`, `IDEMPOTENCY_FAILURES`, `IdempotencyClaimUnconfirmed`, `IdempotencyHashUnavailable`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `IdempotencyOwnershipLost`; and 92 more.
+- `@arki/http`: typed HTTP for ARKI. `HTTP_CLIENT_FAILURES`, `HTTP_ERROR_CODES`, `HTTP_SERVER_FAILURES`, `HttpConfigError`, `HttpError`, `IDEMPOTENCY_FAILURES`, `IdempotencyClaimUnconfirmed`, `IdempotencyHashUnavailable`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `IdempotencyOwnershipLost`; and 91 more.
 - `@arki/http/dot`: DOT adapter for @arki/http — the `http()` entrypoint. `HTTP_PLUGIN_ERROR_CODES`, `endpoints`, `http`, `registerRoutes`; types `BundleNeeds`, `BundleToken`, `EndpointsEntrypoint`, `HttpOptions`, `HttpServer`, `HttpServices`.
 - `@arki/http/projection`: DOT projection entry point for `dot explain --as openapi`. `project`.
 - `@arki/http/client`: A typed fetch client built from the same route contracts the server binds. `HTTP_CLIENT_FAILURES`, `NetworkFailure`, `RequestCancelled`, `RequestTimeout`, `createClient`, `retryTransient`; types `ClientCall`, `ClientInput`, `ClientOptions`, `ClientOutput`, `ClientPolicy`, `HttpClientFailure`; and 1 more.
 - `@arki/http/idempotency`: Idempotency keys for HTTP: `idempotent(...)` is an `HttpMiddleware` that runs a request once per key and answers a repeat with the stored response. `IDEMPOTENCY_FAILURES`, `IdempotencyClaimUnconfirmed`, `IdempotencyHashUnavailable`, `IdempotencyInProgress`, `IdempotencyKeyRequired`, `IdempotencyKeyReused`, `IdempotencyOwnershipLost`, `IdempotencyReleaseUnconfirmed`, `IdempotencyReplayInvalid`, `IdempotencyRequestTooLarge`, `IdempotencyRequestUnreadable`, `IdempotencyResponseUnavailable`; and 12 more.
 - `@arki/http/webhooks`: Signed webhooks in: check that a request comes from the sender who holds the secret. `HTTP_ERROR_CODES`, `HttpConfigError`, `HttpError`, `WEBHOOK_FAILURES`, `WEBHOOK_SIGN_FAILURES`, `WEBHOOK_VERIFY_FAILURES`, `WebhookBodyTooLarge`, `WebhookBodyUnreadable`, `WebhookCryptoUnavailable`, `WebhookMalformed`, `WebhookSignatureMismatch`, `WebhookStale`; and 18 more.
 - `@arki/http/context`: Ambient request context — the last resort. `registerEngineContext`, `requestContext`, `runWithRequestContext`.
-- `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `PUBLIC_FETCH_FAILURES`, `RedirectLimit`, `ResponseTooLarge`, `UnsafeUrl`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`, `systemTransport`, `validatePublicURL`; types `PublicFetchFailure`, `PublicFetchResult`, `PublicFetchTransport`.
+- `@arki/http/public-fetch`: `FETCH_ALLOW_HOSTS_ENV`, `NetworkFailure`, `PUBLIC_FETCH_FAILURES`, `RedirectLimit`, `RequestCancelled`, `RequestTimeout`, `ResponseTooLarge`, `UnsafeUrl`, `fetchAllowedHosts`, `isPublicAddress`, `publicFetch`, `safeFetchBytes`; and 5 more.
 <!-- llms:end -->
 
 ## Start here

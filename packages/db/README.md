@@ -837,6 +837,23 @@ first null
 | `DB_LOGGING`                               | Enable Drizzle logger when truthy.                                                               |
 | `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.                                                        |
 
+## Smaller exports
+
+These are less common. Each has one job.
+
+- `createColumnKit` builds the shared column helpers for one dialect. `pgColumns` and `sqliteColumns` use it.
+- `replayColumn` replays a column spec on a dialect's column builder.
+- `IndexSpec` is what `c.index(name)` returns. `IndexExtra` is the built index. `.where()` makes it partial.
+- `createSchemaFactory` and `createUpdateSchema` come from Drizzle. They turn a table into a Zod schema, next to `createSelectSchema` and `createInsertSchema`.
+- `instantToDriver` and `instantFromDriver` convert an `Instant` to and from the text a Postgres timestamp column uses.
+- `plainDateToDriver` and `plainDateFromDriver` do the same for a `PlainDate` and a Postgres `date` column.
+- `parseTransactionSettings` checks `{ isolation, retries }`. A bad value throws `ARKI_DB_TX_E002`. Nothing is clamped.
+- `DB_TRANSACTION_ERROR_CODES` lists the `ARKI_DB_TX_E###` codes that `runTransaction` and `transactionalProcedure` can throw.
+- `noEffectsInTransaction` is the ESLint rule behind `db/no-effects-in-transaction`. It flags a call inside transactional code that a rollback cannot undo.
+- `SessionNeedsDirectUrl` is the failure you get when a session feature (`LISTEN`, session locks) gets a pooled URL and no direct one. Set `DB_DIRECT_URL`.
+- `isLocalLibsqlUrl` tells you if a libSQL URL names a file or memory database in this process, not a server.
+- `unrefTimer` lets the process exit while a background timer waits.
+
 ## Public imports
 
 - `@arki/db` / `@arki/db/init` — `createDb`, `initDb`, `initDbWithOptions`. Under Bun, `./init` resolves to a Bun-native SQL driver.

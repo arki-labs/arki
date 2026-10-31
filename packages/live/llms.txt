@@ -5,9 +5,9 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/live`: The portable core of live queries. `LIVE_ERROR_CODES`, `affectedPaths`, `createLiveClient`, `createLiveHub`, `live`, `liveReceipts`, `liveTables`, `parseLiveCursor`, `parseLiveEvent`; types `LiveClient`, `LiveClientOptions`, `LiveCursor`; and 18 more.
+- `@arki/live`: The portable core of live queries. `LIVE_ERROR_CODES`, `ReceiptTimeout`, `affectedPaths`, `createLiveClient`, `createLiveHub`, `live`, `liveReceipts`, `liveTables`, `parseLiveCursor`, `parseLiveEvent`; types `LiveClient`, `LiveClientOptions`; and 19 more.
 - `@arki/live/drizzle`: Live queries on Drizzle tables (peer `drizzle-orm`): `live()` meta from Drizzle tables, `tableTag`, `liveScopes()` (which tables are scoped, by which key column), and `snapshot()` — one read-only snapshot per live query. `live`, `liveScopes`, `snapshot`, `tableTag`; types `SnapshotDatabase`, `SnapshotRunner`.
-- `@arki/live/dot`: The Dot plugin (peer `@arki/dot`): `liveQueries`, the Dot plugin that runs live queries for an app. `liveQueries`.
+- `@arki/live/dot`: The Dot unit (peer `@arki/dot`): `liveQueries`, the Dot unit that runs live queries for an app. `liveQueries`.
 - `@arki/live/http`: The SSE stream, `GET /api/live` (peer `@arki/http`). `liveEndpoint`; types `LiveEndpoint`, `LiveGrant`.
 - `@arki/live/orpc`: oRPC middleware (peers `@orpc/server`, `@orpc/contract`): `liveRead()`, the middleware that gives a live procedure one snapshot, and `liveManifest()`, which reads the live procedures out of a contract. `liveManifest`, `liveRead`; types `LiveReadContext`, `LiveReadMiddleware`.
 - `@arki/live/pg`: The Postgres side. `liveChannel`, `liveMigration`, `pgSource`, `touch`, `verifyLiveTriggers`; types `LiveMigration`, `LiveTriggerProblem`.

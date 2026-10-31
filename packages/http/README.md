@@ -672,6 +672,13 @@ Bun's natively matched routes run the same layers as `fetch`; the Dot
 | `@arki/http/projection` | the `dot explain --as openapi` projection |
 | `@arki/http/public-fetch` | a fetch that refuses private addresses |
 
+## Error helpers
+
+- `toErrorResponse(error)` turns any thrown value into the wire envelope. An `HttpError` keeps its status and fields. Anything else becomes a 500.
+- `errorResponse` builds the envelope `Response` for a coded failure.
+- `describeInternalError(error)` gives the message for an unexpected error. It shows full detail in development and hides it in production.
+- `IdempotencyWriteUnconfirmed` is the failure for work that ran when saving its response is unconfirmed. Check what the work did before you release or replace its key.
+
 ## Failure behaviour
 
 Handlers and steps fail with an `HttpError` or return a failure. The engine turns both into a coded envelope on the wire:
