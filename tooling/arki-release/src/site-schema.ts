@@ -118,7 +118,8 @@ export const demosFileSchema = z.array(
     repo: z.string(),
     /** False when the demo folder is not checked out. */
     present: z.boolean(),
-    pins: z.array(z.object({ name: z.string(), pinned: z.string() })),
+    /** `pinned` is null when the demo links the package from source (no release yet), as in `DemoPin`. */
+    pins: z.array(z.object({ name: z.string(), pinned: z.string().nullable() })),
   }),
 );
 

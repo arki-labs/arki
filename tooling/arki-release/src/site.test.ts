@@ -8,8 +8,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { z } from 'zod';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { DemoPin } from './demos';
 import type { ExecRunner, NpmRunner, RunOutput } from './runners';
 import type { ReleaseConfig } from './types';
 import {
@@ -372,6 +374,16 @@ describe('site --out', () => {
     expect(existsSync(path.join(out, SITE_GENERATED_DIR, 'packages.json'))).toBe(true);
     expect(existsSync(path.join(root, 'src'))).toBe(false);
     expect(existsSync(path.join(root, 'apps'))).toBe(false);
+  });
+});
+
+describe('site demos.json', () => {
+  // A demo links a package it uses before that package's first release (`DemoPin.pinned` is null). The site must
+  // list that pin, not crash the whole run on it.
+  it('accepts a demo pin of null, the same pin type demos.ts reads', () => {
+    expectTypeOf<z.output<typeof demosFileSchema>[number]['pins'][number]['pinned']>().toEqualTypeOf<DemoPin['pinned']>();
+    const row = { name: 'shop', repo: 'acme/shop', present: true, pins: [{ name: '@arki/ai', pinned: null }] };
+    expect(demosFileSchema.parse([row])).toEqual([row]);
   });
 });
 
