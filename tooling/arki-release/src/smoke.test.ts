@@ -210,6 +210,34 @@ describe('runSmoke', () => {
     expect(envelope.status).toBe('success');
   });
 
+  it('passes the with-peers run when a Bun-only entry still skips under node', async () => {
+    // Why: @arki/db/bun imports 'bun', so node skips it in both runs. The with-peers check
+    // counted that SKIP as a failure and failed @arki/db although it imports with its peers.
+    const dir = makeCandidate(['@arki/journal']);
+    const peerManifest = pkg('@arki/journal', '1.0.0', {
+      exports: { '.': './index.js', './bun': './bun.js' },
+      peerDependencies: { zod: '^4' },
+      peerDependenciesMeta: { zod: { optional: true } },
+    });
+    const files = { 'index.js': "import 'zod';\n", 'bun.js': "import 'bun';\n" };
+    const inner = fakeRunner({ packed: { journal: peerManifest }, installed: { '@arki/journal': { manifest: peerManifest, files } } });
+    const runner: ExecRunner = (command, args, opts) => {
+      if (command === 'npm' && args[0] === 'install' && opts.cwd.endsWith('with-peers')) {
+        const target = path.join(opts.cwd, 'node_modules', '@arki', 'journal');
+        mkdirSync(target, { recursive: true });
+        writeFileSync(path.join(target, 'package.json'), JSON.stringify(peerManifest));
+        writeFileSync(path.join(target, 'index.js'), 'export const ok = 1;\n');
+        writeFileSync(path.join(target, 'bun.js'), files['bun.js']);
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      }
+      return inner.runner(command, args, opts);
+    };
+    const envelope = await runSmoke(base(dir, runner));
+    const item = envelope.items.find(i => i.name === '@arki/journal');
+    expect(item?.checks.find(c => c.id === 'optional-peer')?.status).toBe('pass');
+    expect(envelope.status).toBe('success');
+  });
+
   it('installs a second optional peer that only shows once the first one is there', async () => {
     // Why: an entry names only the first peer it misses. @arki/db/eslint needs
     // @typescript-eslint/utils and then typescript; installing only the first failed

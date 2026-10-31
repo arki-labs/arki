@@ -139,6 +139,8 @@ export function exportSpecs(manifest: z.infer<typeof manifestSchema>): string[] 
 
 /** The text consumer-smoke.mjs prints after the spec of a skipped bundler-only entry. */
 const BUNDLER_ONLY_SKIP = 'bundler-only entry';
+/** A consumer-smoke SKIP for a missing optional peer; group 1 is the peer. */
+const OPTIONAL_PEER_SKIP = /optional peer (\S+) not installed/;
 /** How many with-peers installs smoke runs while each one reveals a further optional peer. */
 const MAX_PEER_ROUNDS = 4;
 
@@ -346,7 +348,7 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
           add(pkg.name, check(id, 'pass', `${mine.filter(l => l.verdict === 'PASS').length} subpath(s) imported${left}`));
         }
         for (const l of mine.filter(l => l.verdict === 'SKIP')) {
-          const peer = /optional peer (\S+) not installed/.exec(l.rest)?.[1];
+          const peer = OPTIONAL_PEER_SKIP.exec(l.rest)?.[1];
           if (peer !== undefined) peerSkips.set(pkg.name, (peerSkips.get(pkg.name) ?? new Set()).add(peer));
         }
       }
@@ -390,7 +392,7 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
       for (let round = 1; round < MAX_PEER_ROUNDS && peerInstall.code === 0; round++) {
         let found = false;
         for (const l of parseSmokeOutput(peerRun.stdout)) {
-          const peer = /optional peer (\S+) not installed/.exec(l.rest)?.[1];
+          const peer = OPTIONAL_PEER_SKIP.exec(l.rest)?.[1];
           const peers = peerSkips.get(packageOfSpec(l.spec));
           if (peer === undefined || peers === undefined || peers.has(peer)) continue;
           peers.add(peer);
@@ -400,11 +402,15 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
         ({ install: peerInstall, result: peerRun } = await installWithPeers());
       }
       for (const [name, peers] of peerSkips) {
-        const lines = parseSmokeOutput(peerRun.stdout).filter(l => packageOfSpec(l.spec) === name);
-        // A bundler-only SKIP is expected here too: the Vite build covers it.
-        const stillBad = peerInstall.code !== 0 || lines.some(l => l.verdict !== 'PASS' && !l.rest.includes(BUNDLER_ONLY_SKIP));
+        // Only a failure or a peer still missing is bad: a bundler-only or Bun-only SKIP
+        // is expected here as in the first run (`@arki/db/bun` under node).
+        const bad = parseSmokeOutput(peerRun.stdout).filter(
+          l => packageOfSpec(l.spec) === name && (l.verdict === 'FAIL' || OPTIONAL_PEER_SKIP.test(l.rest)),
+        );
+        const stillBad = peerInstall.code !== 0 || bad.length > 0;
         const list = [...peers].join(', ');
-        add(name, check('optional-peer', stillBad ? 'fail' : 'pass', stillBad ? `with ${list} installed: ${brief(peerRun)}` : `clear error without ${list}; imports with it`));
+        const why = peerInstall.code !== 0 ? brief(peerInstall) : bad.map(l => `${l.spec}${l.rest}`).join('; ');
+        add(name, check('optional-peer', stillBad ? 'fail' : 'pass', stillBad ? `with ${list} installed: ${why}` : `clear error without ${list}; imports with it`));
         if (stillBad) {
           fail(
             SMOKE_ERROR_CODES.optionalPeerFailed,
