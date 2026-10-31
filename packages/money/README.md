@@ -147,6 +147,8 @@ Report a bug or ask a question in the [Arki issue tracker](https://github.com/ar
 
 `money()` also accepts a `Decimal` or a `Rational` from `@arki/math`.
 
+`isMoney(value)` tells you whether an unknown value is a `Money`. It is true for any currency, and it narrows the type to `Money`.
+
 ## Rounding
 
 Rounding modes: `up`, `down`, `ceiling`, `floor`, `halfUp`, `halfDown`, `halfEven`, `unnecessary`.
