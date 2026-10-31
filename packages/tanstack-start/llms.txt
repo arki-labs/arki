@@ -8,7 +8,7 @@
 - `@arki/tanstack-start/config`: TanStack Start App Configuration. `createAppConfig`, `defineConfig`; types `AppConfig`.
 - `@arki/tanstack-start/vite`: `fleetVite`, `oneChunkPerRoute`, `zodCompiled`.
 - `@arki/tanstack-start/server`: `startServer(app, { hot })` — the server entry of a Dot app on TanStack Start. `startServer`, `withForwardedProto`; types `StartHandler`, `StartServer`, `StartServerOptions`.
-- `@arki/tanstack-start/dot`: the `tanstackStart()` entrypoint plugin and the one-line server-route handlers. `TANSTACK_START_PLUGIN_ERROR_CODES`, `authHandlers`, `cronHandlers`, `healthHandlers`, `rpcHandlers`, `tanstackStart`; types `CorsOptions`, `CronRouter`, `MountOptions`, `RequestContextOf`, `TanstackStartOptions`.
+- `@arki/tanstack-start/dot`: `TANSTACK_START_PLUGIN_ERROR_CODES`, `authHandlers`, `cronHandlers`, `healthHandlers`, `rpcHandlers`, `tanstackStart`; types `CorsOptions`, `CronRouter`, `MountOptions`, `RequestContextOf`, `TanstackStartOptions`.
 - `@arki/tanstack-start/router`: TanStack Router Configuration. `createQueryClient`, `createRouter`, `createTanStackRouter`; types `RouterConfig`.
 - `@arki/tanstack-start/orpc/client`: oRPC Client Setup for TanStack Start. `RPCLink`, `createORPCClient`, `createORPCReact`, `createOrpcUtils`, `createTanstackQueryUtils`, `getORPCUrl`; types `ORPCClientConfig`, `OrpcUtils`, `RouterClient`.
 - `@arki/tanstack-start/orpc/query`: typed React hooks over oRPC query utils. `keysetKey`, `keysetOptions`, `optimisticMutationOptions`, `useKeysetQuery`, `useOptimisticMutation`; types `Cache`, `KeysetOptions`, `KeysetResult`, `KeysetStatus`, `KeysetUtils`, `OptimisticContext`, `OptimisticOptions`; and 2 more.
@@ -19,9 +19,9 @@
 - `@arki/tanstack-start/sentry/client`: Browser-side Sentry initialization for TanStack Start apps. `Sentry`, `initSentryClient`; types `InitSentryClientOptions`.
 - `@arki/tanstack-start/sentry/server`: Server-side Sentry initialization for TanStack Start apps. `Sentry`, `initSentryServer`, `sentryGlobalFunctionMiddleware`, `sentryGlobalRequestMiddleware`, `wrapFetchWithSentry`, `wrapMiddlewaresWithSentry`; types `InitSentryServerOptions`.
 - `@arki/tanstack-start/sentry/bridge`: Zero-dependency bridge that lets shared package code call `captureException` without statically importing `@sentry/*`. `captureException`, `registerSentryCapture`; types `CaptureHandler`, `CaptureHint`.
-- `@arki/tanstack-start/server-error-overlay`: Server-side error overlay for TanStack Start `entry-server.ts`. `withServerErrorOverlay`.
+- `@arki/tanstack-start/server-error-overlay`: A fetch handler; whatever follows the request (Start's `{ context }`) passes through untouched. `withServerErrorOverlay`.
 - `@arki/tanstack-start/pwa`: Configure `vite-plugin-pwa` for a TanStack Start app. `LAZY_CHUNK_IGNORES`, `MERMAID_DIAGRAM_IGNORES`, `SHIKI_LANG_IGNORES`, `SHIKI_THEME_IGNORES`, `createPwaPlugin`; types `CreatePwaPluginOptions`.
-- `@arki/tanstack-start/pwa/sw`: Shared service-worker base for TanStack Start apps. `setupOfflineNavigation`; types `OfflineNavigationOptions`.
+- `@arki/tanstack-start/pwa/sw`: `setupOfflineNavigation`; types `OfflineNavigationOptions`.
 - `@arki/tanstack-start/pwa/client`: Register the app's service worker. `clearCachesOnUserChange`, `registerPwa`, `registerStaleChunkReload`, `useClearCachesOnUserChange`; types `RegisterPwaOptions`.
 <!-- llms:end -->
 
