@@ -1,5 +1,76 @@
 # @arki/live
 
+## 0.2.0
+
+### Minor Changes
+
+- f3c95a0: `parseLiveEvent` and `parseLiveCursor` return a `schema.invalid_input` failure for a bad value instead of `undefined`. `awaitTxId` resolves a `live.receipt_timeout` failure on timeout instead of rejecting with E006 (`ReceiptTimeout` is exported). `touch()` falls back to a table-wide hint for a bad row key instead of throwing inside the caller's transaction. The client logs the error of a throwing `onEvent` on every failed attempt. `@arki/failure` is now a dependency.
+- df6fa72: The documented `liveRead` one-liner now binds the readers through a usecase that takes the transaction (`snapshot(ctx.db, tx => ctx.usecases.readers(tx))`), because a request handler no longer reads infra.
+
+### Patch Changes
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- e132ad3: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+- 36b4da8: Auth checks are plain steps (RFC `docs/rfcs/2026-10-21-dot-middleware.md`, step 4).
+
+  - `@arki/auth` adds `authed`, `verified` and `role(name)`: plain functions that read `ctx.principal` and narrow it to non-null, or refuse with `auth.unauthenticated` (401) / `auth.forbidden` (403). Attach them with the transport's `step()`: `impl.x.use(step(authed))` (`@arki/dot/orpc`), `routes().use(step(authed))` (`@arki/http`). The handler keeps the app's own principal type.
+  - `@arki/auth/http` adds `principalFromHeaders(auth)`, a step that adds `principal` (`null` for a guest) from the request's credentials.
+  - Breaking: `guards<C>()` is removed from `@arki/auth/orpc`. `const { authed } = guards<C>()` → `import { authed } from '@arki/auth'` and `.use(step(authed))`. `can(policies)(name, load)` is now imported directly from `@arki/auth/orpc`, same call shape.
+  - Breaking: `withPrincipal(auth, options)` and `withOptionalPrincipal(auth)` are removed from `@arki/auth/http`. Use `.use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))`, then `.use(step(authed, { failureHeaders: authFailureHeaders }))` (or `verified`, `role(name)`) on routes that need a signed-in caller.
+  - Breaking: `@arki/http` removes `derive(key, fn)`, the bundle's `.derive()`, `Deriver`, `ErasedDeriver`, `BASE_CTX_KEYS` and `ARKI_HTTP_E007`. A keyed deriver becomes a step that returns an object: `.derive('db', fn)` → `.use(step(ctx => ({ db: fn(ctx) })))`. `verifyWebhook({ scheme })` is a step: `.use(step(verifyWebhook({ scheme })))` adds `ctx.webhook`. A route bundle's `derivers` field is renamed `stages` (it holds steps and arounds).
+  - Fix: `@arki/http` steps after the first one see `ctx.url` and `ctx.signal` again (they were dropped when the context was extended). This fixes `@arki/live`'s endpoint, which reads `ctx.url` in its second stage.
+
+- Updated dependencies [5d55e12]
+- Updated dependencies [a905468]
+- Updated dependencies [c36e614]
+- Updated dependencies [b992897]
+- Updated dependencies [289ba73]
+- Updated dependencies [ebc681b]
+- Updated dependencies [6cc8655]
+- Updated dependencies [440c75f]
+- Updated dependencies [5d55e12]
+- Updated dependencies [be8f8e2]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [e132ad3]
+- Updated dependencies [1e47612]
+- Updated dependencies [e132ad3]
+- Updated dependencies [49517e2]
+- Updated dependencies [29520c1]
+- Updated dependencies [8944628]
+- Updated dependencies [88daaeb]
+- Updated dependencies [b37115d]
+- Updated dependencies [36b4da8]
+- Updated dependencies [c1ed2a3]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b435e76]
+- Updated dependencies [517d297]
+- Updated dependencies [1a897f8]
+- Updated dependencies [9d408cf]
+- Updated dependencies [e80211d]
+- Updated dependencies [17e86d3]
+  - @arki/http@0.4.0
+  - @arki/db@0.5.0
+  - @arki/dot@0.9.0
+  - @arki/resilience@0.3.1
+
 ## 0.1.0
 
 ### Minor Changes

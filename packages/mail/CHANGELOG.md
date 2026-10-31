@@ -1,5 +1,85 @@
 # @arki/emails
 
+## 0.3.0
+
+### Minor Changes
+
+- ba05496: A message built from user-typed text, a hung service and a caller's cancel are told apart. Breaking in 0.x.
+
+  - `checkMessage`, and so `send`, `sendRaw`, `compose` and `enqueue`, return `MailInvalidMessage` (`mail.invalid_message`) for no recipient, an empty address, a line break in an address, subject or header, or a reserved header. They no longer throw `ARKI_MAIL_E002`; `E002` now means only "a queued mail without exactly one `to`". `SendFailure` gains it; `sendRaw` returns `SendRawFailure`.
+  - `enqueue` returns `MailTooLarge` (`mail.too_large`) for a message over `maxBytes`, in place of throwing `E010`. `E010` now means only an unreadable stored row.
+  - Every HTTP transport and `ses` take `timeoutMs` (default 30 s) and run each request under it joined with the caller's signal. `MailUncertain.data.reason` says `cancelled`, `timeout`, `network` or `unreadable`.
+  - `MailRejected.data.retryAfterMs` carries the service's `Retry-After`; the outbox waits at least that long before the next try.
+  - Service answers, queue rows and the KV counter are read with schemas. `narrow.ts` and the hand-written guards in `pg/args.ts` are gone; `mailMessageSchema` is locked to `MailMessage` by a type test.
+
+### Patch Changes
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- e132ad3: Hand-written object guards now come from `@arki/schema` (`is(value, recordSchema)` or `plainObjectSchema`), per A-39. Replaced: the `isRecord`/`isPlainObject`/`isObject` helpers in `dot`, `cli`, `http`, `expr`, `lock`, `mail`, `embeddings` (its internal `isRecord`, not a public export), `testing` and `payments`, plus inline `typeof x === 'object' && x !== null` checks on unknown values. Behaviour is the same, except that the inline checks and `lock`'s guard no longer let arrays through. `@arki/expr` and `@arki/lock` now depend on `@arki/schema`.
+- Updated dependencies [8e6970d]
+- Updated dependencies [f49d490]
+- Updated dependencies [7c10c0a]
+- Updated dependencies [ce53dcc]
+- Updated dependencies [f6b9ab1]
+- Updated dependencies [14b61bb]
+- Updated dependencies [289ba73]
+- Updated dependencies [84d246f]
+- Updated dependencies [4f41f91]
+- Updated dependencies [8e5d9df]
+- Updated dependencies [8201ea8]
+- Updated dependencies [289ba73]
+- Updated dependencies [84d246f]
+- Updated dependencies [0403c69]
+- Updated dependencies [8e5d9df]
+- Updated dependencies [86250e6]
+- Updated dependencies [84d246f]
+- Updated dependencies [270aa2e]
+- Updated dependencies [bdfd204]
+- Updated dependencies [11c5bc2]
+- Updated dependencies [440c75f]
+- Updated dependencies [84d246f]
+- Updated dependencies [df44e0d]
+- Updated dependencies [8e5d9df]
+- Updated dependencies [e444104]
+- Updated dependencies [a1da735]
+- Updated dependencies [84d246f]
+- Updated dependencies [49517e2]
+- Updated dependencies [ce53dcc]
+- Updated dependencies [8e5d9df]
+- Updated dependencies [84d246f]
+- Updated dependencies [88daaeb]
+- Updated dependencies [cb5b666]
+- Updated dependencies [c1ed2a3]
+- Updated dependencies [6fd5ff9]
+- Updated dependencies [b435e76]
+- Updated dependencies [b435e76]
+- Updated dependencies [8e5d9df]
+- Updated dependencies [fdec626]
+- Updated dependencies [b438186]
+- Updated dependencies [17e86d3]
+- Updated dependencies [b435e76]
+  - @arki/journal@0.4.0
+  - @arki/dot@0.9.0
+  - @arki/resilience@0.3.1
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,5 +1,72 @@
 # @arki/admin
 
+## 0.2.0
+
+### Minor Changes
+
+- 8944628: Expected outcomes of the signed protocol and the Coolify API are returned `@arki/failure` failures, not thrown `AdminError`s. `createForemanClient` calls (`negotiate`, `manifest`, `read`, `preview`, `execute`), `createCoolifyClient`, `createCoolifyEnvWriter`, `confirmHint` and `parseWebhookHint` return the value or an `Admin*` failure (see the Failures section of the README); the dispatcher builds its wire answers from the same failures and keeps the stable `ARKI_ADMIN_E0NN` wire codes. `fetchFleetSnapshot` returns `{ ok: false, failure }` instead of `{ ok: false, error: string }`. `createFleetHandler` no longer puts the provider's error message or the schema issues on the wire: `502 { error: "snapshot_failed" }` and `500 { error: "invalid_snapshot" }`. `AdminError` is thrown for bugs only. Docs: README updated.
+
+### Patch Changes
+
+- 17e86d3: Breaking: the object-form feature API is removed. Write every feature as a `defineFeature(name).needs().infra().usecases().provides().entrypoints()` chain.
+
+  - `@arki/dot`: removed `feature()`, `plug`, `composeRouter`, `composeRepos`, `tokenOf`, `entrypointsOf` and the types `AnyFeature`, `MountedFeature`, `UnitOf`, `MountedUnitsOf`, `FeatureConfig`, `ComposedRouter`, `ComposedRepos`. `defineApp().features()` takes chain features only. Use `routerFor(rpcContract, features)` instead of `composeRouter`, and a feature's own `repos({...})` store instead of `composeRepos`. Read `f.entrypoints` instead of `entrypointsOf(f)`. Lifecycle hooks (`boot`, `start`, `stop`) live on an infra unit inside the feature.
+  - `@arki/http`: removed `endpoints(build)` and `EndpointsFeatureSlice` from the root export. Use `endpoints(core, build, { contracts })` from `@arki/http/dot` in `.entrypoints()`.
+  - `@arki/schedule`: removed the `schedules(needs, defs)` overload. Use `schedules(core, defs)` in `.entrypoints()`.
+  - `@arki/queue`, `@arki/journal`, `@arki/admin`: dropped their object-form branches. The chain API is unchanged.
+
+- f2ba7ac: Add `createForemanRoute` (`./server`), the one mount for `/api/foreman/*`. It builds the handler on the
+  first request, takes one store for both nonces and receipts, and namespaces the receipts by the app's
+  audience. With no store it answers 404 while the keys are unset and throws `ARKI_ADMIN_E014` once they
+  are set. Also add `memoryForemanStore` for single-instance apps, and a new `./pg` entry with
+  `foremanStoreTable` and `pgForemanStore`: a Postgres store for apps without a KV (`drizzle-orm` is an
+  optional peer).
+
+  no demo impact: no demo mounts Foreman.
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- 23e9f49: `createCoolifyEnvWriter` writes environment variables to a Coolify application, runtime-only, literal and outside previews, with `secret` entries shown once. It stores a probe variable first and checks Coolify kept it runtime-only, so a Coolify that would store a key build-time never receives a real value. It never reads values back or puts a body in an error or a log line. Docs: the Coolify connection README has an "Env writer" section. No demo impact: the Coolify connection has no demo.
+- 5d55e12: The `fetch` option of `createForemanClient` and `fetchFleetSnapshot` now takes a plain `(url, init) => Promise<Response>` instead of `typeof fetch`. Where Bun's types are loaded, even through a dependency, `typeof fetch` also requires `fetch.preconnect`, so a wrapper around fetch did not compile. The global `fetch` still fits. No docs impact: the option is not documented beyond its JSDoc. No demo impact: no demo overrides fetch.
+- 23e153b: The Coolify env writer deletes the preview copies Coolify makes of every new variable, so a production key never reaches PR previews unhidden, and the probe leaves nothing behind. `removePreviewCopies(applicationUuid, keys)` cleans variables written before. Docs: the Coolify connection README explains why. No demo impact: the Coolify connection has no demo.
+- 7711722: New `@arki/admin/panels` entry: the answer shapes of two generic panels Foreman bundles. `arki.board` draws number cards with a tone (`boardOutputSchema`); `arki.rows` draws a table whose panel actions become row buttons (`rowsOutputSchema`). `PANEL_RENDERER` names both renderer ids. Docs: README "Generic panels". No demo impact: the admin package has no demo.
+- 5d55e12: Docs only: README sections follow the library layout, and the package now ships `llms.txt`, an agent guide, `AGENTS.md` and a `LICENSE`. No code change.
+- 43bef40: The Coolify client reads projects and their environments (`listProjects`, `listEnvironments`), so a caller can name an application's project from its `environment_id`. Applications now also carry `environment_id`, `base_directory`, `dockerfile_location`, `docker_compose_location` and `watch_paths`. No docs impact beyond the Coolify connection README. No demo impact: the Coolify connection has no demo.
+- Updated dependencies [5d55e12]
+- Updated dependencies [a905468]
+- Updated dependencies [c36e614]
+- Updated dependencies [b992897]
+- Updated dependencies [440c75f]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [e132ad3]
+- Updated dependencies [1e47612]
+- Updated dependencies [49517e2]
+- Updated dependencies [8944628]
+- Updated dependencies [88daaeb]
+- Updated dependencies [36b4da8]
+- Updated dependencies [5d55e12]
+- Updated dependencies [1a897f8]
+- Updated dependencies [e80211d]
+- Updated dependencies [17e86d3]
+  - @arki/http@0.4.0
+
 ## 0.1.0
 
 ### Minor Changes

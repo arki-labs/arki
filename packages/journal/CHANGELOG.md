@@ -1,5 +1,341 @@
 # @arki/journal
 
+## 0.4.0
+
+### Minor Changes
+
+- 8e6970d: Events in KurrentDB: `kurrentEvents({ client, prefix? })` from the new `@arki/journal/kurrentdb`, with `@kurrent/kurrentdb-client` as an optional peer.
+
+  - One entity is one stream, `<kind>-<entityId>` (a kind must not contain `-`). `prefix` puts all of the log's streams under one name.
+  - The event's type and data are KurrentDB's fields; the rest of the journal event is in its metadata under `journal`. Event ids are UUIDv5s of the journal ids, so a retried append repeats them.
+  - Appends use the stream's expected revision. A repeat KurrentDB does not recognise is read back and acked.
+  - `all` reads `$all` (commit order), with `"commit:prepare"` positions. `forget` is refused: KurrentDB cannot rewrite an event.
+
+- f49d490: `events: 'stored' | 'transient'` on `initJournal` (the journal default) and `j.entity(kind, table, { events })` (per entity). A transient entity keeps no `journal_events` rows: the write still takes the append lock, checks `expectedVersion`, folds, saves the row, runs inline projections and queues effect jobs, and the events it returns carry a real `seq` from the events table's sequence. Workflow runs always store their events.
+
+  - `replay`, `verify`, `repair`, `forget`, `adopt` and `rerun` throw `NO_HISTORY` for a transient entity; an async projection or a tap on one is `BAD_DEFINITION` at `compose`.
+  - Two creates of one transient id that race end in `CONFLICT`, mapped from the row's unique violation.
+  - After a delete, a transient entity's next create starts at version 1 again.
+  - Schema: `journal_jobs_kind_check` no longer requires `event_seq` on effect rows, and the partial unique index `journal_jobs_effect_event_id_unique` on `((args->>'id'), effect) where kind = 'effect'` is new. Generate a migration (`drizzle-kit generate`); both statements are additive. See `docs/upgrades/0.3.0-to-0.4.0.md`, step 7.
+  - `EntityDef.eventStorage` and the type `EventStorage` are new exports.
+
+- 7c10c0a: `.parallel(name, { [branch]: b => ... }, { wait: 'all' | 'any' })` runs branches side by side as child runs of their own definitions. `'all'` gives the outputs by branch name. `'any'` gives `{ branch, result }` of the first to complete, cancels the others, and completes after each has stopped. A signal for the parent reaches every branch that waits for it, an event wait in a branch counts from the parent's start, and each branch run counts its own transitions. A branch can declare `b.output(schema)`; when every branch does, `def.read` types and checks the node. Existing node kinds keep their shape hashes, and old `ChildrenPlanned` events and running `.map` runs replay unchanged.
+- ce53dcc: `limits.transitions` is enforced. It was declared (default 1000) and nothing read it, so a loop could run without end. New column `workflow_runs.transitions`, so an app generates a migration and backfills its open runs (the upgrade note has the SQL).
+
+  - A transition is the first try of a node. Each visit of a node in a loop counts, and so does a node its `when` skips. A retry and an undo do not. The count is written by the event that schedules the node, so it survives a crash and a restart.
+  - A node that would pass the cap does not run. The run compensates, as it does for a deadline, and ends `failed` with the new failure `WorkflowTransitionLimit` (`journal.workflow_transition_limit`, with `data.limit` and `data.transitions`). `onDeadStep` does not apply: a loop that must stop does not wait for an operator.
+  - A workflow whose healthy run passes 1000 transitions now fails: set `limits: { transitions }` above `rounds * nodes in the loop`.
+
+- 14b61bb: Events in another Postgres database, and store switches.
+
+  - `postgresEvents({ db, tables })` from the new `@arki/journal/postgres` is an event log in a second Postgres database. Its table comes from `eventLogTables(schema?)` in `@arki/journal/pg`: `journal_events` with the app's `seq` and a `transaction_id xid8` column. Its entities are forwarded. It offers `all` and `erase`, so async projections, `rerun` and `forget` work on it. `all` orders by `(transaction_id, seq)` and reads only below the oldest open transaction, so a reader never passes a row that commits later. Positions are `"transaction id:seq"`, with no `distance`.
+  - `journal.copyLog(db, entity, { to })` copies an entity kind's events from the log it uses now into `to` (`'stored'` or a log), for a store switch. It is refused while forward jobs of the kind wait (`FORWARD_PENDING`) and onto the log the kind already uses (`BAD_DEFINITION`). It is safe to run again.
+
+  The built-in `journal_events` table is unchanged: its columns now come from the same column list as `eventLogTables`.
+
+- 84d246f: Workflow runs take a scope, tags and metadata when they start.
+
+  - `def.start` takes `{ input, id?, scope?, tags?, metadata? }`. `scope` is the tenant or owner key of the run (1 to 256 characters). `tags` are up to 10 labels of 1 to 128 characters. `metadata` is a JSON object of at most 256 KiB. The limits are exported as `RUN_FIELD_LIMITS`, and the field type as `RunFields`.
+  - A start outside the limits creates no run. A bad shape returns `InvalidInput`; metadata that is too large returns `CommandInvalid`, which `StartOutcome` now includes.
+  - Each run stores `rootId`: null for a top run, else the id of the top run of its tree. A child run (`child`, `map`) takes its parent's `scope` and `rootId`, and no tags or metadata.
+  - Starting an existing id under another `scope` is a `CommandConflict`.
+  - `journal.workflows.run` and `journal.workflows.runs` return `scope`, `tags` and `rootId` (and `run` also `metadata`). `runs` filters by `tag`, `scope`, `rootId`, `from` and `to` (start time). The Foreman workflow console shows and filters by them too.
+  - `workflow_runs` gets four columns: `scope`, `tags`, `metadata` and `root_id`, with an index on `scope`, a GIN index on `tags` and an index on `root_id`. Run `drizzle-kit generate` and apply the migration before you deploy. Runs started before keep working: their rows get no scope, no tags, empty metadata and no root.
+
+- 4f41f91: `dot explain --as journal-flow` is now `dot explain --as event-map`, and the graph covers the whole flow. Breaking (0.x, no shims):
+
+  - Renamed: the format `journal-flow` to `event-map`, `JournalFlow*` types to `EventMap*`, `JOURNAL_FLOW_*` constants to `EVENT_MAP_*`. The manifest projection loads `@arki/journal/event-map`.
+  - New nodes: `command`, `entrypoint`. New edges: `writes` (command to event), `waits-for` (a workflow's `.waitFor` event), `runs` (a workflow's `.command` node, with `undo: true` for its `undo`), `calls` (a procedure file imports a command). A workflow node lists its `.step` names as `opaqueSteps`: a `ctx.run` inside a step is not drawn.
+  - New Node-only entry `@arki/journal/event-map`: `project(manifest, cwd?)`, `scanEntrypoints({ root })`, and `checkEventMapFile({ file, mermaid, update? })`. The scan reads the procedure files under `src/features/**/entrypoints/**` (set `journal({ j, entrypointRoot })` for another root), follows relative imports, and keeps the exports that are journal commands. A command imported and never called is still an edge.
+  - `@arki/journal/projection`: `project` is now `projectGraph(manifest)` and returns `{ document, entrypointRoot }` without the scan. New: `withEntrypoints`, `edgeKey`, and `eventMapMermaid(document)`, which prints Mermaid `flowchart LR` in a stable order. `render` also prints writers, workflow nodes, entrypoints and the files the scan could not read.
+  - `checkEventMapFile` keeps a Mermaid file in an app's docs fresh: it returns the diff when the file is stale, and writes it when `update` is true.
+
+  See the upgrade note (section 21).
+
+- 8e5d9df: A workflow run can narrow how its steps run. `def.start` (and each `startBatch` item, and `journal.workflows.replay` overrides) takes `maxAttempts` (caps the tries of every step; the step's own `retry` still picks the wait and which errors retry), `timeout` (an age; each step attempt times out after it, or after the step's own `timeout` when that is shorter) and `priority` (the claim order of the run's step and timer jobs, on the scale of an effect's `priority`). A run keeps them for its whole life, a replay keeps them unless overridden, and a child does not inherit them. Bad values are `InvalidInput`. `RunOverrides` and `RUN_OVERRIDE_LIMITS` are exported, and the readers return `maxAttempts`, `stepTimeoutMs` and `priority`.
+
+  An effect schedule's `priority` may be a function of the event (`priority: event => number`), like `runAt`, so each job gets its own priority. Each value it gives is checked to fit 32 bits.
+
+  Migration needed: `workflow_runs` gets the nullable integer columns `max_attempts`, `step_timeout_ms` and `priority`. Run `drizzle-kit generate`. Old runs keep `null`.
+
+- 8201ea8: A browser-safe `@arki/journal/contract` subpath, so an oRPC contract that ships to the browser no longer bundles Drizzle:
+
+  - `@arki/journal/contract`: everything a contract needs: `COMMAND_FAILURES`, `CommandNotFound`, `CommandInvalid`, `CommandForbidden`, `CommandConflict`, `WorkflowStranded`, `WorkflowReadMismatch`, and the type `CommandFailure`.
+  - `@arki/journal/errors` now takes the transaction failures from `@arki/db/errors` instead of `@arki/db/transaction`, so it no longer loads Drizzle either. Its exports are unchanged.
+
+- 289ba73: The `dot dev` console shows an "Event map" page drawn from the same document as `dot explain --as event-map`: left to right from entrypoints to commands, events and consumers, click a node for its details and edges, filter by feature, search by name, scan problems in plain view, no network. `@arki/journal/event-map` exports `consolePage(document)`. No demo impact.
+- 84d246f: A workflow step changes its run's metadata and tags while it runs: `ctx.metadata.set(patch)`, `increment(key, by?)`, `append(key, value)`, `remove(key)` and `ctx.tags.add(...tags)`, in a step or an undo. Each call commits at once as one event on the run (`MetadataChanged` with the `change`, or `RunTagged` with the new tags), so a reader sees the progress while the step still runs, and a replay rebuilds the row. A refusal (`CommandConflict` once the run has finished, `CommandInvalid` for a wrong value type, metadata over 256 KiB or more than 10 tags) is the value the call returns and does not fail the step. Operators make the same changes with `journal.workflows.setMetadata(db, { runId, change }, op)` and `addTags(db, { runId, tags }, op)`; the event records `op`. A call never rejects, so a progress report may be left un-awaited: it runs through the new `EffectContext.runUnwatched` (the attempt's fenced runner without the refusal watch), so a stale attempt writes nothing and a late refusal never fails the step. `workflow_runs` gets the column `field_changes integer not null default 0` (push the schema): it counts the metadata and tag events, and the Foreman workflow actions take their revision as `version - field_changes`, so progress reports no longer void an approval. New types: `MetadataChange`, `MetadataContext`, `TagsContext`, `MetadataOutcome`, `TagsOutcome`, `RunMetadata`.
+- 0403c69: `@arki/journal/foreman` names no Zod in its types. Breaking:
+
+  - `journalJobsModule` and `journalWorkflowsModule` return a plain `ForemanModule` from `@arki/admin`. The admin dispatcher reads their schemas at runtime, so registering them is unchanged; a read called on the returned object directly returns `unknown`.
+  - The summary schemas `AttemptSummary`, `OperationSummary`, `ArchivedSummary` and `JobSummary` are no longer exported. Their types keep their names, written in TypeScript and locked to the internal schemas by a type test.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 10.
+
+- 8e5d9df: The public types of workflows no longer reach Zod, so the `.`, `./dot`, `./orpc` and `./foreman` declaration files pass `TYPES_E001` (A-43).
+
+  - The types of starting and operating a run (`StartArgs`, `StartSchema`, `StartOutcome`, `StartBatchArgs`, `StartBatchSchema`, `StartBatchOutcome`, `WorkflowStarter`, `StarterOf`, `ReplayArgs`, `ReplayOverrides`, `RescheduleArgs`, `RescheduleOutcome`, `CancelArgs`, `CancelSchema`, `CancelOutcome`, `SignalArgs`, `SignalSchema`, `SignalOutcome`) moved from `workflow/runner.ts` to the new Zod-free `workflow/run-types.ts`. The schemas that check them stay in `runner.ts`, which no public declaration file reaches now.
+  - The run field schemas (`runFieldsSchema`, `runTimingSchema`, `runOverridesSchema`, `delayAgeSchema`, `ttlAgeSchema`, `metadataChangeSchema`, `addedTagsSchema`) moved from `workflow/run-fields.ts` to the new internal `workflow/run-field-schemas.ts`. `run-fields.ts` keeps the types (`RunFields`, `RunTiming`, `RunOverrides`, `MetadataChange`, ...), the limits and the pure functions, and imports no Zod.
+  - `StepStatus` moved from `workflow/machine.ts` to `workflow/states.ts`, next to `STEP_VIEW_STATUSES`.
+  - No export of a package entry was removed or renamed: these are internal files, and the root still exports the same names. `schemas.test-d.ts` still locks every type to its schema both ways.
+
+  Breaking: `WorkflowBusy.data.key` is now `string | null`. It is `null` for a start without a concurrency key (only a `total` limit can block one); it was `''`. A failure recorded before this change still reads, with `''`.
+
+- 84d246f: Lifecycle hooks on a workflow or a task: `on: { success, failure, cancel, expired, complete }`. A run end queues one job of the new library-owned effect `workflow.on` in the transaction that ends the run, so a hook runs only after that commit, at least once, with the code of the run's own version. A throw is retried like an effect's; a returned failure is final; a hook never changes the run. Each hook gets the run (`runId`, `workflow`, `version`, `scope`, `tags`, `metadata`, typed `input`, `state`), `output` on `success` (typed by the `output` schema and checked again, `unknown` without one), `error` on `failure`, the job's `db`, `run` (records `workflowMeta` without a meta), `accept`, `signal`, `jobId`, `attempt`, and the definition's needs. `complete` runs for every end, after the specific hook. The effect is added only when a composed definition declares `on`.
+
+  `journal.hooks.step.around((ctx, next) => ...)`, next to `command` and `effect`: wraps each step body and undo inside the `journal.step` span. `ctx` is `{ workflow, version, runId, step, attempt, phase }` (exported as `StepHookContext`); it is frozen by the first drain or worker. New exported types: `LifecycleHooks`, `LifecycleHookContext`, `RunEnding`, `StepHookContext`. `WorkflowDef` has a new `on` field, and `WorkflowOptions` a fifth type parameter (the host the hooks see).
+
+- 270aa2e: The built-in event log sits behind one interface (`src/event-log.ts`): append, stream, highest version, a global order (`all.after`, `all.top`, `all.distance`) and erase, bound to the caller's transaction. Every write takes its `seq` and `recordedAt` from the app database before the append, in both event modes. A contract suite checks the built-in log; adapters for other stores will run the same suite.
+
+  Breaking:
+
+  - `journal_cursors.seq` (bigint) becomes `journal_cursors.position` (text, null at the start). Move the values with the SQL in `docs/upgrades/0.3.0-to-0.4.0.md`, step 8; the generated drop and add would send every async projection back to the start.
+  - `journal.cursors(db)` returns `{ name, position, behind, distance }` instead of `{ name, seq, lag }`.
+  - `journal.rerun(db, projection, { after })` takes an `EventLogPosition` (or `null`) instead of `afterSeq`. `EventLogPosition` and `ProjectionCursor` are exported from `@arki/journal`.
+
+- bdfd204: Every effect job carries its event. The writer puts the stored `journal_events` row in the job's `args`; the worker, `journal.job` and the workflow runner read the event from there and never join `journal_events`. The copy is decoded as replay decodes a row, so upcasters apply to a job queued before a release. `StoredEventRow` from `@arki/journal/pg` parses `args` back to the row type. `forget` rewrites the copy in `journal_jobs` and `journal_job_archive` in the same transaction as the event row. The copy never leaves the database: the archive sink gets an effect row with only the event header in `args` (seq, id, kind, entityId, version, type, recordedAt), and the Foreman job module shows a payload for queue jobs only, even with `payload: 'redacted'`.
+
+  Migration: `journal_jobs_kind_check` now requires `args` on an effect row. Drain pending effect jobs or backfill `args` from `journal_events` before the migration; the SQL is in `docs/upgrades/0.3.0-to-0.4.0.md`, step 6.
+
+- 84d246f: Tasks, batches and replays for workflows. `j.task(name, options, run)` defines a workflow of one step named `run`: it is `j.workflow(name, options).step('run', run, { retry, timeout, undo, key }).finish()`, so a task is a `WorkflowDef` in every way, and its output is what `run` returns (or the `output` schema's output, which `run` must then return). `def.startBatch({ items, batchId? })` starts up to `BATCH_LIMIT` (1000) runs of one workflow in one transaction and returns `{ batchId, runs }`, one outcome per item: a refused item rolls back only its own savepoint, and an item that does not fit the start schema refuses the whole batch with `InvalidInput`. `journal.workflows.batch(db, batchId)` counts a batch's runs by state and lists their ids, and `runs(db, { batchId })` filters by it. `journal.workflows.replay(db, { runId, overrides? }, op)` starts a new run of a run's workflow at the newest version with the old input, scope, tags and metadata unless `overrides` replaces them; the new run records `replayOf` and the operator.
+
+  Migration needed: `workflow_runs` gets the nullable columns `batch_id` (with the index `workflow_runs_batch_id_idx`) and `replay_of`. Run `drizzle-kit generate`. `RunStarted` may carry `batchId`, `replayOf` and the operator fields; older events replay with `null`.
+
+- df44e0d: A workflow can continue on a step's failure, a caller can wait for a run's outcome, and `def.read` types more nodes.
+
+  - `.step(name, body, { output, failures: [Declined], onFailure: 'continue' })` keeps a listed returned failure as the step's result and the run goes on. The result type is the output plus the failures. The failure is stored as its envelope and read back, by its own schema, as a real failure. Any unlisted failure still fails the step. `onFailure` needs `failures` and an `output` schema, or the definition throws `BAD_DEFINITION`.
+  - A last node that can be a failure (a command with `accept`, a step with `onFailure: 'continue'`) now needs a function in `.finish`, and `.finish()` without one is a compile error. The `BAD_DEFINITION` throw stays as a backstop.
+  - `def.settled(db, runId, { within })` returns the typed run once it ended, or the new failure `WorkflowPending { runId }`. `def.startAndWait(db, args, { meta, timeout, signal })` starts a run and waits: the output, `WorkflowRunFailed`, `WorkflowRunCancelled`, or `WorkflowPending`. Both take the root database (a transaction handle throws `BAD_ARGUMENT`), take seconds above 0 and at most 30, and never cancel the run. New failures: `WorkflowPending`, `WorkflowRunFailed`, `WorkflowRunCancelled`.
+  - `def.read` checks and types a sleep (`null`), a `.child(name, def)` and a `.map` of a definition with an `output` schema. A stored value that no longer fits is `WorkflowReadMismatch`. A child chosen by a function stays `unknown`.
+
+- 8e5d9df: Workflows: `concurrency: { onBusy: 'queue' }`. A start that a full or paused limit blocks creates the run in the new state `queued` (events `RunStarted` and `RunQueued`) with no node scheduled, and returns its `{ runId }`. A child may queue too; its parent stays parked. A queued run holds no slot: no limit counts it. When a run that held a limit ends, or an operator raises, resets or resumes a limit, or a key override runs out (a new `workflow.limitTimer` job at its `until`), the oldest queued runs that now fit are promoted in the same transaction (`RunDequeued` and the first `NodeScheduled`, due at `start_at` when a delay is still ahead), FIFO per key, checking at most `LIMIT_BOUNDS.promoteTries` (50) candidates per change. A queued run past its `ttl` ends `expired` through its timer job; `cancel` ends it `cancelled` at once; `reschedule` moves its start. `journal.limits.get` and `list` show `queued` next to `running`.
+
+  The start gate now runs inside the start's write, after the journal's append lock, and a limit verb takes the limit lock inside its write: every path takes the append lock first and the limit locks after it, so a run end that promotes and a start that queues never deadlock.
+
+  Apps need `drizzle-kit generate`: `workflow_runs` gets the partial index `workflow_runs_queued_idx` on `(started_at, id) where state = 'queued'`, and `state` may now be `queued`.
+
+- e444104: Events can live outside the app database. `events` on `initJournal` and `j.entity` takes an `EventLog` besides `'stored'` and `'transient'`. A log that joins the row's transaction is written with the row. A log that cannot join is forwarded: the write commits the row, its projections and effect jobs, and one `forward` job with the write's events. The worker appends them to the log after the commit.
+
+  - One entity's forward jobs form a stream (`stream`, `stream_position` on `journal_jobs`). A job is claimed only when no earlier job of its stream is left in the table. `purgeDead` keeps a dead job that later jobs of its stream wait behind. Any job kind can use the columns.
+  - The worker reads the log's top first. Below the job's version, the job waits and never dies of waiting. Other events at its versions are the new `FORWARD_DIVERGED`, and the job dies at once.
+  - `replay`, `verify`, `repair` and `forget` read the entity's own log, and throw the new `FORWARD_PENDING` while a forward job for the entity waits. `cancel` refuses a forward job. `discard` takes one only when the log already holds its versions.
+  - `journal.forwardLag(db)` returns `{ pending, dead, oldestEnqueuedAt }`.
+  - `compose` refuses a tap on a forwarded entity, an async projection whose entities live in different logs, and one on a forwarded log with no global order. One entity kind has one log.
+  - `EventLog` and its parts are exported from `@arki/journal`, and the adapter conformance suite from `@arki/journal/event-log-contract` (`eventLogContract`, `ContractSkip`). `JOB_KINDS`, `JobKind` and `ForwardArgs` are exported from `@arki/journal/pg`.
+
+  Migration: two columns, a check branch and an index on the job tables, all additive. See `docs/upgrades/0.3.0-to-0.4.0.md`, step 9.
+
+- a1da735: Public types no longer name Zod (`TYPES_E001`). Breaking:
+
+  - The schemas that decode stored values move to the new `@arki/journal/zod` entry and take `xSchema` names: `storedEventRowSchema` and `forwardArgsSchema` (were `StoredEventRow` and `ForwardArgs` in `@arki/journal/pg`), and `eventLogPositionSchema` (was the `EventLogPosition` value in `@arki/journal`). The types keep their names and places.
+  - `EventLogPosition` is a TypeScript brand (`string & { readonly [brand]: true }`) made only by `eventLogPositionSchema`, which `z.custom` builds on a `z.string().min(1)` check.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 10.
+
+- 84d246f: Workflow runs can start later and give up waiting. `def.start` takes `delay` (an age such as `'5m'`, or a `Date`) and `ttl` (an age). A delayed run's first node is due at the planned start, and the readers show `delayedUntil`. A run whose first node has not started `ttl` after it was due ends in the new state `expired` without running, and frees its concurrency slot. `journal.workflows.reschedule(db, { runId, delay } | { runId, at }, op)` moves a start that has not happened. Retention has `workflows.expired` (default: the `failed` time).
+
+  Migration needed: `workflow_runs` gets the nullable columns `start_at`, `ttl_at` and `ttl_ms`, and `state` may now hold `expired`. Run `drizzle-kit generate`. Code that lists the end states must handle `expired`.
+
+- ce53dcc: A workflow can wait for one of the app's own events. New table, so `ExportsEveryJournalTable` stops compiling until `workflowWaits` has its export (0.x, no shims).
+
+  New:
+
+  - `.waitFor(name, { on: { [label]: { entity, events, match, where? } }, timeout | until, onTimeout, when? })` parks a run until an entity records one of the events. The result is `{ via: label, event }`, and narrowing `event.type` types `data`. `match` must return the entity's id type and `events` must belong to the entity: both are compile errors. With `onTimeout: 'continue'` a deadline gives `null`, so a wait doubles as a sleep an event cuts short. The signal form stays.
+  - No lost wake-ups: a parked wait writes rows in the new `workflow_waits` table, and the library effect `workflow.wake:<entity kind>` is mounted for each entity a wait watches. Park and wake take a lock on the correlation key, and the park reads the log, so whichever commits second sees the other.
+  - An event counts from the run's admission, so one recorded before the worker reaches the wait is kept. A revisit in a `next` loop reads on from the last event that wait took, one event is taken once per run, and a deadline and an event contend on one run transition. `WaitEventTaken` records each take, with the event id as `deliveryId`.
+  - An event wait stores a pointer to the event (`{ via, seq }`), never a copy, so `forget` on the entity reaches every run that took its events, parked, running or finished. An event with an `erased` form reads in that form. `results.x`, `def.read` and the operator views keep their types.
+  - `.sleep(name, until, { next })` loops, as a step's `next` does.
+  - `workflowHarness` gains `tickTo`, `dueJobs` and `release`, so a test runs due jobs one by one. `workflowHarnessOn(db, { setup })` runs it on a database the test opened, such as a real Postgres.
+
+  An event wait is a new node kind, `eventWait`, and its `on` joins the shape hash, so changing it needs a new version. Shape hashes of existing node kinds do not change. A run whose shape has no event wait never touches `workflow_waits`. The upgrade note names the migration step.
+
+- 8e5d9df: Foreman can change runs and limits. `journalWorkflowsModule` gains the actions `workflow.setMetadata` and `workflow.addTags` (permission `workflow:metadata`, low risk), `workflow.reschedule` (`workflow:reschedule`, medium), `workflow.replay` (`workflow:replay`, medium), and `workflow.limits.pause`, `.resume`, `.override` and `.reset` (`workflow:limits`, high), plus the reads `workflow.limits.list` and `workflow.limits.get` (`workflow:read`). Each verb has its own permission, so an operator who may tag runs may not replay them or pause a limit. Every action previews what it will do and refuses a stale approval with `ARKI_JOURNAL_E010`. A run action's approval is taken on the run's revision, which metadata and tag changes do not move: two metadata actions in a row both apply, and neither voids a cancel. A limit action's approval is taken on the limit's version, which runs that take a slot do not move. The newer actions answer the journal's own refusals with their codes, statuses and data (`journal.workflow_busy` for a replay at a busy key, `journal.conflict` for a reschedule of a run that has started).
+
+  The run reads show `batchId`, `replayOf`, `startAt`, `maxAttempts`, `stepTimeoutMs` and `priority`, and `workflow.runs` filters by `batchId`. `LimitView` gains `version`: the `journal.limit` entity's version, 0 until an operator first changes the limit. No migration.
+
+- 84d246f: Workflow `concurrency` now works, and commands, effects and workflow steps emit OpenTelemetry spans.
+
+  - `concurrency: { key, limit, onBusy }` was typed but never applied: every run was stored with a null key. A start now counts the unfinished runs with its key, under a transaction-scoped advisory lock. At the limit, `onBusy: 'refuse'` returns the new failure `WorkflowBusy` (`journal.workflow_busy`, exported from `@arki/journal`, `./errors` and `./contract`), and `'join'` returns the oldest running run. A child start that is busy is always `WorkflowBusy`. `def.start` now has `WorkflowBusy` in its result type.
+  - Breaking for the schema: the unique index `workflow_runs_concurrency_unique` becomes the plain partial index `workflow_runs_concurrency_idx`, so a `limit` above 1 can hold. Generate a migration (`drizzle-kit generate`) after upgrading.
+  - Spans `journal.command`, `journal.effect` and `journal.step`, with the tracer `@arki/journal`. Outcomes are classified as `ok`, `failure` (with `failure.code`) or `defect`; no payload is an attribute. New dependency: `@opentelemetry/api`.
+
+- 88daaeb: `infra.fromFeatures` and `entrypoint.fromFeatures` take one declaration, the same one `infra()` and `entrypoint()` take, instead of a callback `features => unit({...})`. Breaking: rewrite each callback (`docs/upgrades/0.7.0-to-0.8.0.md`, step 6).
+
+  - Every `provides` factory and lifecycle hook also gets `$features`, the app's mounted features, and `$state`, what the declaration's new `state()` returned for this app. The builder calls `state()` once per app, so two apps built from one binder never share a worker, a timer or a server. Without `state`, `$state` is `undefined`.
+  - `actions` may be a function of the mounted features.
+  - The binder has a static `name` and typed `provides` handles, so a feature needs a `fromFeatures` service by handle: `entrypointOnly(appJournal.provides.journal)`. A misplaced binder is reported by its name, not `infra.fromFeatures(...)`.
+  - New types: `FromFeaturesDefinition` and `FeaturesContext` (`@arki/dot/unit`, `@arki/dot/feature`). `UnitBinder` gains `name` and `provides`.
+  - `@arki/journal`: `journal({ j })` exposes `provides.journal`; `JournalDriven` is inferred from it. `journalWorker()` keeps its worker in `$state`.
+  - `@arki/schedule`: `schedule(...)` exposes `provides.scheduler`.
+  - `@arki/queue` (`queueWorker`) and `@arki/http` (`http`) keep their per-app runtime in `$state`. No change for their callers.
+
+  docs: `packages/dot/docs/unit-authoring.md` (Units built from the features), `composition-doctrine.md`, `di.md`, the upgrade note; `@arki/journal` README; `@arki/schedule` `docs/reference/dot.md`.
+  no demo impact: no demo calls `fromFeatures` directly.
+
+- cb5b666: Durable workflows. A workflow is a list of steps that runs to the end even when the process dies. Each step runs as a job in `journal_jobs`, and its checkpoint (the result, and the next step scheduled) commits in one transaction. Use it for work that must survive a restart or waits for hours or days. A loop of steps inside one request stays `createFlow` from `@arki/ai`, which is in memory and not durable. See the README chapter Workflows and the agent guide.
+
+  - `j.workflow(name, { version, input, output?, needs?, deadline?, concurrency?, onDeadStep?, retention?, limits? })`, then `.step`, `.waitFor`, `.sleep`, `.child`, `.map` and `.finish`. Step results are inferred: a later step reads `results.<name>` typed. Step options: `undo`, `output`, `key`, `retry`, `timeout`, `when` (skip; the result is `R | null`) and `next` (jump back to an earlier node). `waitFor` takes `when` too: false skips the wait without parking, and its result is `payload | null`, in `results` and in `def.read`.
+  - `startOn: { entity, event, id, input }` on `j.workflow` starts a run when the entity records the event: a runner-owned effect `workflow.start:<name>`, whose job is written in the event's transaction, starts it once with `workflowMeta` at the highest version; an id that already has a run starts nothing. `id` and `input` are typed from the entity's key and the event's data, and `input` is checked against the workflow's input. Only the highest registered version may declare `startOn` (`BAD_DEFINITION`).
+  - `compose({ workflows, workflowMeta })` registers them, once per `initJournal()`. It adds the effects `workflow.step` and `workflow.timer`. `workflowMeta` is recorded on the runner's checkpoints, and on each command a workflow body runs with `ctx.run(command, input)` and no meta. A body may still pass its own meta. An effect's `ctx.run` (`RootCommandRunner`) still requires one.
+  - A finished definition has `def.start` (`{ input, id? }` → `{ runId }`, idempotent on `id`), `def.signal(name)` (`{ runId, deliveryId, payload }` → `woke`, `kept`, `duplicate`, `finished` or `no-run`; `no-run` is a signal to a run that does not exist or belongs to another workflow, which stores nothing and does not fail, so a webhook is not resent forever), `def.cancel` (`{ runId, reason }`) and `def.read(db, runId)`, which reads a run back typed and returns `WorkflowReadMismatch` (`journal.workflow_read_mismatch`) when a stored value no longer fits its schema.
+  - Failure and compensation: a thrown error retries with the step's `retry`, or the default (8 tries); a returned failure kills the step unless that `retry`'s `while` accepts it. `onDeadStep: 'wait'` (default) leaves a dead step for an operator; `'compensate'` undoes the finished steps, newest first. A step without `undo` is listed in `residual`. A cancel compensates the same way. A wait the run was parked on when compensation began is dropped and leaves no result.
+  - Versions: new runs start the highest registered version; older versions only finish their runs. A run whose code is missing or has other nodes is stranded and never runs the wrong step.
+  - Operators: `journal.workflows.runs`, `run`, `counts`, `stranded`, `history`, and the verbs `retryStep`, `resolveStep`, `skipUndo`, `signal`, `cancel` and `checkResult`. `journalWorkflowsModule` in `@arki/journal/foreman` serves them in Foreman (`ARKI_JOURNAL_E010` to `E017`).
+  - Dot: `journalHandlers({ workflows })`, `journalWorkflows(core, defs)` for `defineFeature`, and `journal({ j, workflowMeta })`. A step gets the services of the feature that lists its workflow.
+  - Testing: `workflowHarness({ setup })` in `@arki/journal/testing`, with `tick`, `drain`, `crash` and `close`.
+  - Every effect context has `attempt`. An effect whose job lease was lost gets `LEASE_LOST` from `ctx.run`, and nothing it runs is written.
+  - `EffectSchedule.when(event)`: an effect makes a job only for the events it accepts.
+  - One rule for a throw, as in `@arki/queue`: an effect or step that throws is retried by its `retry`, or the default (8 tries), and the `while` gets the error that was thrown, not the `UnexpectedDefect` the journal records for it, so `.while(reason => reason instanceof TransientError)` needs no `findCause`. A returned failure is final, unless the `while` accepts it.
+  - New `JournalError` codes: `LEASE_LOST`, `STEP_TIMEOUT`, `WORKFLOW_LIMIT`, `WORKFLOW_UNKNOWN`, `WORKFLOW_SHAPE_CHANGED`, `WORKFLOW_VERSION_RETIRED`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_FINISHED`, `WORKFLOW_COMPENSATING`, `STEP_NOT_DEAD`, `STEP_NOT_RESOLVABLE`, `WORKFLOW_READ_MISMATCH` and `JOB_MANAGED`. New failures: `WorkflowStranded`, `WorkflowReadMismatch`.
+
+  Breaking (0.x). These shipped in the 0.3.0 code without a changelog entry. 0.3.0 was not published to npm, so an app moving from 0.2.1 meets them here. The upgrade guide is `docs/upgrades/0.3.0-to-0.4.0.md`.
+
+  - `initJournal({ tables, meta?, retention? })` takes the journal tables, and `tables` is required. `compose()` no longer takes `tables`, and the Dot adapter `journal({ j })` no longer takes `tables`.
+  - `retention` moved from `compose()` to `initJournal()`. It gains `retention.workflows` (`completed` 7 days, `failed` 90 days, `cancelled` as `failed`).
+  - Migration: three new tables, `workflow_runs`, `workflow_steps` and `workflow_signals`, and a nullable `run_id` column on `journal_jobs` and `journal_job_archive`. Export the new tables from the schema module (`ExportsEveryJournalTable` names any you miss) and run `drizzle-kit generate`. Every statement is additive. Migrate first, then roll the workers.
+  - `journal.retry`, `journal.discard` and `journal.cancel` refuse a job that belongs to a workflow run with `JOB_MANAGED`.
+  - For code written against the unreleased workflow code in 0.3.0: `NodeSkipped` event data has a required `cause` (`when`, `compensating`, `no-undo`, `detached`, `operator`), and a node dropped by compensation leaves no key in `results` (it was `null`). `RunDetail` takes `<Input, Output, Results>`, and `WorkflowDef`, `WorkflowStarter`, `DefExtension` and `ApplyExtension` have new type parameters. `finish(fn)` with a declared `output` no longer needs a second argument. `Effect.bindPerWorkflow` is internal and no longer in the published types.
+
+- 6fd5ff9: `journal.adopt` takes a row at any version whose log is empty, not only a row at version 0. The create event is recorded as version 1 and the row is set to version 1 under the row lock, so the row's version drops from N to 1 and a client holding `expectedVersion: N` gets `CONFLICT` once. This is how an entity goes from `events: 'transient'` to `'stored'`: change the setting, then adopt each row before its first write. A row with a non-empty log is still `CONFLICT`; the message now says the row was written to after its events started being stored.
+- b435e76: A command declares the events it writes. Breaking (0.x, no shims):
+
+  - `j.command(name, input, options, handler)` replaces `j.command(name, input, handler, options?)`. `options.writes` is required: `{ writes: [OrderPaid] }`, or `{ writes: [] }` for a command that only runs child commands. `authorize` moves into the same object.
+  - `write` in a handler takes only the declared events: anything else is a type error. At run time an undeclared event fails the run with `BAD_DEFINITION`, naming the command and the event, and nothing commits, even when the handler catches the error.
+  - `Command` has a fifth type parameter, `Writes`, and a read-only `writes` field that keeps the exact tuple, so code can read it before boot. `CommandContext` has a third, `Declared`. `CommandOptions` has a fifth.
+  - New type `CommandWrite<MetaOut, Tx, Declared>`, the type of `context.write`. A helper that takes `write` names what it writes; a command can pass its `write` only when it declares at least those events.
+
+  `@arki/payments` moves its commands to the new form; its API does not change. The `@arki/dot` app-stack template and the `@arki/db` README show the new form.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 12.
+
+  docs: README (Quick start, Commands, Idempotent commands, Failures, Workflows, Dot), `docs/agent-guide.md` (model, write a command, rules that bite, errors, shared packages), `llms.txt`.
+  demo impact: `demos/faultline` (commands and lesson 02) moves to the new form.
+
+- b435e76: An effect is application code, not an entrypoint. In a Dot app a feature's effects, taps and workflows are an application contribution of `.usecases(...)`. Breaking (0.x, no shims):
+
+  - `journalHandlers(core, { effects, taps, workflows })` takes the feature core first and is mounted as `core.usecases({ ...factories }, journalHandlers(core, { … }))`. It binds once at the feature's boot to the usecase-level deps: needs that are not `entrypointOnly`, private infra, domain services. It no longer takes `projections`: list those with `journalProjections(...)` in `.infra(...)`.
+  - Removed: the entrypoint helpers `journalEffects(core, …)` and `journalWorkflows(core, defs)`, and the types `JournalEffectsEntrypoint` and `JournalFeatureSlice` (now `JournalHandlers`). `journalWorker()` is the only journal entrypoint.
+  - New: `needsOf((_: Deps) => ['mailer'])`, the needs record of an effect, tap or workflow in a Dot feature, typed from the selector's parameter annotation with no type arguments. It refuses an `entrypointOnly` key and a key the feature lacks. A key missing at runtime fails the feature's boot and names it. A reaction file is a plain exported value and imports `Deps` from the feature as a type only. New type `UsecaseCore`.
+  - `dot explain --as journal-flow` is now one graph for the whole app: `nodes` (event, entity, projection, effect, tap, workflow, feature) and typed `edges` (`folds`, `projects`, `reacts`, `owned-by`), with each edge to an event carrying its `timing` and `delivery`, and each reaction its deps and retry policy. The text view prints it per event. It is derived from the declarations at configure; the old `edges: [{ event, effect, plugin, entities }]` shape is gone.
+  - New in `@arki/journal/orpc`: `orThrowCommand(result, errors)`. A contract-first procedure answers `context.run(command, input)` with it: the contract lists its business failures only, and the journal's own `CommandFailure`s answer through `toORPCError`.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 11.
+
+  docs: README (Dot, A `defineFeature` feature, Workflows in Dot, the actor), `docs/agent-guide.md` (Dot, task map), `llms.txt`.
+  no demo impact: no demo mounts the journal in a Dot feature.
+
+- 8e5d9df: Named limits and pause for workflows. `j.limit({ name, total?, perKey? })` makes a limit several workflows share: list it in `concurrency.shared` (at most two). `concurrency` also takes `total` (every unfinished run of the workflow) next to `limit` (per key), and `key` is optional unless `limit` or a shared `perKey` needs it; together `limit` and `total` are the workflow's own limit, `workflow/<name>`. A start is admitted only when every limit it holds has room; `onBusy: 'join'` joins only when the workflow's own per-key limit is full. `{ key, limit, onBusy }` works as before.
+
+  `journal.limits` reads and changes limits at runtime: `list`, `get`, `override` (the limit's `total` and `perKey`, or one key's `perKey` for up to 30 days, 7 by default; `0` admits nothing), `reset`, `pause` and `resume`. A paused limit admits no new run (`WorkflowBusy` with `reason: 'paused'`); running runs finish. A workflow without `concurrency` can be paused by its own name. Each change is an event on the new `journal.limit` entity that names the operator; an unknown name is `CommandNotFound`. `WorkflowBusy` data gains `limitName` and `reason` (`LIMIT_BUSY_REASONS`). New exports: `LIMIT_BOUNDS`, `LIMIT_KEY_TTL`, `WORKFLOW_LIMIT_PREFIX`, `LIMIT_BUSY_REASONS`, `LimitDef`, `LimitView`, `LimitOps` and the verb argument types.
+
+  Migration needed: `workflow_runs` gets `limits text[] not null default '{}'` with a partial GIN index (`workflow_runs_limits_idx`), and there is a new table `journal_limits`. Run `drizzle-kit generate`. Old runs hold no shared limit; a workflow's own limit counts them by name.
+
+- b438186: The journal's Postgres storage lives in one place, split by concern: entity rows, the event log, receipts, effect jobs and the wake signal (`src/store.ts`). The write path, history and command receipts call it instead of building queries inline. One behaviour changes: a row insert that hits a unique constraint is now `CONFLICT` for every entity, not only for one with `events: 'transient'`. Before, an entity with stored events let the driver's unique-violation error through. The write still rolls back with its events.
+- b435e76: Effects only reach out, `startOn` says when a run starts, and workflows get a command node. Breaking (0.x, no shims):
+
+  - An effect's context has no `run` and no `accept`: `{ jobId, attempt, signal, db }`. An event that must run a command starts a `j.task` or a `j.workflow` with `startOn`. `Effect` and `EffectHandlers` lose their runner type argument, and `RootCommandRunner` is no longer exported.
+  - `startOn.timing` is required: `'after-commit'` (the behaviour so far) or `'with-event'`. `'with-event'` writes `RunStarted`, the first scheduled node and its job in the event's transaction, so a rollback of the command removes the run. No body runs inline. `onBusy: 'refuse'` with `'with-event'` is a type error. A standalone `workflow()` now types its `startOn` mapping.
+
+  New:
+
+  - `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` runs one command as a savepoint inside the checkpoint's transaction: exactly once per node, even when the job runs again after a crash. A refused command rolls back and the failure transition commits. `accept` names failures the run goes on from, and they join the typed result. `undo` runs in compensation, in reverse order.
+  - `j.command(name, input, { writes, output }, handler)` takes a schema of the plain result. A command node stores it, and `results.x` and `def.read` are typed from it. Stored JSON is checked by the schema, never cast.
+
+  Shape hashes of existing node kinds do not change. `@arki/payments`: the refund workflow names `timing: 'after-commit'`. Its steps stay steps, because none has a body of exactly one command.
+
+### Patch Changes
+
+- f6b9ab1: `@arki/journal/pg` exports `LimitKeyOverride`, the type of the `journal_limits.keys` column. A schema module that infers its tables from `journalTables` can now name it, so its declaration no longer fails with TS2883.
+
+  no docs impact: a type export for an existing column, named by the compiler, not by app code.
+  no demo impact: no demo builds journal tables from inferred types.
+
+- 86250e6: `toORPCError` and `commandErrors()` answer the `TransactionDefect` that `journal.run` returns for a `JournalError('CONFLICT')` with the same 409 as the thrown conflict. Since a command's transaction started returning thrown errors as `TransactionDefect`, a stale `expectedVersion` or a lost insert race reached the client as a 500.
+
+  no docs impact: README already promised the 409; one sentence added on the returned shape.
+  no demo impact: error mapping only.
+
+- 11c5bc2: Complete public error summaries and remediation metadata. The source error index now follows canonical factory aliases, checks duplicate original codes across packages, and enforces documentation for private libraries too. Runtime behavior and failure data are unchanged.
+
+  No demo impact: this changes error documentation and repository checks only.
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- 49517e2: The build no longer compiles type tests (`*.test-d.ts`). They stay in `typecheck`, but a type test can no longer fail the build, and the published `dist` no longer holds compiled type tests.
+
+  `@arki/db` exports the `OnDelete` type from `@arki/db/id` and `@arki/db/sqlite`. A package whose types come from `idColumns` (such as `@arki/auth`) can now build its declarations. Before, TypeScript could not name `OnDelete` and stopped with TS2883.
+
+  `@arki/ai` drops a `@ts-expect-error` above the `@huggingface/transformers` import. That package is now always installed, so the comment had no error to hide and failed the build.
+
+- fdec626: Workflow concurrency no longer crosses a run's `scope`. The limit still counts every run with the key, but `onBusy: 'join'` joins only a run of the caller's own scope (otherwise the start is `WorkflowBusy`), and `WorkflowBusy.running` lists only the caller's own scope's run ids. Before, two tenants whose inputs gave the same key could get each other's run ids.
+- 17e86d3: Breaking: the object-form feature API is removed. Write every feature as a `defineFeature(name).needs().infra().usecases().provides().entrypoints()` chain.
+
+  - `@arki/dot`: removed `feature()`, `plug`, `composeRouter`, `composeRepos`, `tokenOf`, `entrypointsOf` and the types `AnyFeature`, `MountedFeature`, `UnitOf`, `MountedUnitsOf`, `FeatureConfig`, `ComposedRouter`, `ComposedRepos`. `defineApp().features()` takes chain features only. Use `routerFor(rpcContract, features)` instead of `composeRouter`, and a feature's own `repos({...})` store instead of `composeRepos`. Read `f.entrypoints` instead of `entrypointsOf(f)`. Lifecycle hooks (`boot`, `start`, `stop`) live on an infra unit inside the feature.
+  - `@arki/http`: removed `endpoints(build)` and `EndpointsFeatureSlice` from the root export. Use `endpoints(core, build, { contracts })` from `@arki/http/dot` in `.entrypoints()`.
+  - `@arki/schedule`: removed the `schedules(needs, defs)` overload. Use `schedules(core, defs)` in `.entrypoints()`.
+  - `@arki/queue`, `@arki/journal`, `@arki/admin`: dropped their object-form branches. The chain API is unchanged.
+
+- Updated dependencies [5d55e12]
+- Updated dependencies [a905468]
+- Updated dependencies [c36e614]
+- Updated dependencies [b992897]
+- Updated dependencies [289ba73]
+- Updated dependencies [17e86d3]
+- Updated dependencies [ebc681b]
+- Updated dependencies [f2ba7ac]
+- Updated dependencies [6cc8655]
+- Updated dependencies [440c75f]
+- Updated dependencies [440c75f]
+- Updated dependencies [5d55e12]
+- Updated dependencies [be8f8e2]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [e132ad3]
+- Updated dependencies [23e9f49]
+- Updated dependencies [1e47612]
+- Updated dependencies [5d55e12]
+- Updated dependencies [e132ad3]
+- Updated dependencies [23e153b]
+- Updated dependencies [49517e2]
+- Updated dependencies [7711722]
+- Updated dependencies [29520c1]
+- Updated dependencies [8944628]
+- Updated dependencies [88daaeb]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b37115d]
+- Updated dependencies [36b4da8]
+- Updated dependencies [c1ed2a3]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b435e76]
+- Updated dependencies [517d297]
+- Updated dependencies [1a897f8]
+- Updated dependencies [9d408cf]
+- Updated dependencies [8944628]
+- Updated dependencies [43bef40]
+- Updated dependencies [e80211d]
+- Updated dependencies [17e86d3]
+  - @arki/http@0.4.0
+  - @arki/db@0.5.0
+  - @arki/dot@0.9.0
+  - @arki/admin@0.2.0
+  - @arki/resilience@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

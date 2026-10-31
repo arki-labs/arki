@@ -1,6 +1,6 @@
 {
   "name": "@arki/resilience",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets, built on cockatiel.",
   "keywords": [
     "arki",

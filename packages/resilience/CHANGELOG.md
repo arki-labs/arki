@@ -4,6 +4,14 @@
 
 - Breaking: retry cancellation returns canonical `Cancelled` before another attempt and after rejected cancelled work. `RetryFailure`/`RETRY_FAILURES` include the exact cancellation and clock outcomes. Pre-aborted retries no longer invoke callbacks. See [upgrade guidance](docs/upgrades/0.2.0-to-0.3.0.md).
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [289ba73]
+- Updated dependencies [c1ed2a3]
+  - @arki/dot@0.9.0
+
 ## 0.3.0
 
 ### Minor Changes

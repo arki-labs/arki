@@ -1,6 +1,6 @@
 {
   "name": "@arki/schedule",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Typed schedules for TypeScript: cron and interval handlers that run in process or on a durable queue backend, with locks and honest run results.",
   "repository": {
     "type": "git",

@@ -1,5 +1,70 @@
 # @arki/kv
 
+## 0.4.0
+
+### Minor Changes
+
+- 164e25a: Breaking changes, found by the T08 review.
+
+  - TLS certificates are now verified for `rediss://` URLs. Before, every `rediss://` URL skipped the check. For a self-signed server you trust, pass `{ allowUnverifiedTls: true }` as the fourth argument of `new KV`, set `KV_ALLOW_UNVERIFIED_TLS=true`, or use the `allowUnverifiedTls` Dot option.
+  - `KV.close()` now returns a `kv.close_failed` failure (`KvCloseFailed`) when a disconnect fails, instead of printing to the console and resolving. The Dot plugin throws it on dispose.
+  - `@arki/kv/instance` no longer exports `kv`, which built a client when the module loaded. Call `createKVInstance()` once in your app.
+  - `createKV` and `createRateLimitKV` throw `KVInitializationError` (`KV_INIT_E004`) when no URL is set, instead of a plain `Error`.
+  - `setIfNotExists` now writes the same key and format as `set`, so `get` reads its value back. `mset` now applies its expiry to every pair.
+  - The rate limiter fallback to memory is no longer silent: it logs a warning and lists the id in `KV.degradedRateLimiters`. A memory limiter is replaced by a Redis one on the next `getRateLimiter` call after Redis is ready. Before, the memory limiter stayed cached for good.
+  - `setIfNotExists` and `publish` wait for the Redis connection instead of failing with a raw "Stream isn't writeable" error right after the client is made.
+  - Every command runs in a `kv.<command>` span and counts in the `kv.commands` metric (new dependency `@opentelemetry/api`). Console output is replaced by `@arki/log`.
+
+  No docs impact beyond the README and agent guide, updated here. No demo impact.
+
+### Patch Changes
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- 1e47612: `Lazy<T>` and `resolveLazy` move from `@arki/ts` to `@arki/dot/plugin` as `Deferred<T>` and `resolveDeferred`. They are the "value now, or a thunk the adapter calls at boot" shape that Dot adapters accept, and the old name clashed with Dot's own `Lazy<Value, Cleanup>` service handle. Behaviour is unchanged. `@arki/ts` no longer exports them; to upgrade, import `Deferred` and `resolveDeferred` from `@arki/dot/plugin`.
+
+  `@arki/http` (`port`) and `@arki/kv` (`kv()`, `kv.optional()`) now type their deferred options as `Deferred<T>`, the same shape as before, and no longer depend on `@arki/ts`. `@arki/env` drops an `@arki/ts` dependency it never imported.
+
+  demo impact: none (neither demo imports `Lazy` or `resolveLazy`).
+
+- Updated dependencies [5d55e12]
+- Updated dependencies [a905468]
+- Updated dependencies [c36e614]
+- Updated dependencies [b992897]
+- Updated dependencies [289ba73]
+- Updated dependencies [440c75f]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [e132ad3]
+- Updated dependencies [1e47612]
+- Updated dependencies [49517e2]
+- Updated dependencies [8944628]
+- Updated dependencies [88daaeb]
+- Updated dependencies [36b4da8]
+- Updated dependencies [c1ed2a3]
+- Updated dependencies [5d55e12]
+- Updated dependencies [1a897f8]
+- Updated dependencies [e80211d]
+- Updated dependencies [17e86d3]
+  - @arki/http@0.4.0
+  - @arki/dot@0.9.0
+
 ## 0.3.0
 
 ### Minor Changes

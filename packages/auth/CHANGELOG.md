@@ -1,5 +1,86 @@
 # @arki/auth
 
+## 0.3.0
+
+### Minor Changes
+
+- 49deeb6: `@arki/auth` now runs on SQLite (libSQL) as well as Postgres. The auth and workspace tables are written once against the column kit of `@arki/db`, and the new entries `@arki/auth/sqlite` and `@arki/auth/sqlite/workspaces` build them on SQLite. `createAuth` reads Better Auth's adapter dialect from `db`; `AuthDb` accepts a libSQL database, and `AuthTables` takes tables of either dialect. `testAuth(definition, { tables, database: 'libsql' })` runs a test auth on in-memory libSQL. The Postgres tables are unchanged: drizzle-kit sees no difference, and their row types are the same.
+
+  Breaking: `createAuthTables`, `createWorkspaceTables` and the `auth*Columns` helpers take a column kit instead of a `PgSchema`, and their columns are kit specs. Migrate `createAuthTables(schema, { ids: { user: userIdColumns, session: sessionIdColumns, account: accountIdColumns, verification: verificationIdColumns }, columns: { user: { tweaks: tweaksColumn().notNull().default(EMPTY_TWEAKS) } } })` to `const c = pgColumns(schema); createAuthTables(c, { ids: authIdSources, columns: { user: { tweaks: tweaksSpec(c).notNull().default(EMPTY_TWEAKS) } } })`, with `pgColumns` from `@arki/db/pg`. Extra columns become `c.text(...)`, `c.timestamp(...)`, `c.json(...)`; a custom id is `{ primaryColumn: () => c.text('id')... }` or `c.id(declaration)`. `createWorkspaceTables(schema, …)` becomes `createWorkspaceTables(pgColumns(schema), …)`. `tweaksColumn()` and the `*IdColumns` helpers for an app's own Postgres tables are unchanged.
+
+  SQLite limits: timestamps keep milliseconds, not microseconds; case-insensitive matching covers ASCII letters only; unique-violation errors carry no constraint name. The workspace scoping kernel stays on `@arki/auth/pg/workspaces`.
+
+- 8944628: `resolveWriteScope` and `reassignScope` return `AccessDenied` (403) for a write the actor may not make and `ResourceMissing` (404) for a move of a row the actor cannot see, instead of throwing `WorkspaceScopeError`, which reached the wire as a 500. `WorkspaceScopeError` stays for bugs in the caller. The handlers `createSignInHandlers` returns now resolve to a `SignInRefused` failure (`data.reason`: `credentials`, `unverified`, `rateLimited` or `unknown`) instead of throwing an `Error` with the server's text; `SignInForm` shows `credentialsError`, `unverifiedError` or `rateLimitedError` from its localization. `SignInFailure` is now derived from the new `SIGN_IN_FAILURE_REASONS` list. `createE2EHandler` answers its refusals with the shared failure envelope (`{ version, code, data? }`). Docs: reference.md updated.
+- 36b4da8: Auth checks are plain steps (RFC `docs/rfcs/2026-10-21-dot-middleware.md`, step 4).
+
+  - `@arki/auth` adds `authed`, `verified` and `role(name)`: plain functions that read `ctx.principal` and narrow it to non-null, or refuse with `auth.unauthenticated` (401) / `auth.forbidden` (403). Attach them with the transport's `step()`: `impl.x.use(step(authed))` (`@arki/dot/orpc`), `routes().use(step(authed))` (`@arki/http`). The handler keeps the app's own principal type.
+  - `@arki/auth/http` adds `principalFromHeaders(auth)`, a step that adds `principal` (`null` for a guest) from the request's credentials.
+  - Breaking: `guards<C>()` is removed from `@arki/auth/orpc`. `const { authed } = guards<C>()` → `import { authed } from '@arki/auth'` and `.use(step(authed))`. `can(policies)(name, load)` is now imported directly from `@arki/auth/orpc`, same call shape.
+  - Breaking: `withPrincipal(auth, options)` and `withOptionalPrincipal(auth)` are removed from `@arki/auth/http`. Use `.use(step(principalFromHeaders(auth), { failureHeaders: authFailureHeaders }))`, then `.use(step(authed, { failureHeaders: authFailureHeaders }))` (or `verified`, `role(name)`) on routes that need a signed-in caller.
+  - Breaking: `@arki/http` removes `derive(key, fn)`, the bundle's `.derive()`, `Deriver`, `ErasedDeriver`, `BASE_CTX_KEYS` and `ARKI_HTTP_E007`. A keyed deriver becomes a step that returns an object: `.derive('db', fn)` → `.use(step(ctx => ({ db: fn(ctx) })))`. `verifyWebhook({ scheme })` is a step: `.use(step(verifyWebhook({ scheme })))` adds `ctx.webhook`. A route bundle's `derivers` field is renamed `stages` (it holds steps and arounds).
+  - Fix: `@arki/http` steps after the first one see `ctx.url` and `ctx.signal` again (they were dropped when the context was extended). This fixes `@arki/live`'s endpoint, which reads `ctx.url` in its second stage.
+
+### Patch Changes
+
+- ff85471: Go to Definition works on mapped keys again. Handle maps (`unit.provides.x`, feature handles), `PolicyTree`, `SessionValues`, `CronPolicy.respond`, `ChartConfig.theme`, `Operations` and the oRPC utils tree now map `[K in keyof T as K & string]` instead of `[K in keyof T & string]`. The old form cut the link from each key back to its declaration, so the editor found no definition. Types are otherwise unchanged.
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- e132ad3: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+- 5d55e12: Docs only: `llms.txt` import paths list `./sqlite` and `./sqlite/workspaces`. No code change.
+- 530b86a: `ArkiAuthProvider` takes an optional `onUserChange(userId: string | null)` prop. It is called with the signed-in user's id, or `null` when signed out, each time that changes (sign-in, sign-out, or a new session that replaced another user's). It is never called while the session is loading or failed to load, and not twice in a row for the same user. Use it for per-user cleanup, such as dropping the previous user's offline caches.
+- Updated dependencies [5d55e12]
+- Updated dependencies [a905468]
+- Updated dependencies [c36e614]
+- Updated dependencies [b992897]
+- Updated dependencies [289ba73]
+- Updated dependencies [ebc681b]
+- Updated dependencies [6cc8655]
+- Updated dependencies [440c75f]
+- Updated dependencies [5d55e12]
+- Updated dependencies [be8f8e2]
+- Updated dependencies [c3e63ba]
+- Updated dependencies [e132ad3]
+- Updated dependencies [1e47612]
+- Updated dependencies [e132ad3]
+- Updated dependencies [49517e2]
+- Updated dependencies [ba05496]
+- Updated dependencies [164e25a]
+- Updated dependencies [29520c1]
+- Updated dependencies [8944628]
+- Updated dependencies [88daaeb]
+- Updated dependencies [b37115d]
+- Updated dependencies [36b4da8]
+- Updated dependencies [c1ed2a3]
+- Updated dependencies [5d55e12]
+- Updated dependencies [b435e76]
+- Updated dependencies [517d297]
+- Updated dependencies [1a897f8]
+- Updated dependencies [9d408cf]
+- Updated dependencies [e80211d]
+- Updated dependencies [17e86d3]
+  - @arki/http@0.4.0
+  - @arki/db@0.5.0
+  - @arki/dot@0.9.0
+  - @arki/kv@0.4.0
+  - @arki/mail@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

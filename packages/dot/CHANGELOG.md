@@ -1,5 +1,18 @@
 # @arki/dot
 
+## 0.9.0
+
+### Minor Changes
+
+- 289ba73: `dot dev` serves a console on `--console-port` (default 4321) with one page per projection that registers `console: { title }`. The projection module exports `consolePage(document)`; the console runs `dot explain --as <format> --page` for each request and wraps the HTML in a shell with light and dark tokens. `dot explain --page` is new. `ProjectionManifest` gains `console`. A taken console port prints a warning and `dot dev` runs without the console. No demo impact: the console has no demo.
+
+### Patch Changes
+
+- c1ed2a3: The `dot dev` console answers only requests whose `Host` is `127.0.0.1:<port>` or `localhost:<port>` (421 otherwise), so a page on another site cannot read it through DNS rebinding. A malformed escape in a page path is a 404, and a page that fails to render is a 500; neither stops the console.
+
+  no docs impact: the console's behaviour for its own URLs is unchanged.
+  no demo impact: no demo opens the console.
+
 ## 0.8.0
 
 ### Minor Changes

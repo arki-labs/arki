@@ -1,5 +1,82 @@
 # @arki/db
 
+## 0.5.0
+
+### Minor Changes
+
+- ebc681b: Stored values and shutdown no longer leak raw errors. The Postgres plugin now ends the query pool and the session pool even when the first `end()` throws, and reports every failure (an `AggregateError` when both fail). The `plainDate` and `instant` codecs, and the SQLite `instant`, throw an `UnexpectedFailure` carrying the new `StoredValueUnreadable` failure (`db.stored_value_unreadable`) instead of a raw `RangeError` for `infinity`, BC dates, malformed text, `NaN` and out-of-range milliseconds. `listenOnPool` rejects its start with `ListenUnavailable` (`db.listen_unavailable`, raw pool error as `cause`), and a throwing `onState` observer is logged instead of rejecting the start or breaking the listener. `runTransaction`, `runTransactionOnce`, `createUnitOfWork` (and so `transactionalProcedure`) and `listenOnPool` emit default `db.*` spans, and every observed operation records `db.operations` and `db.operation.duration`. Removed the dead `DbRuntimeLocalError`, `DB_RUNTIME_LOCAL_ERROR_CODES` and `DbRuntimeLocalErrorCode`. `createIdFactory` is marked deprecated. Migration: replace imports of the removed names with the canonical `DataDirInUse` failure; catch `UnexpectedFailure` where you caught `RangeError` from a temporal read.
+- be8f8e2: SQLite through libSQL. `db({ driver: 'libsql', url })` and `createLibsqlDb` (`@arki/db/libsql`) open a local file, `:memory:` or a Turso / libSQL server; `@libsql/client` is an optional peer. `@arki/db/sqlite` re-exports `drizzle-orm/sqlite-core` and adds `idColumns`. `runTransaction`, `createUnitOfWork`, `isUniqueViolation`, `migrateDb`, `pendingMigrations` and `dbMigrations()` work on it: SQLite errors read as SQL-standard SQLSTATEs (`SQLITE_BUSY` is the retryable `40001`), and local writers take turns instead of failing with `SQLITE_BUSY`. New: `dialectOf`, `isTransaction`, `isLibsql`; `ARKI_DB_TX_E007` refuses SQLite drivers other than libSQL; `ARKI_DB_PLUGIN_E005` catches a URL that belongs to the other driver. `TransactionalDb`'s config is now `TransactionConfig` (`PgTransactionConfig & SQLiteTransactionConfig`), and `runTransaction` passes `{ isolationLevel: 'serializable', behavior: 'immediate' }`. `MigratableDb` now includes `LibSQLDatabase`: code that used it as its own query handle should name its driver's database type.
+- 29520c1: A browser-safe `@arki/db/contract` entry, so an oRPC contract that ships to the browser never bundles drizzle-orm or a Postgres driver. It holds `TRANSACTION_FAILURES`, the six transaction failures (`TransactionConflict`, `TransactionUnavailable`, `TransactionRejected`, `TransactionCommitUncertain`, `TransactionCancelled`, `TransactionDefect`) and the type `TransactionFailure`. Ids for a contract come from `defineId` in `@arki/contracts`.
+- b37115d: Return precise canonical outcomes from migration source reads, state inspection and application. Preserve unwrapped success, stop Dot boot on refusal and report unconfirmed application without automatic retry. Validate native bookkeeping rows through their source schema and expose original failure declarations through the browser-safe contract entry.
+
+  Default migration spans preserve caller context and keep paths, SQL and private causes out of telemetry. Observe rejected telemetry acquisition and reserve synchronous execution as well as existing asynchronous ownership. Process/test callers handle migration failures explicitly. See the migration outcome upgrade guide; no demo impact because demos use the existing Dot boundary.
+
+- 517d297: The column kit: a package writes each table once, against `ColumnKit<D>` (`@arki/db/columns`), and the app passes `pgColumns(schema?)` (`@arki/db/pg`) or `sqliteColumns({ prefix? })` (`@arki/db/sqlite`). Kit tables have exactly the types of hand-written `pgTable` / `sqliteTable` tables, and on Postgres drizzle-kit sees no difference, so moving tables to the kit needs no migration. On SQLite, `varchar(n)` / `char(n)` keep their limit as a `length()` `CHECK`, and index names take the prefix. `@arki/db/sqlite` also gains `instant`, a `Temporal.Instant` column stored as integer milliseconds. The kit's `serial(name?)` is an auto-incrementing primary key (`bigserial` on Postgres, `integer primary key autoincrement` on SQLite), and `@arki/db/sqlite` exports `sqliteNowMs`, the database clock in milliseconds.
+- 9d408cf: Hosted Postgres behind a connection pooler (Neon, Supabase, PlanetScale Postgres, self-hosted PgBouncer). The `db()` plugin takes a `directUrl` thunk, falling back to the new `DB_DIRECT_URL` env var, and publishes `sessionPool`: a small pool on the direct URL for `LISTEN`, session locks and migrations. On a known pooled `DB_URL` (Neon `-pooler`, Supabase port `6543`) with no direct URL, the app still boots, and `sessionPool.connect()` rejects with `ARKI_DB_PLUGIN_E004` naming the host and the fix. `@arki/db/pg` exports `pooledHostOf`, `resolveDirectUrl`, `POOLED_HOSTS` and the `db.session_needs_direct_url` failure for apps without Dot. CockroachDB is checked by an opt-in test (`ARKI_DB_CRDB=1`): queries, `40001` retries, unique-violation errors and migrations work; `LISTEN` does not.
+
+### Patch Changes
+
+- b992897: Return canonical retry cancellation before dispatch and after cancelled rejected work, preserving completed outcomes and actual clock failure identity. Propagate the exact inferred RetryFailure union through helpers, composition and Dot; update Embeddings and HTTP policy types, RPC failure declarations and application template guidance. DB maps retry cancellation to its existing TransactionCancelled; Games Platform persists it as cancellation.
+
+  no demo impact: no demo declares the narrower retry-wait outcome type; application failure admission is migrated. Embeddings changes only its existing optional policy type/schema binding.
+
+- 6cc8655: `dialectOf`, `isTransaction`, `isLibsql` and `DIALECTS` are now public through `@arki/db/dialect`; the SQLite release named them but no entry exported them. `@arki/db/pg` exports `PgTableOf` and `@arki/db/sqlite` exports `SqliteTableOf`, so a package that emits declarations can name the type of a table built with a column kit.
+
+  `@arki/db/errors` exports `findDatabaseError(error)` and its `DatabaseErrorFacts` type: the SQL-standard SQLSTATE (and, on Postgres, the constraint) of a database error, read the same way on Postgres and SQLite.
+
+- 440c75f: Dot's kernel atom is now a **unit**, and its constructor says its role. Breaking (0.x, so a minor):
+
+  - The builder has three steps, always in this order: `defineApp(name).infra(...).features([...]).entrypoints(...)`. `.use()`, `.useAll()` and `.serve()` are removed: write `.use(x)` as `.infra(x)`, `.useAll(list)` as `.infra(...list)`, and `.serve(x)` as `.entrypoints(x)`. `.infra(a, b)` checks the list in order, like separate calls.
+  - `plugin({...})` → `infra({...})` for infrastructure (a database, a cache, a mailer, an outside client). `.infra(...)` mounts it.
+  - A unit served from `.entrypoints(...)` is now `entrypoint({...})`.
+  - `driven(features => plugin({...}))` → `infra.fromFeatures(features => unit({...}))`; `driver(features => plugin({...}))` → `entrypoint.fromFeatures(features => unit({...}))`. `unit({...})` is the role-less atom and belongs only inside `fromFeatures`.
+  - `@arki/dot/plugin` → `@arki/dot/unit`. Every `Plugin*` type is now `Unit*` (`Unit`, `AnyUnit`, `UnitNeeds`, `UnitPhases`, ...); `Driver` / `Driven` → `EntrypointBinder` / `InfraBinder`; `DotPluginError` → `DotUnitError`; `testPlugin` → `testUnit`; `initPlugins` → `initUnits` (its factory method `.plugin` → `.infra`); a feature's `.plugins()` → `.units()`; the context key `$plugin` → `$unit`.
+  - `UnitRole` is `'infra' | 'feature' | 'entrypoint'` (was `'feature' | 'driving'`, with infra unlabelled). Every mounted unit has a role, and the manifest shows it.
+  - The builder checks the side: `.infra()` refuses an entrypoint, and `.entrypoints()` refuses an infra or feature unit, at compile time. An erased graph fails `configure()` with the new `ARKI_DOT_E033` (`DotLifecycleErrorCode.UnitOnWrongSide`).
+  - OpenTelemetry attributes: `dot.plugin.*` → `dot.unit.*` and `dot.app.plugin.count` → `dot.app.unit.count`. Update dashboards and alerts that query them.
+  - `dot explain --graph` groups the hexagon as `infra` / `features` / `entrypoints`.
+  - Domain logic with no usecases is still a feature: `defineFeature('orders').needs({...}).provides({...}).entrypoints()`. The quickstart now teaches this shape.
+
+  Not yet renamed: the manifest and diagnostics JSON keys (`plugins`, `plugin`, `registeringPlugin`). A follow-up renames them. `@arki/dot/plugin` and `plugin` stay as aliases of `@arki/dot/unit` and `infra` inside the monorepo until then, and will be removed before this ships.
+
+  The adapters move to the new names and the new steps (`@arki/tanstack-start`'s `tanstackStart(...)` is now built with `entrypoint`, so it mounts only with `.entrypoints(...)`, as before).
+
+  demo impact: drop-studio's and faultline's Dot code uses `plugin(...)` and `@arki/dot/plugin`; rename on their next upgrade.
+
+- 5d55e12: Remove Zod types from more public declarations, with no API change. `@arki/db`: `TransactionSettings` and `ResolvedTransactionSettings` are plain types, locked to their schema by an exact type test. `@arki/fs`: the `./pg` and `./sqlite` declarations no longer reach the wire schemas, and `UploadRequest` is a plain type with the same lock. `@arki/lock`: the table name schema is private to `pg/lease.sql`.
+
+  No docs impact: no public name or behaviour changed. No demo impact: same reason.
+
+- e132ad3: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+- 49517e2: The build no longer compiles type tests (`*.test-d.ts`). They stay in `typecheck`, but a type test can no longer fail the build, and the published `dist` no longer holds compiled type tests.
+
+  `@arki/db` exports the `OnDelete` type from `@arki/db/id` and `@arki/db/sqlite`. A package whose types come from `idColumns` (such as `@arki/auth`) can now build its declarations. Before, TypeScript could not name `OnDelete` and stopped with TS2883.
+
+  `@arki/ai` drops a `@ts-expect-error` above the `@huggingface/transformers` import. That package is now always installed, so the comment had no error to hide and failed the build.
+
+- b435e76: A command declares the events it writes. Breaking (0.x, no shims):
+
+  - `j.command(name, input, options, handler)` replaces `j.command(name, input, handler, options?)`. `options.writes` is required: `{ writes: [OrderPaid] }`, or `{ writes: [] }` for a command that only runs child commands. `authorize` moves into the same object.
+  - `write` in a handler takes only the declared events: anything else is a type error. At run time an undeclared event fails the run with `BAD_DEFINITION`, naming the command and the event, and nothing commits, even when the handler catches the error.
+  - `Command` has a fifth type parameter, `Writes`, and a read-only `writes` field that keeps the exact tuple, so code can read it before boot. `CommandContext` has a third, `Declared`. `CommandOptions` has a fifth.
+  - New type `CommandWrite<MetaOut, Tx, Declared>`, the type of `context.write`. A helper that takes `write` names what it writes; a command can pass its `write` only when it declares at least those events.
+
+  `@arki/payments` moves its commands to the new form; its API does not change. The `@arki/dot` app-stack template and the `@arki/db` README show the new form.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 12.
+
+  docs: README (Quick start, Commands, Idempotent commands, Failures, Workflows, Dot), `docs/agent-guide.md` (model, write a command, rules that bite, errors, shared packages), `llms.txt`.
+  demo impact: `demos/faultline` (commands and lesson 02) moves to the new form.
+
+- e80211d: Return exact canonical engine refusals and final defects while preserving raw throw retry/fallback provenance. Remove obsolete operational error classes and guards; preserve static backoff diagnostics. Capture timeout/caller cancellation before observation. Infer heterogeneous policy unions.
+
+  Migrate HTTP response/network mapping, DB exhausted SQLSTATE conflicts, Embeddings defect admission and RPC consumers together. See the Resilience 0.2.0-to-0.3.0 upgrade guide. No demo impact: the affected app callers and generator admission guidance are migrated in place.
+
+- Updated dependencies [289ba73]
+- Updated dependencies [c1ed2a3]
+  - @arki/dot@0.9.0
+  - @arki/resilience@0.3.1
+
 ## 0.4.0
 
 ### Minor Changes

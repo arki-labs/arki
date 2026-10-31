@@ -1,6 +1,6 @@
 {
   "name": "@arki/live",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Live queries for oRPC and TanStack Query on your own Postgres: procedures declare the tables they read, a statement trigger publishes a hint at commit, and one SSE stream per tab refetches the queries that read those tables.",
   "keywords": [
