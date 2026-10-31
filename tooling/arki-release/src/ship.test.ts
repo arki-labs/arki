@@ -70,8 +70,8 @@ beforeEach(() => {
   writeChangeset('x-feature.md', { '@arki/x': 'patch' });
   mkdirSync(path.join(root, 'node_modules', '.bin'), { recursive: true });
   writeFileSync(path.join(root, 'node_modules', '.bin', 'changeset'), '');
-  mkdirSync(path.join(root, 'apps', 'arki', 'docs'), { recursive: true });
-  writeFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), '# ARKI Release Ledger\n\nIntro.\n\n---\n\n## v0.0.1 — older\n');
+  mkdirSync(path.join(root, 'docs', 'releases'), { recursive: true });
+  writeFileSync(path.join(root, 'docs', 'releases', 'RELEASES.md'), '# ARKI Release Ledger\n\nIntro.\n\n---\n\n## v0.0.1 — older\n');
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -403,12 +403,12 @@ describe('ship --finish', () => {
     const after = await candidateOf(dir);
     expect(after.checks['shipped']?.status).toBe('success');
     expect(synced).toEqual([dir]);
-    const ledger = readFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), 'utf8');
+    const ledger = readFileSync(path.join(root, 'docs', 'releases', 'RELEASES.md'), 'utf8');
     expect(ledger.indexOf('@arki/a | 0.2.0')).toBeLessThan(ledger.indexOf('## v0.0.1'));
 
     // A second run adds no second ledger entry.
     await ship({ kind: 'finish', candidateDir: dir });
-    const again = readFileSync(path.join(root, 'apps', 'arki', 'docs', 'RELEASES.md'), 'utf8');
+    const again = readFileSync(path.join(root, 'docs', 'releases', 'RELEASES.md'), 'utf8');
     expect(again.split('<!-- candidate: foundation-abcdef1 -->').length).toBe(2);
   });
 

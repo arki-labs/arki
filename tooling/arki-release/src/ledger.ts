@@ -1,5 +1,5 @@
 /**
- * The human release ledger, `apps/arki/docs/RELEASES.md`.
+ * The human release ledger, `docs/releases/RELEASES.md`.
  *
  * `ship --finish` writes one entry per shipped candidate, generated from
  * `candidate.json` so the ledger never disagrees with the bytes that were
@@ -15,7 +15,7 @@ import { z } from 'zod';
 
 import type { Candidate } from './candidate';
 
-export const LEDGER_PATH = path.join('apps', 'arki', 'docs', 'RELEASES.md');
+export const LEDGER_PATH = path.join('docs', 'releases', 'RELEASES.md');
 
 const scorecardSummarySchema = z.object({
   stableReleaseGate: z.enum(['open', 'blocked']),

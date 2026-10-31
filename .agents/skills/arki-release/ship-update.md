@@ -67,7 +67,7 @@ bun release:arki ship --finish --candidate <dir>
 
 1. `npm view <pkg>@<version> dist.integrity` for each package, from `/tmp`. A match is skipped (never republished); a missing version is SHIP_E006 with its publish line; a different integrity is SHIP_E005.
 2. Records `checks.shipped` (the next docs-impact diffs from this commit).
-3. Writes the entry in `apps/arki/docs/RELEASES.md`, newest first (once per candidate).
+3. Writes the entry in `docs/releases/RELEASES.md`, newest first (once per candidate).
 4. Runs the mirror sync (`sync --apply`, T1.7) and records `checks.sync`.
 5. Prints the demo pin bumps (`arki.deps.json` + `bun run arki:npm`).
 
