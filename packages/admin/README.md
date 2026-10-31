@@ -38,7 +38,7 @@ Set all four variables, or none. With none set, `/api/foreman/*` answers 404 and
 
 | Variable              | What                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `novelette:prod`.                           |
+| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `pizzeria:prod`.                           |
 | `FOREMAN_ENVIRONMENT` | Optional `prod`, `staging` or `dev`. Overrides what `foremanEnvironmentFromNodeEnv(NODE_ENV)` returns. |
 | `FOREMAN_APP_KEY`     | The app's identity key. It signs every response.                                                       |
 | `FOREMAN_READ_KEY`    | Foreman's read public key. `_NEXT` holds the new key while rotating.                                   |
@@ -206,7 +206,7 @@ A second execute with the same id never runs the action again. It gets the store
 
 An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) did apply: it is recorded `applied` with `result: null`.
 
-**Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:prod`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
+**Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `pizzeria:prod`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
 
 **DOT app with a journal: `journalReceiptStore(...)`** (`@arki/journal/foreman`). Add the table and migrate:
 
