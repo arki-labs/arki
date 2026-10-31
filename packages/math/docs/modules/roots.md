@@ -12,6 +12,7 @@ The same page covers `@arki/math/roots`. For `integrate` see [integrate](integra
 
 ```ts
 import { findRoot } from '@arki/math/roots';
+import { orThrow } from '@arki/failure';
 
-findRoot(x => x ** 3 - 2 * x - 5, [2, 3]).root; // 2.094551481542327   Brent, bracket must change sign
+orThrow(findRoot(x => x ** 3 - 2 * x - 5, [2, 3])).root; // 2.094551481542327   Brent, bracket must change sign
 ```

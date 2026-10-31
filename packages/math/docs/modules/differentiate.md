@@ -6,7 +6,8 @@ Back to the [README](../../README.md#documentation).
 
 ```ts
 import { derivative, limit } from '@arki/math/differentiate';
+import { orThrow } from '@arki/failure';
 
-derivative(Math.sin, 0).value; // 1
-limit(x => Math.sin(x) / x, 0).value; // 1
+orThrow(derivative(Math.sin, 0)).value; // 1
+orThrow(limit(x => Math.sin(x) / x, 0)).value; // 1
 ```

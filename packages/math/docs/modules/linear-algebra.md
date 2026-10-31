@@ -70,15 +70,18 @@ eigenvalues come back as `Complex`, sorted like `polynomialRoots`.
 
 ```ts
 import { eigenvalues, leastSquares, singularValues, symmetricEigenvalues } from '@arki/math/linear-algebra';
+import { orThrow } from '@arki/failure';
 
 symmetricEigenvalues([
   [2, 1],
   [1, 2],
 ]); // [1.0000000000000002, 3]   ascending
-eigenvalues([
-  [0, -1],
-  [1, 0],
-]).map(String); // ['-i', 'i']   a rotation
+orThrow(
+  eigenvalues([
+    [0, -1],
+    [1, 0],
+  ]),
+).map(String); // ['-i', 'i']   a rotation
 singularValues([
   [3, 0],
   [4, 5],
@@ -106,6 +109,7 @@ results are reproducible.
 
 ```ts
 import { luDecompose, qrDecompose, singularValueDecompose, symmetricEigenDecompose } from '@arki/math/linear-algebra';
+import { orThrow } from '@arki/failure';
 
 luDecompose([
   [1, 2],
@@ -120,8 +124,10 @@ symmetricEigenDecompose([
   [2, 1],
   [1, 2],
 ]); // { values: [1.0000000000000002, 3], vectors: [[0.707…, -0.707…], [0.707…, 0.707…]] }
-singularValueDecompose([
-  [3, 0],
-  [4, 5],
-]).values; // [6.708203932499369, 2.2360679774997894]
+orThrow(
+  singularValueDecompose([
+    [3, 0],
+    [4, 5],
+  ]),
+).values; // [6.708203932499369, 2.2360679774997894]
 ```
