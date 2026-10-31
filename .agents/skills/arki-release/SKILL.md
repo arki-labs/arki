@@ -91,7 +91,7 @@ Other procedures:
 ## Hard rules
 
 - **Agents run only `--dry-run`, phase 1 and `--resume`.** `ship --finish` refuses with SHIP_E004 when `CLAUDECODE` is set or stdin is not a TTY. Never work around it.
-- **Apps and non-wave packages are never versioned.** `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, every package outside the waves is `private: true`, and `ship` runs `changeset version --ignore <every package outside the set>`. If a bump still lands outside the set, `ship` stops with SHIP_E002; restore those files, do not commit them.
+- **Apps and non-wave packages are never versioned.** `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, every package outside the waves is `private: true`, and `ship` runs `changeset version --ignore <every package outside the set>`. `changeset version` also bumps dependents of bumped packages ("Updated dependencies"). A dependent in the same wave ships with it: `ship` builds it and puts it in the commit line, and `--resume` freezes it. If a bump still lands in another wave or in no wave, `ship` stops with SHIP_E002; restore those files, do not commit them.
 - **`arki.release.config.ts` is the source of truth** for which packages are in which wave.
 - **Never commit `.release/`** — candidates, the public tree and the package mirror checkouts are regenerated.
 - **`npm publish` needs the founder's OTP** — see [troubleshooting.md](./troubleshooting.md#the-npm-otp-wall).

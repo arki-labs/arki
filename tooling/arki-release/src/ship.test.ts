@@ -256,6 +256,47 @@ describe('ship', () => {
     expect(envelope.summary.next).toContain('.changeset/held-change.md');
   });
 
+  /** `changeset version` with `updateInternalDependencies: patch`: it also bumps `dependent` because it depends on @arki/a. */
+  const versionBumpsDependent = (dependent: string): Partial<ShipDeps> => {
+    const base = deps();
+    return {
+      exec: async (command, args, opts) => {
+        const out = await (base.exec ?? (async () => ok()))(command, args, opts);
+        if (args[1] === 'version') {
+          const manifestFile = path.join(root, 'packages', dependent, 'package.json');
+          writeFileSync(manifestFile, JSON.stringify({ ...JSON.parse(readFileSync(manifestFile, 'utf8')), version: '0.1.1' }));
+          writeFileSync(path.join(root, 'packages', dependent, 'CHANGELOG.md'), `# @arki/${dependent}\n\n## 0.1.1\n\n- Updated dependencies\n`);
+        }
+        return out;
+      },
+    };
+  };
+
+  it('ships a same-wave dependent that changeset version bumped, building and committing it', async () => {
+    // Why: @arki/b depends on @arki/a, so changeset version gives it a patch
+    // bump. It is in the same wave, so it must ship with it; refusing it as a
+    // stray (SHIP_E002) blocked the infrastructure-adapters wave for good.
+    addDependencies('b', { dependencies: { '@arki/a': 'workspace:*' } });
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false }, versionBumpsDependent('b'));
+    expect(envelope.errors.map(e => e.code)).toEqual([SHIP_ERROR_CODES.commitNeeded]);
+    expect(envelope.summary.next).toBe(
+      'git -c commit.gpgsign=false commit -- packages/a/package.json packages/a/CHANGELOG.md packages/b/package.json packages/b/CHANGELOG.md .changeset/a-feature.md',
+    );
+    const build = calls.find(c => c.command.includes(' build '));
+    expect(build?.command).toContain('--filter=@arki/a');
+    expect(build?.command).toContain('--filter=@arki/b');
+  });
+
+  it('still refuses a dependent bump in another wave', async () => {
+    // Why: this ship never publishes @arki/x, so its new version would sit in
+    // source with no npm release behind it.
+    addDependencies('x', { dependencies: { '@arki/a': 'workspace:*' } });
+    const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: false }, versionBumpsDependent('x'));
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => [e.code, e.target])).toEqual([[SHIP_ERROR_CODES.foreignChangeset, '@arki/x']]);
+    expect(calls.some(c => c.command.includes(' build '))).toBe(false);
+  });
+
   it('dry run prints the plan and runs neither changeset version nor the build', async () => {
     // Why: agents run the dry run freely; it must leave the tree untouched.
     const envelope = await ship({ kind: 'start', wave: 'foundation', dryRun: true });

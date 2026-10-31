@@ -369,7 +369,8 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
   });
 
   const turboBin = path.join(cwd, 'node_modules', '.bin', 'turbo');
-  const buildArgs = ['run', 'build', ...[...publishSet].map(name => `--filter=${name}`)];
+  const buildArgsFor = (names: readonly string[]): string[] => ['run', 'build', ...names.map(name => `--filter=${name}`)];
+  const buildArgs = buildArgsFor([...publishSet]);
   const needGuide = await onNpm(stackMinors(config, publishSet, ours), versionOf, deps.npm, cwd);
   if (dryRun) {
     // Dry run predicts the new version as the next minor.
@@ -408,7 +409,12 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
   }
   const after = await discoverManifests(cwd);
   const bumped = after.manifests.filter(m => versionOf[m.name] !== undefined && versionOf[m.name] !== m.version);
-  const strays = bumped.filter(m => !versionSet.has(m.name));
+  // `changeset version` also bumps the dependents of bumped packages
+  // ("Updated dependencies"). A dependent in this wave ships with it:
+  // `--resume` freezes every wave package whose version is not on npm.
+  // A bump in another wave, or in no wave, is a stray.
+  const sameWaveDependents = bumped.map(m => m.name).filter(name => !versionSet.has(name) && waveOf.get(name) === wave);
+  const strays = bumped.filter(m => !versionSet.has(m.name) && waveOf.get(m.name) !== wave);
   if (strays.length > 0) {
     steps.push({ id: 'version', status: 'failed', detail: `bumped outside the set: ${strays.map(m => m.name).join(', ')}` });
     return fail('`changeset version` bumped packages outside the publish set.', strays.map(m =>
@@ -422,15 +428,17 @@ async function start(options: ShipOptions, wave: string, dryRun: boolean, deps: 
   }
   steps.push({ id: 'version', status: 'done', detail: bumped.map(m => `${m.name}@${m.version}`).join(', ') });
 
-  // 4. Build the set.
-  const build = await deps.exec(turboBin, buildArgs, { cwd });
+  // 4. Build the set and its same-wave dependents.
+  const built = [...publishSet, ...sameWaveDependents];
+  const builtArgs = buildArgsFor(built);
+  const build = await deps.exec(turboBin, builtArgs, { cwd });
   if (build.code !== 0) {
     steps.push({ id: 'build', status: 'failed', detail: build.stderr.trim().slice(-400) });
     return fail('The build failed after versioning.', [
-      shipError(SHIP_ERROR_CODES.stepFailed, `turbo build exited ${String(build.code)}.`, `Fix the build, then run \`${turboBin} ${buildArgs.join(' ')}\` and the commit line.`),
+      shipError(SHIP_ERROR_CODES.stepFailed, `turbo build exited ${String(build.code)}.`, `Fix the build, then run \`${turboBin} ${builtArgs.join(' ')}\` and the commit line.`),
     ]);
   }
-  steps.push({ id: 'build', status: 'done', detail: [...publishSet].join(', ') });
+  steps.push({ id: 'build', status: 'done', detail: built.join(', ') });
   const actual = new Map(
     needGuide.map(name => [name, { from: versionOf[name] ?? '', to: after.manifests.find(m => m.name === name)?.version ?? null }]),
   );

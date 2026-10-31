@@ -7,7 +7,7 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 | Code | Meaning | Do this |
 |---|---|---|
 | SHIP_E001 | Versions bumped and built (a stop, not a failure) | Review the diff, run the printed commit line, then `ship --wave <id> --resume` |
-| SHIP_E002 | A changeset bumps a package outside the wave, or `changeset version` bumped one | Split the changeset; restore any stray `package.json` / `CHANGELOG.md` |
+| SHIP_E002 | A changeset bumps a package outside the wave, or `changeset version` bumped one in another wave or in no wave (a same-wave dependent bump is fine) | Split the changeset; restore any stray `package.json` / `CHANGELOG.md` |
 | SHIP_E003 | `changeset version`, the build or `node_modules/.bin/changeset` failed or is missing | Fix the step; `@changesets/cli` must be a workspace dev dependency (never `bunx`) |
 | SHIP_E004 | `--finish` run by an agent or without a TTY | The founder runs it in a terminal |
 | SHIP_E005 | npm has the version with a different `dist.integrity` | Do not republish. Find what was published; ship a new patch from a fresh candidate |
