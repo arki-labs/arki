@@ -130,6 +130,43 @@ These are the inputs of the journal commands behind the services. A command retu
 - `createNotificationService`: builds an email, Slack or multi-channel notification service from a config.
 - `EmailNotificationService`, `SlackNotificationService`, `MultiChannelNotificationService`: the three implementations. The multi-channel one sends through several channels at once.
 
+## Failures
+
+Each failure is returned, never thrown. Check it with `isFailure`, or with `Failure.is(result)` for one kind. The code is in the `payments.*` family.
+
+From `@arki/payments/core/failures` (subscriptions, proration, retries, the repository and notifications):
+
+| Failure                        | When it comes back                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `SubscriptionInvalidState`     | The subscription's status does not allow the change that was asked for.                         |
+| `SubscriptionAlreadyActive`    | The user already has an active subscription, so a second one is not created.                    |
+| `PlanInactive`                 | The plan exists but is no longer offered.                                                       |
+| `PlanCurrencyMismatch`         | The two plans of a plan change are priced in different currencies.                              |
+| `EffectiveDateOutsidePeriod`   | A plan change was asked to take effect outside the current period.                              |
+| `PaymentWithoutSubscription`   | A payment has no subscription, so there is nothing to keep alive with retries.                  |
+| `WebhookEventNotFound`         | No webhook event has the id that was given.                                                     |
+| `NotificationFailed`           | A notification was not delivered: the mail transport, Slack or the request failed.              |
+| `PaymentsConfigurationInvalid` | A payments service was set up with a missing capability or a bad setting. It is thrown at boot. |
+
+`PlanPriceNotFlat` (from `@arki/payments/core/providers/provider-error`) comes back from `getPlan`, `updatePlan` and `listPlans` when the provider price is tiered, metered or one-time.
+
+From `@arki/payments/core/services/webhook-handler` (webhook delivery). A webhook route must answer non-2xx for any of these so the provider can resend:
+
+| Failure                   | When it comes back                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| `WebhookRejected`         | The validator refused the delivery: bad signature, bad address, old timestamp or replay.  |
+| `WebhookPayloadInvalid`   | The event body lacks the fields the handler reads.                                        |
+| `WebhookClaimConflict`    | The claim insert conflicted, yet no row holds the event. A resend claims it again.        |
+| `WebhookInProgress`       | Another delivery of the same event is running it now.                                     |
+| `WebhookTargetNotFound`   | The event is about a payment or subscription with no local row yet. A resend may find it. |
+| `WebhookRetriesExhausted` | Every attempt failed and the handler gave up. Fix the cause, then replay by hand.         |
+
+From `@arki/payments/dunning`:
+
+- `DunningTemplateInUse`: a campaign update removed a step that already sent a message. Nothing changed.
+- `NotificationWebhookHostNotAllowed`: a webhook recipient URL names a host that is not in `webhook.allowedHosts`. Nothing was sent.
+- `tickFault`: turns one failure or error of a scheduled tick into the `{ id, code, message }` entry listed in `DunningTickReport.failed`.
+
 ## Tax (`@arki/payments/tax`)
 
 - `createTaxService` and `TaxService`: calculates tax for a sale, keeps customers' exemptions and records the result with an audit trail.
