@@ -1,5 +1,32 @@
 # @arki/money
 
+## 0.2.0
+
+### Minor Changes
+
+- b5cc408: Parsers return, builders throw. `Money.parse`, `Money.fromJSON`, `parseMoney`, `createMoneyParser(...).parse`, `fromProviderUnits` and `fromStripeAmount` return the value or an `@arki/failure` value instead of throwing on bad outside input. New doors `Currency.parse(code, currencies?)` and `Currency.parseNumeric(numeric)` read currency codes from outside. Failures, listed once in `MONEY_FAILURES` and carrying no input text: `InvalidMoneyText` (`money.invalid_text`, 400), `InvalidMoneyShape` (`money.invalid_shape`, 400), `UnknownCurrency` (`money.unknown_currency`, 400), `RoundingNecessary` (`money.rounding_necessary`, 400), `AmountOutOfRange` (`money.out_of_range`, 400), `InputTooLarge` (`money.input_too_large`, 413), `UnsupportedLocale` (`money.unsupported_locale`, 400) and `ProviderAmount` (`money.provider_amount`, 422). `createMoneyParser` and `parseMoney` return `UnsupportedLocale` for a locale tag `Intl` rejects.
+
+  Breaking: `MoneyParser#tryParse` is removed; `parse` now returns failures. Builders (`money`, `Money.of`, `Money.fromMinor`, `Currency.of`, `Currency.fromNumeric`, `stripeRule`, `toProviderUnits`, `toStripeAmount`) and arithmetic still throw. A provider rule with a step below 1 or a bad scale now throws `InvalidArgumentError` (a zero step used to throw a bare `RangeError`). A `bigint` product past about 10 000 digits throws `ResourceLimitError` before it is built, instead of crashing Hermes. Drizzle columns still throw on bad stored values, so a query rejects instead of returning a wrong amount. `@arki/failure` is now a runtime dependency. See `docs/upgrades/0.1.0-to-0.2.0.md`.
+
+- c55a254: More doors for outside values return failures instead of throwing (T08 fix lane).
+
+  Breaking: `RationalMoney.fromJSON` now returns `InvalidMoneyShape`, `UnknownCurrency`, `InvalidMoneyText` (also for a zero denominator) or `InputTooLarge`, like `Money.fromJSON`, instead of throwing `InvalidArgumentError`, `NumberFormatError` or `UnknownCurrencyError`. Check `isMoneyFailure(result)` before using it.
+
+  New door `parseRates(table)` in `@arki/money/exchange` reads a rate table from a feed and returns `UnknownCurrency`, `InvalidMoneyText`, `AmountOutOfRange`, `InputTooLarge` or the new `InvalidExchangeRate` (`money.invalid_rate`, 400) for a rate of 0 or less, or a currency to itself that is not 1. `ratesFrom` stays the throwing builder for tables in your code. `MONEY_FAILURES` gains `InvalidExchangeRate`.
+
+  `convert` and `Converter#convert` check `options.scale` first and throw `InvalidArgumentError` for a scale outside 0 to 100, instead of a raw `RangeError` from building a huge bigint. `fromProviderUnits` and `fromStripeAmount` return `InputTooLarge` for a near-limit bigint that would pass the digit cap when moved to the currency's scale, instead of throwing `ResourceLimitError`.
+
+  no docs impact: README, llms.txt, AGENTS.md and the agent guide are updated in this change. no demo impact: no demo reads rational JSON or rate feeds.
+
+### Patch Changes
+
+- Updated dependencies [d2faf8f]
+- Updated dependencies [f9ecefb]
+- Updated dependencies [e6b9330]
+- Updated dependencies [a1b64e6]
+  - @arki/math@0.2.0
+  - @arki/failure@0.3.0
+
 ## 0.1.0
 
 ### Minor Changes

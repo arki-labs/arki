@@ -1,5 +1,172 @@
 # @arki/payments
 
+## 0.5.0
+
+### Minor Changes
+
+- c55a254: Expected outcomes return typed failures from `@arki/failure` instead of plain `Error`s, strings or raw throws (T08 fix lane). Breaking in 0.x.
+
+  ## Webhooks
+
+  Webhook processing returns typed failures instead of strings and throws.
+
+  Breaking:
+
+  - `WebhookHandler.processWebhook` returns `{ status: 'processed' | 'queued' | 'duplicate' | 'ignored', webhookId? }` when the route may answer 2xx, and a returned failure otherwise. The old `{ success, error, retryable }` result is gone, and so is the hand-written `WebhookProcessingResult` type in `core/services/webhook-handler` (use the one inferred from `webhookProcessingResultSchema`).
+  - `webhookProcessingResultSchema` (the route's 2xx answer) is now `{ status: 'processed' | 'queued' | 'duplicate' | 'ignored' | 'refused', webhookId?, code? }`. `refused` carries the code of a webhook failure whose `retryable` is false.
+  - New webhook failures, exported from `core/services/webhook-handler`, each with `retryable` in its data: `payments.webhook_rejected` (validator refused the delivery; not retryable), `payments.webhook_payload_invalid` (no `id`/`type`, or a body the event's schema refuses; not retryable; `cause` is the `InvalidInput`), `payments.webhook_retries_exhausted` (not retryable), `payments.webhook_in_progress` (retryable), `payments.webhook_target_not_found` (no local payment or subscription for the provider id; retryable, because the webhook can arrive before the app's own insert commits), `payments.webhook_claim_conflict` (retryable). Also `WEBHOOK_FAILURES` and `isWebhookFailure`.
+  - A journal write the handler makes is returned when refused (`journal.conflict`, ...), and so is a refund signal failure; they are no longer thrown. A fault (database, registered handler) now propagates as a throw after it is recorded on the event row, instead of a `{ success: false, retryable: true }` result.
+  - `parseStripeSubscription`, `parseStripePaymentIntent`, `parseStripeCharge`, `parseStripeRefund` and `parseStripeDispute` return `InvalidInput` (from `@arki/schema`'s `parse`) instead of throwing. A subscription with no items, or a timestamp outside the `fromUnix` range, is refused by the schema.
+  - `claimWebhookEvent` (and `PaymentRepository.claimWebhookEvent`) returns `payments.webhook_claim_conflict` instead of throwing.
+  - `registerEventHandler` now overrides the built-in handling of its event type, and `removeEventHandler` restores it. `getProcessingStats` reports every event type.
+  - `WebhookSecurityService` starts no timer; old replay entries are pruned during `validateWebhook`, at most hourly.
+
+  Also: `processWebhook` runs in a `payments.webhook.process` span and each claimed event in a `payments.webhook.event` span (attributes `payments.provider`, `payments.event_type`). `WebhookAnalyticsService` logs through `arki:payments:webhook` instead of `console`.
+
+  ## Stripe provider and presets
+
+  Stripe provider and presets return typed failures for outside input instead of throwing, and every Stripe request is traced.
+
+  Breaking changes:
+
+  - `StripeProvider.constructWebhookEvent` returns `InvalidWebhookSignature` (`payments.invalid_signature`) for a bad, missing or stale signature instead of throwing `StripeSignatureVerificationError`.
+  - `createSubscriptionBilling().handleWebhook` returns `InvalidWebhookSignature`, `SubscriptionWithoutItems` (`payments.subscription_without_items`) and `PriceNotConfigured` (`payments.price_not_configured`) instead of throwing. `createCheckoutSession` returns `PriceNotConfigured` for a price that is not in `prices`, and the `CustomerConflict` of `repo.createCustomer`.
+  - `projectStripeSubscription` no longer takes `mapStatus`: it parses the Stripe status with `subscriptionStatusSchema` and returns `UnknownSubscriptionStatus` (`payments.unknown_subscription_status`). A subscription event for a Stripe customer with no local row returns `UnknownProviderCustomer` (`payments.unknown_provider_customer`); one with no items returns `SubscriptionWithoutItems`.
+  - `createPlan`, `createPayment`, `createPaymentIntent`, `refundPayment`, `calculateTax` and `createTaxTransaction` return `money.provider_amount` (negative amount, a currency Stripe has no rule for, a fraction Stripe does not take) or `money.out_of_range` (past 2^53 Stripe units) before any request, instead of throwing `ProviderAmountError`. `createPlan` no longer leaves a product behind when the price amount is refused.
+  - `createPaymentIntent` returns `PaymentMethodRequired` (`payments.payment_method_required`) for `automatic: true` without a `paymentMethodId`, instead of throwing `PaymentProviderError('invalid_request')`.
+  - `calculateTax` and `createTaxTransaction` return `TaxAddressIncomplete` (`payments.tax_address_incomplete`) for a customer address with no country, instead of throwing.
+  - `revenueCatWebhookSchema` accepts `purchased_at_ms` and `expiration_at_ms` only as whole milliseconds from 0 to the end of year 9999, so `projectRevenueCatEvent` never throws a range error.
+  - `validateWebhook` gives no `eventType` for a Stripe event type the package does not model, instead of passing the Stripe name off as one of ours.
+
+  Every Stripe request runs in a `payments.stripe.<resource>.<method>` span with `payments.provider: stripe`; a returned failure sets `payments.failure_code`.
+
+  ## Subscriptions, proration, dunning, retries, repository, notifications
+
+  Subscriptions, proration, dunning, retries, the core repository and refund notifications return typed failures instead of throwing plain `Error`s for expected outcomes.
+
+  Breaking changes:
+
+  - `SubscriptionManager`: every change returns a failure instead of throwing. `createSubscription` returns `payments.reference_not_found` (no customer for the user, or no plan), `payments.plan_inactive` or `payments.subscription_already_active`; `updateSubscription`, `setCancelAtPeriodEnd`, `cancelSubscription`, `reactivateSubscription`, `pauseSubscription` and `resumeSubscription` return `payments.reference_not_found` or `payments.subscription_invalid_state`; `previewSubscriptionChange` returns `payments.reference_not_found` or `payments.plan_inactive`; `syncSubscriptionWithProvider` returns `payments.reference_not_found` (`missing: 'provider_id'` when the provider has no such subscription) and the journal's refusal instead of hiding it. Provider and database errors are no longer rewrapped as `Failed to ...`: they reach the caller unchanged. `validateSubscriptionAccess` no longer turns a database error into `hasAccess: false`. The `get*` reads return the stored rows unchanged (nulls stay null).
+  - `ProrationService`: `calculateProration`, `previewSubscriptionChange`, `getOptimalChangeTimings` and `generateProrationSummary` return `payments.reference_not_found`, `payments.plan_inactive`, `payments.plan_currency_mismatch` (plans in different currencies, for every proration behaviour; `CurrencyMismatchError` no longer escapes) or `payments.effective_date_outside_period`. `previewMultiplePlanChanges` leaves out a refused plan and logs it at WARN.
+  - `PaymentRepository`: `updatePlan`, `deactivatePlan` and `updateCustomer` return `payments.reference_not_found` for an unknown id; `createCustomer` returns `payments.customer_conflict` for a clash; `updateWebhookEvent`, `markWebhookEventAsProcessed` and `incrementWebhookEventAttempts` return `payments.webhook_event_not_found`.
+  - `DunningService.handlePaymentFailure` returns `payments.reference_not_found` for an unknown payment or subscription. A dunning step that throws now stays scheduled for the next run instead of counting as done.
+  - `PaymentRetryService.scheduleRetries` returns `payments.reference_not_found` or `payments.payment_without_subscription`, and picks the strategy from the stored subscription status. `getRetryAnalytics` with a date range no longer throws on Temporal instants.
+  - Notifications: `EmailNotificationService` sends through a transport the app passes in (`send(mail: { to, subject, text })`, such as `@arki/mail`'s `sendRaw`) and reads the customer's address from `reads` (`findPaymentById`, `findCustomerById`); `fromEmail` is gone (the app's mailer owns the sender). `SlackNotificationService` really POSTs to `webhookUrl` with a timeout (`timeoutMs`, default 10 s). Every send returns `payments.notification_failed` when it did not go out, and the `NotificationService` methods resolve with `void | Failure`. `createNotificationService` takes a discriminated config and throws `AssertError` at boot for a config that cannot send. Sends run in a `payments.notification` span.
+  - `PaymentMonitoringService` starts no timer and `destroy()` is removed; a refused `kv.set` is logged at WARN; alerts run in a `payments.alert` span and log through `@arki/log` instead of `console.error`.
+
+  New failure codes (in `@arki/payments/core/failures`): `payments.subscription_invalid_state`, `payments.subscription_already_active`, `payments.plan_inactive`, `payments.plan_currency_mismatch`, `payments.effective_date_outside_period`, `payments.payment_without_subscription`, `payments.customer_conflict`, `payments.webhook_event_not_found`, `payments.notification_failed`.
+
+  ## Dunning campaigns, segments and communication providers
+
+  Dunning returns typed failures for expected outcomes and checks every notification provider answer.
+
+  Breaking changes:
+
+  - `DunningCampaignService.executeCampaign` returns `DunningCampaignNotFound` (`payments.dunning_campaign_not_found`), `DunningCampaignNotActive` (`payments.dunning_campaign_not_active`) or `DunningCampaignWithoutSteps` (`payments.dunning_campaign_without_steps`) instead of throwing. Each writes nothing.
+  - `CustomerSegmentationService.updateSegmentCustomerCount` and `getCustomersInSegment` return `CustomerSegmentNotFound` (`payments.customer_segment_not_found`) instead of throwing. `updateSegmentCustomerCount` now returns the new count. `createSegment` and `updateSegment` can return it too (a segment deleted while it is counted).
+  - `CommunicationProvider.send` returns `CommunicationSent` (`{ messageId, providerResponse }`) or a `NotificationProviderFailure`: `NotificationProviderRejected` (`payments.notification_provider_rejected`, with `upstreamStatus` and `upstreamMessage`), `NotificationProviderTimeout` (`payments.notification_provider_timeout`), `NotificationProviderResponseInvalid` (`payments.notification_provider_response_invalid`, cause = the schema failure) or `schema.invalid_input` for a webhook recipient that is not an http or https URL. `CommunicationResult` (`{ success, errorMessage }`) is removed. A provider that cannot be reached at all throws, with the network error as its cause.
+  - `getDeliveryStatus` on `EmailProvider` and `SMSProvider` returns the same failures instead of a made-up `sent` status; `CommunicationOrchestrationService.getDeliveryStatus` returns them instead of `null`.
+  - `CommunicationOrchestrationService.sendCommunication` returns `NotificationChannelUnavailable` (`payments.notification_channel_unavailable`) when no provider is registered for the step's channel (nothing written), returns the provider failure after marking the row `failed`, and returns the row as it is after the send (`sent`), not the `pending` row it created.
+  - `WebhookProvider` config `timeout` is renamed `timeoutMs`. `EmailProvider` and `SMSProvider` take optional `timeoutMs` (default 30 000) and `apiBaseUrl`; `createCommunicationOrchestrationService` passes `email.timeoutMs` and `sms.timeoutMs`.
+  - `validateProviders` returns `Partial<Record<CommunicationChannel, boolean>>` (only registered channels have an entry). `DunningIntegrationConfig.systemUserId` is `string`.
+
+  Fixes: the engagement score no longer divides by zero for a customer with no payment in the last 30 days (`updateCustomerRiskProfile` threw a raw Postgres error). Every provider send and delivery status call runs in a `payments.notification.send` or `payments.notification.delivery_status` span with only the channel and provider name. The eligibility query rows are checked by a schema instead of cast.
+
+  ## Tax and refunds
+
+  Tax and refunds return typed failures for expected outcomes instead of throwing.
+
+  Breaking changes:
+
+  - `TaxConfigurationRepository.updateConfiguration` and `setDefaultConfiguration`, `TaxJurisdictionRepository.updateJurisdiction`, and `TaxExemptionRepository.updateExemption`, `approveExemption` and `revokeExemption` return `TaxReferenceNotFound` (`payments.tax_reference_not_found`) for an id with no row, in place of throwing. `setDefaultConfiguration` with an unknown id now leaves the current default as it is.
+  - `TaxExemptionRepository.createExemption` checks the row with the new `exemptionTargetSchema` and returns its `InvalidInput` for an exemption with no customer, product code or jurisdiction, in place of throwing. `createExemptionSchema` uses the same rule, so an empty `customerId`, `productCode` or `jurisdictionId` no longer counts as naming one.
+  - `TaxService.createTaxTransaction` returns `TaxCurrencyMismatch` (`payments.tax_currency_mismatch`) for a tax line in another currency than the transaction, and `TaxRefundSaleNotFound` (`payments.tax_refund_sale_not_found`) for a refund with no `originalReference` or one that names a sale never recorded. `calculateTax`, `calculateSubscriptionTax`, `calculateOneTimeTax` and `createTaxTransaction` now infer their failure unions.
+  - `TaxReportingService.getCustomerTaxSummary` returns `StoredTaxInvalid` (`payments.stored_tax_invalid`) when a payment's stored `taxAmount` metadata is not `Money` JSON or is in another currency than the payment. `exportTaxData` takes `format` as `ExportTaxDataInput['format']`; an unknown format is a caller bug (`unreachable`).
+  - `RefundService.requestRefund` and the `requestRefund` journal command return `RefundCurrencyMismatch` (`payments.refund_currency_mismatch`) for a refund in another currency than the payment. The command used to store such a refund.
+  - `RefundService.rejectRefund` returns the schema's `InvalidInput` for a blank reason, checked by the new `refundRejectionReasonSchema`, in place of throwing `RefundError('REASON_REQUIRED')`. `RefundErrorCode` loses `REASON_REQUIRED`.
+  - New exports: `TaxReferenceNotFound`, `TaxCurrencyMismatch`, `TaxRefundSaleNotFound`, `StoredTaxInvalid`, `exemptionTargetSchema` from `@arki/payments/tax`; `RefundCurrencyMismatch` and `refundRejectionReasonSchema` from `@arki/payments/refunds`.
+  - `RefundRepository` and the tax repositories return Drizzle's inferred rows, without casts.
+
+  ## Also
+  - `getSubscriptionAnalytics` counted no monthly or yearly recurring revenue: `PaymentRepository.getPaymentStats` loaded each payment's subscription without its plan. It now loads the plan, and the analytics read it without a cast.
+  - `DunningEvent` gains `action` (the rule step a scheduled event runs; a recovery event has none). `data` no longer repeats it.
+
+  Docs updated by the lane orchestrator in README, llms.txt and the agent guide.
+
+  ## Follow-up: no stubs, no made-up numbers, no casts (R-4 to R-9)
+
+  Breaking changes:
+
+  - `DunningService` (and `createDunningService`) takes `senders: DunningSenders` (`sendEmail`, `sendWebhook`) after the config. An `email` step sends its template to the customer's stored address through `sendEmail`; a `webhook` step hands its config to `sendWebhook`. Before, both only logged. An enabled rule whose sender is missing, or an `email` rule with no `template`, throws `payments.configuration_invalid` when the service is built or `updateConfiguration` runs, so the default rules need `sendEmail`. A sender's returned failure is logged and the step counts as done; a throw leaves it scheduled.
+  - `DunningStats` drops `averageRecoveryTime` (always 5) and `revenueRecovered` (an estimate): no stored data holds either. The recovery note names the subscription's user instead of `''`.
+  - `InAppProvider` takes `{ appUrl, store }`, where `store: InAppNotificationStore` (`save`, `find`) is the app's notifications table; it no longer takes the database. `send` stores through it, and `getDeliveryStatus` reports what the store holds (`delivered`, `opened` once read, `payments.notification_provider_rejected` with status 404 for an unknown id) instead of always `delivered`. `CommunicationOrchestrationConfig.inApp.store` is required.
+  - `WebhookProvider` and `CommunicationOrchestrationConfig.webhook` take `allowedHosts`: the hostnames a customer's `webhookUrl` may reach, compared exactly and lowercased after URL parsing. Any other host returns `payments.notification_webhook_host_not_allowed` and nothing is sent. An empty list, or an entry that is not a bare hostname, throws `payments.configuration_invalid` at boot. The webhook channel is registered only when `webhook` is configured (before: always).
+  - `WebhookProvider` never reads or keeps the receiver's reply: a refusal has `upstreamMessage: null`, and `providerResponse` holds the status only (no headers).
+  - Resend and Twilio answers are read up to `MAX_PROVIDER_BODY_BYTES` (64 KiB); the rest is cancelled.
+  - `PaymentRetryService.getRetryAnalytics().revenueRecovered` is a `MoneyBag` of the stored amounts of the recovered payments (before: `successfulRetries * 50`).
+  - `PaymentMonitoringService` (and `createPaymentMonitoringService`) takes `reads` (a `PaymentRepository`) after `kv`. `getSystemHealth().payments.activeSubscriptions` is the stored count (before: 1000) and `providers` is gone (it was always `{ stripe: true }`). `detectAnomalies` compares the payments stored in the last hour with the hourly average of the 24 hours before (before: a constant 100). New `PaymentRepository.countPaymentsCreatedBetween(start, end)`.
+  - `DunningIntegrationService.healthCheck` reads each table instead of answering `true`; `paymentRetry` says whether a retry service was passed. `getIntegrationMetrics(days)` counts the stored executions and sent communications instead of returning zeros.
+  - `DunningIntegrationService.processScheduledExecutions`, `processPendingCommunications`, `retryFailedExecutions`, `updateRiskProfiles` and `processAutoUpdateSegments`, and the service methods behind them (`DunningCampaignService.processScheduledExecutions`, `retryFailedExecutions`, `CommunicationOrchestrationService.processPendingCommunications`, `retryFailedCommunications`, `CustomerSegmentationService.bulkUpdateRiskProfiles`, `processAutoUpdateSegments`), return a `DunningTickReport` (`{ processed, failed: { id, code, message }[] }`) instead of `void`. A fault that stops a whole tick is logged and thrown instead of swallowed.
+  - `DunningCampaignService.updateCampaign` returns `payments.dunning_template_in_use` before any write when the new steps drop one that already sent a communication (before: a raw foreign-key error). `DunningCampaignServiceTables` needs `dunningCommunications`.
+  - `PaymentRepository`, the six dunning repositories and `CustomerSegmentationService` read with `db.select()` and joins instead of `db.query` behind an `as unknown as` cast, so they work on a database with no relations registered. A payment with no subscription reads `subscription: undefined` (before: `null`).
+  - `StripeProvider.getPlan`, `updatePlan` and `listPlans` return `payments.plan_price_not_flat` for a plan whose Stripe price is not flat recurring, instead of throwing `PaymentProviderError('unknown')`.
+  - An insert that returns no row (repositories, tax repositories, `writtenRow`) throws `invariant`'s `FailureError` instead of a plain `Error`. `readCustomerRiskProfile` throws `@arki/schema`'s `AssertError` for a stored date that is not an instant, instead of a raw `ZodError`.
+  - Every payments boot check that rejects bad configuration throws `payments.configuration_invalid` (setting and problem in its data): `createNotificationService`, `EmailNotificationService`, `SlackNotificationService` (before: `AssertError`) and `RefundService` for a bad `autoApproveLimits` (before: `AssertError` `ARKI_SCHEMA_E004`). New `misconfigured(setting, problem)` in `core/failures` builds the thrown form.
+  - `DunningCampaignService.processScheduledExecutions` and `retryFailedExecutions`: the stop-on-payment-success check reads and validates the succeeded payment (a row of the wrong shape is an `AssertError` bug; a stored currency `@arki/money` refuses is a returned `MoneyFailure`) before it cancels any later execution. A bad stored currency now cancels nothing, leaves the execution `completed` (its message went out), and is listed in the tick report with the money failure's code (before: a raw error after the cancels, and the execution marked `failed`).
+
+  New failure codes: `payments.configuration_invalid` (`core/failures`), `payments.notification_webhook_host_not_allowed` and `payments.dunning_template_in_use` (`dunning/failures`), `payments.plan_price_not_flat` (`core/providers/provider-error`).
+
+- e41e096: Amounts from Stripe, webhooks and stored JSON are no longer turned into throws. A bad one is returned as the `@arki/money` failure: `StripeProvider.getPlan`, `updatePlan`, `listPlans`, `previewSubscriptionChange`, `getPayment`, `createPayment`, `confirmPayment`, `cancelPayment`, `calculateTax` and `createTaxTransaction`; `TaxService.calculateTax`, `calculateSubscriptionTax`, `calculateOneTimeTax` and `createTaxTransaction`; `TaxReportingService.getCustomerTaxSummary`; `WebhookHandler.processWebhook` (a `payment.refunded` charge with a bad amount is not acknowledged and writes no refund); and the dunning segment and campaign calls that read stored spend ranges. Check `isFailure` before reading the result.
+
+### Patch Changes
+
+- 86250e6: `RefundService.requestRefund` returns `DuplicatePendingRefund` again when two requests for one payment race. The journal now reports a row insert's unique violation as `JournalError('CONFLICT')`, so the losing write came back as `TransactionDefect` and reached the caller as a defect. The service now knows the race in that shape too, and still in the `TransactionRejected` 23505 shape from a plain database write.
+
+  no docs impact: behaviour fix; the documented failure is unchanged.
+  no demo impact: no demo covers refund races.
+
+- b435e76: A command declares the events it writes. Breaking (0.x, no shims):
+
+  - `j.command(name, input, options, handler)` replaces `j.command(name, input, handler, options?)`. `options.writes` is required: `{ writes: [OrderPaid] }`, or `{ writes: [] }` for a command that only runs child commands. `authorize` moves into the same object.
+  - `write` in a handler takes only the declared events: anything else is a type error. At run time an undeclared event fails the run with `BAD_DEFINITION`, naming the command and the event, and nothing commits, even when the handler catches the error.
+  - `Command` has a fifth type parameter, `Writes`, and a read-only `writes` field that keeps the exact tuple, so code can read it before boot. `CommandContext` has a third, `Declared`. `CommandOptions` has a fifth.
+  - New type `CommandWrite<MetaOut, Tx, Declared>`, the type of `context.write`. A helper that takes `write` names what it writes; a command can pass its `write` only when it declares at least those events.
+
+  `@arki/payments` moves its commands to the new form; its API does not change. The `@arki/dot` app-stack template and the `@arki/db` README show the new form.
+
+  See `docs/upgrades/0.3.0-to-0.4.0.md`, step 12.
+
+  docs: README (Quick start, Commands, Idempotent commands, Failures, Workflows, Dot), `docs/agent-guide.md` (model, write a command, rules that bite, errors, shared packages), `llms.txt`.
+  demo impact: `demos/faultline` (commands and lesson 02) moves to the new form.
+
+- e132ad3: Hand-written object guards now come from `@arki/schema` (`is(value, recordSchema)` or `plainObjectSchema`), per A-39. Replaced: the `isRecord`/`isPlainObject`/`isObject` helpers in `dot`, `cli`, `http`, `expr`, `lock`, `mail`, `embeddings` (its internal `isRecord`, not a public export), `testing` and `payments`, plus inline `typeof x === 'object' && x !== null` checks on unknown values. Behaviour is the same, except that the inline checks and `lock`'s guard no longer let arrays through. `@arki/expr` and `@arki/lock` now depend on `@arki/schema`.
+- b435e76: Effects only reach out, `startOn` says when a run starts, and workflows get a command node. Breaking (0.x, no shims):
+
+  - An effect's context has no `run` and no `accept`: `{ jobId, attempt, signal, db }`. An event that must run a command starts a `j.task` or a `j.workflow` with `startOn`. `Effect` and `EffectHandlers` lose their runner type argument, and `RootCommandRunner` is no longer exported.
+  - `startOn.timing` is required: `'after-commit'` (the behaviour so far) or `'with-event'`. `'with-event'` writes `RunStarted`, the first scheduled node and its job in the event's transaction, so a rollback of the command removes the run. No body runs inline. `onBusy: 'refuse'` with `'with-event'` is a type error. A standalone `workflow()` now types its `startOn` mapping.
+
+  New:
+
+  - `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` runs one command as a savepoint inside the checkpoint's transaction: exactly once per node, even when the job runs again after a crash. A refused command rolls back and the failure transition commits. `accept` names failures the run goes on from, and they join the typed result. `undo` runs in compensation, in reverse order.
+  - `j.command(name, input, { writes, output }, handler)` takes a schema of the plain result. A command node stores it, and `results.x` and `def.read` are typed from it. Stored JSON is checked by the schema, never cast.
+
+  Shape hashes of existing node kinds do not change. `@arki/payments`: the refund workflow names `timing: 'after-commit'`. Its steps stay steps, because none has a body of exactly one command.
+
+- 5d55e12: Docs only: `llms.txt` import paths list `./refunds/effects`. No code change.
+- Updated dependencies [b5cc408]
+- Updated dependencies [c55a254]
+  - @arki/money@0.2.0
+  - @arki/contracts@0.4.1
+  - @arki/date@0.5.0
+  - @arki/db@0.5.1
+  - @arki/env@0.2.0
+  - @arki/failure@0.3.0
+  - @arki/http@0.4.1
+  - @arki/journal@0.4.1
+  - @arki/kv@0.5.0
+  - @arki/log@0.4.0
+  - @arki/schema@0.3.0
+
 ## 0.4.0
 
 ### Minor Changes

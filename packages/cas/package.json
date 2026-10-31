@@ -1,6 +1,6 @@
 {
   "name": "@arki/cas",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "private": false,
   "description": "A bounded computer algebra package on @arki/expr: exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs.",
   "keywords": [

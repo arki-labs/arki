@@ -1,5 +1,19 @@
 # @arki/math
 
+## 0.2.0
+
+### Minor Changes
+
+- d2faf8f: Lower bigint caps, the same on every runtime, from measured Hermes V1 limits (it rejects bigints past about 19,690 digits). No bigint the library builds passes 18,000 digits: bigint `factorial` stops at n = 5,450 (was 25,205), `combinations`, `permutations` and `lcm` at 18,000 result digits (was 100,000), and roots take a radicand of at most 18,000 digits (was 200,000). Decimal and Rational still keep 10,000 digits per value, but any operation whose bigint intermediate would pass 18,000 digits (multiply, divide, align scales, compare, `exp`, `ln`, `log`, `pow`, roots, `modPow`, `isPythagoreanTriple`) throws `ResourceLimitError` before building it. Two 10,000-digit operands cannot be multiplied. See `docs/upgrades/0.1.0-to-0.2.0.md`.
+- f9ecefb: Valid input that does not converge now returns `NotConverged` (`math.not_converged`) instead of throwing: `integrate`, `limit`, `derivative` (the numeric one), `findRoot`, `bisect`, `newton`, `findRoots`, `polynomialRoots`, `rank`, `symmetricEigenvalues`, `symmetricEigenDecompose`, `eigenvalues`, `eigenDecompose`, `singularValues`, `singularValueDecompose`, `conditionNumber`, `pseudoInverse` and `leastSquares`. The failure's `cause` is the `ConvergenceError`, which now carries `iterations` (its constructor takes it as a second argument); the root, integral and limit errors still carry `.best`, the last estimate. New `orNotConverged` and the `NotConvergedFailure` type. `significantDigits(text)` returns `InvalidNumber` or `NumberOutOfRange` instead of throwing `NumberFormatError`, and refuses text past 10 000 digits. `parseNumber`, `parseDecimal` and `significantDigits` scan in linear time: a run of 200 000 spaces or zeros no longer takes seconds. `polynomialRoots` takes a degree of at most 500 and `Complex.nthRoots` an `n` of at most 1 000 000, or throw `ResourceLimitError`. Results that overflowed to `Infinity` or `NaN` now throw `NumericRangeError`: `round`, `roundTo`, `convert`, the geometry shapes, `distance`, `polygonArea`, `signedPolygonArea`, the solved triangle, and the incomplete gamma and beta functions (so `chiSquare`, `fisherF` and `poisson` cdfs) at huge parameters. `cubicRoots`, `quadraticRoots`, `polynomialRoots` and `betaLn` throw `NumericRangeError`, not `InvalidArgumentError`, when a root or sum overflows. A malformed locale tag in `format*`, `parseNumber`, `parseDecimal`, `localeNumberSymbols`, `formatUnit` and the number words falls back to `en-US` and is logged at DEBUG. `@arki/log` is a new runtime dependency.
+- e6b9330: Breaking: `formatCurrency`, the formatter's `formatCurrency`, `num().formatCurrency` and `formatCompact` with `currency` return `string | InvalidCurrencyFailure` (`math.invalid_currency`) for a currency code that is not three ASCII letters, instead of throwing the `RangeError` from `Intl`. Check with `InvalidCurrency.is(result)`. `formatCompact` without `currency` still returns `string`. Docs updated in the format module page, the agent guide and the README failure table. Demo impact: none.
+- a1b64e6: Parsers return, builders throw. `parseNumber`, `parseDecimal` and `fromBase` return the value or an `@arki/failure` value instead of throwing on outside text: `InvalidNumber` (`math.invalid_number`, 400) and `NumberOutOfRange` (`math.number_out_of_range`, 400), listed in `MATH_PARSE_FAILURES` with the derived `MathParseFailure` union. New `parseComplex` does the same for complex text; `decimal`, `ratio` and `complex` stay throwing builders, and arithmetic keeps its documented throws. Bigint `lcm` is capped at 18 000 digits. `@arki/failure` is now the one runtime dependency. See `docs/upgrades/0.1.0-to-0.2.0.md`.
+
+### Patch Changes
+
+- @arki/failure@0.3.0
+  - @arki/log@0.4.0
+
 ## 0.1.0
 
 ### Minor Changes

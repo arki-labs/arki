@@ -1,6 +1,6 @@
 {
   "name": "@arki/money",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Exact, fast money for every JavaScript runtime — amounts kept as whole units (plain numbers, bigint only when huge), a shipped ISO 4217 currency table, exact-or-throw rounding, fair allocation, and currencies checked by the type system.",
   "keywords": [

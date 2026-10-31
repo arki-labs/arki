@@ -24,6 +24,23 @@ Also unreleased: float domain and LaTeX (RFC `2026-10-14-arki-expr` §21 step 2)
 - `Language` carries its function and constant names as type parameters, so `compile` requires host implementations by type. Function definitions take an optional `cost` (default 1) for the steps budget.
 - `size-limit` budgets in `test`; benchmark suite against mathjs (pruned) and expr-eval.
 
+## 0.1.0
+
+### Minor Changes
+
+- a1b64e6: Parsers of outside values return, builders throw. `evaluate(text)` in every domain returns `InvalidExpression` (`expr.invalid_text`), `ExpressionOverBudget` (`expr.over_budget`) or `NoValue` (`expr.no_value`, for example `0^i`) with the thrown error as `cause`, instead of throwing; the list is `EVALUATE_FAILURES`. `syntaxFor` returns `InvalidLocale` (`expr.invalid_locale`) for a rejected tag and reads the decimal mark with `format`, so Hermes without `formatToParts` no longer throws. New `parseSyntax` returns `InvalidSyntax` (`expr.invalid_syntax`) for stored settings; `defineSyntax` stays the throwing builder. `@arki/failure` is a new runtime dependency. `parse`, `parseEquation` and `fromJSON` also return `InvalidExpression` or `ExpressionOverBudget` (the list is `PARSE_FAILURES`; the `ParseError` or `ExprLimitError`, with the span for the caret, is the `cause`) instead of throwing, so `compile(parse(text))` needs the failure handled first. `compile`, `compileEquation` and compiled functions take trees code built and keep throwing. `fromJSON` now throws `InvalidArgumentError`, not `ParseError`, for a language `defineLanguage` did not build. See `docs/upgrades/0.0.2-to-0.1.0.md`.
+
+### Patch Changes
+
+- e132ad3: Hand-written object guards now come from `@arki/schema` (`is(value, recordSchema)` or `plainObjectSchema`), per A-39. Replaced: the `isRecord`/`isPlainObject`/`isObject` helpers in `dot`, `cli`, `http`, `expr`, `lock`, `mail`, `embeddings` (its internal `isRecord`, not a public export), `testing` and `payments`, plus inline `typeof x === 'object' && x !== null` checks on unknown values. Behaviour is the same, except that the inline checks and `lock`'s guard no longer let arrays through. `@arki/expr` and `@arki/lock` now depend on `@arki/schema`.
+- Updated dependencies [d2faf8f]
+- Updated dependencies [f9ecefb]
+- Updated dependencies [e6b9330]
+- Updated dependencies [a1b64e6]
+  - @arki/math@0.2.0
+  - @arki/failure@0.3.0
+  - @arki/schema@0.3.0
+
 ## 0.0.2
 
 ### Patch Changes
