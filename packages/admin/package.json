@@ -112,6 +112,7 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
+    "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -127,20 +128,15 @@
     "@types/node": "catalog:node",
     "arktype": "catalog:",
     "drizzle-kit": "catalog:drizzle",
-    "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:",
     "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@arki/http": "workspace:*",
-    "drizzle-orm": "catalog:drizzle"
+    "@arki/http": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@arki/http": {
-      "optional": true
-    },
-    "drizzle-orm": {
       "optional": true
     }
   },

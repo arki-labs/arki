@@ -8,7 +8,7 @@ The contract between an ARKI app and Foreman (the fleet control plane). An app e
 bun add @arki/admin
 ```
 
-`@arki/http` and `drizzle-orm` are optional peers. Install `@arki/http` for `./http` and `drizzle-orm` for `./pg`.
+`@arki/http` is an optional peer: install it for `./http`. `drizzle-orm` comes as a dependency, pinned to the same version as `@arki/db`, for `./pg`.
 
 ## Quick start
 
