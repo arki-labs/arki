@@ -124,6 +124,15 @@
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/**",
+    "docs/**",
+    "llms.txt",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
