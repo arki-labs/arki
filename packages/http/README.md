@@ -626,6 +626,10 @@ const partner = createClient(partnerRoutes, {
   `fetch` can only resolve or reject, so `publicFetch()` rejects with a
   `TypeError` whose `cause` is the failure (`createClient` returns it as
   `NetworkFailure`); a caller abort rejects with the signal's reason.
+- **`systemTransport`** is the default `transport` of `publicFetch()` and
+  `safeFetchBytes`: the system DNS resolver and undici, loaded on first use. A
+  test passes its own `{ lookup, fetch }` as `transport`, and every address
+  check still runs for real.
 
 ## Without DOT
 
