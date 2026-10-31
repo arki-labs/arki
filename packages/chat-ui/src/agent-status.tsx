@@ -6,7 +6,7 @@ import { WarningCircle, Brain, CheckCircle, CircleNotch, ChatTeardrop, Pause } f
 import { cn } from '@arki/ui/cn';
 import { cva } from 'class-variance-authority';
 
-import type { AgentStatusType } from './types';
+import type { AgentStatusType } from './types.js';
 
 const agentStatusVariants = cva(
   'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors',

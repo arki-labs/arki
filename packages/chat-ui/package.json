@@ -28,83 +28,83 @@
   "exports": {
     "./thread": {
       "types": "./dist/src/thread.d.ts",
-      "import": "./src/thread.tsx",
-      "browser": "./src/thread.tsx"
+      "import": "./dist/src/thread.js",
+      "default": "./dist/src/thread.js"
     },
     "./agent-panel": {
       "types": "./dist/src/agent-panel.d.ts",
-      "import": "./src/agent-panel.tsx",
-      "browser": "./src/agent-panel.tsx"
+      "import": "./dist/src/agent-panel.js",
+      "default": "./dist/src/agent-panel.js"
     },
     "./runtime-conversation": {
       "types": "./dist/src/runtime-conversation.d.ts",
-      "import": "./src/runtime-conversation.tsx",
-      "browser": "./src/runtime-conversation.tsx"
+      "import": "./dist/src/runtime-conversation.js",
+      "default": "./dist/src/runtime-conversation.js"
     },
     "./message": {
       "types": "./dist/src/message.d.ts",
-      "import": "./src/message.tsx",
-      "browser": "./src/message.tsx"
+      "import": "./dist/src/message.js",
+      "default": "./dist/src/message.js"
     },
     "./composer": {
       "types": "./dist/src/composer.d.ts",
-      "import": "./src/composer.tsx",
-      "browser": "./src/composer.tsx"
+      "import": "./dist/src/composer.js",
+      "default": "./dist/src/composer.js"
     },
     "./action-bar": {
       "types": "./dist/src/action-bar.d.ts",
-      "import": "./src/action-bar.tsx",
-      "browser": "./src/action-bar.tsx"
+      "import": "./dist/src/action-bar.js",
+      "default": "./dist/src/action-bar.js"
     },
     "./branch-picker": {
       "types": "./dist/src/branch-picker.d.ts",
-      "import": "./src/branch-picker.tsx",
-      "browser": "./src/branch-picker.tsx"
+      "import": "./dist/src/branch-picker.js",
+      "default": "./dist/src/branch-picker.js"
     },
     "./tool-call": {
       "types": "./dist/src/tool-call.d.ts",
-      "import": "./src/tool-call.tsx",
-      "browser": "./src/tool-call.tsx"
+      "import": "./dist/src/tool-call.js",
+      "default": "./dist/src/tool-call.js"
     },
     "./thinking-block": {
       "types": "./dist/src/thinking-block.d.ts",
-      "import": "./src/thinking-block.tsx",
-      "browser": "./src/thinking-block.tsx"
+      "import": "./dist/src/thinking-block.js",
+      "default": "./dist/src/thinking-block.js"
     },
     "./approval-card": {
       "types": "./dist/src/approval-card.d.ts",
-      "import": "./src/approval-card.tsx",
-      "browser": "./src/approval-card.tsx"
+      "import": "./dist/src/approval-card.js",
+      "default": "./dist/src/approval-card.js"
     },
     "./step-indicator": {
       "types": "./dist/src/step-indicator.d.ts",
-      "import": "./src/step-indicator.tsx",
-      "browser": "./src/step-indicator.tsx"
+      "import": "./dist/src/step-indicator.js",
+      "default": "./dist/src/step-indicator.js"
     },
     "./agent-status": {
       "types": "./dist/src/agent-status.d.ts",
-      "import": "./src/agent-status.tsx",
-      "browser": "./src/agent-status.tsx"
+      "import": "./dist/src/agent-status.js",
+      "default": "./dist/src/agent-status.js"
     },
     "./code-block": {
       "types": "./dist/src/code-block.d.ts",
-      "import": "./src/code-block.tsx",
-      "browser": "./src/code-block.tsx"
+      "import": "./dist/src/code-block.js",
+      "default": "./dist/src/code-block.js"
     },
     "./markdown-message": {
       "types": "./dist/src/markdown-message.d.ts",
-      "import": "./src/markdown-message.tsx",
-      "browser": "./src/markdown-message.tsx"
+      "import": "./dist/src/markdown-message.js",
+      "default": "./dist/src/markdown-message.js"
     },
     "./tool-registry": {
       "types": "./dist/src/tool-registry.d.ts",
-      "import": "./src/tool-registry.tsx",
-      "browser": "./src/tool-registry.tsx"
+      "import": "./dist/src/tool-registry.js",
+      "default": "./dist/src/tool-registry.js"
     },
     "./types": {
       "types": "./dist/src/types.d.ts",
-      "import": "./src/types.ts",
-      "browser": "./src/types.ts"
+      "import": "./dist/src/types.js",
+      "default": "./dist/src/types.js"
     },
     "./styles/chat.css": "./src/styles/chat.css",
     "./package.json": "./package.json"
@@ -165,9 +165,9 @@
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.test-d.ts",
-    "dist/src/**/*.d.ts",
-    "!dist/src/**/*.test.d.ts",
-    "!dist/src/**/*.test-d.d.ts",
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "!dist/src/**/*.test-d.*",
     "docs/*.md",
     "docs/recipes/**",
     "llms.txt",
@@ -177,9 +177,9 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
@@ -219,5 +219,24 @@
   "publishConfig": {
     "access": "public"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "arki": {
+    "bundlerOnly": [
+      "./thread",
+      "./agent-panel",
+      "./runtime-conversation",
+      "./message",
+      "./composer",
+      "./action-bar",
+      "./branch-picker",
+      "./tool-call",
+      "./thinking-block",
+      "./approval-card",
+      "./step-indicator",
+      "./agent-status",
+      "./code-block",
+      "./markdown-message",
+      "./styles/chat.css"
+    ]
+  }
 }

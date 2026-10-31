@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Check, Circle, CircleNotch } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
-import type { AgentStep } from './types';
+import type { AgentStep } from './types.js';
 
 type StepIndicatorProps = React.ComponentProps<'div'> & {
   steps: AgentStep[];

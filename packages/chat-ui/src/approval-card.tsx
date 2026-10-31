@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Warning, Check, Pencil, X } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
-import type { ApprovalAction, ApprovalResult } from './types';
+import type { ApprovalAction, ApprovalResult } from './types.js';
 
 type ApprovalCardProps = React.ComponentProps<'div'> & {
   title: string;

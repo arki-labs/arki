@@ -6,7 +6,7 @@ import { WarningCircle, CheckCircle, CircleNotch, Clock } from '@arki/icons/phos
 import { cn } from '@arki/ui/cn';
 import { cva } from 'class-variance-authority';
 
-import type { ToolCallStatus } from './types';
+import type { ToolCallStatus } from './types.js';
 
 const toolCallVariants = cva('rounded-lg border p-3 transition-colors animate-chat-fade-in', {
   variants: {

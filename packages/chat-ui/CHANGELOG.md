@@ -4,6 +4,7 @@
 
 ### Minor Changes
 
+- Publish compiled JavaScript in `dist/`. `./tool-registry` and `./types` import under plain Node; the component entries need a bundler, because `@arki/ui` and `@arki/icons` ship TypeScript source.
 - 616437f: First public release of `@arki/chat-ui`: chat and agent UI components for React, with a renderer for `@arki/ai` runtime streams. no demo impact: no registered demo (`drop-studio`) imports `@arki/chat-ui`.
 
 ### Patch Changes

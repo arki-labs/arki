@@ -5,10 +5,10 @@ import * as React from 'react';
 import type { RuntimeToolCall, RuntimeUiState, RuntimeUiStatus } from '@arki/ai';
 import { cn } from '@arki/ui/cn';
 
-import type { AgentStatusType, ToolCallStatus } from './types';
-import { AgentStatus } from './agent-status';
-import { MarkdownMessage } from './markdown-message';
-import { ToolCall, ToolCallResult } from './tool-call';
+import type { AgentStatusType, ToolCallStatus } from './types.js';
+import { AgentStatus } from './agent-status.js';
+import { MarkdownMessage } from './markdown-message.js';
+import { ToolCall, ToolCallResult } from './tool-call.js';
 
 /**
  * Renders an `@arki/ai` `RuntimeUiState` (the reduced agent-runtime event stream) using the

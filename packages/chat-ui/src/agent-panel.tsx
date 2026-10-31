@@ -5,9 +5,9 @@ import * as React from 'react';
 import type { RuntimeUiState } from '@arki/ai';
 import { cn } from '@arki/ui/cn';
 
-import type { AgentStatusType } from './types';
-import { AgentStatus } from './agent-status';
-import { RuntimeConversation, runtimeStatusToAgentStatus } from './runtime-conversation';
+import type { AgentStatusType } from './types.js';
+import { AgentStatus } from './agent-status.js';
+import { RuntimeConversation, runtimeStatusToAgentStatus } from './runtime-conversation.js';
 
 export type AgentPanelProps = Omit<React.ComponentProps<'section'>, 'title'> & {
   /** Display name of the agent (e.g. a candidate brand name). */
