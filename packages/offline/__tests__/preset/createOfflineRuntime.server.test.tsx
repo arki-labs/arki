@@ -46,3 +46,29 @@ describe('createOfflineRuntime on the server', () => {
     expect(() => offline.queryClient).toThrow(/only in the browser/);
   });
 });
+
+describe('createOfflineRuntime dispose', () => {
+  // The queue listens to the window's online and offline events. A runtime that is torn down (a test, a
+  // hot reload) must take those listeners with it, or every old queue keeps replaying.
+  it('removes the queue window listeners', () => {
+    const added: string[] = [];
+    const removed: string[] = [];
+    vi.stubGlobal('window', {
+      addEventListener: (type: string) => added.push(type),
+      removeEventListener: (type: string) => removed.push(type),
+    });
+    const offline = createOfflineRuntime({
+      tier: 'queue',
+      appId: 'dispose-test',
+      rpc: { call: () => Promise.resolve() },
+      actorId: () => null,
+    });
+    expect(added.toSorted()).toEqual(['offline', 'online']);
+
+    offline.dispose();
+
+    expect(removed.toSorted()).toEqual(['offline', 'online']);
+    vi.unstubAllGlobals();
+  });
+});
+

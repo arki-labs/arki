@@ -3,6 +3,10 @@
  * app bug (a wrong call, a bad stored row), so none is a typed client error.
  */
 
+import { z } from 'zod';
+
+import { is } from '@arki/schema';
+
 export const OUTBOX_ERROR_CODES = {
   /**
    * An outbox write was attempted outside the business transaction.
@@ -16,12 +20,6 @@ export const OUTBOX_ERROR_CODES = {
    * @verify bun run test -- src/outbox/outbox.spec.ts
    */
   badArgs: 'OUTBOX_E002',
-  /**
-   * The outbox arguments are not plain JSON within the size limit.
-   * @fix Store plain JSON args within maxArgsBytes; use identifiers instead of large documents or non-JSON instances.
-   * @verify bun run test -- src/outbox/outbox.spec.ts
-   */
-  notJson: 'OUTBOX_E003',
   /**
    * The outbox delay, scheduled time or priority is invalid.
    * @fix Use a non-negative safe-integer delay, a valid runAt Date and a supported QUEUE_PRIORITIES value.
@@ -56,8 +54,6 @@ const REMEDIATIONS: Readonly<Record<OutboxErrorCode, string>> = {
   OUTBOX_E001:
     'Call runAfter/runAt inside db.transaction(async tx => ...) and pass tx. A root database commits the row on its own, so it would not roll back with your write.',
   OUTBOX_E002: "Pass args that the job's .input(schema) accepts. The error's cause holds the schema issues.",
-  OUTBOX_E003:
-    'Job args are stored as plain JSON: use strings, finite numbers, booleans, null, arrays and plain objects; no undefined values, Date, Map, Set, bigint or class instances. Put large documents in storage and schedule their id, or raise maxArgsBytes.',
   OUTBOX_E004:
     'delayMs must be a non-negative safe integer, runAt needs a valid Date, and priority must be one of QUEUE_PRIORITIES.',
   OUTBOX_E005:
@@ -66,7 +62,8 @@ const REMEDIATIONS: Readonly<Record<OutboxErrorCode, string>> = {
   OUTBOX_E007: 'Give every job in the registry its own name: the name is how a stored row finds its job.',
 };
 
-const CODES = new Set<string>(Object.values(OUTBOX_ERROR_CODES));
+/** What makes an `Error` an {@link OutboxError}: one of the codes above and a remediation text. */
+const outboxErrorShapeSchema = z.object({ code: z.enum(OUTBOX_ERROR_CODES), remediation: z.string() });
 
 /** An outbox error with its code's remediation. `cause` keeps what went wrong underneath (e.g. the Zod error). */
 export function outboxError(code: OutboxErrorCode, message: string, cause?: unknown): OutboxError {
@@ -75,12 +72,5 @@ export function outboxError(code: OutboxErrorCode, message: string, cause?: unkn
 }
 
 export function isOutboxError(error: unknown): error is OutboxError {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    CODES.has(error.code) &&
-    'remediation' in error &&
-    typeof error.remediation === 'string'
-  );
+  return error instanceof Error && is(error, outboxErrorShapeSchema);
 }

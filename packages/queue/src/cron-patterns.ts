@@ -104,7 +104,7 @@ export const CronPatterns = {
    * @example CronPatterns.everySeconds(30) // "* /30 * * * * *" - Every 30 seconds
    */
   everySeconds: (n: number): string => {
-    if (n <= 0 || n > 59) {
+    if (!Number.isInteger(n) || n <= 0 || n > 59) {
       throw invalidCronValue('Seconds must be between 1 and 59');
     }
     return `*/${n} * * * * *`;
@@ -116,7 +116,7 @@ export const CronPatterns = {
    * @example CronPatterns.everyMinutes(15) // "* /15 * * * *" - Every 15 minutes
    */
   everyMinutes: (n: number): string => {
-    if (n <= 0 || n > 59) {
+    if (!Number.isInteger(n) || n <= 0 || n > 59) {
       throw invalidCronValue('Minutes must be between 1 and 59');
     }
     return `*/${n} * * * *`;
@@ -128,7 +128,7 @@ export const CronPatterns = {
    * @example CronPatterns.everyHours(6) // "0 0-23/6 * * *" - Every 6 hours
    */
   everyHours: (n: number): string => {
-    if (n <= 0 || n > 23) {
+    if (!Number.isInteger(n) || n <= 0 || n > 23) {
       throw invalidCronValue('Hours must be between 1 and 23');
     }
     return `0 0-23/${n} * * *`;
@@ -139,7 +139,7 @@ export const CronPatterns = {
    * @example CronPatterns.everyDays(2, '09:00') // "0 9 * /2 * *" - Every 2 days at 9am
    */
   everyDays: (n: number, time: string): string => {
-    if (n <= 0 || n > 31) {
+    if (!Number.isInteger(n) || n <= 0 || n > 31) {
       throw invalidCronValue('Days must be between 1 and 31');
     }
     const { hours, minutes } = parseTime(time);
@@ -194,7 +194,7 @@ export const CronPatterns = {
    * @example CronPatterns.monthly(15, '12:00') // "0 12 15 * *" - 15th of month at noon
    */
   monthly: (day: number, time: string): string => {
-    if (day < 1 || day > 31) {
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
       throw invalidCronValue('Day of month must be between 1 and 31');
     }
     const { hours, minutes } = parseTime(time);

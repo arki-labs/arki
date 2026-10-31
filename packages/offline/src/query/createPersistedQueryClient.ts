@@ -5,6 +5,7 @@ import { persistQueryClientSave } from '@tanstack/query-persist-client-core';
 
 import type { IdbPersister } from './idb-persister.ts';
 import { createIdbPersister } from './idb-persister.ts';
+import type { QueryCachePersistFailed } from './failures.ts';
 
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./vite-env.d.ts" />
@@ -42,7 +43,7 @@ export interface PersistedQueryClient {
    * a query that must never come back (a deleted item) and before the page can reload; the
    * provider's own writes are throttled to one a second.
    */
-  persistNow: () => Promise<void>;
+  persistNow: () => Promise<void | ReturnType<typeof QueryCachePersistFailed>>;
   /** Resolved buster string — forward to `PersistedQueryClientProvider`. */
   buster: string;
   /** Resolved max age in ms — forward to `PersistedQueryClientProvider`. */
@@ -94,12 +95,21 @@ export function createPersistedQueryClient(
 
   const persister = createIdbPersister({ storageKey });
 
-  const persistNow = () =>
-    persistQueryClientSave({
+  const persistNow = async (): Promise<void | ReturnType<typeof QueryCachePersistFailed>> => {
+    let outcome: ReturnType<typeof QueryCachePersistFailed> | undefined;
+    await persistQueryClientSave({
       queryClient,
-      persister: { ...persister, persistClient: persister.persistClientNow },
+      persister: {
+        ...persister,
+        persistClient: async client => {
+          const written = await persister.persistClientNow(client);
+          if (written !== undefined) outcome = written;
+        },
+      },
       buster,
     });
+    return outcome;
+  };
 
   return { queryClient, persister, persistNow, buster, maxAge };
 }

@@ -1,5 +1,6 @@
 import { QueueTransportUnavailable, QueueStorageUnavailable } from '../../src/mutations/failures.ts';
 import { orThrow } from '@arki/failure';
+import { backoff } from '@arki/resilience';
 import { queuedMutationId, mutationIdempotencyKey } from '../../src/mutations/identity.ts';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { QueuedMutation, AnyRpcClient, QueueEvent } from '../../src/mutations/queue.ts';
@@ -133,7 +134,7 @@ describe('ReplayLoop', () => {
     const rpc = makeRpc();
     const options: ReplayLoopOptions = {
       storage, dlStore: makeDeadLetterStore(), rpc, actorId: () => ALICE,
-      maxRetries: 1, backoff: () => 0, emit: () => { /* No event observer in this refusal test. */ },
+      retry: backoff.exponential({ base: 0 }).upTo(1), emit: () => { /* No event observer in this refusal test. */ },
       onStateChange: () => { /* Replaced with a malformed JavaScript reporter below. */ },
     };
     Object.defineProperty(options, 'onStateChange', { value: (sending: boolean) => {
@@ -151,7 +152,7 @@ describe('ReplayLoop', () => {
     const rpc = makeRpc();
     const options: ReplayLoopOptions = {
       storage, dlStore: makeDeadLetterStore(), rpc, actorId: () => ALICE,
-      maxRetries: 1, backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(1),
       onStateChange: () => { /* Replaced with a malformed JavaScript reporter below. */ },
       emit: () => { /* Replaced with a pending reporter below. */ },
     };
@@ -187,8 +188,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 3,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(3),
       onStateChange: vi.fn(),
       emit: (e) => events.push(e),
     });
@@ -233,8 +233,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 3,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(3),
       onStateChange: vi.fn(),
       emit: (e) => events.push(e),
     });
@@ -264,8 +263,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 3,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(3),
       onStateChange: vi.fn(),
       emit: (e) => events.push(e),
     });
@@ -299,8 +297,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries,
-      backoff: () => 100, // fixed 100ms backoff for test speed
+      retry: backoff.exponential({ base: 100 }).upTo(maxRetries),
       onStateChange: vi.fn(),
       emit: (e) => events.push(e),
     });
@@ -326,6 +323,31 @@ describe('ReplayLoop', () => {
     vi.useRealTimers();
   });
 
+  it('stop() cancels the retry wait of a running drain, and leaves the entry queued with its attempt count', async () => {
+    vi.useFakeTimers();
+    const storage = makeStorage([makeEntry('id-stop')]);
+    const rpc = makeRpc('fail-500');
+    const loop = createReplayLoop({
+      actorId: () => ALICE,
+      storage,
+      dlStore: makeDeadLetterStore(),
+      rpc,
+      // A one-hour wait: the drain can only end early if stop() cuts the wait.
+      retry: backoff.exponential({ base: 3_600_000 }).upTo(3),
+      onStateChange: vi.fn(),
+      emit: vi.fn(),
+    });
+
+    const drainPromise = loop.drainNow();
+    await vi.advanceTimersByTimeAsync(10);
+    loop.stop();
+    orThrow(await drainPromise);
+
+    expect(rpc.calls).toHaveLength(1);
+    expect(orThrow(await storage.read())).toMatchObject([{ id: 'id-stop', attempts: 1 }]);
+    vi.useRealTimers();
+  });
+
   it('network error retries with backoff and eventually dead-letters', async () => {
     vi.useFakeTimers();
 
@@ -341,8 +363,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries,
-      backoff: () => 50,
+      retry: backoff.exponential({ base: 50 }).upTo(maxRetries),
       onStateChange: vi.fn(),
       emit: (e) => events.push(e),
     });
@@ -370,8 +391,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 0,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(0),
       onStateChange: vi.fn(),
       onDeadLetter,
       emit: vi.fn(),
@@ -395,8 +415,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 3,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(3),
       onStateChange: (sending) => stateChanges.push(sending),
       emit: vi.fn(),
     });
@@ -417,8 +436,7 @@ describe('ReplayLoop', () => {
       storage,
       dlStore,
       rpc,
-      maxRetries: 3,
-      backoff: () => 0,
+      retry: backoff.exponential({ base: 0 }).upTo(3),
       onStateChange: vi.fn(),
       emit: vi.fn(),
     });
@@ -443,8 +461,7 @@ describe('ReplayLoop', () => {
         storage,
         dlStore,
         rpc,
-        maxRetries: 3,
-        backoff: () => 0,
+        retry: backoff.exponential({ base: 0 }).upTo(3),
         onDeadLetter,
         onStateChange: vi.fn(),
         emit: (e) => events.push(e),
@@ -518,11 +535,14 @@ describe('ReplayLoop', () => {
         storage,
         dlStore,
         rpc,
-        maxRetries: 3,
-        backoff: () => {
-          signedIn = 'usr_bob';
-          return 0;
-        },
+        // The retry filter runs when the schedule is asked for the next wait: the account switches there.
+        retry: backoff
+          .exponential({ base: 0 })
+          .upTo(3)
+          .while(() => {
+            signedIn = 'usr_bob';
+            return true;
+          }),
         onStateChange: vi.fn(),
         emit: vi.fn(),
       });
@@ -553,7 +573,7 @@ it('returns the accepted effect identity when local cleanup is unconfirmed, then
   vi.spyOn(storage, 'write').mockResolvedValueOnce(persistenceFailure);
   const call = vi.fn(() => Promise.resolve({ accepted: true }));
   let actor = ALICE;
-  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => actor, maxRetries: 1, backoff: () => 0, onStateChange: vi.fn(), emit: vi.fn() });
+  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => actor, retry: backoff.exponential({ base: 0 }).upTo(1), onStateChange: vi.fn(), emit: vi.fn() });
   const outcome = await loop.drainNow();
   expect(QueueEffectUnconfirmed.is(outcome)).toBe(true);
   if (!QueueEffectUnconfirmed.is(outcome)) throw new Error('Expected accepted effect reconciliation');
@@ -571,7 +591,7 @@ it('preserves the queue if parking a dead letter fails', async () => {
   const dead = makeDeadLetterStore();
   const failure = QueuePersistenceUnconfirmed();
   vi.spyOn(dead, 'add').mockResolvedValueOnce(failure);
-  const loop = createReplayLoop({ storage, dlStore: dead, rpc: makeRpc('fail-422'), actorId: () => ALICE, maxRetries: 1, backoff: () => 0, onStateChange: vi.fn(), emit: vi.fn() });
+  const loop = createReplayLoop({ storage, dlStore: dead, rpc: makeRpc('fail-422'), actorId: () => ALICE, retry: backoff.exponential({ base: 0 }).upTo(1), onStateChange: vi.fn(), emit: vi.fn() });
   expect(await loop.drainNow()).toBe(failure);
   expect(orThrow(await storage.read())).toEqual([entry]);
 });
@@ -581,7 +601,7 @@ it('halts with the original returned defect instead of reporting success or retr
   const failure = UnexpectedDefect({ cause: new Error('adapter defect') });
   const call = vi.fn(() => Promise.resolve(failure));
   const storage = makeStorage([makeEntry('fatal-response')]);
-  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, maxRetries: 5, backoff: () => 0, onStateChange: vi.fn(), emit: vi.fn() });
+  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, retry: backoff.exponential({ base: 0 }).upTo(5), onStateChange: vi.fn(), emit: vi.fn() });
   expect(await loop.drainNow()).toBe(failure);
   expect(call).toHaveBeenCalledTimes(1);
   expect(orThrow(await storage.read())).toHaveLength(1);
@@ -590,7 +610,7 @@ it('halts with the original returned defect instead of reporting success or retr
 it('normalizes an unknown transport throw as a defect without a blind retry', async () => {
   const { UnexpectedDefect } = await import('@arki/failure');
   const call = vi.fn(() => Promise.reject(new Error('programming error')));
-  const loop = createReplayLoop({ storage: makeStorage([makeEntry('unknown-transport')]), dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, maxRetries: 5, backoff: () => 0, onStateChange: vi.fn(), emit: vi.fn() });
+  const loop = createReplayLoop({ storage: makeStorage([makeEntry('unknown-transport')]), dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, retry: backoff.exponential({ base: 0 }).upTo(5), onStateChange: vi.fn(), emit: vi.fn() });
   expect(UnexpectedDefect.is(await loop.drainNow())).toBe(true);
   expect(call).toHaveBeenCalledTimes(1);
 });
@@ -599,7 +619,7 @@ it('resumes an authentication halt on an explicit drain', async () => {
   let authenticated = false;
   const rpc = makeRpc(() => authenticated ? 'success' : 'fail-401');
   const storage = makeStorage([makeEntry('auth-resume')]);
-  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc, actorId: () => ALICE, maxRetries: 1, backoff: () => 0, onStateChange: vi.fn(), emit: vi.fn() });
+  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc, actorId: () => ALICE, retry: backoff.exponential({ base: 0 }).upTo(1), onStateChange: vi.fn(), emit: vi.fn() });
   orThrow(await loop.drainNow());
   expect(orThrow(await storage.read())).toHaveLength(1);
   authenticated = true;
@@ -618,7 +638,7 @@ it('reconciles removal that committed before its acknowledgement failed', async 
   });
   const call = vi.fn(() => Promise.resolve({ accepted: true }));
   const events: QueueEvent[] = [];
-  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, maxRetries: 1, backoff: () => 0, onStateChange: vi.fn(), emit: event => { events.push(event); } });
+  const loop = createReplayLoop({ storage, dlStore: makeDeadLetterStore(), rpc: { call }, actorId: () => ALICE, retry: backoff.exponential({ base: 0 }).upTo(1), onStateChange: vi.fn(), emit: event => { events.push(event); } });
   expect(QueueEffectUnconfirmed.is(await loop.drainNow())).toBe(true);
   orThrow(await loop.drainNow());
   expect(call).toHaveBeenCalledTimes(1);

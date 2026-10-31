@@ -44,6 +44,7 @@
     "rehype-autolink-headings": "catalog:content",
     "rehype-pretty-code": "catalog:content",
     "rehype-raw": "catalog:content",
+    "rehype-sanitize": "^6.0.0",
     "rehype-slug": "catalog:content",
     "rehype-stringify": "catalog:content",
     "remark-gfm": "catalog:content",

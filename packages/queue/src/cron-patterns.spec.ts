@@ -41,6 +41,14 @@ describe('CronPatterns', () => {
       expect(() => CronPatterns.everyMinutes(60)).toThrow('Minutes must be between 1 and 59');
       expect(() => CronPatterns.everyMinutes(-5)).toThrow('Minutes must be between 1 and 59');
     });
+
+    it('refuses NaN and fractions instead of building "*/NaN" patterns', () => {
+      expect(() => CronPatterns.everyMinutes(Number.NaN)).toThrow('Minutes must be between 1 and 59');
+      expect(() => CronPatterns.everyMinutes(1.5)).toThrow('Minutes must be between 1 and 59');
+      expect(() => CronPatterns.everySeconds(Number.NaN)).toThrow('Seconds must be between 1 and 59');
+      expect(() => CronPatterns.everyHours(2.5)).toThrow('Hours must be between 1 and 23');
+      expect(() => CronPatterns.monthly(1.5, '09:00')).toThrow('Day of month must be between 1 and 31');
+    });
   });
 
   describe('everyHours', () => {

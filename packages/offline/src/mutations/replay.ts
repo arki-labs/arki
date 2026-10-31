@@ -9,8 +9,12 @@
  * Nobody signed in: the pass stops and emits `auth-required`, entries stay.
  * Another actor signed in: the entry is dead-lettered unsent (`ACTOR_MISMATCH`).
  */
-import { sleep } from '@arki/async';
+import { z } from 'zod';
+
+import { Cancelled, sleep } from '@arki/async';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
+import type { Backoff } from '@arki/resilience';
+import { is } from '@arki/schema';
 
 import type { DeadLetterStore } from './dead-letter.ts';
 import type { DrainFailure, QueueStorageFailure } from './failures.ts';
@@ -29,8 +33,11 @@ export interface ReplayLoopOptions {
   rpc: AnyRpcClient;
   /** Who is signed in now (`null`: nobody; `undefined`: not known yet). Read right before every send attempt. */
   actorId: () => string | null | undefined;
-  maxRetries: number;
-  backoff: (attempt: number) => number;
+  /**
+   * When to retry a send that failed for a transient reason (5xx, network), and when to give up and
+   * dead-letter the entry. `retry.delay(n, ...)` is the wait before retry `n`; `undefined` ends the retries.
+   */
+  retry: Backoff;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
   onStateChange: (sending: boolean) => void;
   emit: (event: QueueEvent) => void;
@@ -57,13 +64,15 @@ function notify(report: () => void): void {
   }
 }
 
+/** A thrown error that carries an HTTP `status`. */
+const httpStatusSchema = z.object({ status: z.number() });
+
 function getHttpStatus(error: unknown): number | null {
-  if (error !== null && typeof error === 'object' && 'status' in error) {
-    const s = error.status;
-    if (typeof s === 'number') return s;
-  }
-  return null;
+  return is(error, httpStatusSchema) ? error.status : null;
 }
+
+/** What a transient failure tells the retry schedule: a thrown error, which `Backoff` retries by default. */
+const TRANSIENT_FAILURE = new Error('Transient send failure');
 
 function classifyResponse(error: unknown): 'dead-letter' | 'retry' | 'halt' | ReturnType<typeof UnexpectedDefect> {
   if (UnexpectedDefect.is(error)) return error;
@@ -88,13 +97,15 @@ function classifyResponse(error: unknown): 'dead-letter' | 'retry' | 'halt' | Re
 // ---------------------------------------------------------------------------
 
 export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
-  const { storage, dlStore, rpc, actorId, maxRetries, backoff, onDeadLetter, onStateChange, emit } = options;
+  const { storage, dlStore, rpc, actorId, retry, onDeadLetter, onStateChange, emit } = options;
 
   // A successful server call is never repeated in this runtime if queue cleanup fails.
   const accepted = new Map<QueuedMutation['id'], QueuedMutation>();
   let draining = false;
   let halted = false; // auth-required state
   let drainPromise: Promise<void | DrainFailure> | null = null;
+  // Aborted by stop(): cancels the retry wait of a running drain.
+  let stopController = new AbortController();
 
   /**
    * Try sending one mutation. Returns:
@@ -188,8 +199,9 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
 
       // result === 'retry'
       const nextAttempts = current.attempts + 1;
+      const delay = retry.delay(nextAttempts, TRANSIENT_FAILURE);
 
-      if (nextAttempts > maxRetries) {
+      if (delay === undefined) {
         // Exhausted — dead-letter
         const finalError = new Error('Max retries exceeded');
         const updated: QueuedMutation = {
@@ -210,8 +222,8 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       const persisted = await updateEntry(current);
       if (isFailure(persisted)) return persisted;
 
-      const delay = backoff(nextAttempts);
-      const waited = await sleep(delay);
+      const waited = await sleep(delay, { signal: stopController.signal });
+      if (Cancelled.is(waited)) return false;
       if (isFailure(waited)) return waited;
     }
   }
@@ -288,6 +300,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
 
   return {
     start(): void {
+      stopController = new AbortController();
       if (typeof window !== 'undefined') {
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
@@ -295,6 +308,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
     },
 
     stop(): void {
+      stopController.abort();
       if (typeof window !== 'undefined') {
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);

@@ -88,17 +88,21 @@ function jsonProblem(value: unknown, path: string, ancestors: Set<object>): stri
   }
 }
 
-/** Throws `OUTBOX_E003` unless `args` is plain JSON within `maxBytes` UTF-8 bytes. */
-export function assertJsonArgs(args: unknown, maxBytes: number, jobName: string): void {
+/** `schema.invalid_input` unless `args` is plain JSON within `maxBytes` UTF-8 bytes; `undefined` when it is. */
+export function jsonArgsFailure(args: unknown, maxBytes: number, jobName: string): ReturnType<typeof InvalidInput> | undefined {
   const problem = jsonProblem(args, 'args', new Set());
   if (problem !== undefined)
-    throw outboxError(OUTBOX_ERROR_CODES.notJson, `outbox: "${jobName}" args are not plain JSON: ${problem}`);
+    return InvalidInput({ issues: [{ message: `outbox: "${jobName}" args are not plain JSON: ${problem}` }] });
   const bytes = new TextEncoder().encode(JSON.stringify(args)).byteLength;
   if (bytes > maxBytes)
-    throw outboxError(
-      OUTBOX_ERROR_CODES.notJson,
-      `outbox: "${jobName}" args are ${String(bytes)} bytes as JSON; the limit is ${String(maxBytes)}`,
-    );
+    return InvalidInput({
+      issues: [
+        {
+          message: `outbox: "${jobName}" args are ${String(bytes)} bytes as JSON; the limit is ${String(maxBytes)}`,
+        },
+      ],
+    });
+  return undefined;
 }
 
 type When = { readonly at: Date } | { readonly delayMs: number };
@@ -142,7 +146,8 @@ export function outbox(options: OutboxOptions): Outbox {
     // the raw args are stored and the worker parses them, so a transform runs once.
     const parsed = await parseAsync(job._internal.inputSchema, args);
     if (InvalidInput.is(parsed) || ValidatorDefect.is(parsed)) return parsed;
-    assertJsonArgs(args, maxArgsBytes, name);
+    const notJson = jsonArgsFailure(args, maxArgsBytes, name);
+    if (notJson !== undefined) return notJson;
 
     const key = scheduleOptions?.key;
     const id = jobId();

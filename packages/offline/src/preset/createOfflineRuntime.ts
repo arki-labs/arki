@@ -8,6 +8,7 @@ import type { AnyRpcClient, OfflineMutationQueue } from '../mutations/queue.ts';
 import { OfflineDevPanel } from '../devtools/DevPanel.tsx';
 import { OfflineQueueProvider } from '../mutations/OfflineQueueProvider.tsx';
 import { createOfflineMutationQueue } from '../mutations/queue.ts';
+import type { QueryCachePersistFailed } from '../query/failures.ts';
 import { createPersistedQueryClient } from '../query/createPersistedQueryClient.ts';
 import { PersistedQueryClientProvider } from '../query/PersistedQueryClientProvider.tsx';
 
@@ -48,10 +49,13 @@ export type OfflineRuntime = {
   /**
    * Writes the persisted query cache to IndexedDB now and resolves when it is stored. After removing
    * a query that must not come back (a deleted item), await it before the page can reload: the
-   * automatic writes are throttled to one a second. Browser only: on the server it rejects.
+   * automatic writes are throttled to one a second. Resolves `offline.query_cache_persist_failed` when
+   * IndexedDB refuses the write. Browser only: on the server it rejects.
    */
-  persistNow: () => Promise<void>;
+  persistNow: () => Promise<void | ReturnType<typeof QueryCachePersistFailed>>;
   queue?: OfflineMutationQueue;
+  /** Stops the queue's replay loop and removes its window listeners. Call it when the runtime is torn down (tests, hot reload). */
+  dispose: () => void;
   /** In the browser: the persisted client. On the server: a fresh client for each request, never persisted. */
   Provider: (props: { children: ReactNode }) => ReactNode;
 };
@@ -188,6 +192,7 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
     },
     persistNow: () => (persisted ? persisted.persistNow() : Promise.reject(browserOnly('persistNow()'))),
     queue,
+    dispose: () => queue?.dispose(),
     Provider,
   };
 }

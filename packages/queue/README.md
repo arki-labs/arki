@@ -200,7 +200,7 @@ process.exit(0);
 - **A flow is a tree.** A step can be the dependency of one other step. A step that two steps depend on throws `ARKI_QUEUE_E017` at `.build()`.
 - **Job names.** A job name is its queue name. BullMQ refuses a name with `:`. pg-boss accepts only letters, digits, `_`, `-`, `.` and `/`. `orders.ship` works on every lane. `orders:ship` throws `ARKI_QUEUE_E020` when the job is declared.
 - **Runtime-local has no flows and no interval schedules.** It skips them with a warning. Use cron schedules.
-- **Outbox args are plain JSON, at most 256 KiB** (`maxArgsBytes`). A `Date`, `Map`, `bigint` or class instance throws `OUTBOX_E003`.
+- **Outbox args are plain JSON, at most 256 KiB** (`maxArgsBytes`). A `Date`, `Map`, `bigint` or class instance returns `schema.invalid_input`.
 - **Outbox order is not promised.** Priority 1 to 10 picks the claim order, but `SKIP LOCKED` is not FIFO. A steady stream of high-priority rows can starve low ones.
 - **An outbox delay starts with the transaction,** not with the commit. A job can also run late, by up to `pollMs` without a listener.
 - **Recovery time depends on the lane.** BullMQ needs 30 to 60 seconds by default. pg-boss needs `expireInSeconds` (15 minutes by default) plus a supervise pass. See [Recover jobs](docs/recipes/recover-jobs.md).

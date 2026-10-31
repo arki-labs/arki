@@ -103,7 +103,6 @@ Each error has a `code` and a `.remediation`. Test with `isOutboxError(e)`.
 | ------------- | ------------------ | ------------------------------------------------------------------------ |
 | `OUTBOX_E001` | `notInTransaction` | `runAfter` got the root database. Pass `tx`.                             |
 | `OUTBOX_E002` | `badArgs`          | The args do not pass the job's input schema.                             |
-| `OUTBOX_E003` | `notJson`          | The args are not plain JSON, or are over `maxArgsBytes`.                 |
 | `OUTBOX_E004` | `badTiming`        | Bad `delayMs`, invalid `Date`, or a priority outside `QUEUE_PRIORITIES`. |
 | `OUTBOX_E005` | `badStoredArgs`    | Stored args no longer pass the schema. The job goes dead at once.        |
 | `OUTBOX_E006` | `unknownJob`       | A job name is not in the registry.                                       |
@@ -121,7 +120,7 @@ A middleware can return a defined failure directly: `q.middleware(async () => Ac
 
 ### Queue client diagnostic
 
-A worker without its queue client raises `ARKI_QUEUE_E019` (`QUEUE_PLUGIN_ERROR_CODES.clientMissing`). Mount `queue({ connection })` before features and worker startup. `ARKI_QUEUE_E006` remains the missing-name builder diagnostic; older releases used it for both conditions.
+A worker without its queue client raises `ARKI_QUEUE_E019` (`QUEUE_PLUGIN_ERROR_CODES.clientMissing`). Mount `queue({ connection })` before features and worker startup. A worker that starts in the background (the default) and fails to start (Redis down, a context factory that throws) is logged at error level and `stop()` returns `queue.worker_start_failed`; pass `blocking: true` to fail `app.start()` instead. `ARKI_QUEUE_E006` remains the missing-name builder diagnostic; older releases used it for both conditions.
 
 ## Verify
 

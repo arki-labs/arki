@@ -31,7 +31,7 @@ import {
   queueProducerActions,
   queueWorker,
 } from './dot.ts';
-import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueWorkerStartFailed } from './errors.ts';
 import { initQueue } from './init.ts';
 import { jobsByName } from './outbox/registry.ts';
 import { project } from './projection.ts';
@@ -437,9 +437,31 @@ describe('queueWorker() — the entrypoint', () => {
     );
 
     await wait(5);
-    await orThrow(app.dispose());
+    // Shutdown still completes; it also reports why the worker never ran.
+    const disposed = await app.dispose();
 
+    expect(QueueWorkerStartFailed.is(disposed)).toBe(true);
     expect(app.state).toBe('disposed');
+  });
+
+  it('keeps a background startup failure and returns it as a typed failure from stop', async () => {
+    const { fakeQ } = fakeBuilder({
+      ...idleInstance(),
+      start: () => Promise.reject(new Error('redis is down')),
+    });
+
+    const app = await orThrow(
+      defineApp('worker')
+        .infra(queue({ connection: REDIS_URL }))
+        .features([orders])
+        .entrypoints(queueWorker({ q: fakeQ, needs: {}, context: () => ({ dependencyName: 'x' }) }))
+        .start(),
+    );
+    await wait(5);
+
+    const stopped = await app.stop();
+    expect(QueueWorkerStartFailed.is(stopped)).toBe(true);
+    expect(stopped).toMatchObject({ cause: { message: 'redis is down' } });
   });
 });
 

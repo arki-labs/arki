@@ -79,6 +79,7 @@
     "@arki/date": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@tanstack/db": "catalog:",

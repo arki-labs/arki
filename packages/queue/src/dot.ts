@@ -20,6 +20,7 @@ import { entrypoint, handlerObserverOf, instanceOf, sliceOf } from '@arki/dot/fe
 import { DotUnitError, infra, service } from '@arki/dot/unit';
 
 import { is, recordSchema } from '@arki/schema';
+import { z } from 'zod';
 import type { DurableSchedulerOptions } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { Outbox, OutboxOptions, OutboxTx, ScheduleOptions } from './outbox/outbox.ts';
@@ -38,6 +39,7 @@ import { triggerJob } from './job-builder.ts';
 import { outbox } from './outbox/outbox.ts';
 import { collectQueueDefinitions, isFlowDefinition, isJobDefinition, isScheduleDefinition } from './outbox/registry.ts';
 import { outboxRunner } from './outbox/runner.ts';
+import { QueueWorkerStartFailed } from './errors.ts';
 import { createQueueClient } from './queue-client.ts';
 
 export { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
@@ -279,16 +281,11 @@ function isQueueRegistry(value: unknown): value is QueueRegistry {
   return is(value, recordSchema);
 }
 
+/** What a feature's `queue` slice record must hold: the jobs it publishes and the services they run with. */
+const featureJobsShapeSchema = z.looseObject({ registry: z.record(z.string(), z.unknown()), services: z.record(z.string(), z.unknown()) });
+
 function isFeatureJobs(value: unknown): value is FeatureJobs {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'registry' in value &&
-    isQueueRegistry(value.registry) &&
-    'services' in value &&
-    typeof value.services === 'object' &&
-    value.services !== null
-  );
+  return is(value, featureJobsShapeSchema);
 }
 
 function isJobsSlice(slice: AnyFeatureSlice): slice is AnyFeatureSlice & { readonly registry: QueueRegistry } {
@@ -543,16 +540,15 @@ function createQueuePlugin<const Name extends string>(name: Name, options: Queue
   });
 }
 
+/** What makes a value a queue client: an `enqueue` function, a key prefix and a connection. */
+const queueClientShapeSchema = z.looseObject({
+  enqueue: z.instanceof(Function),
+  keyPrefix: z.string(),
+  connection: z.unknown().refine(connection => connection !== undefined),
+});
+
 function isQueueClient(value: unknown): value is QueueClient {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'enqueue' in value &&
-    typeof value.enqueue === 'function' &&
-    'keyPrefix' in value &&
-    typeof value.keyPrefix === 'string' &&
-    'connection' in value
-  );
+  return is(value, queueClientShapeSchema);
 }
 
 /**
@@ -628,15 +624,25 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
     return runtime;
   };
 
-  return entrypoint.fromFeatures({
+  return entrypoint.fromFeatures<
+    WorkerShape<TNeeds>,
+    EmptyShape,
+    string,
+    QueueWorkerState,
+    undefined,
+    undefined,
+    undefined,
+    ReturnType<typeof QueueWorkerStartFailed> | undefined,
+    undefined
+  >({
     name: pluginName,
     needs,
-    state: (): QueueWorkerState => ({ started: false, handle: undefined, startup: undefined }),
+    state: (): QueueWorkerState => ({ started: false, handle: undefined, startup: undefined, startupFailure: undefined }),
     actions: features => queueConsumerActions(declaredRegistry(features)),
-    configure(ctx) {
+    configure(ctx): undefined {
       ctx.declareProvides('queue-worker');
     },
-    async start(ctx) {
+    async start(ctx): Promise<undefined> {
       const state = ctx.$state;
       if (state.started || state.startup !== undefined) {
         throw queuePluginError({
@@ -661,18 +667,23 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
         return;
       }
 
+      // Background start: the app is already up, so the failure cannot fail `start`. It is logged at
+      // error level and kept, and `stop()` returns it as `queue.worker_start_failed`.
       state.startup = runStartup(ctx).catch((error: unknown) => {
+        state.startupFailure = QueueWorkerStartFailed({ cause: error });
         observeQueue(() =>
-          debugWorker.debug('[{pluginName}] Queue worker startup failed', {
+          debugWorker.error('[{pluginName}] Queue worker startup failed: no jobs run', {
             pluginName,
+            code: QueueWorkerStartFailed.code,
             error: error instanceof Error ? error.message : String(error),
           }),
         );
         state.started = false;
         state.handle = undefined;
       });
+      return undefined;
     },
-    async stop({ $state: state }) {
+    async stop({ $state: state }): Promise<ReturnType<typeof QueueWorkerStartFailed> | undefined> {
       if (!state.started && state.startup === undefined && state.handle === undefined) {
         throw queuePluginError({
           code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
@@ -683,17 +694,21 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
       }
 
       const runtime = state.handle ?? (await state.startup);
+      const startupFailure = state.startupFailure;
       state.startup = undefined;
+      state.startupFailure = undefined;
       state.handle = undefined;
       state.started = false;
       await runtime?.stop();
+      return startupFailure;
     },
-    async dispose({ $state: state }) {
+    async dispose({ $state: state }): Promise<undefined> {
       const runtime = state.handle ?? (await state.startup);
       state.startup = undefined;
       state.handle = undefined;
       state.started = false;
       await runtime?.stop();
+      return undefined;
     },
   });
 }
@@ -703,6 +718,8 @@ type QueueWorkerState = {
   started: boolean;
   handle: QueueInstance | undefined;
   startup: Promise<QueueInstance | void> | undefined;
+  /** Why a background startup failed; `stop()` returns it once. */
+  startupFailure: ReturnType<typeof QueueWorkerStartFailed> | undefined;
 };
 
 export type OutboxPluginOptions = OutboxOptions & {

@@ -60,4 +60,30 @@ describe('compileMarkdown', () => {
     expect(html).not.toContain('outside.md');
     expect(html).toContain('<a href="https://example.com">c</a>');
   });
+
+  // Markdown from outside (a README, a comment, a feed) can carry HTML. It must not run script in a reader's page.
+  it('strips script, event handlers and javascript: links from raw HTML by default', async () => {
+    const { html } = await compileMarkdown(
+      '<script>alert(1)</script>\n\n<img src="x.png" onerror="alert(2)">\n\n<a href="javascript:alert(3)">go</a>\n',
+    );
+
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('onerror');
+    expect(html).not.toContain('javascript:');
+    expect(html).toContain('<img src="x.png"');
+  });
+
+  it('keeps harmless raw HTML and the ids this package adds to headings when sanitizing', async () => {
+    const { html } = await compileMarkdown('## Intro\n\n<details><summary>More</summary>Hidden text</details>\n');
+
+    expect(html).toContain('<details><summary>More</summary>Hidden text</details>');
+    expect(html).toContain('<h2 id="intro"');
+  });
+
+  it('keeps raw HTML as written when the caller marks the markdown as trusted', async () => {
+    const { html } = await compileMarkdown('<div onclick="x()">own team</div>\n', { trustedHtml: true });
+
+    expect(html).toContain('<div onclick="x()">own team</div>');
+  });
 });
+

@@ -99,7 +99,7 @@ The replay request carries the session signed in *at replay*, not the one that q
 <offline.Provider>{children}</offline.Provider>
 ```
 
-**Server rendering.** In the browser, `offline.Provider` uses one persisted QueryClient for the app's lifetime (`offline.queryClient`). On the server the module that holds `offline` serves every request, so one client there would be one cache for every user. So on the server `offline.Provider` makes a fresh, unpersisted QueryClient for each request, and `offline.queryClient` and `offline.persistNow()` throw. Read the client with `useQueryClient()` inside the provider.
+**Server rendering.** In the browser, `offline.Provider` uses one persisted QueryClient for the app's lifetime (`offline.queryClient`). On the server the module that holds `offline` serves every request, so one client there would be one cache for every user. So on the server `offline.Provider` makes a fresh, unpersisted QueryClient for each request, and `offline.queryClient` and `offline.persistNow()` throw. Read the client with `useQueryClient()` inside the provider. In the browser, `offline.persistNow()` resolves `offline.query_cache_persist_failed` when IndexedDB refuses the write (storage full, private mode), and `offline.dispose()` stops the queue's replay loop and removes its window listeners (tests, hot reload).
 
 #### The strict idempotency contract
 
@@ -303,7 +303,7 @@ createIdbPersister({ storageKey: 'myapp-query', buster: import.meta.env.VITE_BUI
 
 ### Queue stuck — mutations not replaying
 
-Check the dead-letter list: `queue.deadLetter.list()`. Dead-lettered mutations are moved here after `maxRetries` (default 5) failures. Common causes:
+Check the dead-letter list: `queue.deadLetter.list()`. Dead-lettered mutations are moved here when the `retry` schedule ends (default: exponential from 1 s to 30 s, at most 5 retries; pass any `@arki/resilience` `Backoff` as `retry`). Common causes:
 
 - **4xx errors**: the mutation data is invalid server-side — discard and fix the input.
 - **401 errors**: the queue halts and emits `'auth-required'` — user must re-authenticate.

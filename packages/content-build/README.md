@@ -14,7 +14,7 @@ const { html, headings } = await compileMarkdown(document.content, {
 });
 ```
 
-- `html`: the compiled page. Tables, task lists and raw HTML are kept, so pass trusted input only.
+- `html`: the compiled page. Tables and task lists are kept. Raw HTML is sanitized with GitHub's rules (no `<script>`, no event handlers, no `javascript:` links). Pass `trustedHtml: true` to keep raw HTML as written, for markdown your own team wrote.
 - `headings`: `{ depth, text, id }` for every heading, in order. Ids match GitHub's, so `#anchor` links keep working.
 - Code blocks are highlighted by `rehype-pretty-code` with light and dark themes. Each token carries `--shiki-light` and `--shiki-dark` CSS variables; the app's CSS picks one.
 - `rewriteLink(href)` runs on every link: return a new `href`, `null` to drop the link and keep its text, or `undefined` to keep it.

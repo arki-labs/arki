@@ -1,5 +1,6 @@
 import { QueueTransportUnavailable, QueueStorageCorrupt } from '../../src/mutations/failures.ts';
 import { orThrow } from '@arki/failure';
+import { backoff } from '@arki/resilience';
 import { queuedMutationId } from '../../src/mutations/identity.ts';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { oc } from '@orpc/contract';
@@ -209,7 +210,7 @@ describe('OfflineMutationQueue', () => {
       rpc,
       storageKey: 'q5',
       deadLetterStorageKey: 'dl5',
-      maxRetries: 0,
+      retry: backoff.exponential({ base: 1 }).upTo(0),
     });
 
     orThrow(await queue.enqueue(createPost, { title: 'Will fail' }));
@@ -231,7 +232,7 @@ describe('OfflineMutationQueue', () => {
       rpc,
       storageKey: 'q6',
       deadLetterStorageKey: 'dl6',
-      maxRetries: 0,
+      retry: backoff.exponential({ base: 1 }).upTo(0),
     });
 
     orThrow(await queue.enqueue(createPost, { title: 'Permanent fail' }));
@@ -251,7 +252,7 @@ describe('OfflineMutationQueue', () => {
       rpc,
       storageKey: 'q7',
       deadLetterStorageKey: 'dl7',
-      maxRetries: 0,
+      retry: backoff.exponential({ base: 1 }).upTo(0),
     });
 
     orThrow(await queue.enqueue(createPost, { title: 'Discard me' }));
@@ -283,7 +284,7 @@ describe('OfflineMutationQueue', () => {
       rpc,
       storageKey: 'q8',
       deadLetterStorageKey: 'dl8',
-      maxRetries: 0,
+      retry: backoff.exponential({ base: 1 }).upTo(0),
     });
 
     orThrow(await queue.enqueue(createPost, { title: 'Retry me' }));

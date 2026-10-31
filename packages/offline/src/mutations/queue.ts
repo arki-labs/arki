@@ -18,6 +18,8 @@ import type { Identified, InputOf, Operation } from '@arki/contracts/orpc';
 import { operationOf } from '@arki/contracts/orpc';
 
 import { getLogger } from '@arki/log';
+import { backoff } from '@arki/resilience';
+import type { Backoff } from '@arki/resilience';
 
 import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.ts';
 
@@ -80,8 +82,11 @@ export interface OfflineMutationQueueOptions {
    * answer synchronously from local state: it runs offline.
    */
   actorId: () => string | null | undefined;
-  maxRetries?: number;
-  backoff?: (attempt: number) => number;
+  /**
+   * When to retry a send that failed for a transient reason (5xx, network), and after how many retries the
+   * entry goes to the dead-letter store. Default: exponential from 1 s up to 30 s, at most 5 retries.
+   */
+  retry?: Backoff;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
 }
 
@@ -138,6 +143,8 @@ interface QueueState {
 // Factory
 // ---------------------------------------------------------------------------
 
+const DEFAULT_RETRY = backoff.exponential({ base: 1_000, max: 30_000 }).upTo(5);
+
 export function createOfflineMutationQueue(
   options: OfflineMutationQueueOptions,
 ): OfflineMutationQueue {
@@ -146,8 +153,7 @@ export function createOfflineMutationQueue(
     deadLetterStorageKey = 'arki-offline-mutations-dead',
     rpc,
     actorId,
-    maxRetries = 5,
-    backoff = (attempt: number) => Math.min(30_000, 1_000 * 2 ** attempt),
+    retry = DEFAULT_RETRY,
     onDeadLetter,
   } = options;
 
@@ -225,8 +231,7 @@ export function createOfflineMutationQueue(
     dlStore,
     rpc,
     actorId: signedInActor,
-    maxRetries,
-    backoff,
+    retry,
     onDeadLetter,
     onStateChange: (sending: boolean) => {
       state.sending = sending;

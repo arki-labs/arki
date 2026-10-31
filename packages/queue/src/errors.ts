@@ -151,6 +151,17 @@ export const QueueAcceptanceUnknown = defineFailure('queue.acceptance_unknown', 
   message: 'The queue could not confirm whether the job was accepted.',
   remediation: 'Inspect the job by its idempotency key before enqueueing it again.',
 });
+/**
+ * The queue worker started in the background and failed (Redis down, a slow start, a context factory that threw), so no job runs.
+ * @fix Check Redis connectivity and the worker context factory, then restart the app; use `blocking: true` to fail `app.start()` instead.
+ * @verify bun run test -- src/dot.spec.ts
+ */
+export const QueueWorkerStartFailed = /* @__PURE__ */ defineFailure('queue.worker_start_failed', {
+  status: 503,
+  message: 'The queue worker failed to start, so no job runs.',
+  remediation:
+    'Check Redis connectivity and the worker context factory, then restart the app; use blocking: true to fail app.start() instead.',
+});
 /** Every failure a job trigger can return — spread it into a contract's error map. */
 export const JOB_TRIGGER_FAILURES = [
   InvalidInput,

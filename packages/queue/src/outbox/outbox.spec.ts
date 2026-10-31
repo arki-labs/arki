@@ -20,7 +20,7 @@ import type { JobContext } from '../types/job.ts';
 import { initQueue } from '../init.ts';
 import { QUEUE_PRIORITIES } from '../types/job.ts';
 import { isOutboxError, OUTBOX_ERROR_CODES, outboxError } from './errors.ts';
-import { assertJsonArgs, outbox } from './outbox.ts';
+import { jsonArgsFailure, outbox } from './outbox.ts';
 import { jobsByName } from './registry.ts';
 import { outboxRunner } from './runner.ts';
 
@@ -214,13 +214,11 @@ describe('runAfter in a transaction', () => {
   });
 
   it('refuses args that are not plain JSON, and measures the cap in UTF-8 bytes, not characters', async () => {
-    await expect(db.transaction(tx => schedule.runAfter(tx, dated, { when: new Date() }))).rejects.toMatchObject({
-      code: OUTBOX_ERROR_CODES.notJson,
-    });
+    const notPlain = await db.transaction(tx => schedule.runAfter(tx, dated, { when: new Date() }));
+    expect(InvalidInput.is(notPlain)).toBe(true);
     // 160 000 two-byte characters: under the cap in characters, over it in bytes.
-    await expect(db.transaction(tx => schedule.runAfter(tx, anything, 'é'.repeat(160_000)))).rejects.toMatchObject({
-      code: OUTBOX_ERROR_CODES.notJson,
-    });
+    const tooBig = await db.transaction(tx => schedule.runAfter(tx, anything, 'é'.repeat(160_000)));
+    expect(InvalidInput.is(tooBig)).toBe(true);
     expect(await rows()).toEqual([]);
   });
 
@@ -388,7 +386,7 @@ describe('pieces', () => {
     expect(() => jobsByName({ welcome, again: { welcome } })).not.toThrow();
   });
 
-  it('assertJsonArgs refuses every non-JSON value and allows absent keys and shared references', () => {
+  it('jsonArgsFailure refuses every non-JSON value and allows absent keys and shared references', () => {
     class Point {
       x = 1;
     }
@@ -410,15 +408,13 @@ describe('pieces', () => {
       cycle,
     ];
     for (const value of refused)
-      expect(() => assertJsonArgs(value, 1000, 'j'), String(typeof value)).toThrow(
-        expect.objectContaining({ code: OUTBOX_ERROR_CODES.notJson }),
-      );
+      expect(InvalidInput.is(jsonArgsFailure(value, 1000, 'j')), String(typeof value)).toBe(true);
     const shared = { a: 1 };
-    expect(() => assertJsonArgs({ x: shared, y: shared, z: [shared] }, 1000, 'j')).not.toThrow();
-    expect(() => assertJsonArgs({}, 1000, 'j')).not.toThrow();
-    expect(() => assertJsonArgs(Object.create(null), 1000, 'j')).not.toThrow();
-    expect(() => assertJsonArgs('éé', 6, 'j')).not.toThrow();
-    expect(() => assertJsonArgs('éé', 5, 'j')).toThrow();
+    expect(jsonArgsFailure({ x: shared, y: shared, z: [shared] }, 1000, 'j')).toBeUndefined();
+    expect(jsonArgsFailure({}, 1000, 'j')).toBeUndefined();
+    expect(jsonArgsFailure(Object.create(null), 1000, 'j')).toBeUndefined();
+    expect(jsonArgsFailure('éé', 6, 'j')).toBeUndefined();
+    expect(InvalidInput.is(jsonArgsFailure('éé', 5, 'j'))).toBe(true);
   });
 
   it('every error code has a remediation, and isOutboxError narrows', () => {

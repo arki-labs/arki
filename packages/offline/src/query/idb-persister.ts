@@ -1,8 +1,17 @@
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import type { PersistedClient, Persister } from '@tanstack/query-persist-client-core';
 import { del, get, set } from 'idb-keyval';
+import { z } from 'zod';
+
+import { attempt, isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
+import { parse } from '@arki/schema';
 
 import { offlineSerializer } from '../serializer.ts';
+import { QueryCachePersistFailed } from './failures.ts';
+
+/** Enable with `DEBUG=arki:offline:query`. */
+const debugPersister = getLogger('arki:offline:query');
 
 export interface CreateIdbPersisterOptions {
   /**
@@ -17,10 +26,30 @@ export type IdbPersister = Persister & {
   /**
    * Writes `client` now and resolves when it is stored. `persistClient` is throttled to one write a
    * second and does not say when it finishes; a page that reloads right after a delete would restore
-   * the older snapshot.
+   * the older snapshot. Resolves `offline.query_cache_persist_failed` when IndexedDB refuses (storage
+   * full, private mode) or the cache cannot be serialized.
    */
-  persistClientNow: (client: PersistedClient) => Promise<void>;
+  persistClientNow: (client: PersistedClient) => Promise<void | ReturnType<typeof QueryCachePersistFailed>>;
 };
+
+/**
+ * What a stored cache must look like before TanStack restores it. TanStack owns the shape of the
+ * dehydrated queries and mutations (it changes with its version), so only the envelope and the
+ * entries' identity are checked here; `buster` and `maxAge` reject anything stale or foreign.
+ */
+const storedClientSchema = z.custom<PersistedClient>(
+  value =>
+    z
+      .object({
+        timestamp: z.number(),
+        buster: z.string(),
+        clientState: z.object({
+          mutations: z.array(z.looseObject({})),
+          queries: z.array(z.looseObject({ queryHash: z.string(), queryKey: z.array(z.unknown()) })),
+        }),
+      })
+      .safeParse(value).success,
+);
 
 /**
  * Creates an async storage persister backed by IndexedDB via idb-keyval.
@@ -42,11 +71,33 @@ export function createIdbPersister(options: CreateIdbPersisterOptions = {}): Idb
     key,
     throttleTime: 1_000,
     serialize: (client) => offlineSerializer.stringify(client),
-    deserialize: (text) => offlineSerializer.parse<PersistedClient>(text),
+    deserialize: (text) => {
+      const stored = parse(storedClientSchema, offlineSerializer.parse(text));
+      if (isFailure(stored)) throw new Error('The stored query cache does not match its shape', { cause: stored });
+      return stored;
+    },
   });
 
   return {
     ...throttled,
-    persistClientNow: client => set(key, offlineSerializer.stringify(client)),
+    // A stored cache that does not match its shape (an old build, a bad write) is dropped and refetched.
+    restoreClient: async () => {
+      try {
+        return await throttled.restoreClient();
+      } catch (error) {
+        debugPersister.debug('dropping the stored query cache: {reason}', {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        await throttled.removeClient();
+        return;
+      }
+    },
+    persistClientNow: client =>
+      attempt(
+        async () => {
+          await set(key, offlineSerializer.stringify(client));
+        },
+        cause => QueryCachePersistFailed({ cause }),
+      ),
   };
 }

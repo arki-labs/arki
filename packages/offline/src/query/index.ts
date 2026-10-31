@@ -1,6 +1,8 @@
 export { createIdbPersister } from './idb-persister.ts';
 export type { CreateIdbPersisterOptions, IdbPersister } from './idb-persister.ts';
 
+export { QueryCachePersistFailed } from './failures.ts';
+
 export { createPersistedQueryClient } from './createPersistedQueryClient.ts';
 export type {
   CreatePersistedQueryClientOptions,
