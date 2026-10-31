@@ -114,9 +114,11 @@ export const config: ReleaseConfig = {
       // (it peers on auth and needs db + kv).
       // `@arki/dot` and `@arki/resilience` joined 2026-10-30 from dot-kernel
       // (see there); they lead because db, journal and the rest build on dot.
+      // `@arki/admin` joined 2026-10-31 (founder): journal and queue peer on it,
+      // so it ships with them; it needs http, so it follows it.
       packages: [
         '@arki/dot', '@arki/resilience',
-        '@arki/db', '@arki/kv', '@arki/http', '@arki/journal', '@arki/live',
+        '@arki/db', '@arki/kv', '@arki/http', '@arki/admin', '@arki/journal', '@arki/live',
         '@arki/lock', '@arki/mail', '@arki/auth', '@arki/schedule', '@arki/queue',
         '@arki/testing',
         '@arki/tanstack-start',
@@ -177,12 +179,7 @@ export const config: ReleaseConfig = {
   // Public packages deliberately outside every wave. The `admission`
   // scorecard dimension fails a public package that is in no wave and not
   // listed here (ADMIT_E001), or in both (ADMIT_E002).
-  notYet: [
-    {
-      name: '@arki/admin',
-      reason: 'public so @arki/journal can peer on it; first publish is Foreman F5-02 (0.1.0)',
-    },
-  ],
+  notYet: [],
 };
 
 export default config;
