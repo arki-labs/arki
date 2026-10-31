@@ -1,6 +1,8 @@
 import path from 'node:path';
 
-import type { MigratableDb } from '@arki/db/migrate';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
+
 import type { EmptyShape, NeedsShape, Unit, UnitOwnership, UnitPhases } from '@arki/dot/unit';
 import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
@@ -29,10 +31,18 @@ const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
  * The database unit is a parameter so tests can boot the same app on an
  * in-memory PGlite database (see `src/testing.ts`). Postgres and PGlite fail
  * in different ways, so the parameter accepts any failure (`UnitOwnership`,
- * `UnitPhases`); `boot()` and `start()` return them as values.
+ * `UnitPhases`); `boot()` and `start()` return them as values. The database
+ * type names the two Postgres drivers, so the journal gets a Postgres handle.
  */
 export function createApp(
-  database: Unit<EmptyShape, { readonly db: MigratableDb<typeof relations> }, NeedsShape, string, UnitOwnership, UnitPhases>,
+  database: Unit<
+    EmptyShape,
+    { readonly db: NodePgDatabase<typeof relations> | PgliteDatabase<typeof relations> },
+    NeedsShape,
+    string,
+    UnitOwnership,
+    UnitPhases
+  >,
 ) {
   return defineApp('{{name}}')
     .infra(

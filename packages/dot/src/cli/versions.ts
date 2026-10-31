@@ -37,10 +37,10 @@ export function readDotVersion(): string {
 export const TEMPLATE_VERSIONS = {
   env: '0.2.0',
   log: '0.4.0',
-  db: '0.4.0',
-  journal: '0.3.0',
+  db: '0.5.0',
+  journal: '0.4.0',
   failure: '0.3.0',
-  ui: '0.1.6',
+  ui: '0.2.0',
 } as const;
 
 /** Third-party versions the templates inline through a placeholder. */

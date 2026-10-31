@@ -8,6 +8,7 @@
 
 ### Patch Changes
 
+- `dot new` scaffolds against `@arki/db` 0.5.0, `@arki/journal` 0.4.0 and `@arki/ui` 0.2.0. The stack template's `createApp` names the Postgres database types (`NodePgDatabase | PgliteDatabase`) instead of `MigratableDb`, which now includes libSQL, so the scaffolded app typechecks again.
 - c1ed2a3: The `dot dev` console answers only requests whose `Host` is `127.0.0.1:<port>` or `localhost:<port>` (421 otherwise), so a page on another site cannot read it through DNS rebinding. A malformed escape in a page path is a 404, and a page that fails to render is a 500; neither stops the console.
 
   no docs impact: the console's behaviour for its own URLs is unchanged.
