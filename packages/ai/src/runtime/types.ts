@@ -3,7 +3,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import type { Failure } from '@arki/failure';
 import { InvalidInput, REVIVAL_FAILURES, UnexpectedDefect } from '@arki/failure';
 
-import { Cancelled, ConnectionLost, isProviderFailure, PROVIDER_FAILURES } from '../failures';
+import { Cancelled, ConnectionLost, isProviderFailure, PROVIDER_FAILURES } from '../failures.js';
 
 /**
  * Agent-runtime adapter layer — neutral contracts.

@@ -12,21 +12,21 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 
-import type { ProviderFailure } from '../failures';
-import type { AIServiceConfig as OpenAIServiceConfig, GenerationOptions as ValidatedGenerationOptions } from '../validation';
-import { debugService } from '../debug.ts';
-import { InputBlocked, RateLimited } from '../failures';
-import { modelSchema } from './model-schema';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure';
-import { aiTelemetry } from './telemetry';
-import { BaseInputSanitizer } from '../safety/input-sanitizer';
-import { rateLimiters } from '../utils/rate-limiter';
-import { validateInput } from './validate-input';
-import { aiServiceConfigSchema } from '../validation-schemas';
+import type { ProviderFailure } from '../failures.js';
+import type { AIServiceConfig as OpenAIServiceConfig, GenerationOptions as ValidatedGenerationOptions } from '../validation.js';
+import { debugService } from '../debug.js';
+import { InputBlocked, RateLimited } from '../failures.js';
+import { modelSchema } from './model-schema.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
+import { BaseInputSanitizer } from '../safety/input-sanitizer.js';
+import { rateLimiters } from '../utils/rate-limiter.js';
+import { validateInput } from './validate-input.js';
+import { aiServiceConfigSchema } from '../validation-schemas.js';
 
 type ChatMessage = ModelMessage;
 
-export type { AIServiceConfig as OpenAIServiceConfig } from '../validation';
+export type { AIServiceConfig as OpenAIServiceConfig } from '../validation.js';
 
 export type GenerationOptions = ValidatedGenerationOptions & {
   /**

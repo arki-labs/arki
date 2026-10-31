@@ -6,7 +6,7 @@
 import { z } from '@arki/contracts';
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
 
-import { LLM_PROVIDERS } from './ai-service/provider-names';
+import { LLM_PROVIDERS } from './ai-service/provider-names.js';
 
 /** The local rate limiter has no free slot, or the provider answered 429. `retryAfterMs` is set
  * when the limiter or the provider's `Retry-After` header said how long to wait.

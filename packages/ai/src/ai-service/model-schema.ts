@@ -5,7 +5,7 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
 import { parseAsync } from '@arki/schema';
 
-import { inputJsonSchema } from '../input-json-schema';
+import { inputJsonSchema } from '../input-json-schema.js';
 
 /**
  * Turns a caller's Standard Schema into the schema the AI SDK sends to a model and checks the

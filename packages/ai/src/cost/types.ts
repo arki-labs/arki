@@ -7,7 +7,7 @@
  * @module cost/types
  */
 
-import type { PriceBasis } from './pricing';
+import type { PriceBasis } from './pricing.js';
 
 // ============================================
 // Pricing Types

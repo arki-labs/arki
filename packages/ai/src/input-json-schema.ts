@@ -2,7 +2,7 @@ import type { SchemaWithJson, StandardJSONSchemaV1, StandardSchemaV1 } from '@ar
 
 import { hasJsonSchema } from '@arki/schema';
 
-import { ConfigurationError } from './errors';
+import { ConfigurationError } from './errors.js';
 
 /** The one JSON Schema dialect @arki/ai asks a schema for. */
 const JSON_SCHEMA_TARGET = 'draft-2020-12';

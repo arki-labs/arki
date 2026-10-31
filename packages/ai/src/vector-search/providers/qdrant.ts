@@ -8,11 +8,11 @@ import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-r
 import type { EmbeddingSpace } from '@arki/embeddings';
 import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
-import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
-import { debugVector } from '../../debug.ts';
-import { getErrorMessage, VectorSearchError } from '../../errors';
-import { VectorStoreUnavailable } from '../../failures';
-import { observeAi } from '../../observe';
+import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types.js';
+import { debugVector } from '../../debug.js';
+import { getErrorMessage, VectorSearchError } from '../../errors.js';
+import { VectorStoreUnavailable } from '../../failures.js';
+import { observeAi } from '../../observe.js';
 
 /**
  * Qdrant only accepts point IDs that are an unsigned integer or a UUID. Callers, however, use

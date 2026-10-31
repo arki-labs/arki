@@ -9,8 +9,8 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 
-import type { LLMProviderWithUsage } from '../ai-service/types';
-import { adaptLanguageModel } from '../ai-service/factory';
+import type { LLMProviderWithUsage } from '../ai-service/types.js';
+import { adaptLanguageModel } from '../ai-service/factory.js';
 
 /** What the fake model was asked, in the order it was asked. */
 export type FakeCall = {

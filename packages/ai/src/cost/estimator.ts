@@ -8,8 +8,8 @@
  * @module cost/estimator
  */
 
-import type { Price } from './pricing';
-import type { CostEstimate, ModelPricing } from './types';
+import type { Price } from './pricing.js';
+import type { CostEstimate, ModelPricing } from './types.js';
 import {
   calculateLLMCost,
   estimateTokens,
@@ -17,7 +17,7 @@ import {
   getModelPricing,
   hasKnownPricing,
   priceOf,
-} from './pricing';
+} from './pricing.js';
 
 // ============================================
 // Cost Estimator Class

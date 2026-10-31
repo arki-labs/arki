@@ -37,12 +37,12 @@ import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
 import { isFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { ProviderFailure } from '../failures';
-import { debugService } from '../debug.ts';
-import { env } from '../env';
-import { modelSchema } from './model-schema';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure';
-import { aiTelemetry } from './telemetry';
+import type { ProviderFailure } from '../failures.js';
+import { debugService } from '../debug.js';
+import { env } from '../env.js';
+import { modelSchema } from './model-schema.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
 
 type ChatMessage = ModelMessage;
 

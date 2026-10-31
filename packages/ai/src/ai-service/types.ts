@@ -9,7 +9,7 @@ import type { LanguageModelUsage } from 'ai';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { ProviderFailure } from '../failures.ts';
+import type { ProviderFailure } from '../failures.js';
 
 /**
  * Message format for conversation-based interactions

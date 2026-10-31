@@ -3,8 +3,8 @@
  * Implements token bucket algorithm with sliding window
  */
 
-import { debugRetry } from '../debug.ts';
-import { RateLimited } from '../failures.ts';
+import { debugRetry } from '../debug.js';
+import { RateLimited } from '../failures.js';
 
 export type RateLimiterConfig = {
   maxRequests: number; // Maximum requests allowed

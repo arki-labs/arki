@@ -4,7 +4,7 @@
  */
 
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import { ValidationError } from '../errors';
+import { ValidationError } from '../errors.js';
 
 export type SecureConfigOptions = {
   encryptionKey?: string;

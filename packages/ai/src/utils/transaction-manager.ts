@@ -3,7 +3,7 @@
  * Provides rollback support for failed operations
  */
 
-import { VectorSearchError, getErrorMessage } from '../errors';
+import { VectorSearchError, getErrorMessage } from '../errors.js';
 
 export type TransactionOperation<T = unknown> = {
   name: string;

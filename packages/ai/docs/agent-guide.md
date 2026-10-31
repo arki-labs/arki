@@ -115,6 +115,19 @@ Use `llm(() => config)` from `@arki/ai/dot`. It provides `llm` (an `LLMProviderW
 | `ai.circuit_open` | `CircuitOpen` (returned by `CostCircuitBreaker.execute`) | Wait `data.retryAfterMs`, or raise `costThresholdUsd`. |
 | `ai.keyword_search_unavailable` | `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`) | Pass a `KeywordSearchProvider`, or use `semantic` mode. |
 | `ai.provider_unavailable` | `ProviderUnavailable` (returned by `probeLLMProvider`, boot failure of `llm()`) | `data.problem`: `unreachable` → start Ollama or the server; `model_missing` → `ollama pull <model>`; `missing_key` → set the key. |
+| `ai.unauthorized` | `ProviderUnauthorized` (returned) | The provider refused the key (401 or 403), or no key is set. Set a valid key. |
+| `ai.content_filtered` | `ContentFiltered` (returned) | The provider's filter stopped the answer, or the model refused. Change the prompt. |
+| `ai.invalid_output` | `InvalidOutput` (returned) | The answer had no text, bad JSON, or JSON the schema rejects. Simplify the schema or use a stronger model. |
+| `ai.provider_failed` | `ProviderFailed` (returned) | Server error, timeout or network failure. Retry later or fall back to another provider. |
+| `ai.cancelled` | `Cancelled` (returned) | The caller aborted through its `AbortSignal`. Start a new call if you still need the answer. |
+| `ai.all_providers_failed` | `AllProvidersFailed` (returned by the provider router) | Every provider failed; `data.failures` lists each code. Fix each one, or add a provider. |
+| `ai.no_provider_configured` | `NoProviderConfigured` (returned by the provider router) | No provider is enabled or has a key. Enable one, or run Ollama. |
+| `ai.connection_lost` | `ConnectionLost` (returned) | The connection broke before the answer finished. Retry. |
+| `ai.ungrounded_output` | `UngroundedOutput` (returned by the task functions) | The answer is not backed by its source; `data.reason` says why. Retry or use a stronger model. |
+| `ai.flow_timed_out` | `FlowTimedOut` (returned by a flow) | A node ran past its `timeoutMs`. Raise it, or make the node faster. |
+| `ai.flow_step_limit` | `FlowStepLimitReached` (returned by a flow) | The flow passed `maxSteps`, usually a `next` that loops. End the loop or raise `maxSteps`. |
+| `ai.flow_node_failed` | `FlowNodeFailed` (returned by a flow) | A node still threw after all retries. Read `cause`. |
+| `ai.vector_store_unavailable` | `VectorStoreUnavailable` (returned) | The vector store could not be reached. Check that Qdrant is up. |
 | `CONFIGURATION_ERROR` | `ConfigurationError` | Set the variable or option the message names. |
 | `EMBEDDING_ERROR` | `EmbeddingError` | Check the embedding provider, model and dimensions. |
 | `VECTOR_SEARCH_ERROR` | `VectorSearchError` | Check the vector store and the collection. |

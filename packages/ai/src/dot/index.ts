@@ -14,13 +14,13 @@ import type { Embedder, EmbeddingSpace } from '@arki/embeddings';
 import { infra } from '@arki/dot/unit';
 import { isFailure } from '@arki/failure';
 
-import type { LLMProviderConfig } from '../ai-service/factory';
-import type { ProbeOptions } from '../ai-service/probe';
-import type { LLMProviderWithUsage } from '../ai-service/types';
-import type { VectorSearchProvider } from '../types';
-import { createLLMProvider } from '../ai-service/factory';
-import { probeLLMProvider } from '../ai-service/probe';
-import { createVectorIndex } from '../vector-search/vector-index';
+import type { LLMProviderConfig } from '../ai-service/factory.js';
+import type { ProbeOptions } from '../ai-service/probe.js';
+import type { LLMProviderWithUsage } from '../ai-service/types.js';
+import type { VectorSearchProvider } from '../types.js';
+import { createLLMProvider } from '../ai-service/factory.js';
+import { probeLLMProvider } from '../ai-service/probe.js';
+import { createVectorIndex } from '../vector-search/vector-index.js';
 
 export type VectorIndexPluginOptions<P extends Record<string, unknown>> = {
   /** Collection holding every point of this app. */

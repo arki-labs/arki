@@ -4,10 +4,10 @@ import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
 
-import { OllamaService } from '../ai-service/ollama-service';
-import { debugService } from '../debug';
-import { UngroundedOutput } from '../failures';
-import { hopSelectionSchema } from './schemas';
+import { OllamaService } from '../ai-service/ollama-service.js';
+import { debugService } from '../debug.js';
+import { UngroundedOutput } from '../failures.js';
+import { hopSelectionSchema } from './schemas.js';
 
 /** The moments chosen for a guided route; its runtime schema is `hopSelectionSchema` (`@arki/ai/zod`). */
 export type HopSelection = {

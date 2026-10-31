@@ -20,8 +20,8 @@
  * ```
  */
 
-import type { LLMProviderName } from '../ai-service/provider-names';
-import type { ModelPricing } from './types';
+import type { LLMProviderName } from '../ai-service/provider-names.js';
+import type { ModelPricing } from './types.js';
 
 // ============================================
 // LLM Model Pricing

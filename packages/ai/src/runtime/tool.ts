@@ -2,8 +2,8 @@ import type { StandardSchemaV1 } from '@arki/schema';
 
 import { isFailure } from '@arki/failure';
 
-import type { AgentTool, ToolFailure } from './types';
-import { ToolOutputError } from '../errors';
+import type { AgentTool, ToolFailure } from './types.js';
+import { ToolOutputError } from '../errors.js';
 
 /**
  * Defines an `AgentTool` with its types inferred: `execute`'s `input` from `inputSchema`, and

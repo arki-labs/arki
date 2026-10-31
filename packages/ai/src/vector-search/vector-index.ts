@@ -14,10 +14,10 @@ import { InvalidEnvironment } from '@arki/env/core';
 import { InvalidInput, orThrow } from '@arki/failure';
 import { formatIssues, parse } from '@arki/schema';
 
-import type { VectorSearchProvider } from '../types';
-import { debugVector } from '../debug.ts';
-import { MockVectorProvider } from './providers/mock';
-import { QdrantVectorProvider } from './providers/qdrant';
+import type { VectorSearchProvider } from '../types.js';
+import { debugVector } from '../debug.js';
+import { MockVectorProvider } from './providers/mock.js';
+import { QdrantVectorProvider } from './providers/qdrant.js';
 
 export type VectorIndexOptions<P extends Record<string, unknown>> = {
   /** Collection (Qdrant) holding every point of this app. */

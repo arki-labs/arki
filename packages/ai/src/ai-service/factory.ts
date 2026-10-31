@@ -18,7 +18,7 @@
  */
 
 import type { LanguageModel, LanguageModelUsage } from 'ai';
-import { anthropic } from '../anthropic';
+import { anthropic } from '../anthropic.js';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
@@ -29,13 +29,13 @@ import { createOllama } from 'ai-sdk-ollama';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
-import type { ProviderFailure } from '../failures';
-import type { LLMProviderName } from './provider-names';
-import type { GenerateOptions, Generation, LLMProviderWithUsage, Message, StreamOptions } from './types';
-import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env';
-import { modelSchema } from './model-schema';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure';
-import { aiTelemetry } from './telemetry';
+import type { ProviderFailure } from '../failures.js';
+import type { LLMProviderName } from './provider-names.js';
+import type { GenerateOptions, Generation, LLMProviderWithUsage, Message, StreamOptions } from './types.js';
+import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env.js';
+import { modelSchema } from './model-schema.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
 
 // ── Per-provider model defaults ───────────────────────────────
 

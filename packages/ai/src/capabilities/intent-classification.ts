@@ -9,10 +9,10 @@
 
 import { z } from '@arki/contracts';
 
-import { createLLMProvider  } from '../ai-service/factory';
-import type {LLMProviderConfig} from '../ai-service/factory';
-import type { ProviderFailure } from '../failures';
-import type { StructuredLLMProvider } from '../ai-service/types';
+import { createLLMProvider  } from '../ai-service/factory.js';
+import type {LLMProviderConfig} from '../ai-service/factory.js';
+import type { ProviderFailure } from '../failures.js';
+import type { StructuredLLMProvider } from '../ai-service/types.js';
 
 // ── Schema ────────────────────────────────────────────────────
 

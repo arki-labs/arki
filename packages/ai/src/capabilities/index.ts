@@ -11,14 +11,14 @@ export {
   classifyIntent,
   type ClassifiedIntent,
   type IntentType,
-} from './intent-classification';
+} from './intent-classification.js';
 
 export {
   nameCluster,
   type ClusterName,
   type ClusterNamingContext,
   type ClusterType,
-} from './cluster-naming';
+} from './cluster-naming.js';
 
 export {
   analyzeContent,
@@ -28,13 +28,13 @@ export {
   type ContentType,
   type EntityType,
   type ImportanceLevel,
-} from './content-analysis';
+} from './content-analysis.js';
 
 export {
   classifyConnection,
   type ConnectionClassification,
   type ConnectionType,
-} from './connection-classification';
+} from './connection-classification.js';
 
-export { analyzeEpisode } from './episode-analysis';
-export { analysisDocumentSchema, transcriptDocumentSchema } from './schemas';
+export { analyzeEpisode } from './episode-analysis.js';
+export { analysisDocumentSchema, transcriptDocumentSchema } from './schemas.js';

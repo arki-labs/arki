@@ -9,9 +9,9 @@
 
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-import type { CIRCUIT_OPEN_REASONS } from '../failures';
-import type { CircuitBreakerState, CircuitState, CostCircuitConfig } from './types';
-import { Cancelled, CircuitOpen } from '../failures';
+import type { CIRCUIT_OPEN_REASONS } from '../failures.js';
+import type { CircuitBreakerState, CircuitState, CostCircuitConfig } from './types.js';
+import { Cancelled, CircuitOpen } from '../failures.js';
 
 // ============================================
 // Default Configuration

@@ -11,14 +11,14 @@ import { generateText, streamText } from 'ai';
 
 import { isFailure } from '@arki/failure';
 
-import type { ProviderFailure } from '../failures.ts';
-import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.ts';
-import { debugService } from '../debug.ts';
-import { env } from '../env.ts';
-import { ProviderUnauthorized, RateLimited } from '../failures.ts';
-import { rateLimiters } from '../utils/rate-limiter.ts';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure.ts';
-import { aiTelemetry } from './telemetry.ts';
+import type { ProviderFailure } from '../failures.js';
+import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.js';
+import { debugService } from '../debug.js';
+import { env } from '../env.js';
+import { ProviderUnauthorized, RateLimited } from '../failures.js';
+import { rateLimiters } from '../utils/rate-limiter.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
 
 export type GoogleServiceConfig = {
   model?: string;

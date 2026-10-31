@@ -5,7 +5,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import type { ChatMessage } from '../hooks/useAIChat';
+import type { ChatMessage } from '../hooks/useAIChat.js';
 
 export type AIChatProps = {
   messages: ChatMessage[];

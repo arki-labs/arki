@@ -14,11 +14,11 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import type { RuntimeEvent } from '../../runtime/types';
-import { Cancelled, ConnectionLost } from '../../failures';
-import { thrownRunFailure } from '../../runtime/types';
-import { initialRuntimeUiState, runtimeEventReducer  } from '../../runtime/ui-state';
-import type {RuntimeUiState} from '../../runtime/ui-state';
+import type { RuntimeEvent } from '../../runtime/types.js';
+import { Cancelled, ConnectionLost } from '../../failures.js';
+import { thrownRunFailure } from '../../runtime/types.js';
+import { initialRuntimeUiState, runtimeEventReducer  } from '../../runtime/ui-state.js';
+import type {RuntimeUiState} from '../../runtime/ui-state.js';
 
 export type UseRuntimeStreamResult = {
   state: RuntimeUiState;

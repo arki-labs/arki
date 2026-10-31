@@ -6,13 +6,13 @@
 import type { EmbedFailure, Embedder } from '@arki/embeddings';
 import { embed, embedMany, isEmbedFailure, isSameSpace, SpaceMismatch } from '@arki/embeddings';
 
-import type { VectorSearchProvider } from '../types';
-import type { SearchOptions } from '../validation';
-import type { SearchCache } from './cache';
-import { debugSemantic } from '../debug.ts';
-import { KeywordSearchUnavailable } from '../failures';
-import { SearchAnalyticsCollector } from './analytics';
-import { InMemorySearchCache } from './cache';
+import type { VectorSearchProvider } from '../types.js';
+import type { SearchOptions } from '../validation.js';
+import type { SearchCache } from './cache.js';
+import { debugSemantic } from '../debug.js';
+import { KeywordSearchUnavailable } from '../failures.js';
+import { SearchAnalyticsCollector } from './analytics.js';
+import { InMemorySearchCache } from './cache.js';
 
 export type SemanticSearchConfig<TMetadata = Record<string, unknown>> = {
   vectorProvider: VectorSearchProvider;
@@ -24,7 +24,7 @@ export type SemanticSearchConfig<TMetadata = Record<string, unknown>> = {
   cacheTTL?: number;
 };
 
-export type { SearchOptions } from '../validation';
+export type { SearchOptions } from '../validation.js';
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;

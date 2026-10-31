@@ -1,13 +1,13 @@
 import type { LanguageModel, ToolSet } from 'ai';
 import { isStepCount, streamText, tool } from 'ai';
 
-import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeFailure, ToolFailure, ToolLoopInput } from './types';
-import { modelSchema } from '../ai-service/model-schema';
-import { finishFailure, providerFailure } from '../ai-service/provider-failure';
-import { aiTelemetry } from '../ai-service/telemetry';
-import { debugRuntime } from '../debug';
-import { Cancelled } from '../failures';
-import { runAgentTool } from './tool';
+import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeFailure, ToolFailure, ToolLoopInput } from './types.js';
+import { modelSchema } from '../ai-service/model-schema.js';
+import { finishFailure, providerFailure } from '../ai-service/provider-failure.js';
+import { aiTelemetry } from '../ai-service/telemetry.js';
+import { debugRuntime } from '../debug.js';
+import { Cancelled } from '../failures.js';
+import { runAgentTool } from './tool.js';
 
 /**
  * AI-SDK-backed runtime — the P0 default. Zero new dependencies: `@arki/ai` already wraps the

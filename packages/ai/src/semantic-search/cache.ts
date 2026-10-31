@@ -6,7 +6,7 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { isSchemaFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import { debugCache } from '../debug.ts';
+import { debugCache } from '../debug.js';
 
 /** A cache of one value type. `SemanticSearchService` stores its result lists in one. */
 export type SearchCache<TValue> = {

@@ -44,9 +44,9 @@ import type { EmbeddingSpace, EmbedFailure } from '@arki/embeddings';
 import { spaceId } from '@arki/embeddings';
 import { isFailure } from '@arki/failure';
 
-import { debugVector } from '../debug.ts';
-import { VectorStoreUnavailable } from '../failures.ts';
-import { failSpan, observeAi } from '../observe.ts';
+import { debugVector } from '../debug.js';
+import { VectorStoreUnavailable } from '../failures.js';
+import { failSpan, observeAi } from '../observe.js';
 
 // ── Batch caps (sized to fit under a 5-minute cron tick) ────
 

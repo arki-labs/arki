@@ -5,7 +5,7 @@
  * The other entries expose plain TS types only. Each type is the source; `zod.test.ts` locks every schema
  * here to its type with an exact two-way type test, so the two cannot drift.
  */
-export { CommonSchemas } from './ai-service/structured-generation-schemas';
+export { CommonSchemas } from './ai-service/structured-generation-schemas.js';
 export {
   analysisDocumentSchema,
   askQuestionSchema,
@@ -13,7 +13,7 @@ export {
   passageSchema,
   queueOrderSchema,
   transcriptDocumentSchema,
-} from './capabilities/schemas';
+} from './capabilities/schemas.js';
 export {
   aiServiceConfigSchema,
   chatMessageSchema,
@@ -25,4 +25,4 @@ export {
   searchOptionsSchema,
   searchSettingsSchema,
   vectorProviderConfigSchema,
-} from './validation-schemas';
+} from './validation-schemas.js';

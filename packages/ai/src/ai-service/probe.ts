@@ -5,12 +5,12 @@
 import { z } from '@arki/contracts';
 import { attempt, isFailure } from '@arki/failure';
 
-import type { LLMProviderConfig } from './factory';
-import type { LLMProviderName } from './provider-names';
-import { debugService } from '../debug';
-import { env } from '../env';
-import { ProviderUnavailable } from '../failures';
-import { resolveLlmModel, resolveLlmProvider, resolveOllamaBaseUrl } from './factory';
+import type { LLMProviderConfig } from './factory.js';
+import type { LLMProviderName } from './provider-names.js';
+import { debugService } from '../debug.js';
+import { env } from '../env.js';
+import { ProviderUnavailable } from '../failures.js';
+import { resolveLlmModel, resolveLlmProvider, resolveOllamaBaseUrl } from './factory.js';
 
 /** How long the probe waits for a server that does not answer, in milliseconds. */
 export const DEFAULT_PROBE_TIMEOUT_MS = 2000;

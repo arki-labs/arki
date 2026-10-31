@@ -1,4 +1,4 @@
-import type { RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure } from './types';
+import type { RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure } from './types.js';
 
 /**
  * UI-adapter layer (P2): a framework-agnostic reduction of the normalized `RuntimeEvent`

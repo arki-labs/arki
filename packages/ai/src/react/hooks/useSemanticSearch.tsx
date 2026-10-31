@@ -10,10 +10,10 @@ import { z } from 'zod';
 import { isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import type { RuntimeFailure } from '../../runtime/types';
-import type { SearchMode } from '../../types';
-import { jsonTextSchema, readFailureResponse } from '../../runtime/sse';
-import { connectionFailure } from '../../runtime/types';
+import type { RuntimeFailure } from '../../runtime/types.js';
+import type { SearchMode } from '../../types.js';
+import { jsonTextSchema, readFailureResponse } from '../../runtime/sse.js';
+import { connectionFailure } from '../../runtime/types.js';
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;

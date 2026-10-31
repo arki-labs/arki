@@ -3,7 +3,7 @@
  * Handles automatic retries for failed operations
  */
 
-import { getErrorMessage } from '../errors';
+import { getErrorMessage } from '../errors.js';
 
 export type RetryConfig = {
   maxAttempts?: number;

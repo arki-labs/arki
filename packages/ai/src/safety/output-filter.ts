@@ -8,9 +8,9 @@
  * @module safety/output-filter
  */
 
-import type { ContentFilterResult, ContentRating, FlaggedSegment, OutputFilterConfig, SuggestedEdit } from './types';
-import { scanRegex } from './scan-regex';
-import { DEFAULT_OUTPUT_FILTER_CONFIG } from './types';
+import type { ContentFilterResult, ContentRating, FlaggedSegment, OutputFilterConfig, SuggestedEdit } from './types.js';
+import { scanRegex } from './scan-regex.js';
+import { DEFAULT_OUTPUT_FILTER_CONFIG } from './types.js';
 
 /** A category pattern with its scan copy (`g` set, `y` cleared), built once. */
 type ScanPattern = { readonly scan: RegExp; readonly weight: number };

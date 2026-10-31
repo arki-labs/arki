@@ -13,148 +13,148 @@
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
-      "import": "./src/react/index.ts",
-      "browser": "./src/react/index.ts"
+      "import": "./dist/src/react/index.js",
+      "default": "./dist/src/react/index.js"
     },
     "./react/index": {
       "types": "./dist/src/react/index.d.ts",
-      "import": "./src/react/index.ts",
-      "browser": "./src/react/index.ts"
+      "import": "./dist/src/react/index.js",
+      "default": "./dist/src/react/index.js"
     },
     "./react/md": {
       "types": "./dist/src/react/md.d.ts",
-      "import": "./src/react/md.tsx",
-      "browser": "./src/react/md.tsx"
+      "import": "./dist/src/react/md.js",
+      "default": "./dist/src/react/md.js"
     },
     "./cost": {
       "types": "./dist/src/cost/index.d.ts",
-      "import": "./src/cost/index.ts",
-      "node": "./src/cost/index.ts"
+      "import": "./dist/src/cost/index.js",
+      "default": "./dist/src/cost/index.js"
     },
     "./safety": {
       "types": "./dist/src/safety/index.d.ts",
-      "import": "./src/safety/index.ts",
-      "node": "./src/safety/index.ts"
+      "import": "./dist/src/safety/index.js",
+      "default": "./dist/src/safety/index.js"
     },
     "./dot": {
       "types": "./dist/src/dot/index.d.ts",
-      "import": "./src/dot/index.ts",
-      "node": "./src/dot/index.ts"
+      "import": "./dist/src/dot/index.js",
+      "default": "./dist/src/dot/index.js"
     },
     "./testing": {
       "types": "./dist/src/testing/index.d.ts",
-      "import": "./src/testing/index.ts",
-      "node": "./src/testing/index.ts"
+      "import": "./dist/src/testing/index.js",
+      "default": "./dist/src/testing/index.js"
     },
     "./drizzle": {
       "types": "./dist/src/drizzle/index.d.ts",
-      "import": "./src/drizzle/index.ts",
-      "node": "./src/drizzle/index.ts"
+      "import": "./dist/src/drizzle/index.js",
+      "default": "./dist/src/drizzle/index.js"
     },
     "./drizzle/sqlite": {
       "types": "./dist/src/drizzle/sqlite.d.ts",
-      "import": "./src/drizzle/sqlite.ts",
-      "node": "./src/drizzle/sqlite.ts"
+      "import": "./dist/src/drizzle/sqlite.js",
+      "default": "./dist/src/drizzle/sqlite.js"
     },
     "./env": {
       "types": "./dist/src/env.d.ts",
-      "import": "./src/env.ts",
-      "node": "./src/env.ts"
+      "import": "./dist/src/env.js",
+      "default": "./dist/src/env.js"
     },
     "./sdk": {
       "types": "./dist/src/sdk.d.ts",
-      "import": "./src/sdk.ts",
-      "node": "./src/sdk.ts"
+      "import": "./dist/src/sdk.js",
+      "default": "./dist/src/sdk.js"
     },
     "./anthropic": {
       "types": "./dist/src/anthropic.d.ts",
-      "import": "./src/anthropic.ts",
-      "node": "./src/anthropic.ts"
+      "import": "./dist/src/anthropic.js",
+      "default": "./dist/src/anthropic.js"
     },
     "./google": {
       "types": "./dist/src/google.d.ts",
-      "import": "./src/google.ts",
-      "node": "./src/google.ts"
+      "import": "./dist/src/google.js",
+      "default": "./dist/src/google.js"
     },
     "./groq": {
       "types": "./dist/src/groq.d.ts",
-      "import": "./src/groq.ts",
-      "node": "./src/groq.ts"
+      "import": "./dist/src/groq.js",
+      "default": "./dist/src/groq.js"
     },
     "./mistral": {
       "types": "./dist/src/mistral.d.ts",
-      "import": "./src/mistral.ts",
-      "node": "./src/mistral.ts"
+      "import": "./dist/src/mistral.js",
+      "default": "./dist/src/mistral.js"
     },
     "./openai": {
       "types": "./dist/src/openai.d.ts",
-      "import": "./src/openai.ts",
-      "node": "./src/openai.ts"
+      "import": "./dist/src/openai.js",
+      "default": "./dist/src/openai.js"
     },
     "./mastra": {
       "types": "./dist/src/mastra.d.ts",
-      "import": "./src/mastra.ts",
-      "node": "./src/mastra.ts"
+      "import": "./dist/src/mastra.js",
+      "default": "./dist/src/mastra.js"
     },
     "./transcription": {
       "types": "./dist/src/transcription.d.ts",
-      "import": "./src/transcription.ts",
-      "node": "./src/transcription.ts"
+      "import": "./dist/src/transcription.js",
+      "default": "./dist/src/transcription.js"
     },
     "./validation": {
       "types": "./dist/src/validation.d.ts",
-      "import": "./src/validation.ts",
-      "node": "./src/validation.ts"
+      "import": "./dist/src/validation.js",
+      "default": "./dist/src/validation.js"
     },
     "./zod": {
       "types": "./dist/src/zod.d.ts",
-      "import": "./src/zod.ts",
-      "node": "./src/zod.ts"
+      "import": "./dist/src/zod.js",
+      "default": "./dist/src/zod.js"
     },
     "./runtime/index": {
       "types": "./dist/src/runtime/index.d.ts",
-      "import": "./src/runtime/index.ts",
-      "node": "./src/runtime/index.ts"
+      "import": "./dist/src/runtime/index.js",
+      "default": "./dist/src/runtime/index.js"
     },
     "./ai-service/types": {
       "types": "./dist/src/ai-service/types.d.ts",
-      "import": "./src/ai-service/types.ts",
-      "node": "./src/ai-service/types.ts"
+      "import": "./dist/src/ai-service/types.js",
+      "default": "./dist/src/ai-service/types.js"
     },
     "./ai-service/structured-generation": {
       "types": "./dist/src/ai-service/structured-generation.d.ts",
-      "import": "./src/ai-service/structured-generation.ts",
-      "node": "./src/ai-service/structured-generation.ts"
+      "import": "./dist/src/ai-service/structured-generation.js",
+      "default": "./dist/src/ai-service/structured-generation.js"
     },
     "./capabilities/ask": {
       "types": "./dist/src/capabilities/ask.d.ts",
-      "import": "./src/capabilities/ask.ts",
-      "node": "./src/capabilities/ask.ts"
+      "import": "./dist/src/capabilities/ask.js",
+      "default": "./dist/src/capabilities/ask.js"
     },
     "./capabilities/episode-analysis": {
       "types": "./dist/src/capabilities/episode-analysis.d.ts",
-      "import": "./src/capabilities/episode-analysis.ts",
-      "node": "./src/capabilities/episode-analysis.ts"
+      "import": "./dist/src/capabilities/episode-analysis.js",
+      "default": "./dist/src/capabilities/episode-analysis.js"
     },
     "./capabilities/pips": {
       "types": "./dist/src/capabilities/pips.d.ts",
-      "import": "./src/capabilities/pips.ts",
-      "node": "./src/capabilities/pips.ts"
+      "import": "./dist/src/capabilities/pips.js",
+      "default": "./dist/src/capabilities/pips.js"
     },
     "./capabilities/queue": {
       "types": "./dist/src/capabilities/queue.d.ts",
-      "import": "./src/capabilities/queue.ts",
-      "node": "./src/capabilities/queue.ts"
+      "import": "./dist/src/capabilities/queue.js",
+      "default": "./dist/src/capabilities/queue.js"
     },
     "./capabilities/podhop": {
       "types": "./dist/src/capabilities/podhop.d.ts",
-      "import": "./src/capabilities/podhop.ts",
-      "node": "./src/capabilities/podhop.ts"
+      "import": "./dist/src/capabilities/podhop.js",
+      "default": "./dist/src/capabilities/podhop.js"
     },
     "./package.json": "./package.json"
   },
@@ -166,9 +166,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "test": "vitest run",

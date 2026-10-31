@@ -11,12 +11,12 @@
 import type { PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { asc, inArray } from 'drizzle-orm';
 
-import type { TombstoneStore } from '../vector-search/reconcile';
-import type { createTombstoneTable } from './tables';
-import { chunksOf, TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks';
+import type { TombstoneStore } from '../vector-search/reconcile.js';
+import type { createTombstoneTable } from './tables.js';
+import { chunksOf, TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks.js';
 
-export { createTombstoneTable, type TombstoneTableOptions } from './tables';
-export { TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks';
+export { createTombstoneTable, type TombstoneTableOptions } from './tables.js';
+export { TOMBSTONE_DELETE_CHUNK, TOMBSTONE_INSERT_CHUNK } from './chunks.js';
 
 /** The base table shape (unbranded); a branded table (`userId: defineId('usr_')`) extends it. */
 export type TombstoneTable = ReturnType<typeof createTombstoneTable<'pg', string, string>>['table'];

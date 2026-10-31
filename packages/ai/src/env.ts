@@ -6,7 +6,7 @@
 import { z } from '@arki/contracts';
 import { defineEnv } from '@arki/env/core';
 
-import { LLM_PROVIDERS } from './ai-service/provider-names';
+import { LLM_PROVIDERS } from './ai-service/provider-names.js';
 
 /**
  * Defaults that must also hold when validation is skipped (`SKIP_ENV_VALIDATION=1`).

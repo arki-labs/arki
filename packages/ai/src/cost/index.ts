@@ -60,9 +60,9 @@ export type {
   SpendRecord,
   // Standard periods
   StandardBudgetPeriod,
-} from './types';
+} from './types.js';
 
-export { BUDGET_PERIODS, CIRCUIT_STATES } from './types';
+export { BUDGET_PERIODS, CIRCUIT_STATES } from './types.js';
 
 // ============================================
 // Pricing
@@ -84,8 +84,8 @@ export {
   estimateTokensFromWords,
   getSupportedModels,
   getModelsByProvider,
-} from './pricing';
-export type { Price, PriceBasis, PricedCall } from './pricing';
+} from './pricing.js';
+export type { Price, PriceBasis, PricedCall } from './pricing.js';
 
 // ============================================
 // Cost Estimator
@@ -95,20 +95,20 @@ export {
   CostEstimator,
   costEstimator,
   createCostEstimator,
-} from './estimator';
+} from './estimator.js';
 
 // ============================================
 // Budget Manager
 // ============================================
 
-export { BudgetExceeded, CIRCUIT_OPEN_REASONS, CircuitOpen } from '../failures';
+export { BudgetExceeded, CIRCUIT_OPEN_REASONS, CircuitOpen } from '../failures.js';
 
 export {
   BudgetManager,
   createBudgetManager,
   DEFAULT_BUDGET_LIMITS,
   BUDGET_PERIOD_DURATIONS,
-} from './budget-manager';
+} from './budget-manager.js';
 
 // ============================================
 // Circuit Breaker
@@ -120,4 +120,4 @@ export {
   createCostCircuitBreaker,
   createUserCircuitBreakerManager,
   DEFAULT_CIRCUIT_CONFIG,
-} from './circuit-breaker';
+} from './circuit-breaker.js';

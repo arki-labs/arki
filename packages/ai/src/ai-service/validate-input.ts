@@ -2,7 +2,7 @@ import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, orThrow } from '@arki/failure';
 import { formatIssues, parse, pathOf } from '@arki/schema';
 
-import { ValidationError } from '../errors';
+import { ValidationError } from '../errors.js';
 
 /**
  * Check a provider service's own config, throwing `ValidationError` with field paths when it is wrong.

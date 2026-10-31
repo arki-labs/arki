@@ -7,15 +7,15 @@
  * @module safety/input-sanitizer
  */
 
-import { PIIRedactor } from './pii-redactor';
-import { PromptInjectionDetector } from './prompt-injection';
+import { PIIRedactor } from './pii-redactor.js';
+import { PromptInjectionDetector } from './prompt-injection.js';
 import type {
   BaseIssueType,
   SanitizationIssue,
   SanitizationReport,
   SanitizationResult,
   SanitizerConfig,
-} from './types';
+} from './types.js';
 
 // ============================================
 // Constants

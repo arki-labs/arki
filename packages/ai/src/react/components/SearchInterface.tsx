@@ -5,7 +5,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import type { SearchResult } from '../hooks/useSemanticSearch';
+import type { SearchResult } from '../hooks/useSemanticSearch.js';
 
 export type SearchInterfaceProps<TMetadata = Record<string, unknown>> = {
   query: string;

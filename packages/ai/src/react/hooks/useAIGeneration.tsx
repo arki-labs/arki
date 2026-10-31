@@ -11,10 +11,10 @@ import { isFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { parse } from '@arki/schema';
 
-import type { RuntimeFailure } from '../../runtime/types';
-import { inputJsonSchema } from '../../input-json-schema';
-import { jsonTextSchema, readFailureResponse } from '../../runtime/sse';
-import { connectionFailure } from '../../runtime/types';
+import type { RuntimeFailure } from '../../runtime/types.js';
+import { inputJsonSchema } from '../../input-json-schema.js';
+import { jsonTextSchema, readFailureResponse } from '../../runtime/sse.js';
+import { connectionFailure } from '../../runtime/types.js';
 
 /** The kinds of generation a request asks for; one list feeds the types and the response schema. */
 const GENERATION_TYPES = ['text', 'structured', 'stream'] as const;

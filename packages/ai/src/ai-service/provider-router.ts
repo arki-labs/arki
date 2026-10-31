@@ -6,14 +6,14 @@
  */
 
 import type { LanguageModel } from 'ai';
-import { anthropic, createAnthropic } from '../anthropic';
+import { anthropic, createAnthropic } from '../anthropic.js';
 import { createGoogleGenerativeAI, google } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createMistral, mistral } from '@ai-sdk/mistral';
 import { createOpenAI, openai } from '@ai-sdk/openai';
 import { generateText, streamText } from 'ai';
 
-import type { ProviderFailure } from '../failures.ts';
+import type { ProviderFailure } from '../failures.js';
 import type {
   GenerateOptions,
   LLMProvider,
@@ -22,9 +22,9 @@ import type {
   ProviderHealth,
   ProviderResult,
   StreamOptions,
-} from './types.ts';
-import { debugService } from '../debug.ts';
-import { env } from '../env.ts';
+} from './types.js';
+import { debugService } from '../debug.js';
+import { env } from '../env.js';
 import {
   AllProvidersFailed,
   isProviderFailure,
@@ -32,14 +32,14 @@ import {
   ProviderFailed,
   ProviderUnauthorized,
   RateLimited,
-} from '../failures.ts';
-import { DEFAULT_ANTHROPIC_MODEL } from './factory.ts';
-import { createGoogleService } from './google-service.ts';
-import { createGroqService } from './groq-service.ts';
-import { createMistralService } from './mistral-service.ts';
-import { createOpenRouterService } from './openrouter-service.ts';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure.ts';
-import { aiTelemetry } from './telemetry.ts';
+} from '../failures.js';
+import { DEFAULT_ANTHROPIC_MODEL } from './factory.js';
+import { createGoogleService } from './google-service.js';
+import { createGroqService } from './groq-service.js';
+import { createMistralService } from './mistral-service.js';
+import { createOpenRouterService } from './openrouter-service.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
 
 /** What a router call returns when it does not succeed: one provider's final failure, or every provider's. */
 export type ProviderRouterFailure = ProviderFailure | AllProvidersFailed;

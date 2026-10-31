@@ -17,7 +17,7 @@ export type {
   DocumentChunk,
   CacheEntry,
   AnalyticsEvent,
-} from './types';
+} from './types.js';
 
 // Error handling
 export {
@@ -30,7 +30,7 @@ export {
   ToolOutputError,
   isAIError,
   getErrorMessage,
-} from './errors';
+} from './errors.js';
 
 // Expected failures, returned (not thrown)
 export {
@@ -58,8 +58,8 @@ export {
   RateLimited,
   UngroundedOutput,
   VectorStoreUnavailable,
-} from './failures';
-export type { ProviderFailure } from './failures';
+} from './failures.js';
+export type { ProviderFailure } from './failures.js';
 
 // Input validation
 export {
@@ -73,7 +73,7 @@ export {
   documentSchema,
   documentsSchema,
   chatMessageSchema,
-} from './validation-schemas';
+} from './validation-schemas.js';
 export {
   // Types
   type QdrantConfig,
@@ -83,7 +83,7 @@ export {
   type GenerationOptions,
   type Document,
   type ChatMessage,
-} from './validation';
+} from './validation.js';
 
 // Vector search providers and interfaces
 export {
@@ -108,7 +108,7 @@ export {
   type VectorProviderType,
   type VectorSearchConfig,
   type QdrantSearchFilter,
-} from './vector-search';
+} from './vector-search/index.js';
 
 // Semantic search service and utilities
 export {
@@ -124,7 +124,7 @@ export {
   type RedisSearchClient,
   searchAnalyticsExportSchema,
   type SearchAnalyticsExport,
-} from './semantic-search';
+} from './semantic-search/index.js';
 
 // AI service utilities and providers
 export {
@@ -184,10 +184,10 @@ export {
   probeLLMProvider,
   type ProbeOptions,
   type ReadyProvider,
-} from './ai-service';
+} from './ai-service/index.js';
 
 // Environment configuration
-export { env } from './env';
+export { env } from './env.js';
 
 // Higher-level AI capabilities (provider-agnostic, schema-validated)
 export {
@@ -208,7 +208,7 @@ export {
   classifyConnection,
   type ConnectionClassification,
   type ConnectionType,
-} from './capabilities';
+} from './capabilities/index.js';
 
 // Flow orchestration utilities
 export {
@@ -219,7 +219,7 @@ export {
   type FlowEvent,
   type FlowFailure,
   type FlowNode,
-} from './orchestration';
+} from './orchestration/index.js';
 
 // Agent-runtime adapter layer (swappable tool-loop backends behind one neutral contract).
 // P0 ships the AI-SDK backend; Mastra/LangGraph/TanStack adapters follow the same interface.
@@ -246,7 +246,7 @@ export {
   type RuntimeUsage,
   type ToolFailure,
   type ToolLoopInput,
-} from './runtime';
+} from './runtime/index.js';
 
 // Cost management utilities
 export {
@@ -298,4 +298,4 @@ export {
   estimateTokensFromWords,
   getSupportedModels,
   getModelsByProvider,
-} from './cost';
+} from './cost/index.js';

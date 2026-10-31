@@ -2,11 +2,11 @@ import type { z } from '@arki/contracts';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { formatIssues, parse } from '@arki/schema';
 
-import type { LLMProviderConfig } from '../ai-service/factory';
-import type { StructuredLLMProvider } from '../ai-service/types';
-import { createLLMProvider } from '../ai-service/factory';
-import { InvalidOutput, UngroundedOutput } from '../failures';
-import { analysisDocumentSchema, transcriptDocumentSchema } from './schemas';
+import type { LLMProviderConfig } from '../ai-service/factory.js';
+import type { StructuredLLMProvider } from '../ai-service/types.js';
+import { createLLMProvider } from '../ai-service/factory.js';
+import { InvalidOutput, UngroundedOutput } from '../failures.js';
+import { analysisDocumentSchema, transcriptDocumentSchema } from './schemas.js';
 
 /** A diarized transcript of one episode. Its runtime schema is `transcriptDocumentSchema` (`@arki/ai/zod`). */
 export type TranscriptDocument = {

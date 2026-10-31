@@ -3,14 +3,14 @@ import type { MastraFinishReason } from '@mastra/core/stream';
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
 
-import type { ProviderCall } from './ai-service/provider-failure';
-import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types';
-import { finishFailure, providerFailure } from './ai-service/provider-failure';
-import { debugRuntime } from './debug';
-import { Cancelled, ContentFiltered } from './failures';
-import { requireJsonSchema } from './input-json-schema';
-import { observeAiStream } from './observe';
-import { runAgentTool } from './runtime/tool';
+import type { ProviderCall } from './ai-service/provider-failure.js';
+import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types.js';
+import { finishFailure, providerFailure } from './ai-service/provider-failure.js';
+import { debugRuntime } from './debug.js';
+import { Cancelled, ContentFiltered } from './failures.js';
+import { requireJsonSchema } from './input-json-schema.js';
+import { observeAiStream } from './observe.js';
+import { runAgentTool } from './runtime/tool.js';
 
 /**
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK

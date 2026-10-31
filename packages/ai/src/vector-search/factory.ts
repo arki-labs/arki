@@ -4,11 +4,11 @@
 
 import type { EmbeddingSpace } from '@arki/embeddings';
 
-import type { VectorSearchProvider } from '../types';
-import type { QdrantConfig } from '../validation';
-import { debugVector } from '../debug.ts';
-import { MockVectorProvider } from './providers/mock';
-import { QdrantVectorProvider } from './providers/qdrant';
+import type { VectorSearchProvider } from '../types.js';
+import type { QdrantConfig } from '../validation.js';
+import { debugVector } from '../debug.js';
+import { MockVectorProvider } from './providers/mock.js';
+import { QdrantVectorProvider } from './providers/qdrant.js';
 
 export type VectorProviderType = 'mock' | 'qdrant';
 

@@ -4,8 +4,8 @@
 
 import type { EmbeddingSpace } from '@arki/embeddings';
 
-import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
-import { VectorSearchError } from '../../errors';
+import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types.js';
+import { VectorSearchError } from '../../errors.js';
 
 export type MockDocument<TMetadata = Record<string, unknown>> = {
   id: string;

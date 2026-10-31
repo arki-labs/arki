@@ -5,9 +5,9 @@
 
 import type { StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
-import type { ProviderFailure } from '../failures';
-import type { StructuredLLMProvider } from './types';
-import { CommonSchemas } from './structured-generation-schemas';
+import type { ProviderFailure } from '../failures.js';
+import type { StructuredLLMProvider } from './types.js';
+import { CommonSchemas } from './structured-generation-schemas.js';
 
 export type StructuredGenerationOptions = {
   temperature?: number;

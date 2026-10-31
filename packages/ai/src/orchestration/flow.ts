@@ -2,8 +2,8 @@ import type { Failure } from '@arki/failure';
 import { sleep } from '@arki/async';
 import { isFailure } from '@arki/failure';
 
-import { debugOrchestration } from '../debug';
-import { Cancelled, FlowNodeFailed, FlowStepLimitReached, FlowTimedOut } from '../failures';
+import { debugOrchestration } from '../debug.js';
+import { Cancelled, FlowNodeFailed, FlowStepLimitReached, FlowTimedOut } from '../failures.js';
 
 /**
  * The expected ways a flow run stops early, returned by `Flow.run`: the caller aborted (`Cancelled`),

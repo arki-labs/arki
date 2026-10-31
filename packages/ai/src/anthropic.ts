@@ -5,7 +5,7 @@
 import type { AnthropicProvider, AnthropicProviderSettings } from '@ai-sdk/anthropic';
 import { createAnthropic as createSdkAnthropic } from '@ai-sdk/anthropic';
 
-import { env } from './env';
+import { env } from './env.js';
 
 export * from '@ai-sdk/anthropic';
 

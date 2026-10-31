@@ -25,8 +25,8 @@ import { z } from '@arki/contracts';
 import { UnexpectedDefect } from '@arki/failure';
 import { is } from '@arki/schema';
 
-import type { ProviderFailure } from '../failures';
-import { debugService } from '../debug';
+import type { ProviderFailure } from '../failures.js';
+import { debugService } from '../debug.js';
 import {
   Cancelled,
   ContentFiltered,
@@ -35,7 +35,7 @@ import {
   ProviderFailed,
   ProviderUnauthorized,
   RateLimited,
-} from '../failures';
+} from '../failures.js';
 
 /** Which call failed: the names a failure carries, and the caller's signal (an abort is `Cancelled`). */
 export type ProviderCall = {

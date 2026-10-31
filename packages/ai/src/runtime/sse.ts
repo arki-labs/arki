@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { InvalidEnvelope, isFailure, revive, serialize } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import type { RuntimeEvent, RuntimeFailure } from './types';
-import { debugRuntime } from '../debug';
-import { ConnectionLost } from '../failures';
-import { connectionFailure, RUNTIME_FAILURES, thrownRunFailure } from './types';
+import type { RuntimeEvent, RuntimeFailure } from './types.js';
+import { debugRuntime } from '../debug.js';
+import { ConnectionLost } from '../failures.js';
+import { connectionFailure, RUNTIME_FAILURES, thrownRunFailure } from './types.js';
 
 /**
  * SSE transport for the agent-runtime adapter (P2 completion). Completes the wire:

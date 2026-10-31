@@ -5,9 +5,9 @@
 import type { Embedder, EmbeddingSpace } from '@arki/embeddings';
 import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
-import type { RAGServiceConfig } from './validation';
+import type { RAGServiceConfig } from './validation.js';
 
-export type { RAGServiceConfig, SearchMode, SearchSettings } from './validation';
+export type { RAGServiceConfig, SearchMode, SearchSettings } from './validation.js';
 
 /**
  * Vector search result

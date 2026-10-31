@@ -96,6 +96,8 @@ Thrown configuration, node, timeout, cancellation, checkpoint and retry-wait err
 
 Components and hooks live in `@arki/ai/react` (optional peers `react` and `@ai-sdk/react`): `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`, `AIChat`, `StreamingText` and `SearchInterface`.
 
+`generationResultSchema` and `searchResultSchema` are the Zod schemas for what `useAIGeneration` and `useSemanticSearch` read from the server. Use them to check those response bodies.
+
 ```tsx skip="needs a React app and a /api/chat route"
 import { AIChat, useAIChat } from '@arki/ai/react';
 
@@ -169,6 +171,7 @@ Import from `@arki/ai/safety`. Run these on input before it reaches a model, and
 - `InMemorySearchCache`: a cache inside the process. It forgets on restart.
 - `RedisSearchCache(client, ttlSeconds)`: a cache over a Redis client you pass in. Entries are JSON with a time to live (default 3600 s).
 - `SearchAnalyticsCollector`: records each query. It answers `getPopularSearches`, `getQueryFrequency`, `getUserHistory` and `getMetrics`, and can `export` and `import` its data.
+- `searchAnalyticsExportSchema`: the Zod schema for what `SearchAnalyticsCollector.export` returns and `import` accepts, also after a JSON round trip.
 - `TOMBSTONE_INSERT_CHUNK` (5000) and `TOMBSTONE_DELETE_CHUNK` (10,000): how many rows the Drizzle outbox writes per statement. They keep one statement under the database limit on bind parameters (65,535 on Postgres, 32,766 on SQLite). They are for `@arki/ai/drizzle`, not for app code.
 
 ## Task functions
@@ -203,6 +206,9 @@ The podcast functions (`pipIntervalCandidates`, `selectPodHopMoments`, `synthesi
 
 - `validateInputAsync(schema, input, message?)`: validates with any Standard Schema. It throws a validation error that lists each field and message.
 - `chatMessageSchema`, `documentSchema`, `documentsSchema`, `generationOptionsSchema`, `qdrantConfigSchema` and `vectorProviderConfigSchema`: Zod schemas for chat messages, documents to index, generation options, and the Qdrant or vector provider config. Use them to check request bodies.
+- `PROVIDER_FAILURES`: every failure a provider call returns. `isProviderFailure(value)` is true for one of them.
+- `RUNTIME_FAILURES`: every failure a `run:error` event can carry. The SSE transport keeps their code and data across the wire.
+- `CIRCUIT_OPEN_REASONS`: why `CircuitOpen` refused a call: `open` (already open) or `cost_threshold` (this call would cross the threshold).
 - `isAIError(error)` is true for an `AIError`. `hasErrorMessage(error)` is true for anything with a string `message`. `getErrorMessage(error)` reads a message from any thrown value without throwing.
 
 ## Markdown rendering (React)

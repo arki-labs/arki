@@ -7,7 +7,7 @@
  * @module cost/budget-manager
  */
 
-import { BudgetExceeded } from '../failures';
+import { BudgetExceeded } from '../failures.js';
 import type {
   BudgetConfig,
   BudgetLimits,
@@ -15,7 +15,7 @@ import type {
   KVStore,
   SpendMetadata,
   SpendRecord,
-} from './types';
+} from './types.js';
 
 // ============================================
 // Constants

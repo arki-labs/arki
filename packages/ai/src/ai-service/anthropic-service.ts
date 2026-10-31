@@ -4,23 +4,23 @@
  */
 
 import type { ModelMessage, SystemModelMessage } from 'ai';
-import { anthropic } from '../anthropic';
+import { anthropic } from '../anthropic.js';
 import { generateText, Output, streamText } from 'ai';
 
 import { isFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import type { ProviderFailure } from '../failures';
-import type { AIServiceConfig } from '../validation';
+import type { ProviderFailure } from '../failures.js';
+import type { AIServiceConfig } from '../validation.js';
 
-import { debugService } from '../debug.ts';
-import { RateLimited } from '../failures';
-import { modelSchema } from './model-schema';
-import { finishFailure, providerFailure, readTextParts } from './provider-failure';
-import { aiTelemetry } from './telemetry';
-import { rateLimiters } from '../utils/rate-limiter';
-import { validateInput } from './validate-input';
-import { aiServiceConfigSchema } from '../validation-schemas';
-import { DEFAULT_ANTHROPIC_MODEL } from './factory';
+import { debugService } from '../debug.js';
+import { RateLimited } from '../failures.js';
+import { modelSchema } from './model-schema.js';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
+import { aiTelemetry } from './telemetry.js';
+import { rateLimiters } from '../utils/rate-limiter.js';
+import { validateInput } from './validate-input.js';
+import { aiServiceConfigSchema } from '../validation-schemas.js';
+import { DEFAULT_ANTHROPIC_MODEL } from './factory.js';
 
 type ChatMessage = ModelMessage;
 

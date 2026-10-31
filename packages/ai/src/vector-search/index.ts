@@ -2,8 +2,8 @@
  * Vector search providers and utilities
  */
 
-export { QdrantVectorProvider, type QdrantSearchFilter } from './providers/qdrant';
-export { MockVectorProvider } from './providers/mock';
+export { QdrantVectorProvider, type QdrantSearchFilter } from './providers/qdrant.js';
+export { MockVectorProvider } from './providers/mock.js';
 export {
   createVectorProvider as createVectorSearchProvider,
   createQdrantProvider,
@@ -11,11 +11,11 @@ export {
   type VectorProviderType,
   type VectorProviderConfig,
   type ProviderConfig as VectorSearchConfig
-} from './factory';
-export type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../types';
+} from './factory.js';
+export type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../types.js';
 
 // The app's one vector index (Qdrant or mock) for one embedding space
-export { createVectorIndex, type VectorIndex, type VectorIndexOptions } from './vector-index';
+export { createVectorIndex, type VectorIndex, type VectorIndexOptions } from './vector-index.js';
 
 // Postgres → index reconciler (tombstone drain + dimension migration + re-upsert)
 export {
@@ -31,4 +31,4 @@ export {
   type ReconcileStore,
   type TombstoneStore,
   type VectorPointPayload,
-} from './reconcile';
+} from './reconcile.js';

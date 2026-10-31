@@ -133,9 +133,9 @@ export type {
   OutputFilterConfig,
   ReplacementSuggestion,
   SuggestedEdit,
-} from './types';
+} from './types.js';
 
-export { detectionPatternSchema, piiPatternSchema, sanitizerConfigSchema } from './schemas';
+export { detectionPatternSchema, piiPatternSchema, sanitizerConfigSchema } from './schemas.js';
 export {
   // Input sanitization constants
   BASE_ISSUE_TYPES,
@@ -144,7 +144,7 @@ export {
   // Output filtering constants
   CONTENT_RATINGS,
   DEFAULT_OUTPUT_FILTER_CONFIG,
-} from './types';
+} from './types.js';
 
 // ============================================
 // Prompt Injection Detection
@@ -154,19 +154,19 @@ export {
   createPromptInjectionDetector,
   DEFAULT_INJECTION_PATTERNS,
   PromptInjectionDetector,
-} from './prompt-injection';
+} from './prompt-injection.js';
 
 // ============================================
 // PII Redaction
 // ============================================
 
-export type { PIIRedactionResult } from './pii-redactor';
+export type { PIIRedactionResult } from './pii-redactor.js';
 
 export {
   createPIIRedactor,
   DEFAULT_PII_PATTERNS,
   PIIRedactor,
-} from './pii-redactor';
+} from './pii-redactor.js';
 
 // ============================================
 // Input Sanitization
@@ -175,7 +175,7 @@ export {
 export {
   BaseInputSanitizer,
   createInputSanitizer,
-} from './input-sanitizer';
+} from './input-sanitizer.js';
 
 // ============================================
 // Output Content Filtering
@@ -184,4 +184,4 @@ export {
 export {
   createOutputContentFilter,
   OutputContentFilter,
-} from './output-filter';
+} from './output-filter.js';

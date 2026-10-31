@@ -7,8 +7,8 @@
  * @module safety/prompt-injection
  */
 
-import type { DetectionPattern, SanitizationIssue } from './types';
-import { scanRegex } from './scan-regex';
+import type { DetectionPattern, SanitizationIssue } from './types.js';
+import { scanRegex } from './scan-regex.js';
 
 // ============================================
 // Default Prompt Injection Patterns

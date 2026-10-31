@@ -4,7 +4,7 @@
  */
 import { z } from '@arki/contracts';
 
-import { sanitizerConfigSchema } from './safety/schemas';
+import { sanitizerConfigSchema } from './safety/schemas.js';
 
 /**
  * QDrant configuration validation

@@ -7,8 +7,8 @@
  * @module safety/pii-redactor
  */
 
-import type { PIIPattern, SanitizationIssue } from './types';
-import { scanRegex } from './scan-regex';
+import type { PIIPattern, SanitizationIssue } from './types.js';
+import { scanRegex } from './scan-regex.js';
 
 // ============================================
 // Default PII Patterns

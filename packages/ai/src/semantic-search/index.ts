@@ -2,6 +2,6 @@
  * Semantic search service and utilities
  */
 
-export * from './search-service';
-export * from './cache';
-export * from './analytics';
+export * from './search-service.js';
+export * from './cache.js';
+export * from './analytics.js';

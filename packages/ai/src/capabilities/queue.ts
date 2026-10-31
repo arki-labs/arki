@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
 
-import { OllamaService } from '../ai-service/ollama-service';
-import { UngroundedOutput } from '../failures';
+import { OllamaService } from '../ai-service/ollama-service.js';
+import { UngroundedOutput } from '../failures.js';
 
 /** Episodes to put in listening order. Parse request bodies with `queueOrderSchema` (`@arki/ai/zod`). */
 export type QueueOrderInput = {

@@ -2,10 +2,10 @@ import type { StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, isFailure, orThrow } from '@arki/failure';
 import { formatIssues, parse } from '@arki/schema';
 
-import { retryAfterMs } from './ai-service/provider-failure';
-import { Cancelled, InvalidOutput, ProviderFailed, ProviderUnauthorized, RateLimited } from './failures';
-import { observeAi } from './observe';
-import { deepgramResponseSchema, diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
+import { retryAfterMs } from './ai-service/provider-failure.js';
+import { Cancelled, InvalidOutput, ProviderFailed, ProviderUnauthorized, RateLimited } from './failures.js';
+import { observeAi } from './observe.js';
+import { deepgramResponseSchema, diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas.js';
 
 /** Deepgram settings for one transcription. `transcriptionModel` defaults to `nova-3`. */
 type TranscriptionOptions = { deepgramKey: string; transcriptionModel?: string };

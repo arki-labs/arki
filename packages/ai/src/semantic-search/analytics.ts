@@ -7,7 +7,7 @@ import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
-import { debugSemantic } from '../debug.ts';
+import { debugSemantic } from '../debug.js';
 
 /** A count: a whole number, never negative. */
 const countSchema = z.number().int().nonnegative();

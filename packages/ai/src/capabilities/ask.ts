@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { isFailure } from '@arki/failure';
 
-import type { HopTranscript } from './podhop';
-import { OllamaService } from '../ai-service/ollama-service';
-import { UngroundedOutput } from '../failures';
+import type { HopTranscript } from './podhop.js';
+import { OllamaService } from '../ai-service/ollama-service.js';
+import { UngroundedOutput } from '../failures.js';
 
 /** A listener's question at a moment of the episode. Parse request bodies with `askQuestionSchema` (`@arki/ai/zod`). */
 export type AskQuestion = {

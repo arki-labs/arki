@@ -1,5 +1,5 @@
-export { createAiSdkRuntime, toAiSdkToolSet, type AiSdkRuntimeOptions } from './ai-sdk-runtime';
-export { defineAgentTool } from './tool';
+export { createAiSdkRuntime, toAiSdkToolSet, type AiSdkRuntimeOptions } from './ai-sdk-runtime.js';
+export { defineAgentTool } from './tool.js';
 export type {
   AgentRuntime,
   AgentTool,
@@ -9,13 +9,13 @@ export type {
   RuntimeUsage,
   ToolFailure,
   ToolLoopInput,
-} from './types';
-export { RUNTIME_FAILURES } from './types';
+} from './types.js';
+export { RUNTIME_FAILURES } from './types.js';
 export {
   initialRuntimeUiState,
   runtimeEventReducer,
   type RuntimeToolCall,
   type RuntimeUiState,
   type RuntimeUiStatus,
-} from './ui-state';
-export { fetchRuntimeEventStream, readRuntimeEventStream, toRuntimeEventStreamResponse } from './sse';
+} from './ui-state.js';
+export { fetchRuntimeEventStream, readRuntimeEventStream, toRuntimeEventStreamResponse } from './sse.js';

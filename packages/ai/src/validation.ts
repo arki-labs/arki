@@ -5,7 +5,7 @@
  * Each type below is the source. Its runtime schema lives in `validation-schemas.ts` (offered to callers
  * by `@arki/ai/zod`), and `zod.test.ts` locks the two together, so this entry's types carry no Zod.
  */
-import type { SanitizerConfig } from './safety/types';
+import type { SanitizerConfig } from './safety/types.js';
 
 /** Qdrant connection settings. */
 export type QdrantConfig = {
