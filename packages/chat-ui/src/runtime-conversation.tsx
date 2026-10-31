@@ -98,9 +98,9 @@ function RuntimeConversation({ state, renderText, hideStatus, className, ...prop
         <MarkdownMessage>{renderText ? renderText(state.text) : state.text}</MarkdownMessage>
       ) : null}
 
-      {state.status === 'error' && state.error ? (
+      {state.status === 'error' && state.failure ? (
         <p data-slot="chat-runtime-error" className="text-sm text-destructive">
-          {state.error}
+          {state.failure.message}
         </p>
       ) : null}
     </div>

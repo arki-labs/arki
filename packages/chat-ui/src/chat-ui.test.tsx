@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { RuntimeUiState } from '@arki/ai';
+import { ConnectionLost } from '@arki/ai';
 
 import { AgentStatus } from './agent-status';
 import { RuntimeConversation, runtimeStatusToAgentStatus } from './runtime-conversation';
@@ -25,12 +26,12 @@ describe('RuntimeConversation', () => {
     const state: RuntimeUiState = {
       status: 'error',
       text: '',
-      error: 'run stopped',
+      failure: ConnectionLost(),
       toolCalls: [{ tool: 'lookup', status: 'error', error: 'timed out' }],
     };
     const html = renderToStaticMarkup(<RuntimeConversation state={state} />);
     expect(html).toContain('timed out');
-    expect(html).toContain('run stopped');
+    expect(html).toContain(ConnectionLost().message);
   });
 
   it('hides the status pill on request', () => {
