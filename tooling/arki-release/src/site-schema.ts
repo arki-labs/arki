@@ -14,6 +14,10 @@
  *   src/generated/examples.json                                -> examplesFileSchema
  *   src/generated/demos.json                                   -> demosFileSchema
  *   src/generated/dot-new.json                                 -> dotNewFileSchema
+ *   src/generated/inside-proofs.json                           -> insideProofsFileSchema
+ *
+ * `site` also reads one input with a schema here: the proof spec
+ * `docs/arki/inside-proofs.json` -> insideProofsSpecSchema.
  */
 
 import { z } from 'zod';
@@ -146,6 +150,52 @@ export const dotNewFileSchema = z.object({
   templates: z.array(z.object({ template: z.string(), result: dotNewResultSchema })),
 });
 
+/** A 1-based, inclusive line range in a file: `"12"` or `"12-18"`. */
+export const lineRangeSchema = z
+  .string()
+  .regex(/^[1-9]\d*(-[1-9]\d*)?$/)
+  .refine(range => {
+    const [from = 0, to = from] = range.split('-').map(Number);
+    return to >= from;
+  }, 'a line range ends before it starts');
+
+/** A range the proof spec quotes. `anchor`: the first 16 hex chars of the sha256 of its lines, joined with `\n`. */
+const insideProofSpecPartSchema = z.strictObject({
+  lines: lineRangeSchema,
+  anchor: z.string().regex(/^[0-9a-f]{16}$/),
+});
+
+/**
+ * `docs/arki/inside-proofs.json`: the arki source lines the "What's inside" page on arki.dev quotes, keyed by a
+ * stable id (`<package>.<topic>`) that the page's rows reference. `path` is relative to the repo root. `imports` are
+ * ranges of the same file the page shows above the code. `site` copies each range and refuses one whose anchor no
+ * longer matches the lines.
+ */
+export const insideProofsSpecSchema = z.record(
+  z.string().regex(/^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$/),
+  insideProofSpecPartSchema.extend({
+    path: z
+      .string()
+      .regex(/^[\w@.-]+(\/[\w@.-]+)*$/)
+      .refine(file => !file.split('/').includes('..'), 'a proof path stays inside the repo'),
+    imports: z.array(insideProofSpecPartSchema).default([]),
+  }),
+);
+
+/** A range as the site shows it: its line numbers and the exact text of those lines. */
+const insideProofPartSchema = z.object({ lines: lineRangeSchema, code: z.string() });
+
+/** One quote on the "What's inside" page, copied by `site` from the arki repo. */
+export const insideProofSchema = insideProofPartSchema.extend({
+  path: z.string(),
+  imports: z.array(insideProofPartSchema),
+});
+
+/** `src/generated/inside-proofs.json`, keyed by the spec's ids, in spec order. */
+export const insideProofsFileSchema = z.record(z.string(), insideProofSchema);
+
 export type SnapshotMeta = z.output<typeof snapshotMetaSchema>;
 export type PackageEntry = z.output<typeof packageEntrySchema>;
 export type DotNewFile = z.output<typeof dotNewFileSchema>;
+export type InsideProof = z.output<typeof insideProofSchema>;
+export type InsideProofsFile = z.output<typeof insideProofsFileSchema>;

@@ -16,6 +16,9 @@ import type { ExecRunner, NpmRunner, RunOutput } from './runners';
 import type { ReleaseConfig } from './types';
 import {
   compareVersions,
+  INSIDE_PROOFS_FILE,
+  INSIDE_PROOFS_SPEC,
+  proofAnchor,
   REPO_DOC_COPIES,
   runSite,
   SITE_APP_CONTENT_DIR,
@@ -28,6 +31,7 @@ import {
   dotNewFileSchema,
   errorsFileSchema,
   examplesFileSchema,
+  insideProofsFileSchema,
   packagesFileSchema,
   snapshotMetaSchema,
 } from './site-schema';
@@ -90,6 +94,12 @@ function writeRepoDocs(root: string): void {
   }
 }
 
+/** Writes `docs/arki/inside-proofs.json`; tests that are not about proofs get an empty spec. */
+function writeProofSpec(root: string, spec: unknown): void {
+  mkdirSync(path.dirname(path.join(root, INSIDE_PROOFS_SPEC)), { recursive: true });
+  writeFileSync(path.join(root, INSIDE_PROOFS_SPEC), JSON.stringify(spec));
+}
+
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'arki-site-'));
   out = mkdtempSync(path.join(tmpdir(), 'arki-site-out-'));
@@ -97,6 +107,7 @@ beforeEach(() => {
   packCalls = [];
   registry = new Map();
   writeRepoDocs(root);
+  writeProofSpec(root, {});
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -360,6 +371,101 @@ describe('site repo docs', () => {
     const envelope = await runSite({ cwd: root, outDir: out, config, channel: 'published', npmRunner: npm });
     expect(envelope.status).toBe('failure');
     expect(envelope.errors.map(e => e.code)).toContain(SITE_ERROR_CODES.repoDocMissing);
+  });
+});
+
+describe('site inside-proofs.json', () => {
+  const SOURCE = 'packages/a/src/thing.ts';
+  const LINES = ["import { z } from 'zod';", '', 'export function thing() {', "  return 'thing';", '}'];
+  const proofsFile = (): string => path.join(out, SITE_GENERATED_DIR, INSIDE_PROOFS_FILE);
+  const writeSource = (lines: readonly string[]): void => {
+    mkdirSync(path.dirname(path.join(root, SOURCE)), { recursive: true });
+    writeFileSync(path.join(root, SOURCE), `${lines.join('\n')}\n`);
+  };
+  const run = () => runSite({ cwd: root, outDir: out, config, channel: 'published', npmRunner: npm });
+
+  beforeEach(() => {
+    writeSource(LINES);
+    writeProofSpec(root, {
+      'a.thing': {
+        path: SOURCE,
+        lines: '3-4',
+        anchor: proofAnchor(LINES.slice(2, 4).join('\n')),
+        imports: [{ lines: '1', anchor: proofAnchor(LINES[0] ?? '') }],
+      },
+    });
+  });
+
+  // The page says each code line is copied from the named file. The copy is made from the source itself, so the
+  // page shows what the repo holds, never a hand-typed version of it.
+  it('copies each quoted range, imports too, from the repo source', async () => {
+    const envelope = await run();
+    expect(envelope.status).toBe('success');
+    expect(envelope.summary.insideProofs).toBe(1);
+    const file = insideProofsFileSchema.parse(JSON.parse(readFileSync(proofsFile(), 'utf8')));
+    expect(file).toEqual({
+      'a.thing': {
+        path: SOURCE,
+        lines: '3-4',
+        code: "export function thing() {\n  return 'thing';",
+        imports: [{ lines: '1', code: "import { z } from 'zod';" }],
+      },
+    });
+  });
+
+  // Lines move when code is added above them. Copying the old range would show the wrong lines under the right file
+  // name; the run must stop and say where the quoted text went, and the page keeps its last good copy.
+  it('refuses a quote whose lines moved, names where the text went, and leaves the file as it was', async () => {
+    await run();
+    const before = readFileSync(proofsFile(), 'utf8');
+    writeSource(['// a new first line', ...LINES]);
+    const envelope = await run();
+    expect(envelope.status).toBe('failure');
+    expect(envelope.summary.insideProofs).toBe(0);
+    const drifts = envelope.errors.filter(e => e.code === SITE_ERROR_CODES.proofDrifted);
+    expect(drifts.map(e => e.remediation)).toEqual([
+      expect.stringContaining('set "a.thing".imports[0].lines from "1" to "2"'),
+      expect.stringContaining('set "a.thing".lines from "3-4" to "4-5"'),
+    ]);
+    expect(readFileSync(proofsFile(), 'utf8')).toBe(before);
+  });
+
+  // An edit inside the quoted lines can make the row's sentence about them untrue. A person has to look, so the run
+  // stops and hands them the anchor of what the lines hold now.
+  it('refuses a quote whose text changed and gives the anchor of the new text', async () => {
+    const changed = LINES.with(3, "  return 'other';");
+    writeSource(changed);
+    const envelope = await run();
+    expect(envelope.status).toBe('failure');
+    const [drift, ...rest] = envelope.errors.filter(e => e.code === SITE_ERROR_CODES.proofDrifted);
+    expect(rest).toEqual([]);
+    expect(drift?.target).toBe(`${SOURCE}:3-4`);
+    expect(drift?.remediation).toContain(`set "a.thing".anchor in ${INSIDE_PROOFS_SPEC} to "${proofAnchor(changed.slice(2, 4).join('\n'))}"`);
+    expect(existsSync(proofsFile())).toBe(false);
+  });
+
+  // A file that was moved or a range cut short by a deletion leaves nothing to quote.
+  it('refuses a quote whose file is gone or whose range runs past the end', async () => {
+    writeSource(LINES.slice(0, 3));
+    const cut = await run();
+    expect(cut.errors.find(e => e.code === SITE_ERROR_CODES.proofDrifted)?.message).toContain(
+      'has 3 lines, so lines 3-4 do not exist',
+    );
+    rmSync(path.join(root, SOURCE));
+    const gone = await run();
+    expect(gone.errors.find(e => e.code === SITE_ERROR_CODES.proofDrifted)?.message).toContain(`${SOURCE} does not exist`);
+    expect(existsSync(proofsFile())).toBe(false);
+  });
+
+  // Without a readable spec there is nothing to check the quotes against; the run must not pass quietly.
+  it('fails when the spec is missing or does not match its schema', async () => {
+    writeProofSpec(root, { 'a.thing': { path: SOURCE, lines: '4-3', anchor: 'nothex' } });
+    const malformed = await run();
+    expect(malformed.errors.map(e => e.code)).toContain(SITE_ERROR_CODES.proofSpecInvalid);
+    rmSync(path.join(root, INSIDE_PROOFS_SPEC));
+    const envelope = await run();
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => e.code)).toContain(SITE_ERROR_CODES.proofSpecInvalid);
   });
 });
 

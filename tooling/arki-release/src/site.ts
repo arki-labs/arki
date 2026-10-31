@@ -17,7 +17,9 @@
  *     the candidate's `@arki/dot` CLI (never from source).
  *
  * Both channels then regenerate `src/generated/{packages,errors,examples,demos}.json`
- * from the snapshot folders on disk, each parsed through its schema in
+ * from the snapshot folders on disk, and `src/generated/inside-proofs.json`
+ * from the proof spec `docs/arki/inside-proofs.json` and the source lines it
+ * names (a quote whose lines drifted stops the run), each parsed through its schema in
  * `./site-schema`, and `src/generated/site-schema.ts`, the self-contained copy
  * of those schemas the app reads its types from (`./site-schema-copy`). Only
  * docs files are copied: never `dist/` code or `src/`.
@@ -34,7 +36,7 @@ import { errorIndexSchema } from '@arki/library-tooling/error-index-schema';
 
 import type { Candidate, CandidatePackage } from './candidate';
 import type { ExecRunner, NpmRunner } from './runners';
-import type { DotNewFile, PackageEntry, SiteChannel, SnapshotMeta } from './site-schema';
+import type { DotNewFile, InsideProofsFile, PackageEntry, SiteChannel, SnapshotMeta } from './site-schema';
 import type { ReleaseCommandEnvelope, ReleaseConfig, ReleaseError } from './types';
 import {
   CANDIDATE_FILE,
@@ -58,6 +60,8 @@ import {
   dotNewResultSchema,
   errorsFileSchema,
   examplesFileSchema,
+  insideProofsFileSchema,
+  insideProofsSpecSchema,
   packagesFileSchema,
   snapshotMetaSchema,
 } from './site-schema';
@@ -80,6 +84,10 @@ export const SITE_ERROR_CODES = {
   badSnapshot: 'SITE_E006',
   /** A repo doc the site copies (`REPO_DOC_COPIES`) is missing. */
   repoDocMissing: 'SITE_E007',
+  /** A quote in `docs/arki/inside-proofs.json` no longer matches its source lines: they moved, changed, or are gone. */
+  proofDrifted: 'SITE_E008',
+  /** `docs/arki/inside-proofs.json` is missing or does not match `insideProofsSpecSchema`. */
+  proofSpecInvalid: 'SITE_E009',
 } as const;
 
 /** Where `site` writes, relative to `--out` (the site's start app). */
@@ -101,6 +109,9 @@ export const REPO_DOC_COPIES = [
   { from: 'docs/arki/agent-bench/results.json', to: 'agent-bench/results.json', optional: true, sourceLine: false },
   { from: 'SECURITY.md', to: 'security/SECURITY.md', optional: false, sourceLine: false },
 ] as const;
+/** The proof spec, relative to the repo root, and the file `site` writes from it into `SITE_GENERATED_DIR`. */
+export const INSIDE_PROOFS_SPEC = path.join('docs', 'arki', 'inside-proofs.json');
+export const INSIDE_PROOFS_FILE = 'inside-proofs.json';
 const READINESS_BASELINE = path.join('tooling', 'arki-release', 'readiness-baseline.json');
 const MIRROR_ORG = 'https://github.com/arki-labs';
 
@@ -149,6 +160,8 @@ export interface SiteSummary {
   readonly examples: number;
   /** Repo docs copied into the app (`REPO_DOC_COPIES`). */
   readonly repoDocs: number;
+  /** Quotes written to `inside-proofs.json`; 0 when a quote drifted and the file was left as it was. */
+  readonly insideProofs: number;
   readonly dotNew: 'written' | 'skipped' | 'failed' | 'not-run';
   readonly wavesWithoutCandidate: readonly string[];
 }
@@ -741,6 +754,125 @@ async function copyRepoDocs(cwd: string, outRoot: string, errors: ReleaseError[]
 }
 
 // ---------------------------------------------------------------------------
+// Inside proofs
+// ---------------------------------------------------------------------------
+
+/** The spec's anchor for some lines: the first 16 hex chars of the sha256 of the lines joined with `\n`. */
+export function proofAnchor(code: string): string {
+  return createHash('sha256').update(code).digest('hex').slice(0, 16);
+}
+
+/** `line 12` or `lines 12-18`, for messages. */
+function linesLabel(range: string): string {
+  return range.includes('-') ? `lines ${range}` : `line ${range}`;
+}
+
+/** `"12"` for one line, `"12-18"` for more. */
+function rangeOf(from: number, count: number): string {
+  return count === 1 ? String(from) : `${String(from)}-${String(from + count - 1)}`;
+}
+
+/**
+ * The exact text of `lines` in `fileLines`, or a `proofDrifted` error. When the anchor's text now sits elsewhere in
+ * the file, the error names the new range; when it is nowhere, it gives the anchor of what the lines hold now.
+ */
+function quoteRange(
+  id: string,
+  /** Where the range sits in the spec entry: `""` for the entry itself, `"imports[0]."` for its first import. */
+  field: string,
+  file: string,
+  fileLines: readonly string[],
+  part: { readonly lines: string; readonly anchor: string },
+): { readonly code: string } | { readonly error: ReleaseError } {
+  const [from = 0, to = from] = part.lines.split('-').map(Number);
+  const drift = (message: string, remediation: string): { readonly error: ReleaseError } => ({
+    error: { code: SITE_ERROR_CODES.proofDrifted, severity: 'error', message, target: `${file}:${part.lines}`, remediation },
+  });
+  const code = fileLines.slice(from - 1, to).join('\n');
+  if (to <= fileLines.length && proofAnchor(code) === part.anchor) return { code };
+  const count = to - from + 1;
+  for (let start = 0; start + count <= fileLines.length; start += 1) {
+    if (proofAnchor(fileLines.slice(start, start + count).join('\n')) === part.anchor) {
+      const moved = rangeOf(start + 1, count);
+      return drift(
+        `Proof "${id}": ${file} ${linesLabel(part.lines)} no longer hold the quoted text; it now sits at ${linesLabel(moved)}.`,
+        `In ${INSIDE_PROOFS_SPEC}, set "${id}".${field}lines from "${part.lines}" to "${moved}", then rerun site.`,
+      );
+    }
+  }
+  if (to > fileLines.length)
+    return drift(
+      `Proof "${id}": ${file} has ${String(fileLines.length)} lines, so ${linesLabel(part.lines)} do not exist, and the quoted text is gone.`,
+      `Find the code "${id}" quotes in ${file}, set "${id}".${field}lines and .${field}anchor (proofAnchor of the new lines) in ${INSIDE_PROOFS_SPEC}, and check the row on the inside page still describes it.`,
+    );
+  return drift(
+    `Proof "${id}": the text at ${file} ${linesLabel(part.lines)} changed since it was quoted.`,
+    `Read ${file} ${linesLabel(part.lines)}. If they still show what the row on the inside page says, set "${id}".${field}anchor in ${INSIDE_PROOFS_SPEC} to "${proofAnchor(code)}"; if the code moved, fix "lines" first. Then rerun site.`,
+  );
+}
+
+/**
+ * Writes `inside-proofs.json`: every range the spec names, copied from the repo. Any drift is an error and the file
+ * is left as it was, so the page never shows a quote that is not in the repo. Returns the number of quotes written.
+ */
+async function writeInsideProofs(cwd: string, generatedRoot: string, errors: ReleaseError[]): Promise<number> {
+  const spec = insideProofsSpecSchema.safeParse(
+    safeJson(await readFile(path.join(cwd, INSIDE_PROOFS_SPEC), 'utf8').catch(() => '')),
+  );
+  if (!spec.success) {
+    errors.push({
+      code: SITE_ERROR_CODES.proofSpecInvalid,
+      severity: 'error',
+      message: `${INSIDE_PROOFS_SPEC} is missing or invalid: ${z.prettifyError(spec.error)}`,
+      target: INSIDE_PROOFS_SPEC,
+      remediation: `Restore ${INSIDE_PROOFS_SPEC} so it matches insideProofsSpecSchema in tooling/arki-release/src/site-schema.ts.`,
+    });
+    return 0;
+  }
+  const proofs: InsideProofsFile = {};
+  const drifts: ReleaseError[] = [];
+  for (const [id, entry] of Object.entries(spec.data)) {
+    const text = await readFile(path.join(cwd, entry.path), 'utf8').catch(() => null);
+    if (text === null) {
+      drifts.push({
+        code: SITE_ERROR_CODES.proofDrifted,
+        severity: 'error',
+        message: `Proof "${id}": ${entry.path} does not exist.`,
+        target: entry.path,
+        remediation: `Point "path" of "${id}" in ${INSIDE_PROOFS_SPEC} at the file that now holds the code, with its "lines" and "anchor", or remove the proof and the row that shows it.`,
+      });
+      continue;
+    }
+    const fileLines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n');
+    const imports = entry.imports.map((part, index) => ({
+      lines: part.lines,
+      quote: quoteRange(id, `imports[${String(index)}].`, entry.path, fileLines, part),
+    }));
+    const main = quoteRange(id, '', entry.path, fileLines, entry);
+    const failed = [...imports.map(part => part.quote), main].flatMap(quote => ('error' in quote ? [quote.error] : []));
+    // `'error' in main` repeats part of `failed` so the compiler knows `main` holds code below.
+    if (failed.length > 0 || 'error' in main) {
+      drifts.push(...failed);
+      continue;
+    }
+    proofs[id] = {
+      path: entry.path,
+      lines: entry.lines,
+      code: main.code,
+      imports: imports.flatMap(part => ('code' in part.quote ? [{ lines: part.lines, code: part.quote.code }] : [])),
+    };
+  }
+  if (drifts.length > 0) {
+    errors.push(...drifts);
+    return 0;
+  }
+  await mkdir(generatedRoot, { recursive: true });
+  const file = insideProofsFileSchema.parse(proofs);
+  await writeFile(path.join(generatedRoot, INSIDE_PROOFS_FILE), `${JSON.stringify(file, null, 2)}\n`);
+  return Object.keys(file).length;
+}
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
@@ -785,6 +917,7 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
   items.push(...(await pruneRetired(options, contentRoot)));
   const counts = await writeGenerated(options, contentRoot, generatedRoot, errors);
   const repoDocs = await copyRepoDocs(options.cwd, outRoot, errors);
+  const insideProofs = await writeInsideProofs(options.cwd, generatedRoot, errors);
   await writeFile(path.join(outRoot, SITE_SCHEMA_COPY_FILE), renderSiteSchemaCopy());
   const count = (action: SiteItem['action']): number => items.filter(i => i.action === action).length;
   const status = errors.some(e => e.severity === 'error') ? 'failure' : errors.length > 0 ? 'warning' : 'success';
@@ -802,6 +935,7 @@ export async function runSite(options: SiteOptions): Promise<SiteEnvelope> {
       removed: count('removed'),
       ...counts,
       repoDocs,
+      insideProofs,
       dotNew,
       wavesWithoutCandidate: missing,
     },

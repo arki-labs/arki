@@ -1,0 +1,227 @@
+{
+  "dot.needs-error": {
+    "path": "packages/dot/src/define-app.ts",
+    "lines": "93-98",
+    "anchor": "a7c4c5c559f971ad",
+    "imports": [
+      {
+        "lines": "42-56",
+        "anchor": "a0945ba71f1f10de"
+      }
+    ]
+  },
+  "dot.collision-error": {
+    "path": "packages/dot/src/define-app.ts",
+    "lines": "100-103",
+    "anchor": "db396e0c1ad2fa73"
+  },
+  "dot.typed-handles": {
+    "path": "packages/dot/docs/di.md",
+    "lines": "646-649",
+    "anchor": "106087e6ff48eca3"
+  },
+  "dot.error-codes": {
+    "path": "packages/dot/src/lifecycle.ts",
+    "lines": "50-56",
+    "anchor": "a90375fad8c17f40"
+  },
+  "dot.configure-order": {
+    "path": "packages/dot/docs/diagnostics.md",
+    "lines": "224-226",
+    "anchor": "0e3ff11962dfc4db"
+  },
+  "dot.boot-failure": {
+    "path": "packages/dot/docs/lifecycle.md",
+    "lines": "100-102",
+    "anchor": "371b30f7a0fee8ed"
+  },
+  "dot.explain-doctor": {
+    "path": "packages/dot/docs/cli.md",
+    "lines": "9-10",
+    "anchor": "b75bd99dfc9f962f"
+  },
+  "dot.otel-first": {
+    "path": "packages/dot/docs/observability.md",
+    "lines": "3-4",
+    "anchor": "7578683ed82b7227"
+  },
+  "journal.one-transaction": {
+    "path": "packages/journal/src/write.ts",
+    "lines": "420-424",
+    "anchor": "4ba341008b963bee"
+  },
+  "journal.typed-refusals": {
+    "path": "packages/journal/README.md",
+    "lines": "86-91",
+    "anchor": "a18468f0daba1a2a",
+    "imports": [
+      {
+        "lines": "46",
+        "anchor": "b03ad50b946e947b"
+      }
+    ]
+  },
+  "journal.reducer-patch": {
+    "path": "packages/journal/README.md",
+    "lines": "75-77",
+    "anchor": "f896d0e34744285f"
+  },
+  "journal.receipts": {
+    "path": "packages/journal/README.md",
+    "lines": "206-209",
+    "anchor": "28abd29c454b3a3a"
+  },
+  "journal.effects-after-commit": {
+    "path": "packages/journal/README.md",
+    "lines": "539",
+    "anchor": "690ff614e864cb46"
+  },
+  "journal.wake-channel": {
+    "path": "packages/journal/src/store.ts",
+    "lines": "199",
+    "anchor": "5b11a5b147d7e7ec",
+    "imports": [
+      {
+        "lines": "10",
+        "anchor": "c1aeec568003ac2c"
+      }
+    ]
+  },
+  "journal.workflow-entities": {
+    "path": "packages/journal/README.md",
+    "lines": "947",
+    "anchor": "f6bf2fca0094ceb2"
+  },
+  "journal.workflow-from-event": {
+    "path": "packages/payments/src/refunds/workflow.ts",
+    "lines": "124-130",
+    "anchor": "627d0fdb313ff808"
+  },
+  "journal.step-idempotency": {
+    "path": "packages/payments/src/refunds/workflow.ts",
+    "lines": "174-178",
+    "anchor": "b9b033a5cab9c6e6",
+    "imports": [
+      {
+        "lines": "38",
+        "anchor": "9761ce84370f418f"
+      }
+    ]
+  },
+  "journal.wait-for-signal": {
+    "path": "packages/payments/src/refunds/workflow.ts",
+    "lines": "202-207",
+    "anchor": "52a0d05f61044fbc"
+  },
+  "journal.erasure": {
+    "path": "packages/journal/README.md",
+    "lines": "390",
+    "anchor": "3b66c22f3368a798"
+  },
+  "journal.dot-plugin": {
+    "path": "packages/journal/src/dot.ts",
+    "lines": "792-797",
+    "anchor": "f55692f210d249c3"
+  },
+  "db.three-runtimes": {
+    "path": "packages/db/README.md",
+    "lines": "5",
+    "anchor": "83a9c96028ed26a4"
+  },
+  "kv.safe-fallback": {
+    "path": "packages/kv/README.md",
+    "lines": "3",
+    "anchor": "fdada912259a82db"
+  },
+  "env.encrypted-files": {
+    "path": "packages/env/README.md",
+    "lines": "85",
+    "anchor": "f2d4f7d0ff75ec01"
+  },
+  "env.standard-schema": {
+    "path": "packages/env/README.md",
+    "lines": "3",
+    "anchor": "05dfcdfbedc84fa8"
+  },
+  "http.route-contracts": {
+    "path": "packages/http/README.md",
+    "lines": "3-6",
+    "anchor": "dcf95eef0b5c34da"
+  },
+  "http.socketless-engine": {
+    "path": "packages/http/README.md",
+    "lines": "39-41",
+    "anchor": "c5054a01485e2e70",
+    "imports": [
+      {
+        "lines": "28",
+        "anchor": "0b9d74691257fe15"
+      }
+    ]
+  },
+  "ui.one-import": {
+    "path": "packages/ui/README.md",
+    "lines": "3",
+    "anchor": "b8c1ed65d8beacae"
+  },
+  "money.exact-units": {
+    "path": "packages/money/README.md",
+    "lines": "5",
+    "anchor": "7237eef0cf7f1836"
+  },
+  "money.currencies-apart": {
+    "path": "packages/money/README.md",
+    "lines": "7",
+    "anchor": "7338653cc81cc03d"
+  },
+  "payments.stripe-provider": {
+    "path": "packages/payments/README.md",
+    "lines": "3",
+    "anchor": "8e4ff48be5493617"
+  },
+  "failure.no-wrapper": {
+    "path": "packages/failure/README.md",
+    "lines": "28-32",
+    "anchor": "038ae6c91b96f1ed",
+    "imports": [
+      {
+        "lines": "24",
+        "anchor": "06bca167dd161166"
+      },
+      {
+        "lines": "26",
+        "anchor": "5800747c12f8d24a"
+      }
+    ]
+  },
+  "failure.inferred-union": {
+    "path": "packages/failure/README.md",
+    "lines": "48",
+    "anchor": "c0012789c3723d70"
+  },
+  "failure.ignored-lint": {
+    "path": "packages/failure/README.md",
+    "lines": "9",
+    "anchor": "2bc0a631311e19a7"
+  },
+  "schema.one-path": {
+    "path": "packages/schema/README.md",
+    "lines": "3",
+    "anchor": "4f098612d1a12856"
+  },
+  "cli.json-envelope": {
+    "path": "packages/cli/README.md",
+    "lines": "3",
+    "anchor": "b9b9fec9fad4d1e0"
+  },
+  "log.message-templates": {
+    "path": "packages/log/README.md",
+    "lines": "3",
+    "anchor": "d1e57175c2a254a7"
+  },
+  "date.temporal": {
+    "path": "packages/date/README.md",
+    "lines": "3",
+    "anchor": "b6c8676368bc252f"
+  }
+}
