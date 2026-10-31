@@ -115,6 +115,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     private config: QdrantConfig,
     { space, sparseSpace }: { space: EmbeddingSpace; sparseSpace?: SparseSpace },
   ) {
+    // A bad URL is a configuration fault: fail when the provider is built, not on the first query.
+    if (!URL.canParse(config.url)) throw new VectorSearchError(`Qdrant url is not a valid URL: "${config.url}"`);
     this.space = space;
     if (sparseSpace !== undefined) this.sparseSpace = sparseSpace;
     this.collectionName = config.collectionName;
@@ -289,6 +291,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     metadata?: TMetadata,
     sparse?: SparseVector,
   ): Promise<void> {
+    // eslint-disable-next-line unicorn/prefer-spread -- an ArrayLike (a typed array or array-like) has no iterator in its type
     const vector = Array.from(values);
     if (vector.length !== this.vectorSize) {
       throw new VectorSearchError(
@@ -326,6 +329,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     limit = 10,
     filter?: Record<string, unknown>,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    // eslint-disable-next-line unicorn/prefer-spread -- an ArrayLike (a typed array or array-like) has no iterator in its type
     const vector = Array.from(values);
     if (vector.length !== this.vectorSize) {
       throw new VectorSearchError(
@@ -340,15 +344,13 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     const qdrantFilter = this.flatFilter(filter);
 
-    const searchResult = (
-      await client.query(this.collectionName, {
-        query: vector,
-        limit,
-        filter: qdrantFilter,
-        with_payload: true,
-        score_threshold: 0, // caller filters by score
-      })
-    ).points;
+    const { points: searchResult } = await client.query(this.collectionName, {
+      query: vector,
+      limit,
+      filter: qdrantFilter,
+      with_payload: true,
+      score_threshold: 0, // caller filters by score
+    });
 
     debugVector.debug('[Qdrant] searchByVector completed (results: {results})', { results: searchResult.length });
     return this.toResults(searchResult);
@@ -487,7 +489,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         if (isRangeCondition(value)) {
           return { key, range: value };
         }
-        return { key, match: { value } as Record<string, unknown> };
+        return { key, match: { value } };
       }),
     });
   }
@@ -530,31 +532,22 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   }
 
   /**
-   * Get document by ID
+   * The payload of the point with this ID, or null when no such point exists. A Qdrant error
+   * (unreachable, auth, server error) is thrown as the client threw it, never read as "not found".
    */
   async getDocument(id: string): Promise<TMetadata | null> {
     debugVector.debug('[Qdrant] Getting document by ID: {ID}', { ID: id });
     const client = await this.getClient();
-
-    try {
-      const points = await client.retrieve(this.collectionName, {
-        ids: [await toPointId(id)],
-        with_payload: true,
-        with_vector: false,
-      });
-
-      const result = (points[0]?.payload as TMetadata) || null;
-      debugVector.debug('[Qdrant] Document retrieved: {retrieved} (found: {found})', {
-        retrieved: id,
-        found: !!result,
-      });
-      return result;
-    } catch (error) {
-      debugVector.debug('[Qdrant] Failed to get document: {document} - {value2}', {
-        document: id,
-        value2: getErrorMessage(error),
-      });
-      return null;
-    }
+    const points = await client.retrieve(this.collectionName, {
+      ids: [await toPointId(id)],
+      with_payload: true,
+      with_vector: false,
+    });
+    const result = (points[0]?.payload as TMetadata | undefined) ?? null;
+    debugVector.debug('[Qdrant] Document retrieved: {retrieved} (found: {found})', {
+      retrieved: id,
+      found: result !== null,
+    });
+    return result;
   }
 }

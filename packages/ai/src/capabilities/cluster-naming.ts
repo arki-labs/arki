@@ -9,7 +9,9 @@
 
 import { z } from '@arki/contracts';
 
-import { createLLMProvider, type LLMProviderConfig } from '../ai-service/factory';
+import { createLLMProvider  } from '../ai-service/factory';
+import type {LLMProviderConfig} from '../ai-service/factory';
+import type { ProviderFailure } from '../failures';
 import type { StructuredLLMProvider } from '../ai-service/types';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -102,7 +104,7 @@ export async function nameCluster(
   existingName?: string,
   context?: ClusterNamingContext,
   config?: LLMProviderConfig,
-): Promise<ClusterName> {
+): Promise<ClusterName | ProviderFailure> {
   const llm = provider ?? createLLMProvider({ temperature: 0.4, ...config });
 
   const titlesBlock = sampleTitles

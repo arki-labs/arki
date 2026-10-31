@@ -173,7 +173,7 @@ export const LLM_PRICING: Record<string, ModelPricing> = {
   },
   'openai/gpt-oss-20b': {
     inputPer1k: 0.000_075,
-    outputPer1k: 0.000_3,
+    outputPer1k: 0.0003,
   },
   'mixtral-8x7b-32768': {
     inputPer1k: 0.000_24,
@@ -217,7 +217,8 @@ export const DEFAULT_PRICING: ModelPricing = {
  * @returns Model pricing or default if unknown
  */
 export function getModelPricing(model: string): ModelPricing {
-  return LLM_PRICING[model] ?? DEFAULT_PRICING;
+  // An own-key check: `constructor` or `toString` must not resolve to `Object.prototype` members.
+  return hasKnownPricing(model) ? (LLM_PRICING[model] ?? DEFAULT_PRICING) : DEFAULT_PRICING;
 }
 
 /**
@@ -227,7 +228,7 @@ export function getModelPricing(model: string): ModelPricing {
  * @returns True if pricing is known
  */
 export function hasKnownPricing(model: string): boolean {
-  return model in LLM_PRICING;
+  return Object.hasOwn(LLM_PRICING, model);
 }
 
 /**

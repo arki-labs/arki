@@ -9,7 +9,9 @@
 
 import { z } from '@arki/contracts';
 
-import { createLLMProvider, type LLMProviderConfig } from '../ai-service/factory';
+import { createLLMProvider  } from '../ai-service/factory';
+import type {LLMProviderConfig} from '../ai-service/factory';
+import type { ProviderFailure } from '../failures';
 import type { StructuredLLMProvider } from '../ai-service/types';
 
 // ── Schema ────────────────────────────────────────────────────
@@ -62,7 +64,7 @@ export async function classifyIntent(
   message: string,
   provider?: StructuredLLMProvider,
   config?: LLMProviderConfig,
-): Promise<ClassifiedIntent> {
+): Promise<ClassifiedIntent | ProviderFailure> {
   const llm = provider ?? createLLMProvider({ temperature: 0, ...config });
   return llm.generateStructuredData(message, IntentSchema, {
     systemPrompt: SYSTEM_PROMPT,

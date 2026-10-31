@@ -1,12 +1,14 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { simulateReadableStream } from 'ai';
+import { APICallError, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineFailure } from '@arki/failure';
+
+import { Cancelled, ContentFiltered, IncompleteGeneration, RateLimited } from '../failures';
 
 import type { AgentTool, RuntimeEvent } from './types';
 import { createAiSdkRuntime, toAiSdkToolSet } from './ai-sdk-runtime';
@@ -137,7 +139,7 @@ function secondPrompt(model: MockLanguageModelV4): string {
 }
 
 describe('createAiSdkRuntime cancellation', () => {
-  it('stops after an abort mid-tool: no second paid model call, and the run rejects with the reason', async () => {
+  it('stops after an abort mid-tool: no second paid model call, and the run ends with Cancelled', async () => {
     // WHY: cancelling must stop spending. If the loop went on to the next step, a cancelled run
     // would still pay for another model call the user no longer wants.
     const controller = new AbortController();
@@ -156,21 +158,25 @@ describe('createAiSdkRuntime cancellation', () => {
     const model = toolCallingModel('weather');
     const runtime = createAiSdkRuntime({ model });
 
-    await expect(
-      collect(runtime.runToolLoop({ prompt: 'Weather?', tools: [weather], signal: controller.signal })),
-    ).rejects.toBe(reason);
+    const events = await collect(runtime.runToolLoop({ prompt: 'Weather?', tools: [weather], signal: controller.signal }));
+    const last = events.at(-1);
+    expect(last?.type === 'run:error' && Cancelled.is(last.failure)).toBe(true);
+    expect(last?.type === 'run:error' ? last.failure.cause : undefined).toBe(reason);
+    expect(events.filter(event => event.type === 'run:finish' || event.type === 'run:error')).toHaveLength(1);
     expect(model.doStreamCalls).toHaveLength(1);
     expect(toolSignal?.aborted).toBe(true);
   });
 
-  it('rejects at once, without any model call, when the signal is already aborted', async () => {
+  it('ends at once with Cancelled, without any model call, when the signal is already aborted', async () => {
     // WHY: a request that was cancelled before the run began must cost nothing.
     const controller = new AbortController();
     controller.abort(new Error('gone'));
     const model = textOnlyModel();
     const runtime = createAiSdkRuntime({ model });
 
-    await expect(collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }))).rejects.toThrow('gone');
+    const events = await collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }));
+    expect(events.map(event => event.type)).toEqual(['run:start', 'run:error']);
+    expect(events[1]?.type === 'run:error' ? events[1].failure.code : undefined).toBe('ai.cancelled');
     expect(model.doStreamCalls).toHaveLength(0);
   });
 
@@ -364,5 +370,86 @@ describe('createAiSdkRuntime spans', () => {
     );
 
     expect(exporter.getFinishedSpans()).toHaveLength(0);
+  });
+});
+
+/** A model whose one step streams `parts` after the stream start. */
+function streamingModel(parts: LanguageModelV4StreamPart[]): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: simulateReadableStream({ chunks: [{ type: 'stream-start', warnings: [] }, ...parts] }),
+    }),
+  });
+}
+
+function apiError(statusCode: number, responseHeaders?: Record<string, string>): APICallError {
+  return new APICallError({ message: `status ${statusCode}`, url: 'https://x', requestBodyValues: {}, statusCode, responseHeaders });
+}
+
+describe('createAiSdkRuntime terminal failures', () => {
+  it('ends a run whose stream errors with one run:error carrying RateLimited and its Retry-After, never run:finish', async () => {
+    // WHY (F2): a 429 mid-stream used to yield run:error, keep reading, then run:finish, so the UI showed
+    // a failed run as done and the Retry-After was lost in a message string.
+    const runtime = createAiSdkRuntime({
+      model: streamingModel([
+        { type: 'text-start', id: '1' },
+        { type: 'text-delta', id: '1', delta: 'hel' },
+        { type: 'error', error: apiError(429, { 'retry-after': '2' }) },
+      ]),
+    });
+    const events = await collect(runtime.runToolLoop({ prompt: 'x' }));
+    expect(events.map(event => event.type)).toEqual(['run:start', 'text:delta', 'run:error']);
+    const last = events.at(-1);
+    expect(last?.type === 'run:error' ? last.failure.code : undefined).toBe('ai.rate_limited');
+    expect(last?.type === 'run:error' && RateLimited.is(last.failure) ? last.failure.data.retryAfterMs : undefined).toBe(2000);
+  });
+
+  it('turns a content-filter finish into ContentFiltered, not a finished run', async () => {
+    // WHY: a filtered answer is cut short; showing it as done would present a partial answer as whole.
+    const runtime = createAiSdkRuntime({
+      model: streamingModel([
+        { type: 'text-start', id: '1' },
+        { type: 'text-delta', id: '1', delta: 'par' },
+        { type: 'text-end', id: '1' },
+        {
+          type: 'finish',
+          finishReason: { unified: 'content-filter', raw: 'content_filter' },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+        },
+      ]),
+    });
+    const events = await collect(runtime.runToolLoop({ prompt: 'x' }));
+    const last = events.at(-1);
+    expect(last?.type === 'run:error' && ContentFiltered.is(last.failure)).toBe(true);
+    expect(events.some(event => event.type === 'run:finish')).toBe(false);
+  });
+
+  it('turns a run the step cap cut while the model still called tools into IncompleteGeneration', async () => {
+    // WHY: with maxSteps reached mid tool use there is no answer yet; run:finish would claim one.
+    const weather = defineAgentTool({
+      name: 'weather',
+      description: 'Weather for a city.',
+      inputSchema: z.object({ city: z.string() }),
+      execute: () => 'sunny',
+    });
+    const runtime = createAiSdkRuntime({ model: toolCallingModel('weather') });
+    const events = await collect(runtime.runToolLoop({ prompt: 'Weather?', tools: [weather], maxSteps: 1 }));
+    const last = events.at(-1);
+    expect(last?.type === 'run:error' && IncompleteGeneration.is(last.failure) ? last.failure.data.finishReason : undefined).toBe(
+      'tool-calls',
+    );
+  });
+
+  it('maps a model call that throws to the same failure as a streamed error', async () => {
+    // WHY: one boundary maps provider errors (providerFailure), so a 401 is ProviderUnauthorized however it arrives.
+    const runtime = createAiSdkRuntime({
+      model: new MockLanguageModelV4({ doStream: () => Promise.reject(apiError(401)) }),
+    });
+    const events = await collect(runtime.runToolLoop({ prompt: 'x' }));
+    expect(events.map(event => event.type)).toEqual(['run:start', 'run:error']);
+    expect(events[1]?.type === 'run:error' ? events[1].failure.code : undefined).toBe('ai.unauthorized');
   });
 });

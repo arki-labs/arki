@@ -5,6 +5,7 @@
 
 import type { StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
+import type { ProviderFailure } from '../failures';
 import type { StructuredLLMProvider } from './types';
 import { CommonSchemas } from './structured-generation-schemas';
 
@@ -45,7 +46,7 @@ export class StructuredGenerator {
   async generateSummary(
     text: string,
     options: StructuredGenerationOptions = {}
-  ): Promise<StructuredSummary> {
+  ): Promise<StructuredSummary | ProviderFailure> {
     const prompt = `Please provide a comprehensive summary of the following text:
 
 "${text}"
@@ -69,7 +70,7 @@ Include a title, main summary, and key points.`;
     question: string,
     context: string,
     options: StructuredGenerationOptions = {}
-  ): Promise<QuestionAnswer> {
+  ): Promise<QuestionAnswer | ProviderFailure> {
     const prompt = `Based on the following context, answer the question.
 
 Context: "${context}"
@@ -95,7 +96,7 @@ Provide your answer with a confidence score.`;
     text: string,
     categories: string[],
     options: StructuredGenerationOptions = {}
-  ): Promise<TextClassification> {
+  ): Promise<TextClassification | ProviderFailure> {
     const prompt = `Classify the following text into one of these categories: ${categories.join(', ')}
 
 Text: "${text}"
@@ -119,7 +120,7 @@ Provide the classification with confidence score and reasoning.`;
     text: string,
     entityTypes: string[] = [],
     options: StructuredGenerationOptions = {}
-  ): Promise<ExtractedEntities> {
+  ): Promise<ExtractedEntities | ProviderFailure> {
     const typesHint = entityTypes.length > 0
       ? `Focus on these entity types: ${entityTypes.join(', ')}`
       : 'Extract all relevant entities';
@@ -145,7 +146,7 @@ Text: "${text}"`;
   async analyzeSentiment(
     text: string,
     options: StructuredGenerationOptions = {}
-  ): Promise<SentimentAnalysis> {
+  ): Promise<SentimentAnalysis | ProviderFailure> {
     const prompt = `Analyze the sentiment of the following text:
 
 "${text}"
@@ -169,7 +170,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
     text: string,
     targetLanguage: string,
     options: StructuredGenerationOptions = {}
-  ): Promise<Translation> {
+  ): Promise<Translation | ProviderFailure> {
     const prompt = `Translate the following text to ${targetLanguage}:
 
 "${text}"`;
@@ -191,7 +192,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
     description: string,
     language: string,
     options: StructuredGenerationOptions = {}
-  ): Promise<GeneratedCode> {
+  ): Promise<GeneratedCode | ProviderFailure> {
     const prompt = `Generate ${language} code for the following requirement:
 
 "${description}"

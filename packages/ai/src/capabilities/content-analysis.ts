@@ -9,7 +9,9 @@
 
 import { z } from '@arki/contracts';
 
-import { createLLMProvider, type LLMProviderConfig } from '../ai-service/factory';
+import { createLLMProvider  } from '../ai-service/factory';
+import type {LLMProviderConfig} from '../ai-service/factory';
+import type { ProviderFailure } from '../failures';
 import type { StructuredLLMProvider } from '../ai-service/types';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -47,23 +49,23 @@ export type ContentAnalysis = {
   /** Full breakdown: context, core claims, evidence, implications, and caveats. */
   summaryDetailed?: string;
   /** Table of contents: one entry per logical section. */
-  toc?: Array<{
+  toc?: {
     heading: string;
     keyPoint: string;
     estimatedReadTime?: string;
-  }>;
+  }[];
   /** Concrete, actionable insights worth remembering. */
-  takeaways?: Array<{
+  takeaways?: {
     text: string;
     importance: ImportanceLevel;
     category: string;
-  }>;
+  }[];
   /** Named entities central to the content. */
-  entities?: Array<{
+  entities?: {
     name: string;
     type: EntityType;
     context: string;
-  }>;
+  }[];
   /** A clearer, more specific title. */
   rewrittenTitle: string;
   /** Primary content format. */
@@ -204,7 +206,7 @@ export async function analyzeContent(
   wordCount: number,
   provider?: StructuredLLMProvider,
   config?: LLMProviderConfig,
-): Promise<ContentAnalysis> {
+): Promise<ContentAnalysis | ProviderFailure> {
   const llm = provider ?? createLLMProvider({ temperature: 0.3, ...config });
   const truncatedText = text.length > 40_000 ? text.slice(0, 40_000) : text;
 

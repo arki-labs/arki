@@ -34,12 +34,15 @@ import type { ModelMessage } from 'ai';
 import { Output } from 'ai';
 import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
 
+import { isFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
+import type { ProviderFailure } from '../failures';
 import { debugService } from '../debug.ts';
 import { env } from '../env';
-import { GenerationError, getErrorMessage } from '../errors';
 import { modelSchema } from './model-schema';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure';
+import { aiTelemetry } from './telemetry';
 
 type ChatMessage = ModelMessage;
 
@@ -118,7 +121,8 @@ export type OllamaGenerationOptions = {
 export type OllamaStreamOptions = OllamaGenerationOptions & {
   onStart?: () => void;
   onComplete?: (text: string) => void;
-  onError?: (error: Error) => void;
+  /** Called with the failure that ends the stream, just before the stream yields it. */
+  onError?: (failure: ProviderFailure) => void;
 };
 
 const DEFAULT_MODEL = 'gemma4';
@@ -144,6 +148,7 @@ function resolveHost(explicit?: string): string {
  * typed against the `DiscoveryLlmAdapter` boundary.
  */
 export class OllamaService {
+  readonly name = 'ollama';
   private readonly provider: ReturnType<typeof createOllama>;
   private readonly model: string;
   private readonly defaultTemperature: number;
@@ -183,6 +188,20 @@ export class OllamaService {
     return { temperature: 0, seed: this.deterministicSeed };
   }
 
+  /** The names and signal of one call, for the failure boundary. */
+  private call(options: OllamaGenerationOptions) {
+    return { provider: this.name, model: this.model, signal: options.signal };
+  }
+
+  /** Log a failed call at DEBUG; the result passes through unchanged. */
+  private logged<T>(operation: string, result: T | ProviderFailure): T | ProviderFailure {
+    const value: unknown = result;
+    if (isFailure(value)) {
+      debugService.debug('[Ollama] {operation} failed (model={model}): {code}', { operation, model: this.model, code: value.code });
+    }
+    return result;
+  }
+
   /**
    * Build the ai-sdk-ollama LanguageModel for this call. Threads
    * `keep_alive` into the chat settings so the daemon doesn't unload
@@ -190,8 +209,8 @@ export class OllamaService {
    */
   private buildModel() {
     return this.provider(this.model, {
-      ...(this.keepAlive !== undefined ? { keep_alive: this.keepAlive } : {}),
-      ...(this.think !== undefined ? { think: this.think } : {}),
+      ...(this.keepAlive === undefined ? {} : { keep_alive: this.keepAlive }),
+      ...(this.think === undefined ? {} : { think: this.think }),
     });
   }
 
@@ -203,7 +222,7 @@ export class OllamaService {
     prompt: string,
     schema: S,
     options: OllamaGenerationOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -218,7 +237,7 @@ export class OllamaService {
     messages: ChatMessage[],
     schema: S,
     options: OllamaGenerationOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
     const output = Output.object({ schema: modelSchema(schema, 'Ollama structured generation') });
@@ -230,7 +249,8 @@ export class OllamaService {
 
     try {
       // Streaming path — emit token deltas to `onToken` as the model
-      // generates, then await the assembled + Zod-validated output.
+      // generates, then await the assembled + Zod-validated output. An
+      // error part or an early finish ends the stream with a failure.
       if (options.onToken) {
         const result = await streamText({
           model: this.buildModel(),
@@ -241,15 +261,15 @@ export class OllamaService {
           seed,
           maxRetries,
           abortSignal: options.signal,
+          ...aiTelemetry('ollama.generateStructuredData'),
         });
 
-        for await (const chunk of result.textStream) {
+        for await (const chunk of readTextParts(result.fullStream, this.call(options))) {
+          if (isFailure(chunk)) return this.logged('generateStructuredData', chunk);
           options.onToken(chunk);
         }
 
-        const obj = await result.output;
-        debugService.debug('[Ollama] Structured data generated successfully (streamed)');
-        return obj;
+        return await result.output;
       }
 
       // Non-streaming path — single round-trip, full structured output
@@ -263,19 +283,12 @@ export class OllamaService {
         seed,
         maxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry('ollama.generateStructuredData'),
       });
 
-      debugService.debug('[Ollama] Structured data generated successfully');
-      return result.output;
+      return this.logged('generateStructuredData', finishFailure(result.finishReason, this.call(options)) ?? result.output);
     } catch (error) {
-      debugService.debug('[Ollama] Structured generation failed (model={model}): {value2}', {
-        model: this.model,
-        value2: getErrorMessage(error),
-      });
-      throw new GenerationError(
-        `Failed to generate structured data via Ollama (${this.model}): ${getErrorMessage(error)}`,
-        error,
-      );
+      return this.logged('generateStructuredData', providerFailure(error, this.call(options)));
     }
   }
 
@@ -286,7 +299,10 @@ export class OllamaService {
    * the model's own voice and formatting. The anti-leak / role system prompt is
    * threaded via `options.systemPrompt`.
    */
-  async generateConversation(messages: ChatMessage[], options: OllamaGenerationOptions = {}): Promise<string> {
+  async generateConversation(
+    messages: ChatMessage[],
+    options: OllamaGenerationOptions = {},
+  ): Promise<string | ProviderFailure> {
     const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
@@ -304,19 +320,11 @@ export class OllamaService {
         seed,
         maxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry('ollama.generateConversation'),
       });
-
-      debugService.debug('[Ollama] Conversation response generated (length: {length})', { length: result.text.length });
-      return result.text;
+      return this.logged('generateConversation', finishFailure(result.finishReason, this.call(options)) ?? result.text);
     } catch (error) {
-      debugService.debug('[Ollama] Conversation generation failed (model={model}): {value2}', {
-        model: this.model,
-        value2: getErrorMessage(error),
-      });
-      throw new GenerationError(
-        `Failed to generate conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
-        error,
-      );
+      return this.logged('generateConversation', providerFailure(error, this.call(options)));
     }
   }
 
@@ -324,12 +332,13 @@ export class OllamaService {
    * Streaming variant of {@link generateConversation}. Yields each text delta as
    * the model emits it (for a typing-indicator UX) and invokes the optional
    * lifecycle callbacks. The abort signal cancels both the stream and the
-   * upstream Ollama generation.
+   * upstream Ollama generation. When the stream fails or stops early, its last
+   * item is the `ProviderFailure` (an abort is `Cancelled`).
    */
   async *streamConversation(
     messages: ChatMessage[],
     options: OllamaStreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
     const { temperature, seed } = this.sampling(options);
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
@@ -339,9 +348,11 @@ export class OllamaService {
       temperature,
     });
 
-    try {
-      options.onStart?.();
+    const call = this.call(options);
+    options.onStart?.();
 
+    let chunks: AsyncIterable<string | ProviderFailure> | readonly ProviderFailure[];
+    try {
       const result = await streamText({
         model: this.buildModel(),
         instructions: options.systemPrompt,
@@ -350,26 +361,26 @@ export class OllamaService {
         seed,
         maxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry('ollama.streamConversation'),
       });
-
-      let fullText = '';
-      for await (const chunk of result.textStream) {
-        fullText += chunk;
-        options.onToken?.(chunk);
-        yield chunk;
-      }
-
-      options.onComplete?.(fullText);
+      chunks = readTextParts(result.fullStream, call);
     } catch (error) {
-      options.onError?.(error as Error);
-      debugService.debug('[Ollama] Stream conversation failed (model={model}): {value2}', {
-        model: this.model,
-        value2: getErrorMessage(error),
-      });
-      throw new GenerationError(
-        `Failed to stream conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
-        error,
-      );
+      chunks = [providerFailure(error, call)];
     }
+
+    let fullText = '';
+    for await (const chunk of chunks) {
+      if (isFailure(chunk)) {
+        const failure = this.logged('streamConversation', chunk);
+        options.onError?.(failure);
+        yield failure;
+        return;
+      }
+      fullText += chunk;
+      options.onToken?.(chunk);
+      yield chunk;
+    }
+
+    options.onComplete?.(fullText);
   }
 }

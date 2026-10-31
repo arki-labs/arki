@@ -1,10 +1,11 @@
 import { afterEach, expect, expectTypeOf, test, vi } from 'vitest';
 
 import type { z } from '@arki/contracts';
+import { isFailure, orThrow } from '@arki/failure';
 
-import type { DiarizedTranscript } from './transcription';
+import type { DiarizedTranscript, TranscriptionFailure } from './transcription';
 import { transcribeDiarizedAudio } from './transcription';
-import { diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
+import type { diarizedTranscriptSchema, transcriptionOptionsSchema } from './transcription-schemas';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -26,21 +27,22 @@ test('shared transcription validates speaker IDs, intervals and cancellation wir
       expect(init?.signal).toBeDefined();
       controller.abort();
       expect(init?.signal?.aborted).toBe(true);
-      return new Response(JSON.stringify(raw()));
+      return Response.json(raw());
     }),
     {},
   );
-  const result = await transcribeDiarizedAudio(new Uint8Array([1]), options, controller.signal);
+  const result = orThrow(await transcribeDiarizedAudio(new Uint8Array([1]), options, controller.signal));
   expect(result.segments[0]?.speaker).toBe('speaker-2');
 });
 
 for (const end of [0, 11])
   test(`rejects invalid diarization end ${end}`, async () => {
     globalThis.fetch = Object.assign(
-      vi.fn(async () => new Response(JSON.stringify(raw(end)))),
+      vi.fn(async () => Response.json(raw(end))),
       {},
     );
-    await expect(transcribeDiarizedAudio(new Uint8Array([1]), options)).rejects.toThrow();
+    const result = await transcribeDiarizedAudio(new Uint8Array([1]), options);
+    expect(isFailure(result) && result.code).toBe('ai.invalid_output');
   });
 
 test('rejects oversized response before parsing', async () => {
@@ -48,7 +50,58 @@ test('rejects oversized response before parsing', async () => {
     vi.fn(async () => new Response(new Uint8Array(8 * 1024 * 1024 + 1))),
     {},
   );
-  await expect(transcribeDiarizedAudio(new Uint8Array([1]), options)).rejects.toThrow('byte limit');
+  const result = await transcribeDiarizedAudio(new Uint8Array([1]), options);
+  expect(isFailure(result) && result.code).toBe('ai.invalid_output');
+});
+
+// A caller must tell "wait and retry" from "fix the key" from "Deepgram is down": each refusal is its own
+// returned failure, never a raw Error or ZodError.
+const respond = (response: () => Response | Promise<Response>) => {
+  globalThis.fetch = Object.assign(vi.fn(async () => response()), {});
+};
+const codeOf = async (bytes = new Uint8Array([1]), input = options, signal?: AbortSignal) => {
+  const result = await transcribeDiarizedAudio(bytes, input, signal);
+  return isFailure(result) ? result : undefined;
+};
+
+test('a 429 is RateLimited and keeps the Retry-After wait', async () => {
+  respond(() => new Response('{}', { status: 429, headers: { 'Retry-After': '2' } }));
+  const failure = await codeOf();
+  expect(failure?.code).toBe('ai.rate_limited');
+  expect(failure?.code === 'ai.rate_limited' && failure.data.retryAfterMs).toBe(2000);
+});
+
+test('401 and 403 are ProviderUnauthorized; other statuses are ProviderFailed', async () => {
+  for (const status of [401, 403]) {
+    respond(() => new Response('{}', { status }));
+    expect(await codeOf()).toHaveProperty('code', 'ai.unauthorized');
+  }
+  respond(() => new Response('{}', { status: 503 }));
+  const failure = await codeOf();
+  expect(failure?.code).toBe('ai.provider_failed');
+  expect(failure?.code === 'ai.provider_failed' && failure.data.status).toBe(503);
+});
+
+test('a body that is not JSON is InvalidOutput', async () => {
+  respond(() => new Response('not json'));
+  expect(await codeOf()).toHaveProperty('code', 'ai.invalid_output');
+});
+
+test('a network failure is ProviderFailed; the caller abort is Cancelled', async () => {
+  respond(() => Promise.reject(new TypeError('fetch failed')));
+  expect(await codeOf()).toHaveProperty('code', 'ai.provider_failed');
+  const controller = new AbortController();
+  controller.abort();
+  respond(() => Promise.reject(new DOMException('aborted', 'AbortError')));
+  expect(await codeOf(new Uint8Array([1]), options, controller.signal)).toHaveProperty('code', 'ai.cancelled');
+});
+
+test('empty audio and a blank key are InvalidInput, before any request', async () => {
+  const fetchMock = vi.fn(async () => Response.json(raw()));
+  globalThis.fetch = Object.assign(fetchMock, {});
+  expect(await codeOf(new Uint8Array())).toHaveProperty('code', 'schema.invalid_input');
+  expect(await codeOf(new Uint8Array([1]), { deepgramKey: ' ' })).toHaveProperty('code', 'schema.invalid_input');
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 // `./transcription` exposes plain TS types (the source); the schemas that parse the same data are internal.
@@ -58,4 +111,5 @@ test('the options and the transcript are exactly what the schemas take and retur
     z.input<typeof transcriptionOptionsSchema>
   >();
   expectTypeOf<DiarizedTranscript>().toEqualTypeOf<z.output<typeof diarizedTranscriptSchema>>();
+  expectTypeOf<Exclude<Awaited<ReturnType<typeof transcribeDiarizedAudio>>, TranscriptionFailure>>().toEqualTypeOf<DiarizedTranscript>();
 });

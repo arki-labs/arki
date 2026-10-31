@@ -29,12 +29,36 @@ export {
   ConfigurationError,
   ToolOutputError,
   isAIError,
-  hasErrorMessage,
   getErrorMessage,
 } from './errors';
 
 // Expected failures, returned (not thrown)
-export { BudgetExceeded, PROVIDER_PROBLEMS, ProviderUnavailable, RateLimited } from './failures';
+export {
+  AllProvidersFailed,
+  BudgetExceeded,
+  Cancelled,
+  CIRCUIT_OPEN_REASONS,
+  CircuitOpen,
+  ConnectionLost,
+  ContentFiltered,
+  FlowNodeFailed,
+  FlowStepLimitReached,
+  FlowTimedOut,
+  IncompleteGeneration,
+  InputBlocked,
+  InvalidOutput,
+  isProviderFailure,
+  KeywordSearchUnavailable,
+  NoProviderConfigured,
+  PROVIDER_FAILURES,
+  PROVIDER_PROBLEMS,
+  ProviderFailed,
+  ProviderUnauthorized,
+  ProviderUnavailable,
+  RateLimited,
+  UngroundedOutput,
+} from './failures';
+export type { ProviderFailure } from './failures';
 
 // Input validation
 export {
@@ -58,9 +82,6 @@ export {
   type GenerationOptions,
   type Document,
   type ChatMessage,
-  // Functions
-  validateInput,
-  validateInputAsync,
 } from './validation';
 
 // Vector search providers and interfaces
@@ -98,6 +119,9 @@ export {
   type SearchAnalytics,
   type SearchMetrics,
   type SearchCache,
+  type RedisSearchClient,
+  searchAnalyticsExportSchema,
+  type SearchAnalyticsExport,
 } from './semantic-search';
 
 // AI service utilities and providers
@@ -131,6 +155,8 @@ export {
   createProviderRouter,
   createDefaultProviderRouter,
   type ProviderRouterConfig,
+  type ProviderRouterFailure,
+  type ProviderRouterStreamOptions,
   type ResolvedLanguageModel,
   // Common LLM types
   type LLMProvider,
@@ -183,7 +209,15 @@ export {
 } from './capabilities';
 
 // Flow orchestration utilities
-export { Flow, FlowError, createFlow, type FlowConfig, type FlowEvent, type FlowNode } from './orchestration';
+export {
+  Flow,
+  FlowError,
+  createFlow,
+  type FlowConfig,
+  type FlowEvent,
+  type FlowFailure,
+  type FlowNode,
+} from './orchestration';
 
 // Agent-runtime adapter layer (swappable tool-loop backends behind one neutral contract).
 // P0 ships the AI-SDK backend; Mastra/LangGraph/TanStack adapters follow the same interface.
@@ -194,10 +228,12 @@ export {
   fetchRuntimeEventStream,
   initialRuntimeUiState,
   readRuntimeEventStream,
+  RUNTIME_FAILURES,
   runtimeEventReducer,
   toAiSdkToolSet,
   toRuntimeEventStreamResponse,
   type AgentRuntime,
+  type RuntimeFailure,
   type AgentTool,
   type AgentToolExecuteOptions,
   type AiSdkRuntimeOptions,
@@ -216,7 +252,6 @@ export {
   type BudgetConfig,
   type BudgetLimits,
   type BudgetPeriod,
-  type CircuitBreakerResult,
   type CircuitBreakerState,
   type CircuitState,
   type CostCircuitConfig,
@@ -241,7 +276,6 @@ export {
   CostEstimator,
   BudgetManager,
   CostCircuitBreaker,
-  CircuitBreakerError,
   UserCircuitBreakerManager,
   // Instances
   costEstimator,

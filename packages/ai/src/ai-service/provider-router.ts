@@ -13,6 +13,7 @@ import { createMistral, mistral } from '@ai-sdk/mistral';
 import { createOpenAI, openai } from '@ai-sdk/openai';
 import { generateText, streamText } from 'ai';
 
+import type { ProviderFailure } from '../failures.ts';
 import type {
   GenerateOptions,
   LLMProvider,
@@ -24,13 +25,46 @@ import type {
 } from './types.ts';
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, getErrorMessage } from '../errors.ts';
-import { RateLimited } from '../failures.ts';
+import {
+  AllProvidersFailed,
+  isProviderFailure,
+  NoProviderConfigured,
+  ProviderFailed,
+  ProviderUnauthorized,
+  RateLimited,
+} from '../failures.ts';
 import { DEFAULT_ANTHROPIC_MODEL } from './factory.ts';
 import { createGoogleService } from './google-service.ts';
 import { createGroqService } from './groq-service.ts';
 import { createMistralService } from './mistral-service.ts';
 import { createOpenRouterService } from './openrouter-service.ts';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.ts';
+import { aiTelemetry } from './telemetry.ts';
+
+/** What a router call returns when it does not succeed: one provider's final failure, or every provider's. */
+export type ProviderRouterFailure = ProviderFailure | AllProvidersFailed;
+
+/** Stream options for the router: `onError` gets the failure that ends the router's stream, never one it recovered from. */
+export type ProviderRouterStreamOptions = Omit<StreamOptions, 'onError'> & {
+  onError?: (failure: ProviderRouterFailure) => void;
+};
+
+/**
+ * The failures that mean "this provider cannot serve right now": a rate limit, an outage, or a
+ * refused key. Only these fall back to the next provider and count against provider health. A
+ * bad key on one provider says nothing about the others, so it falls back too. `Cancelled` and
+ * `UnexpectedDefect` stop the call; a refusal, a cut-off answer or an unusable answer is about
+ * the request, not the provider, so it is returned as is (sending a refused prompt to the next
+ * provider would shop it around).
+ */
+const PROVIDER_OUTAGES = [RateLimited, ProviderFailed, ProviderUnauthorized] as const;
+
+/** One provider a fallback call tried, and how it failed. */
+type ProviderAttempt = { provider: string; failure: ProviderFailure };
+
+function isOutage(failure: ProviderFailure): boolean {
+  return PROVIDER_OUTAGES.some(definition => definition.is(failure));
+}
 
 /**
  * Default models for each provider (free tier compatible)
@@ -131,136 +165,106 @@ function createLanguageModel(config: ProviderConfig): LanguageModel {
   }
 }
 
+/**
+ * An `LLMProvider` over the AI SDK for one provider config. Every call returns its failure through
+ * the shared boundary (`providerFailure`, `finishFailure`, `readTextParts`) and is traced through
+ * `aiTelemetry`, like the `LanguageModelAdapter`.
+ */
 function createLanguageModelProvider(config: ProviderConfig, defaultTemperature: number): LLMProvider {
   const model = resolveModel(config);
   const maxRetries = 2;
+  const call = (options: GenerateOptions) => ({ provider: config.name, model, signal: options.signal });
+  const missingKey = (): ProviderFailure | undefined =>
+    hasConfiguredCredentials(config) ? undefined : ProviderUnauthorized({ provider: config.name, model });
+  const callOptions = (options: GenerateOptions, operation: string) => ({
+    model: createLanguageModel(config),
+    temperature: options.temperature ?? defaultTemperature,
+    maxOutputTokens: options.maxTokens,
+    maxRetries: options.maxRetries ?? maxRetries,
+    stopSequences: options.stopSequences,
+    abortSignal: options.signal,
+    ...aiTelemetry(`${config.name}.${operation}`),
+  });
+
+  /** Read a started stream to its end, calling the stream callbacks; a failure is the last item. */
+  async function* textOf(
+    open: () => ReturnType<typeof streamText>,
+    options: StreamOptions,
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    const missing = missingKey();
+    if (missing) {
+      options.onError?.(missing);
+      yield missing;
+      return;
+    }
+    let stream: ReturnType<typeof streamText>;
+    try {
+      stream = open();
+    } catch (error) {
+      const failure = providerFailure(error, call(options));
+      options.onError?.(failure);
+      yield failure;
+      return;
+    }
+    let text = '';
+    for await (const chunk of readTextParts(stream.fullStream, call(options))) {
+      if (typeof chunk !== 'string') {
+        options.onError?.(chunk);
+        yield chunk;
+        return;
+      }
+      text += chunk;
+      options.onChunk?.(chunk);
+      yield chunk;
+    }
+    options.onComplete?.(text);
+  }
 
   return {
     name: config.name,
     model,
     isAvailable: () => hasConfiguredCredentials(config),
     generateText: async (prompt, options = {}) => {
-      if (!hasConfiguredCredentials(config)) {
-        throw new GenerationError(`${config.name} API key not configured`);
-      }
-
+      const missing = missingKey();
+      if (missing) return missing;
       try {
         const result = await generateText({
-          model: createLanguageModel(config),
+          ...callOptions(options, 'generateText'),
           instructions: options.systemPrompt,
           prompt,
-          temperature: options.temperature ?? defaultTemperature,
-          maxOutputTokens: options.maxTokens,
-          maxRetries: options.maxRetries ?? maxRetries,
-          stopSequences: options.stopSequences,
         });
-
-        return result.text;
+        return finishFailure(result.finishReason, call(options)) ?? result.text;
       } catch (error) {
-        throw new GenerationError(`Failed to generate text with ${config.name}: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, call(options));
       }
     },
     generateConversation: async (messages, options = {}) => {
-      if (!hasConfiguredCredentials(config)) {
-        throw new GenerationError(`${config.name} API key not configured`);
-      }
-
+      const missing = missingKey();
+      if (missing) return missing;
       try {
         const result = await generateText({
-          model: createLanguageModel(config),
-          messages: messages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })),
-          temperature: options.temperature ?? defaultTemperature,
-          maxOutputTokens: options.maxTokens,
-          maxRetries: options.maxRetries ?? maxRetries,
-          stopSequences: options.stopSequences,
+          ...callOptions(options, 'generateConversation'),
+          messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
         });
-
-        return result.text;
+        return finishFailure(result.finishReason, call(options)) ?? result.text;
       } catch (error) {
-        throw new GenerationError(
-          `Failed to generate conversation with ${config.name}: ${getErrorMessage(error)}`,
-          error,
-        );
+        return providerFailure(error, call(options));
       }
     },
-    streamText: async function* (prompt, options = {}) {
-      if (!hasConfiguredCredentials(config)) {
-        throw new GenerationError(`${config.name} API key not configured`);
-      }
-
-      try {
-        const stream = streamText({
-          model: createLanguageModel(config),
-          instructions: options.systemPrompt,
-          prompt,
-          temperature: options.temperature ?? defaultTemperature,
-          maxOutputTokens: options.maxTokens,
-          stopSequences: options.stopSequences,
-        });
-
-        let fullText = '';
-        for await (const chunk of stream.textStream) {
-          fullText += chunk;
-          if (options.onChunk) {
-            options.onChunk(chunk);
-          }
-          yield chunk;
-        }
-
-        if (options.onComplete) {
-          options.onComplete(fullText);
-        }
-      } catch (error) {
-        if (options.onError) {
-          options.onError(error as Error);
-        }
-
-        throw new GenerationError(`Failed to stream text with ${config.name}: ${getErrorMessage(error)}`, error);
-      }
-    },
-    streamConversation: async function* (messages, options = {}) {
-      if (!hasConfiguredCredentials(config)) {
-        throw new GenerationError(`${config.name} API key not configured`);
-      }
-
-      try {
-        const stream = streamText({
-          model: createLanguageModel(config),
-          messages: messages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })),
-          temperature: options.temperature ?? defaultTemperature,
-          maxOutputTokens: options.maxTokens,
-          stopSequences: options.stopSequences,
-        });
-
-        let fullText = '';
-        for await (const chunk of stream.textStream) {
-          fullText += chunk;
-          if (options.onChunk) {
-            options.onChunk(chunk);
-          }
-          yield chunk;
-        }
-
-        if (options.onComplete) {
-          options.onComplete(fullText);
-        }
-      } catch (error) {
-        if (options.onError) {
-          options.onError(error as Error);
-        }
-
-        throw new GenerationError(
-          `Failed to stream conversation with ${config.name}: ${getErrorMessage(error)}`,
-          error,
-        );
-      }
-    },
+    streamText: (prompt, options = {}) =>
+      textOf(
+        () => streamText({ ...callOptions(options, 'streamText'), instructions: options.systemPrompt, prompt }),
+        options,
+      ),
+    streamConversation: (messages, options = {}) =>
+      textOf(
+        () =>
+          streamText({
+            ...callOptions(options, 'streamConversation'),
+            messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
+          }),
+        options,
+      ),
   };
 }
 
@@ -293,28 +297,34 @@ export type ProviderRouterConfig = {
  *
  * Manages multiple LLM providers with:
  * - Weighted round-robin selection
- * - Automatic failover on errors
+ * - Failover to the next provider on an outage (`RateLimited`, `ProviderFailed`, `ProviderUnauthorized`)
  * - Health tracking and recovery
+ *
+ * Build it with `createProviderRouter` (or `ProviderRouter.create`): a config with no usable
+ * provider returns `NoProviderConfigured` there, at boot, instead of a router that fails every call.
+ * Every call returns its failure; nothing is thrown.
  */
 export class ProviderRouter {
   private readonly providers = new Map<string, LLMProvider>();
   private readonly configs: ProviderConfig[];
   private readonly healthStatus = new Map<string, ProviderHealth>();
+  /** The failure that last counted against each provider, for `AllProvidersFailed`. */
+  private readonly lastFailures = new Map<string, ProviderFailure>();
   private readonly maxConsecutiveFailures: number;
   private readonly healthCheckIntervalMs: number;
   private currentIndex = 0;
   private totalWeight = 0;
 
-  constructor(config: ProviderRouterConfig) {
+  /** Private: `create` checks that at least one provider can run. */
+  private constructor(config: ProviderRouterConfig) {
     this.configs = config.providers.filter(p => p.enabled !== false);
     this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? 3;
     this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 60_000;
 
-    // Initialize providers
     for (const providerConfig of this.configs) {
       const provider = this.createProvider(providerConfig, config.defaultTemperature);
 
-      if (provider && provider.isAvailable()) {
+      if (provider.isAvailable()) {
         this.providers.set(providerConfig.name, provider);
         this.healthStatus.set(providerConfig.name, {
           isHealthy: true,
@@ -333,21 +343,31 @@ export class ProviderRouter {
         });
       }
     }
+  }
 
-    if (this.providers.size === 0) {
-      throw new GenerationError('No LLM providers available. Please configure at least one provider API key.');
+  /**
+   * Build a router, or return `NoProviderConfigured` when no provider is enabled with an API key.
+   * This is a configuration fault: check it at boot.
+   */
+  static create(config: ProviderRouterConfig): ProviderRouter | NoProviderConfigured {
+    const router = new ProviderRouter(config);
+    if (router.providers.size === 0) {
+      debugService.debug('[ProviderRouter] No provider is enabled with an API key ({listed} listed)', {
+        listed: config.providers.length,
+      });
+      return NoProviderConfigured();
     }
-
     debugService.debug('[ProviderRouter] Initialized with {providersSize} providers (total weight: {weight})', {
-      providersSize: this.providers.size,
-      weight: this.totalWeight,
+      providersSize: router.providers.size,
+      weight: router.totalWeight,
     });
+    return router;
   }
 
   /**
    * Create a provider instance based on config
    */
-  private createProvider(config: ProviderConfig, defaultTemperature?: number): LLMProvider | null {
+  private createProvider(config: ProviderConfig, defaultTemperature?: number): LLMProvider {
     const model = resolveModel(config);
     const temperature = defaultTemperature ?? 0.7;
 
@@ -369,9 +389,6 @@ export class ProviderRouter {
       }
       case 'openrouter': {
         return createOpenRouterService({ model, temperature });
-      }
-      default: {
-        return createLanguageModelProvider({ ...config, model }, temperature);
       }
     }
   }
@@ -417,6 +434,54 @@ export class ProviderRouter {
     }
 
     return normalized.at(-1)?.config ?? null;
+  }
+
+  /**
+   * The providers one fallback call tries, each once: the healthy ones (the first picked by
+   * weighted round-robin, the rest in config order), then the tripped ones whose health check
+   * interval has passed (a half-open retry: one more outage trips them again).
+   */
+  private attemptOrder(): LLMProvider[] {
+    const healthy = this.getHealthyConfigs();
+    const first = this.selectNextWeightedConfig(healthy);
+    const now = Date.now();
+    const recoverable = this.configs.filter(config => {
+      const health = this.healthStatus.get(config.name);
+      return (
+        this.providers.has(config.name) &&
+        health?.isHealthy === false &&
+        health.lastFailure !== undefined &&
+        now - health.lastFailure.getTime() > this.healthCheckIntervalMs
+      );
+    });
+    const ordered = [...(first ? [first] : []), ...healthy.filter(config => config !== first), ...recoverable];
+    return ordered.flatMap(config => this.providers.get(config.name) ?? []);
+  }
+
+  /**
+   * `AllProvidersFailed` for the providers this call tried, plus every provider it skipped because
+   * it is tripped (with the failure that tripped it). `retryAfterMs` is the shortest Retry-After.
+   */
+  private allFailed(attempts: readonly ProviderAttempt[]): AllProvidersFailed {
+    const tried = new Set(attempts.map(attempt => attempt.provider));
+    const skipped = [...this.providers.keys()].flatMap(provider => {
+      const failure = this.lastFailures.get(provider);
+      return tried.has(provider) || !failure ? [] : [{ provider, failure }];
+    });
+    const all = [...attempts, ...skipped];
+    const waits = all.flatMap(({ failure }) =>
+      RateLimited.is(failure) && failure.data.retryAfterMs !== undefined ? [failure.data.retryAfterMs] : [],
+    );
+    debugService.debug('[ProviderRouter] Every provider failed: {codes}', {
+      codes: all.map(({ provider, failure }) => `${provider}=${failure.code}`).join(', '),
+    });
+    return AllProvidersFailed(
+      {
+        failures: all.map(({ provider, failure }) => ({ provider, code: failure.code })),
+        ...(waits.length > 0 ? { retryAfterMs: Math.min(...waits) } : {}),
+      },
+      { cause: all.map(({ failure }) => failure) },
+    );
   }
 
   /**
@@ -470,21 +535,36 @@ export class ProviderRouter {
   }
 
   /**
-   * Report a failure for a provider
+   * Report a failure for a provider, for calls made outside the router (for example `streamText`
+   * on the model from `toLanguageModel`). Pass the `ProviderFailure` or the raw error the AI SDK
+   * gave you: it is mapped through the same boundary as the router's own calls. Only an outage
+   * (`RateLimited`, `ProviderFailed`, `ProviderUnauthorized`) counts against the provider's
+   * health; a cancel or a bug does not.
    */
-  reportFailure(providerName: string, error: Error): void {
+  reportFailure(providerName: string, error: unknown): void {
+    const provider = this.providers.get(providerName);
+    if (!provider) return;
+    const failure = isProviderFailure(error)
+      ? error
+      : providerFailure(error, { provider: providerName, model: provider.model });
+    if (isOutage(failure)) this.recordOutage(providerName, failure);
+  }
+
+  /** Count one outage against a provider; it is tripped after `maxConsecutiveFailures` in a row. */
+  private recordOutage(providerName: string, failure: ProviderFailure): void {
     const health = this.healthStatus.get(providerName);
     if (!health) return;
 
     const newFailures = health.consecutiveFailures + 1;
     const isHealthy = newFailures < this.maxConsecutiveFailures;
 
+    this.lastFailures.set(providerName, failure);
     this.healthStatus.set(providerName, {
       isHealthy,
       consecutiveFailures: newFailures,
       lastFailure: new Date(),
       lastSuccess: health.lastSuccess,
-      lastError: error.message,
+      lastError: `${failure.code}: ${failure.message}`,
     });
 
     if (!isHealthy) {
@@ -510,131 +590,103 @@ export class ProviderRouter {
   }
 
   /**
-   * Execute an operation with automatic failover. A provider whose rate limiter refuses the call
-   * counts as failed and the next one is tried. When no provider answers and at least one was
-   * rate limited, the `RateLimited` with the shortest wait is returned.
+   * Run `operation` on one provider after another until one succeeds. Only an outage
+   * (`RateLimited`, `ProviderFailed`, `ProviderUnauthorized`) moves on to the next provider and
+   * counts against the provider's health. `Cancelled`, `UnexpectedDefect` (an unknown throw from
+   * `operation`) and a refused, cut-off or unusable answer are returned at once. When every
+   * provider failed or is tripped, returns `AllProvidersFailed` with each provider's failure code.
    */
   async executeWithFallback<T>(
-    operation: (provider: LLMProvider) => Promise<T | RateLimited>,
-  ): Promise<ProviderResult<T> | RateLimited> {
+    operation: (provider: LLMProvider) => Promise<T | ProviderFailure>,
+  ): Promise<ProviderResult<T> | ProviderRouterFailure> {
     const startTime = Date.now();
-    const triedProviders = new Set<string>();
-    let soonestRetry: RateLimited | undefined;
+    const attempts: ProviderAttempt[] = [];
 
-    while (triedProviders.size < this.providers.size) {
-      const provider = this.getNextProvider();
+    for (const provider of this.attemptOrder()) {
+      debugService.debug('[ProviderRouter] Attempting operation with provider: {provider}', {
+        provider: provider.name,
+      });
 
-      if (!provider) {
-        throw new GenerationError(
-          'No healthy providers available',
-          new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
-        );
-      }
-
-      if (triedProviders.has(provider.name)) {
-        continue;
-      }
-
-      triedProviders.add(provider.name);
-
+      let result: T | ProviderFailure;
       try {
-        debugService.debug('[ProviderRouter] Attempting operation with provider: {provider}', {
-          provider: provider.name,
-        });
-
-        const data = await operation(provider);
-
-        if (RateLimited.is(data)) {
-          debugService.debug('[ProviderRouter] Provider {providerName} rate limited (retry after {after}ms)', {
-            providerName: provider.name,
-            after: data.data.retryAfterMs,
-          });
-          this.reportFailure(provider.name, new Error(data.message));
-          if (!soonestRetry || data.data.retryAfterMs < soonestRetry.data.retryAfterMs) soonestRetry = data;
-          continue;
-        }
-
-        this.reportSuccess(provider.name);
-
-        return {
-          data,
-          provider: provider.name,
-          durationMs: Date.now() - startTime,
-        };
+        result = await operation(provider);
       } catch (error) {
-        debugService.debug('[ProviderRouter] Provider {providerName} failed: {failed}', {
-          providerName: provider.name,
-          failed: getErrorMessage(error),
-        });
-
-        this.reportFailure(provider.name, error as Error);
-        // Continue to next provider
+        result = providerFailure(error, { provider: provider.name, model: provider.model });
       }
+
+      if (!isProviderFailure(result)) {
+        this.reportSuccess(provider.name);
+        return { data: result, provider: provider.name, durationMs: Date.now() - startTime };
+      }
+
+      debugService.debug('[ProviderRouter] Provider {providerName} failed: {code}', {
+        providerName: provider.name,
+        code: result.code,
+      });
+      if (!isOutage(result)) return result;
+      this.recordOutage(provider.name, result);
+      attempts.push({ provider: provider.name, failure: result });
     }
 
-    if (soonestRetry) return soonestRetry;
-
-    throw new GenerationError('All providers failed', new Error(`Tried providers: ${[...triedProviders].join(', ')}`));
+    return this.allFailed(attempts);
   }
 
   /**
-   * Stream with automatic failover
-   *
-   * Note: Streaming with failover is tricky because we can't retry
-   * mid-stream. This implementation fails over before starting the stream.
+   * Stream from one provider after another. A provider is replaced only when it fails with an
+   * outage BEFORE its first chunk; after the first chunk its failure is final (the stream ends with
+   * it), so the caller never reads the same text twice. Like `executeWithFallback`, `Cancelled`,
+   * `UnexpectedDefect` and refusals end the stream at once, and the last item is
+   * `AllProvidersFailed` when every provider failed or is tripped.
    */
   async *streamWithFallback(
-    operation: (provider: LLMProvider) => AsyncGenerator<string, void, unknown>,
-  ): AsyncGenerator<string, void, unknown> {
-    const triedProviders = new Set<string>();
+    operation: (provider: LLMProvider) => AsyncGenerator<string | ProviderFailure, void, unknown>,
+  ): AsyncGenerator<string | ProviderRouterFailure, void, unknown> {
+    const attempts: ProviderAttempt[] = [];
 
-    while (triedProviders.size < this.providers.size) {
-      const provider = this.getNextProvider();
+    for (const provider of this.attemptOrder()) {
+      debugService.debug('[ProviderRouter] Attempting stream with provider: {provider}', { provider: provider.name });
 
-      if (!provider) {
-        throw new GenerationError(
-          'No healthy providers available',
-          new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
-        );
-      }
-
-      if (triedProviders.has(provider.name)) {
-        continue;
-      }
-
-      triedProviders.add(provider.name);
-
+      let started = false;
+      let failure: ProviderFailure | undefined;
       try {
-        debugService.debug('[ProviderRouter] Attempting stream with provider: {provider}', { provider: provider.name });
-
-        const stream = operation(provider);
-
-        // Yield all chunks from the stream
-        for await (const chunk of stream) {
+        for await (const chunk of operation(provider)) {
+          if (typeof chunk !== 'string') {
+            failure = chunk;
+            break;
+          }
+          started = true;
           yield chunk;
         }
+      } catch (error) {
+        failure = providerFailure(error, { provider: provider.name, model: provider.model });
+      }
 
-        // If we get here, stream completed successfully
+      if (!failure) {
         this.reportSuccess(provider.name);
         return;
-      } catch (error) {
-        debugService.debug('[ProviderRouter] Provider {providerName} stream failed: {failed}', {
-          providerName: provider.name,
-          failed: getErrorMessage(error),
-        });
-
-        this.reportFailure(provider.name, error as Error);
-        // Continue to next provider
       }
+
+      debugService.debug('[ProviderRouter] Provider {providerName} stream failed: {code} (after text: {started})', {
+        providerName: provider.name,
+        code: failure.code,
+        started,
+      });
+      const outage = isOutage(failure);
+      if (outage) this.recordOutage(provider.name, failure);
+      if (started || !outage) {
+        yield failure;
+        return;
+      }
+      attempts.push({ provider: provider.name, failure });
     }
 
-    throw new GenerationError('All providers failed', new Error(`Tried providers: ${[...triedProviders].join(', ')}`));
+    yield this.allFailed(attempts);
   }
 
   /**
    * Convenience method: Generate text with automatic failover
    */
-  async generateText(prompt: string, options?: GenerateOptions): Promise<ProviderResult<string> | RateLimited> {
+  async generateText(prompt: string, options?: GenerateOptions): Promise<ProviderResult<string> | ProviderRouterFailure> {
     return this.executeWithFallback(provider => provider.generateText(prompt, options));
   }
 
@@ -644,22 +696,36 @@ export class ProviderRouter {
   async generateConversation(
     messages: Message[],
     options?: GenerateOptions,
-  ): Promise<ProviderResult<string> | RateLimited> {
+  ): Promise<ProviderResult<string> | ProviderRouterFailure> {
     return this.executeWithFallback(provider => provider.generateConversation(messages, options));
   }
 
   /**
    * Convenience method: Stream text with automatic failover
    */
-  async *streamText(prompt: string, options?: StreamOptions): AsyncGenerator<string, void, unknown> {
-    yield* this.streamWithFallback(provider => provider.streamText(prompt, options));
+  async *streamText(
+    prompt: string,
+    options: ProviderRouterStreamOptions = {},
+  ): AsyncGenerator<string | ProviderRouterFailure, void, unknown> {
+    const { onError, ...providerOptions } = options;
+    yield* withFinalError(
+      this.streamWithFallback(provider => provider.streamText(prompt, providerOptions)),
+      onError,
+    );
   }
 
   /**
    * Convenience method: Stream conversation with automatic failover
    */
-  async *streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown> {
-    yield* this.streamWithFallback(provider => provider.streamConversation(messages, options));
+  async *streamConversation(
+    messages: Message[],
+    options: ProviderRouterStreamOptions = {},
+  ): AsyncGenerator<string | ProviderRouterFailure, void, unknown> {
+    const { onError, ...providerOptions } = options;
+    yield* withFinalError(
+      this.streamWithFallback(provider => provider.streamConversation(messages, providerOptions)),
+      onError,
+    );
   }
 
   /**
@@ -692,6 +758,7 @@ export class ProviderRouter {
         isHealthy: true,
         consecutiveFailures: 0,
       });
+      this.lastFailures.delete(providerName);
       debugService.debug('[ProviderRouter] Reset health for provider: {provider}', { provider: providerName });
     }
   }
@@ -712,47 +779,32 @@ export class ProviderRouter {
    * Vercel AI SDK's `streamText()` / `generateText()` functions, which
    * require a `LanguageModel` instance.
    *
-   * @returns The resolved model and provider name for health reporting
-   * @throws GenerationError if no healthy provider is available
+   * @returns The resolved model and provider name for health reporting, or `AllProvidersFailed`
+   *   when every provider is tripped (with the failure that tripped each)
    *
    * @example
    * ```ts
    * const router = createProviderRouter({ providers: [...] });
-   * const { model, providerName } = router.toLanguageModel();
+   * if (isFailure(router)) throw router; // NoProviderConfigured: a boot-time configuration fault
+   * const resolved = router.toLanguageModel();
+   * if (isFailure(resolved)) return resolved;
    *
    * const result = streamText({
-   *   model,
+   *   model: resolved.model,
    *   messages,
-   *   onEnd: () => router.reportSuccess(providerName),
-   *   onError: () => router.reportFailure(providerName, new Error('failed')),
+   *   onEnd: () => router.reportSuccess(resolved.providerName),
+   *   onError: ({ error }) => router.reportFailure(resolved.providerName, error),
    * });
    * ```
    */
-  toLanguageModel(): ResolvedLanguageModel {
+  toLanguageModel(): ResolvedLanguageModel | AllProvidersFailed {
     const healthyConfigs = this.getHealthyConfigs();
+    const recovered = healthyConfigs.length === 0 ? this.tryRecoverProvider() : null;
+    const config = recovered
+      ? this.configs.find(c => c.name === recovered.name)
+      : this.selectNextWeightedConfig(healthyConfigs);
 
-    if (healthyConfigs.length === 0) {
-      // Attempt recovery before giving up
-      const recovered = this.tryRecoverProvider();
-      if (recovered) {
-        const config = this.configs.find(c => c.name === recovered.name);
-        if (config) {
-          const model = createLanguageModel(config);
-          debugService.debug('[ProviderRouter] Resolved recovered AI SDK model: {model} ({model2})', {
-            model: config.name,
-            model2: config.model,
-          });
-          return { model, providerName: config.name };
-        }
-      }
-
-      throw new GenerationError('No healthy LLM provider available. Configure at least one provider API key.');
-    }
-
-    const config = this.selectNextWeightedConfig(healthyConfigs);
-    if (!config) {
-      throw new GenerationError('No healthy LLM provider available.');
-    }
+    if (!config) return this.allFailed([]);
 
     const model = createLanguageModel(config);
 
@@ -765,20 +817,35 @@ export class ProviderRouter {
   }
 }
 
+/** Pass a router stream through, calling `onError` with the failure that ends it (the last item). */
+async function* withFinalError(
+  stream: AsyncGenerator<string | ProviderRouterFailure, void, unknown>,
+  onError: ((failure: ProviderRouterFailure) => void) | undefined,
+): AsyncGenerator<string | ProviderRouterFailure, void, unknown> {
+  for await (const chunk of stream) {
+    if (typeof chunk !== 'string') onError?.(chunk);
+    yield chunk;
+  }
+}
+
 /**
- * Factory function for creating a ProviderRouter
+ * Build a ProviderRouter, or return `NoProviderConfigured` when no listed provider is enabled
+ * with an API key. Check the result at boot.
  */
-export function createProviderRouter(config: ProviderRouterConfig): ProviderRouter {
-  return new ProviderRouter(config);
+export function createProviderRouter(config: ProviderRouterConfig): ProviderRouter | NoProviderConfigured {
+  return ProviderRouter.create(config);
 }
 
 /**
  * Create a ProviderRouter with default free-tier providers
  *
- * Automatically enables providers that have API keys configured.
+ * Automatically enables providers that have API keys configured. Returns `NoProviderConfigured`
+ * when none of them has a key.
  */
-export function createDefaultProviderRouter(options?: { defaultTemperature?: number }): ProviderRouter {
-  return new ProviderRouter({
+export function createDefaultProviderRouter(options?: {
+  defaultTemperature?: number;
+}): ProviderRouter | NoProviderConfigured {
+  return ProviderRouter.create({
     providers: [
       { name: 'groq', model: 'gemma2-9b-it', weight: 3, enabled: true },
       { name: 'google', model: 'gemini-1.5-flash', weight: 2, enabled: true },

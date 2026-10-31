@@ -345,7 +345,7 @@ export const PromptValidator = {
     template: string,
     variables: Record<string, string | number | boolean>
   ): { valid: boolean; missing: string[] } {
-    const requiredVars = template.match(/\{(\w+)\}/g)?.map(v => v.slice(1, -1)) || [];
+    const requiredVars = template.match(/\{\w+\}/g)?.map(v => v.slice(1, -1)) || [];
     const missing = requiredVars.filter(v => !(v in variables));
 
     return {
@@ -396,7 +396,7 @@ export const PromptValidator = {
     }
 
     // Check for unclear instructions
-    if (!prompt.includes('?') && !/^(create|generate|write|explain|describe|analyze)/i.test(prompt)) {
+    if (!prompt.includes('?') && !/^(?:create|generate|write|explain|describe|analyze)/i.test(prompt)) {
       suggestions.push('Consider starting with a clear action verb');
     }
 

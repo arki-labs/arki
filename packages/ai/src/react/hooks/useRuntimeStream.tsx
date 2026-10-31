@@ -15,13 +15,20 @@
 import { useCallback, useRef, useState } from 'react';
 
 import type { RuntimeEvent } from '../../runtime/types';
-import { initialRuntimeUiState, runtimeEventReducer, type RuntimeUiState } from '../../runtime/ui-state';
+import { Cancelled, ConnectionLost } from '../../failures';
+import { thrownRunFailure } from '../../runtime/types';
+import { initialRuntimeUiState, runtimeEventReducer  } from '../../runtime/ui-state';
+import type {RuntimeUiState} from '../../runtime/ui-state';
 
-export interface UseRuntimeStreamResult {
+export type UseRuntimeStreamResult = {
   state: RuntimeUiState;
-  /** Consume a RuntimeEvent stream to completion, updating `state` as events arrive. */
-  run: (source: AsyncIterable<RuntimeEvent>) => Promise<void>;
-  /** Abort the in-flight stream (state keeps whatever was reduced so far). */
+  /**
+   * Consume a RuntimeEvent stream to completion, updating `state` as events arrive. `source` gets the
+   * signal `stop()` aborts: pass it on (`signal => fetchRuntimeEventStream(url, { signal })`, or
+   * `runToolLoop({ ..., signal })`) so stopping really cancels the request. A new `run` stops the last one.
+   */
+  run: (source: (signal: AbortSignal) => AsyncIterable<RuntimeEvent>) => Promise<void>;
+  /** Abort the in-flight stream. The run ends with status `error` and a `Cancelled` failure. */
   stop: () => void;
   isStreaming: boolean;
 }
@@ -29,34 +36,48 @@ export interface UseRuntimeStreamResult {
 export function useRuntimeStream(): UseRuntimeStreamResult {
   const [state, setState] = useState<RuntimeUiState>(initialRuntimeUiState);
   const abortRef = useRef<AbortController | null>(null);
+  // Bumped by every `run`, so a superseded run never writes over the state of the run that replaced it.
+  const runIdRef = useRef(0);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
   }, []);
 
-  const run = useCallback(async (source: AsyncIterable<RuntimeEvent>) => {
+  const run = useCallback(async (source: (signal: AbortSignal) => AsyncIterable<RuntimeEvent>) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    runIdRef.current += 1;
+    const runId = runIdRef.current;
+    const isCurrent = () => runIdRef.current === runId;
 
     let accumulated = initialRuntimeUiState;
     setState(accumulated);
 
     try {
-      for await (const event of source) {
+      for await (const event of source(controller.signal)) {
         if (controller.signal.aborted) break;
         accumulated = runtimeEventReducer(accumulated, event);
         setState(accumulated);
       }
     } catch (error) {
-      if (!controller.signal.aborted) {
-        const message = error instanceof Error ? error.message : String(error);
-        setState(runtimeEventReducer(accumulated, { type: 'run:error', error: message }));
-      }
+      accumulated = runtimeEventReducer(accumulated, {
+        type: 'run:error',
+        failure: thrownRunFailure(error, controller.signal),
+      });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
+
+    // A stream that stopped without run:finish or run:error did not finish: never leave it `running`.
+    if (accumulated.status === 'running' || accumulated.status === 'idle') {
+      accumulated = runtimeEventReducer(accumulated, {
+        type: 'run:error',
+        failure: controller.signal.aborted ? Cancelled() : ConnectionLost(),
+      });
+    }
+    if (isCurrent()) setState(accumulated);
   }, []);
 
   return { state, run, stop, isStreaming: state.status === 'running' };

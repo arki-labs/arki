@@ -8,6 +8,7 @@
  * @module cost/estimator
  */
 
+import type { Price } from './pricing';
 import type { CostEstimate, ModelPricing } from './types';
 import {
   calculateLLMCost,
@@ -15,6 +16,7 @@ import {
   estimateTokensFromWords,
   getModelPricing,
   hasKnownPricing,
+  priceOf,
 } from './pricing';
 
 // ============================================
@@ -62,6 +64,26 @@ export class CostEstimator {
    */
   estimateLLMCost(model: string, inputTokens: number, outputTokens: number): number {
     return calculateLLMCost(model, inputTokens, outputTokens);
+  }
+
+  /**
+   * Estimate the price of an LLM operation and say how it was worked out, like `priceOf`:
+   * `list-price` for a known model, `default-rate` for a guess on an unknown hosted model, `local`
+   * for a provider that runs on your machine.
+   *
+   * @param model - Model identifier
+   * @param inputTokens - Estimated input token count
+   * @param outputTokens - Estimated output token count
+   * @param options - `provider`: the provider that will serve the call (`ollama` costs 0)
+   * @returns The price in USD and its basis
+   */
+  estimateLLMPrice(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    options: { readonly provider?: string } = {}
+  ): Price {
+    return priceOf({ ...options, model, inputTokens, outputTokens });
   }
 
   /**
@@ -116,7 +138,7 @@ export class CostEstimator {
    * @param model - Model identifier
    * @param inputTokens - Estimated input tokens
    * @param outputTokens - Estimated output tokens
-   * @returns Cost estimate object
+   * @returns Cost estimate object, with the price `basis` so a default-rate guess is never passed off as a list price
    */
   createEstimate(
     operation: string,
@@ -124,10 +146,12 @@ export class CostEstimator {
     inputTokens: number,
     outputTokens: number
   ): CostEstimate {
+    const price = this.estimateLLMPrice(model, inputTokens, outputTokens);
     return {
       operation,
       model,
-      estimatedCostUsd: this.estimateLLMCost(model, inputTokens, outputTokens),
+      estimatedCostUsd: price.usd,
+      basis: price.basis,
       tokenEstimate: {
         input: inputTokens,
         output: outputTokens,

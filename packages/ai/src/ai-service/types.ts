@@ -9,7 +9,7 @@ import type { LanguageModelUsage } from 'ai';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
-import type { RateLimited } from '../failures.ts';
+import type { ProviderFailure } from '../failures.ts';
 
 /**
  * Message format for conversation-based interactions
@@ -55,8 +55,8 @@ export type StreamOptions = {
   onChunk?: (chunk: string) => void;
   /** Callback when stream completes */
   onComplete?: (fullText: string) => void;
-  /** Callback on error */
-  onError?: (error: Error) => void;
+  /** Called with the failure that ends the stream, just before the stream yields it */
+  onError?: (failure: ProviderFailure) => void;
 } & GenerateOptions;
 
 /**
@@ -121,36 +121,36 @@ export type LLMProvider = {
    *
    * @param prompt - The input prompt
    * @param options - Generation options
-   * @returns Generated text, or `RateLimited` when the provider's local rate limiter refuses the call
+   * @returns Generated text, or a `ProviderFailure` (local or provider rate limit, refusal, truncation, outage, cancel)
    */
-  generateText(prompt: string, options?: GenerateOptions): Promise<string | RateLimited>;
+  generateText(prompt: string, options?: GenerateOptions): Promise<string | ProviderFailure>;
 
   /**
    * Generate text from a conversation history
    *
    * @param messages - Array of conversation messages
    * @param options - Generation options
-   * @returns Generated response text, or `RateLimited` when the provider's local rate limiter refuses the call
+   * @returns Generated response text, or a `ProviderFailure`
    */
-  generateConversation(messages: Message[], options?: GenerateOptions): Promise<string | RateLimited>;
+  generateConversation(messages: Message[], options?: GenerateOptions): Promise<string | ProviderFailure>;
 
   /**
    * Stream text generation from a single prompt
    *
    * @param prompt - The input prompt
    * @param options - Stream options
-   * @yields Text chunks as they're generated
+   * @yields Text chunks as they're generated; a `ProviderFailure` is the last item when the stream fails or stops early
    */
-  streamText(prompt: string, options?: StreamOptions): AsyncGenerator<string, void, unknown>;
+  streamText(prompt: string, options?: StreamOptions): AsyncGenerator<string | ProviderFailure, void, unknown>;
 
   /**
    * Stream text generation from a conversation history
    *
    * @param messages - Array of conversation messages
    * @param options - Stream options
-   * @yields Text chunks as they're generated
+   * @yields Text chunks as they're generated; a `ProviderFailure` is the last item when the stream fails or stops early
    */
-  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown>;
+  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string | ProviderFailure, void, unknown>;
 
   /**
    * Check if the provider is available (has API key configured)
@@ -182,14 +182,14 @@ export type StructuredLLMProvider = {
    * Generate a structured object from a single prompt.
    * Any Standard Schema works (zod, valibot, arktype, ...). The model is shown the schema's input
    * JSON Schema and writes raw JSON; the result is that JSON run through the schema, so it has
-   * the schema's OUTPUT type (a transform has already run). Invalid output throws a
-   * `GenerationError` whose cause chain includes `UnexpectedFailure` carrying canonical `InvalidInput` issues.
+   * the schema's OUTPUT type (a transform has already run). Output the schema rejects is returned
+   * as `InvalidOutput`; every other way the call can fail is a returned `ProviderFailure` too.
    */
   generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
     schema: S,
     options?: GenerateOptions,
-  ): Promise<SchemaOutput<S>>;
+  ): Promise<SchemaOutput<S> | ProviderFailure>;
 
   /**
    * Generate a structured object from a conversation history.
@@ -199,18 +199,20 @@ export type StructuredLLMProvider = {
     messages: Message[],
     schema: S,
     options?: GenerateOptions,
-  ): Promise<SchemaOutput<S>>;
+  ): Promise<SchemaOutput<S> | ProviderFailure>;
 
   /**
-   * Generate plain text from a single prompt.
+   * Generate plain text from a single prompt. A cut-off answer (`length`) is `IncompleteGeneration`,
+   * a filtered one `ContentFiltered`: text is only returned when the model finished.
    */
-  generateText(prompt: string, options?: GenerateOptions): Promise<string>;
+  generateText(prompt: string, options?: GenerateOptions): Promise<string | ProviderFailure>;
 
   /**
    * Stream a conversational response, yielding text chunks as they arrive.
-   * Used for real-time copilot streaming endpoints.
+   * Used for real-time copilot streaming endpoints. When the stream fails or stops early, its last
+   * item is the `ProviderFailure`; a stream that ends on a string finished normally.
    */
-  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown>;
+  streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string | ProviderFailure, void, unknown>;
 };
 
 /**
@@ -236,6 +238,7 @@ export type Generation<T> = {
  * ```ts
  * const llm = createLLMProvider();
  * const answer = await llm.generateStructuredResult('Name one planet.', z.object({ planet: z.string() }));
+ * if (isFailure(answer)) return answer;
  * answer.value.planet; // 'Mars'
  * answer.usage.outputTokens; // 12
  * ```
@@ -245,12 +248,12 @@ export type LLMProviderWithUsage = StructuredLLMProvider & {
   readonly provider: string;
   /** The model id every call uses. */
   readonly model: string;
-  /** `generateStructuredData`, with the token usage of the call next to the value. Throws as it does. */
+  /** `generateStructuredData`, with the token usage of the call next to the value. Fails as it does. */
   generateStructuredResult<S extends StandardSchemaV1>(
     prompt: string,
     schema: S,
     options?: GenerateOptions,
-  ): Promise<Generation<SchemaOutput<S>>>;
-  /** `generateText`, with the token usage of the call next to the text. Throws as it does. */
-  generateTextResult(prompt: string, options?: GenerateOptions): Promise<Generation<string>>;
+  ): Promise<Generation<SchemaOutput<S>> | ProviderFailure>;
+  /** `generateText`, with the token usage of the call next to the text. Fails as it does. */
+  generateTextResult(prompt: string, options?: GenerateOptions): Promise<Generation<string> | ProviderFailure>;
 };

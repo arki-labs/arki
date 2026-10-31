@@ -26,7 +26,7 @@ const llm = createLLMProvider();
 const result = await llm.generateStructuredData('Name one planet.', z.object({ planet: z.string() }));
 ```
 
-`generateStructuredData` on `OpenAIService` can also return `RateLimited`. Check it with `RateLimited.is(result)`.
+The services (`OpenAIService`, `AnthropicService`, `OllamaService`, ...) return the same `ProviderFailure` values: a full rate limiter or a provider 429 is `RateLimited`, a cut-off answer `IncompleteGeneration`. `OpenAIService` with `sanitize` on also returns `InputBlocked` for a refused prompt. Check with `isFailure(result)`.
 
 Need the token counts? Call `llm.generateStructuredResult(...)` instead: the same call, returning `{ value, usage }`. Price it with `priceOf({ provider, model, inputTokens, outputTokens })`: a local provider costs 0 (`basis: 'local'`), an unknown hosted model gets the default rate (`basis: 'default-rate'`).
 
@@ -46,18 +46,19 @@ else console.log(await createLLMProvider(ready).generateText('Say hi.'));
 import { z } from 'zod';
 
 import { createFakeLLMProvider } from '@arki/ai/testing';
+import { isFailure } from '@arki/failure';
 
 const llm = createFakeLLMProvider({ answers: [{ planet: 'Mars' }] });
 const planet = await llm.generateStructuredData('Name one planet.', z.object({ planet: z.string() }));
 
-console.log(planet.planet, llm.calls.length);
+console.log(isFailure(planet) ? planet.code : planet.planet, llm.calls.length);
 ```
 
 ```text
 Mars 1
 ```
 
-Pass `answers` as a function of the call (`call.prompt`, `call.system`, `call.jsonSchema`) when the order of calls is not fixed. A call past the last scripted answer throws.
+Pass `answers` as a function of the call (`call.prompt`, `call.system`, `call.jsonSchema`) when the order of calls is not fixed. A call past the last scripted answer returns `UnexpectedDefect`.
 
 ### Embed and search
 
@@ -70,14 +71,19 @@ See [The tool loop](reference.md#the-tool-loop). Define tools with `defineAgentT
 ### Handle a rate limit
 
 ```ts skip="needs a running model"
+import { isFailure } from '@arki/failure';
 import { RateLimited, OpenAIService } from '@arki/ai';
 
 const service = new OpenAIService({ model: 'gpt-4o-mini' });
 const stream = await service.streamText('Tell me a story');
 if (RateLimited.is(stream)) {
   console.log(`retry in ${stream.data.retryAfterMs} ms`);
-} else {
-  for await (const chunk of stream) process.stdout.write(chunk);
+} else if (!isFailure(stream)) {
+  for await (const chunk of stream) {
+    // When the stream fails or stops early, its last item is the failure.
+    if (isFailure(chunk)) console.log(chunk.code);
+    else process.stdout.write(chunk);
+  }
 }
 ```
 
@@ -106,6 +112,8 @@ Use `llm(() => config)` from `@arki/ai/dot`. It provides `llm` (an `LLMProviderW
 | --- | --- | --- |
 | `ai.rate_limited` | `RateLimited` (returned) | Wait `data.retryAfterMs`, retry. |
 | `ai.budget_exceeded` | `BudgetExceeded` (returned) | Wait for the period to reset, or raise the limit. |
+| `ai.circuit_open` | `CircuitOpen` (returned by `CostCircuitBreaker.execute`) | Wait `data.retryAfterMs`, or raise `costThresholdUsd`. |
+| `ai.keyword_search_unavailable` | `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`) | Pass a `KeywordSearchProvider`, or use `semantic` mode. |
 | `ai.provider_unavailable` | `ProviderUnavailable` (returned by `probeLLMProvider`, boot failure of `llm()`) | `data.problem`: `unreachable` → start Ollama or the server; `model_missing` → `ollama pull <model>`; `missing_key` → set the key. |
 | `CONFIGURATION_ERROR` | `ConfigurationError` | Set the variable or option the message names. |
 | `EMBEDDING_ERROR` | `EmbeddingError` | Check the embedding provider, model and dimensions. |

@@ -2,17 +2,38 @@
  * Search Analytics Collection
  */
 
+import type { SchemaFailure } from '@arki/failure';
+import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
+
 import { debugSemantic } from '../debug.ts';
 
-export type SearchAnalytics = {
-  query: string;
-  mode: string;
-  filters?: Record<string, unknown>;
-  resultCount: number;
-  responseTime: number;
-  userId?: string;
-  timestamp: Date;
-};
+/** A count: a whole number, never negative. */
+const countSchema = z.number().int().nonnegative();
+
+/** One recorded search. A stored `timestamp` is a `Date`, or its ISO string once the export went through JSON. */
+const searchAnalyticsSchema = z.object({
+  query: z.string(),
+  mode: z.string(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+  resultCount: countSchema,
+  responseTime: z.number().nonnegative(),
+  userId: z.string().optional(),
+  timestamp: z.union([z.date(), z.iso.datetime({ offset: true })]).transform(value => new Date(value)),
+});
+
+export type SearchAnalytics = z.output<typeof searchAnalyticsSchema>;
+
+/** What `SearchAnalyticsCollector.export` returns and `import` accepts (also after a JSON round trip). */
+export const searchAnalyticsExportSchema = z.object({
+  history: z.array(searchAnalyticsSchema),
+  popularSearches: z.array(z.tuple([z.string(), countSchema])),
+  cacheHits: countSchema,
+  totalRequests: countSchema,
+});
+
+export type SearchAnalyticsExport = z.output<typeof searchAnalyticsExportSchema>;
 
 export type SearchMetrics = {
   totalSearches: number;
@@ -184,13 +205,8 @@ export class SearchAnalyticsCollector {
   /**
    * Export analytics data for persistence
    */
-  export(): {
-    history: SearchAnalytics[];
-    popularSearches: [string, number][];
-    cacheHits: number;
-    totalRequests: number;
-  } {
-    const exported = {
+  export(): SearchAnalyticsExport {
+    const exported: SearchAnalyticsExport = {
       history: this.history,
       popularSearches: [...this.popularSearches.entries()],
       cacheHits: this.cacheHits,
@@ -209,14 +225,17 @@ export class SearchAnalyticsCollector {
   }
 
   /**
-   * Import analytics data from persistence
+   * Import analytics data from persistence. Stored data is outside input: it is checked against
+   * `searchAnalyticsExportSchema`, and malformed data returns `InvalidInput` and changes nothing.
    */
-  import(data: {
-    history: SearchAnalytics[];
-    popularSearches: [string, number][];
-    cacheHits: number;
-    totalRequests: number;
-  }): void {
+  import(stored: unknown): SchemaFailure | undefined {
+    const data = parse(searchAnalyticsExportSchema, stored);
+    if (isFailure(data)) {
+      debugSemantic.debug('[Analytics] Import refused: stored data does not match the export shape ({code})', {
+        code: data.code,
+      });
+      return data;
+    }
     debugSemantic.debug(
       '[Analytics] Importing data (history: {history} entries, popularSearches: {popularSearches} queries, cacheHits: {cacheHits}, totalRequests: {totalRequests})',
       {
@@ -226,13 +245,11 @@ export class SearchAnalyticsCollector {
         totalRequests: data.totalRequests,
       },
     );
-    this.history = data.history.map(h => ({
-      ...h,
-      timestamp: new Date(h.timestamp),
-    }));
+    this.history = data.history;
     this.popularSearches = new Map(data.popularSearches);
     this.cacheHits = data.cacheHits;
     this.totalRequests = data.totalRequests;
     debugSemantic.debug('[Analytics] Data imported successfully');
+    return undefined;
   }
 }

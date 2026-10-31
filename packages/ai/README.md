@@ -58,7 +58,7 @@ Node (the workspace tests on Node 26) and Bun. The root and the server entries (
 | `@arki/ai/mastra` | The bridge to Mastra agents. |
 | `@arki/ai/transcription` | Speech-to-text through Deepgram. |
 | `@arki/ai/runtime/index` | The tool-loop runtime on its own. |
-| `@arki/ai/validation` | The config and input types, and `validateInput` for any Standard Schema. |
+| `@arki/ai/validation` | The config and input types. Check values with `parse` from `@arki/schema`. |
 | `@arki/ai/zod` | The package's Zod schemas: request bodies (`askQuestionSchema`, `queueOrderSchema`), stored documents (`transcriptDocumentSchema`, `analysisDocumentSchema`), config and `CommonSchemas`. The capability, `validation`, `transcription` and `structured-generation` entries expose plain TS types only. |
 | `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation` | Service types and `StructuredGenerator`. |
 | `@arki/ai/capabilities/ask`, `/episode-analysis`, `/pips`, `/queue` | Ready-made capabilities on a `StructuredLLMProvider`. |
@@ -75,9 +75,12 @@ import { z } from 'zod';
 
 import { calculateLLMCost } from '@arki/ai';
 import { createFakeLLMProvider } from '@arki/ai/testing';
+import { isFailure } from '@arki/failure';
 
 const llm = createFakeLLMProvider({ answers: [{ planet: 'Mars' }], usage: { inputTokens: 12, outputTokens: 4 } });
 const answer = await llm.generateStructuredResult('Name one planet.', z.object({ planet: z.string() }));
+// Rate limits, refusals and bad answers come back as failures, never as thrown errors.
+if (isFailure(answer)) throw new Error(answer.message);
 const { inputTokens = 0, outputTokens = 0 } = answer.usage;
 const usd = calculateLLMCost('gemma4:latest', inputTokens, outputTokens, { provider: 'ollama' });
 
@@ -172,6 +175,8 @@ SQLite limits that apply here:
 | --- | --- | --- |
 | `RateLimited` (returned, code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) | The local limiter has no free slot. | Wait `retryAfterMs`, then retry. |
 | `BudgetExceeded` (returned, code `ai.budget_exceeded`, status 402) | The estimated cost passes the budget of one period. | Wait for the period to reset, or raise the limit. |
+| `CircuitOpen` (returned by `CostCircuitBreaker.execute`, code `ai.circuit_open`, status 503, data `{ reason, retryAfterMs, cumulativeCostUsd, costThresholdUsd }`) | The breaker is open, or this call would cross `costThresholdUsd`. The operation did not run. | Wait `retryAfterMs`, or raise the threshold. |
+| `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`, code `ai.keyword_search_unavailable`, status 500) | Mode `keyword` with no keyword search provider. | Pass a `KeywordSearchProvider`, or search in `semantic` mode. |
 | `ProviderUnavailable` (returned by `probeLLMProvider`, code `ai.provider_unavailable`, status 503, data `{ provider, model, problem }`) | `problem` is `unreachable` (Ollama or the `baseURL` server does not answer), `model_missing` (Ollama runs without the model) or `missing_key`. The `llm` Dot plugin fails boot with it. | Start Ollama and `ollama pull` the model, or set the provider's key. |
 | `ConfigurationError` (thrown) | A key, model or variable is missing or wrong. | Set what the message names. |
 | `GenerationError`, `EmbeddingError`, `VectorSearchError` (thrown) | The provider or the store is down or refused. | Read `cause`. Retry later. |

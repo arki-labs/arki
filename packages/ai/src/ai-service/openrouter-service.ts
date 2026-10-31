@@ -6,14 +6,19 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
+import type { TextStreamPart, ToolSet } from 'ai';
 import { generateText, streamText } from 'ai';
 
+import { isFailure } from '@arki/failure';
+
+import type { ProviderFailure } from '../failures.ts';
 import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.ts';
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, getErrorMessage } from '../errors.ts';
-import type { RateLimited } from '../failures.ts';
+import { ProviderUnauthorized, RateLimited } from '../failures.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure.ts';
+import { aiTelemetry } from './telemetry.ts';
 
 export type OpenRouterServiceConfig = {
   model?: string;
@@ -73,16 +78,16 @@ export class OpenRouterService implements LLMProvider {
   }
 
   /**
-   * Generate text from a single prompt
+   * Generate text from a single prompt. A missing API key, a full rate limiter, a provider error
+   * and a cut-off answer are returned as a `ProviderFailure`, never thrown.
    */
-  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string | RateLimited> {
-    if (!this.isAvailable()) {
-      throw new GenerationError('OpenRouter API key not configured');
-    }
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string | ProviderFailure> {
+    const missing = this.missingKey();
+    if (missing) return missing;
 
     debugService.debug('[OpenRouter] Generating text (prompt length: {length})', { length: prompt.length });
 
-    const rateLimitResult = await rateLimiters.openrouter.execute('generateText', async () => {
+    return rateLimiters.openrouter.execute('generateText', async () => {
       try {
         const result = await generateText({
           model: this.client(this.model),
@@ -91,145 +96,143 @@ export class OpenRouterService implements LLMProvider {
           temperature: options.temperature ?? this.defaultTemperature,
           maxOutputTokens: options.maxTokens,
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+          abortSignal: options.signal,
+          ...aiTelemetry('openrouter.generateText'),
         });
-
-        debugService.debug('[OpenRouter] Text generated successfully (length: {length})', {
-          length: result.text.length,
-        });
-
-        return result.text;
+        return finishFailure(result.finishReason, this.call(options)) ?? result.text;
       } catch (error) {
-        debugService.debug('[OpenRouter] Text generation failed: {failed}', { failed: getErrorMessage(error) });
-        throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+        return this.failed('generateText', providerFailure(error, this.call(options)));
       }
     });
-
-    return rateLimitResult;
   }
 
   /**
-   * Generate text from conversation messages
+   * Generate text from conversation messages. Fails like {@link generateText}.
    */
-  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string | RateLimited> {
-    if (!this.isAvailable()) {
-      throw new GenerationError('OpenRouter API key not configured');
-    }
+  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string | ProviderFailure> {
+    const missing = this.missingKey();
+    if (missing) return missing;
 
     debugService.debug('[OpenRouter] Generating conversation (messages: {messages})', { messages: messages.length });
 
-    const rateLimitResult = await rateLimiters.openrouter.execute('generateConversation', async () => {
+    return rateLimiters.openrouter.execute('generateConversation', async () => {
       try {
         const result = await generateText({
           model: this.client(this.model),
-          messages: messages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })),
+          messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
           temperature: options.temperature ?? this.defaultTemperature,
           maxOutputTokens: options.maxTokens,
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+          abortSignal: options.signal,
+          ...aiTelemetry('openrouter.generateConversation'),
         });
-
-        debugService.debug('[OpenRouter] Conversation generated successfully (length: {length})', {
-          length: result.text.length,
-        });
-
-        return result.text;
+        return finishFailure(result.finishReason, this.call(options)) ?? result.text;
       } catch (error) {
-        debugService.debug('[OpenRouter] Conversation generation failed: {failed}', { failed: getErrorMessage(error) });
-        throw new GenerationError(`Failed to generate conversation: ${getErrorMessage(error)}`, error);
+        return this.failed('generateConversation', providerFailure(error, this.call(options)));
       }
     });
-
-    return rateLimitResult;
   }
 
   /**
-   * Stream text generation from a prompt
+   * Stream text generation from a prompt. Takes a rate-limit slot first; when the stream fails or
+   * stops early, its last item is the `ProviderFailure`.
    */
-  async *streamText(prompt: string, options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
-    if (!this.isAvailable()) {
-      throw new GenerationError('OpenRouter API key not configured');
-    }
-
+  async *streamText(prompt: string, options: StreamOptions = {}): AsyncGenerator<string | ProviderFailure, void, unknown> {
     debugService.debug('[OpenRouter] Streaming text (prompt length: {length})', { length: prompt.length });
 
-    try {
-      const stream = await streamText({
+    yield* this.stream('streamText', options, () =>
+      streamText({
         model: this.client(this.model),
         instructions: options.systemPrompt,
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxOutputTokens: options.maxTokens,
-      });
-
-      let fullText = '';
-      for await (const chunk of stream.textStream) {
-        fullText += chunk;
-        if (options.onChunk) {
-          options.onChunk(chunk);
-        }
-        yield chunk;
-      }
-
-      if (options.onComplete) {
-        options.onComplete(fullText);
-      }
-
-      debugService.debug('[OpenRouter] Stream completed (total length: {length})', { length: fullText.length });
-    } catch (error) {
-      debugService.debug('[OpenRouter] Stream failed: {failed}', { failed: getErrorMessage(error) });
-      if (options.onError) {
-        options.onError(error as Error);
-      }
-      throw new GenerationError(`Failed to stream text: ${getErrorMessage(error)}`, error);
-    }
+        abortSignal: options.signal,
+        ...aiTelemetry('openrouter.streamText'),
+      }).fullStream,
+    );
   }
 
   /**
-   * Stream conversation generation
+   * Stream conversation generation. Fails like {@link streamText}.
    */
-  async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
-    if (!this.isAvailable()) {
-      throw new GenerationError('OpenRouter API key not configured');
-    }
-
+  async *streamConversation(
+    messages: Message[],
+    options: StreamOptions = {},
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
     debugService.debug('[OpenRouter] Streaming conversation (messages: {messages})', { messages: messages.length });
 
-    try {
-      const stream = await streamText({
+    yield* this.stream('streamConversation', options, () =>
+      streamText({
         model: this.client(this.model),
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content,
-        })),
+        messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
         temperature: options.temperature ?? this.defaultTemperature,
         maxOutputTokens: options.maxTokens,
-      });
+        abortSignal: options.signal,
+        ...aiTelemetry('openrouter.streamConversation'),
+      }).fullStream,
+    );
+  }
 
-      let fullText = '';
-      for await (const chunk of stream.textStream) {
-        fullText += chunk;
-        if (options.onChunk) {
-          options.onChunk(chunk);
-        }
-        yield chunk;
-      }
+  /** The names and signal of one call, for the failure boundary. */
+  private call(options: GenerateOptions) {
+    return { provider: this.name, model: this.model, signal: options.signal };
+  }
 
-      if (options.onComplete) {
-        options.onComplete(fullText);
-      }
+  /** `ProviderUnauthorized` when no API key is set, so no request is sent. */
+  private missingKey(): ProviderUnauthorized | undefined {
+    return this.isAvailable() ? undefined : ProviderUnauthorized({ provider: this.name, model: this.model });
+  }
 
-      debugService.debug('[OpenRouter] Conversation stream completed (total length: {length})', {
-        length: fullText.length,
-      });
-    } catch (error) {
-      debugService.debug('[OpenRouter] Conversation stream failed: {failed}', { failed: getErrorMessage(error) });
-      if (options.onError) {
-        options.onError(error as Error);
+  /** Log a failed call at DEBUG and hand the failure back. */
+  private failed<F extends ProviderFailure>(operation: string, failure: F): F {
+    debugService.debug('[OpenRouter] {operation} failed: {code}', { operation, code: failure.code });
+    return failure;
+  }
+
+  /**
+   * Run one stream: a missing key or a full rate limiter ends it before any request is sent;
+   * otherwise it yields the text of `start()`'s parts. Either way a failure is the last item, and
+   * `onError` sees it first.
+   */
+  private async *stream(
+    operation: 'streamText' | 'streamConversation',
+    options: StreamOptions,
+    start: () => AsyncIterable<TextStreamPart<ToolSet>>,
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    const call = this.call(options);
+    let chunks: AsyncIterable<string | ProviderFailure> | readonly ProviderFailure[];
+    const refused = this.missingKey() ?? (await this.rateLimitSlot(operation));
+    if (refused) {
+      chunks = [refused];
+    } else {
+      try {
+        chunks = readTextParts(start(), call);
+      } catch (error) {
+        chunks = [providerFailure(error, call)];
       }
-      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
     }
+
+    let fullText = '';
+    for await (const chunk of chunks) {
+      if (isFailure(chunk)) {
+        const failure = this.failed(operation, chunk);
+        options.onError?.(failure);
+        yield failure;
+        return;
+      }
+      fullText += chunk;
+      options.onChunk?.(chunk);
+      yield chunk;
+    }
+    options.onComplete?.(fullText);
+    debugService.debug('[OpenRouter] {operation} completed (total length: {length})', { operation, length: fullText.length });
+  }
+
+  /** Take a slot from the same rate limiter `generateText` uses; `RateLimited` when none is free. */
+  private async rateLimitSlot(operation: string): Promise<RateLimited | undefined> {
+    const slot = await rateLimiters.openrouter.execute(operation, () => Promise.resolve());
+    return RateLimited.is(slot) ? slot : undefined;
   }
 }
 

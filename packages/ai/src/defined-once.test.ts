@@ -8,6 +8,7 @@ import type { AnthropicServiceConfig } from './ai-service/anthropic-service';
 import type { OpenAIServiceConfig } from './ai-service/openai-service';
 import type { StructuredLLMProvider } from './ai-service/types';
 import type { ClassifiedIntent, IntentType } from './capabilities/intent-classification';
+import type { ProviderFailure } from './failures';
 import type { SanitizerConfig } from './safety/types';
 import type { SemanticSearchService } from './semantic-search/search-service';
 import type { RAGConfig, RAGServiceConfig, SearchMode, SearchSettings } from './types';
@@ -111,7 +112,7 @@ it('validates programmatic sanitizer patterns without dropping or converting Reg
 describe('intent classification follows its provider output schema', () => {
   it('preserves retrieval decisions and optional hints in the inferred result', async () => {
     expectTypeOf<ClassifiedIntent['intent']>().toEqualTypeOf<IntentType>();
-    expectTypeOf<Awaited<ReturnType<typeof classifyIntent>>>().toEqualTypeOf<ClassifiedIntent>();
+    expectTypeOf<Awaited<ReturnType<typeof classifyIntent>>>().toEqualTypeOf<ClassifiedIntent | ProviderFailure>();
     const output = { intent: 'search', requiresRAG: true, timeFilter: '7d', topicHint: 'forests' };
     expect(await classifyIntent('Find what I read about forests this week', providerFor(output))).toEqual(output);
     expect(await classifyIntent('What is a forest?', providerFor({ intent: 'general', requiresRAG: false }))).toEqual({

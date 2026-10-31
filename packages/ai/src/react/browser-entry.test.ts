@@ -36,6 +36,6 @@ it('the react entry bundles for the browser and offers the runtime UI reducer wi
 it('the react entry names the types its runtime hook speaks', () => {
   expectTypeOf<ReturnType<typeof useRuntimeStream>['state']>().toEqualTypeOf<RuntimeUiState>();
   expectTypeOf<Parameters<ReturnType<typeof useRuntimeStream>['run']>[0]>().toEqualTypeOf<
-    AsyncIterable<RuntimeEvent>
+    (signal: AbortSignal) => AsyncIterable<RuntimeEvent>
   >();
 });

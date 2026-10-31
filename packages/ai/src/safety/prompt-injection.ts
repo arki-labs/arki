@@ -8,6 +8,7 @@
  */
 
 import type { DetectionPattern, SanitizationIssue } from './types';
+import { scanRegex } from './scan-regex';
 
 // ============================================
 // Default Prompt Injection Patterns
@@ -49,11 +50,11 @@ export const DEFAULT_INJECTION_PATTERNS: DetectionPattern[] = [
     description: 'Attempt to change AI persona',
   },
   {
-    pattern: /pretend\s+(to\s+be|you\s+are)\s+(a|an|the)/i,
+    pattern: /pretend\s+(?:to\s+be|you\s+are)\s+(?:an?|the)/i,
     description: 'Attempt to change AI persona via pretending',
   },
   {
-    pattern: /act\s+as\s+(a|an|the|if)/i,
+    pattern: /act\s+as\s+(?:an?|the|if)/i,
     description: 'Attempt to change AI behavior via role-play',
   },
 
@@ -63,7 +64,7 @@ export const DEFAULT_INJECTION_PATTERNS: DetectionPattern[] = [
     description: 'Known jailbreak attempt (DAN)',
   },
   {
-    pattern: /\bjailbreak\b|\bunlock\b.*\bmode\b/i,
+    pattern: /\bjailbreak\b|\bunlock\b.+?\bmode\b/i,
     description: 'Explicit jailbreak attempt',
   },
 
@@ -139,6 +140,8 @@ export const DEFAULT_INJECTION_PATTERNS: DetectionPattern[] = [
  */
 export class PromptInjectionDetector {
   private readonly patterns: DetectionPattern[];
+  /** Each pattern's scan copy (`g` set, `y` cleared), built once, so a caller's flags never carry `lastIndex` between calls. */
+  private readonly scans: { scan: RegExp; description: string }[];
 
   /**
    * Creates a new PromptInjectionDetector.
@@ -154,6 +157,7 @@ export class PromptInjectionDetector {
     } else {
       this.patterns = DEFAULT_INJECTION_PATTERNS;
     }
+    this.scans = this.patterns.map(({ pattern, description }) => ({ scan: scanRegex(pattern), description }));
   }
 
   /**
@@ -165,8 +169,9 @@ export class PromptInjectionDetector {
   public detect(input: string): SanitizationIssue<'prompt_injection'>[] {
     const issues: SanitizationIssue<'prompt_injection'>[] = [];
 
-    for (const { pattern, description } of this.patterns) {
-      const match = pattern.exec(input);
+    for (const { scan, description } of this.scans) {
+      // The first match; `matchAll` works on a copy, so the scan regex keeps no state.
+      const match = input.matchAll(scan).next().value;
       if (match) {
         issues.push({
           type: 'prompt_injection',
@@ -188,7 +193,8 @@ export class PromptInjectionDetector {
    * @returns True if any injection pattern matches
    */
   public hasInjection(input: string): boolean {
-    return this.patterns.some(({ pattern }) => pattern.test(input));
+    // `search` always starts at 0 and ignores `lastIndex`.
+    return this.scans.some(({ scan }) => input.search(scan) !== -1);
   }
 
   /**

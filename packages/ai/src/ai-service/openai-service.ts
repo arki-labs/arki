@@ -4,21 +4,24 @@
  * rate limiting and optional input sanitization.
  */
 
-import type { ModelMessage } from 'ai';
+import type { ModelMessage, TextStreamPart, ToolSet } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { generateText, Output, streamText } from 'ai';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
 
+import type { ProviderFailure } from '../failures';
 import type { AIServiceConfig as OpenAIServiceConfig, GenerationOptions as ValidatedGenerationOptions } from '../validation';
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage } from '../errors';
-import { RateLimited } from '../failures';
+import { InputBlocked, RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure';
+import { aiTelemetry } from './telemetry';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import { rateLimiters } from '../utils/rate-limiter';
-import { validateInput } from '../validation';
+import { validateInput } from './validate-input';
 import { aiServiceConfigSchema } from '../validation-schemas';
 
 type ChatMessage = ModelMessage;
@@ -38,7 +41,8 @@ export type OpenAIStreamOptions = {
   onStart?: () => void;
   onToken?: (token: string) => void;
   onComplete?: (text: string) => void;
-  onError?: (error: Error) => void;
+  /** Called with the failure that ends the stream, just before the stream yields it. */
+  onError?: (failure: ProviderFailure) => void;
 } & GenerationOptions;
 
 /**
@@ -49,6 +53,7 @@ export type OpenAIStreamOptions = {
  * via the `sanitize` constructor option.
  */
 export class OpenAIService {
+  readonly name = 'openai';
   private model: string;
   private defaultTemperature: number;
   private defaultMaxRetries: number;
@@ -57,8 +62,8 @@ export class OpenAIService {
   constructor(config: OpenAIServiceConfig = {}) {
     const validConfig = validateInput(aiServiceConfigSchema, config);
     this.model = validConfig.model || 'gpt-4o-mini';
-    this.defaultTemperature = validConfig.temperature || 0.7;
-    this.defaultMaxRetries = validConfig.maxRetries || 2;
+    this.defaultTemperature = validConfig.temperature ?? 0.7;
+    this.defaultMaxRetries = validConfig.maxRetries ?? 2;
 
     // Initialize sanitizer if enabled
     if (validConfig.sanitize) {
@@ -81,13 +86,14 @@ export class OpenAIService {
   }
 
   /**
-   * Generate structured data from a prompt.
+   * Generate structured data from a prompt. A blocked input is `InputBlocked`; every way the
+   * provider call can fail (rate limit, refusal, cut-off, outage, cancel) is a returned `ProviderFailure`.
    */
   async generateStructuredData<S extends StandardSchemaV1>(
     prompt: string,
     schema: S,
     options: GenerationOptions = {},
-  ): Promise<SchemaOutput<S> | RateLimited> {
+  ): Promise<SchemaOutput<S> | ProviderFailure | InputBlocked> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -99,12 +105,13 @@ export class OpenAIService {
     messages: ChatMessage[],
     schema: S,
     options: GenerationOptions = {},
-  ): Promise<SchemaOutput<S> | RateLimited> {
+  ): Promise<SchemaOutput<S> | ProviderFailure | InputBlocked> {
     const sanitizedMessages = this.sanitizeMessages(messages);
+    if (InputBlocked.is(sanitizedMessages)) return sanitizedMessages;
 
     debugService.debug('[OpenAI] Generating structured data (messages: {messages}, temperature: {temperature})', {
       messages: sanitizedMessages.length,
-      temperature: options.temperature || this.defaultTemperature,
+      temperature: options.temperature ?? this.defaultTemperature,
     });
 
     return this.withRateLimit('generateStructuredData', async () => {
@@ -116,18 +123,14 @@ export class OpenAIService {
           instructions: options.systemPrompt,
           messages: sanitizedMessages,
           output: Output.object({ schema: modelSchema(schema, 'OpenAI structured generation') }),
-          maxRetries: options.maxRetries || this.defaultMaxRetries,
-          temperature: options.temperature || this.defaultTemperature,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+          temperature: options.temperature ?? this.defaultTemperature,
           abortSignal: options.signal,
+          ...aiTelemetry('openai.generateStructuredData'),
         });
-
-        debugService.debug('[OpenAI] Structured data generated successfully');
-
-        return result.output;
+        return finishFailure(result.finishReason, this.call(options)) ?? result.output;
       } catch (error) {
-        debugService.debug('[OpenAI] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
-
-        throw new GenerationError(`Failed to generate structured data: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, this.call(options));
       }
     });
   }
@@ -135,8 +138,9 @@ export class OpenAIService {
   /**
    * Generate text completion.
    */
-  async generateText(prompt: string, options: GenerationOptions = {}): Promise<string | RateLimited> {
+  async generateText(prompt: string, options: GenerationOptions = {}): Promise<string | ProviderFailure | InputBlocked> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
+    if (InputBlocked.is(sanitizedPrompt)) return sanitizedPrompt;
 
     debugService.debug('[OpenAI] Generating text (prompt length: {length})', { length: sanitizedPrompt.length });
 
@@ -146,18 +150,14 @@ export class OpenAIService {
           model: openai(this.model),
           instructions: options.systemPrompt,
           prompt: sanitizedPrompt,
-          temperature: options.temperature || this.defaultTemperature,
-          maxRetries: options.maxRetries || this.defaultMaxRetries,
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           abortSignal: options.signal,
+          ...aiTelemetry('openai.generateText'),
         });
-
-        debugService.debug('[OpenAI] Text generated successfully (length: {length})', { length: result.text.length });
-
-        return result.text;
+        return finishFailure(result.finishReason, this.call(options)) ?? result.text;
       } catch (error) {
-        debugService.debug('[OpenAI] Text generation failed: {failed}', { failed: getErrorMessage(error) });
-
-        throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, this.call(options));
       }
     });
   }
@@ -165,8 +165,12 @@ export class OpenAIService {
   /**
    * Generate text with conversation context.
    */
-  async generateConversation(messages: ChatMessage[], options: GenerationOptions = {}): Promise<string | RateLimited> {
+  async generateConversation(
+    messages: ChatMessage[],
+    options: GenerationOptions = {},
+  ): Promise<string | ProviderFailure | InputBlocked> {
     const sanitizedMessages = this.sanitizeMessages(messages);
+    if (InputBlocked.is(sanitizedMessages)) return sanitizedMessages;
 
     return this.withRateLimit('generateConversation', async () => {
       try {
@@ -174,27 +178,29 @@ export class OpenAIService {
           model: openai(this.model),
           instructions: options.systemPrompt,
           messages: sanitizedMessages,
-          temperature: options.temperature || this.defaultTemperature,
-          maxRetries: options.maxRetries || this.defaultMaxRetries,
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           abortSignal: options.signal,
+          ...aiTelemetry('openai.generateConversation'),
         });
-
-        return result.text;
+        return finishFailure(result.finishReason, this.call(options)) ?? result.text;
       } catch (error) {
-        throw new GenerationError(`Failed to generate conversation response: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, this.call(options));
       }
     });
   }
 
   /**
    * Stream text generation. Takes a rate-limit slot before the stream starts, so an over-limit
-   * caller gets `RateLimited` up front; otherwise resolves to a generator of text chunks.
+   * caller gets `RateLimited` (and a blocked input `InputBlocked`) up front; otherwise resolves to
+   * a generator of text chunks whose last item is the `ProviderFailure` when the stream fails or stops early.
    */
   async streamText(
     prompt: string,
     options: OpenAIStreamOptions = {},
-  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
+  ): Promise<AsyncGenerator<string | ProviderFailure, void, unknown> | RateLimited | InputBlocked> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
+    if (InputBlocked.is(sanitizedPrompt)) return sanitizedPrompt;
 
     // Register rate limit slot before starting the stream
     const slot = await this.consumeRateLimitSlot('streamText');
@@ -203,54 +209,31 @@ export class OpenAIService {
     return this.streamTextChunks(sanitizedPrompt, options);
   }
 
-  private async *streamTextChunks(
+  private streamTextChunks(
     sanitizedPrompt: string,
     options: OpenAIStreamOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    try {
-      if (options.onStart) {
-        options.onStart();
-      }
-
-      const stream = await streamText({
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    return this.streamChunks('streamText', options, () =>
+      streamText({
         model: openai(this.model),
         instructions: options.systemPrompt,
         prompt: sanitizedPrompt,
-        temperature: options.temperature || this.defaultTemperature,
+        temperature: options.temperature ?? this.defaultTemperature,
         abortSignal: options.signal,
-      });
-
-      let fullText = '';
-      for await (const chunk of stream.textStream) {
-        fullText += chunk;
-
-        if (options.onToken) {
-          options.onToken(chunk);
-        }
-
-        yield chunk;
-      }
-
-      if (options.onComplete) {
-        options.onComplete(fullText);
-      }
-    } catch (error) {
-      if (options.onError) {
-        options.onError(error as Error);
-      }
-      throw new GenerationError(`Failed to stream text: ${getErrorMessage(error)}`, error);
-    }
+        ...aiTelemetry('openai.streamText'),
+      }).fullStream,
+    );
   }
 
   /**
-   * Stream conversation with context. Takes a rate-limit slot before the stream starts, so an
-   * over-limit caller gets `RateLimited` up front; otherwise resolves to a generator of text chunks.
+   * Stream conversation with context. Fails like {@link streamText}.
    */
   async streamConversation(
     messages: ChatMessage[],
     options: OpenAIStreamOptions = {},
-  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
+  ): Promise<AsyncGenerator<string | ProviderFailure, void, unknown> | RateLimited | InputBlocked> {
     const sanitizedMessages = this.sanitizeMessages(messages);
+    if (InputBlocked.is(sanitizedMessages)) return sanitizedMessages;
 
     // Register rate limit slot before starting the stream
     const slot = await this.consumeRateLimitSlot('streamConversation');
@@ -259,92 +242,65 @@ export class OpenAIService {
     return this.streamConversationChunks(sanitizedMessages, options);
   }
 
-  private async *streamConversationChunks(
+  private streamConversationChunks(
     sanitizedMessages: ChatMessage[],
     options: OpenAIStreamOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    try {
-      if (options.onStart) {
-        options.onStart();
-      }
-
-      const stream = await streamText({
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    return this.streamChunks('streamConversation', options, () =>
+      streamText({
         model: openai(this.model),
         instructions: options.systemPrompt,
         messages: sanitizedMessages,
-        temperature: options.temperature || this.defaultTemperature,
+        temperature: options.temperature ?? this.defaultTemperature,
         abortSignal: options.signal,
-      });
-
-      let fullText = '';
-      for await (const chunk of stream.textStream) {
-        fullText += chunk;
-
-        if (options.onToken) {
-          options.onToken(chunk);
-        }
-
-        yield chunk;
-      }
-
-      if (options.onComplete) {
-        options.onComplete(fullText);
-      }
-    } catch (error) {
-      if (options.onError) {
-        options.onError(error as Error);
-      }
-      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
-    }
+        ...aiTelemetry('openai.streamConversation'),
+      }).fullStream,
+    );
   }
 
   /**
-   * Create a text stream (useful for tRPC streaming endpoints).
+   * Create a raw AI SDK text stream (useful for tRPC streaming endpoints). The caller reads it and
+   * owns its errors: read `fullStream` through `readTextParts` to get failures as values.
    */
-  createTextStream(prompt: string, systemPrompt?: string): ReturnType<typeof streamText> {
+  createTextStream(prompt: string, systemPrompt?: string): ReturnType<typeof streamText> | InputBlocked {
     const sanitizedPrompt = this.sanitizeInput(prompt);
+    if (InputBlocked.is(sanitizedPrompt)) return sanitizedPrompt;
 
     return streamText({
       model: openai(this.model),
       instructions: systemPrompt,
       prompt: sanitizedPrompt,
       temperature: this.defaultTemperature,
+      ...aiTelemetry('openai.createTextStream'),
     });
   }
 
   /**
-   * Batch process multiple prompts. A prompt the rate limiter refused is `RateLimited` in its slot;
-   * use `partition` from `@arki/failure` to split the answers from the refusals.
+   * Batch process multiple prompts. Each slot holds the answer or that prompt's failure
+   * (`ProviderFailure` or `InputBlocked`); use `partition` from `@arki/failure` to split them.
    */
   async batchGenerate<S extends StandardSchemaV1>(
     prompts: string[],
     schema?: S,
     options: GenerationOptions = {},
-  ): Promise<(SchemaOutput<S> | string | RateLimited)[]> {
+  ): Promise<(SchemaOutput<S> | string | ProviderFailure | InputBlocked)[]> {
     debugService.debug('[OpenAI] Batch generating {promptsLength} prompts (structured: {structured})', {
       promptsLength: prompts.length,
       structured: !!schema,
     });
 
-    const results = await Promise.allSettled(
+    const results = await Promise.all(
       prompts.map(prompt =>
         schema ? this.generateStructuredData(prompt, schema, options) : this.generateText(prompt, options),
       ),
     );
 
-    const successCount = results.filter(r => r.status === 'fulfilled').length;
     debugService.debug('[OpenAI] Batch generation complete ({successCount}/{promptsLength} successful)', {
-      successCount,
+      successCount: results.filter((result: unknown) => !isFailure(result)).length,
       promptsLength: prompts.length,
     });
 
-    return results.map((result, index) => {
-      if (result.status === 'fulfilled') {
-        return result.value;
-      } else {
-        throw new GenerationError(`Failed to generate for prompt ${index}`, result.reason);
-      }
-    });
+    return results;
   }
 
   /**
@@ -358,7 +314,7 @@ export class OpenAIService {
         categories?: string[];
         confidence?: number;
       }
-    | RateLimited
+    | ProviderFailure
   > {
     const moderationSchema = z.object({
       safe: z.boolean(),
@@ -371,9 +327,9 @@ Identify any problematic categories if present.
 
 Content: "${text}"`;
 
-    try {
-      // Bypass sanitization for moderation — we need to analyze raw text
-      return await this.withRateLimit('moderateContent', async () => {
+    // Bypass sanitization for moderation — we need to analyze raw text
+    return this.withRateLimit('moderateContent', async () => {
+      try {
         const result = await generateText({
           model: openai(this.model),
           instructions: 'You are a content moderation assistant. Analyze text for safety.',
@@ -381,31 +337,66 @@ Content: "${text}"`;
           output: Output.object({ schema: moderationSchema }),
           maxRetries: this.defaultMaxRetries,
           temperature: 0.1,
+          ...aiTelemetry('openai.moderateContent'),
         });
-
-        return result.output;
-      });
-    } catch (error) {
-      throw new GenerationError(`Failed to moderate content: ${getErrorMessage(error)}`, error);
-    }
+        return finishFailure(result.finishReason, this.call({})) ?? result.output;
+      } catch (error) {
+        return providerFailure(error, this.call({}));
+      }
+    });
   }
 
   // ── Private helpers ──────────────────────────────────────────────
 
+  /** The names and signal of one call, for the failure boundary. */
+  private call(options: { signal?: AbortSignal | undefined }) {
+    return { provider: this.name, model: this.model, signal: options.signal };
+  }
+
   /**
-   * Wraps an async function with rate limiting. A refused call returns `RateLimited` and never runs `fn`.
+   * Wraps an async function with rate limiting. A refused call returns `RateLimited` and never runs
+   * `fn`; any failure is logged at DEBUG and returned.
    */
   private async withRateLimit<T>(key: string, fn: () => Promise<T>): Promise<T | RateLimited> {
     const result = await rateLimiters.openai.execute(key, fn);
+    const value: unknown = result;
+    if (isFailure(value)) debugService.debug('[OpenAI] {key} failed: {code}', { key, code: value.code });
+    return result;
+  }
 
-    if (RateLimited.is(result)) {
-      debugService.debug('[OpenAI] Rate limit exceeded for {key} (retry after: {after}ms)', {
-        key,
-        after: result.data.retryAfterMs,
-      });
+  /**
+   * The text of one stream, with the lifecycle callbacks. A throw while starting the stream, an
+   * `error` part, an abort or a finish other than `stop` ends it with one `ProviderFailure`, which
+   * `onError` sees first.
+   */
+  private async *streamChunks(
+    operation: string,
+    options: OpenAIStreamOptions,
+    start: () => AsyncIterable<TextStreamPart<ToolSet>>,
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    const call = this.call(options);
+    options.onStart?.();
+
+    let chunks: AsyncIterable<string | ProviderFailure> | readonly ProviderFailure[];
+    try {
+      chunks = readTextParts(start(), call);
+    } catch (error) {
+      chunks = [providerFailure(error, call)];
     }
 
-    return result;
+    let fullText = '';
+    for await (const chunk of chunks) {
+      if (isFailure(chunk)) {
+        debugService.debug('[OpenAI] {operation} failed: {code}', { operation, code: chunk.code });
+        options.onError?.(chunk);
+        yield chunk;
+        return;
+      }
+      fullText += chunk;
+      options.onToken?.(chunk);
+      yield chunk;
+    }
+    options.onComplete?.(fullText);
   }
 
   /**
@@ -420,11 +411,10 @@ Content: "${text}"`;
 
   /**
    * Sanitizes a single text input if sanitization is enabled.
-   * Returns the original text unchanged when sanitization is disabled.
-   *
-   * @throws GenerationError if the input is blocked (e.g., prompt injection detected)
+   * Returns the original text unchanged when sanitization is disabled, and `InputBlocked` when the
+   * sanitizer refuses it (e.g., prompt injection detected).
    */
-  private sanitizeInput(text: string): string {
+  private sanitizeInput(text: string): string | InputBlocked {
     if (!this.sanitizer) {
       return text;
     }
@@ -433,7 +423,7 @@ Content: "${text}"`;
 
     if (report.result === 'blocked') {
       debugService.debug('[OpenAI] Input blocked by sanitizer: {sanitizer}', { sanitizer: report.blockedReason });
-      throw new GenerationError(`Input blocked: ${report.blockedReason}`);
+      return InputBlocked({ reason: report.blockedReason ?? 'blocked by the input sanitizer' });
     }
 
     if (report.result === 'sanitized' && report.sanitizedInput) {
@@ -449,23 +439,24 @@ Content: "${text}"`;
   /**
    * Sanitizes all user-role messages in a conversation.
    * System and assistant messages are trusted and passed through unchanged.
-   *
-   * @throws GenerationError if any user message is blocked
+   * Returns `InputBlocked` when any user message is blocked.
    */
-  private sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  private sanitizeMessages(messages: ChatMessage[]): ChatMessage[] | InputBlocked {
     if (!this.sanitizer) {
       return messages;
     }
 
-    return messages.map(msg => {
-      if (msg.role !== 'user') {
-        return msg;
+    const sanitized: ChatMessage[] = [];
+    for (const msg of messages) {
+      // Only sanitize plain-string user content — other roles and multimodal content pass through
+      if (msg.role !== 'user' || typeof msg.content !== 'string') {
+        sanitized.push(msg);
+        continue;
       }
-      // Only sanitize plain string content — multimodal content is passed through
-      if (typeof msg.content !== 'string') {
-        return msg;
-      }
-      return { role: 'user' as const, content: this.sanitizeInput(msg.content) };
-    });
+      const content = this.sanitizeInput(msg.content);
+      if (InputBlocked.is(content)) return content;
+      sanitized.push({ role: 'user', content });
+    }
+    return sanitized;
   }
 }

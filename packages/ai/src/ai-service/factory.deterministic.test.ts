@@ -9,6 +9,7 @@
  * Runs against the real Ollama daemon (`OLLAMA_BASE_URL`, default http://127.0.0.1:11434) and
  * model (`AI_TEST_MODEL`, default `gemma4:latest`). Without them the test fails with setup text.
  */
+import { isFailure, orThrow } from '@arki/failure';
 import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
@@ -26,6 +27,7 @@ describe('deterministic mode on a real local model', () => {
     const first = await llm.generateText(prompt, { temperature: 1.5, maxTokens: 600 });
     const second = await llm.generateText(prompt, { temperature: 1.5, maxTokens: 600 });
 
+    if (isFailure(first)) throw new Error(`no answer from Ollama model ${model}: ${first.code}; is the daemon running?`);
     expect(first.trim().length, `no answer from Ollama model ${model}; is the daemon running?`).toBeGreaterThan(0);
     expect(second).toBe(first);
   });
@@ -35,7 +37,7 @@ describe('deterministic mode on a real local model', () => {
     const service = new OllamaService({ model, deterministicSeed: 7 });
     const schema = z.object({ sentence: z.string() });
 
-    const first = await service.generateStructuredData(prompt, schema, { temperature: 1.5 });
+    const first = orThrow(await service.generateStructuredData(prompt, schema, { temperature: 1.5 }));
     const second = await service.generateStructuredData(prompt, schema, { temperature: 1.5 });
 
     expect(first.sentence.trim().length, `no answer from Ollama model ${model}; is the daemon running?`).toBeGreaterThan(0);

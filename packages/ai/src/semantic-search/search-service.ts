@@ -10,14 +10,15 @@ import type { VectorSearchProvider } from '../types';
 import type { SearchOptions } from '../validation';
 import type { SearchCache } from './cache';
 import { debugSemantic } from '../debug.ts';
+import { KeywordSearchUnavailable } from '../failures';
 import { SearchAnalyticsCollector } from './analytics';
 import { InMemorySearchCache } from './cache';
 
-export type SemanticSearchConfig = {
+export type SemanticSearchConfig<TMetadata = Record<string, unknown>> = {
   vectorProvider: VectorSearchProvider;
   /** Embeds queries and documents; its space must be the store's (`vectorProvider.space`). */
   embedder: Embedder;
-  cache?: SearchCache;
+  cache?: SearchCache<SearchResult<TMetadata>[]>;
   analytics?: SearchAnalyticsCollector;
   enableCache?: boolean;
   cacheTTL?: number;
@@ -34,16 +35,21 @@ export type SearchResult<TMetadata = Record<string, unknown>> = {
   metadata?: TMetadata;
 };
 
+/** Escapes every RegExp syntax character, so `text` matches only itself. */
+function escapeRegExp(text: string): string {
+  return text.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+}
+
 export type KeywordSearchProvider<TMetadata = Record<string, unknown>> = {
   search(query: string, options?: SearchOptions): Promise<SearchResult<TMetadata>[]>;
 };
 
 export class SemanticSearchService<TMetadata = Record<string, unknown>> {
-  private cache: SearchCache;
+  private cache: SearchCache<SearchResult<TMetadata>[]>;
   private analytics: SearchAnalyticsCollector;
 
   constructor(
-    private config: SemanticSearchConfig,
+    private config: SemanticSearchConfig<TMetadata>,
     private keywordProvider?: KeywordSearchProvider<TMetadata>,
   ) {
     this.cache = config.cache || new InMemorySearchCache(config.cacheTTL || 3600);
@@ -62,7 +68,15 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Perform advanced search with multiple strategies
    */
-  async search(options: SearchOptions): Promise<SearchResult<TMetadata>[] | EmbedFailure> {
+  async search(
+    options: SearchOptions & { mode?: 'semantic' },
+  ): Promise<SearchResult<TMetadata>[] | EmbedFailure>;
+  async search(
+    options: SearchOptions,
+  ): Promise<SearchResult<TMetadata>[] | EmbedFailure | KeywordSearchUnavailable>;
+  async search(
+    options: SearchOptions,
+  ): Promise<SearchResult<TMetadata>[] | EmbedFailure | KeywordSearchUnavailable> {
     debugSemantic.debug('[SearchService] Performing search (query: "{query}", mode: {mode}, limit: {limit})', {
       query: options.query,
       mode: options.mode || 'semantic',
@@ -74,7 +88,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     // Check cache first
     if (this.config.enableCache !== false) {
-      const cached = await this.cache.get<SearchResult<TMetadata>[]>(cacheKey);
+      const cached = await this.cache.get(cacheKey);
       if (cached) {
         debugSemantic.debug('[SearchService] Cache hit (query: "{query}", results: {results})', {
           query: options.query,
@@ -115,7 +129,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       } else {
         if (mode === 'keyword') {
           debugSemantic.debug('[SearchService] Keyword search requested but no keyword provider configured');
-          throw new Error('Keyword search provider not configured');
+          return KeywordSearchUnavailable();
         }
         debugSemantic.debug('[SearchService] No keyword provider, continuing with semantic results only');
       }
@@ -283,7 +297,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     if (!options.includeMetadata) {
       results = results.map(r => {
         const { metadata, ...rest } = r;
-        return rest as SearchResult<TMetadata>;
+        return rest;
       });
     }
 
@@ -306,10 +320,10 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     for (let i = 0; i < lowerText.length - 50; i++) {
       let score = 0;
-      const substring = lowerText.substring(i, i + 200);
+      const substring = new Set(lowerText.slice(i, i + 200));
 
       for (const word of words) {
-        if (substring.includes(word)) {
+        if (substring.has(word)) {
           score++;
         }
       }
@@ -327,7 +341,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     // Extract preview around best match
     const start = Math.max(0, bestIndex - 50);
     const end = Math.min(text.length, bestIndex + 150);
-    let preview = text.substring(start, end);
+    let preview = text.slice(start, end);
 
     if (start > 0) preview = '...' + preview;
     if (end < text.length) preview = preview + '...';
@@ -341,17 +355,18 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   private highlightText(text: string, query: string): string[] {
     if (!text) return [];
 
-    const words = query.split(/\s+/);
+    // Query words are plain text: escape them, so `c++` or `(` neither throws nor backtracks.
+    const words = query.split(/\s+/).filter(word => word.length > 0);
     const highlights: string[] = [];
 
     for (const word of words) {
-      const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+      const regex = new RegExp(`\\b(${escapeRegExp(word)})\\b`, 'gi');
       const matches = [...text.matchAll(regex)];
 
       for (const match of matches) {
         const start = Math.max(0, match.index - 30);
         const end = Math.min(text.length, match.index + word.length + 30);
-        const highlight = text.substring(start, end);
+        const highlight = text.slice(start, end);
         highlights.push(highlight);
       }
     }
@@ -363,6 +378,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
    * Generate cache key for search options
    */
   private generateCacheKey(options: SearchOptions): string {
+    // Every option that changes which results come back, or their shape.
     return JSON.stringify({
       q: options.query,
       m: options.mode,
@@ -370,6 +386,8 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       l: options.limit,
       o: options.offset,
       st: options.scoreThreshold,
+      im: options.includeMetadata,
+      ht: options.highlightTerms,
     });
   }
 
@@ -441,9 +459,9 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Clear the search cache
    */
-  clearCache(): void {
+  async clearCache(): Promise<void> {
     debugSemantic.debug('[SearchService] Clearing search cache');
-    this.cache.clear();
+    await this.cache.clear();
   }
 
   /**

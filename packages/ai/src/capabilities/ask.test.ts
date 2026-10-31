@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import { askCitationLabels, askPassages } from './ask';
 import { askQuestionSchema } from './schemas';
 
@@ -8,7 +10,9 @@ describe('Ask evidence retrieval', () => {
     expect(askCitationLabels('Three prompts [source_18].', [{ id: 'source_18', start: 86.28 }])).toBe(
       'Three prompts [1:26].',
     );
-    expect(() => askCitationLabels('A claim [source_19].', [{ id: 'source_18', start: 86.28 }])).toThrow();
+    const unknown = askCitationLabels('A claim [source_19].', [{ id: 'source_18', start: 86.28 }]);
+    expect(isFailure(unknown) && unknown.code).toBe('ai.ungrounded_output');
+    expect(askCitationLabels(null, [])).toBeNull();
   });
   it('keeps the capture context and distant matching evidence without inventing source text or timing', () => {
     const segments = Array.from({ length: 150 }, (_, i) => ({

@@ -9,6 +9,10 @@
  * reconciler acknowledges erasure tombstones only against a durable index.
  */
 import type { EmbeddingSpace } from '@arki/embeddings';
+import { z } from '@arki/contracts';
+import { InvalidEnvironment } from '@arki/env/core';
+import { InvalidInput, orThrow } from '@arki/failure';
+import { formatIssues, parse } from '@arki/schema';
 
 import type { VectorSearchProvider } from '../types';
 import { debugVector } from '../debug.ts';
@@ -30,19 +34,40 @@ export type VectorIndex<P extends Record<string, unknown>> = {
   durable: boolean;
 };
 
-/** Build the app's vector index for one embedding space. */
+/** The Qdrant settings read from the environment, checked once at boot. An empty value counts as unset. */
+const qdrantEnvSchema = z.object({
+  QDRANT_URL: z.url({ protocol: /^https?$/, error: 'must be an http(s) URL' }),
+  QDRANT_API_KEY: z.string().optional(),
+  QDRANT_REPLICATION_FACTOR: z
+    .string()
+    .regex(/^[1-9]\d*$/, 'must be a whole number of 1 or more')
+    .transform(Number)
+    .optional(),
+});
+
+/**
+ * Build the app's vector index for one embedding space. Returns `InvalidEnvironment` (from
+ * `@arki/env/core`) when `QDRANT_URL` is not an http(s) URL or `QDRANT_REPLICATION_FACTOR` is not a
+ * whole number of 1 or more, so a bad value fails the boot instead of the first collection call.
+ */
 export function createVectorIndex<P extends Record<string, unknown>>(
   space: EmbeddingSpace,
   { collection, payloadIndexes, env }: VectorIndexOptions<P>,
-): VectorIndex<P> {
+): VectorIndex<P> | ReturnType<typeof InvalidEnvironment> {
   const qdrantUrl = env['QDRANT_URL'];
   if (!qdrantUrl || env['VECTOR_BACKEND'] === 'mock') {
     debugVector.debug('[Index] in-memory mock index for collection {collection} (not durable)', { collection });
     return { provider: new MockVectorProvider<P>({ space }), durable: false };
   }
 
-  const apiKey = env['QDRANT_API_KEY'];
-  const replication = env['QDRANT_REPLICATION_FACTOR'];
+  const parsed = parse(qdrantEnvSchema, {
+    QDRANT_URL: qdrantUrl,
+    QDRANT_API_KEY: env['QDRANT_API_KEY'] || undefined,
+    QDRANT_REPLICATION_FACTOR: env['QDRANT_REPLICATION_FACTOR'] || undefined,
+  });
+  if (InvalidInput.is(parsed)) return InvalidEnvironment({ report: formatIssues(parsed.data.issues) }, { cause: parsed });
+  const qdrantEnv = orThrow(parsed);
+  const apiKey = qdrantEnv.QDRANT_API_KEY;
   debugVector.debug('[Index] Qdrant index for collection {collection} at {url} (dims: {dimensions})', {
     collection,
     url: qdrantUrl,
@@ -55,7 +80,7 @@ export function createVectorIndex<P extends Record<string, unknown>>(
         ...(apiKey ? { apiKey } : {}),
         collectionName: collection,
         // Single node by default; override for a cluster.
-        replicationFactor: replication ? Number(replication) : 1,
+        replicationFactor: qdrantEnv.QDRANT_REPLICATION_FACTOR ?? 1,
         payloadIndexes: [...payloadIndexes],
         createCollectionIfNotExists: true,
       },

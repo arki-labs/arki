@@ -32,7 +32,7 @@ export const queueOrderSchema = z
             .regex(/^[a-f0-9]{64}$/)
             .optional(),
           title: z.string().max(2000),
-          summary: z.string().max(12000),
+          summary: z.string().max(12_000),
         }),
       )
       .min(2)
@@ -71,7 +71,7 @@ export const transcriptDocumentSchema = z.object({
       }),
     )
     .min(1)
-    .max(100000),
+    .max(100_000),
   provider: z.string(),
   model: z.string(),
 });

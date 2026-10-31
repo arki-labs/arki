@@ -94,7 +94,7 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
 
   const chat = useChat({
     transport,
-    messages: initialMessages.map(chatMessageToUIMessage),
+    messages: initialMessages.map(message => chatMessageToUIMessage(message)),
     onError: error => {
       onError?.(error);
     },
@@ -106,7 +106,7 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
   const [input, setInput] = useState('');
 
   const messages = useMemo<ChatMessage[]>(
-    () => chat.messages.map(uiMessageToChatMessage),
+    () => chat.messages.map(message => uiMessageToChatMessage(message)),
     [chat.messages],
   );
 

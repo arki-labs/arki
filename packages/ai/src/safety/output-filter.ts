@@ -8,15 +8,12 @@
  * @module safety/output-filter
  */
 
-import type {
-  ContentFilterResult,
-  ContentPattern,
-  ContentRating,
-  FlaggedSegment,
-  OutputFilterConfig,
-  SuggestedEdit,
-} from './types';
+import type { ContentFilterResult, ContentRating, FlaggedSegment, OutputFilterConfig, SuggestedEdit } from './types';
+import { scanRegex } from './scan-regex';
 import { DEFAULT_OUTPUT_FILTER_CONFIG } from './types';
+
+/** A category pattern with its scan copy (`g` set, `y` cleared), built once. */
+type ScanPattern = { readonly scan: RegExp; readonly weight: number };
 
 // ============================================
 // OutputContentFilter Class
@@ -61,6 +58,7 @@ export class OutputContentFilter<TCategory extends string = string> {
   private readonly config: Required<OutputFilterConfig<TCategory>>;
   private readonly categories: TCategory[];
   private readonly replacementMap: Map<string, string>;
+  private readonly scans: Map<TCategory, ScanPattern[]>;
 
   /**
    * Creates a new OutputContentFilter instance.
@@ -76,6 +74,12 @@ export class OutputContentFilter<TCategory extends string = string> {
     };
 
     this.categories = Object.keys(config.categoryPatterns) as TCategory[];
+    this.scans = new Map(
+      this.categories.map(category => [
+        category,
+        config.categoryPatterns[category].map(({ pattern, weight }) => ({ scan: scanRegex(pattern), weight })),
+      ]),
+    );
 
     // Build replacement map for efficient lookups
     this.replacementMap = new Map(this.config.replacements.map(r => [r.original.toLowerCase(), r.replacement]));
@@ -177,8 +181,7 @@ export class OutputContentFilter<TCategory extends string = string> {
     const scores = {} as Record<TCategory, number>;
 
     for (const category of this.categories) {
-      const patterns = this.config.categoryPatterns[category];
-      const rawScore = this.calculatePatternScore(normalizedContent, patterns, wordCount);
+      const rawScore = this.calculatePatternScore(normalizedContent, this.scans.get(category) ?? [], wordCount);
       scores[category] = Math.min(rawScore, 1);
     }
 
@@ -188,11 +191,12 @@ export class OutputContentFilter<TCategory extends string = string> {
   /**
    * Calculates a weighted score based on pattern matches.
    */
-  private calculatePatternScore(content: string, patterns: ContentPattern[], wordCount: number): number {
+  private calculatePatternScore(content: string, patterns: ScanPattern[], wordCount: number): number {
     let totalScore = 0;
 
-    for (const { pattern, weight } of patterns) {
-      const matches = content.match(pattern) || [];
+    for (const { scan, weight } of patterns) {
+      // A `g` scan: `match` returns every match, never one match's capture groups.
+      const matches = content.match(scan) ?? [];
       if (matches.length > 0) {
         // Each match contributes weighted score
         totalScore += matches.length * weight;
@@ -232,18 +236,14 @@ export class OutputContentFilter<TCategory extends string = string> {
         continue;
       }
 
-      const patterns = this.config.categoryPatterns[category];
       const threshold = this.config.thresholds[category];
 
-      for (const { pattern, weight } of patterns) {
+      for (const { scan, weight } of this.scans.get(category) ?? []) {
         // Only flag if the weight is above threshold for this category
         const relativeWeight = weight - threshold;
         if (relativeWeight <= 0) continue;
 
-        const regex = new RegExp(pattern.source, pattern.flags);
-        let match: RegExpExecArray | null;
-
-        while ((match = regex.exec(content)) !== null) {
+        for (const match of content.matchAll(scan)) {
           segments.push({
             text: match[0],
             category,

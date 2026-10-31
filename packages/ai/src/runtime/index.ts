@@ -5,10 +5,12 @@ export type {
   AgentTool,
   AgentToolExecuteOptions,
   RuntimeEvent,
+  RuntimeFailure,
   RuntimeUsage,
   ToolFailure,
   ToolLoopInput,
 } from './types';
+export { RUNTIME_FAILURES } from './types';
 export {
   initialRuntimeUiState,
   runtimeEventReducer,

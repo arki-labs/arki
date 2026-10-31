@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { calculateLLMCost, DEFAULT_PRICING, priceOf } from './pricing';
+import { CostEstimator } from './estimator';
+import { calculateLLMCost, DEFAULT_PRICING, getModelPricing, hasKnownPricing, priceOf } from './pricing';
 
 describe('priceOf', () => {
   it('prices a local provider at 0 with basis local (lib-gaps 24)', () => {
@@ -38,5 +39,32 @@ describe('calculateLLMCost', () => {
     // WHY: existing callers pass three arguments and must get the same number as before.
     expect(calculateLLMCost('gemma4:latest', 100, 100)).toBeCloseTo(0.004, 10);
     expect(calculateLLMCost('gemma4:latest', 100, 100, { provider: 'ollama' })).toBe(0);
+  });
+});
+
+describe('pricing lookups use own keys only (F8)', () => {
+  it('treats Object.prototype names as unknown models, priced at the default rate', () => {
+    // WHY: `constructor` resolved to Object's constructor: hasKnownPricing said true and the cost was NaN.
+    for (const model of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(hasKnownPricing(model)).toBe(false);
+      expect(getModelPricing(model)).toEqual(DEFAULT_PRICING);
+      expect(priceOf({ model, inputTokens: 1000, outputTokens: 1000 })).toEqual({
+        usd: DEFAULT_PRICING.inputPer1k + DEFAULT_PRICING.outputPer1k,
+        basis: 'default-rate',
+      });
+    }
+  });
+});
+
+describe('CostEstimator says how a price was worked out (F8)', () => {
+  it('createEstimate carries the basis, so a default-rate guess is not passed off as a list price', () => {
+    const estimator = new CostEstimator();
+
+    expect(estimator.createEstimate('summary', 'gpt-4o', 1000, 500).basis).toBe('list-price');
+    expect(estimator.createEstimate('summary', 'brand-new-model', 1000, 500).basis).toBe('default-rate');
+    expect(estimator.estimateLLMPrice('gemma4:latest', 100, 100, { provider: 'ollama' })).toEqual({
+      usd: 0,
+      basis: 'local',
+    });
   });
 });

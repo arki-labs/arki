@@ -5,6 +5,7 @@
 import type { EmbeddingSpace } from '@arki/embeddings';
 
 import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types';
+import { VectorSearchError } from '../../errors';
 
 export type MockDocument<TMetadata = Record<string, unknown>> = {
   id: string;
@@ -20,8 +21,18 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
     this.space = space;
   }
 
+  /** Refuse a vector of the wrong size, exactly as the Qdrant provider does, so tests see dimension bugs. */
+  private checkDimensions(vector: number[], where: string): void {
+    if (vector.length !== this.space.dimensions) {
+      throw new VectorSearchError(`${where} dimension mismatch: got ${vector.length}, collection is ${this.space.dimensions}.`);
+    }
+  }
+
   async upsertVector(id: string, vector: ArrayLike<number>, metadata?: TMetadata): Promise<void> {
-    this.documents.set(id, { id, embedding: Array.from(vector), metadata });
+    // eslint-disable-next-line unicorn/prefer-spread -- an ArrayLike (a typed array or array-like) has no iterator in its type
+    const embedding = Array.from(vector);
+    this.checkDimensions(embedding, `upsertVector "${id}"`);
+    this.documents.set(id, { id, embedding, metadata });
   }
 
   async searchByVector(
@@ -29,7 +40,9 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
     limit = 10,
     filter?: Record<string, unknown>,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    // eslint-disable-next-line unicorn/prefer-spread -- an ArrayLike (a typed array or array-like) has no iterator in its type
     const query = Array.from(vector);
+    this.checkDimensions(query, 'searchByVector');
     const results: VectorSearchResult<TMetadata>[] = [];
 
     for (const doc of this.documents.values()) {

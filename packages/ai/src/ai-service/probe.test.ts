@@ -59,6 +59,13 @@ describe('probeLLMProvider', () => {
     }
   });
 
+  it('says unreachable, without throwing or calling fetch, when the Ollama base URL is not a URL', async () => {
+    const fetchSpy = vi.fn<typeof fetch>();
+    const result = await probeLLMProvider({ provider: 'ollama', model: 'gemma4', baseURL: 'not a url', fetch: fetchSpy });
+    expect(ProviderUnavailable.is(result) && result.data.problem).toBe('unreachable');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('checks a cloud provider by its key, without a network call', async () => {
     // WHY: a probe must be cheap and must not spend tokens; a key that is not set is the common
     // misconfiguration.

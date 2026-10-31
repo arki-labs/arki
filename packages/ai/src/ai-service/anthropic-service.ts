@@ -7,15 +7,18 @@ import type { ModelMessage, SystemModelMessage } from 'ai';
 import { anthropic } from '../anthropic';
 import { generateText, Output, streamText } from 'ai';
 
+import { isFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { ProviderFailure } from '../failures';
 import type { AIServiceConfig } from '../validation';
 
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage } from '../errors';
 import { RateLimited } from '../failures';
 import { modelSchema } from './model-schema';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure';
+import { aiTelemetry } from './telemetry';
 import { rateLimiters } from '../utils/rate-limiter';
-import { validateInput } from '../validation';
+import { validateInput } from './validate-input';
 import { aiServiceConfigSchema } from '../validation-schemas';
 import { DEFAULT_ANTHROPIC_MODEL } from './factory';
 
@@ -39,7 +42,8 @@ type AnthropicStreamOptions = {
   onStart?: () => void;
   onToken?: (chunk: string) => void;
   onComplete?: (text: string) => void;
-  onError?: (error: Error) => void;
+  /** Called with the failure that ends the stream, just before the stream yields it. */
+  onError?: (failure: ProviderFailure) => void;
 };
 
 export type AnthropicServiceConfig = Pick<AIServiceConfig, 'model' | 'temperature' | 'maxRetries'>;
@@ -61,6 +65,7 @@ function buildSystemParam(systemPrompt: string | SystemPart[] | undefined): stri
 }
 
 export class AnthropicService {
+  readonly name = 'anthropic';
   private model: string;
   private defaultTemperature: number;
   private defaultMaxRetries: number;
@@ -98,7 +103,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<SchemaOutput<S> | RateLimited> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
@@ -114,7 +119,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<SchemaOutput<S> | RateLimited> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     debugService.debug('[Anthropic] Generating structured data (messages: {messages}, temperature: {temperature})', {
       messages: messages.length,
       temperature: options.temperature ?? this.defaultTemperature,
@@ -134,32 +139,21 @@ export class AnthropicService {
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
           abortSignal: options.signal,
+          ...aiTelemetry('anthropic.generateStructuredData'),
         });
 
-        debugService.debug(
-          '[Anthropic] Structured data generated successfully (cache: creation={creation}, read={read})',
-          {
-            creation:
-              (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheCreationInputTokens ??
-              0,
-            read:
-              (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheReadInputTokens ?? 0,
-          },
-        );
+        debugService.debug('[Anthropic] Structured data generated (cache: creation={creation}, read={read})', {
+          creation: response.usage.inputTokenDetails.cacheWriteTokens ?? 0,
+          read: response.usage.inputTokenDetails.cacheReadTokens ?? 0,
+        });
 
-        return response.output;
+        return finishFailure(response.finishReason, this.call(options)) ?? response.output;
       } catch (error) {
-        debugService.debug('[Anthropic] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
-
-        throw new GenerationError(`Failed to generate structured data: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, this.call(options));
       }
     });
 
-    if (RateLimited.is(result)) {
-      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
-    }
-
-    return result;
+    return this.logged('generateStructuredDataFromMessages', result);
   }
 
   /**
@@ -173,7 +167,7 @@ export class AnthropicService {
       systemPrompt?: string;
       signal?: AbortSignal;
     } = {},
-  ) {
+  ): Promise<string | ProviderFailure> {
     debugService.debug('[Anthropic] Generating text (prompt length: {length})', { length: prompt.length });
 
     try {
@@ -184,15 +178,11 @@ export class AnthropicService {
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry('anthropic.generateText'),
       });
-
-      debugService.debug('[Anthropic] Text generated successfully (length: {length})', { length: result.text.length });
-
-      return result.text;
+      return this.logged('generateText', finishFailure(result.finishReason, this.call(options)) ?? result.text);
     } catch (error) {
-      debugService.debug('[Anthropic] Text generation failed: {failed}', { failed: getErrorMessage(error) });
-
-      throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+      return this.logged('generateText', providerFailure(error, this.call(options)));
     }
   }
 
@@ -210,7 +200,7 @@ export class AnthropicService {
       systemPrompt?: string | SystemPart[];
       signal?: AbortSignal;
     } = {},
-  ): Promise<string | RateLimited> {
+  ): Promise<string | ProviderFailure> {
     debugService.debug('[Anthropic] generateConversation (messages: {messages})', { messages: messages.length });
 
     const system = buildSystemParam(options.systemPrompt);
@@ -224,33 +214,29 @@ export class AnthropicService {
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
           abortSignal: options.signal,
+          ...aiTelemetry('anthropic.generateConversation'),
         });
 
-        return response.text;
+        return finishFailure(response.finishReason, this.call(options)) ?? response.text;
       } catch (error) {
-        debugService.debug('[Anthropic] Conversation generation failed: {failed}', { failed: getErrorMessage(error) });
-
-        throw new GenerationError(`Failed to generate conversation response: ${getErrorMessage(error)}`, error);
+        return providerFailure(error, this.call(options));
       }
     });
 
-    if (RateLimited.is(result)) {
-      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.data.retryAfterMs });
-    }
-
-    return result;
+    return this.logged('generateConversation', result);
   }
 
   /**
    * Streaming variant of {@link generateConversation}. Takes a rate-limit slot
    * before streaming starts, so an over-limit caller gets `RateLimited` up front
    * rather than mid-stream. Otherwise it resolves to a generator that yields each
-   * text delta for a typing-indicator UX.
+   * text delta for a typing-indicator UX; when the stream fails or stops early, its
+   * last item is the `ProviderFailure`.
    */
   async streamConversation(
     messages: ChatMessage[],
     options: AnthropicStreamOptions = {},
-  ): Promise<AsyncGenerator<string, void, unknown> | RateLimited> {
+  ): Promise<AsyncGenerator<string | ProviderFailure, void, unknown> | RateLimited> {
     const slot = await this.consumeRateLimitSlot('streamConversation');
     if (RateLimited.is(slot)) return slot;
 
@@ -260,34 +246,51 @@ export class AnthropicService {
   private async *streamConversationChunks(
     messages: ChatMessage[],
     options: AnthropicStreamOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    const system = buildSystemParam(options.systemPrompt);
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    const call = this.call(options);
+    options.onStart?.();
 
+    let chunks: AsyncIterable<string | ProviderFailure> | readonly ProviderFailure[];
     try {
-      options.onStart?.();
-
-      const result = await streamText({
+      const result = streamText({
         model: anthropic(this.model),
-        instructions: system,
+        instructions: buildSystemParam(options.systemPrompt),
         messages,
         temperature: options.temperature ?? this.defaultTemperature,
         abortSignal: options.signal,
+        ...aiTelemetry('anthropic.streamConversation'),
       });
-
-      let fullText = '';
-      for await (const chunk of result.textStream) {
-        fullText += chunk;
-        options.onToken?.(chunk);
-        yield chunk;
-      }
-
-      options.onComplete?.(fullText);
+      chunks = readTextParts(result.fullStream, call);
     } catch (error) {
-      options.onError?.(error as Error);
-      debugService.debug('[Anthropic] Stream conversation failed: {failed}', { failed: getErrorMessage(error) });
-
-      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
+      chunks = [providerFailure(error, call)];
     }
+
+    let fullText = '';
+    for await (const chunk of chunks) {
+      if (isFailure(chunk)) {
+        const failure = this.logged('streamConversation', chunk);
+        options.onError?.(failure);
+        yield failure;
+        return;
+      }
+      fullText += chunk;
+      options.onToken?.(chunk);
+      yield chunk;
+    }
+
+    options.onComplete?.(fullText);
+  }
+
+  /** The names and signal of one call, for the failure boundary. */
+  private call(options: { signal?: AbortSignal | undefined }) {
+    return { provider: this.name, model: this.model, signal: options.signal };
+  }
+
+  /** Log a failed call at DEBUG; the result passes through unchanged. */
+  private logged<T>(operation: string, result: T | ProviderFailure): T | ProviderFailure {
+    const value: unknown = result;
+    if (isFailure(value)) debugService.debug('[Anthropic] {operation} failed: {code}', { operation, code: value.code });
+    return result;
   }
 
   /**

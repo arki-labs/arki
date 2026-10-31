@@ -186,7 +186,7 @@ export function withRetry<TArgs extends unknown[], TResult>(
     const result = await retryManager.execute(() => fn(...args));
 
     if (!result.success) {
-      throw result.error;
+      throw result.error ?? new Error('Retry failed');
     }
 
     return result.data!;
@@ -222,7 +222,7 @@ export function Retryable(config?: RetryConfig) {
       );
 
       if (!result.success) {
-        throw result.error;
+        throw result.error ?? new Error('Retry failed');
       }
 
       return result.data;

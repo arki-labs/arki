@@ -55,3 +55,52 @@ describe('BudgetManager.checkBudget', () => {
     expect(BudgetExceeded.is(result) && result.data.remainingUsd).toBe(0);
   });
 });
+
+describe('BudgetManager.recordSpend under concurrency (F18)', () => {
+  test('never loses a spend when calls for the same user overlap', async () => {
+    // WHY: two overlapping calls used to read the same old total and both write total + own cost,
+    // so one spend vanished and the user could overspend their budget.
+    const values = new Map<string, unknown>();
+    const kv: KVStore = {
+      // A real store answers after a round trip; the delay lets the two read-modify-writes interleave.
+      get: vi.fn().mockImplementation(async (key: string) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return values.get(key) ?? null;
+      }),
+      set: async (key, value) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        values.set(key, value);
+      },
+      delete: async key => {
+        values.delete(key);
+      },
+    };
+    const budgets = new BudgetManager(kv, { limits: { hourly: 100, daily: 100, monthly: 100 } });
+
+    await Promise.all([budgets.recordSpend('usr_1', 1), budgets.recordSpend('usr_1', 2), budgets.recordSpend('usr_1', 3)]);
+
+    expect(await budgets.getCurrentSpend('usr_1', 'hourly')).toBe(6);
+    expect(await budgets.getCurrentSpend('usr_1', 'monthly')).toBe(6);
+  });
+});
+
+describe('BudgetManager.getBudgetStatus with a zero limit (F18)', () => {
+  test('reports 0 % while nothing is spent, never NaN', async () => {
+    const budgets = new BudgetManager(memoryKv(), { limits: { hourly: 0, daily: 10, monthly: 100 } });
+
+    const statuses = await budgets.getBudgetStatus('usr_1');
+    const hourly = statuses.find(status => status.period === 'hourly');
+
+    expect(hourly?.percentUsed).toBe(0);
+  });
+
+  test('reports 100 % once anything is spent against a zero limit', async () => {
+    const budgets = new BudgetManager(memoryKv(), { limits: { hourly: 0, daily: 10, monthly: 100 } });
+    await budgets.recordSpend('usr_1', 0.5);
+
+    const statuses = await budgets.getBudgetStatus('usr_1');
+    const hourly = statuses.find(status => status.period === 'hourly');
+
+    expect(hourly?.percentUsed).toBe(100);
+  });
+});

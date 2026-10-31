@@ -8,6 +8,7 @@
  */
 
 import type { PIIPattern, SanitizationIssue } from './types';
+import { scanRegex } from './scan-regex';
 
 // ============================================
 // Default PII Patterns
@@ -49,7 +50,7 @@ export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
 
   // US Street addresses (basic pattern)
   {
-    pattern: /\b\d{1,5}\s[\w\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)\b,?\s*(?:apt\.?\s*\d+)?,?\s*[a-z]+,?\s*[a-z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
+    pattern: /\b\d{1,5}\s[\w\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)[\s,]+(?:apt\.?\s*\d+[\s,]*)?[a-z]+,?\s*[a-z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
     replacement: '[ADDRESS REDACTED]',
     description: 'Street address',
   },
@@ -99,6 +100,8 @@ export type PIIRedactionResult = {
  */
 export class PIIRedactor {
   private readonly patterns: PIIPattern[];
+  /** Each pattern's scan copy (`g` set, `y` cleared), built once. */
+  private readonly scans: { scan: RegExp; replacement: string; description: string }[];
 
   /**
    * Creates a new PIIRedactor.
@@ -114,6 +117,11 @@ export class PIIRedactor {
     } else {
       this.patterns = DEFAULT_PII_PATTERNS;
     }
+    this.scans = this.patterns.map(({ pattern, replacement, description }) => ({
+      scan: scanRegex(pattern),
+      replacement,
+      description,
+    }));
   }
 
   /**
@@ -126,12 +134,8 @@ export class PIIRedactor {
     const issues: SanitizationIssue<'pii_detected'>[] = [];
     let redactedText = input;
 
-    for (const { pattern, replacement, description } of this.patterns) {
-      // Create a new regex instance for detection
-      const detectPattern = new RegExp(pattern.source, pattern.flags);
-      let match: RegExpExecArray | null;
-
-      while ((match = detectPattern.exec(input)) !== null) {
+    for (const { scan, replacement, description } of this.scans) {
+      for (const match of input.matchAll(scan)) {
         issues.push({
           type: 'pii_detected',
           description: `${description} detected and redacted`,
@@ -141,8 +145,8 @@ export class PIIRedactor {
         });
       }
 
-      // Apply the replacement
-      redactedText = redactedText.replace(pattern, replacement);
+      // Apply the replacement to every match
+      redactedText = redactedText.replace(scan, replacement);
     }
 
     return {
@@ -160,11 +164,8 @@ export class PIIRedactor {
    * @returns True if any PII pattern matches
    */
   public hasPII(input: string): boolean {
-    return this.patterns.some(({ pattern }) => {
-      // Create fresh regex to avoid lastIndex issues
-      const testPattern = new RegExp(pattern.source, pattern.flags.replace('g', ''));
-      return testPattern.test(input);
-    });
+    // `search` always starts at 0 and ignores `lastIndex`.
+    return this.scans.some(({ scan }) => input.search(scan) !== -1);
   }
 
   /**
@@ -176,11 +177,8 @@ export class PIIRedactor {
   public detect(input: string): SanitizationIssue<'pii_detected'>[] {
     const issues: SanitizationIssue<'pii_detected'>[] = [];
 
-    for (const { pattern, description } of this.patterns) {
-      const detectPattern = new RegExp(pattern.source, pattern.flags);
-      let match: RegExpExecArray | null;
-
-      while ((match = detectPattern.exec(input)) !== null) {
+    for (const { scan, description } of this.scans) {
+      for (const match of input.matchAll(scan)) {
         issues.push({
           type: 'pii_detected',
           description: `${description} detected`,

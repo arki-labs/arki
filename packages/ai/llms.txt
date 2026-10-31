@@ -5,7 +5,7 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/ai`: Comprehensive AI, RAG, and Vector Search Library Provides reusable AI infrastructure for all Arki projects. `AIError`, `AnthropicService`, `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitBreakerError`, `ConfigurationError`, `ContentAnalysisSchema`, `CostCircuitBreaker`, `CostEstimator`; and 196 more.
+- `@arki/ai`: Comprehensive AI, RAG, and Vector Search Library Provides reusable AI infrastructure for all Arki projects. `AIError`, `AnthropicService`, `BUDGET_PERIODS`, `BUDGET_PERIOD_DURATIONS`, `BudgetExceeded`, `BudgetManager`, `CIRCUIT_STATES`, `CircuitOpen`, `ConfigurationError`, `ContentAnalysisSchema`, `CostCircuitBreaker`, `CostEstimator`; and 196 more.
 - react/* (3 paths): React components and hooks for AI functionality. `@arki/ai/react`, `@arki/ai/react/index`, `@arki/ai/react/md`.
 - drizzle/* (2 paths): Erasure outbox for a vector index, on Drizzle + Postgres (the SQLite twin is @arki/ai/drizzle/sqlite). `@arki/ai/drizzle`, `@arki/ai/drizzle/sqlite`.
 - ai-service/* (2 paths): `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation`.

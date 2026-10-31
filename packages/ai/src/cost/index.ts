@@ -30,10 +30,8 @@
  * if (BudgetExceeded.is(exceeded)) return exceeded;
  *
  * // Execute with circuit breaker protection
- * const result = await circuitBreaker.executeOrThrow(
- *   () => aiOperation(),
- *   cost
- * );
+ * const result = await circuitBreaker.execute(() => aiOperation(), cost);
+ * if (CircuitOpen.is(result)) return result; // refused: the operation did not run
  *
  * // Record actual spend
  * await budgetManager.recordSpend(userId, actualCost, metadata);
@@ -49,7 +47,6 @@ export type {
   BudgetConfig,
   BudgetLimits,
   BudgetPeriod,
-  CircuitBreakerResult,
   CircuitBreakerState,
   CircuitState,
   CostCircuitConfig,
@@ -104,7 +101,7 @@ export {
 // Budget Manager
 // ============================================
 
-export { BudgetExceeded } from '../failures';
+export { BudgetExceeded, CIRCUIT_OPEN_REASONS, CircuitOpen } from '../failures';
 
 export {
   BudgetManager,
@@ -119,7 +116,6 @@ export {
 
 export {
   CostCircuitBreaker,
-  CircuitBreakerError,
   UserCircuitBreakerManager,
   createCostCircuitBreaker,
   createUserCircuitBreakerManager,

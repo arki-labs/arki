@@ -1,6 +1,9 @@
 import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { Failure } from '@arki/failure';
+import { InvalidInput, REVIVAL_FAILURES, UnexpectedDefect } from '@arki/failure';
+
+import { Cancelled, ConnectionLost, isProviderFailure, PROVIDER_FAILURES } from '../failures';
 
 /**
  * Agent-runtime adapter layer — neutral contracts.
@@ -17,7 +20,7 @@ import type { Failure } from '@arki/failure';
  */
 
 /** Token accounting for one run (fields may be undefined when a provider omits usage). */
-export interface RuntimeUsage {
+export type RuntimeUsage = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
@@ -36,7 +39,46 @@ export type RuntimeEvent =
   | { type: 'tool:failure'; tool: string; failure: ToolFailure }
   | { type: 'tool:error'; tool: string; error: string }
   | { type: 'run:finish'; text: string; usage?: RuntimeUsage }
-  | { type: 'run:error'; error: string };
+  /**
+   * The run failed: the provider refused or broke off (`ProviderFailure`), the caller aborted
+   * (`Cancelled`), or, on the client, the wire broke (`ConnectionLost`, a malformed frame). It is the
+   * last event of a run: no `run:finish` follows it.
+   */
+  | { type: 'run:error'; failure: RuntimeFailure };
+
+/**
+ * Every failure a `run:error` can carry. It is also the allowlist the SSE transport serializes and
+ * revives, so a failure keeps its code and data (a rate limit keeps its Retry-After) across the wire.
+ */
+export const RUNTIME_FAILURES = [
+  ...PROVIDER_FAILURES,
+  ConnectionLost,
+  InvalidInput,
+  ...REVIVAL_FAILURES,
+] as const;
+
+/** One of {@link RUNTIME_FAILURES}. */
+export type RuntimeFailure = ReturnType<(typeof RUNTIME_FAILURES)[number]>;
+
+/** An abort raised by `fetch` or a stream: a DOM `AbortError`, or the `TimeoutError` of `AbortSignal.timeout`. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+/** A broken connection to an AI endpoint: `Cancelled` when the caller aborted it, `ConnectionLost` otherwise. */
+export function connectionFailure(error: unknown, signal?: AbortSignal | null): RuntimeFailure {
+  return signal?.aborted || isAbortError(error) ? Cancelled({ cause: error }) : ConnectionLost({ cause: error });
+}
+
+/**
+ * The failure for a value a run's source threw: an abort is `Cancelled`, a provider failure stays
+ * itself, anything else is a bug (`UnexpectedDefect`).
+ */
+export function thrownRunFailure(error: unknown, signal?: AbortSignal): RuntimeFailure {
+  if (signal?.aborted || isAbortError(error)) return Cancelled({ cause: error });
+  if (isProviderFailure(error)) return error;
+  return UnexpectedDefect({ cause: error });
+}
 
 /**
  * What the model receives, as `{ error: ToolFailure }`, when a tool returns a failure from
@@ -66,7 +108,7 @@ export type AgentToolExecuteOptions = {
  * Build one with `defineAgentTool` to get `input` typed from `inputSchema` and the `execute` return
  * typed from `output`.
  */
-export interface AgentTool<TInput = unknown, TOutput = unknown> {
+export type AgentTool<TInput = unknown, TOutput = unknown> = {
   name: string;
   description: string;
   /** Any Standard Schema. The model is shown its input JSON Schema; `execute` gets its parsed output. */
@@ -102,21 +144,21 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
 }
 
 /** Input to a single agentic tool-loop run. */
-export interface ToolLoopInput {
+export type ToolLoopInput = {
   system?: string;
   prompt: string;
-  tools?: ReadonlyArray<AgentTool>;
+  tools?: readonly AgentTool[];
   /** Hard cap on agent iterations (model + tool turns). */
   maxSteps?: number;
   /**
    * Cancels the run. Once it aborts, the run starts no new model call or tool call, the model
    * call in flight is aborted, every running tool sees the abort on its own `signal`, and the
-   * event stream rejects with the signal's reason.
+   * event stream ends with a `run:error` whose failure is `Cancelled` (its cause is the signal's reason).
    */
   signal?: AbortSignal;
 }
 
 /** The swappable runtime backend. P0 ships `createAiSdkRuntime`; Mastra/LangGraph/TanStack follow. */
-export interface AgentRuntime {
+export type AgentRuntime = {
   runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent>;
 }

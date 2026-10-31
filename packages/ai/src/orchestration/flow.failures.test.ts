@@ -3,8 +3,10 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { Failure } from '@arki/failure';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 
-import type { FlowConfig, FlowNode } from './flow';
-import { createFlow, Flow } from './flow';
+import { FlowNodeFailed, FlowStepLimitReached } from '../failures';
+
+import type { FlowConfig, FlowEvent, FlowFailure, FlowNode } from './flow';
+import { createFlow, Flow, FlowError } from './flow';
 
 const PersistenceRefused = defineFailure('flow_test.persistence_refused', {
   message: 'Persistence refused',
@@ -52,7 +54,7 @@ describe('returned node failures', () => {
 
     const result = await flow.run(state, {});
     expectTypeOf(result).toEqualTypeOf<
-      typeof state | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect>
+      typeof state | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect> | FlowFailure
     >();
     expect(result).toBe(refusal);
     expect(state).toEqual({ saved: false });
@@ -83,6 +85,7 @@ it('infers distinct node failures from their definitions without widening them',
     | ReturnType<typeof PersistenceRefused>
     | ReturnType<typeof ApprovalRefused>
     | ReturnType<typeof UnexpectedDefect>
+    | FlowFailure
   >();
   expect(ApprovalRefused.is(result)).toBe(true);
 });
@@ -97,7 +100,7 @@ it('returns successful state unwrapped and keeps failure-free authoring compatib
     },
   });
   const result = await flow.run({ saved: false }, {});
-  expectTypeOf(result).toEqualTypeOf<State | ReturnType<typeof UnexpectedDefect>>();
+  expectTypeOf(result).toEqualTypeOf<State | ReturnType<typeof UnexpectedDefect> | FlowFailure>();
   expect(result).toEqual({ saved: true });
 });
 
@@ -114,7 +117,7 @@ it('recognizes a failure even when its type is also admitted as state', async ()
   };
   const flow = new Flow(config);
   const result = await flow.run(refusal, {});
-  expectTypeOf(result).toEqualTypeOf<typeof refusal | ReturnType<typeof UnexpectedDefect>>();
+  expectTypeOf(result).toEqualTypeOf<typeof refusal | ReturnType<typeof UnexpectedDefect> | FlowFailure>();
   expect(result).toBe(refusal);
   expect(merged).toBe(false);
 });
@@ -133,7 +136,7 @@ it('contextually types inline nodes while inferring their concrete failure', asy
   });
   const result = await flow.run({ saved: false }, { allowed: true });
   expectTypeOf(result).toEqualTypeOf<
-    State | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect>
+    State | ReturnType<typeof PersistenceRefused> | ReturnType<typeof UnexpectedDefect> | FlowFailure
   >();
   expect(result).toEqual({ saved: true });
 });
@@ -174,7 +177,7 @@ it('infers overlapping refusals precisely alongside state patches and void nodes
   });
 
   const result = await flow.run({ code: 'ready', saved: false }, {});
-  expectTypeOf(result).toEqualTypeOf<State | typeof refusal | ReturnType<typeof UnexpectedDefect>>();
+  expectTypeOf(result).toEqualTypeOf<State | typeof refusal | ReturnType<typeof UnexpectedDefect> | FlowFailure>();
   expect(result).toBe(refusal);
 });
 
@@ -209,4 +212,60 @@ it('returns a retry-wait defect unchanged without another attempt or a success e
   } finally {
     wait.mockRestore();
   }
+});
+
+// A flow that loops or a node that keeps throwing is an expected outcome the caller must branch on,
+// so it is a returned failure with its own code, never a thrown FlowError.
+describe('expected early stops are returned failures', () => {
+  it('a flow that loops past maxSteps returns FlowStepLimitReached', async () => {
+    const events: FlowEvent<{ n: number }>[] = [];
+    const flow = createFlow<{ n: number }, Record<string, never>>({
+      start: 'loop',
+      maxSteps: 3,
+      onEvent: event => events.push(event),
+      nodes: { loop: { id: 'loop', run: async state => ({ n: state.n + 1 }), next: 'loop' } },
+    });
+    const result = await flow.run({ n: 0 }, {});
+    expect(FlowStepLimitReached.is(result) && result.data).toEqual({ nodeId: 'loop', maxSteps: 3 });
+    const failed = events.at(-1);
+    expect(failed?.type === 'flow:failed' && failed.failure.code).toBe('ai.flow_step_limit');
+  });
+
+  it('a node that still throws after its retries returns FlowNodeFailed with the last error as cause', async () => {
+    const last = new Error('second failure');
+    let attempts = 0;
+    const flow = createFlow<{ n: number }, Record<string, never>>({
+      start: 'work',
+      nodes: {
+        work: {
+          id: 'work',
+          retries: 1,
+          retryDelayMs: 0,
+          run: async () => {
+            attempts++;
+            throw attempts === 1 ? new Error('first failure') : last;
+          },
+        },
+      },
+    });
+    const result = await flow.run({ n: 0 }, {});
+    expect(FlowNodeFailed.is(result) && result.data).toEqual({ nodeId: 'work', attempts: 2 });
+    expect(FlowNodeFailed.is(result) && result.cause).toBe(last);
+  });
+
+  it('a next that names a missing node is a broken definition and still throws FlowError', async () => {
+    const flow = createFlow<{ n: number }, Record<string, never>>({
+      start: 'a',
+      nodes: {
+        a: {
+          id: 'a',
+          run: async () => {
+            // No work: the broken `next` is what this test is about.
+          },
+          next: 'missing',
+        },
+      },
+    });
+    await expect(flow.run({ n: 0 }, {})).rejects.toBeInstanceOf(FlowError);
+  });
 });

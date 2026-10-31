@@ -72,6 +72,8 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
   private readonly periods: readonly TPeriod[];
   private readonly keyPrefix: string;
   private readonly periodDurations: Record<TPeriod, number>;
+  /** The tail of the write chain per spend key, so two `recordSpend` calls never read the same old total. */
+  private readonly spendWrites = new Map<string, Promise<void>>();
 
   constructor(kv: KVStore, config: BudgetConfig<TPeriod>) {
     this.kv = kv;
@@ -237,14 +239,15 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
       const spent = breakdown[period];
       const limit = this.limits[period];
       const remaining = Math.max(0, limit - spent);
-      const percentUsed = (spent / limit) * 100;
+      // A zero limit allows nothing: 0 % while nothing is spent, 100 % once anything is (never 0/0 = NaN).
+      const percentUsed = limit > 0 ? Math.min(100, (spent / limit) * 100) : spent > 0 ? 100 : 0;
 
       return {
         period,
         spent,
         limit,
         remaining,
-        percentUsed: Math.min(100, percentUsed),
+        percentUsed,
       };
     });
   }
@@ -261,12 +264,29 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
     return `${this.keyPrefix}:record:${userId}:${timestamp}`;
   }
 
+  /**
+   * Add to one period's total. `KVStore` has no atomic increment, so the read-modify-write of each
+   * key runs after the previous one on that key finishes: concurrent `recordSpend` calls in this
+   * process never lose a spend. Several processes sharing one store still need a store-side increment.
+   */
   private async addSpend(userId: string, period: TPeriod, costUsd: number): Promise<void> {
     const key = this.getSpendKey(userId, period);
-    const current = await this.getCurrentSpend(userId, period);
     const ttl = this.periodDurations[period];
-
-    await this.kv.set(key, current + costUsd, ttl);
+    const previous = this.spendWrites.get(key) ?? Promise.resolve();
+    const write = previous.then(async () => {
+      const current = await this.getCurrentSpend(userId, period);
+      await this.kv.set(key, current + costUsd, ttl);
+    });
+    // The chain goes on after a failed write; the failure itself reaches this call's awaiter below.
+    const tail = write.catch(() => {
+      // Swallowed only for the chain; the awaiter below gets the failure.
+    });
+    this.spendWrites.set(key, tail);
+    try {
+      await write;
+    } finally {
+      if (this.spendWrites.get(key) === tail) this.spendWrites.delete(key);
+    }
   }
 
   private async storeSpendRecord(

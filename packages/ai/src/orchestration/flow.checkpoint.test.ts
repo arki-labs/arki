@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { orThrow } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { createFlow } from './flow';
 
@@ -93,9 +93,10 @@ describe('Flow onCheckpoint', () => {
     const runPromise = flow.run({ value: 0, trail: [] }, {});
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Abort while held at b — the gate releases, then the post-checkpoint abort check throws.
+    // Abort while held at b — the gate releases, then the post-checkpoint abort check returns Cancelled.
     controller.abort();
-    await expect(runPromise).rejects.toThrow(/abort/i);
+    const result = await runPromise;
+    expect(isFailure(result) && result.code).toBe('ai.cancelled');
     expect(releaseB).not.toBeNull();
   });
 });

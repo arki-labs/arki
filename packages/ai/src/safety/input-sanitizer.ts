@@ -22,6 +22,7 @@ import type {
 // ============================================
 
 /** Characters to strip from input for safety */
+// eslint-disable-next-line no-control-regex -- matching control characters is what this pattern is for
 const DANGEROUS_CHARACTERS = /[\u0000-\u0008\v\f\u000E-\u001F\u007F]/g;
 
 // ============================================

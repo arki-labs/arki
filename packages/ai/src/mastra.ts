@@ -1,11 +1,15 @@
 import type { MastraModelConfig } from '@mastra/core/llm';
+import type { MastraFinishReason } from '@mastra/core/stream';
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
 
-import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types';
+import type { ProviderCall } from './ai-service/provider-failure';
+import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure, ToolLoopInput } from './runtime/types';
+import { finishFailure, providerFailure } from './ai-service/provider-failure';
 import { debugRuntime } from './debug';
+import { Cancelled, ContentFiltered } from './failures';
 import { requireJsonSchema } from './input-json-schema';
-import { abortReason, runAgentTool } from './runtime/tool';
+import { runAgentTool } from './runtime/tool';
 
 /**
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK
@@ -20,7 +24,7 @@ import { abortReason, runAgentTool } from './runtime/tool';
  * The model is a resolved AI-SDK `LanguageModel` (Mastra accepts AI-SDK models), so the same
  * LAW-1-resolved model can feed either backend.
  */
-export interface MastraRuntimeOptions {
+export type MastraRuntimeOptions = {
   /**
    * The model Mastra's Agent should use — either a resolved AI-SDK language model or a Mastra
    * model-router id (e.g. `'ollama/qwen3.6:latest'`). Typed as Mastra's own `MastraModelConfig`
@@ -35,6 +39,25 @@ export interface MastraRuntimeOptions {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The failure a Mastra finish reason (the AI SDK's plus `unknown`, `tripwire` and `retry`) means, or undefined for `stop`. A `tripwire` (a processor
+ * blocked the answer) is `ContentFiltered`; `unknown` and `retry` are an incomplete answer.
+ */
+function mastraFinishFailure(reason: MastraFinishReason, call: ProviderCall): RuntimeFailure | undefined {
+  switch (reason) {
+    case 'tripwire': {
+      return ContentFiltered({ provider: call.provider, model: call.model });
+    }
+    case 'unknown':
+    case 'retry': {
+      return finishFailure('other', call);
+    }
+    default: {
+      return finishFailure(reason, call);
+    }
+  }
 }
 
 /**
@@ -64,7 +87,7 @@ function toMastraTool(
 
 /** `onFailure` hears each tool call that returned a failure from `@arki/failure`. */
 export function toMastraTools(
-  tools: ReadonlyArray<AgentTool> | undefined,
+  tools: readonly AgentTool[] | undefined,
   onFailure?: (toolCallId: string, failure: ToolFailure) => void,
 ): Record<string, ReturnType<typeof createTool>> {
   const out: Record<string, ReturnType<typeof createTool>> = {};
@@ -78,16 +101,21 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
   return {
     async *runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
       const { signal } = input;
-      if (signal?.aborted) throw abortReason(signal);
       const maxSteps = input.maxSteps ?? defaultMaxSteps;
       debugRuntime.debug('mastra runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
         maxSteps,
         tools: input.tools?.length ?? 0,
       });
       yield { type: 'run:start' };
+      if (signal?.aborted) {
+        yield { type: 'run:error', failure: Cancelled({ cause: signal.reason }) };
+        return;
+      }
 
       // Tool calls whose tool returned a failure, by call id: their result becomes `tool:failure`.
       const failures = new Map<string, ToolFailure>();
+      // The names a failure carries, filled in from the resolved model once the agent exists.
+      let call: ProviderCall = { provider: 'mastra', model: 'unknown', signal };
       try {
         const agentName = options.name ?? 'arki-runtime-agent';
         const agent = new Agent({
@@ -95,38 +123,48 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
           name: agentName,
           instructions: input.system ?? options.instructions ?? 'You are a helpful assistant.',
           model: options.model,
-          tools: toMastraTools(input.tools, (toolCallId, failure) => failures.set(toolCallId, failure)),
+          tools: toMastraTools(input.tools, (toolCallId, toolFailure) => failures.set(toolCallId, toolFailure)),
         });
+        const model = await agent.getModel();
+        call = { provider: model.provider, model: model.modelId, signal };
 
         const stream = await agent.stream(input.prompt, { maxSteps, abortSignal: signal });
 
         let text = '';
         let usage: RuntimeUsage | undefined;
+        // The one terminal failure of the run, if any: the loop stops at the first one.
+        let failure: RuntimeFailure | undefined;
 
         for await (const chunk of stream.fullStream) {
-          if (signal?.aborted) throw abortReason(signal);
+          if (signal?.aborted) {
+            failure = Cancelled({ cause: signal.reason });
+            break;
+          }
           switch (chunk.type) {
-            case 'text-delta':
+            case 'text-delta': {
               text += chunk.payload.text;
               yield { type: 'text:delta', delta: chunk.payload.text };
               break;
-            case 'tool-call':
+            }
+            case 'tool-call': {
               yield { type: 'tool:start', tool: chunk.payload.toolName, args: chunk.payload.args };
               break;
+            }
             case 'tool-result': {
-              const failure = failures.get(chunk.payload.toolCallId);
-              yield failure === undefined
+              const toolFailure = failures.get(chunk.payload.toolCallId);
+              yield toolFailure === undefined
                 ? { type: 'tool:result', tool: chunk.payload.toolName, result: chunk.payload.result }
-                : { type: 'tool:failure', tool: chunk.payload.toolName, failure };
+                : { type: 'tool:failure', tool: chunk.payload.toolName, failure: toolFailure };
               break;
             }
-            case 'tool-error':
+            case 'tool-error': {
               yield {
                 type: 'tool:error',
                 tool: chunk.payload.toolName ?? '',
                 error: errorMessage(chunk.payload.error),
               };
               break;
+            }
             case 'finish': {
               const u = chunk.payload.output.usage;
               usage = {
@@ -134,26 +172,40 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
                 outputTokens: u.outputTokens,
                 totalTokens: u.totalTokens,
               };
+              // The last step's finish: `tool-calls` here means the step cap cut the run before an answer.
+              failure = mastraFinishFailure(chunk.payload.stepResult.reason, call);
               break;
             }
-            case 'error':
-              yield { type: 'run:error', error: errorMessage(chunk.payload.error) };
+            case 'error': {
+              failure = providerFailure(chunk.payload.error, call);
               break;
-            default:
+            }
+            case 'abort': {
+              failure = Cancelled({ cause: signal?.reason });
               break;
+            }
+            default: {
+              break;
+            }
           }
+          if (failure) break;
         }
 
-        if (signal?.aborted) throw abortReason(signal);
+        if (!failure && signal?.aborted) failure = Cancelled({ cause: signal.reason });
+        if (failure) {
+          debugRuntime.debug('mastra runToolLoop failed ({code})', { code: failure.code });
+          yield { type: 'run:error', failure };
+          return;
+        }
         debugRuntime.debug('mastra runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
           chars: text.length,
           totalTokens: usage?.totalTokens,
         });
         yield { type: 'run:finish', text, usage };
       } catch (error) {
-        if (signal?.aborted) throw abortReason(signal);
-        debugRuntime.debug('mastra runToolLoop error', { error: errorMessage(error) });
-        yield { type: 'run:error', error: errorMessage(error) };
+        const thrown = providerFailure(error, call);
+        debugRuntime.debug('mastra runToolLoop failed ({code})', { code: thrown.code });
+        yield { type: 'run:error', failure: thrown };
       }
     },
   };

@@ -6,8 +6,8 @@ import { z } from 'zod';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { UnexpectedFailure } from '@arki/failure';
 
-import { ValidationError } from './errors';
-import { validateInput, validateInputAsync } from './validation';
+import { ValidationError } from '../errors';
+import { validateInput } from './validate-input';
 
 // Input is a string, output is a number: proves the result type follows the OUTPUT type.
 const handWritten: StandardSchemaV1<string, number> = {
@@ -39,13 +39,6 @@ describe('validateInput accepts every Standard Schema and maps output types', ()
     const typed: SchemaOutput<typeof zodSchema> = b;
     expect(typed.n).toBe(4);
   });
-
-  it('async variant works for each kind', async () => {
-    expect(await validateInputAsync(handWritten, 'ab')).toBe(2);
-    expect(await validateInputAsync(zodSchema, { n: 'a' })).toEqual({ n: 1 });
-    expect(await validateInputAsync(valibotSchema, { n: 'a' })).toEqual({ n: 1 });
-    expect(await validateInputAsync(arkSchema, { n: 'a' })).toEqual({ n: 'a' });
-  });
 });
 
 describe('invalid input becomes ValidationError with plain field paths', () => {
@@ -67,8 +60,8 @@ describe('invalid input becomes ValidationError with plain field paths', () => {
     }
   });
 
-  it('uses the custom message and never reports a throwing validator as bad input', async () => {
-    await expect(validateInputAsync(zodSchema, {}, 'custom')).rejects.toThrow('custom');
+  it('uses the custom message and never reports a throwing validator as bad input', () => {
+    expect(() => validateInput(zodSchema, {}, 'custom')).toThrow('custom');
     const broken: StandardSchemaV1<unknown, unknown> = {
       '~standard': {
         version: 1,

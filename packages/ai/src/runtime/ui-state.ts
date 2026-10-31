@@ -1,4 +1,4 @@
-import type { RuntimeEvent, RuntimeUsage, ToolFailure } from './types';
+import type { RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure } from './types';
 
 /**
  * UI-adapter layer (P2): a framework-agnostic reduction of the normalized `RuntimeEvent`
@@ -11,7 +11,7 @@ import type { RuntimeEvent, RuntimeUsage, ToolFailure } from './types';
  */
 export type RuntimeUiStatus = 'idle' | 'running' | 'done' | 'error';
 
-export interface RuntimeToolCall {
+export type RuntimeToolCall = {
   tool: string;
   args?: unknown;
   result?: unknown;
@@ -21,14 +21,15 @@ export interface RuntimeToolCall {
   status: 'running' | 'done' | 'failed' | 'error';
 }
 
-export interface RuntimeUiState {
+export type RuntimeUiState = {
   status: RuntimeUiStatus;
   /** Accumulated assistant text (deltas joined; finalized on run:finish). */
   text: string;
   /** Tool calls in start order, each progressing running → done|failed|error. */
   toolCalls: RuntimeToolCall[];
   usage?: RuntimeUsage;
-  error?: string;
+  /** Why the run failed, when `status` is `error`. Match on `failure.code`; show `failure.message`. */
+  failure?: RuntimeFailure;
 }
 
 export const initialRuntimeUiState: RuntimeUiState = {
@@ -46,7 +47,7 @@ function settleToolCall(
   for (let i = toolCalls.length - 1; i >= 0; i -= 1) {
     const candidate = toolCalls[i];
     if (candidate && candidate.tool === tool && candidate.status === 'running') {
-      const next = toolCalls.slice();
+      const next = [...toolCalls];
       next[i] = { ...candidate, ...patch };
       return next;
     }
@@ -55,36 +56,48 @@ function settleToolCall(
   return [...toolCalls, { tool, status: 'done', ...patch }];
 }
 
-/** Fold one RuntimeEvent into the UI state. Pure. */
+/**
+ * Fold one RuntimeEvent into the UI state. Pure. A failed run stays failed: only a new `run:start`
+ * leaves the `error` status, so a late `run:finish` never shows a failed run as done.
+ */
 export function runtimeEventReducer(state: RuntimeUiState, event: RuntimeEvent): RuntimeUiState {
+  if (state.status === 'error' && event.type !== 'run:start') return state;
   switch (event.type) {
-    case 'run:start':
+    case 'run:start': {
       return { status: 'running', text: '', toolCalls: [] };
-    case 'text:delta':
+    }
+    case 'text:delta': {
       return { ...state, text: state.text + event.delta };
-    case 'tool:start':
+    }
+    case 'tool:start': {
       return { ...state, toolCalls: [...state.toolCalls, { tool: event.tool, args: event.args, status: 'running' }] };
-    case 'tool:result':
+    }
+    case 'tool:result': {
       return {
         ...state,
         toolCalls: settleToolCall(state.toolCalls, event.tool, { result: event.result, status: 'done' }),
       };
+    }
     case 'tool:failure': {
       return {
         ...state,
         toolCalls: settleToolCall(state.toolCalls, event.tool, { failure: event.failure, status: 'failed' }),
       };
     }
-    case 'tool:error':
+    case 'tool:error': {
       return {
         ...state,
         toolCalls: settleToolCall(state.toolCalls, event.tool, { error: event.error, status: 'error' }),
       };
-    case 'run:finish':
+    }
+    case 'run:finish': {
       return { ...state, status: 'done', text: event.text.length > 0 ? event.text : state.text, usage: event.usage };
-    case 'run:error':
-      return { ...state, status: 'error', error: event.error };
-    default:
+    }
+    case 'run:error': {
+      return { ...state, status: 'error', failure: event.failure };
+    }
+    default: {
       return state;
+    }
   }
 }

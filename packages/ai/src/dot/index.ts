@@ -18,7 +18,6 @@ import type { LLMProviderConfig } from '../ai-service/factory';
 import type { ProbeOptions } from '../ai-service/probe';
 import type { LLMProviderWithUsage } from '../ai-service/types';
 import type { VectorSearchProvider } from '../types';
-import type { VectorIndex } from '../vector-search/vector-index';
 import { createLLMProvider } from '../ai-service/factory';
 import { probeLLMProvider } from '../ai-service/probe';
 import { createVectorIndex } from '../vector-search/vector-index';
@@ -63,7 +62,8 @@ export function vectorIndex<P extends Record<string, unknown>>(options: VectorIn
   return infra({
     name: 'vectorIndex',
     provides: {
-      vectorIndex: (): VectorIndex<P> | { provider: null; durable: false } => {
+      // A bad QDRANT_* value is returned as InvalidEnvironment, which fails the boot.
+      vectorIndex: (): ReturnType<typeof createVectorIndex<P>> | { provider: null; durable: false } => {
         const chosen = typeof options.space === 'function' ? options.space() : options.space;
         if (chosen === null) return { provider: null, durable: false };
         if (provider) return { provider, durable };

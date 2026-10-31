@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import { GenerationError } from '../errors';
+import { UnexpectedDefect } from '@arki/failure';
+
+import { InvalidOutput } from '../failures';
 import { createFakeLLMProvider } from './index';
 
 const planet = z.object({ planet: z.string() });
@@ -42,7 +44,8 @@ describe('createFakeLLMProvider', () => {
     // skipped the schema check would let half-valid output reach the database in tests only.
     const llm = createFakeLLMProvider({ answers: [{ planet: 42 }] });
 
-    await expect(llm.generateStructuredData('Name one planet.', planet)).rejects.toBeInstanceOf(GenerationError);
+    const result = await llm.generateStructuredData('Name one planet.', planet);
+    expect(InvalidOutput.is(result)).toBe(true);
   });
 
   it('picks the answer from the call when given a function', async () => {
@@ -59,20 +62,26 @@ describe('createFakeLLMProvider', () => {
     });
   });
 
-  it('throws when a call has no scripted answer left', async () => {
+  it('returns a defect when a call has no scripted answer left', async () => {
     // WHY: an unexpected extra model call is a bug in the code under test; answering it with a
-    // default would hide it.
+    // default would hide it. The adapter returns the throw as `UnexpectedDefect`, never as text.
     const llm = createFakeLLMProvider({ answers: ['only one'] });
-    await llm.generateText('first');
+    expect(await llm.generateText('first')).toBe('only one');
 
-    await expect(llm.generateText('second')).rejects.toThrow(/call 2 has no scripted answer/u);
+    const extra = await llm.generateText('second');
+    expect(UnexpectedDefect.is(extra) && extra.cause instanceof Error && extra.cause.message).toMatch(
+      /call 2 has no scripted answer/u,
+    );
   });
 
   it('streams a conversation from the script', async () => {
     // WHY: chat routes stream; they must be testable with the same fake.
     const llm = createFakeLLMProvider({ answers: ['Hello there'] });
     let text = '';
-    for await (const chunk of llm.streamConversation([{ role: 'user', content: 'Hi' }])) text += chunk;
+    for await (const chunk of llm.streamConversation([{ role: 'user', content: 'Hi' }])) {
+      if (typeof chunk !== 'string') throw new Error(`unexpected failure ${chunk.code}`);
+      text += chunk;
+    }
 
     expect(text).toBe('Hello there');
     expect(llm.calls[0]?.prompt).toBe('Hi');

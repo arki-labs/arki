@@ -28,7 +28,7 @@ export type FakeAnswer = string | Readonly<Record<string, unknown>> | readonly u
 export type FakeLLMProviderOptions = {
   /**
    * The answers, in call order, or a function that picks the answer from the call. A call after
-   * the last scripted answer throws, so a test never reads an answer it did not write.
+   * the last scripted answer returns `UnexpectedDefect`, so a test never reads an answer it did not write.
    */
   readonly answers: readonly FakeAnswer[] | ((call: FakeCall) => FakeAnswer);
   /** The usage every call reports. Default `{ inputTokens: 10, outputTokens: 5 }`. */
@@ -64,7 +64,7 @@ function callOf(options: CallOptions): FakeCall {
 
 /**
  * A provider that answers from a script and reports fixed usage. `generateStructuredData` still
- * parses the answer with your schema, so an answer that does not fit throws `GenerationError`
+ * parses the answer with your schema, so an answer that does not fit returns `InvalidOutput`
  * exactly as a real model's would.
  *
  * @example

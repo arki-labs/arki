@@ -3,6 +3,14 @@ import { sleep } from '@arki/async';
 import { isFailure } from '@arki/failure';
 
 import { debugOrchestration } from '../debug';
+import { Cancelled, FlowNodeFailed, FlowStepLimitReached, FlowTimedOut } from '../failures';
+
+/**
+ * The expected ways a flow run stops early, returned by `Flow.run`: the caller aborted (`Cancelled`),
+ * a node ran past its `timeoutMs` (`FlowTimedOut`), the flow took more than `maxSteps` steps
+ * (`FlowStepLimitReached`), or a node still threw after its retries (`FlowNodeFailed`).
+ */
+export type FlowFailure = Cancelled | FlowTimedOut | FlowStepLimitReached | FlowNodeFailed;
 
 export type FlowEvent<State> =
   | { type: 'flow:start'; state: State; timestamp: number }
@@ -18,7 +26,7 @@ export type FlowEvent<State> =
     }
   | { type: 'node:error'; nodeId: string; attempt: number; error: Error; timestamp: number }
   | { type: 'flow:complete'; state: State; steps: number; timestamp: number }
-  | { type: 'flow:failed'; nodeId: string; error: Error; steps: number; timestamp: number };
+  | { type: 'flow:failed'; nodeId: string; failure: FlowFailure; steps: number; timestamp: number };
 
 /** A state patch cannot carry the canonical failure brand, even if fields overlap. */
 type FlowOutput<Output> = Output extends Failure | void ? Output : Output & { readonly '~failure'?: never };
@@ -59,6 +67,7 @@ export type FlowConfig<State, Context, Output extends Partial<State> | void | Fa
   onCheckpoint?: (nodeId: string, state: State) => Promise<void>;
 };
 
+/** A broken flow definition: the start node or a `next` target does not exist. A caller bug, thrown. */
 export class FlowError extends Error {
   readonly nodeId?: string;
   readonly attempt?: number;
@@ -77,7 +86,16 @@ const DEFAULT_MAX_STEPS = 100;
 const DEFAULT_RETRY_DELAY_MS = 250;
 const DEFAULT_RETRY_BACKOFF = 2;
 
-class FlowInterruptedError extends FlowError {}
+/** Why `runAttempt` stopped a node: the caller's abort or the node's timeout. */
+class FlowInterruptedError extends FlowError {
+  constructor(
+    readonly reason: 'aborted' | 'timeout',
+    message: string,
+    nodeId?: string,
+  ) {
+    super(message, { nodeId });
+  }
+}
 
 function isStatePatch<State>(value: Partial<State> | void | Failure): value is Partial<State> | void {
   return !isFailure<unknown>(value);
@@ -100,17 +118,17 @@ async function runAttempt<T>(
       'abort',
       () => {
         const reason: unknown = controller.signal.reason;
-        reject(reason instanceof Error ? reason : new FlowInterruptedError('Flow aborted by signal', { nodeId }));
+        reject(reason instanceof Error ? reason : new FlowInterruptedError('aborted', 'Flow aborted by signal', nodeId));
       },
       { once: true },
     );
   });
-  const abort = () => controller.abort(new FlowInterruptedError('Flow aborted by signal', { nodeId }));
+  const abort = () => controller.abort(new FlowInterruptedError('aborted', 'Flow aborted by signal', nodeId));
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
   const timer = timeoutMs
     ? setTimeout(() => {
-        controller.abort(new FlowInterruptedError(`Flow node timed out after ${timeoutMs}ms`, { nodeId }));
+        controller.abort(new FlowInterruptedError('timeout', `Flow node timed out after ${timeoutMs}ms`, nodeId));
       }, timeoutMs)
     : undefined;
 
@@ -162,6 +180,17 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
     this.onEvent?.(event);
   }
 
+  /** Emit `flow:failed` for an expected early stop and hand the failure back for `run` to return. */
+  private stopped<F extends FlowFailure>(nodeId: string, failure: F, steps: number): F {
+    debugOrchestration.debug('[Flow] Stopped at {node}: {code}', { node: nodeId, code: failure.code });
+    this.emit({ type: 'flow:failed', nodeId, failure, steps, timestamp: Date.now() });
+    return failure;
+  }
+
+  /**
+   * Run the flow from its start node. Returns the final state, a node's own refusal, or a
+   * {@link FlowFailure}. Throws `FlowError` only for a broken definition (a `next` to a missing node).
+   */
   async run(initialState: State, ctx: Context) {
     let state = initialState;
     let current = this.start;
@@ -171,40 +200,24 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
     this.emit({ type: 'flow:start', state, timestamp: Date.now() });
 
     while (current) {
-      if (this.signal?.aborted) {
-        const error = new FlowError('Flow aborted by signal');
-        this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
-        throw error;
-      }
+      if (this.signal?.aborted) return this.stopped(current, Cancelled(), steps);
 
       steps += 1;
-      if (steps > this.maxSteps) {
-        const error = new FlowError(`Flow exceeded max steps (${this.maxSteps})`, { nodeId: current });
-        this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
-        throw error;
-      }
+      if (steps > this.maxSteps)
+        return this.stopped(current, FlowStepLimitReached({ nodeId: current, maxSteps: this.maxSteps }), steps);
 
       const node = this.nodes.get(current);
-      if (!node) {
-        const error = new FlowError(`Flow node not found: ${current}`, { nodeId: current });
-        this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
-        throw error;
-      }
+      if (!node) throw new FlowError(`Flow node not found: ${current}`, { nodeId: current });
 
       // Cooperative pause point — held at the node boundary, never mid-node. A consumer
       // can park the flow here (pause/step); abort during the hold is honored next.
       if (this.onCheckpoint) {
         await this.onCheckpoint(node.id, state);
-        if (this.signal?.aborted) {
-          const error = new FlowError('Flow aborted by signal');
-          this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
-          throw error;
-        }
+        if (this.signal?.aborted) return this.stopped(current, Cancelled(), steps);
       }
 
       const maxAttempts = Math.max(1, (node.retries ?? 0) + 1);
       let attempt = 0;
-      let patch: Partial<State> | void = undefined;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -221,8 +234,8 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
           );
           // Separate truthful guards retain the exact failure even when State can
           // itself contain a Failure; a generic negative guard cannot prove a patch.
-          if (isStatePatch<State>(result)) patch = result;
-          else if (isNodeFailure(result)) return result;
+          if (!isStatePatch<State>(result) && isNodeFailure(result)) return result;
+          const patch = isStatePatch<State>(result) ? result : undefined;
 
           if (patch && typeof patch === 'object') {
             state = this.mergeState(state, patch);
@@ -252,15 +265,16 @@ export class Flow<State, Context, Output extends Partial<State> | void | Failure
           });
           this.emit({ type: 'node:error', nodeId: node.id, attempt, error: err, timestamp: Date.now() });
 
-          if (err instanceof FlowInterruptedError || this.signal?.aborted || attempt >= maxAttempts) {
-            const flowError = new FlowError(`Flow node failed: ${node.id}`, {
-              nodeId: node.id,
-              attempt,
-              cause: err,
-            });
-            this.emit({ type: 'flow:failed', nodeId: node.id, error: flowError, steps, timestamp: Date.now() });
-            throw flowError;
-          }
+          if (this.signal?.aborted || (err instanceof FlowInterruptedError && err.reason === 'aborted'))
+            return this.stopped(node.id, Cancelled({ cause: err }), steps);
+          if (err instanceof FlowInterruptedError)
+            return this.stopped(
+              node.id,
+              FlowTimedOut({ nodeId: node.id, timeoutMs: node.timeoutMs ?? 0 }, { cause: err }),
+              steps,
+            );
+          if (attempt >= maxAttempts)
+            return this.stopped(node.id, FlowNodeFailed({ nodeId: node.id, attempts: attempt }, { cause: err }), steps);
 
           const delay =
             (node.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS) *

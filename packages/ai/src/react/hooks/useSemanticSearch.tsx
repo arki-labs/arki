@@ -5,7 +5,15 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { z } from 'zod';
+
+import { isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
+
+import type { RuntimeFailure } from '../../runtime/types';
 import type { SearchMode } from '../../types';
+import { jsonTextSchema, readFailureResponse } from '../../runtime/sse';
+import { connectionFailure } from '../../runtime/types';
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;
@@ -14,6 +22,22 @@ export type SearchResult<TMetadata = Record<string, unknown>> = {
   highlights?: string[];
   metadata?: TMetadata;
 }
+
+/** A {@link SearchResult} as the search endpoint sends it. A two-way type test locks it to the type. */
+export const searchResultSchema = z.object({
+  id: z.string(),
+  score: z.number(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  highlights: z.array(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** The search endpoint answers `{ results: SearchResult[] }` or a bare `SearchResult[]`. */
+const searchResponseSchema = jsonTextSchema.pipe(
+  z.union([z.object({ results: z.array(searchResultSchema) }).transform(body => body.results), z.array(searchResultSchema)]),
+);
+
+const suggestionsResponseSchema = jsonTextSchema.pipe(z.object({ suggestions: z.array(z.string()) }));
 
 export type SearchFilters = Record<string, string | number | boolean | string[] | number[]>
 
@@ -25,14 +49,18 @@ export type UseSemanticSearchOptions = {
   minQueryLength?: number;
   onSearch?: (query: string) => void;
   onResults?: (results: SearchResult[]) => void;
-  onError?: (error: Error) => void;
+  /**
+   * Hears why a search failed: the failure the server answered with (its `{ error: envelope }` body,
+   * revived), `InvalidInput` for a body that is not a list of results, or `ConnectionLost`.
+   */
+  onError?: (failure: RuntimeFailure) => void;
 }
 
 export type UseSemanticSearchReturn<TMetadata = Record<string, unknown>> = {
   query: string;
   results: SearchResult<TMetadata>[];
   isSearching: boolean;
-  error: Error | null;
+  error: RuntimeFailure | null;
   search: (query: string, filters?: SearchFilters) => Promise<void>;
   setQuery: (query: string) => void;
   clearResults: () => void;
@@ -40,12 +68,40 @@ export type UseSemanticSearchReturn<TMetadata = Record<string, unknown>> = {
   getSuggestions: (prefix: string) => Promise<void>;
 }
 
+/** One search request: the results, or the failure the server, the body or the connection gave. */
+async function requestSearch(
+  apiEndpoint: string,
+  body: { query: string; mode: SearchMode; limit: number; filters: SearchFilters | undefined },
+  signal: AbortSignal,
+): Promise<SearchResult[] | RuntimeFailure> {
+  let response: Response;
+  try {
+    response = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    return connectionFailure(error, signal);
+  }
+  if (!response.ok) return readFailureResponse(response);
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    return connectionFailure(error, signal);
+  }
+  return parse(searchResponseSchema, text);
+}
+
 /**
- * Hook for semantic search functionality
+ * Hook for semantic search functionality. Results are checked by {@link searchResultSchema}, so their
+ * `metadata` is a plain record: check it with your own schema to type it.
  */
-export function useSemanticSearch<TMetadata = Record<string, unknown>>(
-  options: UseSemanticSearchOptions = {}
-): UseSemanticSearchReturn<TMetadata> {
+export function useSemanticSearch(options: UseSemanticSearchOptions = {}): UseSemanticSearchReturn {
   const {
     apiEndpoint = '/api/search',
     mode = 'semantic',
@@ -58,10 +114,10 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
   } = options;
 
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult<TMetadata>[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const [error, setError] = useState<RuntimeFailure | null>(null);
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -72,56 +128,36 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
   const performSearch = useCallback(
     async (searchQuery: string, filters?: SearchFilters) => {
       // Cancel any previous request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
 
       // Check minimum query length
       if (searchQuery.length < minQueryLength) {
         setResults([]);
+        setIsSearching(false);
         return;
       }
 
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       setIsSearching(true);
       setError(null);
 
       if (onSearch) onSearch(searchQuery);
 
-      try {
-        abortControllerRef.current = new AbortController();
+      const outcome = await requestSearch(apiEndpoint, { query: searchQuery, mode, limit, filters }, controller.signal);
+      // A newer search, or unmount, replaced this one: its outcome and its `isSearching` are not ours to set.
+      if (abortControllerRef.current !== controller) return;
+      abortControllerRef.current = null;
+      setIsSearching(false);
 
-        const response = await fetch(apiEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: searchQuery,
-            mode,
-            limit,
-            filters,
-          }),
-          signal: abortControllerRef.current.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Search failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const searchResults = data.results || data;
-
-        setResults(searchResults);
-        if (onResults) onResults(searchResults);
-      } catch (error_) {
-        if (error_ instanceof Error && error_.name !== 'AbortError') {
-          setError(error_);
-          if (onError) onError(error_);
-        }
-      } finally {
-        setIsSearching(false);
-        abortControllerRef.current = null;
+      if (isFailure(outcome)) {
+        setError(outcome);
+        if (onError) onError(outcome);
+        return;
       }
+      setResults(outcome);
+      if (onResults) onResults(outcome);
     },
     [apiEndpoint, mode, limit, minQueryLength, onSearch, onResults, onError]
   );
@@ -140,7 +176,7 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
 
       // Set new debounce timer
       debounceTimerRef.current = setTimeout(() => {
-        performSearch(searchQuery, filters);
+        void performSearch(searchQuery, filters);
       }, debounceMs);
     },
     [performSearch, debounceMs]
@@ -168,10 +204,9 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
           }),
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          setSuggestions(data.suggestions || []);
-        }
+        const data = response.ok ? parse(suggestionsResponseSchema, await response.text()) : undefined;
+        // Suggestions are not critical: a failed or malformed answer shows none.
+        setSuggestions(data === undefined || isFailure(data) ? [] : data.suggestions);
       } catch {
         // Silently fail for suggestions - they're not critical
         setSuggestions([]);
@@ -196,9 +231,8 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, []);
 

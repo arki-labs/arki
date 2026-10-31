@@ -1,4 +1,6 @@
 import type { StandardSchemaV1 } from '@arki/schema';
+import { z } from '@arki/contracts';
+import { is } from '@arki/schema';
 
 /**
  * Custom error classes for @arki/ai
@@ -122,23 +124,14 @@ export function isAIError(error: unknown): error is AIError {
   return error instanceof AIError;
 }
 
-/**
- * Type guard to check if error has a message property
- */
-export function hasErrorMessage(error: unknown): error is { message: string } {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof (error as Record<string, unknown>)['message'] === 'string'
-  );
-}
+/** Anything with a string `message`: an `Error`, a failure, or a plain object from a foreign library. */
+const withMessage = z.object({ message: z.string() });
 
 /**
  * Safe error message extraction
  */
 export function getErrorMessage(error: unknown): string {
-  if (hasErrorMessage(error)) {
+  if (is(error, withMessage)) {
     return error.message;
   }
   if (typeof error === 'string') {

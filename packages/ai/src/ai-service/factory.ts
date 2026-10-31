@@ -27,12 +27,14 @@ import { generateText, Output, streamText } from 'ai';
 import { createOllama } from 'ai-sdk-ollama';
 
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import { isFailure } from '@arki/failure';
 
+import type { ProviderFailure } from '../failures';
 import type { LLMProviderName } from './provider-names';
 import type { GenerateOptions, Generation, LLMProviderWithUsage, Message, StreamOptions } from './types';
 import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env';
-import { GenerationError, getErrorMessage } from '../errors';
 import { modelSchema } from './model-schema';
+import { finishFailure, providerFailure, readTextParts } from './provider-failure';
 import { aiTelemetry } from './telemetry';
 
 // ── Per-provider model defaults ───────────────────────────────
@@ -229,25 +231,25 @@ class LanguageModelAdapter implements LLMProviderWithUsage {
     };
   }
 
-  private failure(what: string, error: unknown): GenerationError {
-    return new GenerationError(`[${this.provider}/${this.model}] ${what} failed: ${getErrorMessage(error)}`, error);
+  /** The names and signal of one call, for `providerFailure`. */
+  private call(options: GenerateOptions) {
+    return { provider: this.provider, model: this.model, signal: options.signal };
   }
 
   async generateStructuredResult<S extends StandardSchemaV1>(
     prompt: string,
     schema: S,
     options: GenerateOptions = {},
-  ): Promise<Generation<SchemaOutput<S>>> {
+  ): Promise<Generation<SchemaOutput<S>> | ProviderFailure> {
     try {
       const result = await generateText({
         ...this.callOptions(options, 'generateStructuredData'),
         prompt,
         output: Output.object({ schema: modelSchema(schema, `${this.provider} structured generation`) }),
       });
-      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
-      return this.generation(result.output, result.totalUsage);
+      return finishFailure(result.finishReason, this.call(options)) ?? this.generation(result.output, result.totalUsage);
     } catch (error) {
-      throw this.failure('Structured generation', error);
+      return providerFailure(error, this.call(options));
     }
   }
 
@@ -255,57 +257,69 @@ class LanguageModelAdapter implements LLMProviderWithUsage {
     prompt: string,
     schema: S,
     options: GenerateOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     const result = await this.generateStructuredResult(prompt, schema, options);
-    return result.value;
+    return isFailure(result) ? result : result.value;
   }
 
   async generateStructuredDataFromMessages<S extends StandardSchemaV1>(
     messages: Message[],
     schema: S,
     options: GenerateOptions = {},
-  ): Promise<SchemaOutput<S>> {
+  ): Promise<SchemaOutput<S> | ProviderFailure> {
     try {
       const result = await generateText({
         ...this.callOptions(options, 'generateStructuredDataFromMessages'),
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         output: Output.object({ schema: modelSchema(schema, `${this.provider} structured generation`) }),
       });
-      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
-      return result.output;
+      return finishFailure(result.finishReason, this.call(options)) ?? result.output;
     } catch (error) {
-      throw this.failure('Structured generation from messages', error);
+      return providerFailure(error, this.call(options));
     }
   }
 
-  async generateTextResult(prompt: string, options: GenerateOptions = {}): Promise<Generation<string>> {
+  async generateTextResult(prompt: string, options: GenerateOptions = {}): Promise<Generation<string> | ProviderFailure> {
     try {
       const result = await generateText({ ...this.callOptions(options, 'generateText'), prompt });
-      return this.generation(result.text, result.totalUsage);
+      return finishFailure(result.finishReason, this.call(options)) ?? this.generation(result.text, result.totalUsage);
     } catch (error) {
-      throw this.failure('Text generation', error);
+      return providerFailure(error, this.call(options));
     }
   }
 
-  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string | ProviderFailure> {
     const result = await this.generateTextResult(prompt, options);
-    return result.value;
+    return isFailure(result) ? result : result.value;
   }
 
-  async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
+  async *streamConversation(
+    messages: Message[],
+    options: StreamOptions = {},
+  ): AsyncGenerator<string | ProviderFailure, void, unknown> {
+    let stream;
     try {
-      const stream = streamText({
+      stream = streamText({
         ...this.callOptions(options, 'streamConversation'),
         messages: messages.map(m => ({ role: m.role, content: m.content })),
       });
-
-      for await (const chunk of (await stream).textStream) {
-        options.onChunk?.(chunk);
-        yield chunk;
-      }
     } catch (error) {
-      options.onError?.(error as Error);
-      throw this.failure('Stream conversation', error);
+      const failure = providerFailure(error, this.call(options));
+      options.onError?.(failure);
+      yield failure;
+      return;
     }
+    let text = '';
+    for await (const chunk of readTextParts(stream.fullStream, this.call(options))) {
+      if (isFailure(chunk)) {
+        options.onError?.(chunk);
+        yield chunk;
+        return;
+      }
+      text += chunk;
+      options.onChunk?.(chunk);
+      yield chunk;
+    }
+    options.onComplete?.(text);
   }
 }

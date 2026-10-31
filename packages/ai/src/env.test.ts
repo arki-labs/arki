@@ -36,8 +36,10 @@ test('with validation skipped (production), createLLMProvider still talks to Oll
   });
   const { createLLMProvider } = await import('./ai-service/factory');
   const { z } = await import('@arki/contracts');
-  await createLLMProvider({ model: 'x', maxRetries: 0 })
-    .generateStructuredData('hi', z.object({ a: z.string() }))
-    .catch(() => 'failed as expected');
+  const result = await createLLMProvider({ model: 'x', maxRetries: 0 }).generateStructuredData(
+    'hi',
+    z.object({ a: z.string() }),
+  );
+  expect(result).toMatchObject({ code: 'ai.provider_failed' });
   expect(urls[0]).toBe('http://127.0.0.1:11434/api/chat');
 });

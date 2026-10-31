@@ -19,4 +19,4 @@ export {
   type RuntimeUiState,
   type RuntimeUiStatus,
 } from '../runtime/ui-state';
-export type { RuntimeEvent, RuntimeUsage, ToolFailure } from '../runtime/types';
+export type { RuntimeEvent, RuntimeFailure, RuntimeUsage, ToolFailure } from '../runtime/types';

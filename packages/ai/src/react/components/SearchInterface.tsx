@@ -130,9 +130,9 @@ export function SearchInterface<TMetadata = Record<string, unknown>>({
       key={result.id || index}
       className="p-4 border-b last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800"
     >
-      {'preview' in result && result.preview ? (
+      {'preview' in result && typeof result.preview === 'string' && result.preview ? (
         <p className="text-gray-700 dark:text-gray-300 mb-2">
-          {String(result.preview)}
+          {result.preview}
         </p>
       ) : null}
       <div className="flex justify-between items-center">

@@ -1,2 +1,2 @@
-export type { FlowConfig, FlowEvent, FlowNode } from './flow';
+export type { FlowConfig, FlowEvent, FlowFailure, FlowNode } from './flow';
 export { Flow, FlowError, createFlow } from './flow';

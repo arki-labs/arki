@@ -1,5 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { simulateReadableStream } from 'ai';
+import { APICallError, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import * as v from 'valibot';
@@ -98,7 +98,7 @@ describe('toMastraTools', () => {
 });
 
 describe('createMastraRuntime cancellation', () => {
-  it('rejects at once, without any model call, when the signal is already aborted', async () => {
+  it('ends at once with Cancelled, without any model call, when the signal is already aborted', async () => {
     // WHY: the Mastra backend honours the same AgentRuntime contract: a run cancelled before
     // it began must cost nothing.
     const controller = new AbortController();
@@ -106,7 +106,9 @@ describe('createMastraRuntime cancellation', () => {
     const model = textOnlyModel();
     const runtime = createMastraRuntime({ model });
 
-    await expect(collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }))).rejects.toThrow('gone');
+    const events = await collect(runtime.runToolLoop({ prompt: 'x', signal: controller.signal }));
+    expect(events.map(event => event.type)).toEqual(['run:start', 'run:error']);
+    expect(events[1]?.type === 'run:error' ? events[1].failure.code : undefined).toBe('ai.cancelled');
     expect(model.doStreamCalls).toHaveLength(0);
   });
 });
@@ -195,5 +197,34 @@ describe('createMastraRuntime tool failures', () => {
     );
     expect(events).toContainEqual({ type: 'tool:error', tool: 'weather', error: 'weather API down' });
     expect(events.some(event => event.type === 'tool:failure')).toBe(false);
+  });
+});
+
+describe('createMastraRuntime terminal failures', () => {
+  it('ends a run whose stream errors with one run:error carrying the typed failure, never run:finish', async () => {
+    // WHY (F2): Mastra used to yield run:error for an error chunk and then run:finish, so a failed run
+    // looked done and the failure was only message text.
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<LanguageModelV4StreamPart>({
+          chunks: [
+            { type: 'stream-start', warnings: [] },
+            { type: 'text-start', id: '1' },
+            { type: 'text-delta', id: '1', delta: 'hel' },
+            {
+              type: 'error',
+              error: new APICallError({ message: 'status 401', url: 'https://x', requestBodyValues: {}, statusCode: 401 }),
+            },
+          ],
+        }),
+      }),
+    });
+    const runtime = createMastraRuntime({ model });
+    const events = await collect(runtime.runToolLoop({ prompt: 'x' }));
+    const terminal = events.filter(event => event.type === 'run:finish' || event.type === 'run:error');
+    expect(terminal).toHaveLength(1);
+    const last = events.at(-1);
+    expect(last?.type).toBe('run:error');
+    expect(last?.type === 'run:error' ? last.failure.code : undefined).toBe('ai.unauthorized');
   });
 });

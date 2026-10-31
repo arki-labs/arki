@@ -50,6 +50,6 @@ export const deepgramResponseSchema = z.object({
         }),
       )
       .min(1)
-      .max(100000),
+      .max(100_000),
   }),
 });

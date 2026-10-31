@@ -1,6 +1,7 @@
 import type { EmbeddingSpace } from '@arki/embeddings';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { VectorSearchError } from '../../../errors';
 import { QdrantVectorProvider } from '../qdrant';
 
 // ── Qdrant client mock ────────────────────────────────────────
@@ -14,6 +15,7 @@ const client = {
   query: vi.fn().mockResolvedValue({ points: [] }),
   scroll: vi.fn().mockResolvedValue({ points: [] }),
   delete: vi.fn().mockResolvedValue(undefined),
+  retrieve: vi.fn().mockResolvedValue([]),
 };
 
 vi.mock('@qdrant/js-client-rest', () => ({
@@ -150,5 +152,26 @@ describe('QdrantVectorProvider — vector-in methods', () => {
     });
     expect(scrollArgs).not.toHaveProperty('vector');
     expect(client.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('QdrantVectorProvider — outages are not "not found" (F11)', () => {
+  it('getDocument returns null only when the point is missing', async () => {
+    const p = new QdrantVectorProvider(config, { space });
+    client.retrieve.mockResolvedValueOnce([]);
+    expect(await p.getDocument('missing')).toBeNull();
+    client.retrieve.mockResolvedValueOnce([{ id: 1, payload: { userId: 'u1' } }]);
+    expect(await p.getDocument('present')).toEqual({ userId: 'u1' });
+  });
+
+  it('getDocument lets a Qdrant error through instead of answering null', async () => {
+    // WHY: an outage read as "no such document" makes callers re-create or skip data that exists.
+    const p = new QdrantVectorProvider(config, { space });
+    client.retrieve.mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(p.getDocument('a')).rejects.toThrow('fetch failed');
+  });
+
+  it('a url that is not a URL fails when the provider is built, as a VectorSearchError', () => {
+    expect(() => new QdrantVectorProvider({ ...config, url: 'not a url' }, { space })).toThrow(VectorSearchError);
   });
 });

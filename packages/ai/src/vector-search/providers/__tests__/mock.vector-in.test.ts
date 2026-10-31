@@ -1,6 +1,7 @@
 import type { EmbeddingSpace } from '@arki/embeddings';
 import { describe, expect, it } from 'vitest';
 
+import { VectorSearchError } from '../../../errors';
 import { MockVectorProvider } from '../mock';
 
 const space: EmbeddingSpace = {
@@ -13,6 +14,14 @@ const space: EmbeddingSpace = {
 };
 
 describe('MockVectorProvider vector-in', () => {
+  it('refuses a vector of the wrong size, as Qdrant does (F11)', async () => {
+    // WHY: a mock that scored a wrong-size vector 0 let a model/dimension mix-up pass every test
+    // and fail only against the real collection.
+    const p = new MockVectorProvider({ space });
+    await expect(p.upsertVector('a', [1, 0])).rejects.toBeInstanceOf(VectorSearchError);
+    await expect(p.searchByVector([1, 0, 0, 0])).rejects.toThrow(/dimension mismatch: got 4, collection is 3/u);
+  });
+
   it('ranks by cosine similarity, descending', async () => {
     const p = new MockVectorProvider({ space });
     await p.upsertVector('a', [1, 0, 0], { userId: 'u1', kind: 'item' });

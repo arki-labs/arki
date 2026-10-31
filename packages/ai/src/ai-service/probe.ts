@@ -82,7 +82,11 @@ export async function probeLLMProvider(options: ProbeOptions = {}): Promise<Read
 
   let result: ReadyProvider | ProviderUnavailable;
   if (provider === 'ollama') {
-    const response = await get(new URL('/api/tags', resolveOllamaBaseUrl(options)).href, client, timeoutMs);
+    // A base URL that does not parse cannot be reached: the probe still answers instead of throwing.
+    const base = resolveOllamaBaseUrl(options);
+    const response = URL.canParse('/api/tags', base)
+      ? await get(new URL('/api/tags', base).href, client, timeoutMs)
+      : null;
     const tags =
       response &&
       ollamaTagsSchema.safeParse(

@@ -7,6 +7,8 @@
  * @module cost/types
  */
 
+import type { PriceBasis } from './pricing';
+
 // ============================================
 // Pricing Types
 // ============================================
@@ -50,6 +52,9 @@ export type CostEstimate = {
 
   /** Estimated cost in USD */
   estimatedCostUsd: number;
+
+  /** How the cost was worked out: a list price, a default-rate guess, or a local model (0) */
+  basis: PriceBasis;
 
   /** Model used for the operation */
   model: string;
@@ -204,26 +209,6 @@ export type CircuitBreakerState = {
 
   /** Cost that caused the circuit to open (if applicable) */
   triggeringCostUsd?: number;
-}
-
-/**
- * Result of a circuit breaker execution.
- */
-export type CircuitBreakerResult<T> = {
-  /** Whether the operation was executed */
-  executed: boolean;
-
-  /** Result of the operation (if executed successfully) */
-  result?: T;
-
-  /** Error that occurred (if any) */
-  error?: Error;
-
-  /** Whether the circuit is now open */
-  circuitOpen: boolean;
-
-  /** Reason for blocking (if not executed) */
-  blockReason?: string;
 }
 
 // ============================================

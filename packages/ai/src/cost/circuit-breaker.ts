@@ -7,12 +7,11 @@
  * @module cost/circuit-breaker
  */
 
-import type {
-  CircuitBreakerResult,
-  CircuitBreakerState,
-  CircuitState,
-  CostCircuitConfig,
-} from './types';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+
+import type { CIRCUIT_OPEN_REASONS } from '../failures';
+import type { CircuitBreakerState, CircuitState, CostCircuitConfig } from './types';
+import { Cancelled, CircuitOpen } from '../failures';
 
 // ============================================
 // Default Configuration
@@ -28,24 +27,9 @@ export const DEFAULT_CIRCUIT_CONFIG: CostCircuitConfig = {
   costThresholdUsd: 10,
 };
 
-// ============================================
-// Error Classes
-// ============================================
-
-/**
- * Error thrown when circuit breaker is open.
- */
-export class CircuitBreakerError extends Error {
-  readonly code = 'CIRCUIT_BREAKER_OPEN';
-  readonly circuitState: CircuitState;
-  readonly resetAt?: Date;
-
-  constructor(message: string, state: CircuitState, resetAt?: Date) {
-    super(message);
-    this.name = 'CircuitBreakerError';
-    this.circuitState = state;
-    this.resetAt = resetAt;
-  }
+/** An abort raised by `fetch` or the AI SDK: a DOM `AbortError`, or the `TimeoutError` of `AbortSignal.timeout`. */
+function isAbort(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
 
 // ============================================
@@ -69,14 +53,8 @@ export class CircuitBreakerError extends Error {
  * });
  *
  * // Execute with circuit breaker protection
- * const result = await circuitBreaker.execute(
- *   () => expensiveOperation(),
- *   estimatedCost
- * );
- *
- * if (!result.executed) {
- *   console.log('Circuit is open:', result.blockReason);
- * }
+ * const result = await circuitBreaker.execute(() => expensiveOperation(), estimatedCost);
+ * if (CircuitOpen.is(result)) return result; // the operation did not run
  * ```
  */
 export class CostCircuitBreaker {
@@ -96,77 +74,44 @@ export class CostCircuitBreaker {
   /**
    * Execute an operation with circuit breaker protection.
    *
+   * The operation returns its expected failures (an `@arki/failure` value), it does not throw them.
+   * A returned failure counts toward `failureThreshold`, except `Cancelled` (the caller gave up)
+   * and `UnexpectedDefect` (a bug, not an outage). A throw is never counted: an abort becomes
+   * `Cancelled`, anything else `UnexpectedDefect`.
+   *
    * @param operation - The operation to execute
    * @param estimatedCost - Estimated cost of the operation in USD
-   * @returns Execution result
+   * @returns The operation's own result (success or returned failure), `CircuitOpen` when the
+   *   breaker refused to run it, or `Cancelled` / `UnexpectedDefect` when it threw
    */
   async execute<T>(
     operation: () => Promise<T>,
     estimatedCost = 0
-  ): Promise<CircuitBreakerResult<T>> {
+  ): Promise<T | CircuitOpen | Cancelled | ReturnType<typeof UnexpectedDefect>> {
     // Check if circuit should transition from open to half-open
     this.checkTimeout();
 
-    // Check if operation should be blocked
-    if (!this.shouldAllowOperation(estimatedCost)) {
-      return {
-        executed: false,
-        circuitOpen: true,
-        blockReason: this.getBlockReason(estimatedCost),
-      };
-    }
+    const refusal = this.refusalFor(estimatedCost);
+    if (refusal !== undefined) return refusal;
 
+    let result: T;
     try {
-      const result = await operation();
-
-      // Record success
-      this.recordSuccess();
-      this.cumulativeCost += estimatedCost;
-
-      return {
-        executed: true,
-        result,
-        circuitOpen: false,
-      };
+      result = await operation();
     } catch (error) {
-      // Record failure
-      this.recordFailure(estimatedCost);
-
-      return {
-        executed: true,
-        error: error as Error,
-        circuitOpen: this.state.state === 'open',
-      };
-    }
-  }
-
-  /**
-   * Execute or throw if circuit is open.
-   *
-   * @param operation - The operation to execute
-   * @param estimatedCost - Estimated cost of the operation
-   * @returns Operation result
-   * @throws CircuitBreakerError if circuit is open
-   */
-  async executeOrThrow<T>(
-    operation: () => Promise<T>,
-    estimatedCost = 0
-  ): Promise<T> {
-    const result = await this.execute(operation, estimatedCost);
-
-    if (!result.executed) {
-      throw new CircuitBreakerError(
-        result.blockReason ?? 'Circuit breaker is open',
-        this.state.state,
-        this.state.resetAt
-      );
+      // A throw is not an expected outcome of the operation: it never trips the breaker.
+      return isAbort(error) ? Cancelled({ cause: error }) : UnexpectedDefect({ cause: error });
     }
 
-    if (result.error) {
-      throw result.error;
+    // Widened to `unknown` only to ask whether the result is a failure; the caller still gets `result` as `T`.
+    const outcome: unknown = result;
+    if (isFailure(outcome)) {
+      if (!Cancelled.is(outcome) && !UnexpectedDefect.is(outcome)) this.recordFailure();
+      return result;
     }
 
-    return result.result!;
+    this.recordSuccess();
+    this.cumulativeCost += estimatedCost;
+    return result;
   }
 
   // ============================================
@@ -240,25 +185,31 @@ export class CostCircuitBreaker {
     };
   }
 
-  private shouldAllowOperation(estimatedCost: number): boolean {
+  /** `CircuitOpen` when this call must not run; trips the breaker when the call would cross the cost threshold. */
+  private refusalFor(estimatedCost: number): CircuitOpen | undefined {
     const state = this.state.state;
 
-    if (state === 'closed') {
-      // Check if cost threshold would be exceeded
-      if (this.cumulativeCost + estimatedCost > this.config.costThresholdUsd) {
-        this.trip();
-        return false;
-      }
-      return true;
+    if (state === 'closed' && this.cumulativeCost + estimatedCost > this.config.costThresholdUsd) {
+      this.trip();
+      return this.openFailure('cost_threshold');
     }
 
-    if (state === 'half_open') {
-      // Allow limited requests in half-open state
-      return true;
-    }
+    // half_open lets calls through to test recovery
+    if (state === 'open') return this.openFailure('open');
+    return undefined;
+  }
 
-    // state === 'open'
-    return false;
+  private openFailure(reason: (typeof CIRCUIT_OPEN_REASONS)[number]): CircuitOpen {
+    const retryAfterMs =
+      this.state.resetAt === undefined
+        ? this.config.timeoutSeconds * 1000
+        : Math.max(0, this.state.resetAt.getTime() - Date.now());
+    return CircuitOpen({
+      reason,
+      retryAfterMs,
+      cumulativeCostUsd: this.cumulativeCost,
+      costThresholdUsd: this.config.costThresholdUsd,
+    });
   }
 
   private checkTimeout(): void {
@@ -292,7 +243,7 @@ export class CostCircuitBreaker {
     }
   }
 
-  private recordFailure(_cost: number): void {
+  private recordFailure(): void {
     this.state.failureCount++;
     this.state.lastFailureAt = new Date();
 
@@ -304,21 +255,6 @@ export class CostCircuitBreaker {
     }
   }
 
-  private getBlockReason(estimatedCost: number): string {
-    if (this.state.state === 'open') {
-      const resetIn = this.state.resetAt
-        ? Math.ceil((this.state.resetAt.getTime() - Date.now()) / 1000)
-        : this.config.timeoutSeconds;
-
-      return `Circuit breaker is open. Will reset in ${resetIn} seconds. Cumulative cost: $${this.cumulativeCost.toFixed(2)}`;
-    }
-
-    if (this.cumulativeCost + estimatedCost > this.config.costThresholdUsd) {
-      return `Cost threshold would be exceeded. Current: $${this.cumulativeCost.toFixed(2)}, Requested: $${estimatedCost.toFixed(2)}, Threshold: $${this.config.costThresholdUsd.toFixed(2)}`;
-    }
-
-    return 'Operation blocked by circuit breaker';
-  }
 }
 
 // ============================================

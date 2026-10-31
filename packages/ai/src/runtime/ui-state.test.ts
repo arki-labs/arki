@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { RateLimited } from '../failures';
 import type { RuntimeEvent } from './types';
 import type { RuntimeUiState } from './ui-state';
 import { initialRuntimeUiState, runtimeEventReducer } from './ui-state';
 
 /** Fold a sequence of events from the initial state. */
 function reduceAll(events: RuntimeEvent[]): RuntimeUiState {
-  return events.reduce(runtimeEventReducer, initialRuntimeUiState);
+  return events.reduce((state, event) => runtimeEventReducer(state, event), initialRuntimeUiState);
 }
 
 describe('runtimeEventReducer', () => {
@@ -70,9 +71,23 @@ describe('runtimeEventReducer', () => {
     expect(second).toEqual({ status: 'running', text: '', toolCalls: [] });
   });
 
-  it('captures run:error as terminal error status', () => {
-    const state = reduceAll([{ type: 'run:start' }, { type: 'run:error', error: 'model unreachable' }]);
+  it('captures run:error as terminal error status with its typed failure', () => {
+    const failure = RateLimited({ retryAfterMs: 500 });
+    const state = reduceAll([{ type: 'run:start' }, { type: 'run:error', failure }]);
     expect(state.status).toBe('error');
-    expect(state.error).toBe('model unreachable');
+    expect(state.failure).toBe(failure);
+  });
+
+  it('keeps a failed run failed when a late run:finish arrives', () => {
+    // WHY (F2): a run:finish after run:error used to set status done, showing a failed run as a success.
+    const failure = RateLimited({ retryAfterMs: 500 });
+    const state = reduceAll([
+      { type: 'run:start' },
+      { type: 'text:delta', delta: 'hel' },
+      { type: 'run:error', failure },
+      { type: 'run:finish', text: 'hel', usage: {} },
+    ]);
+    expect(state.status).toBe('error');
+    expect(state.failure?.code).toBe('ai.rate_limited');
   });
 });

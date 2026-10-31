@@ -7,7 +7,7 @@
   ],
   "tasks": {
     "test": {
-      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY"]
+      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY", "AI_TEST_MODEL"]
     }
   }
 }

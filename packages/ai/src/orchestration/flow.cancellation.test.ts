@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { isFailure } from '@arki/failure';
+
 import { createFlow } from './flow';
+
+const codeOf = async (result: Promise<unknown>) => {
+  const value = await result;
+  return isFailure(value) ? value.code : undefined;
+};
 
 describe('flow cancellation prevents overlapping generation', () => {
   afterEach(() => vi.useRealTimers());
@@ -28,10 +35,10 @@ describe('flow cancellation prevents overlapping generation', () => {
         },
       },
     });
-    const result = flow.run({ done: false }, {});
-    const rejected = expect(result).rejects.toThrow('Flow node failed');
+    const result = codeOf(flow.run({ done: false }, {}));
     await vi.advanceTimersByTimeAsync(10);
-    await rejected;
+    // A timeout is its own returned failure, so a caller can tell "too slow" from "broken".
+    expect(await result).toBe('ai.flow_timed_out');
     expect(order).toEqual(['start:1', 'abort:1']);
     await vi.runAllTimersAsync();
     expect(order).toEqual(['start:1', 'abort:1', 'stopped:1']);
@@ -49,10 +56,10 @@ describe('flow cancellation prevents overlapping generation', () => {
       onEvent: event => events.push(event.type),
       nodes: { generate: { id: 'generate', retries: 2, timeoutMs: 10, run } },
     });
-    const rejected = expect(flow.run({ done: false }, {})).rejects.toThrow('Flow node failed');
+    const result = codeOf(flow.run({ done: false }, {}));
     if (kind === 'cancel') controller.abort();
     else await vi.advanceTimersByTimeAsync(10);
-    await rejected;
+    expect(await result).toBe(kind === 'cancel' ? 'ai.cancelled' : 'ai.flow_timed_out');
     expect(run).toHaveBeenCalledTimes(1);
     expect(events.at(-1)).toBe('flow:failed');
     finish?.({ done: true });
@@ -94,9 +101,9 @@ describe('flow cancellation prevents overlapping generation', () => {
         },
       },
     });
-    const result = flow.run({ done: false }, {});
+    const result = codeOf(flow.run({ done: false }, {}));
     controller.abort();
-    await expect(result).rejects.toThrow('Flow node failed');
+    expect(await result).toBe('ai.cancelled');
     expect(stopped).toBe(true);
     expect(attempts).toBe(1);
     expect(events).not.toContain('node:success');

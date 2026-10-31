@@ -3,6 +3,7 @@ import { expectTypeOf, it } from 'vitest';
 import type { z } from '@arki/contracts';
 
 import type { StructuredGenerator } from './ai-service/structured-generation';
+import type { ProviderFailure } from './failures';
 import type { AskQuestion } from './capabilities/ask';
 import type { AnalysisDocument, TranscriptDocument } from './capabilities/episode-analysis';
 import type { HopSelection } from './capabilities/podhop';
@@ -26,7 +27,7 @@ import type * as zodEntry from './zod';
 type TaskResult<K extends keyof StructuredGenerator> = StructuredGenerator[K] extends (
   ...args: never[]
 ) => Promise<infer R>
-  ? R
+  ? Exclude<R, ProviderFailure>
   : never;
 
 // Every public entry but `./zod` exposes plain TS types, written once as the source. The schema that parses the

@@ -1,15 +1,11 @@
 /**
- * Input validation for @arki/ai: the config and input types, and `validateInput`.
+ * The config and input types of @arki/ai. Validate values against their schemas with `parse` from
+ * `@arki/schema`, which returns `InvalidInput` instead of throwing.
  *
  * Each type below is the source. Its runtime schema lives in `validation-schemas.ts` (offered to callers
  * by `@arki/ai/zod`), and `zod.test.ts` locks the two together, so this entry's types carry no Zod.
  */
-import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
-import { InvalidInput, orThrow } from '@arki/failure';
-import { formatIssues, parse, parseAsync, pathOf } from '@arki/schema';
-
 import type { SanitizerConfig } from './safety/types';
-import { ValidationError } from './errors';
 
 /** Qdrant connection settings. */
 export type QdrantConfig = {
@@ -79,35 +75,3 @@ export type ChatMessage = {
   timestamp?: Date;
   metadata?: Record<string, unknown>;
 };
-
-/**
- * Validate input with detailed error messages.
- * Takes any Standard Schema (zod, valibot, arktype, ...). A schema that
- * cannot run synchronously crosses this throwing adapter through `orThrow`.
- */
-export function validateInput<S extends StandardSchemaV1>(
-  schema: S,
-  input: unknown,
-  errorMessage?: string,
-): SchemaOutput<S> {
-  const result = parse(schema, input);
-  if (!InvalidInput.is(result)) return orThrow(result);
-  throw new ValidationError(
-    errorMessage || `Input validation failed: ${formatIssues(result.data.issues)}`,
-    result.data.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message })),
-  );
-}
-
-/** Async validation for the existing throwing AI validation API. */
-export async function validateInputAsync<S extends StandardSchemaV1>(
-  schema: S,
-  input: unknown,
-  errorMessage?: string,
-): Promise<SchemaOutput<S>> {
-  const result = await parseAsync(schema, input);
-  if (!InvalidInput.is(result)) return orThrow(result);
-  throw new ValidationError(
-    errorMessage || `Input validation failed: ${formatIssues(result.data.issues)}`,
-    result.data.issues.map(issue => ({ field: pathOf(issue).map(String).join('.'), message: issue.message })),
-  );
-}
