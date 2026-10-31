@@ -5,8 +5,13 @@ import { Redis } from 'ioredis'; // Import ioredis for rate limiter
 import Keyv from 'keyv';
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
+import type { Failure } from '@arki/failure';
+import { attempt, InvalidInput, isFailure } from '@arki/failure';
+import { formatIssues, parse } from '@arki/schema';
+
 import { debugKV, debugLimiter } from './debug.js';
-import { KvCloseFailed } from './errors.js';
+import { KvCancelled, KvCloseFailed, KvUnavailable, KvValueInvalid } from './errors.js';
 import { observeKv } from './telemetry.js';
 
 /** Options for {@link KV} beyond the URL, namespace and rate limit prefix. */
@@ -16,6 +21,17 @@ export type KvOptions = {
    * Turn it on only for a server with a self-signed certificate that you trust, such as a local test Redis.
    */
   readonly allowUnverifiedTls?: boolean;
+  /**
+   * How long one command may take before it returns {@link KvUnavailable}, in milliseconds (default `5000`).
+   * A Redis that is down never answers (the client keeps reconnecting), so without this limit a call would wait for ever.
+   */
+  readonly commandTimeoutMs?: number;
+};
+
+/** Options for one command. */
+export type KvCallOptions = {
+  /** Aborting the signal ends the wait with {@link KvCancelled}. A write that was already sent may still land. */
+  readonly signal?: AbortSignal;
 };
 
 export class KV {
@@ -25,6 +41,8 @@ export class KV {
   /** Limiters by id. One id can hold several, one per distinct options (compared as JSON). */
   readonly #limiterInstances = new Map<string, LimiterEntry[]>();
   #isRateLimiterReady = false;
+  #limiterClosed = false;
+  readonly #commandTimeoutMs: number;
 
   constructor(
     redisUrl: string,
@@ -32,6 +50,7 @@ export class KV {
     private readonly rateLimitPrefix = 'rl', // Prefix for rate limiter keys
     options: KvOptions = {},
   ) {
+    this.#commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     debugKV.debug('[kv] Initializing KV instance (namespace: {namespace}, rateLimitPrefix: {rateLimitPrefix})', {
       namespace: namespace || 'default',
       rateLimitPrefix,
@@ -54,7 +73,7 @@ export class KV {
       namespace: this.namespace,
       ...(skipTlsVerification && { socket: { tls: true, rejectUnauthorized: false } }),
     });
-    this.#keyv = new Keyv({ store: this.#store, namespace: this.namespace });
+    this.#keyv = new Keyv({ store: this.#store, namespace: this.namespace, throwOnErrors: true });
     this.#keyv.on('error', err => {
       // `SocketClosedUnexpectedlyError` from @redis/client fires during
       // normal events: dev-server SSR reloads tearing down the old module,
@@ -124,22 +143,88 @@ export class KV {
     });
   }
 
+  /**
+   * Run one command under its `kv.<command>` span. A driver error or a missing answer within
+   * `commandTimeoutMs` becomes {@link KvUnavailable}; the caller's abort signal becomes {@link KvCancelled}.
+   * No driver error escapes.
+   */
+  async #run<Result>(command: string, options: KvCallOptions | undefined, execute: () => Promise<Result>) {
+    return await observeKv(command, async () => {
+      const signal = options?.signal;
+      if (signal?.aborted) return KvCancelled({ command });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
+      const interrupted = new Promise<KvUnavailable | KvCancelled>(resolve => {
+        timer = setTimeout(() => {
+          resolve(KvUnavailable({ command, reason: `no answer within ${this.#commandTimeoutMs} ms` }));
+        }, this.#commandTimeoutMs);
+        onAbort = () => resolve(KvCancelled({ command }));
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+      try {
+        const done = attempt(execute, cause =>
+          KvUnavailable({ command, reason: cause instanceof Error ? cause.message : String(cause) }),
+        );
+        return await Promise.race([done, interrupted]);
+      } finally {
+        clearTimeout(timer);
+        if (onAbort) signal?.removeEventListener('abort', onAbort);
+      }
+    });
+  }
+
+  /** Wait for a disconnect, but no longer than `commandTimeoutMs`: a client that is reconnecting never answers `quit`. */
+  async #within(pending: Promise<unknown> | undefined): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`no answer within ${this.#commandTimeoutMs} ms`)), this.#commandTimeoutMs);
+    });
+    try {
+      await Promise.race([pending, late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** A stored value checked against the schema: its output, or {@link KvValueInvalid} (other schema failures pass through). */
+  #check<Schema extends StandardSchemaV1>(
+    key: string,
+    schema: Schema,
+    stored: unknown,
+  ): Failure | { readonly value: SchemaOutput<Schema> | undefined } {
+    if (stored === undefined) return { value: undefined };
+    const parsed = parse(schema, stored);
+    if (isFailure(parsed) && InvalidInput.is(parsed)) {
+      return KvValueInvalid({ key, issues: formatIssues(parsed.data.issues) });
+    }
+    return { value: parsed };
+  }
+
   // --- Standard Key-Value Methods (using Keyv) ---
 
-  async get<T = unknown>(key: string): Promise<T | undefined> {
-    return await observeKv('get', async () => {
+  /**
+   * Read `key` and check it against `schema` (any Standard Schema, zod by default). Returns the parsed
+   * value, `undefined` for a missing key, {@link KvValueInvalid} when the stored value has the wrong shape,
+   * or {@link KvUnavailable} / {@link KvCancelled}.
+   */
+  async get<Schema extends StandardSchemaV1>(key: string, schema: Schema, options?: KvCallOptions) {
+    const stored = await this.#run('get', options, async () => {
       debugKV.debug('[kv] Getting key: {key}', { key });
-      const result = await this.#keyv.get(key);
+      const result: unknown = await this.#keyv.get(key);
       debugKV.debug('[kv] Get result for key {key}: {outcome}', {
         key,
         outcome: result === undefined ? 'not found' : 'found',
       });
-      return result;
+      return { stored: result };
     });
+    if (isFailure(stored)) return stored;
+    const checked = this.#check(key, schema, stored.stored);
+    return isFailure(checked) ? checked : checked.value;
   }
 
-  async set<T = unknown>(key: string, value: T, expirationSeconds?: number): Promise<boolean> {
-    return await observeKv('set', async () => {
+  /** Write `value` (anything JSON can hold). With `expirationSeconds` the key expires after that many seconds. */
+  async set(key: string, value: unknown, expirationSeconds?: number, options?: KvCallOptions) {
+    return await this.#run('set', options, async () => {
       debugKV.debug('[kv] Setting key: {key} (ttl: {ttl})', {
         key,
         ttl: expirationSeconds ? `${expirationSeconds}s` : 'none',
@@ -155,8 +240,8 @@ export class KV {
    * Write `value` only if `key` is absent, in one atomic Redis `SET NX EX`. The key and the stored
    * format are the ones {@link KV.set} uses, so {@link KV.get} reads the value back.
    */
-  async setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean> {
-    return await observeKv('setIfNotExists', async () => {
+  async setIfNotExists(key: string, value: unknown, expirationSeconds: number, options?: KvCallOptions) {
+    return await this.#run('setIfNotExists', options, async () => {
       debugKV.debug('[kv] Setting key if absent: {key} (ttl: {ttl}s)', { key, ttl: expirationSeconds });
       await this.#whenRedisReady();
       const keyvKey = this.namespace ? `${this.namespace}:${key}` : key;
@@ -179,8 +264,8 @@ export class KV {
   }
 
   /** Write every pair; with `expirationSeconds`, each pair expires after that many seconds. */
-  async mset<T = unknown>(keyValuePairs: [string, T][], expirationSeconds?: number): Promise<void> {
-    await observeKv('mset', async () => {
+  async mset(keyValuePairs: readonly (readonly [string, unknown])[], expirationSeconds?: number, options?: KvCallOptions) {
+    return await this.#run('mset', options, async () => {
       debugKV.debug('[kv] Setting multiple keys (count: {count})', { count: keyValuePairs.length });
       const ttl = expirationSeconds ? expirationSeconds * 1000 : undefined;
       const entries = keyValuePairs.map(([key, value]) => ({ key, value, ttl }));
@@ -189,31 +274,43 @@ export class KV {
     });
   }
 
-  async mget<T = unknown>(keys: string[]): Promise<(T | undefined)[]> {
-    return await observeKv('mget', async () => {
+  /**
+   * Read several keys and check each stored value against `schema`. Missing keys are `undefined`.
+   * The first value with the wrong shape fails the whole call with {@link KvValueInvalid}.
+   */
+  async mget<Schema extends StandardSchemaV1>(keys: readonly string[], schema: Schema, options?: KvCallOptions) {
+    const stored = await this.#run('mget', options, async () => {
       debugKV.debug('[kv] Getting multiple keys (count: {count})', { count: keys.length });
-      const results = await this.#keyv.getMany(keys);
+      const results: unknown[] = await this.#keyv.getMany([...keys]);
       const foundCount = results.filter(r => r !== undefined).length;
       debugKV.debug('[kv] Got multiple keys (requested: {requested}, found: {found})', {
         requested: keys.length,
         found: foundCount,
       });
-      return results;
+      return { stored: results };
     });
+    if (isFailure(stored)) return stored;
+    const values: (SchemaOutput<Schema> | undefined)[] = [];
+    for (const [index, value] of stored.stored.entries()) {
+      const checked = this.#check(keys[index] ?? '', schema, value);
+      if (isFailure(checked)) return checked;
+      values.push(checked.value);
+    }
+    return values;
   }
 
-  async exists(key: string): Promise<boolean> {
-    return await observeKv('exists', async () => {
+  async exists(key: string, options?: KvCallOptions) {
+    return await this.#run('exists', options, async () => {
       debugKV.debug('[kv] Checking existence of key: {key}', { key });
-      const value = await this.#keyv.get<unknown>(key);
+      const value: unknown = await this.#keyv.get(key);
       const exists = value !== undefined;
       debugKV.debug('[kv] Key {key} exists: {exists}', { key, exists });
       return exists;
     });
   }
 
-  async delete(key: string): Promise<boolean> {
-    return await observeKv('delete', async () => {
+  async delete(key: string, options?: KvCallOptions) {
+    return await this.#run('delete', options, async () => {
       debugKV.debug('[kv] Deleting key: {key}', { key });
       const result = await this.#keyv.delete(key);
       debugKV.debug('[kv] Delete result for key {key}: {outcome}', { key, outcome: result ? 'deleted' : 'not found' });
@@ -221,17 +318,17 @@ export class KV {
     });
   }
 
-  async deleteMany(keys: string[]): Promise<boolean> {
-    return await observeKv('deleteMany', async () => {
+  async deleteMany(keys: readonly string[], options?: KvCallOptions) {
+    return await this.#run('deleteMany', options, async () => {
       debugKV.debug('[kv] Deleting multiple keys (count: {count})', { count: keys.length });
-      const result = await this.#keyv.deleteMany(keys);
+      const result = await this.#keyv.deleteMany([...keys]);
       debugKV.debug('[kv] Delete many result: {result}', { result: result ? 'success' : 'failed' });
       return result;
     });
   }
 
-  async clear(): Promise<void> {
-    await observeKv('clear', async () => {
+  async clear(options?: KvCallOptions) {
+    return await this.#run('clear', options, async () => {
       debugKV.debug('[kv] Clearing all keys');
       await this.#keyv.clear();
       debugKV.debug('[kv] All keys cleared');
@@ -240,8 +337,9 @@ export class KV {
 
   // --- Redis Pub/Sub Methods ---
 
-  async publish(channel: string, message: string): Promise<number> {
-    return await observeKv('publish', async () => {
+  /** Publish `message` on `channel`. Returns how many subscribers received it. */
+  async publish(channel: string, message: string, options?: KvCallOptions) {
+    return await this.#run('publish', options, async () => {
       debugKV.debug('[kv] Publishing to channel: {channel} (message length: {length})', {
         channel,
         length: message.length,
@@ -353,7 +451,7 @@ export class KV {
 
     try {
       debugKV.debug('[kv] Disconnecting Keyv store');
-      await this.#keyv.opts.store.disconnect?.();
+      await this.#within(this.#keyv.opts.store.disconnect?.());
       debugKV.debug('[kv] Keyv store disconnected');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -364,8 +462,11 @@ export class KV {
     try {
       debugLimiter.debug('[kv] Disconnecting rate limiter Redis client');
       // A connection that never came up (or is retrying) has nothing to flush, so it is dropped, not asked to quit.
-      if (this.#redisClient.status === 'ready') await this.#redisClient.quit();
+      // ioredis reports `ready` for a moment after `quit` is answered, so a closed client is remembered here.
+      if (this.#limiterClosed) debugLimiter.debug('[kv] Rate limiter Redis client was already closed');
+      else if (this.#redisClient.status === 'ready') await this.#within(this.#redisClient.quit());
       else this.#redisClient.disconnect();
+      this.#limiterClosed = true;
       debugLimiter.debug('[kv] Rate limiter Redis client disconnected');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -449,7 +550,7 @@ function findLimiter(entries: readonly LimiterEntry[], options: object): Limiter
   return undefined;
 }
 
-export { KvCloseFailed } from './errors.js';
+export { KvCancelled, KvCloseFailed, KvUnavailable, KvValueInvalid } from './errors.js';
 
 // Re-export factory functions
 export { createKV, createRateLimitKV } from './factory.js';

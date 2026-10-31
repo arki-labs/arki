@@ -20,7 +20,6 @@ import nodeFetch from 'node-fetch';
 import { invariant, isFailure } from '@arki/failure';
 import type { KV } from '@arki/kv';
 import { getLogger } from '@arki/log';
-import { parse } from '@arki/schema';
 
 import { isValidCoordinates } from '../core/coordinates';
 import {
@@ -417,34 +416,20 @@ export class GeocodingService {
   /** A stored answer, or undefined on a miss. A cache fault or a stored value of the wrong shape is a miss, never an error. */
   private async readCache(key: string): Promise<GeocodeResult | undefined> {
     if (!this.cacheEnabled || !this.kv) return undefined;
-    try {
-      const stored = await this.kv.get(key);
-      if (stored === undefined || stored === null) return undefined;
-      const parsed = parse(geocodeResultSchema, stored);
-      if (isFailure(parsed)) {
-        log.warn('Ignoring a cached geocode result of the wrong shape at {key}', { key });
-        return undefined;
-      }
-      return parsed;
-    } catch (error) {
-      log.warn('Geocode cache read failed for {key}: {message}', {
-        key,
-        message: error instanceof Error ? error.message : String(error),
-      });
+    const stored = await this.kv.get(key, geocodeResultSchema);
+    if (isFailure(stored)) {
+      log.warn('Geocode cache read failed for {key}: {message}', { key, message: stored.message });
       return undefined;
     }
+    return stored;
   }
 
   /** Store an answer. A cache fault is logged and the good answer is still returned. */
   private async writeCache(key: string, result: GeocodeResult): Promise<void> {
     if (!this.cacheEnabled || !this.kv) return;
-    try {
-      await this.kv.set(key, result, this.cacheTTL);
-    } catch (error) {
-      log.warn('Geocode cache write failed for {key}: {message}', {
-        key,
-        message: error instanceof Error ? error.message : String(error),
-      });
+    const stored = await this.kv.set(key, result, this.cacheTTL);
+    if (isFailure(stored)) {
+      log.warn('Geocode cache write failed for {key}: {message}', { key, message: stored.message });
     }
   }
 

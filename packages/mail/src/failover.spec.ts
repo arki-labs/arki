@@ -41,7 +41,7 @@ function scripted(id: string, answer: (id: string) => Answer, quotaPerMonth?: nu
 describe('quota', () => {
   it('skips a transport over its quota for the month and sends through the next', async () => {
     const store = inMemoryQuotaStore();
-    await store.increment('resend', '2026-10');
+    await orThrow(store.increment('resend', '2026-10'));
     const resend = scripted('resend', accepted, 1);
     const ses = scripted('ses', accepted);
     const result = await failover([resend.transport, ses.transport], { store, now }).send(message, {});
@@ -61,7 +61,7 @@ describe('quota', () => {
 
   it('when every transport is over quota, sends nothing and returns MailQuotaExhausted', async () => {
     const store = inMemoryQuotaStore();
-    await store.increment('resend', '2026-10');
+    await orThrow(store.increment('resend', '2026-10'));
     const resend = scripted('resend', accepted, 1);
     const result = await failover([resend.transport], { store, now }).send(message, {});
     expect(MailQuotaExhausted.is(result)).toBe(true);
@@ -84,6 +84,18 @@ describe('quota', () => {
     const resend = scripted('resend', accepted, 5);
     const result = await failover([resend.transport], { store, now }).send(message, {});
     expect(result).toMatchObject({ id: 'resend-1' });
+  });
+
+  it('a counter that returns a failure is treated like one that throws: the mail still goes', async () => {
+    const down = MailRejected({ transport: 'resend', retryable: false, upstreamStatus: 422 });
+    const store: QuotaStore = {
+      getSent: () => Promise.resolve(down),
+      increment: () => Promise.resolve(down),
+    };
+    const resend = scripted('resend', accepted, 5);
+    await expect(failover([resend.transport], { store, now }).send(message, {})).resolves.toMatchObject({
+      transport: 'resend',
+    });
   });
 
   it('a counter that cannot be read does not stop the mail', async () => {

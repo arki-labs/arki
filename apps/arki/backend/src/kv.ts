@@ -1,3 +1,5 @@
+import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { KV } from '@arki/kv';
 
 import { env } from './env';
@@ -20,9 +22,9 @@ const initializeKV = async (): Promise<KV> => {
     // Test the connection with a simple operation
     // keyv might connect lazily, so a quick set/get ensures it's working.
     const testKey = 'startup-test';
-    await instance.set(testKey, 'ok', 5); // Set with short TTL
-    const result = await instance.get(testKey);
-    await instance.delete(testKey);
+    await orThrow(instance.set(testKey, 'ok', 5)); // Set with short TTL
+    const result = await orThrow(instance.get(testKey, z.literal('ok')));
+    await orThrow(instance.delete(testKey));
 
     if (result !== 'ok') {
       throw new Error('KV connection test failed: Set/Get mismatch.');

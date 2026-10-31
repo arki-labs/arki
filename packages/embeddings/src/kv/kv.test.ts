@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { z } from 'zod';
+
+import type { Failure } from '@arki/failure';
+import { KvUnavailable, KvValueInvalid } from '@arki/kv';
 
 import type { EmbedFailure } from '../failures.js';
 import type { EmbeddingBatch } from '../types.js';
@@ -7,23 +11,37 @@ import { isEmbedFailure } from '../failures.js';
 import { fakeEmbedder } from '../testing/index.js';
 import { kvCacheStore } from './index.js';
 
-/** A Map behind JSON, as `@arki/kv` serialises values: what a Uint8Array would not survive. */
-function jsonKv() {
+type TestKv = {
+  readonly calls: unknown[][];
+  get(key: string, schema: ReturnType<typeof z.base64>): Promise<string | undefined | Failure>;
+  set(key: string, value: unknown, expirationSeconds?: number): Promise<boolean>;
+};
+
+/** A Map behind JSON, as `@arki/kv` serialises values; a value of the wrong shape answers `KvValueInvalid`, as the real client does. */
+function jsonKv(): TestKv {
   const entries = new Map<string, string>();
   const calls: unknown[][] = [];
   return {
     calls,
-    get: (key: string): Promise<unknown> => {
+    get: (key, schema) => {
       const text = entries.get(key);
-      return Promise.resolve(text === undefined ? undefined : JSON.parse(text));
+      if (text === undefined) return Promise.resolve(text);
+      const parsed = schema.safeParse(JSON.parse(text));
+      return Promise.resolve(parsed.success ? parsed.data : KvValueInvalid({ key, issues: parsed.error.message }));
     },
-    set: (key: string, value: unknown, expirationSeconds?: number) => {
+    set: (key, value, expirationSeconds) => {
       calls.push([key, value, expirationSeconds]);
       entries.set(key, JSON.stringify(value));
       return Promise.resolve(true);
     },
   };
 }
+
+/** A KV client whose Redis is down: every command answers `KvUnavailable`. */
+const downKv = {
+  get: () => Promise.resolve(KvUnavailable({ command: 'get', reason: 'connection refused' })),
+  set: () => Promise.resolve(KvUnavailable({ command: 'set', reason: 'connection refused' })),
+};
 
 async function ok(pending: Promise<EmbeddingBatch | EmbedFailure>): Promise<EmbeddingBatch> {
   const result = await pending;
@@ -64,5 +82,16 @@ describe('kvCacheStore', () => {
 
     expect(second.usage.cacheHits).toBe(1);
     expect(second.vectors).toEqual(first.vectors);
+  });
+
+  it('Redis down is a miss on read and a skipped write, never an error: embedding still works', async () => {
+    const store = kvCacheStore(downKv);
+
+    expect(await store.get('k')).toBeUndefined();
+    await expect(store.set('k', new Uint8Array([1]))).resolves.toBeUndefined();
+
+    const embedder = withCache(fakeEmbedder({ dimensions: 8 }), store);
+    const result = await ok(embedder.embed(['a'], {}));
+    expect(result.usage.cacheHits).toBe(0);
   });
 });

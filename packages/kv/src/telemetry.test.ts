@@ -1,6 +1,7 @@
 /** Every KV command runs in a `kv.<command>` span, ended even when the command fails. */
 import type { Span, Tracer, TracerProvider } from '@opentelemetry/api';
 import { trace } from '@opentelemetry/api';
+import { defineFailure, isFailure } from '@arki/failure';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { observeKv } from './telemetry.js';
@@ -34,6 +35,12 @@ beforeAll(() => {
 afterAll(() => trace.disable());
 
 describe('observeKv', () => {
+  it('marks the span failed when the command returns a failure', async () => {
+    const Down = defineFailure('test.down', { status: 503 });
+    expect(isFailure(await observeKv('get', () => Promise.resolve(Down())))).toBe(true);
+    expect(started.at(-1)).toMatchObject({ name: 'kv.get', ended: true });
+  });
+
   it('opens a kv.<command> span and ends it on success', async () => {
     expect(await observeKv('get', () => Promise.resolve(42))).toBe(42);
     expect(started.at(-1)).toEqual({ name: 'kv.get', ended: true, errored: false });

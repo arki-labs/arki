@@ -23,6 +23,8 @@
  * ANY: ({ request, context }) => foremanRoute(request, context.services)
  * ```
  */
+import { parse } from '@arki/schema';
+
 import type { NonceStore } from './dispatcher';
 import type { ForemanEnv } from './env';
 import type { ForemanAppOptions } from './foreman-app';
@@ -121,7 +123,10 @@ export function memoryForemanStore(now: () => number = Date.now): ForemanStore {
   };
   const forever = Number.POSITIVE_INFINITY;
   return {
-    get: key => Promise.resolve(live(key)?.value),
+    get: (key, schema) => {
+      const value = live(key)?.value;
+      return Promise.resolve(value === undefined ? value : parse(schema, value));
+    },
     set: (key: string, value: StoredReceipt, expirationSeconds?: number) => {
       const expiresAt = expirationSeconds === undefined ? forever : now() + expirationSeconds * 1000;
       entries.set(key, { value: structuredClone(value), expiresAt });

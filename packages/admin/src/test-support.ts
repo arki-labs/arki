@@ -4,6 +4,8 @@
  */
 import type { Clock } from '@arki/clock';
 import { isFailure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { parse } from '@arki/schema';
 
 import { wireCodeOf } from './failures';
 
@@ -23,7 +25,10 @@ export function memoryKv(clock: Clock) {
     seconds === undefined ? undefined : clock.now().getTime() + seconds * 1000;
   return {
     entries,
-    get: (key: string): Promise<unknown> => Promise.resolve(structuredClone(live(key)?.value)),
+    get: <Output>(key: string, schema: StandardSchemaV1<unknown, Output>) => {
+      const value: unknown = structuredClone(live(key)?.value);
+      return Promise.resolve(value === undefined ? undefined : parse(schema, value));
+    },
     set: (key: string, value: unknown, expirationSeconds?: number): Promise<boolean> => {
       entries.set(key, { value: structuredClone(value), expiresAt: expiry(expirationSeconds) });
       return Promise.resolve(true);

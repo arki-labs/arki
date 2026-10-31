@@ -7,6 +7,7 @@
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { CacheBackedEmbeddings } from '@langchain/classic/embeddings/cache_backed';
 import { InMemoryStore } from '@langchain/core/stores';
+import { z } from 'zod';
 
 import type { CaseBuilder, CaseSpec } from '@arki/bench';
 import type { CacheStore, Embedder } from '@arki/embeddings';
@@ -63,9 +64,11 @@ function langchainCache() {
 function jsonKv() {
   const entries = new Map<string, string>();
   return {
-    get: (key: string): Promise<unknown> => {
+    get: (key: string, schema: ReturnType<typeof z.base64>): Promise<string | undefined> => {
       const stored = entries.get(key);
-      return Promise.resolve(stored === undefined ? undefined : JSON.parse(stored));
+      if (stored === undefined) return Promise.resolve(stored);
+      const parsed = schema.safeParse(JSON.parse(stored));
+      return Promise.resolve(parsed.success ? parsed.data : undefined);
     },
     set: (key: string, value: string) => {
       entries.set(key, JSON.stringify(value));
@@ -181,7 +184,7 @@ export default defineSuite({
         },
         raw: {
           label: 'raw kv.get of the stored value',
-          run: () => kv.get(firstKvKey),
+          run: () => kv.get(firstKvKey, z.base64()),
         },
       },
     }),

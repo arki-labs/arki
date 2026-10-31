@@ -42,7 +42,8 @@
 import type { Deferred } from '@arki/dot/unit';
 import { DotUnitError, infra, resolveDeferred } from '@arki/dot/unit';
 
-import { orThrow } from '@arki/failure';
+import { z } from '@arki/contracts';
+import { isFailure, orThrow } from '@arki/failure';
 
 import { KV } from './index.js';
 
@@ -100,6 +101,8 @@ export type KvDotOptions = {
    * without this limit a bad URL would hang boot instead of failing it.
    */
   readonly probeTimeoutMs?: number;
+  /** How long one command may take before it returns `KvUnavailable`, in milliseconds (default `5000`). */
+  readonly commandTimeoutMs?: number;
 };
 
 /** Services published by the kv adapter. */
@@ -113,12 +116,17 @@ function resolveUrl(config: KvDotOptions): string | undefined {
   return url === '' ? undefined : url;
 }
 
+const probeValue = z.literal('ok');
+
 /** Set, read back and delete one key; resolves only if the value survived the round trip. */
 async function roundTrip(client: KV): Promise<void> {
   const key = 'arki-kv-dot-probe';
-  await client.set(key, 'ok', 5);
-  const value = await client.get<string>(key);
-  await client.delete(key);
+  const written = await client.set(key, 'ok', 5);
+  if (isFailure(written)) throw new Error(written.message);
+  const value = await client.get(key, probeValue);
+  const deleted = await client.delete(key);
+  if (isFailure(value)) throw new Error(value.message);
+  if (isFailure(deleted)) throw new Error(deleted.message);
   if (value !== 'ok') throw new Error(`read back ${JSON.stringify(value)} instead of "ok"`);
 }
 
@@ -148,7 +156,10 @@ async function probe(client: KV, timeoutMs: number): Promise<KV> {
 
 /** Open the client for `url`; with `probe: true`, only once a round trip worked. */
 function open(url: string, config: KvDotOptions): KV | Promise<KV> {
-  const client = new KV(url, config.namespace, config.rateLimitPrefix, { allowUnverifiedTls: config.allowUnverifiedTls });
+  const client = new KV(url, config.namespace, config.rateLimitPrefix, {
+    allowUnverifiedTls: config.allowUnverifiedTls,
+    commandTimeoutMs: config.commandTimeoutMs,
+  });
   return config.probe === true ? probe(client, config.probeTimeoutMs ?? 5000) : client;
 }
 

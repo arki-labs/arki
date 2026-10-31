@@ -13,6 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { z } from '@arki/contracts';
 import type { Provided } from '@arki/dot/unit';
 import { defineApp, DotUnitError, rename } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
@@ -197,9 +198,9 @@ describe('@arki/kv/dot kv.optional', () => {
     try {
       const client = app.services.kv;
       expect(client).toBeInstanceOf(KV);
-      await client?.set('greeting', 'hello', 5);
-      expect(await client?.get('greeting')).toBe('hello');
-      await client?.delete('greeting');
+      expect(await client?.set('greeting', 'hello', 5)).toBe(true);
+      expect(await client?.get('greeting', z.string())).toBe('hello');
+      expect(await client?.delete('greeting')).toBe(true);
     } finally {
       await orThrow(app.dispose());
     }

@@ -1,4 +1,7 @@
+import { KvUnavailable } from '@arki/kv/errors';
 import { fakeLog } from '@arki/log/testing';
+import type { StandardSchemaV1 } from '@arki/schema';
+import { parse } from '@arki/schema';
 import { http, HttpResponse, setupMswServer } from '@arki/testing/msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -39,8 +42,12 @@ const createFakeCache = () => {
   const store = new Map<string, unknown>();
   const writes: { key: string; ttl: number | undefined }[] = [];
   const cache: GeocodingCache = {
-    get: <T = unknown>(key: string) => Promise.resolve(store.get(key) as T | undefined),
-    set: <T = unknown>(key: string, value: T, ttl?: number) => {
+    // Like `KV.get`: the stored value is checked against the schema the caller gives. A wrong shape comes back as a failure.
+    get: <Schema extends StandardSchemaV1>(key: string, schema: Schema) => {
+      const stored = store.get(key);
+      return Promise.resolve(stored === undefined ? undefined : parse(schema, stored));
+    },
+    set: (key: string, value: unknown, ttl?: number) => {
       store.set(key, value);
       writes.push({ key, ttl });
       return Promise.resolve(true);
@@ -692,8 +699,8 @@ describe('GeocodingService', () => {
     it('a cache read that rejects is a miss, and a cache write that rejects keeps the good answer', async () => {
       server.use(http.get(`${NOMINATIM}/search`, () => HttpResponse.json(nominatimHit('1', '2'))));
       const broken: GeocodingCache = {
-        get: () => Promise.reject(new Error('cache down')),
-        set: () => Promise.reject(new Error('cache down')),
+        get: () => Promise.resolve(KvUnavailable({ command: 'get', reason: 'cache down' })),
+        set: () => Promise.resolve(KvUnavailable({ command: 'set', reason: 'cache down' })),
       };
       const service = new GeocodingService(baseConfig(), broken);
 

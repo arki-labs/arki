@@ -28,6 +28,7 @@
 import type { Clock } from '@arki/clock';
 import { SystemClock } from '@arki/clock';
 import { z } from '@arki/contracts';
+import type { Failure } from '@arki/failure';
 import { isFailure, revive, serialize, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
@@ -46,6 +47,7 @@ import {
   AdminScopeDenied,
   AdminStaleApproval,
   AdminExecutionInProgress,
+  AdminHandlerFailed,
   AdminUnauthenticated,
   AdminUnknownCapability,
   AdminWritesDisabled,
@@ -87,7 +89,7 @@ const logger = getLogger('arki:admin');
  * for the first caller of a key within the TTL.
  */
 export type NonceStore = {
-  setIfNotExists(key: string, value: number, expirationSeconds: number): Promise<boolean>;
+  setIfNotExists(key: string, value: number, expirationSeconds: number): Promise<boolean | Failure>;
 };
 
 /** Public keys for one use. `next` is the overlap key during rotation (`FOREMAN_*_KEY_NEXT`). */
@@ -286,6 +288,15 @@ export function createForemanHandler<TCtx>(
       envelope.iat,
       NONCE_TTL_SECONDS,
     );
+    if (isFailure(fresh)) {
+      // Replay protection fails closed: a nonce that cannot be recorded is a request that is not served.
+      logger.error('Foreman nonce store failed on {path}; the request is refused: {code}: {message}', {
+        path: url.pathname,
+        code: fresh.code,
+        message: fresh.message,
+      });
+      return AdminHandlerFailed({ detail: 'The nonce store is unavailable, so the request was refused.' });
+    }
     if (!fresh) return unauthenticated('replayed nonce', url);
 
     return { envelope, body };

@@ -22,6 +22,8 @@
  * `journalReceiptStore` in `@arki/journal/foreman` (Postgres through `@arki/journal`).
  */
 import { z } from '@arki/contracts';
+import type { Failure } from '@arki/failure';
+import { isFailure, orThrow } from '@arki/failure';
 
 import type { ForemanModule } from './module';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
@@ -142,11 +144,13 @@ export type ReceiptStore = {
 /**
  * The part of `@arki/kv` `KV` the receipt store uses. `setIfNotExists` takes the
  * claim (Redis `SET NX EX`, atomic); `get` and `set` hold the receipt itself.
+ * `get` checks the stored value against the receipt schema it is given. Every call
+ * answers a failure value when the store is down or the stored value is not a receipt.
  */
 export type ReceiptKV = {
-  get(key: string): Promise<unknown>;
-  set(key: string, value: StoredReceipt, expirationSeconds?: number): Promise<boolean>;
-  setIfNotExists(key: string, value: number, expirationSeconds: number): Promise<boolean>;
+  get(key: string, schema: typeof storedReceiptSchema): Promise<StoredReceipt | undefined | Failure>;
+  set(key: string, value: StoredReceipt, expirationSeconds?: number): Promise<boolean | Failure>;
+  setIfNotExists(key: string, value: number, expirationSeconds: number): Promise<boolean | Failure>;
 };
 
 export type KvReceiptStoreOptions = {
@@ -173,7 +177,8 @@ const kvOptionsSchema = z.object({
  * the claim and the settle each are one write. An action that throws after a
  * partial write is still recorded `failed`, so keep each action atomic.
  *
- * Throws `ARKI_ADMIN_E014` for a TTL shorter than Foreman's receipt window,
+ * Like every {@link ReceiptStore}, its methods throw when the KV store fails (the dispatcher turns a
+ * failed claim into `AdminReceiptsUnavailable` and logs a failed settle). Throws `ARKI_ADMIN_E014` for a TTL shorter than Foreman's receipt window,
  * or a namespace that is not an audience.
  */
 export function kvReceiptStore(kv: ReceiptKV, options: KvReceiptStoreOptions): ReceiptStore {
@@ -192,30 +197,37 @@ export function kvReceiptStore(kv: ReceiptKV, options: KvReceiptStoreOptions): R
   const receiptKey = (executionId: string) => `${prefix}:${namespace}:value:${executionId}`;
 
   const get = async (executionId: string): Promise<StoredReceipt | undefined> => {
-    const raw = await kv.get(receiptKey(executionId));
-    if (raw === undefined || raw === null) return undefined;
-    const receipt = storedReceiptSchema.safeParse(raw);
-    if (!receipt.success || receipt.data.executionId !== executionId) {
+    const receipt = await kv.get(receiptKey(executionId), storedReceiptSchema);
+    if (isFailure(receipt) && receipt.code === 'kv.value_invalid') {
       throw new AdminError(
         ADMIN_ERROR_CODES.handlerFailed,
         `The stored receipt for execution ${executionId} is not a receipt.`,
         'Inspect the receipt key in the KV store; something other than @arki/admin wrote it.',
-        { cause: receipt.error },
+        { cause: receipt },
       );
     }
-    return receipt.data;
+    const stored = orThrow(receipt);
+    if (stored === undefined) return undefined;
+    if (stored.executionId !== executionId) {
+      throw new AdminError(
+        ADMIN_ERROR_CODES.handlerFailed,
+        `The stored receipt for execution ${executionId} is not a receipt.`,
+        'Inspect the receipt key in the KV store; something other than @arki/admin wrote it.',
+      );
+    }
+    return stored;
   };
 
   return {
     async claim(receipt) {
-      if (!(await kv.setIfNotExists(claimKey(receipt.executionId), 1, ttl))) {
+      if (!orThrow(await kv.setIfNotExists(claimKey(receipt.executionId), 1, ttl))) {
         return { claimed: false, receipt: await get(receipt.executionId) };
       }
-      await kv.set(receiptKey(receipt.executionId), pendingReceiptSchema.parse(receipt), ttl);
+      orThrow(await kv.set(receiptKey(receipt.executionId), pendingReceiptSchema.parse(receipt), ttl));
       return { claimed: true };
     },
     async settle(receipt) {
-      await kv.set(receiptKey(receipt.executionId), settledReceiptSchema.parse(receipt), ttl);
+      orThrow(await kv.set(receiptKey(receipt.executionId), settledReceiptSchema.parse(receipt), ttl));
     },
     get,
   };

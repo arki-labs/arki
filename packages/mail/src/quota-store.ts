@@ -4,13 +4,16 @@
  */
 import { z } from 'zod';
 
+import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
 import { log } from './log.js';
 
 export type QuotaStore = {
-  /** Sends counted for `transport` in `month` (`YYYY-MM`, UTC). */
-  getSent(transport: string, month: string): Promise<number>;
-  /** Counts one accepted send. */
-  increment(transport: string, month: string): Promise<void>;
+  /** Sends counted for `transport` in `month` (`YYYY-MM`, UTC). A failure means the count could not be read. */
+  getSent(transport: string, month: string): Promise<number | Failure>;
+  /** Counts one accepted send. A failure means the count could not be stored. */
+  increment(transport: string, month: string): Promise<void | Failure>;
 };
 
 const memoryKey = (transport: string, month: string): string => `${transport}:${month}`;
@@ -29,20 +32,16 @@ export function inMemoryQuotaStore(): QuotaStore {
   };
 }
 
+/** A stored count. Anything else (a corrupt value) is rejected by `get`; a missing key reads as 0. */
+const countSchema = z.number().nonnegative();
+
 /**
  * The part of a key-value store `kvQuotaStore` needs. `@arki/kv` fits, so does a test double.
- * `get` returns `unknown`: the store checks it is a count instead of trusting a type argument.
+ * `get` checks the stored value against the count schema and returns a failure when Redis is down or the value is not a count.
  */
 export type KVLike = {
-  get(key: string): Promise<unknown>;
-  set(key: string, value: number, ttlSeconds?: number): Promise<boolean>;
-};
-
-/** A stored count. Anything else (a missing key, a corrupt value) reads as 0. */
-const countSchema = z.number().nonnegative();
-const countOf = (value: unknown): number => {
-  const parsed = countSchema.safeParse(value);
-  return parsed.success ? parsed.data : 0;
+  get(key: string, schema: typeof countSchema): Promise<number | undefined | Failure>;
+  set(key: string, value: number, ttlSeconds?: number): Promise<boolean | Failure>;
 };
 
 /** Counters expire after 60 days, well past a month's end. */
@@ -54,12 +53,18 @@ const COUNTER_TTL_SECONDS = 60 * 24 * 60 * 60;
  */
 export function kvQuotaStore(kv: KVLike): QuotaStore {
   return {
-    getSent: async (transport, month) => countOf(await kv.get(kvKey(transport, month))),
+    getSent: async (transport, month) => {
+      const count = await kv.get(kvKey(transport, month), countSchema);
+      return count ?? 0;
+    },
     increment: async (transport, month) => {
       const key = kvKey(transport, month);
-      const next = countOf(await kv.get(key)) + 1;
-      const stored = await kv.set(key, next, COUNTER_TTL_SECONDS);
+      const current = await kv.get(key, countSchema);
+      if (isFailure(current)) return current;
+      const stored = await kv.set(key, (current ?? 0) + 1, COUNTER_TTL_SECONDS);
+      if (isFailure(stored)) return stored;
       if (!stored) log.warn('quota counter for {transport} in {month} was not stored', { transport, month });
+      return;
     },
   };
 }

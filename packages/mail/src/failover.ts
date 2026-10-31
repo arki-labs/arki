@@ -49,7 +49,15 @@ export function failover(transports: readonly MailTransport[], options: Failover
   const overQuota = async (transport: MailTransport, month: string): Promise<boolean> => {
     if (transport.quotaPerMonth === undefined) return false;
     try {
-      return (await store.getSent(transport.id, month)) >= transport.quotaPerMonth;
+      const sent = await store.getSent(transport.id, month);
+      if (isFailure(sent)) {
+        log.warn('could not read the quota counter for {transport}; sending anyway', {
+          transport: transport.id,
+          reason: sent.message,
+        });
+        return false;
+      }
+      return sent >= transport.quotaPerMonth;
     } catch (error) {
       log.warn('could not read the quota counter for {transport}; sending anyway', {
         transport: transport.id,
@@ -63,7 +71,10 @@ export function failover(transports: readonly MailTransport[], options: Failover
   // caller would retry and send it twice.
   const count = async (transport: string, month: string): Promise<void> => {
     try {
-      await store.increment(transport, month);
+      const counted = await store.increment(transport, month);
+      if (isFailure(counted)) {
+        log.warn('could not count a send for {transport} in {month}', { transport, month, reason: counted.message });
+      }
     } catch (error) {
       log.warn('could not count a send for {transport} in {month}', { transport, month, error: errorField(error) });
     }

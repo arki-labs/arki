@@ -1,4 +1,7 @@
 /** Lazy-singleton helpers that build a `KV` from the environment. */
+import { z } from '@arki/contracts';
+import { isFailure } from '@arki/failure';
+
 import { debugKV } from './debug.js';
 import { env } from './env.js';
 import { KV_INITIALIZATION_ERROR_CODES, KVInitializationError } from './errors.js';
@@ -45,9 +48,12 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     // keyv might connect lazily, so a quick set/get ensures it's working.
     debugKV.debug('[instance] Testing connection with set/get/delete cycle');
     const testKey = 'startup-test';
-    await instance.set(testKey, 'ok', 5); // Set with short TTL
-    const result = await instance.get(testKey);
-    await instance.delete(testKey);
+    const written = await instance.set(testKey, 'ok', 5); // Set with short TTL
+    if (isFailure(written)) throw new Error(written.message);
+    const result = await instance.get(testKey, z.literal('ok'));
+    const deleted = await instance.delete(testKey);
+    if (isFailure(result)) throw new Error(result.message);
+    if (isFailure(deleted)) throw new Error(deleted.message);
 
     if (result !== 'ok') {
       debugKV.debug('[instance] Connection test failed: value mismatch (expected: "ok", got: {got})', {

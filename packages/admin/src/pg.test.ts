@@ -10,7 +10,10 @@ import { pgSchema } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { foremanStoreTable, pgForemanStore } from './pg';
+import { storedReceiptSchema } from './receipts';
 
 const table = foremanStoreTable();
 const clients: PGlite[] = [];
@@ -80,25 +83,25 @@ describe('T(admin-pg-store) pgForemanStore', () => {
       appliedAt: '2026-10-23T00:00:01.000Z',
       result: { ok: true },
     } as const;
-    await store.set('receipt:1', pending, 60);
-    expect(await store.get('receipt:1')).toEqual(pending);
-    await store.set('receipt:1', applied, 60);
-    expect(await store.get('receipt:1')).toEqual(applied);
+    orThrow(await store.set('receipt:1', pending, 60));
+    expect(await store.get('receipt:1', storedReceiptSchema)).toEqual(pending);
+    orThrow(await store.set('receipt:1', applied, 60));
+    expect(await store.get('receipt:1', storedReceiptSchema)).toEqual(applied);
     await db
       .update(table)
       .set({ expiresAt: sql`now() - interval '1 second'` })
       .where(eq(table.key, 'receipt:1'));
-    expect(await store.get('receipt:1')).toBeUndefined();
+    expect(await store.get('receipt:1', storedReceiptSchema)).toBeUndefined();
   });
 
   it('deletes expired rows when it takes a nonce, so the table stays small', async () => {
     const { db, store } = await openStore();
-    await store.setIfNotExists('nonce:old', 1, 300);
+    orThrow(await store.setIfNotExists('nonce:old', 1, 300));
     await db
       .update(table)
       .set({ expiresAt: sql`now() - interval '1 second'` })
       .where(eq(table.key, 'nonce:old'));
-    await store.setIfNotExists('nonce:new', 1, 300);
+    orThrow(await store.setIfNotExists('nonce:new', 1, 300));
     const rows = await db.select({ key: table.key }).from(table);
     expect(rows.map(row => row.key)).toEqual(['nonce:new']);
   });

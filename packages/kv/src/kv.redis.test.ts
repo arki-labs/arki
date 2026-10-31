@@ -11,7 +11,9 @@ import { Redis } from 'ioredis';
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { KvCloseFailed } from './errors.js';
+import { z } from '@arki/contracts';
+
+import { KvCancelled, KvCloseFailed, KvUnavailable, KvValueInvalid } from './errors.js';
 import { KV } from './index.js';
 
 let container: StartedRedisContainer;
@@ -20,6 +22,12 @@ let url: string;
 let counter = 0;
 const fresh = (name: string) => `${name}-${++counter}-${Math.random().toString(36).slice(2)}`;
 const closeCleanly = async (kv: KV) => expect(await kv.close()).toBeUndefined();
+const owner = z.object({ owner: z.string() });
+/** Closing a client whose Redis is gone may succeed or report `KvCloseFailed`; either is a value, never a throw. */
+const closeUnreachable = async (kv: KV) => {
+  const closed = await kv.close();
+  expect(closed === undefined || KvCloseFailed.is(closed)).toBe(true);
+};
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 beforeAll(async () => {
@@ -40,10 +48,10 @@ describe('setIfNotExists writes what set writes', () => {
     expect(await kv.setIfNotExists(key, { owner: 'a' }, 100)).toBe(true);
     expect(await kv.setIfNotExists(key, { owner: 'b' }, 100)).toBe(false);
     // Before the fix `get` saw nothing: NX wrote bare JSON under a different key than `set` uses.
-    expect(await kv.get(key)).toEqual({ owner: 'a' });
+    expect(await kv.get(key, owner)).toEqual({ owner: 'a' });
     // `set` on the same key overwrites that one Redis entry instead of making a second one.
-    await kv.set(key, { owner: 'c' }, 100);
-    expect(await kv.get(key)).toEqual({ owner: 'c' });
+    expect(await kv.set(key, { owner: 'c' }, 100)).toBe(true);
+    expect(await kv.get(key, owner)).toEqual({ owner: 'c' });
     const stored = await probe.keys(`*${key}`);
     expect(stored).toHaveLength(1);
     expect(await probe.ttl(stored[0] ?? '')).toBeGreaterThan(0);
@@ -54,7 +62,7 @@ describe('setIfNotExists writes what set writes', () => {
     const kv = new KV(url);
     const key = fresh('nx-bare');
     expect(await kv.setIfNotExists(key, 'v', 100)).toBe(true);
-    expect(await kv.get(key)).toBe('v');
+    expect(await kv.get(key, z.string())).toBe('v');
     await closeCleanly(kv);
   });
 });
@@ -64,26 +72,28 @@ describe('mset', () => {
     const kv = new KV(url, 'mset-ns');
     const a = fresh('a');
     const b = fresh('b');
-    await kv.mset(
-      [
-        [a, 1],
-        [b, 2],
-      ],
-      100,
-    );
+    expect(
+      await kv.mset(
+        [
+          [a, 1],
+          [b, 2],
+        ],
+        100,
+      ),
+    ).toBeUndefined();
     for (const key of [a, b]) {
       const [redisKey] = await probe.keys(`*${key}`);
       // Before the fix the TTL was dropped and every pair lived forever (ttl -1).
       expect(await probe.ttl(redisKey ?? '')).toBeGreaterThan(0);
     }
-    expect(await kv.mget([a, b])).toEqual([1, 2]);
+    expect(await kv.mget([a, b], z.number())).toEqual([1, 2]);
     await closeCleanly(kv);
   });
 
   it('stores pairs without an expiry when none is given', async () => {
     const kv = new KV(url, 'mset-ns');
     const key = fresh('forever');
-    await kv.mset([[key, 1]]);
+    expect(await kv.mset([[key, 1]])).toBeUndefined();
     const [redisKey] = await probe.keys(`*${key}`);
     expect(await probe.ttl(redisKey ?? '')).toBe(-1);
     await closeCleanly(kv);
@@ -93,13 +103,13 @@ describe('mset', () => {
 describe('close', () => {
   it('returns nothing when both connections close', async () => {
     const kv = new KV(url, 'close-ns');
-    await kv.set(fresh('k'), 1);
+    expect(await kv.set(fresh('k'), 1)).toBe(true);
     await closeCleanly(kv);
   });
 
   it('returns a KvCloseFailed failure, not a console line, when a disconnect fails', async () => {
     const kv = new KV(url, 'close-ns');
-    await kv.set(fresh('k'), 1);
+    expect(await kv.set(fresh('k'), 1)).toBe(true);
     // A refused disconnect cannot be provoked on a live connection, so it is injected.
     const refuse = vi.spyOn(KeyvRedis.prototype, 'disconnect').mockRejectedValueOnce(new Error('disconnect refused'));
     const closed = await kv.close();
@@ -111,7 +121,7 @@ describe('close', () => {
 
   it('still closes the limiter connection when the store disconnect fails', async () => {
     const kv = new KV(url, 'close-ns');
-    await kv.set(fresh('k'), 1);
+    expect(await kv.set(fresh('k'), 1)).toBe(true);
     const refuse = vi.spyOn(KeyvRedis.prototype, 'disconnect').mockRejectedValueOnce(new Error('disconnect refused'));
     expect(await kv.close()).toBeDefined();
     refuse.mockRestore();
@@ -193,4 +203,77 @@ describe('TLS certificate checking', () => {
     await closeCleanly(kv);
     expect(secureConnections).toBeGreaterThan(0);
   });
+});
+
+describe('get checks the stored value against the schema', () => {
+  it('returns the parsed value, undefined for a missing key, and KvValueInvalid for a wrong shape', async () => {
+    const kv = new KV(url, 'schema-ns');
+    const key = fresh('profile');
+    const profile = z.object({ name: z.string(), age: z.number() });
+    expect(await kv.get(key, profile)).toBeUndefined();
+    expect(await kv.set(key, { name: 'Ada', age: 36 }, 100)).toBe(true);
+    expect(await kv.get(key, profile)).toEqual({ name: 'Ada', age: 36 });
+    // An older app version wrote another shape: the caller learns it, instead of getting a cast value.
+    expect(await kv.set(key, { name: 'Ada', age: 'thirty-six' }, 100)).toBe(true);
+    const wrong = await kv.get(key, profile);
+    expect(KvValueInvalid.is(wrong)).toBe(true);
+    expect(wrong).toMatchObject({ data: { key }, status: 500 });
+    // The bad value is untouched and a missing key still reads as a miss.
+    expect(await kv.exists(key)).toBe(true);
+    await closeCleanly(kv);
+  });
+
+  it('mget returns the parsed values and fails on the first wrong shape', async () => {
+    const kv = new KV(url, 'schema-ns');
+    const [a, b, missing] = [fresh('a'), fresh('b'), fresh('missing')];
+    expect(await kv.mset([[a, 1], [b, 'two']], 100)).toBeUndefined();
+    expect(await kv.mget([a, missing], z.number())).toEqual([1, undefined]);
+    const wrong = await kv.mget([a, b], z.number());
+    expect(KvValueInvalid.is(wrong)).toBe(true);
+    await closeCleanly(kv);
+  });
+});
+
+describe('an outage is a typed failure, not a driver error', () => {
+  it('returns KvUnavailable from every data method when Redis is unreachable', async () => {
+    const kv = new KV('redis://127.0.0.1:1', 'down', 'rl', { commandTimeoutMs: 300 });
+    const results = [
+      await kv.get('k', z.string()),
+      await kv.set('k', 1, 5),
+      await kv.setIfNotExists('k', 1, 5),
+      await kv.mset([['k', 1]]),
+      await kv.mget(['k'], z.number()),
+      await kv.exists('k'),
+      await kv.delete('k'),
+      await kv.deleteMany(['k']),
+      await kv.clear(),
+      await kv.publish('c', 'm'),
+    ];
+    for (const result of results) {
+      expect(KvUnavailable.is(result)).toBe(true);
+      expect(result).toMatchObject({ status: 503 });
+    }
+    await closeUnreachable(kv);
+  }, 20_000);
+
+  it('returns KvUnavailable, not a miss, when a running Redis goes away', async () => {
+    const own = await new RedisContainer('redis:7-alpine').start();
+    const kv = new KV(own.getConnectionUrl(), 'gone', 'rl', { commandTimeoutMs: 1000 });
+    expect(await kv.set('k', 'v', 100)).toBe(true);
+    await own.stop();
+    // Keyv alone would answer undefined (a cache miss) here.
+    const read = await kv.get('k', z.string());
+    expect(KvUnavailable.is(read)).toBe(true);
+    await closeUnreachable(kv);
+  }, 60_000);
+
+  it('returns KvCancelled when the caller aborts, and does not call Redis for a signal already aborted', async () => {
+    const kv = new KV('redis://127.0.0.1:1', 'down', 'rl', { commandTimeoutMs: 10_000 });
+    const controller = new AbortController();
+    const pending = kv.get('k', z.string(), { signal: controller.signal });
+    controller.abort();
+    expect(KvCancelled.is(await pending)).toBe(true);
+    expect(KvCancelled.is(await kv.set('k', 1, 5, { signal: AbortSignal.abort() }))).toBe(true);
+    await closeUnreachable(kv);
+  }, 20_000);
 });

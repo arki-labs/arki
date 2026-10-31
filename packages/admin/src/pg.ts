@@ -18,6 +18,8 @@ import type { PgAsyncDatabase, PgQueryResultHKT, PgSchema, PgTableFn } from 'dri
 import { and, eq, gt, lte, sql } from 'drizzle-orm';
 import { index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
+import { parse } from '@arki/schema';
+
 import type { ForemanStore } from './foreman-route';
 import { DEFAULT_RECEIPT_TTL_SECONDS } from './receipts';
 
@@ -65,13 +67,14 @@ const expiresIn = (seconds: number) => sql`now() + ${seconds} * interval '1 seco
  */
 export function pgForemanStore({ db, table }: PgForemanStoreOptions): ForemanStore {
   return {
-    async get(key) {
+    async get(key, schema) {
       const rows = await db
         .select({ value: table.value })
         .from(table)
         .where(and(eq(table.key, key), gt(table.expiresAt, sql`now()`)))
         .limit(1);
-      return rows[0]?.value;
+      const value: unknown = rows[0]?.value;
+      return value === undefined || value === null ? undefined : parse(schema, value);
     },
     async set(key, value, expirationSeconds = DEFAULT_RECEIPT_TTL_SECONDS) {
       await db

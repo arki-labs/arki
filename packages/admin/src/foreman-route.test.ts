@@ -7,12 +7,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
+import { KvUnavailable } from '@arki/kv/errors';
 
 import type { ForemanEnv } from './env';
 import type { ForemanStore } from './foreman-route';
+import { AdminHandlerFailed } from './failures';
 import { createForemanClient, generateForemanKeyPair, signRequest } from './client';
 import { createForemanRoute, memoryForemanStore } from './foreman-route';
 import { defineAction, defineModule, describeModule } from './module';
+import { storedReceiptSchema } from './receipts';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 
@@ -71,7 +74,7 @@ function recordingStore() {
   const inner = memoryForemanStore();
   const keys: string[] = [];
   const store: ForemanStore = {
-    get: key => inner.get(key),
+    get: (key, schema) => inner.get(key, schema),
     set: (key, value, ttl) => {
       keys.push(key);
       return inner.set(key, value, ttl);
@@ -133,6 +136,23 @@ describe('T(foreman-route) createForemanRoute', () => {
     const manifest = orThrow(await clientFor(request => route(request)).manifest());
     expect(manifest.app).toEqual({ id: APP_ID, environment: 'prod', version: '2.0.0', commit: 'abc1234' });
     expect(manifest.modules.map(module => module.id)).toEqual(['core.health', 'core.manifest', 'core.receipts']);
+  });
+
+  it('refuses the request, and does not serve it, when the nonce store cannot record the nonce', async () => {
+    const down = KvUnavailable({ command: 'setIfNotExists', reason: 'connection refused' });
+    const store: ForemanStore = {
+      ...memoryForemanStore(),
+      setIfNotExists: () => Promise.resolve(down),
+    };
+    const route = createForemanRoute(() => ({
+      env: keyedEnv(),
+      app: { version: '1.0.0' },
+      store,
+      health,
+      context: () => ({}),
+    }));
+    const result = await clientFor(request => route(request)).manifest();
+    expect(AdminHandlerFailed.is(result)).toBe(true);
   });
 
   it('refuses a replayed request: the store holds the nonces', async () => {
@@ -229,9 +249,9 @@ describe('T(foreman-route) memoryForemanStore', () => {
       actionId: 'a.b',
       claimedAt: '2026-10-23T00:00:00.000Z',
     } as const;
-    await store.set('r1', receipt, 10);
-    expect(await store.get('r1')).toEqual(receipt);
+    orThrow(await store.set('r1', receipt, 10));
+    expect(await store.get('r1', storedReceiptSchema)).toEqual(receipt);
     now = 10_000;
-    expect(await store.get('r1')).toBeUndefined();
+    expect(await store.get('r1', storedReceiptSchema)).toBeUndefined();
   });
 });
