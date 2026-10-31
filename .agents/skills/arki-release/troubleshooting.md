@@ -179,6 +179,14 @@ List only entries that truly need a bundler. Every other entry must still import
 
 The smoke reads the claim from the INSTALLED `package.json`, so the claim must be in the tarball. The materializer keeps `arki` in the published manifest (since 2026-10-31; before that it was dropped and bundler-only entries still failed under Node). A claim that does not match `arkiClaimSchema` (`tooling/library/src/manifest.ts`) stops the export with `RELEASE_E008`. Check a tarball with `tar -xOzf <tgz> package/package.json | jq .arki`.
 
+## `optional-peer` fails with EOVERRIDE
+
+**Symptom:** `smoke` fails with `SMOKE_E004` and `EOVERRIDE Override for @arki/admin@^0.3.0 conflicts with direct dependency`.
+
+**Root cause:** the optional peer is itself in the candidate (`@arki/admin`, peered by `@arki/journal` and `@arki/queue`). The `with-peers` install listed it with its peer range, while `overrides` pointed it at the tarball. npm refuses a direct dependency whose spec differs from its override.
+
+**Fixed 2026-10-31:** a peer that is in the candidate now uses the same `file:` tarball spec as its override. If you still see it, the smoke code is older than that fix.
+
 ## "Stable release gate: BLOCKED" but I can't tell why
 
 **Symptom:** Scorecard says BLOCKED; gate decision shows multiple packages with multiple blockers.

@@ -210,6 +210,45 @@ describe('runSmoke', () => {
     expect(envelope.status).toBe('success');
   });
 
+  it('installs an optional peer that is in the candidate from its tarball, not its peer range', async () => {
+    // Why: @arki/journal peers on @arki/admin (^0.3.0) and both are in the candidate.
+    // The with-peers step listed admin as a dependency with the range while
+    // `overrides` mapped it to the tarball, and npm stopped with EOVERRIDE.
+    const dir = makeCandidate(['@arki/journal', '@arki/admin']);
+    const peerManifest = pkg('@arki/journal', '1.0.0', {
+      peerDependencies: { '@arki/admin': '^0.3.0' },
+      peerDependenciesMeta: { '@arki/admin': { optional: true } },
+    });
+    const needsAdmin: Fixture = { manifest: peerManifest, files: { 'index.js': "import '@arki/admin';\n" } };
+    const inner = fakeRunner({ packed: { journal: peerManifest, admin: pkg('@arki/admin', '0.3.0') }, installed: { '@arki/journal': needsAdmin } });
+    const runner: ExecRunner = async (command, args, opts) => {
+      if (command === 'npm' && args[0] === 'install' && opts.cwd.endsWith('with-peers')) {
+        // npm's rule: an override for a direct dependency must equal its spec.
+        const consumerPkg = JSON.parse(readFileSync(path.join(opts.cwd, 'package.json'), 'utf8')) as {
+          dependencies: Record<string, string>;
+          overrides: Record<string, string>;
+        };
+        for (const [name, spec] of Object.entries(consumerPkg.overrides)) {
+          const direct = consumerPkg.dependencies[name];
+          if (direct !== undefined && direct !== spec) {
+            return { code: 1, stdout: '', stderr: `npm error code EOVERRIDE\nOverride for ${name}@${direct} conflicts with direct dependency` };
+          }
+        }
+        const target = path.join(opts.cwd, 'node_modules', '@arki', 'journal');
+        mkdirSync(target, { recursive: true });
+        writeFileSync(path.join(target, 'package.json'), JSON.stringify(peerManifest));
+        writeFileSync(path.join(target, 'index.js'), 'export const ok = 1;\n');
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      return inner.runner(command, args, opts);
+    };
+    const envelope = await runSmoke(base(dir, runner));
+    const peerCheck = envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'optional-peer');
+    expect(peerCheck?.detail).not.toContain('EOVERRIDE');
+    expect(peerCheck?.status).toBe('pass');
+    expect(envelope.status).toBe('success');
+  });
+
   it('runs a Vite build for source-distributed waves', async () => {
     // Why: source-shipped packages only prove themselves under a bundler, not under bare node.
     const dir = makeCandidate(['@arki/journal']);

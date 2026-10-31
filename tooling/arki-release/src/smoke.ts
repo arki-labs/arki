@@ -364,7 +364,10 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
       const peerRanges = new Map<string, string>();
       for (const pkg of installed) {
         for (const peer of peerSkips.get(pkg.name) ?? []) {
-          peerRanges.set(peer, pkg.manifest.peerDependencies?.[peer] ?? '*');
+          // A peer from the candidate (@arki/admin, peered by journal and queue)
+          // keeps its tarball spec: npm refuses a direct dependency whose spec
+          // differs from its override (EOVERRIDE).
+          peerRanges.set(peer, tarballOf.has(peer) ? fileSpec(peer) : (pkg.manifest.peerDependencies?.[peer] ?? '*'));
         }
       }
       const withPeers = path.join(consumer, 'with-peers');
