@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method -- the stubs are vi.fn() mocks; asserting on them never detaches `this` */
 import { QueueTransportUnavailable, QueueStorageUnavailable } from '../../src/mutations/failures.ts';
 import { orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
@@ -90,9 +91,9 @@ function makeRpc(
     | 'network-error'
     | ((call: number) => 'success' | 'fail-401' | 'fail-422' | 'fail-500' | 'network-error') =
     'success',
-): AnyRpcClient & { calls: Array<{ path: readonly string[]; headers: Record<string, string> }> } {
+): AnyRpcClient & { calls: { path: readonly string[]; headers: Record<string, string> }[] } {
   let callIndex = 0;
-  const calls: Array<{ path: readonly string[]; headers: Record<string, string> }> = [];
+  const calls: { path: readonly string[]; headers: Record<string, string> }[] = [];
 
   return {
     calls,
@@ -106,16 +107,21 @@ function makeRpc(
         calls.push({ path, headers });
 
         switch (decision) {
-          case 'success':
+          case 'success': {
             return { ok: true };
-          case 'fail-401':
+          }
+          case 'fail-401': {
             throw Object.assign(new Error('Unauthorized'), { status: 401 });
-          case 'fail-422':
+          }
+          case 'fail-422': {
             throw Object.assign(new Error('Unprocessable Entity'), { status: 422 });
-          case 'fail-500':
+          }
+          case 'fail-500': {
             throw Object.assign(new Error('Internal Server Error'), { status: 500 });
-          case 'network-error':
+          }
+          case 'network-error': {
             return QueueTransportUnavailable();
+          }
         }
       },
     ),
@@ -423,7 +429,7 @@ describe('ReplayLoop', () => {
     orThrow(await loop.drainNow());
 
     expect(stateChanges[0]).toBe(true);
-    expect(stateChanges[stateChanges.length - 1]).toBe(false);
+    expect(stateChanges.at(-1)).toBe(false);
   });
 
   it('drainNow() when queue is empty completes without rpc.call', async () => {

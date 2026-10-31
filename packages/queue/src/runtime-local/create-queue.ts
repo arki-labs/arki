@@ -69,7 +69,9 @@ function makeJobShim(id: string, name: string, data: unknown, attemptsMade = 0):
     name,
     data,
     attemptsMade,
-    updateProgress: async () => {},
+    updateProgress: async () => {
+      /* local jobs report no progress */
+    },
     log: async msg => {
       observeQueue(() => debugJob.info('[{job}] {message}', { job: name, message: msg }));
     },

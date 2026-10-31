@@ -15,10 +15,10 @@ export class IdempotencyRepository {
     private readonly table: IdempotencyKeysTable,
   ) {}
 
-  async find(key: string, path: string, userId: string): Promise<unknown | null> {
+  async find(key: string, path: string, userId: string): Promise<unknown> {
     const rows = await this.db
       .select({ responseJson: this.table.responseJson })
-      .from(this.table as typeof this.table)
+      .from(this.table)
       .where(
         and(
           eq(this.table.idempotencyKey, key),

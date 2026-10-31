@@ -3,7 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 
 // Minimal mock — we only care about the factory shape, not IDB internals.
 vi.mock('idb-keyval', () => ({
-  get: vi.fn(() => Promise.resolve(undefined)),
+  get: vi.fn(() => Promise.resolve()),
   set: vi.fn(() => Promise.resolve()),
   del: vi.fn(() => Promise.resolve()),
 }));
@@ -38,7 +38,7 @@ describe('createPersistedQueryClient', () => {
   });
 
   it('sets gcTime on queries to the provided maxAge', () => {
-    const maxAge = 1_000 * 60 * 30; // 30 minutes
+    const maxAge = 1000 * 60 * 30; // 30 minutes
     const { queryClient, maxAge: resolvedMaxAge } = createPersistedQueryClient({ maxAge });
 
     const defaults = queryClient.getDefaultOptions();
@@ -67,17 +67,17 @@ describe('createPersistedQueryClient', () => {
   });
 
   it('custom defaultOptions are merged without overwriting gcTime set by maxAge', () => {
-    const maxAge = 5_000;
+    const maxAge = 5000;
     const { queryClient } = createPersistedQueryClient({
       maxAge,
       defaultOptions: {
-        queries: { staleTime: 1_000 },
+        queries: { staleTime: 1000 },
       },
     });
 
     const defaults = queryClient.getDefaultOptions();
     // Both maxAge-derived gcTime and the custom staleTime should be present.
     expect(defaults.queries?.gcTime).toBe(maxAge);
-    expect(defaults.queries?.staleTime).toBe(1_000);
+    expect(defaults.queries?.staleTime).toBe(1000);
   });
 });

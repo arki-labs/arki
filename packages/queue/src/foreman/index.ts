@@ -16,7 +16,7 @@ import { QUEUE_FOREMAN_ERROR_CODES } from './errors.ts';
 export { QUEUE_FOREMAN_ERROR_CODES, type QueueForemanErrorCode } from './errors.ts';
 export { bullmqFailedJobSource, type BullMQFailedJobSourceOptions } from './bullmq-source.ts';
 export { pgBossFailedJobSource, type PgBossFailedJobSourceOptions } from './pg-boss-source.ts';
-export { redactSecrets };
+
 export type { FailedJobRecord, FailedJobSource } from './source.ts';
 
 const log = getLogger('arki:queue');
@@ -192,3 +192,5 @@ export function queueForemanModule(options: QueueForemanOptions) {
     panels: [{ id: 'failed-jobs', renderer: 'arki.queue.failed-jobs', read: 'failedJobs', actions: ['retryJob'] }],
   });
 }
+
+export {redactSecrets} from '@arki/admin/module';

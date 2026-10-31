@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // No IndexedDB on the server. The stand-in only keeps the import from touching a real one.
 vi.mock('idb-keyval', () => ({
-  get: vi.fn(() => Promise.resolve(undefined)),
+  get: vi.fn(() => Promise.resolve()),
   set: vi.fn(() => Promise.resolve()),
   del: vi.fn(() => Promise.resolve()),
 }));

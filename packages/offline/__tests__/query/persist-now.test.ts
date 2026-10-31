@@ -50,7 +50,8 @@ describe('persistNow', () => {
     queryClient.setQueryData(['item', 'a'], { title: 'Kept' });
     orThrow(await persistNow());
 
-    expect((await persister.restoreClient())?.buster).toBe(buster);
+    const restored = await persister.restoreClient();
+    expect(restored?.buster).toBe(buster);
     expect(buster).toBe('build-7');
   });
 

@@ -1,4 +1,3 @@
-/// <reference path="../query/vite-env.d.ts" />
 import type { DefaultOptions } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { isServer, QueryClient, QueryClientProvider } from '@tanstack/react-query';

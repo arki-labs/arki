@@ -61,7 +61,7 @@ export type QueueEvent =
  * Structural RPC client interface. Apps adapt their oRPC client to this shape.
  * @arki/offline never imports oRPC directly.
  */
-export interface AnyRpcClient {
+export type AnyRpcClient = {
   call(
     procedurePath: readonly string[],
     input: unknown,
@@ -69,7 +69,7 @@ export interface AnyRpcClient {
   ): Promise<unknown>;
 }
 
-export interface OfflineMutationQueueOptions {
+export type OfflineMutationQueueOptions = {
   storageKey?: string;
   deadLetterStorageKey?: string;
   rpc: AnyRpcClient;
@@ -93,7 +93,7 @@ export interface OfflineMutationQueueOptions {
 /** An operation whose contract meta says `offlineSafe: true` (see `offlineSafe(p)` in `@arki/offline/orpc`). */
 export type OfflineSafeOperation = Operation<unknown, unknown, unknown, OfflineSafeMeta>;
 
-export interface OfflineMutationQueue {
+export type OfflineMutationQueue = {
   /**
    * Queue a call to an offline-safe procedure. `carrier` is its utils leaf
    * (`orpc.posts.create` from `createOrpcUtils`): it carries the procedure's
@@ -132,7 +132,7 @@ export type QueueSnapshot = {
   failure: OfflineQueueFailure | null;
 };
 
-interface QueueState {
+type QueueState = {
   sending: boolean;
   queuedCount: number;
   deadLetteredCount: number;
@@ -143,7 +143,7 @@ interface QueueState {
 // Factory
 // ---------------------------------------------------------------------------
 
-const DEFAULT_RETRY = backoff.exponential({ base: 1_000, max: 30_000 }).upTo(5);
+const DEFAULT_RETRY = backoff.exponential({ base: 1000, max: 30_000 }).upTo(5);
 
 export function createOfflineMutationQueue(
   options: OfflineMutationQueueOptions,

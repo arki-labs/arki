@@ -100,7 +100,7 @@ describe('runtime-local schedules trigger their job', () => {
     await waitFor(() => order.length === 3);
 
     expect(order).toEqual(['job-mw-before', 'handler-am', 'job-mw-after']);
-  }, 15000);
+  }, 15_000);
 
   it('runs an inline schedule as a job, with its .use() middleware around the handler', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -137,7 +137,7 @@ describe('runtime-local schedules trigger their job', () => {
     await waitFor(() => order.length === 3);
 
     expect(order).toEqual(['schedule-mw-before', 'handler-local-user', 'schedule-mw-after']);
-  }, 15000);
+  }, 15_000);
 
   it('prunes a keyed schedule removed from code at start, and leaves unkeyed entries', async () => {
     const build = () => {
@@ -145,7 +145,9 @@ describe('runtime-local schedules trigger their job', () => {
       const job = q.job
         .name('local-pruned')
         .input(z.object({ slot: z.string() }))
-        .handler(async () => {});
+        .handler(async () => {
+          /* this job does nothing */
+        });
       return { q, job };
     };
 
@@ -167,8 +169,9 @@ describe('runtime-local schedules trigger their job', () => {
     const aAgain = after.q.schedule.cron('0 8 * * *').name('local-a').job(after.job).data({ slot: 'am' });
     await startQueue(after.q.registry({ aAgain }));
 
-    expect((await scheduleRows()).map(row => row.key)).toEqual(['', 'local-a']);
-  }, 15000);
+    const rows = await scheduleRows();
+    expect(rows.map(row => row.key)).toEqual(['', 'local-a']);
+  }, 15_000);
 
   it('throws a coded error for a duplicate schedule name', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -176,7 +179,9 @@ describe('runtime-local schedules trigger their job', () => {
     const job = q.job
       .name('local-dupe')
       .input(z.object({}))
-      .handler(async () => {});
+      .handler(async () => {
+        /* this job does nothing */
+      });
 
     const first = q.schedule.cron('0 1 * * *').name('local-dupe-name').job(job).data({});
     const second = q.schedule.cron('0 2 * * *').name('local-dupe-name').job(job).data({});

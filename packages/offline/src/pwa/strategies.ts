@@ -4,7 +4,7 @@ import { ExpirationPlugin } from 'workbox-expiration';
 
 export type FetchStrategy = 'networkFirst' | 'staleWhileRevalidate' | 'cacheFirst';
 
-export interface StrategyConfig {
+export type StrategyConfig = {
   cacheName: string;
   maxAgeSeconds?: number;
   maxEntries?: number;
@@ -35,11 +35,14 @@ export function createStrategy(
     : [];
 
   switch (strategy) {
-    case 'networkFirst':
+    case 'networkFirst': {
       return new NetworkFirst({ cacheName: config.cacheName, plugins });
-    case 'staleWhileRevalidate':
+    }
+    case 'staleWhileRevalidate': {
       return new StaleWhileRevalidate({ cacheName: config.cacheName, plugins });
-    case 'cacheFirst':
+    }
+    case 'cacheFirst': {
       return new CacheFirst({ cacheName: config.cacheName, plugins });
+    }
   }
 }

@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Permit } from '@arki/admin/module';
 import { isModuleError } from '@arki/admin/module';
 import { z } from '@arki/contracts';
+import { orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
 import type { BullMQQueueInstance } from '../types/builder.ts';
@@ -93,8 +94,8 @@ async function start() {
   });
   return {
     module,
-    mailId: String(mail),
-    otherId: String(otherJob),
+    mailId: orThrow(mail),
+    otherId: orThrow(otherJob),
     runs: () => runs,
     openGate: () => {
       open = true;
@@ -157,7 +158,8 @@ describe('T(queue-foreman-bullmq)', () => {
       module.actions.retryJob.runExecute({ queue: 'mail', jobId: mailId }, {}, permit('rev_from_an_older_failure')),
     );
     expect(code).toBe(QUEUE_FOREMAN_ERROR_CODES.staleRevision);
-    expect((await module.reads.failedJobs.run({ queue: 'mail' }, {})).total).toBe(1);
+    const mailFailed = await module.reads.failedJobs.run({ queue: 'mail' }, {});
+    expect(mailFailed.total).toBe(1);
   }, 60_000);
 
   it('attack: a job id from another queue, and a revision from another job, change nothing', async () => {
@@ -181,7 +183,8 @@ describe('T(queue-foreman-bullmq)', () => {
         module.actions.retryJob.runExecute({ queue: 'mail', jobId: mailId }, {}, permit(otherPreview.revision)),
       ),
     ).toBe(QUEUE_FOREMAN_ERROR_CODES.staleRevision);
-    expect((await module.reads.failedJobs.run({}, {})).total).toBe(2);
+    const allFailed = await module.reads.failedJobs.run({}, {});
+    expect(allFailed.total).toBe(2);
   }, 60_000);
 
   it('attack: two concurrent retries re-queue the job exactly once', async () => {

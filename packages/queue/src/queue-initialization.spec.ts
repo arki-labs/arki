@@ -45,14 +45,14 @@ beforeAll(async () => {
   redisUrl = `redis://${redisHost}:${redisPort}`;
 
   console.log(`✓ Redis container started at ${redisUrl}`);
-}, 60000);
+}, 60_000);
 
 afterAll(async () => {
   if (redisContainer) {
     await redisContainer.stop();
     console.log('✓ Redis container stopped');
   }
-}, 30000);
+}, 30_000);
 
 // ============================================
 // Queue Initialization Tests
@@ -209,7 +209,7 @@ describe('Job Registration and Execution', () => {
       expect(processedMessages).toContain('Hello from test!');
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
 
     it('should validate job input with Zod schema', async () => {
       const q = initQueue.context<TestContext>().create();
@@ -266,7 +266,7 @@ describe('Job Registration and Execution', () => {
       expect(invalidState).toBe('failed');
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
   });
 
   describe('Multiple job registration', () => {
@@ -334,7 +334,7 @@ describe('Job Registration and Execution', () => {
       expect(results['job3']).toContain('Alice');
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
 
     it('should register nested job registries', async () => {
       const q = initQueue.context<TestContext>().create();
@@ -386,7 +386,7 @@ describe('Job Registration and Execution', () => {
       expect(results).toContain('sms:+1234567890');
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
   });
 
   describe('Job context', () => {
@@ -431,10 +431,10 @@ describe('Job Registration and Execution', () => {
 
       expect(progressUpdates.length).toBeGreaterThan(0);
       expect(logMessages.length).toBeGreaterThan(0);
-      expect(progressUpdates[progressUpdates.length - 1]).toBe(100);
+      expect(progressUpdates.at(-1)).toBe(100);
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
 
     it('should provide custom context to job handlers', async () => {
       const q = initQueue.context<TestContext>().create();
@@ -475,7 +475,7 @@ describe('Job Registration and Execution', () => {
       expect(capturedTimestamp).toEqual(testTimestamp);
 
       await queue.stop();
-    }, 15000);
+    }, 15_000);
   });
 });
 
@@ -525,7 +525,7 @@ describe('Middleware Integration', () => {
     expect(executionOrder).toEqual(['middleware-start', 'handler', 'middleware-end']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should chain multiple middleware', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -584,7 +584,7 @@ describe('Middleware Integration', () => {
     expect(executionOrder).toEqual(['m1-start', 'm2-start', 'm3-start', 'handler', 'm3-end', 'm2-end', 'm1-end']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should transform context through middleware', async () => {
     type ExtendedContext = JobContext<TestContext> & {
@@ -641,7 +641,7 @@ describe('Middleware Integration', () => {
     expect(typeof capturedStartTime).toBe('number');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -702,7 +702,7 @@ describe('Retry and Error Handling', () => {
     }
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should respect maxDelay cap in retry config', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -744,7 +744,7 @@ describe('Retry and Error Handling', () => {
     expect(attemptCount).toBeGreaterThanOrEqual(3);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should handle job failures gracefully', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -794,7 +794,7 @@ describe('Retry and Error Handling', () => {
     expect(failedJobIds).toContain(failingJob.id!);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -836,13 +836,12 @@ describe('Graceful Shutdown', () => {
     // Note: BullMQ workers don't have an isRunning() method, but we can check
     // that stop() completes without errors
     expect(true).toBe(true); // Successful stop
-  }, 15000);
+  }, 15_000);
 
   it('should complete in-flight jobs before shutdown', async () => {
     const q = initQueue.context<TestContext>().create();
 
     const processedIds: string[] = [];
-    let shutdownTime: number | undefined;
 
     const job = q.job
       .name('test-inflight-job')
@@ -874,7 +873,7 @@ describe('Graceful Shutdown', () => {
 
     // Stop the queue (should wait for in-flight job)
     const stopPromise = queue.stop();
-    shutdownTime = Date.now();
+    const shutdownTime = Date.now();
     await stopPromise;
 
     const shutdownDuration = Date.now() - shutdownTime;
@@ -884,7 +883,7 @@ describe('Graceful Shutdown', () => {
 
     // Shutdown should have waited for the job (allow some variance)
     expect(shutdownDuration).toBeGreaterThanOrEqual(1500);
-  }, 20000);
+  }, 20_000);
 });
 
 // ============================================
@@ -935,7 +934,7 @@ describe('Real-World Scenarios', () => {
     expect(processedCount.value).toBe(JOB_COUNT);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should handle job with external API call simulation', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -983,7 +982,7 @@ describe('Real-World Scenarios', () => {
     expect(processedResults).toContain('processed-user-xyz');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -1027,7 +1026,7 @@ describe('Schedules trigger their job', () => {
     expect(runs[0]).toEqual({ traceId: 'from-job-middleware', value: 7 });
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('creates no queue of its own for a schedule that wraps a job', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -1035,7 +1034,9 @@ describe('Schedules trigger their job', () => {
     const job = q.job
       .name('sched-target')
       .input(z.object({}))
-      .handler(async () => {});
+      .handler(async () => {
+        /* this job does nothing */
+      });
     const schedule = q.schedule.cron('0 0 * * *').name('sched-no-own-queue').job(job).data({});
 
     const queue = q.createQueue({ connection: redisUrl, createContext });
@@ -1047,19 +1048,22 @@ describe('Schedules trigger their job', () => {
     expect(await redis.keys('queue:sched-no-own-queue*')).toEqual([]);
     // Its scheduler lives on the job's own queue.
     const jobQueue = bullQueue('sched-target');
-    expect((await jobQueue.getJobSchedulers()).map(s => s.key)).toEqual(['schedule:sched-no-own-queue']);
+    const schedulers = await jobQueue.getJobSchedulers();
+    expect(schedulers.map(s => s.key)).toEqual(['schedule:sched-no-own-queue']);
 
     await jobQueue.close();
     redis.disconnect();
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('prunes a schedule removed from code at start, and keeps the rest', async () => {
     const job = (q: QueueBuilder<TestContext>) =>
       q.job
         .name('sched-shared')
         .input(z.object({ slot: z.string() }))
-        .handler(async () => {});
+        .handler(async () => {
+          /* this job does nothing */
+        });
 
     // First deploy: schedules A and B on one job.
     const before = initQueue.context<TestContext>().create();
@@ -1078,7 +1082,9 @@ describe('Schedules trigger their job', () => {
       { every: 60_000 },
       { name: 'sched-shared', data: { slot: 'x' } },
     );
-    expect((await jobQueue.getJobSchedulers()).map(s => s.key).sort()).toEqual([
+    const schedulers = await jobQueue.getJobSchedulers();
+    const schedulerKeys = schedulers.map(s => s.key);
+    expect(schedulerKeys.toSorted()).toEqual([
       'app-own-repeat',
       'schedule:sched-shared-a',
       'schedule:sched-shared-b',
@@ -1092,14 +1098,16 @@ describe('Schedules trigger their job', () => {
     await second.register(after.registry({ aAgain }));
     await second.start();
 
-    expect((await jobQueue.getJobSchedulers()).map(s => s.key).sort()).toEqual([
+    const restartedSchedulers = await jobQueue.getJobSchedulers();
+    const restartedKeys = restartedSchedulers.map(s => s.key);
+    expect(restartedKeys.toSorted()).toEqual([
       'app-own-repeat',
       'schedule:sched-shared-a',
     ]);
 
     await jobQueue.close();
     await second.stop();
-  }, 15000);
+  }, 15_000);
 
   it('throws a coded error for a duplicate schedule name', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -1107,7 +1115,9 @@ describe('Schedules trigger their job', () => {
     const job = q.job
       .name('sched-dupe')
       .input(z.object({}))
-      .handler(async () => {});
+      .handler(async () => {
+        /* this job does nothing */
+      });
 
     const first = q.schedule.cron('0 1 * * *').name('sched-dupe-name').job(job).data({});
     const second = q.schedule.cron('0 2 * * *').name('sched-dupe-name').job(job).data({});
@@ -1120,5 +1130,5 @@ describe('Schedules trigger their job', () => {
     });
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });

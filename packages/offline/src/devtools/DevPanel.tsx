@@ -1,4 +1,3 @@
-/// <reference path="../query/vite-env.d.ts" />
 import { isFailure } from '@arki/failure';
 import type { OfflineQueueFailure } from '../mutations/failures.ts';
 
@@ -17,6 +16,7 @@ import type { QueuedMutation } from '../mutations/queue.ts';
  */
 export function OfflineDevPanel(): ReactNode {
   // Gate: no-op in production. Vite replaces import.meta.env.DEV at build time.
+  // eslint-disable-next-line turbo/no-undeclared-env-vars -- DEV is a Vite build-time constant, not a Turbo env var
   if (!import.meta.env.DEV) return null;
 
   return <DevPanelImpl />;

@@ -7,10 +7,10 @@ import type { IdbPersister } from './idb-persister.ts';
 import { createIdbPersister } from './idb-persister.ts';
 import type { QueryCachePersistFailed } from './failures.ts';
 
-// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+ 
 /// <reference path="./vite-env.d.ts" />
 
-export interface CreatePersistedQueryClientOptions {
+export type CreatePersistedQueryClientOptions = {
   /**
    * The key used to store the persisted QueryClient cache in IndexedDB.
    * @default 'arki-offline-query'
@@ -35,7 +35,7 @@ export interface CreatePersistedQueryClientOptions {
   defaultOptions?: DefaultOptions;
 }
 
-export interface PersistedQueryClient {
+export type PersistedQueryClient = {
   queryClient: QueryClient;
   persister: IdbPersister;
   /**
@@ -51,7 +51,7 @@ export interface PersistedQueryClient {
 }
 
 const DEFAULT_STORAGE_KEY = 'arki-offline-query';
-const DEFAULT_MAX_AGE_MS = 1_000 * 60 * 60 * 24; // 24 hours
+const DEFAULT_MAX_AGE_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 /**
  * Creates a TanStack QueryClient paired with an IndexedDB-backed persister.
@@ -79,6 +79,7 @@ export function createPersistedQueryClient(
   const {
     storageKey = DEFAULT_STORAGE_KEY,
     maxAge = DEFAULT_MAX_AGE_MS,
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- VITE_BUILD_ID is inlined by Vite at build time, not read from the Turbo env
     buster = import.meta.env.VITE_BUILD_ID ?? '',
     defaultOptions,
   } = options;

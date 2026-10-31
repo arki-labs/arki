@@ -42,7 +42,9 @@ async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number
   const q = initQueue.context<{ userId: string }>().create();
   let runs = 0;
   // `upTo(0)` allows no retry, so the first throw is final. The operator retry waits here, so it stays in flight.
-  let release = () => {};
+  let release = () => {
+    /* replaced by the gate promise below */
+  };
   const gate = new Promise<void>(resolve => {
     release = resolve;
   });
@@ -60,8 +62,10 @@ async function startWithFailedJob(): Promise<{ jobId: string; runs: () => number
   await instance.register(q.registry({ flaky }));
   await instance.start();
   orThrow(await flaky.trigger({ to: 'a@b.c' }));
-  const failed = async () =>
-    (await pglite.query(`select 1 from infra_pg_boss.job where state = 'failed'`)).rows.length === 1;
+  const failed = async () => {
+    const failedRows = await pglite.query(`select 1 from infra_pg_boss.job where state = 'failed'`);
+    return failedRows.rows.length === 1;
+  };
   await waitFor(failed);
   const rows = await pglite.query<{ id: string }>(
     `select id::text as id from infra_pg_boss.job where state = 'failed'`,
@@ -94,7 +98,7 @@ describe('T(queue-foreman)', () => {
     expect(job?.error).toContain('failure.unexpected_defect');
     expect(job?.error).not.toContain('hunter2');
     expect(job?.error).not.toContain('s3cr3t');
-  }, 20000);
+  }, 20_000);
 
   it('retries once, and blocks a second retry with the same revision', async () => {
     const { jobId, runs, release } = await startWithFailedJob();
@@ -113,7 +117,7 @@ describe('T(queue-foreman)', () => {
       QUEUE_FOREMAN_ERROR_CODES.notFailed,
     );
     release();
-  }, 30000);
+  }, 30_000);
 
   it('rejects a stale revision and writes nothing', async () => {
     const { jobId } = await startWithFailedJob();
@@ -126,7 +130,7 @@ describe('T(queue-foreman)', () => {
       jobId,
     ]);
     expect(state.rows[0]?.state).toBe('failed');
-  }, 20000);
+  }, 20_000);
 
   it('rejects an offset past the bound, so one read cannot force an unbounded scan', async () => {
     const module = queueForemanModule({ queues: { main: pgBossFailedJobSource({ pglite }) } });

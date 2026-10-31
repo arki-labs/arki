@@ -27,7 +27,7 @@ describe('createLocalCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
 
     const tx = col.insert({ id: 'a', label: 'Alpha', count: 1 });
     await tx.isPersisted.promise;
@@ -43,7 +43,7 @@ describe('createLocalCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
 
     expect(() => {
       // @ts-expect-error — deliberately passing wrong shape
@@ -58,13 +58,13 @@ describe('createLocalCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
 
     await col.insert({ id: 'x', label: 'X', count: 10 }).isPersisted.promise;
     await col.insert({ id: 'y', label: 'Y', count: 20 }).isPersisted.promise;
 
     expect(col.size).toBe(2);
-    expect([...col.keys()].sort()).toEqual(['x', 'y']);
+    expect([...col.keys()].toSorted()).toEqual(['x', 'y']);
   });
 
   it('supports delete operations', async () => {
@@ -74,7 +74,7 @@ describe('createLocalCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
     await col.insert({ id: 'd', label: 'D', count: 5 }).isPersisted.promise;
     expect(col.size).toBe(1);
 
@@ -90,7 +90,7 @@ describe('createLocalCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
     await col.insert({ id: 'u', label: 'Before', count: 1 }).isPersisted.promise;
 
     await col.update('u', (draft) => {
@@ -135,7 +135,7 @@ describe('createMemoryCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
     expect(col.size).toBe(0);
   });
 
@@ -151,7 +151,7 @@ describe('createMemoryCollection', () => {
       initialData: seed,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
     expect(col.size).toBe(2);
     expect(col.get('m1')).toMatchObject({ id: 'm1', label: 'One', count: 1 });
     expect(col.get('m2')).toMatchObject({ id: 'm2', label: 'Two', count: 2 });
@@ -163,7 +163,7 @@ describe('createMemoryCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
     await col.insert({ id: 'n', label: 'N', count: 7 }).isPersisted.promise;
 
     expect(col.size).toBe(1);
@@ -176,7 +176,7 @@ describe('createMemoryCollection', () => {
       getKey: (item) => item.id,
     });
 
-    await col.stateWhenReady;
+    await col.stateWhenReady();
 
     expect(() => {
       // @ts-expect-error — deliberately wrong shape
@@ -189,7 +189,7 @@ describe('createMemoryCollection', () => {
       schema: itemSchema,
       getKey: (item) => item.id,
     });
-    await col1.stateWhenReady;
+    await col1.stateWhenReady();
     await col1.insert({ id: 'p', label: 'P', count: 0 }).isPersisted.promise;
 
     // A new instance with no initialData starts empty
@@ -197,7 +197,7 @@ describe('createMemoryCollection', () => {
       schema: itemSchema,
       getKey: (item) => item.id,
     });
-    await col2.stateWhenReady;
+    await col2.stateWhenReady();
     expect(col2.size).toBe(0);
   });
 });

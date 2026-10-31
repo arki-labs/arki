@@ -1,27 +1,28 @@
 /// <reference lib="webworker" />
 import { registerRoute, NavigationRoute, Route } from 'workbox-routing';
-import { createStrategy, type FetchStrategy } from './strategies.ts';
+import { createStrategy } from './strategies.ts';
+import type { FetchStrategy } from './strategies.ts';
 
-export interface AppShellConfig {
+export type AppShellConfig = {
   strategy?: 'networkFirst' | 'staleWhileRevalidate';
   maxAgeSeconds?: number;
   cacheName?: string;
 }
 
-export interface ApiRouteConfig {
+export type ApiRouteConfig = {
   urlPattern: RegExp;
   strategy: 'networkFirst' | 'staleWhileRevalidate';
   maxAgeSeconds?: number;
   cacheName?: string;
 }
 
-export interface StaticAssetConfig {
+export type StaticAssetConfig = {
   urlPattern: RegExp;
   strategy?: Extract<FetchStrategy, 'cacheFirst' | 'staleWhileRevalidate'>;
   cacheName?: string;
 }
 
-export interface RegisterOfflineRoutesOptions {
+export type RegisterOfflineRoutesOptions = {
   appShell?: AppShellConfig;
   apiRoutes?: ApiRouteConfig[];
   staticAssets?: StaticAssetConfig[];

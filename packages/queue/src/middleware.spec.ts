@@ -55,14 +55,14 @@ beforeAll(async () => {
   redisUrl = `redis://${redisHost}:${redisPort}`;
 
   console.log(`✓ Redis container started at ${redisUrl}`);
-}, 60000);
+}, 60_000);
 
 afterAll(async () => {
   if (redisContainer) {
     await redisContainer.stop();
     console.log('✓ Redis container stopped');
   }
-}, 30000);
+}, 30_000);
 
 // ============================================
 // Basic Middleware Execution Tests
@@ -110,7 +110,7 @@ describe('Basic Middleware Execution', () => {
     expect(executionLog.indexOf('middleware-executed')).toBeLessThan(executionLog.indexOf('handler-executed'));
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should execute middleware chain in order', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -169,7 +169,7 @@ describe('Basic Middleware Execution', () => {
     expect(executionOrder).toEqual(['m1-start', 'm2-start', 'm3-start', 'handler', 'm3-end', 'm2-end', 'm1-end']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should execute middleware without calling next (early return)', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -220,7 +220,7 @@ describe('Basic Middleware Execution', () => {
     expect(executionLog).not.toContain('handler');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -278,7 +278,7 @@ describe('Context Transformation', () => {
     expect(typeof capturedStartTime).toBe('number');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should chain context transformations', async () => {
     type Step1Context = JobContext<BaseContext> & { step1: string };
@@ -334,7 +334,7 @@ describe('Context Transformation', () => {
     expect(capturedContext.step3).toBe(true);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should access original context in middleware', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -378,7 +378,7 @@ describe('Context Transformation', () => {
     expect(capturedTimestamp).toEqual(testTimestamp);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -439,7 +439,7 @@ describe('Async Middleware Operations', () => {
     expect(capturedData).toEqual({ apiData: 'fetched' });
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should handle multiple async middleware in sequence', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -502,7 +502,7 @@ describe('Async Middleware Operations', () => {
     ]);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -513,7 +513,7 @@ describe('Real-World Middleware Patterns', () => {
   it('should implement logging middleware', async () => {
     const q = initQueue.context<BaseContext>().create();
 
-    const logs: Array<{ level: string; message: string; data?: unknown }> = [];
+    const logs: { level: string; message: string; data?: unknown }[] = [];
 
     const loggingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       const startTime = Date.now();
@@ -572,15 +572,15 @@ describe('Real-World Middleware Patterns', () => {
 
     expect(logs.length).toBeGreaterThanOrEqual(2);
     expect(logs[0]!.message).toBe('Job started');
-    expect(logs[logs.length - 1]!.message).toBe('Job completed');
+    expect(logs.at(-1)!.message).toBe('Job completed');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should implement timing middleware', async () => {
     const q = initQueue.context<BaseContext>().create();
 
-    const timings: Array<{ jobName: string; duration: number }> = [];
+    const timings: { jobName: string; duration: number }[] = [];
 
     const timingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       const startTime = Date.now();
@@ -626,7 +626,7 @@ describe('Real-World Middleware Patterns', () => {
     expect(timings[0]!.duration).toBeGreaterThanOrEqual(180);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should implement authentication middleware', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -676,7 +676,7 @@ describe('Real-World Middleware Patterns', () => {
     expect(capturedPermissions).toEqual(['read', 'write', 'delete']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should implement validation middleware', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -737,7 +737,7 @@ describe('Real-World Middleware Patterns', () => {
     expect(validationErrors.length).toBeGreaterThanOrEqual(2);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -784,7 +784,7 @@ describe('Error Handling in Middleware', () => {
     expect(state).toBe('failed');
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('should handle errors gracefully in middleware try-catch', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -832,7 +832,7 @@ describe('Error Handling in Middleware', () => {
     expect(handlerExecuted).toBe(true);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });
 
 // ============================================
@@ -892,7 +892,7 @@ describe('Onion order (middleware wraps the handler)', () => {
     expect(order).toEqual(['mw1-before', 'mw2-before', 'handler', 'mw2-after', 'mw1-after']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('rejects a middleware next() with the handler error, so its catch sees it', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -926,7 +926,7 @@ describe('Onion order (middleware wraps the handler)', () => {
     expect(JSON.parse(settled.failedReason)).toMatchObject({ code: 'failure.unexpected_defect' });
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('lets a middleware see the handler result, and the job returns it', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -954,7 +954,7 @@ describe('Onion order (middleware wraps the handler)', () => {
     expect(settled.returnvalue).toEqual({ sum: 3 });
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 
   it('passes the context from next({ ctx }) to the handler', async () => {
     const q = initQueue.context<BaseContext>().create();
@@ -981,5 +981,5 @@ describe('Onion order (middleware wraps the handler)', () => {
     expect(handlerTraceIds).toEqual(['trace-1']);
 
     await queue.stop();
-  }, 15000);
+  }, 15_000);
 });

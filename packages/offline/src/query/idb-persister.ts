@@ -13,7 +13,7 @@ import { QueryCachePersistFailed } from './failures.ts';
 /** Enable with `DEBUG=arki:offline:query`. */
 const debugPersister = getLogger('arki:offline:query');
 
-export interface CreateIdbPersisterOptions {
+export type CreateIdbPersisterOptions = {
   /**
    * The key used to store the persisted QueryClient cache in IndexedDB.
    * @default 'arki-offline-query'
@@ -69,7 +69,7 @@ export function createIdbPersister(options: CreateIdbPersisterOptions = {}): Idb
       removeItem: (storageKey) => del(storageKey),
     },
     key,
-    throttleTime: 1_000,
+    throttleTime: 1000,
     serialize: (client) => offlineSerializer.stringify(client),
     deserialize: (text) => {
       const stored = parse(storedClientSchema, offlineSerializer.parse(text));

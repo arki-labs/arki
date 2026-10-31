@@ -27,7 +27,7 @@ import { observeQueue } from './telemetry.ts';
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ReplayLoopOptions {
+export type ReplayLoopOptions = {
   storage: QueueStorage;
   dlStore: DeadLetterStore;
   rpc: AnyRpcClient;
@@ -43,7 +43,7 @@ export interface ReplayLoopOptions {
   emit: (event: QueueEvent) => void;
 }
 
-export interface ReplayLoop {
+export type ReplayLoop = {
   start(): void;
   stop(): void;
   drainNow(): Promise<void | DrainFailure>;

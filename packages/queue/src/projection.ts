@@ -1,7 +1,7 @@
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-type JsonObject = { [key: string]: JsonValue };
+type JsonObject = Record<string, JsonValue>;
 
 type QueueActionLike = {
   readonly id: string;

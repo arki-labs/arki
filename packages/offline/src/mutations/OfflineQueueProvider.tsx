@@ -26,7 +26,7 @@ import type { OfflineMutationQueue } from './queue.ts';
 // Context
 // ---------------------------------------------------------------------------
 
-interface OfflineQueueContextValue {
+type OfflineQueueContextValue = {
   queue: OfflineMutationQueue;
 }
 
@@ -36,7 +36,7 @@ const OfflineQueueContext = createContext<OfflineQueueContextValue | null>(null)
 // Provider
 // ---------------------------------------------------------------------------
 
-export interface OfflineQueueProviderProps {
+export type OfflineQueueProviderProps = {
   queue: OfflineMutationQueue;
   children: ReactNode;
 }

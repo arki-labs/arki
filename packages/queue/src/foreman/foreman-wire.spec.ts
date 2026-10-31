@@ -53,7 +53,8 @@ describe('T(queue-foreman-wire)', () => {
       generateForemanKeyPair(),
       generateForemanKeyPair(),
     ]);
-    const hashes = new Map((await describeModule(module)).actions.map(action => [action.id, action.schemaHash]));
+    const described = await describeModule(module);
+    const hashes = new Map(described.actions.map(action => [action.id, action.schemaHash]));
     const receipts = memoryReceipts();
     const seen = new Set<string>();
     const handler = createForemanHandler<Record<string, never>>({

@@ -3,10 +3,10 @@ import type { Collection } from '@tanstack/db';
 import type { StandardSchemaV1 } from '@arki/schema';
 import type { InferSchemaOutput } from '@tanstack/db';
 
-export interface LocalCollectionConfig<
+export type LocalCollectionConfig<
   TSchema extends StandardSchemaV1,
   TKey extends string | number = string,
-> {
+> = {
   storageKey: string;
   schema: TSchema;
   getKey: (item: InferSchemaOutput<TSchema>) => TKey;
@@ -15,8 +15,12 @@ export interface LocalCollectionConfig<
 
 // A no-op event API to disable cross-tab storage events.
 const NULL_STORAGE_EVENT_API = {
-  addEventListener: () => undefined,
-  removeEventListener: () => undefined,
+  addEventListener: () => {
+    /* cross-tab storage events are off */
+  },
+  removeEventListener: () => {
+    /* cross-tab storage events are off */
+  },
 };
 
 /**

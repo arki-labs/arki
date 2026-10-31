@@ -56,9 +56,11 @@ const CREATE_TABLE = sql`
     response_json jsonb not null,
     created_at timestamptz not null default now(),
     expires_at timestamptz not null
-  )`;
+  )
+`;
 const CREATE_INDEX = sql`
-  create unique index offline_idk_key_path_user_idx on offline_idempotency_keys (idempotency_key, procedure_path, user_id)`;
+  create unique index offline_idk_key_path_user_idx on offline_idempotency_keys (idempotency_key, procedure_path, user_id)
+`;
 
 const CREATE_SQLITE_TABLES = async (db: ReturnType<typeof createLibsqlDb>['db'], tables: Record<string, unknown>) => {
   const empty = await generateDrizzleJson({});
@@ -88,6 +90,7 @@ function pgHandle(db: IdempotencyDatabase, close: () => Promise<void>): LegHandl
     close,
     rows: () => db.select().from(idempotencyKeys),
     clear: async () => {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- this helper empties the whole test table on purpose
       await db.delete(idempotencyKeys);
     },
     insertExpired: async row => {
@@ -170,7 +173,9 @@ describe.each(legs)('idempotency on $name', leg => {
   function serve(key: string, overlap = false) {
     let runs = 0;
     let lookups = 0;
-    let bothLookedUp: () => void = () => undefined;
+    let bothLookedUp: () => void = () => {
+      /* replaced once both lookups start */
+    };
     const twoLookups = new Promise<void>(resolve => (bothLookedUp = resolve));
     const repo = handle.store;
     const store: IdempotencyStore = {

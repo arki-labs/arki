@@ -28,6 +28,7 @@ it('README: idempotency(repo) installed once on the implementer', () => {
   const implementer = implement(rpcContract)
     .$context<IdempotentContext>()
     .use(idempotency(new IdempotencyRepository(db, idempotencyKeys)));
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- type-level check only; the handler is never detached or called
   expectTypeOf(implementer.posts.create.handler).toBeFunction();
 });
 

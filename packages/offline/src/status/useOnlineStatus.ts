@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from 'react';
 
 const isOnline = (): boolean =>
-  typeof navigator !== 'undefined' ? navigator.onLine : true;
+  typeof navigator === 'undefined' ? true : navigator.onLine;
 
 function subscribeToOnlineStatus(callback: () => void): () => void {
-  if (typeof window === 'undefined') return () => undefined;
+  if (typeof window === 'undefined') return () => {
+    /* nothing to unsubscribe */
+  };
   window.addEventListener('online', callback);
   window.addEventListener('offline', callback);
   return () => {
@@ -13,7 +15,7 @@ function subscribeToOnlineStatus(callback: () => void): () => void {
   };
 }
 
-export interface OnlineStatus {
+export type OnlineStatus = {
   online: boolean;
   lastChange: number;
 }

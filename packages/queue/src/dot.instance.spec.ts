@@ -151,8 +151,10 @@ describe('queueWorker + jobProducers: feature instances', () => {
       .start();
     const eu = bullQueue('digest#eu', keyPrefix);
     try {
-      expect((await eu.getJobSchedulers()).map(s => s.key)).toEqual(['schedule:digest-nightly#eu']);
-      expect((await eu.getJob('schedule-digest-once#eu'))?.name).toBe('digest#eu');
+      const euSchedulers = await eu.getJobSchedulers();
+      expect(euSchedulers.map(s => s.key)).toEqual(['schedule:digest-nightly#eu']);
+      const euOnce = await eu.getJob('schedule-digest-once#eu');
+      expect(euOnce?.name).toBe('digest#eu');
       expect(app.manifest.actions.filter(a => a.plugin === 'queue-worker').map(a => a.id)).toEqual([
         'digest#eu.consume',
         'digest-nightly#eu.fire',
@@ -176,8 +178,10 @@ describe('queueWorker + jobProducers: feature instances', () => {
       .start();
     const ledger = bullQueue('ledger', keyPrefix);
     try {
-      expect((await ledger.getJobSchedulers()).map(s => s.key)).toEqual(['schedule:ledger-nightly']);
-      expect((await ledger.getJob('schedule-ledger-once'))?.name).toBe('ledger');
+      const ledgerSchedulers = await ledger.getJobSchedulers();
+      expect(ledgerSchedulers.map(s => s.key)).toEqual(['schedule:ledger-nightly']);
+      const ledgerOnce = await ledger.getJob('schedule-ledger-once');
+      expect(ledgerOnce?.name).toBe('ledger');
       expect(app.manifest.actions.map(a => `${a.plugin}:${a.id}`)).toEqual([
         'reports:ledger.produce',
         'queue-worker:ledger.consume',
@@ -188,7 +192,7 @@ describe('queueWorker + jobProducers: feature instances', () => {
       await app.services.notifier.notify('via-producer');
       await app.services.queue.enqueue(sendMail, { to: 'via-client' });
       await until(() => ran.length === 2);
-      expect([...ran].sort()).toEqual(['us:ledger:via-client', 'us:ledger:via-producer']);
+      expect([...ran].toSorted()).toEqual(['us:ledger:via-client', 'us:ledger:via-producer']);
     } finally {
       await ledger.close();
       await app.dispose();
@@ -204,6 +208,7 @@ describe('queueWorker + jobProducers: feature instances', () => {
         notify:
           ({ jobs: producers }) =>
           () => {
+            // eslint-disable-next-line @typescript-eslint/unbound-method -- type-level check only; the method is never called or detached
             expectTypeOf(producers.sendMail.enqueue).parameter(0).toEqualTypeOf<{ to: string }>();
             // @ts-expect-error -- `to` is a string
             return producers.sendMail.enqueue({ to: 1 });

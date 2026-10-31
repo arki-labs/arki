@@ -3,13 +3,13 @@ import type { Collection } from '@tanstack/db';
 import type { StandardSchemaV1 } from '@arki/schema';
 import type { InferSchemaOutput } from '@tanstack/db';
 
-export interface MemoryCollectionConfig<
+export type MemoryCollectionConfig<
   TSchema extends StandardSchemaV1,
   TKey extends string | number = string,
-> {
+> = {
   schema: TSchema;
   getKey: (item: InferSchemaOutput<TSchema>) => TKey;
-  initialData?: Array<InferSchemaOutput<TSchema>>;
+  initialData?: InferSchemaOutput<TSchema>[];
 }
 
 /**
@@ -32,7 +32,7 @@ export function createMemoryCollection<
     localOnlyCollectionOptions({
       schema,
       getKey,
-      ...(initialData !== undefined ? { initialData } : {}),
+      ...(initialData === undefined ? {} : { initialData }),
     }),
   );
 }

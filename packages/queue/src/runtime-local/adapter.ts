@@ -22,7 +22,8 @@ function encodePgArray(arr: unknown[]): string {
   return `{${arr
     .map(v => {
       if (v === null || v === undefined) return 'NULL';
-      if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      if (typeof v === 'string') return `"${v.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- keeps the existing text for array items that are not null, string or number
       return String(v);
     })
     .join(',')}}`;
@@ -32,13 +33,13 @@ export function buildPgBossAdapter(pglite: Pick<PGlite, 'exec'>): Db {
   // Bind the multi-statement runner so it keeps PGlite's `this` context.
   // We alias it here to keep the call sites readable without triggering
   // the security hook that pattern-matches on the raw method name + paren form.
-  const runSql = pglite.exec.bind(pglite) as typeof pglite.exec;
+  const runSql = pglite.exec.bind(pglite);
 
   return {
     async executeSql(text: string, values?: unknown[]) {
       let sql = text;
       if (values && values.length > 0) {
-        sql = text.replace(/\$(\d+)/g, (_, n: string) => {
+        sql = text.replaceAll(/\$(\d+)/g, (_, n: string) => {
           const v = values[Number(n) - 1];
           if (v === null || v === undefined) return 'NULL';
           if (Array.isArray(v)) return `'${encodePgArray(v).replaceAll("'", "''")}'`;
@@ -47,15 +48,17 @@ export function buildPgBossAdapter(pglite: Pick<PGlite, 'exec'>): Db {
           if (v instanceof Date) return `'${v.toISOString()}'`;
           if (typeof v === 'object') {
             try {
-              return `'${JSON.stringify(v).replace(/'/g, "''")}'`;
+              return `'${JSON.stringify(v).replaceAll('\'', "''")}'`;
             } catch {
-              return `'${String(v).replace(/'/g, "''")}'`;
+              // eslint-disable-next-line @typescript-eslint/no-base-to-string -- JSON.stringify threw, so fall back to the default text
+              return `'${String(v).replaceAll('\'', "''")}'`;
             }
           }
-          return `'${String(v).replace(/'/g, "''")}'`;
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- remaining values are bigint, symbol or function; default text is intended
+          return `'${String(v).replaceAll('\'', "''")}'`;
         });
       }
-      const results = (await runSql(sql)) as Array<{ rows?: Record<string, unknown>[] }>;
+      const results = (await runSql(sql)) as { rows?: Record<string, unknown>[] }[];
       if (Array.isArray(results) && results.length > 0 && results[0] !== undefined && 'rows' in results[0]) {
         return { rows: (results[0].rows ?? []) as unknown[] };
       }

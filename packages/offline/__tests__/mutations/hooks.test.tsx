@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method -- the stubs are vi.fn() mocks; asserting on them never detaches `this` */
 // @vitest-environment jsdom
 import { mutationIdempotencyKey } from '../../src/mutations/identity.ts';
 

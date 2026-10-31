@@ -46,14 +46,14 @@ beforeAll(async () => {
   redisUrl = `redis://${redisHost}:${redisPort}`;
 
   console.log(`✓ Redis container started at ${redisUrl}`);
-}, 60000);
+}, 60_000);
 
 afterAll(async () => {
   if (redisContainer) {
     await redisContainer.stop();
     console.log('✓ Redis container stopped');
   }
-}, 30000);
+}, 30_000);
 
 // ============================================
 // CRON Schedule Tests
@@ -96,7 +96,7 @@ describe('CRON Schedules', () => {
       expect(executionCount.value).toBeLessThanOrEqual(3);
 
       await queue.stop();
-    }, 20000);
+    }, 20_000);
 
     it('should create CRON schedule with inline handler', async () => {
       const q = initQueue.context<TestContext>().create();
@@ -129,7 +129,7 @@ describe('CRON Schedules', () => {
       expect(executions.length).toBeGreaterThanOrEqual(2);
 
       await queue.stop();
-    }, 20000);
+    }, 20_000);
 
     it('should respect timezone option in CRON schedule', async () => {
       const q = initQueue.context<TestContext>().create();
@@ -187,7 +187,7 @@ describe('CRON Schedules', () => {
       expect(executions.length).toBeGreaterThanOrEqual(2);
 
       await queue.stop();
-    }, 20000);
+    }, 20_000);
 
     it('should use everyMinutes helper', () => {
       const q = initQueue.context<TestContext>().create();
@@ -313,7 +313,7 @@ describe('INTERVAL Schedules', () => {
     }
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should create interval schedule with inline handler', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -346,7 +346,7 @@ describe('INTERVAL Schedules', () => {
     expect(executions.length).toBeGreaterThanOrEqual(3);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   // BullMQ 5 stored a schedule under an md5 key. BullMQ 6 keeps running such an
   // entry next to the one registered now, so every tick would execute twice.
@@ -398,7 +398,7 @@ describe('INTERVAL Schedules', () => {
 
     await queue.stop();
     await bullQueue.close();
-  }, 20000);
+  }, 20_000);
 
   it('should handle fast intervals correctly', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -434,7 +434,7 @@ describe('INTERVAL Schedules', () => {
     expect(executionCount.value).toBeLessThanOrEqual(7);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 });
 
 // ============================================
@@ -494,7 +494,7 @@ describe('TIMEOUT Schedules', () => {
     expect(executionCount.value).toBe(1);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should execute timeout schedule with inline handler', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -536,7 +536,7 @@ describe('TIMEOUT Schedules', () => {
     expect(actualDelay).toBeLessThanOrEqual(2000 + 500); // same 500ms slack as the job timeout test
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should not repeat timeout execution', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -571,7 +571,7 @@ describe('TIMEOUT Schedules', () => {
     expect(executionCount.value).toBe(1);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 });
 
 // ============================================
@@ -621,7 +621,7 @@ describe('Schedules with Middleware', () => {
     expect(executionOrder).toContain('middleware-end');
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should apply middleware to inline schedule handlers', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -661,7 +661,7 @@ describe('Schedules with Middleware', () => {
     expect(handlerExecuted.value).toBe(true);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 });
 
 // ============================================
@@ -761,7 +761,7 @@ describe('Real-World Schedule Scenarios', () => {
     expect(reportsGenerated[0]).toMatch(/^daily-\d{4}-\d{2}-\d{2}$/);
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should implement health check with interval', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -809,7 +809,7 @@ describe('Real-World Schedule Scenarios', () => {
     }
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 
   it('should implement reminder email with timeout', async () => {
     const q = initQueue.context<TestContext>().create();
@@ -858,5 +858,5 @@ describe('Real-World Schedule Scenarios', () => {
     expect(reminderSent.value).toBe(true); // Still just once
 
     await queue.stop();
-  }, 20000);
+  }, 20_000);
 });

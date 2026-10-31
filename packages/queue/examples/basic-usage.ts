@@ -329,7 +329,7 @@ const queue = q.createQueue({
 });
 
 // Example usage (in an async function):
-async function example() {
+export async function example() {
   // Register all jobs, schedules, and flows from the registry
   await queue.register(jobs);
 

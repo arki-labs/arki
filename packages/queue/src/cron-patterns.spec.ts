@@ -292,9 +292,9 @@ describe('CronPatterns', () => {
       // At runtime, we just verify the valid values work
       const validDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
 
-      validDays.forEach(day => {
+      for (const day of validDays) {
         expect(() => CronPatterns.weekly(day, '09:00')).not.toThrow();
-      });
+      }
     });
   });
 

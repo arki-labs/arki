@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method -- the stubs are vi.fn() mocks; asserting on them never detaches `this` */
 import { QueueTransportUnavailable, QueueStorageCorrupt } from '../../src/mutations/failures.ts';
 import { orThrow } from '@arki/failure';
 import { backoff } from '@arki/resilience';
@@ -59,16 +60,21 @@ function makeRpc(
   return {
     call: vi.fn(async () => {
       switch (behavior) {
-        case 'success':
+        case 'success': {
           return { ok: true };
-        case 'fail-401':
+        }
+        case 'fail-401': {
           throw Object.assign(new Error('Unauthorized'), { status: 401 });
-        case 'fail-422':
+        }
+        case 'fail-422': {
           throw Object.assign(new Error('Unprocessable Entity'), { status: 422 });
-        case 'fail-500':
+        }
+        case 'fail-500': {
           throw Object.assign(new Error('Internal Server Error'), { status: 500 });
-        case 'network-error':
+        }
+        case 'network-error': {
           return QueueTransportUnavailable();
+        }
       }
     }),
   };
@@ -185,7 +191,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q4', deadLetterStorageKey: 'dl4' });
 
-    const events: Array<{ type: string }> = [];
+    const events: { type: string }[] = [];
     queue.subscribe((event) => events.push(event));
 
     orThrow(await queue.enqueue(createPost, { title: 'Event test' }));
@@ -442,7 +448,9 @@ describe('OfflineMutationQueue', () => {
       delete store[key];
 
       const after = createOfflineMutationQueue({
-        actorId: () => undefined,
+        actorId: () => {
+          /* no actor id */
+        },
         rpc: makeRpc('success'),
         storageKey: key,
         deadLetterStorageKey: `dl-${key}`,

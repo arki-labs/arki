@@ -4,13 +4,13 @@ import { useOnlineStatus } from './useOnlineStatus.ts';
 import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.tsx';
 import type { QueueEvent } from '../mutations/queue.ts';
 
-export interface OfflineBannerState {
+export type OfflineBannerState = {
   online: boolean;
   queued: number;
   deadLettered: number;
 }
 
-export interface OfflineBannerProps {
+export type OfflineBannerProps = {
   children: (state: OfflineBannerState) => ReactNode;
 }
 
@@ -37,7 +37,9 @@ export function OfflineBanner({ children }: OfflineBannerProps): ReactNode {
   // Wire queue events → re-render only when a queue is present.
   const subscribeToQueue = useCallback(
     (onStoreChange: () => void): (() => void) => {
-      if (!queueCtx) return () => undefined;
+      if (!queueCtx) return () => {
+        /* nothing to unsubscribe */
+      };
       return queueCtx.queue.subscribe((_event: QueueEvent) => onStoreChange());
     },
     [queueCtx],
