@@ -246,6 +246,61 @@ describe('runSmoke', () => {
     expect(envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'import:node')?.status).toBe('skip');
   });
 
+  // A compiled package whose `./react` entry pulls CSS, the way @arki/auth/react
+  // renders @arki/ui source: bare node throws "Unknown file extension".
+  const reactJournal: Fixture = {
+    manifest: pkg('@arki/journal', '1.0.0', { exports: { '.': './index.js', './react': './react.js' }, arki: { bundlerOnly: ['./react'] } }),
+    files: { 'index.js': 'export const j = 1;\n', 'react.js': "import './tokens.css';\n", 'tokens.css': ':root{}\n' },
+  };
+
+  it('skips an arki.bundlerOnly entry under node instead of failing the package', async () => {
+    // Why: @arki/auth/react and @arki/tanstack-start/pwa/sw only load inside a bundler or a worker; importing them under node blocked compiled waves.
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner } = fakeRunner({ packed: { journal: reactJournal.manifest }, installed: { '@arki/journal': reactJournal } });
+    const envelope = await runSmoke(base(dir, runner));
+    expect(envelope.errors).toEqual([]);
+    const importNode = envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'import:node');
+    expect(importNode?.status).toBe('pass');
+    expect(importNode?.detail).toBe('1 subpath(s) imported; 1 bundler-only left to the Vite build');
+  });
+
+  it('bundles the arki.bundlerOnly entries of a compiled wave with Vite', async () => {
+    // Why: a skipped entry must still be proven somewhere; the Vite build is that proof, and it must not pull the node-imported entries in.
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner, calls } = fakeRunner({ packed: { journal: reactJournal.manifest }, installed: { '@arki/journal': reactJournal } });
+    let bundled = '';
+    const spy: ExecRunner = (command, args, opts) => {
+      if (command === 'npx' && args.includes('vite')) bundled = readFileSync(path.join(opts.cwd, 'src', 'main.ts'), 'utf8');
+      return runner(command, args, opts);
+    };
+    const envelope = await runSmoke(base(dir, spy));
+    expect(calls).toContain('npx --no-install vite build');
+    expect(bundled).toContain("from '@arki/journal/react'");
+    expect(bundled).not.toContain("from '@arki/journal'");
+    expect(envelope.items[0]?.checks.find(c => c.id === 'vite-build')).toEqual({ id: 'vite-build', status: 'pass', detail: '1 subpath(s) bundled' });
+  });
+
+  it('runs no Vite build for a compiled wave without bundler-only entries', async () => {
+    // Why: compiled packages are proven by node and bun; a needless Vite install only slows every wave down.
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner, calls } = fakeRunner({ packed: { journal: journal.manifest }, installed: { '@arki/journal': journal, '@arki/log': logNew } });
+    const envelope = await runSmoke(base(dir, runner));
+    expect(calls).not.toContain('npx --no-install vite build');
+    expect(envelope.items[0]?.checks.find(c => c.id === 'vite-build')).toBeUndefined();
+  });
+
+  it('fails with SMOKE_E010 when arki.bundlerOnly names a key that is not in exports', async () => {
+    // Why: a typo ("react" for "./react") would silently leave the real entry under node and prove nothing in Vite.
+    const typo: Fixture = { manifest: { ...reactJournal.manifest, arki: { bundlerOnly: ['./react', 'react'] } }, files: reactJournal.files };
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner } = fakeRunner({ packed: { journal: typo.manifest }, installed: { '@arki/journal': typo } });
+    const envelope = await runSmoke(base(dir, runner));
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors.map(e => [e.code, e.target])).toEqual([['SMOKE_E010', '@arki/journal']]);
+    expect(envelope.errors[0]?.message).toContain('react in arki.bundlerOnly');
+    expect(envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'bundler-only')?.status).toBe('fail');
+  });
+
   it('fails with SMOKE_E008 when candidate.json is missing', async () => {
     // Why: smoke must never guess a wave; a missing candidate means the freeze step was skipped.
     const dir = mkdtempSync(path.join(tmpdir(), 'smoke-empty-'));

@@ -3,8 +3,10 @@
 // folder), install the wave tarballs there, then run it with node AND bun:
 //   node consumer-smoke.mjs && bun consumer-smoke.mjs
 // It imports every `exports` entry of every installed @arki/* package.
-// A missing optional peer, or a Bun-only entry under node, is reported as
-// SKIP; any other failure exits 1.
+// A missing optional peer, a Bun-only entry under node, or an entry the
+// package lists in `arki.bundlerOnly` (it loads only inside a bundler or a
+// worker; the release smoke's Vite build checks it) is reported as SKIP;
+// any other failure exits 1.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -17,10 +19,15 @@ for (const dir of readdirSync(root).sort()) {
   const optionalPeers = Object.entries(manifest.peerDependenciesMeta ?? {})
     .filter(([, meta]) => meta.optional === true)
     .map(([name]) => name);
+  const bundlerOnly = new Set(manifest.arki?.bundlerOnly ?? []);
   const entries = Object.keys(manifest.exports ?? { '.': null })
     .filter(key => key !== './package.json' && !key.includes('*'));
   for (const entry of entries) {
     const spec = entry === '.' ? manifest.name : `${manifest.name}/${entry.slice(2)}`;
+    if (bundlerOnly.has(entry)) {
+      console.log(`SKIP ${runtime} ${spec} (bundler-only entry; checked by the Vite build)`);
+      continue;
+    }
     try {
       await import(spec);
       console.log(`PASS ${runtime} ${spec}`);

@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
 
+import { arkiClaimSchema } from '@arki/library-tooling/src/manifest';
+
 import { appendCandidateCheck, readCandidate, type Candidate } from './candidate';
 import { defaultConfigPath, loadConfig } from './config';
 import { createEnvelope } from './json-output';
@@ -33,6 +35,7 @@ export const SMOKE_ERROR_CODES = {
   resolvesInsideRepo: 'SMOKE_E007',
   candidateInvalid: 'SMOKE_E008',
   waveUnknown: 'SMOKE_E009',
+  bundlerOnlyUnknown: 'SMOKE_E010',
 } as const;
 
 const smokeDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'smoke');
@@ -45,6 +48,7 @@ const manifestSchema = z
     dependencies: z.record(z.string(), z.string()).optional(),
     peerDependencies: z.record(z.string(), z.string()).optional(),
     peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() }).loose()).optional(),
+    arki: arkiClaimSchema.optional(),
   })
   .loose();
 
@@ -131,6 +135,24 @@ export function exportSpecs(manifest: z.infer<typeof manifestSchema>): string[] 
   return keys
     .filter(key => key !== './package.json' && !key.includes('*'))
     .map(key => (key === '.' ? manifest.name : `${manifest.name}/${key.slice(2)}`));
+}
+
+/** The text consumer-smoke.mjs prints after the spec of a skipped bundler-only entry. */
+const BUNDLER_ONLY_SKIP = 'bundler-only entry';
+
+/**
+ * The `arki.bundlerOnly` claim as import specs. These entries load only inside
+ * a bundler or a worker, so the Vite build imports them instead of node/bun.
+ * `unknown` lists claimed keys that are not in `exports`: a config error.
+ */
+export function bundlerOnlySpecs(manifest: z.infer<typeof manifestSchema>): { specs: string[]; unknown: string[] } {
+  const claimed = manifest.arki?.bundlerOnly ?? [];
+  const keys =
+    manifest.exports === undefined || typeof manifest.exports === 'string' ? ['.'] : Object.keys(manifest.exports);
+  return {
+    specs: claimed.filter(key => keys.includes(key)).map(key => (key === '.' ? manifest.name : `${manifest.name}/${key.slice(2)}`)),
+    unknown: claimed.filter(key => !keys.includes(key)),
+  };
 }
 
 type LsCopy = { name: string; version: string; where: string };
@@ -282,6 +304,18 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
 
     // --- Import every subpath on Node and Bun ---
     const installed = await readInstalled(consumer);
+    const candidateInstalled = installed.filter(p => tarballOf.has(p.name));
+    for (const p of candidateInstalled) {
+      const { unknown } = bundlerOnlySpecs(p.manifest);
+      if (unknown.length === 0) continue;
+      add(p.name, check('bundler-only', 'fail', `not in exports: ${unknown.join(', ')}`));
+      fail(
+        SMOKE_ERROR_CODES.bundlerOnlyUnknown,
+        `${p.name} lists ${unknown.join(', ')} in arki.bundlerOnly, but its exports have no such key.`,
+        'Each arki.bundlerOnly item must be an exports key, spelled the same ("./react"). Fix or remove it in package.json, then re-pack.',
+        p.name,
+      );
+    }
     await cp(path.join(smokeDir, 'consumer-smoke.mjs'), path.join(consumer, 'consumer-smoke.mjs'));
     const peerSkips = new Map<string, Set<string>>();
     // Source-distributed packages ship .ts/.css for a bundler; bare runtimes
@@ -305,7 +339,9 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
             pkg.name,
           );
         } else {
-          add(pkg.name, check(id, 'pass', `${mine.filter(l => l.verdict === 'PASS').length} subpath(s) imported`));
+          const bundlerOnly = mine.filter(l => l.verdict === 'SKIP' && l.rest.includes(BUNDLER_ONLY_SKIP)).length;
+          const left = bundlerOnly === 0 ? '' : `; ${bundlerOnly} bundler-only left to the Vite build`;
+          add(pkg.name, check(id, 'pass', `${mine.filter(l => l.verdict === 'PASS').length} subpath(s) imported${left}`));
         }
         for (const l of mine.filter(l => l.verdict === 'SKIP')) {
           const peer = /optional peer (\S+) not installed/.exec(l.rest)?.[1];
@@ -342,7 +378,8 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
       const peerRun = peerInstall.code === 0 ? await run('node', ['consumer-smoke.mjs'], { cwd: withPeers }) : peerInstall;
       for (const [name, peers] of peerSkips) {
         const lines = parseSmokeOutput(peerRun.stdout).filter(l => packageOfSpec(l.spec) === name);
-        const stillBad = peerInstall.code !== 0 || lines.some(l => l.verdict !== 'PASS');
+        // A bundler-only SKIP is expected here too: the Vite build covers it.
+        const stillBad = peerInstall.code !== 0 || lines.some(l => l.verdict !== 'PASS' && !l.rest.includes(BUNDLER_ONLY_SKIP));
         const list = [...peers].join(', ');
         add(name, check('optional-peer', stillBad ? 'fail' : 'pass', stillBad ? `with ${list} installed: ${brief(peerRun)}` : `clear error without ${list}; imports with it`));
         if (stillBad) {
@@ -356,16 +393,18 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
       }
     }
 
-    // --- Source-distributed packages: a Vite build must pass ---
-    if (kind === 'source') {
+    // --- Source-distributed packages and bundler-only entries: a Vite build must pass ---
+    // Compiled packages were imported under node and bun above, except the
+    // entries they list in `arki.bundlerOnly`; their other optional-peer
+    // entries cannot bundle without the peer, so only those entries go in.
+    const bundled = new Set([
+      ...candidateInstalled.filter(p => sourcePackages.has(p.name)).flatMap(p => exportSpecs(p.manifest)),
+      ...candidateInstalled.flatMap(p => bundlerOnlySpecs(p.manifest).specs),
+    ]);
+    if (kind === 'source' || bundled.size > 0) {
       const viteDir = path.join(consumer, 'vite-fixture');
       await cp(path.join(smokeDir, 'vite-fixture'), viteDir, { recursive: true });
-      // Compiled packages in the candidate were imported under node and bun
-      // above; their optional-peer entries cannot bundle without the peer.
-      const imports = installed
-        .filter(p => tarballOf.has(p.name) && sourcePackages.has(p.name))
-        .flatMap(p => exportSpecs(p.manifest))
-        .map((spec, i) => `import * as m${i} from '${spec}';\nvoid m${i};`);
+      const imports = [...bundled].map((spec, i) => `import * as m${i} from '${spec}';\nvoid m${i};`);
       await writeFile(path.join(viteDir, 'src', 'main.ts'), `${imports.join('\n')}\nexport {};\n`);
       const viteInstall = await run('npm', ['install', '--no-audit', '--no-fund'], { cwd: viteDir });
       const build = viteInstall.code === 0 ? await run('npx', ['--no-install', 'vite', 'build'], { cwd: viteDir }) : viteInstall;
@@ -374,8 +413,8 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
       if (!ok) {
         fail(
           SMOKE_ERROR_CODES.viteBuildFailed,
-          `Vite could not build a page that imports every subpath: ${brief(build)}`,
-          'Source-distributed packages must bundle in a plain Vite project. Fix the failing import or its dependency.',
+          `Vite could not build a page that imports ${imports.length} subpath(s): ${brief(build)}`,
+          'Source-distributed packages and arki.bundlerOnly entries must bundle in a plain Vite project. Fix the failing import or its dependency.',
           candidate.wave,
         );
       }

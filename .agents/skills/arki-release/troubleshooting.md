@@ -163,6 +163,20 @@ npm view @arki/<pkg> version
 
 **Real fix (future work, ~1-2 hours):** make the matrix inspect each package's exports map and template a real subpath into the probe instead of the bare specifier.
 
+## An entry loads only inside a bundler or a worker
+
+**Symptom:** `smoke` fails with `SMOKE_E002` on an entry that renders `@arki/ui` source (`@arki/auth/react`) or needs a service worker (`@arki/tanstack-start/pwa/sw`). Plain Node and Bun cannot load it.
+
+**Fix:** list the export key in the package's `package.json`, next to `runtimes`:
+
+```json
+"arki": { "bundlerOnly": ["./react", "./react/templates"] }
+```
+
+`consumer-smoke.mjs` then prints `SKIP <runtime> <spec> (bundler-only entry; checked by the Vite build)`. `smoke` runs its Vite build for that wave, even a compiled one, and the build imports those entries. The `vite-build` check says how many subpaths it bundled.
+
+List only entries that truly need a bundler. Every other entry must still import in Node and Bun. Each key must be in `exports`, spelled the same (`./react`, not `react`). A key that is not there fails with `SMOKE_E010`.
+
 ## "Stable release gate: BLOCKED" but I can't tell why
 
 **Symptom:** Scorecard says BLOCKED; gate decision shows multiple packages with multiple blockers.

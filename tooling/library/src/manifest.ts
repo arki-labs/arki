@@ -13,8 +13,17 @@ const exportTarget: z.ZodType<ExportTarget> = z.lazy(() =>
 export const RUNTIMES = ['node', 'bun', 'deno', 'browser', 'hermes'] as const;
 export type Runtime = (typeof RUNTIMES)[number];
 
-/** `"arki": { "runtimes": [...] }`: the engines the package claims. Missing means all of them. */
-const arkiSchema = z.object({ runtimes: z.array(z.enum(RUNTIMES)).min(1) });
+/**
+ * The `"arki"` claim in a package.json.
+ * - `runtimes`: the engines the package claims. Missing means all of them.
+ * - `bundlerOnly`: export keys (`./react`) that load only inside a bundler or a
+ *   worker. The release smoke bundles them with Vite instead of importing them
+ *   under plain Node and Bun. Each key must be in `exports`.
+ */
+export const arkiClaimSchema = z.object({
+  runtimes: z.array(z.enum(RUNTIMES)).min(1).optional(),
+  bundlerOnly: z.array(z.string().min(1)).min(1).optional(),
+});
 
 const manifestSchema = z.object({
   name: z.string().min(1),
@@ -25,7 +34,7 @@ const manifestSchema = z.object({
   optionalDependencies: z.record(z.string(), z.string()).optional(),
   peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() })).optional(),
   sideEffects: z.union([z.boolean(), z.array(z.string())]).optional(),
-  arki: arkiSchema.optional(),
+  arki: arkiClaimSchema.optional(),
   private: z.boolean().optional(),
   scripts: z.record(z.string(), z.string()).optional(),
   files: z.array(z.string()).optional(),
