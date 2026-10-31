@@ -1,5 +1,11 @@
 # @arki/contracts
 
+## 0.4.1
+
+### Patch Changes
+
+- 84b2480: The root doc comment says which functions throw and which return a failure. New tests cover `defineId().is` and `operationAt`. No behaviour change.
+
 ## 0.4.0
 
 ### Minor Changes
