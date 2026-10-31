@@ -1,12 +1,18 @@
 import type { UserId } from '../user-id.js';
 import type { Instant } from '@arki/date';
 import { fromDate } from '@arki/date';
+import type { IdGenerationFailure } from '@arki/contracts';
+import type { FailureOf, Result } from '@arki/failure';
+import type { CommandNotFound } from '@arki/journal';
+import type { MoneyFailure } from '@arki/money';
 import { isFailure } from '@arki/failure';
 
 import type { CoreWrites } from '../journal.js';
+import type { JournalWriteFailure } from '../journal/support.js';
+import type { CardDeclined, IdempotencyConflict } from '../providers/provider-error.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
-import type { PlanId, Subscription, SubscriptionId, SubscriptionStatus } from '../types.js';
+import type { PlanId, Subscription, SubscriptionId, SubscriptionPreview, SubscriptionStatus } from '../types.js';
 import { PlanInactive, SubscriptionAlreadyActive, SubscriptionInvalidState } from '../failures.js';
 import { paymentAmount } from '../money.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
@@ -14,11 +20,23 @@ import { ReferenceNotFound } from '../providers/provider-error.js';
 /** What a caller asks a subscription to do, as `SubscriptionInvalidState` names it. */
 type SubscriptionAction = ReturnType<typeof SubscriptionInvalidState>['data']['action'];
 
+type NotFound = FailureOf<typeof ReferenceNotFound>;
+type InvalidState = FailureOf<typeof SubscriptionInvalidState>;
+type Inactive = FailureOf<typeof PlanInactive>;
+type AlreadyActive = FailureOf<typeof SubscriptionAlreadyActive>;
+type Declined = FailureOf<typeof CardDeclined>;
+type Conflict = FailureOf<typeof IdempotencyConflict>;
+/** What a `writes.*` call here returns besides the row: a journal failure, or no row to change. */
+type StoreFailure = JournalWriteFailure | CommandNotFound;
+
 export type SubscriptionChangeOptions = {
   prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
   immediateChange?: boolean;
   effectiveDate?: Instant;
 }
+
+/** A plan change that went through: the provider's subscription, and the preview it was made from. */
+export type SubscriptionChange = { subscription: Subscription; preview: SubscriptionPreview };
 
 export type SubscriptionCreationOptions = {
   trialPeriodDays?: number;
@@ -92,7 +110,7 @@ export class SubscriptionManager {
     userId: UserId,
     planId: PlanId,
     options: SubscriptionCreationOptions = {},
-  ) {
+  ): Promise<Result<Subscription, Declined | Conflict | NotFound | IdGenerationFailure | Inactive | AlreadyActive>> {
     const customer = await this.paymentRepository.findCustomerByUserId(userId);
     if (!customer) return ReferenceNotFound({ kind: 'customer', id: userId, missing: 'row' });
 
@@ -122,7 +140,9 @@ export class SubscriptionManager {
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ) {
+  ): Promise<
+    SubscriptionChange | NotFound | InvalidState | Inactive | MoneyFailure | Declined | Conflict | StoreFailure
+  > {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['active'], 'update');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -159,7 +179,10 @@ export class SubscriptionManager {
    * Set or clear "ends when the paid period ends". The provider changes the flag, then the row follows.
    * Unlike `cancelSubscription` it never cancels now, and `false` undoes an earlier `true`.
    */
-  async setCancelAtPeriodEnd(subscriptionId: SubscriptionId, cancelAtPeriodEnd: boolean) {
+  async setCancelAtPeriodEnd(
+    subscriptionId: SubscriptionId,
+    cancelAtPeriodEnd: boolean,
+  ): Promise<Subscription | NotFound | InvalidState | Declined | Conflict | StoreFailure> {
     const currentSubscription = await this.subscriptionNotCanceled(subscriptionId, 'set_cancel_at_period_end');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -178,7 +201,7 @@ export class SubscriptionManager {
   async cancelSubscription(
     subscriptionId: SubscriptionId,
     options: SubscriptionCancellationOptions = {},
-  ) {
+  ): Promise<Subscription | NotFound | InvalidState | Conflict | StoreFailure> {
     const currentSubscription = await this.subscriptionNotCanceled(subscriptionId, 'cancel');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -201,7 +224,9 @@ export class SubscriptionManager {
     return canceledSubscription;
   }
 
-  async reactivateSubscription(subscriptionId: SubscriptionId) {
+  async reactivateSubscription(
+    subscriptionId: SubscriptionId,
+  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['canceled', 'past_due'], 'reactivate');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -219,7 +244,9 @@ export class SubscriptionManager {
     return reactivatedSubscription;
   }
 
-  async pauseSubscription(subscriptionId: SubscriptionId) {
+  async pauseSubscription(
+    subscriptionId: SubscriptionId,
+  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['active'], 'pause');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -234,7 +261,9 @@ export class SubscriptionManager {
     return pausedSubscription;
   }
 
-  async resumeSubscription(subscriptionId: SubscriptionId) {
+  async resumeSubscription(
+    subscriptionId: SubscriptionId,
+  ): Promise<Subscription | NotFound | InvalidState | StoreFailure> {
     const currentSubscription = await this.subscriptionIn(subscriptionId, ['paused'], 'resume');
     if (isFailure(currentSubscription)) return currentSubscription;
 
@@ -301,7 +330,7 @@ export class SubscriptionManager {
     subscriptionId: SubscriptionId,
     newPlanId: PlanId,
     options: SubscriptionChangeOptions = {},
-  ) {
+  ): Promise<Result<SubscriptionPreview, NotFound | Inactive | MoneyFailure>> {
     const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!subscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
 
@@ -400,7 +429,9 @@ export class SubscriptionManager {
    * `ReferenceNotFound` (`missing: 'row'` when we hold no such subscription, `missing: 'provider_id'`
    * when the provider has none for it), or the refusal of the journal write.
    */
-  async syncSubscriptionWithProvider(subscriptionId: SubscriptionId) {
+  async syncSubscriptionWithProvider(
+    subscriptionId: SubscriptionId,
+  ): Promise<Subscription | NotFound | JournalWriteFailure> {
     const localSubscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
     if (!localSubscription) return ReferenceNotFound({ kind: 'subscription', id: subscriptionId, missing: 'row' });
 

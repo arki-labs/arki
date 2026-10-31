@@ -13,6 +13,7 @@ Naming pattern you will see everywhere:
 
 - `createRefundsTables`, `createDunningTables`, `createTaxTables`: build the Drizzle tables of one area inside your own `pgSchema`. `createRefundsTables` and `createDunningTables` take references to your payments and user id columns. Call them in your schema module so drizzle-kit can generate the migrations.
 - `createCoreDerivedSchemas`: builds the Zod select and insert schemas that depend on your concrete core tables. Call it once with your core tables.
+- Named result types, so your editor and your `.d.ts` files show a name instead of the whole Drizzle or Zod type: `CoreTables`, `TaxTables`, `DunningTables`, `RefundsTables` (what the table factories return), `CoreDerivedSchemas`, and one name per table: `PlansTable`, `CustomersTable`, `SubscriptionsTable`, `PaymentsTable`, `WebhookEventsTable`, `TaxConfigurationsTable`, `TaxJurisdictionsTable`, `TaxExemptionsTable`, `TaxRecordsTable`, `TaxAuditEntriesTable`, `DunningCampaignsTable`, `DunningTemplatesTable`, `DunningExecutionsTable`, `DunningCommunicationsTable`, `CustomerSegmentsTable`, `CustomerRiskProfilesTable`, `DunningCampaignAnalyticsTable`, `RefundsTable`.
 - `createPaymentRepositories`: builds the core, dunning, refunds and tax repositories in one call from one database and one tables object. Use it when you want every repository. Use the single factories below when you want one.
 - `createPaymentRepository` and `PaymentRepository`: reads and writes for plans, customers, subscriptions, payments and webhook events. Most services take it.
 - `createRefundRepository` and `RefundRepository`: reads, lists and searches for refund rows.
@@ -69,6 +70,7 @@ These are the inputs of the journal commands behind the services. A command retu
 - Payments: `initiatePaymentInputSchema`, `completePaymentInputSchema`, `failPaymentInputSchema`, `cancelPaymentInputSchema`, `markPaymentRequiresActionInputSchema`, `recordPaymentRefundInputSchema`, `recordPaymentDisputeInputSchema`.
 - Subscriptions: `syncSubscriptionInputSchema` (one whole provider snapshot, so a webhook is one event), `activateSubscriptionInputSchema`, `pauseSubscriptionInputSchema`, `resumeSubscriptionInputSchema`, `reactivateSubscriptionInputSchema`, `changeSubscriptionPlanInputSchema`, `setSubscriptionCancelAtPeriodEndInputSchema`, `markSubscriptionPastDueInputSchema`.
 - Refunds: `processRefundInputSchema`, `completeRefundInputSchema`, `failRefundInputSchema`.
+- Journal types: `CoreJournal` (what `createCoreJournal` returns), `PaymentJournal` and `SubscriptionJournal` (its two halves), `CoreWrites` and `RefundWrites` (the write functions the services call), and `JournalWriteFailure` (what any write can return besides the row and its own refusal). Each event has a name too: `PaymentInitiatedEvent`, `PaymentInitiatedV2Event`, `PaymentCompletedEvent`, `PaymentFailedEvent`, `PaymentCanceledEvent`, `PaymentRequiresActionEvent`, `PaymentRefundRecordedEvent`, `PaymentDisputeRecordedEvent`, `SubscriptionCreatedEvent`, `SubscriptionSyncedEvent`, `SubscriptionActivatedEvent`, `SubscriptionCanceledEvent`, `SubscriptionReactivatedEvent`, `SubscriptionPausedEvent`, `SubscriptionResumedEvent`, `SubscriptionPlanChangedEvent`, `SubscriptionCancelAtPeriodEndSetEvent`, `SubscriptionPastDueEvent`, `RefundRequestedEvent`, `RefundRequestedV2Event`, `RefundApprovedEvent`, `RefundRejectedEvent`, `RefundProcessedEvent`, `RefundCompletedEvent`, `RefundFailedEvent`.
 - Reducer helpers from `core/journal/support`: `toIso` (a time as ISO text for event data), `toInstant` and `toNullableInstant` (the `Instant` a reducer builds from it), `sameJson` (deep JSON equality, key order ignored, so you can skip a write that changes nothing), `storedReal` (the number a `real` column gives back; a reducer must return this value or the journal rejects the write with `VALUE_MISMATCH`), `writtenRow` (the row a command returned, or the failure it returned, with the storage-only `version` removed).
 
 ## Refunds
@@ -83,7 +85,7 @@ These are the inputs of the journal commands behind the services. A command retu
 
 ## Subscriptions, retries and proration (core services)
 
-- `createSubscriptionManager`: create, update, pause, resume, reactivate and cancel subscriptions against the provider, preview a change, sync with the provider, handle trials ending and past-due subscriptions, and check access.
+- `createSubscriptionManager`: create, update, pause, resume, reactivate and cancel subscriptions against the provider, preview a change, sync with the provider, handle trials ending and past-due subscriptions, and check access. A plan change that went through returns a `SubscriptionChange`.
 - `createPaymentRetryService`: schedules and runs retries of failed payments by named strategies, and reports retry analytics. You can add or change strategies.
 - `createDunningService` (core): rule-based handling of failed payments. A rule has a trigger (`payment_failed`, `invoice_payment_failed` or `subscription_past_due`), a delay in days and an action (email, retry, pause, cancel or webhook). Email and webhook steps go out through the app's `DunningSenders` (`sendEmail`, `sendWebhook`); an enabled rule whose sender is missing throws `payments.configuration_invalid` when the service is built. Do not mix it up with the campaign-based dunning in `@arki/payments/dunning`.
 - `ProrationService` and `createProrationService`: previews the charge or credit of a plan change.
@@ -93,7 +95,7 @@ These are the inputs of the journal commands behind the services. A command retu
 
 - `WebhookHandler` and `createWebhookHandler`: receives a provider webhook, checks it, claims it once, and processes it. It emits events and holds a processing lease for crashed attempts.
 - `WebhookSecurityService` and `createWebhookSecurityService`: verifies signature, timestamp window, replay and source address. The older `core/security/webhook-security` path re-exports the same implementation.
-- `claimWebhookEvent`: inserts the event, or returns the existing row. Only the caller whose insert won gets `created: true`, so exactly one delivery processes a new event.
+- `claimWebhookEvent`: inserts the event, or returns the existing row. Only the caller whose insert won gets `created: true`, so exactly one delivery processes a new event. The result is a `WebhookClaim`.
 - `reclaimWebhookEvent`: takes over an unprocessed event for one more attempt after a failure or a crash. Only one caller wins, because `attempts` is the token.
 - `WebhookAnalyticsService` and `createWebhookAnalyticsService`: counts, success rates and alerts over webhook events.
 - `mapStripeEventType`: our internal event name for a Stripe event type, or `null` when we do not model it.
@@ -104,7 +106,7 @@ These are the inputs of the journal commands behind the services. A command retu
 
 ## Presets (Stripe and RevenueCat)
 
-- `createSubscriptionBilling`: the whole web Stripe flow behind three methods: checkout, webhook projection and entitlement. Start here for a normal subscription app.
+- `createSubscriptionBilling`: the whole web Stripe flow behind three methods: checkout, webhook projection and entitlement. Start here for a normal subscription app. A verified webhook returns a `StripeWebhookOutcome`.
 - `projectStripeSubscription`: writes a Stripe subscription object to the `subscriptions` table through the journal. Repeated or out-of-order webhooks converge to one row. A refused write is returned, and the webhook route must reject it.
 - `projectRevenueCatEvent`: the same for a validated RevenueCat event. Returns `{ handled: false }` for events that are not a subscription change.
 - `revenueCatWebhookSchema`: the schema of the RevenueCat webhook body.
@@ -113,7 +115,7 @@ These are the inputs of the journal commands behind the services. A command retu
 
 ## Dunning campaigns (`@arki/payments/dunning`)
 
-- `DunningCampaignService` and `createDunningCampaignService`: campaign CRUD, templates and execution.
+- `DunningCampaignService` and `createDunningCampaignService`: campaign CRUD, templates and execution. A campaign read with its steps is a `DunningCampaignWithSteps`.
 - `CustomerSegmentationService` and `createCustomerSegmentationService`: segments, customer classification and risk scoring.
 - `DunningIntegrationService` and `createDunningIntegrationService`: connects campaigns, segments and communications into one flow.
 - `CommunicationOrchestrationService` and `createCommunicationOrchestrationService`: sends messages through the channels you configure. Apps pass the channel config in, so the package never reads `env`.

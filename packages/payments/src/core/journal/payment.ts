@@ -19,7 +19,7 @@
  */
 
 import type { Instant } from '@arki/date';
-import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { EventDef, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
@@ -89,6 +89,64 @@ export type MarkPaymentRequiresActionInput = z.input<typeof markPaymentRequiresA
 export type RecordPaymentRefundInput = z.input<typeof recordPaymentRefundInputSchema>;
 export type RecordPaymentDisputeInput = z.input<typeof recordPaymentDisputeInputSchema>;
 
+const paymentStart = {
+  subscriptionId: subscriptionIdSchema.nullable(),
+  userId: userIdSchema,
+  customerId: customerIdSchema,
+  providerPaymentId: z.string(),
+  paymentMethod: paymentMethodSchema,
+  description: z.string().nullable(),
+  metadata: metadataSchema.nullable(),
+};
+const paymentInitiatedSchema = z.object({ ...paymentStart, amount: z.number(), currency: z.string() });
+const paymentInitiatedV2Schema = z.object({ ...paymentStart, amount: moneyJsonSchema });
+const paymentCompletedSchema = z.object({ receiptUrl: z.string().nullable() });
+const paymentFailedSchema = z.object({ failureReason: z.string() });
+const paymentCanceledSchema = z.object({});
+const paymentRequiresActionSchema = z.object({});
+const paymentRefundRecordedSchema = z.object({ refundedAmount: moneyJsonSchema });
+const paymentDisputeRecordedSchema = z.object({
+  disputeId: z.string(),
+  status: z.string(),
+  reason: z.string().nullable(),
+});
+
+// The events have names (interfaces over `EventDef`), so the journal's types say `PaymentCompletedEvent`
+// instead of the event's whole schema type, in declaration files and editor hovers alike.
+/** Before minor units: a payment was started, its amount a JS number of major units. Replay only. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentInitiatedEvent extends EventDef<'PaymentInitiated', typeof paymentInitiatedSchema> {}
+/** A payment was started with the provider. It is `pending`. The amount is exact `Money` JSON. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentInitiatedV2Event extends EventDef<'PaymentInitiatedV2', typeof paymentInitiatedV2Schema> {}
+/** The provider collected the money. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentCompletedEvent extends EventDef<'PaymentCompleted', typeof paymentCompletedSchema> {}
+/** The provider could not collect the money. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentFailedEvent extends EventDef<'PaymentFailed', typeof paymentFailedSchema> {}
+/** The payment was canceled before it finished. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentCanceledEvent extends EventDef<'PaymentCanceled', typeof paymentCanceledSchema> {}
+/** The provider needs the customer to act (for example 3-D Secure) before the payment can finish. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentRequiresActionEvent extends EventDef<
+  'PaymentRequiresAction',
+  typeof paymentRequiresActionSchema
+> {}
+/** The provider refunded part or all of the payment. `refundedAmount` is the exact total refunded so far, as `Money` JSON. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentRefundRecordedEvent extends EventDef<
+  'PaymentRefundRecorded',
+  typeof paymentRefundRecordedSchema
+> {}
+/** The customer's bank opened a dispute on the payment, or the dispute changed status. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentDisputeRecordedEvent extends EventDef<
+  'PaymentDisputeRecorded',
+  typeof paymentDisputeRecordedSchema
+> {}
+
 function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow | CommandNotFound {
   if (!row) {
     return CommandNotFound({ detail: `Payment ${paymentId} not found` });
@@ -107,33 +165,22 @@ export function createPaymentJournal<
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 >(j: JournalDefinitions<Meta, Tx, AppDb>, payments: CoreTables['payments']) {
-  const paymentStart = {
-    subscriptionId: subscriptionIdSchema.nullable(),
-    userId: userIdSchema,
-    customerId: customerIdSchema,
-    providerPaymentId: z.string(),
-    paymentMethod: paymentMethodSchema,
-    description: z.string().nullable(),
-    metadata: metadataSchema.nullable(),
-  };
-  /** Before minor units: a payment was started, its amount a JS number of major units. Replay only. */
-  const PaymentInitiated = j.event(
-    'PaymentInitiated',
-    z.object({ ...paymentStart, amount: z.number(), currency: z.string() }),
+  const PaymentInitiated: PaymentInitiatedEvent = j.event('PaymentInitiated', paymentInitiatedSchema);
+  const PaymentInitiatedV2: PaymentInitiatedV2Event = j.event('PaymentInitiatedV2', paymentInitiatedV2Schema);
+  const PaymentCompleted: PaymentCompletedEvent = j.event('PaymentCompleted', paymentCompletedSchema);
+  const PaymentFailed: PaymentFailedEvent = j.event('PaymentFailed', paymentFailedSchema);
+  const PaymentCanceled: PaymentCanceledEvent = j.event('PaymentCanceled', paymentCanceledSchema);
+  const PaymentRequiresAction: PaymentRequiresActionEvent = j.event(
+    'PaymentRequiresAction',
+    paymentRequiresActionSchema,
   );
-  /** A payment was started with the provider. It is `pending`. The amount is exact `Money` JSON. */
-  const PaymentInitiatedV2 = j.event('PaymentInitiatedV2', z.object({ ...paymentStart, amount: moneyJsonSchema }));
-  const PaymentCompleted = j.event('PaymentCompleted', z.object({ receiptUrl: z.string().nullable() }));
-  const PaymentFailed = j.event('PaymentFailed', z.object({ failureReason: z.string() }));
-  const PaymentCanceled = j.event('PaymentCanceled', z.object({}));
-  /** The provider needs the customer to act (for example 3-D Secure) before the payment can finish. */
-  const PaymentRequiresAction = j.event('PaymentRequiresAction', z.object({}));
-  /** The provider refunded part or all of the payment. `refundedAmount` is the exact total refunded so far, as `Money` JSON. */
-  const PaymentRefundRecorded = j.event('PaymentRefundRecorded', z.object({ refundedAmount: moneyJsonSchema }));
-  /** The customer's bank opened a dispute on the payment, or the dispute changed status. */
-  const PaymentDisputeRecorded = j.event(
+  const PaymentRefundRecorded: PaymentRefundRecordedEvent = j.event(
+    'PaymentRefundRecorded',
+    paymentRefundRecordedSchema,
+  );
+  const PaymentDisputeRecorded: PaymentDisputeRecordedEvent = j.event(
     'PaymentDisputeRecorded',
-    z.object({ disputeId: z.string(), status: z.string(), reason: z.string().nullable() }),
+    paymentDisputeRecordedSchema,
   );
 
   type StartData = z.output<typeof PaymentInitiatedV2.schema>;
@@ -391,3 +438,10 @@ export function createPaymentJournal<
     },
   };
 }
+
+/** What `createPaymentJournal` returns for one app's journal definitions. */
+export type PaymentJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = ReturnType<typeof createPaymentJournal<Meta, Tx, AppDb>>;

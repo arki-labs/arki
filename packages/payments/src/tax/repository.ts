@@ -5,6 +5,7 @@ import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizz
 
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import { parse } from '@arki/schema';
 
@@ -24,6 +25,8 @@ import type {
 } from './types.js';
 import { exemptionTargetSchema } from './contracts.js';
 import { TaxReferenceNotFound } from './failures.js';
+
+type NotFound = FailureOf<typeof TaxReferenceNotFound>;
 
 /**
  * Structural database type for the tax repositories. The tax repositories
@@ -88,7 +91,7 @@ export class TaxConfigurationRepository {
   }
 
   /** The updated row, or `TaxReferenceNotFound` when no configuration has `id`. */
-  async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration) {
+  async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration): Promise<TaxConfig | NotFound> {
     const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ ...data, updatedAt: now() })
@@ -101,7 +104,7 @@ export class TaxConfigurationRepository {
    * Makes `id` the one default configuration. An unknown `id` returns `TaxReferenceNotFound` and
    * leaves the current default as it is: the new default is set before the old one is cleared.
    */
-  async setDefaultConfiguration(id: TaxConfigId) {
+  async setDefaultConfiguration(id: TaxConfigId): Promise<TaxConfig | NotFound> {
     const [updated] = await this.db
       .update(this.taxConfigurations)
       .set({ isDefault: true, updatedAt: now() })
@@ -214,7 +217,7 @@ export class TaxJurisdictionRepository {
   }
 
   /** The updated row, or `TaxReferenceNotFound` when no jurisdiction has `id`. */
-  async updateJurisdiction(id: TaxJurisdictionId, data: UpdateTaxJurisdiction) {
+  async updateJurisdiction(id: TaxJurisdictionId, data: UpdateTaxJurisdiction): Promise<TaxJurisdiction | NotFound> {
     const [updated] = await this.db
       .update(this.taxJurisdictions)
       .set({ ...data, updatedAt: now() })
@@ -245,7 +248,7 @@ export class TaxExemptionRepository {
    * The new row. One that names no customer, product code or jurisdiction would exempt every sale:
    * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written.
    */
-  async createExemption(data: NewTaxExemption) {
+  async createExemption(data: NewTaxExemption): Promise<TaxExemption | SchemaFailure> {
     const target = parse(exemptionTargetSchema, data);
     if (isFailure(target)) return target;
 
@@ -385,7 +388,7 @@ export class TaxExemptionRepository {
   }
 
   /** The updated row, or `TaxReferenceNotFound` when no exemption has `id`. */
-  async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption) {
+  async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption): Promise<TaxExemption | NotFound> {
     const [updated] = await this.db
       .update(this.taxExemptions)
       .set({ ...data, updatedAt: now() })
@@ -395,7 +398,7 @@ export class TaxExemptionRepository {
   }
 
   /** The approved row, or `TaxReferenceNotFound` when no exemption has `id`. */
-  async approveExemption(id: TaxExemptionId, approvedBy: string) {
+  async approveExemption(id: TaxExemptionId, approvedBy: string): Promise<TaxExemption | NotFound> {
     const [approved] = await this.db
       .update(this.taxExemptions)
       .set({
@@ -410,7 +413,7 @@ export class TaxExemptionRepository {
   }
 
   /** The revoked row, or `TaxReferenceNotFound` when no exemption has `id`. */
-  async revokeExemption(id: TaxExemptionId) {
+  async revokeExemption(id: TaxExemptionId): Promise<TaxExemption | NotFound> {
     const [revoked] = await this.db
       .update(this.taxExemptions)
       .set({ status: 'revoked', updatedAt: now() })

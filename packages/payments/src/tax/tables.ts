@@ -33,7 +33,8 @@ export type CreateTaxTablesDeps = {
   schema: PgSchema;
 };
 
-export function createTaxTables({ schema }: CreateTaxTablesDeps) {
+/** Builds the tables. `createTaxTables` returns them under the names declared below. */
+function buildTaxTables({ schema }: CreateTaxTablesDeps) {
   const taxConfigStatusEnum = schema.enum('tax_config_status', taxConfigStatusValues);
   const taxCalculationModeEnum = schema.enum('tax_calculation_mode', taxCalculationModeValues);
   const taxBusinessTypeEnum = schema.enum('tax_business_type', taxBusinessTypeValues);
@@ -281,4 +282,43 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
   };
 }
 
-export type TaxTables = ReturnType<typeof createTaxTables>;
+// Each table gets a name (an interface over its Drizzle type), so declaration files, docs and editor
+// hovers say the table's name instead of the whole expanded Drizzle type. The type is still built by
+// `buildTaxTables` above; the interfaces only name it.
+type BuiltTaxTables = ReturnType<typeof buildTaxTables>;
+type TaxConfigurationsTableType = BuiltTaxTables['taxConfigurations'];
+type TaxJurisdictionsTableType = BuiltTaxTables['taxJurisdictions'];
+type TaxExemptionsTableType = BuiltTaxTables['taxExemptions'];
+type TaxRecordsTableType = BuiltTaxTables['taxRecords'];
+type TaxAuditEntriesTableType = BuiltTaxTables['taxAuditEntries'];
+
+/** The `tax_configurations` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface TaxConfigurationsTable extends TaxConfigurationsTableType {}
+/** The `tax_jurisdictions` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface TaxJurisdictionsTable extends TaxJurisdictionsTableType {}
+/** The `tax_exemptions` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface TaxExemptionsTable extends TaxExemptionsTableType {}
+/** The `tax_records` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface TaxRecordsTable extends TaxRecordsTableType {}
+/** The `tax_audit_entries` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface TaxAuditEntriesTable extends TaxAuditEntriesTableType {}
+
+/** What `createTaxTables` returns: the enums, the five tables, and a foreign-key factory for three of them. */
+export type TaxTables = {
+  enums: BuiltTaxTables['enums'];
+  taxConfigurations: TaxConfigurationsTable;
+  taxJurisdictions: TaxJurisdictionsTable;
+  taxExemptions: TaxExemptionsTable;
+  taxRecords: TaxRecordsTable;
+  taxAuditEntries: TaxAuditEntriesTable;
+  foreignKeys: BuiltTaxTables['foreignKeys'];
+};
+
+export function createTaxTables(deps: CreateTaxTablesDeps): TaxTables {
+  return buildTaxTables(deps);
+}

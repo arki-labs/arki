@@ -4,6 +4,7 @@ import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { toMillis } from '@arki/date';
 import { TransactionDefect, TransactionRejected } from '@arki/db/errors';
+import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import { isJournalError } from '@arki/journal';
 import { getLogger } from '@arki/log';
@@ -149,7 +150,16 @@ export class RefundService {
     this.autoApproveLimits = limits.data;
   }
 
-  async requestRefund(data: RefundRequestData) {
+  async requestRefund(
+    data: RefundRequestData,
+  ): Promise<
+    | Awaited<ReturnType<RefundWrites['requestRefund']>>
+    | Awaited<ReturnType<RefundService['approveRefund']>>
+    | FailureOf<typeof DuplicatePendingRefund>
+    | FailureOf<typeof RefundAmountExceeded>
+    | FailureOf<typeof RefundWindowExceeded>
+    | FailureOf<typeof TransactionNotFound>
+  > {
     const refused = await this.validateRefundEligibility(data.paymentId, data.amount);
     if (isFailure(refused)) return refused;
 
@@ -177,7 +187,13 @@ export class RefundService {
     return refund;
   }
 
-  async approveRefund(data: RefundApprovalData) {
+  async approveRefund(
+    data: RefundApprovalData,
+  ): Promise<
+    | Awaited<ReturnType<RefundWrites['approveRefund']>>
+    | FailureOf<typeof RefundNotFound>
+    | FailureOf<typeof RefundInvalidState>
+  > {
     const pending = await this.requirePending(data.refundId);
     if (isFailure(pending)) return pending;
 
@@ -191,7 +207,13 @@ export class RefundService {
   }
 
   /** A blank `reason` is refused with the schema's `InvalidInput` before anything is read or written. */
-  async rejectRefund(data: RefundRejectionData) {
+  async rejectRefund(
+    data: RefundRejectionData,
+  ): Promise<
+    | Awaited<ReturnType<RefundWrites['rejectRefund']>>
+    | FailureOf<typeof RefundNotFound>
+    | FailureOf<typeof RefundInvalidState>
+  > {
     const reason = parse(refundRejectionReasonSchema, data.reason);
     if (isFailure(reason)) return reason;
 

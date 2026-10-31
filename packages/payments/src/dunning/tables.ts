@@ -51,12 +51,8 @@ export type CreateDunningTablesDeps = {
  */
 type ExecutionResultJson = Record<string, unknown>;
 
-export function createDunningTables({
-  schema,
-  customerIdRef,
-  paymentIdRef,
-  subscriptionIdRef,
-}: CreateDunningTablesDeps) {
+/** Builds the tables. `createDunningTables` returns them under the names declared below. */
+function buildDunningTables({ schema, customerIdRef, paymentIdRef, subscriptionIdRef }: CreateDunningTablesDeps) {
   const customerFk = idColumns(customerIdFactory).createForeignKeyFactory(customerIdRef);
   const paymentFk = idColumns(paymentIdFactory).createForeignKeyFactory(paymentIdRef);
   const subscriptionFk = idColumns(subscriptionIdFactory).createForeignKeyFactory(subscriptionIdRef);
@@ -351,4 +347,53 @@ export function createDunningTables({
   };
 }
 
-export type DunningTables = ReturnType<typeof createDunningTables>;
+// Each table gets a name (an interface over its Drizzle type), so declaration files, docs and editor
+// hovers say the table's name instead of the whole expanded Drizzle type. The type is still built by
+// `buildDunningTables` above; the interfaces only name it.
+type BuiltDunningTables = ReturnType<typeof buildDunningTables>;
+type DunningCampaignsTableType = BuiltDunningTables['dunningCampaigns'];
+type DunningTemplatesTableType = BuiltDunningTables['dunningTemplates'];
+type DunningExecutionsTableType = BuiltDunningTables['dunningExecutions'];
+type DunningCommunicationsTableType = BuiltDunningTables['dunningCommunications'];
+type CustomerSegmentsTableType = BuiltDunningTables['customerSegments'];
+type CustomerRiskProfilesTableType = BuiltDunningTables['customerRiskProfiles'];
+type DunningCampaignAnalyticsTableType = BuiltDunningTables['dunningCampaignAnalytics'];
+
+/** The `dunning_campaigns` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface DunningCampaignsTable extends DunningCampaignsTableType {}
+/** The `dunning_templates` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface DunningTemplatesTable extends DunningTemplatesTableType {}
+/** The `dunning_executions` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface DunningExecutionsTable extends DunningExecutionsTableType {}
+/** The `dunning_communications` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface DunningCommunicationsTable extends DunningCommunicationsTableType {}
+/** The `customer_segments` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface CustomerSegmentsTable extends CustomerSegmentsTableType {}
+/** The `customer_risk_profiles` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface CustomerRiskProfilesTable extends CustomerRiskProfilesTableType {}
+/** The `dunning_campaign_analytics` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface DunningCampaignAnalyticsTable extends DunningCampaignAnalyticsTableType {}
+
+/** What `createDunningTables` returns: the enums, the seven tables, and a foreign-key factory for six of them. */
+export type DunningTables = {
+  enums: BuiltDunningTables['enums'];
+  dunningCampaigns: DunningCampaignsTable;
+  dunningTemplates: DunningTemplatesTable;
+  dunningExecutions: DunningExecutionsTable;
+  dunningCommunications: DunningCommunicationsTable;
+  customerSegments: CustomerSegmentsTable;
+  customerRiskProfiles: CustomerRiskProfilesTable;
+  dunningCampaignAnalytics: DunningCampaignAnalyticsTable;
+  foreignKeys: BuiltDunningTables['foreignKeys'];
+};
+
+export function createDunningTables(deps: CreateDunningTablesDeps): DunningTables {
+  return buildDunningTables(deps);
+}

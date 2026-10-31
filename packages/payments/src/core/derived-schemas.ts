@@ -19,16 +19,8 @@ import {
 } from './primitives.js';
 import { userIdSchema } from './user-id.js';
 
-/**
- * Factory for the Drizzle-table-derived Zod schemas. The host app calls this
- * with its `createCoreTables(...)` output so we can wire `createSelectSchema`
- * / `createInsertSchema` to the concrete table objects.
- *
- * Pure schemas (enums, input shapes, query schemas) live alongside in
- * `./contracts` and are imported directly — only the table-coupled ones are
- * factoried.
- */
-export function createCoreDerivedSchemas({
+/** Builds the schemas. `createCoreDerivedSchemas` returns them under the name declared below. */
+function buildCoreDerivedSchemas({
   plans,
   customers,
   subscriptions,
@@ -183,4 +175,25 @@ export function createCoreDerivedSchemas({
   };
 }
 
-export type CoreDerivedSchemas = ReturnType<typeof createCoreDerivedSchemas>;
+// A name for the schemas, so declaration files, docs and editor hovers say `CoreDerivedSchemas` instead
+// of twenty expanded Zod object types. The types are still built by `buildCoreDerivedSchemas` above.
+type BuiltCoreDerivedSchemas = ReturnType<typeof buildCoreDerivedSchemas>;
+
+/** What `createCoreDerivedSchemas` returns: the select, insert, update and response schemas of the core tables. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface CoreDerivedSchemas extends BuiltCoreDerivedSchemas {}
+
+/**
+ * Factory for the Drizzle-table-derived Zod schemas. The host app calls this
+ * with its `createCoreTables(...)` output so we can wire `createSelectSchema`
+ * / `createInsertSchema` to the concrete table objects.
+ *
+ * Pure schemas (enums, input shapes, query schemas) live alongside in
+ * `./contracts` and are imported directly — only the table-coupled ones are
+ * factoried.
+ */
+export function createCoreDerivedSchemas(
+  tables: Pick<CoreTables, 'plans' | 'customers' | 'subscriptions' | 'payments' | 'webhookEvents'>,
+): CoreDerivedSchemas {
+  return buildCoreDerivedSchemas(tables);
+}

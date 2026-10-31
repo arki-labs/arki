@@ -37,7 +37,8 @@ export type CreateCoreTablesDeps = {
   userIdRef: () => PgColumn;
 };
 
-export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
+/** Builds the tables. `createCoreTables` returns them under the names declared below. */
+function buildCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const paymentProviderEnum = schema.enum('payment_provider', paymentProviderValues);
   const subscriptionStatusEnum = schema.enum('subscription_status', subscriptionStatusValues);
   const paymentStatusEnum = schema.enum('payment_status', paymentStatusValues);
@@ -202,4 +203,43 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   };
 }
 
-export type CoreTables = ReturnType<typeof createCoreTables>;
+// Each table gets a name (an interface over its Drizzle type), so declaration files, docs and editor
+// hovers say the table's name instead of the whole expanded Drizzle type. The type is still built by
+// `buildCoreTables` above; the interfaces only name it.
+type BuiltCoreTables = ReturnType<typeof buildCoreTables>;
+type PlansTableType = BuiltCoreTables['plans'];
+type CustomersTableType = BuiltCoreTables['customers'];
+type SubscriptionsTableType = BuiltCoreTables['subscriptions'];
+type PaymentsTableType = BuiltCoreTables['payments'];
+type WebhookEventsTableType = BuiltCoreTables['webhookEvents'];
+
+/** The `plans` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PlansTable extends PlansTableType {}
+/** The `customers` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface CustomersTable extends CustomersTableType {}
+/** The `subscriptions` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionsTable extends SubscriptionsTableType {}
+/** The `payments` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface PaymentsTable extends PaymentsTableType {}
+/** The `webhook_events` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface WebhookEventsTable extends WebhookEventsTableType {}
+
+/** What `createCoreTables` returns: the enums, the five tables, and a foreign-key factory for four of them. */
+export type CoreTables = {
+  enums: BuiltCoreTables['enums'];
+  plans: PlansTable;
+  customers: CustomersTable;
+  subscriptions: SubscriptionsTable;
+  payments: PaymentsTable;
+  webhookEvents: WebhookEventsTable;
+  foreignKeys: BuiltCoreTables['foreignKeys'];
+};
+
+export function createCoreTables(deps: CreateCoreTablesDeps): CoreTables {
+  return buildCoreTables(deps);
+}

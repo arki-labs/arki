@@ -21,7 +21,8 @@ export type CreateRefundsTablesDeps = {
   userIdRef: () => PgColumn;
 };
 
-export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateRefundsTablesDeps) {
+/** Builds the tables. `createRefundsTables` returns them under the names declared below. */
+function buildRefundsTables({ schema, paymentIdRef, userIdRef }: CreateRefundsTablesDeps) {
   // Re-build FK factories locally so COLUMN_ZOD_SCHEMA tagging matches the host-app's
   // version of these column builders exactly.
   const paymentFk = idColumns(paymentIdFactory).createForeignKeyFactory(paymentIdRef);
@@ -78,4 +79,23 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
   };
 }
 
-export type RefundsTables = ReturnType<typeof createRefundsTables>;
+// Each table gets a name (an interface over its Drizzle type), so declaration files, docs and editor
+// hovers say the table's name instead of the whole expanded Drizzle type. The type is still built by
+// `buildRefundsTables` above; the interfaces only name it.
+type BuiltRefundsTables = ReturnType<typeof buildRefundsTables>;
+type RefundsTableType = BuiltRefundsTables['refunds'];
+
+/** The `refunds` table. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface RefundsTable extends RefundsTableType {}
+
+/** What `createRefundsTables` returns: the enums, the `refunds` table, and its foreign-key factory. */
+export type RefundsTables = {
+  enums: BuiltRefundsTables['enums'];
+  refunds: RefundsTable;
+  foreignKeys: BuiltRefundsTables['foreignKeys'];
+};
+
+export function createRefundsTables(deps: CreateRefundsTablesDeps): RefundsTables {
+  return buildRefundsTables(deps);
+}

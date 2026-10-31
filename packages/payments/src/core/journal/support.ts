@@ -6,7 +6,9 @@
  */
 
 import type { Instant } from '@arki/date';
-import type { Failure } from '@arki/failure';
+import type { IdGenerationFailure } from '@arki/contracts';
+import type { Failure, SchemaFailure } from '@arki/failure';
+import type { CommandFailure } from '@arki/journal';
 import { instant } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
@@ -70,6 +72,12 @@ export function sameJson(left: unknown, right: unknown): boolean {
 
   return false;
 }
+
+/**
+ * What a write function returns besides the row and its command's own refusals: the
+ * command runner's failures (`CommandFailure`), a failed id and a schema failure.
+ */
+export type JournalWriteFailure = CommandFailure | IdGenerationFailure | SchemaFailure;
 
 /**
  * The row a command hands back to a service, or the failure the command

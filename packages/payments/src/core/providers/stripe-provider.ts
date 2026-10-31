@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
 import { fromUnix, now } from '@arki/date';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, Result } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import {
@@ -34,7 +34,8 @@ import type {
   SubscriptionPreview,
   WebhookValidationResult,
 } from '../types.js';
-import type { PaymentProviderConfig } from './base-provider.js';
+import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
+import type { CardDeclined, IdempotencyConflict } from './provider-error.js';
 import { toMinorColumn } from '../money.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { BasePaymentProvider } from './base-provider.js';
@@ -93,6 +94,15 @@ function stripeAmountOf(amount: Money) {
     throw error;
   }
 }
+
+/** An amount of ours that Stripe cannot take: what `stripeAmountOf` returns instead of units. */
+type SendAmountFailure = Exclude<ReturnType<typeof stripeAmountOf>, number>;
+/** An amount Stripe sent that is not a valid `Money`: what `fromStripeAmount` returns instead. */
+type ReadAmountFailure = Exclude<ReturnType<typeof fromStripeAmount>, Money>;
+type NotFound = FailureOf<typeof ReferenceNotFound>;
+type NotFlat = FailureOf<typeof PlanPriceNotFlat>;
+type Declined = FailureOf<typeof CardDeclined>;
+type Conflict = FailureOf<typeof IdempotencyConflict>;
 
 /** Metadata Stripe accepts: strings only. Objects become JSON, null and undefined are left out. */
 function toStripeMetadata(metadata: Record<string, unknown> | undefined): Stripe.MetadataParam | undefined {
@@ -385,7 +395,7 @@ export class StripeProvider extends BasePaymentProvider {
   async updateCustomer(
     customerId: CustomerId,
     params: { email?: string; name?: string; metadata?: Record<string, unknown> },
-  ) {
+  ): Promise<Result<Customer, NotFound>> {
     const row = await this.customerRef(customerId);
     if (isFailure(row)) return row;
 
@@ -448,7 +458,7 @@ export class StripeProvider extends BasePaymentProvider {
     intervalCount?: number;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
-  }) {
+  }): Promise<Result<Plan, IdGenerationFailure | SendAmountFailure>> {
     const planId = createPlanId();
     if (isFailure(planId)) return planId;
     // Before any request: a price Stripe cannot take must not leave a product behind
@@ -496,7 +506,7 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** `null` when the plan has no row; `ReferenceNotFound` when its row has no Stripe price. */
-  async getPlan(planId: PlanId) {
+  async getPlan(planId: PlanId): Promise<Result<Plan | null, NotFound | NotFlat | ReadAmountFailure>> {
     const row = await this.requireReferences().findPlanById(planId);
     if (!row) return null;
     const priceId = this.priceIdOf(row);
@@ -511,7 +521,7 @@ export class StripeProvider extends BasePaymentProvider {
   async updatePlan(
     planId: PlanId,
     params: { name?: string; metadata?: Record<string, unknown> },
-  ) {
+  ): Promise<Result<Plan, NotFound | NotFlat | ReadAmountFailure>> {
     const row = await this.planRef(planId);
     if (isFailure(row)) return row;
     const priceId = this.priceIdOf(row);
@@ -551,7 +561,7 @@ export class StripeProvider extends BasePaymentProvider {
    * The active plans Stripe sells that this package created: prices carrying our `planId` in their
    * metadata, whose row still exists. Prices made in the Stripe dashboard have no row here and are left out.
    */
-  async listPlans() {
+  async listPlans(): Promise<Result<Plan[], NotFlat | ReadAmountFailure>> {
     const references = this.requireReferences();
     const prices = await this.call('stripe.prices.list', () =>
       this.stripe.prices
@@ -761,7 +771,7 @@ export class StripeProvider extends BasePaymentProvider {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
-  }) {
+  }): Promise<Result<SubscriptionPreview, NotFound | ReadAmountFailure>> {
     const current = await this.subscriptionRef(params.subscriptionId);
     if (isFailure(current)) return current;
     const priceId = await this.priceRef(params.planId);
@@ -983,7 +993,7 @@ export class StripeProvider extends BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ) {
+  ): Promise<Result<ProviderRefundResult, NotFound | Conflict | SendAmountFailure>> {
     const row = await this.paymentRef(paymentId);
     if (isFailure(row)) return row;
     // The caller names the payment and builds the amount: an amount in another currency is its bug.
@@ -1067,7 +1077,7 @@ export class StripeProvider extends BasePaymentProvider {
   async attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
-  }) {
+  }): Promise<Result<PaymentMethodInfo, Declined | NotFound>> {
     const customer = await this.customerRef(params.customerId);
     if (isFailure(customer)) return customer;
 

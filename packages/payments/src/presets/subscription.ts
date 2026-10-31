@@ -1,3 +1,5 @@
+import type { IdGenerationFailure } from '@arki/contracts';
+import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import type Stripe from 'stripe';
 
@@ -6,6 +8,9 @@ import type { Instant } from '@arki/date';
 import { fromUnix } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal.js';
+import type { JournalWriteFailure } from '../core/journal/support.js';
+import type { CustomerConflict } from '../core/failures.js';
+import type { InvalidWebhookSignature } from '../core/providers/provider-error.js';
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { PaymentRepository } from '../core/repository.js';
 import type { PlanId, SubscriptionStatus } from '../core/types.js';
@@ -19,6 +24,13 @@ import {
 
 /** The one journal write a webhook preset makes. A `CoreWrites` fits. */
 type SubscriptionSync = Pick<CoreWrites, 'syncSubscription'>;
+
+/** Why `projectStripeSubscription` stored nothing. */
+type ProjectionFailure =
+  | FailureOf<typeof UnknownProviderCustomer>
+  | FailureOf<typeof SubscriptionWithoutItems>
+  | FailureOf<typeof UnknownSubscriptionStatus>
+  | JournalWriteFailure;
 
 /**
  * Project a Stripe Subscription object onto our `subscriptions` table.
@@ -46,7 +58,7 @@ export async function projectStripeSubscription(params: {
   subscription: Stripe.Subscription;
   /** Our plan-row id for the price this subscription is on (resolved from the preset config). */
   planId: PlanId;
-}) {
+}): Promise<undefined | ProjectionFailure> {
   const { repo, writes, subscription: sub, planId } = params;
 
   const stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
@@ -155,6 +167,15 @@ export type SubscriptionBillingConfig = {
 
 export type SubscriptionBilling = ReturnType<typeof createSubscriptionBilling>;
 
+/** The three Stripe events `handleWebhook` projects onto the `subscriptions` table. */
+type SubscriptionEventType =
+  'customer.subscription.created' | 'customer.subscription.updated' | 'customer.subscription.deleted';
+
+/** What `handleWebhook` returns for a verified event: whether it changed a subscription, and the event's type. */
+export type StripeWebhookOutcome =
+  | { handled: boolean; type: SubscriptionEventType }
+  | { handled: boolean; type: Exclude<Stripe.Event['type'], SubscriptionEventType> };
+
 /**
  * The high-level subscription-billing preset: the whole web Stripe flow — checkout, webhook
  * projection, entitlement — behind three methods, so a consuming app wires routes instead of
@@ -173,7 +194,20 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
      * Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to.
      * A price that is not in `prices` returns `PriceNotConfigured` before any provider request.
      */
-    async createCheckoutSession({ userId, email, priceId }: { userId: UserId; email: string; priceId: string }) {
+    async createCheckoutSession({
+      userId,
+      email,
+      priceId,
+    }: {
+      userId: UserId;
+      email: string;
+      priceId: string;
+    }): Promise<
+      | Awaited<ReturnType<StripeProvider['createCheckoutSession']>>
+      | IdGenerationFailure
+      | FailureOf<typeof PriceNotConfigured>
+      | FailureOf<typeof CustomerConflict>
+    > {
       if (!planByPrice.has(priceId)) return PriceNotConfigured({ priceId });
 
       // Find-or-create the local customer so the subscription webhook can attribute the row to a
@@ -205,7 +239,16 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
      * map to a plan, the failures of `projectStripeSubscription`, and the journal's refused writes.
      * Nothing is written for any of them; a webhook route must not acknowledge them.
      */
-    async handleWebhook(payload: string | Buffer, signature: string) {
+    async handleWebhook(
+      payload: string | Buffer,
+      signature: string,
+    ): Promise<
+      | StripeWebhookOutcome
+      | FailureOf<typeof InvalidWebhookSignature>
+      | FailureOf<typeof SubscriptionWithoutItems>
+      | FailureOf<typeof PriceNotConfigured>
+      | ProjectionFailure
+    > {
       const event = provider.constructWebhookEvent(payload, signature);
       if (isFailure(event)) return event;
 

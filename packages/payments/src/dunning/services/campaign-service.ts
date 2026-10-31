@@ -6,6 +6,7 @@ import type { Money, MoneyFailure } from '@arki/money';
 import { z } from '@arki/contracts';
 import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
+import type { FailureOf } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import { Currency } from '@arki/money';
 import { ensure } from '@arki/schema';
@@ -30,6 +31,7 @@ import type {
   CampaignExecutionFilters,
   CustomerData,
   DunningCampaign,
+  DunningCampaignWithSteps,
   DunningDashboardStats,
   DunningExecution,
   DunningTemplate,
@@ -139,10 +141,7 @@ export class DunningCampaignService {
   /**
    * Create a new dunning campaign with templates
    */
-  async createCampaign(
-    input: CreateDunningCampaignInput,
-    createdBy: string,
-  ): Promise<DunningCampaign & { templates: DunningTemplate[] }> {
+  async createCampaign(input: CreateDunningCampaignInput, createdBy: string): Promise<DunningCampaignWithSteps> {
     return this.db.transaction(async tx => {
       // The repositories run on the transaction: a template that fails takes the campaign with it
       const campaignRepo = createDunningCampaignRepository(tx, {
@@ -187,7 +186,11 @@ export class DunningCampaignService {
    * `DunningTemplateInUse` and nothing changes. Returns `null` for an unknown campaign.
    * Omit `templates` to leave the steps alone.
    */
-  async updateCampaign(campaignId: DunningCampaignId, input: UpdateDunningCampaignInput, updatedBy: string) {
+  async updateCampaign(
+    campaignId: DunningCampaignId,
+    input: UpdateDunningCampaignInput,
+    updatedBy: string,
+  ): Promise<DunningCampaignWithSteps | null | FailureOf<typeof DunningTemplateInUse>> {
     const { templates: nextTemplates, ...campaignFields } = input;
     const { dunningCommunications } = this.tables;
 
@@ -245,7 +248,7 @@ export class DunningCampaignService {
   /**
    * Get campaign by ID with templates
    */
-  async getCampaign(campaignId: DunningCampaignId) {
+  async getCampaign(campaignId: DunningCampaignId): Promise<DunningCampaignWithSteps | null> {
     const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return null;
 
@@ -260,7 +263,7 @@ export class DunningCampaignService {
   /**
    * List campaigns with filtering and pagination
    */
-  async listCampaigns(query: ListDunningCampaignsQuery) {
+  async listCampaigns(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
     return this.campaignRepo.findMany(query);
   }
 
@@ -274,7 +277,11 @@ export class DunningCampaignService {
   /**
    * Activate or deactivate a campaign
    */
-  async updateCampaignStatus(campaignId: DunningCampaignId, status: DunningCampaignStatus, updatedBy: string) {
+  async updateCampaignStatus(
+    campaignId: DunningCampaignId,
+    status: DunningCampaignStatus,
+    updatedBy: string,
+  ): Promise<DunningCampaign | undefined> {
     return this.campaignRepo.updateStatus(campaignId, status, updatedBy);
   }
 
@@ -284,7 +291,15 @@ export class DunningCampaignService {
    * not active `DunningCampaignNotActive`, one with no active step `DunningCampaignWithoutSteps`;
    * each writes nothing.
    */
-  async executeCampaign(input: ExecuteCampaignInput, _executedBy: string) {
+  async executeCampaign(
+    input: ExecuteCampaignInput,
+    _executedBy: string,
+  ): Promise<
+    | DunningExecution[]
+    | FailureOf<typeof DunningCampaignNotFound>
+    | FailureOf<typeof DunningCampaignNotActive>
+    | FailureOf<typeof DunningCampaignWithoutSteps>
+  > {
     const campaign = await this.campaignRepo.findById(input.campaignId);
     if (!campaign) {
       return DunningCampaignNotFound({ campaignId: input.campaignId });
@@ -1078,7 +1093,7 @@ export class DunningCampaignService {
   /**
    * Find active campaigns for a specific trigger
    */
-  async findActiveCampaignsForTrigger(triggerType: string, customerSegmentIds?: string[]) {
+  async findActiveCampaignsForTrigger(triggerType: string, customerSegmentIds?: string[]): Promise<DunningCampaign[]> {
     return this.campaignRepo.findActiveForTrigger(triggerType, customerSegmentIds);
   }
 }

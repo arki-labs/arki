@@ -4,6 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
+import type { FailureOf } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
@@ -75,7 +76,10 @@ export class CustomerSegmentationService {
    * returns its `MoneyFailure` and nothing is written. After a good write, the count can only fail with a
    * database error, which throws (this service holds no transaction, so the saved row stays).
    */
-  async createSegment(input: CreateCustomerSegmentInput, createdBy: string) {
+  async createSegment(
+    input: CreateCustomerSegmentInput,
+    createdBy: string,
+  ): Promise<CustomerSegment | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound>> {
     const valid = this.buildSegmentConditions(input.criteria);
     if (isFailure(valid)) return valid;
 
@@ -101,7 +105,10 @@ export class CustomerSegmentationService {
    * Update an existing segment. As in `createSegment`, new criteria with a spend range that is not valid
    * money return their `MoneyFailure` before anything is written.
    */
-  async updateSegment(segmentId: CustomerSegmentId, input: UpdateCustomerSegmentInput) {
+  async updateSegment(
+    segmentId: CustomerSegmentId,
+    input: UpdateCustomerSegmentInput,
+  ): Promise<CustomerSegment | null | MoneyFailure | FailureOf<typeof CustomerSegmentNotFound>> {
     if (input.criteria) {
       const valid = this.buildSegmentConditions(input.criteria);
       if (isFailure(valid)) return valid;

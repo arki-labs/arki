@@ -173,6 +173,9 @@ export type NewCustomerRiskProfile = InferInsertModel<DunningTables['customerRis
 // Domain Model Types (uses undefined for optional fields)
 // Removed manual domain models in favor of Drizzle inferred types
 
+/** A campaign with its steps (its templates). */
+export type DunningCampaignWithSteps = DunningCampaign & { templates: DunningTemplate[] };
+
 // Domain Model Types (with templates included)
 export type DunningCampaignWithTemplates = DunningCampaign & {
   templates?: DunningTemplate[];

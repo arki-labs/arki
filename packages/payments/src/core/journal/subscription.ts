@@ -16,7 +16,7 @@
 import { eq } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
-import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { EventDef, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
@@ -60,6 +60,67 @@ const subscriptionCreatedSchema = z.object({ providerSubscriptionId: z.string(),
 const subscriptionSyncedSchema = z.object(snapshotShape);
 
 type Snapshot = z.input<typeof subscriptionSyncedSchema>;
+
+const subscriptionActivatedSchema = z.object({});
+const subscriptionCanceledSchema = z.object({
+  status: statusSchema,
+  canceledAt: isoSchema.nullable(),
+  cancelAtPeriodEnd: z.boolean(),
+});
+const subscriptionReactivatedSchema = z.object({ status: statusSchema });
+const subscriptionPausedSchema = z.object({ status: statusSchema });
+const subscriptionResumedSchema = z.object({ status: statusSchema });
+const subscriptionPlanChangedSchema = z.object({ planId: planIdSchema });
+const subscriptionCancelAtPeriodEndSetSchema = z.object({ cancelAtPeriodEnd: z.boolean() });
+const subscriptionPastDueSchema = z.object({});
+
+// The events have names (interfaces over `EventDef`), so the journal's types say `SubscriptionPausedEvent`
+// instead of the event's whole schema type, in declaration files and editor hovers alike.
+/** A subscription was stored for the first time, with the state the provider reported. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionCreatedEvent extends EventDef<'SubscriptionCreated', typeof subscriptionCreatedSchema> {}
+/** The provider's state differs from the row: a webhook delivery or a manual sync. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionSyncedEvent extends EventDef<'SubscriptionSynced', typeof subscriptionSyncedSchema> {}
+/** A payment went through: the subscription is `active`. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionActivatedEvent extends EventDef<
+  'SubscriptionActivated',
+  typeof subscriptionActivatedSchema
+> {}
+/** The subscription was canceled, now or at the end of the paid period. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionCanceledEvent extends EventDef<
+  'SubscriptionCanceled',
+  typeof subscriptionCanceledSchema
+> {}
+/** A canceled or past-due subscription was turned back on. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionReactivatedEvent extends EventDef<
+  'SubscriptionReactivated',
+  typeof subscriptionReactivatedSchema
+> {}
+/** The subscription was paused. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionPausedEvent extends EventDef<'SubscriptionPaused', typeof subscriptionPausedSchema> {}
+/** A paused subscription was resumed. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionResumedEvent extends EventDef<'SubscriptionResumed', typeof subscriptionResumedSchema> {}
+/** The provider moved the subscription to another plan. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionPlanChangedEvent extends EventDef<
+  'SubscriptionPlanChanged',
+  typeof subscriptionPlanChangedSchema
+> {}
+/** The subscription will (or will no longer) end when the paid period ends. The status does not change. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionCancelAtPeriodEndSetEvent extends EventDef<
+  'SubscriptionCancelAtPeriodEndSet',
+  typeof subscriptionCancelAtPeriodEndSetSchema
+> {}
+/** A payment failed for good: the subscription is `past_due`. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions
+export interface SubscriptionPastDueEvent extends EventDef<'SubscriptionPastDue', typeof subscriptionPastDueSchema> {}
 
 /**
  * A field left `undefined` means "the caller did not say": a new row gets the
@@ -198,28 +259,28 @@ export function createSubscriptionJournal<
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 >(j: JournalDefinitions<Meta, Tx, AppDb>, subscriptions: CoreTables['subscriptions']) {
-  /** A subscription was stored for the first time, with the state the provider reported. */
-  const SubscriptionCreated = j.event('SubscriptionCreated', subscriptionCreatedSchema);
-  /** The provider's state differs from the row: a webhook delivery or a manual sync. */
-  const SubscriptionSynced = j.event('SubscriptionSynced', subscriptionSyncedSchema);
-  /** A payment went through: the subscription is `active`. */
-  const SubscriptionActivated = j.event('SubscriptionActivated', z.object({}));
-  const SubscriptionCanceled = j.event(
-    'SubscriptionCanceled',
-    z.object({ status: statusSchema, canceledAt: isoSchema.nullable(), cancelAtPeriodEnd: z.boolean() }),
+  const SubscriptionCreated: SubscriptionCreatedEvent = j.event('SubscriptionCreated', subscriptionCreatedSchema);
+  const SubscriptionSynced: SubscriptionSyncedEvent = j.event('SubscriptionSynced', subscriptionSyncedSchema);
+  const SubscriptionActivated: SubscriptionActivatedEvent = j.event(
+    'SubscriptionActivated',
+    subscriptionActivatedSchema,
   );
-  const SubscriptionReactivated = j.event('SubscriptionReactivated', z.object({ status: statusSchema }));
-  const SubscriptionPaused = j.event('SubscriptionPaused', z.object({ status: statusSchema }));
-  const SubscriptionResumed = j.event('SubscriptionResumed', z.object({ status: statusSchema }));
-  /** The provider moved the subscription to another plan. */
-  const SubscriptionPlanChanged = j.event('SubscriptionPlanChanged', z.object({ planId: planIdSchema }));
-  /** The subscription will (or will no longer) end when the paid period ends. The status does not change. */
-  const SubscriptionCancelAtPeriodEndSet = j.event(
+  const SubscriptionCanceled: SubscriptionCanceledEvent = j.event('SubscriptionCanceled', subscriptionCanceledSchema);
+  const SubscriptionReactivated: SubscriptionReactivatedEvent = j.event(
+    'SubscriptionReactivated',
+    subscriptionReactivatedSchema,
+  );
+  const SubscriptionPaused: SubscriptionPausedEvent = j.event('SubscriptionPaused', subscriptionPausedSchema);
+  const SubscriptionResumed: SubscriptionResumedEvent = j.event('SubscriptionResumed', subscriptionResumedSchema);
+  const SubscriptionPlanChanged: SubscriptionPlanChangedEvent = j.event(
+    'SubscriptionPlanChanged',
+    subscriptionPlanChangedSchema,
+  );
+  const SubscriptionCancelAtPeriodEndSet: SubscriptionCancelAtPeriodEndSetEvent = j.event(
     'SubscriptionCancelAtPeriodEndSet',
-    z.object({ cancelAtPeriodEnd: z.boolean() }),
+    subscriptionCancelAtPeriodEndSetSchema,
   );
-  /** A payment failed for good: the subscription is `past_due`. */
-  const SubscriptionPastDue = j.event('SubscriptionPastDue', z.object({}));
+  const SubscriptionPastDue: SubscriptionPastDueEvent = j.event('SubscriptionPastDue', subscriptionPastDueSchema);
 
   const subscription = j
     .entity('subscription', subscriptions)
@@ -500,3 +561,10 @@ export function createSubscriptionJournal<
     },
   };
 }
+
+/** What `createSubscriptionJournal` returns for one app's journal definitions. */
+export type SubscriptionJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+> = ReturnType<typeof createSubscriptionJournal<Meta, Tx, AppDb>>;

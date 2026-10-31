@@ -7,6 +7,7 @@ import { and, count, desc, eq, gte, lt, lte } from 'drizzle-orm';
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
+import type { FailureOf } from '@arki/failure';
 import { invariant } from '@arki/failure';
 
 import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
@@ -40,6 +41,9 @@ import type {
 import { CustomerConflict, WebhookEventNotFound } from './failures.js';
 import { ReferenceNotFound } from './providers/provider-error.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
+
+type NotFound = FailureOf<typeof ReferenceNotFound>;
+type EventNotFound = FailureOf<typeof WebhookEventNotFound>;
 
 /**
  * Structural database type accepted by the payments repositories.
@@ -124,7 +128,7 @@ export class PaymentRepository {
   }
 
   /** The updated plan, or `ReferenceNotFound` when no plan has this id. */
-  async updatePlan(id: PlanId, data: UpdatePlan) {
+  async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan | NotFound> {
     const result = await this.db
       .update(this.plans)
       .set({ ...data, updatedAt: now() })
@@ -138,7 +142,7 @@ export class PaymentRepository {
   }
 
   /** The deactivated plan, or `ReferenceNotFound` when no plan has this id. */
-  async deactivatePlan(id: PlanId) {
+  async deactivatePlan(id: PlanId): Promise<Plan | NotFound> {
     const result = await this.db
       .update(this.plans)
       .set({ isActive: false, updatedAt: now() })
@@ -162,7 +166,7 @@ export class PaymentRepository {
    * that clashes with a different one (another provider id for the user, or the provider id
    * of another user) is returned as `CustomerConflict`, never a silent pick of either row.
    */
-  async createCustomer(data: NewCustomer) {
+  async createCustomer(data: NewCustomer): Promise<Customer | FailureOf<typeof CustomerConflict>> {
     const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
     if (created) {
       return created;
@@ -207,7 +211,7 @@ export class PaymentRepository {
   }
 
   /** The updated customer, or `ReferenceNotFound` when no customer has this id. */
-  async updateCustomer(id: CustomerId, data: UpdateCustomer) {
+  async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer | NotFound> {
     const result = await this.db
       .update(this.customers)
       .set({ ...data, updatedAt: now() })
@@ -415,7 +419,7 @@ export class PaymentRepository {
   }
 
   /** Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`. */
-  async claimWebhookEvent(data: NewWebhookEvent) {
+  async claimWebhookEvent(data: NewWebhookEvent): ReturnType<typeof claimWebhookEvent> {
     return claimWebhookEvent(this.db, this.webhookEvents, data);
   }
 
@@ -463,7 +467,7 @@ export class PaymentRepository {
   }
 
   /** The updated event, or `WebhookEventNotFound` when no event has this id. */
-  async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent) {
+  async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent): Promise<WebhookEvent | EventNotFound> {
     const result = await this.db
       .update(this.webhookEvents)
       .set({ ...data, updatedAt: now() })
@@ -477,7 +481,7 @@ export class PaymentRepository {
   }
 
   /** The processed event, or `WebhookEventNotFound` when no event has this id. */
-  async markWebhookEventAsProcessed(id: WebhookId) {
+  async markWebhookEventAsProcessed(id: WebhookId): Promise<WebhookEvent | EventNotFound> {
     const result = await this.db
       .update(this.webhookEvents)
       .set({
@@ -495,7 +499,7 @@ export class PaymentRepository {
   }
 
   /** The event with one more attempt, or `WebhookEventNotFound` when no event has this id. */
-  async incrementWebhookEventAttempts(id: WebhookId, errorMessage?: string) {
+  async incrementWebhookEventAttempts(id: WebhookId, errorMessage?: string): Promise<WebhookEvent | EventNotFound> {
     const currentEvent = await this.findWebhookEventById(id);
     if (!currentEvent) {
       return WebhookEventNotFound({ webhookId: id });
