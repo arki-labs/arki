@@ -225,6 +225,14 @@ OpenTelemetry; absent or faulty instrumentation does not change the result.
 
 `dbMigrations({ migrationsFolder })` applies pending migrations at boot. It also provides `migrations: { pending }`, the names it found pending and applied, read before applying (`pendingMigrations(db, options)` from `@arki/db/migrate` gives the same list on demand). `dot dev` prints it.
 
+`readMigrations`, `pendingMigrations` and `migrateDb` return canonical failures;
+check the result before using it or reporting completion. An unconfirmed apply
+may already have changed the database. Reconcile its schema and bookkeeping
+before explicitly running again. Dot stops boot on these failures. Default
+`db.migrations.read`, `db.migrations.pending` and `db.migrations.apply` spans
+inherit caller context and contain only canonical failure codes. See the
+[migration outcome guide](docs/upgrades/migration-outcomes.md).
+
 ### Projections (event sourcing read models)
 
 ```ts

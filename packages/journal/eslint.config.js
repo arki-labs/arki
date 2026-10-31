@@ -34,6 +34,8 @@ export default [
     files: ['src/**/*.ts'],
     ignores: [
       'src/**/*.test.ts',
+      // Type tests ship nowhere either (tsconfig.build.json excludes them), so they may import the peers.
+      'src/**/*.test-d.ts',
       'src/dot.ts',
       'src/orpc.ts',
       'src/kurrentdb.ts',
