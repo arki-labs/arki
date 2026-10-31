@@ -177,7 +177,6 @@
   },
   "arki": {
     "runtimes": [
-      "node",
       "bun",
       "deno",
       "browser"

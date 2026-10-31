@@ -39,16 +39,16 @@ export function SearchButton() {
 
 Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
 
-`bun run test:runtimes` renders an icon to HTML, reads the brand data and checks the spinner names on Node, Bun, Deno and a browser. Hermes is not claimed: the package targets web React.
+`bun run test:runtimes` renders an icon to HTML, reads the brand data and checks the spinner names on Bun, Deno and a browser. Plain Node is not claimed: the package ships TypeScript source, and Node does not strip types inside `node_modules`. On Node, import it through a bundler (Vite, Next, TanStack Start). Hermes is not claimed: the package targets web React.
 
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |
 | --- | --- | --- | --- |
-| node | pass | v26.12.1 | 2026-10-30 |
-| bun | pass | 1.4.4 | 2026-10-30 |
-| deno | pass | 2.9.8 | 2026-10-30 |
-| browser | pass | Chromium 156.0.8078.4 | 2026-10-30 |
-| hermes | n/a | - | 2026-10-30 |
+| node | n/a | - | 2026-10-31 |
+| bun | pass | 1.4.4 | 2026-10-31 |
+| deno | pass | 2.9.8 | 2026-10-31 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-10-31 |
+| hermes | n/a | - | 2026-10-31 |
 <!-- runtimes:end -->
 
 ## Public imports
