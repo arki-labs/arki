@@ -32,7 +32,7 @@
  * ```
  */
 
-import { debugFactories } from './debug';
+import { debugFactories } from './debug.js';
 
 /**
  * Factory builder for creating test data with a fluent API

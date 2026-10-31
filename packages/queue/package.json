@@ -19,57 +19,53 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./types": {
-      "types": "./dist/src/types/index.d.ts",
-      "import": "./src/types/index.ts",
-      "node": "./src/types/index.ts"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js",
+      "default": "./dist/types/index.js"
     },
     "./errors": {
-      "types": "./dist/src/errors.d.ts",
-      "import": "./src/errors.ts",
-      "node": "./src/errors.ts"
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
     },
     "./contract": {
-      "types": "./dist/src/contract.d.ts",
-      "import": "./src/contract.ts",
-      "node": "./src/contract.ts"
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js",
+      "default": "./dist/contract.js"
     },
     "./runtime-local": {
-      "types": "./dist/src/runtime-local/index.d.ts",
-      "import": "./src/runtime-local/index.ts",
-      "node": "./src/runtime-local/index.ts"
+      "types": "./dist/runtime-local/index.d.ts",
+      "import": "./dist/runtime-local/index.js",
+      "default": "./dist/runtime-local/index.js"
     },
     "./dot": {
-      "types": "./dist/src/dot.d.ts",
-      "import": "./src/dot.ts",
-      "node": "./src/dot.ts",
-      "default": "./src/dot.ts"
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
     },
     "./outbox": {
-      "types": "./dist/src/outbox/index.d.ts",
-      "import": "./src/outbox/index.ts",
-      "node": "./src/outbox/index.ts",
-      "default": "./src/outbox/index.ts"
+      "types": "./dist/outbox/index.d.ts",
+      "import": "./dist/outbox/index.js",
+      "default": "./dist/outbox/index.js"
     },
     "./projection": {
-      "types": "./dist/src/projection.d.ts",
-      "import": "./src/projection.ts",
-      "node": "./src/projection.ts",
-      "default": "./src/projection.ts"
+      "types": "./dist/projection.d.ts",
+      "import": "./dist/projection.js",
+      "default": "./dist/projection.js"
     },
     "./foreman": {
-      "types": "./dist/src/foreman/index.d.ts",
-      "import": "./src/foreman/index.ts",
-      "node": "./src/foreman/index.ts",
-      "default": "./src/foreman/index.ts"
+      "types": "./dist/foreman/index.d.ts",
+      "import": "./dist/foreman/index.js",
+      "default": "./dist/foreman/index.js"
     },
     "./package.json": "./package.json"
   },
-  "types": "./dist/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist/**",
     "src/**",

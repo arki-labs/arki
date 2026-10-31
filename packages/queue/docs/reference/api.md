@@ -91,3 +91,10 @@ Flow enqueue returns `QueueAcceptanceUnknown` if its acknowledgement lacks any s
 nonempty job ID, contains extra nodes, or names a different job/queue. Accessor defects after
 submission return the same uncertainty. It never resubmits automatically: reconcile accepted jobs
 before retrying application effects. Confirmed IDs retain their provider bytes and every step key.
+
+## Helpers
+
+- `createBoard`: builds a Bull Board web page that lists your BullMQ queues, so you can look at jobs in the browser. Pass your queues and a base path; it returns the board and its Hono adapter to mount in your app.
+- `createJobContext`: wraps the worker context with `updateProgress`, `log` and the job itself. The runner calls it for you before your handler runs; call it directly only when you test a handler by hand.
+- `executeMiddlewareChain`: runs the middleware list around a job handler. Each middleware runs in order and can replace the context with `next({ ctx })`. Both the BullMQ and the runtime-local queue use it. It is internal plumbing; you rarely call it yourself.
+- `queueProducerActions` (from `@arki/queue/dot`): lists the outgoing actions (jobs and flows you enqueue) of a queue registry, so Dot can show what a feature sends. Dot calls it for you; it is internal.

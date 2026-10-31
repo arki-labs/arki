@@ -4,6 +4,7 @@
 
 ### Minor Changes
 
+- Publish compiled JavaScript in `dist/`; every export entry now imports under plain Node from the npm tarball.
 - 2c57c1c: Preserve typed business failures across job execution, scheduled runs and durable
   commands. BullMQ and pg-boss share outcome classification and explicit retry
   decisions; persisted refusals cannot become successful jobs. Queue submission

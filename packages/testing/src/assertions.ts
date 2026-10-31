@@ -9,8 +9,8 @@ import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { InvalidInput, orThrow } from '@arki/failure';
 import { formatIssues, parse } from '@arki/schema';
 
-import type { Timestamp } from './timestamps';
-import { describeKind, epochNanoseconds, isTimestamp } from './timestamps';
+import type { Timestamp } from './timestamps.js';
+import { describeKind, epochNanoseconds, isTimestamp } from './timestamps.js';
 
 /**
  * Assert that a pagination response is valid

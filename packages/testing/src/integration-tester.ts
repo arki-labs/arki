@@ -24,20 +24,20 @@ import type {
   TesterUsers,
   TestUser,
   TestUserRole,
-} from './types';
-import * as assertions from './assertions';
+} from './types.js';
+import * as assertions from './assertions.js';
 import {
   getGlobalPostgresConnectionString,
   getGlobalRedisConnectionString,
   startPostgresContainer,
   startRedisContainer,
-} from './containers';
-import * as debug from './debug';
-import { debugTester } from './debug';
-import { faker } from './factories';
-import * as performance from './performance';
-import type { Timestamp, Timestamps } from './timestamps';
-import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from './timestamps';
+} from './containers.js';
+import * as debug from './debug.js';
+import { debugTester } from './debug.js';
+import { faker } from './factories.js';
+import * as performance from './performance.js';
+import type { Timestamp, Timestamps } from './timestamps.js';
+import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from './timestamps.js';
 
 type CallerCollection<TCaller> = {
   public: TCaller;
@@ -1409,4 +1409,4 @@ export class IntegrationTester<
   }
 }
 
-export type * from './types';
+export type * from './types.js';

@@ -25,122 +25,120 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./ai": {
-      "types": "./dist/src/ai/index.d.ts",
-      "import": "./src/ai/index.ts",
-      "node": "./src/ai/index.ts"
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js",
+      "default": "./dist/ai/index.js"
     },
     "./ai/playwright": {
-      "types": "./dist/src/ai/playwright.d.ts",
-      "import": "./src/ai/playwright.ts",
-      "node": "./src/ai/playwright.ts"
+      "types": "./dist/ai/playwright.d.ts",
+      "import": "./dist/ai/playwright.js",
+      "default": "./dist/ai/playwright.js"
     },
     "./ai/vitest": {
-      "types": "./dist/src/ai/vitest.d.ts",
-      "import": "./src/ai/vitest.ts",
-      "node": "./src/ai/vitest.ts"
+      "types": "./dist/ai/vitest.d.ts",
+      "import": "./dist/ai/vitest.js",
+      "default": "./dist/ai/vitest.js"
     },
     "./assertions": {
-      "types": "./dist/src/assertions.d.ts",
-      "import": "./src/assertions.ts",
-      "node": "./src/assertions.ts"
+      "types": "./dist/assertions.d.ts",
+      "import": "./dist/assertions.js",
+      "default": "./dist/assertions.js"
     },
     "./containers": {
-      "types": "./dist/src/containers.d.ts",
-      "import": "./src/containers.ts",
-      "node": "./src/containers.ts"
+      "types": "./dist/containers.d.ts",
+      "import": "./dist/containers.js",
+      "default": "./dist/containers.js"
     },
     "./debug": {
-      "types": "./dist/src/debug.d.ts",
-      "import": "./src/debug.ts",
-      "node": "./src/debug.ts"
+      "types": "./dist/debug.d.ts",
+      "import": "./dist/debug.js",
+      "default": "./dist/debug.js"
     },
     "./factories": {
-      "types": "./dist/src/factories.d.ts",
-      "import": "./src/factories.ts",
-      "node": "./src/factories.ts"
+      "types": "./dist/factories.d.ts",
+      "import": "./dist/factories.js",
+      "default": "./dist/factories.js"
     },
     "./e2e": {
-      "types": "./dist/src/e2e/index.d.ts",
-      "import": "./src/e2e/index.ts",
-      "node": "./src/e2e/index.ts"
+      "types": "./dist/e2e/index.d.ts",
+      "import": "./dist/e2e/index.js",
+      "default": "./dist/e2e/index.js"
     },
     "./services/http-fixtures": {
-      "types": "./dist/src/services/http-fixtures.d.ts",
-      "import": "./src/services/http-fixtures.ts",
-      "node": "./src/services/http-fixtures.ts"
+      "types": "./dist/services/http-fixtures.d.ts",
+      "import": "./dist/services/http-fixtures.js",
+      "default": "./dist/services/http-fixtures.js"
     },
     "./services/mailpit": {
-      "types": "./dist/src/services/mailpit.d.ts",
-      "import": "./src/services/mailpit.ts",
-      "node": "./src/services/mailpit.ts"
+      "types": "./dist/services/mailpit.d.ts",
+      "import": "./dist/services/mailpit.js",
+      "default": "./dist/services/mailpit.js"
     },
     "./services/ollama": {
-      "types": "./dist/src/services/ollama.d.ts",
-      "import": "./src/services/ollama.ts",
-      "node": "./src/services/ollama.ts"
+      "types": "./dist/services/ollama.d.ts",
+      "import": "./dist/services/ollama.js",
+      "default": "./dist/services/ollama.js"
     },
     "./services/postgres": {
-      "types": "./dist/src/services/postgres.d.ts",
-      "import": "./src/services/postgres.ts",
-      "node": "./src/services/postgres.ts"
+      "types": "./dist/services/postgres.d.ts",
+      "import": "./dist/services/postgres.js",
+      "default": "./dist/services/postgres.js"
     },
     "./services/redis": {
-      "types": "./dist/src/services/redis.d.ts",
-      "import": "./src/services/redis.ts",
-      "node": "./src/services/redis.ts"
+      "types": "./dist/services/redis.d.ts",
+      "import": "./dist/services/redis.js",
+      "default": "./dist/services/redis.js"
     },
     "./stack": {
-      "types": "./dist/src/stack/index.d.ts",
-      "import": "./src/stack/index.ts",
-      "node": "./src/stack/index.ts"
+      "types": "./dist/stack/index.d.ts",
+      "import": "./dist/stack/index.js",
+      "default": "./dist/stack/index.js"
     },
     "./stack/contract": {
-      "types": "./dist/src/stack/contract.d.ts",
-      "import": "./src/stack/contract.ts",
-      "node": "./src/stack/contract.ts"
+      "types": "./dist/stack/contract.d.ts",
+      "import": "./dist/stack/contract.js",
+      "default": "./dist/stack/contract.js"
     },
     "./server/integration-tester": {
-      "types": "./dist/src/integration-tester.d.ts",
-      "import": "./src/integration-tester.ts",
-      "node": "./src/integration-tester.ts"
+      "types": "./dist/integration-tester.d.ts",
+      "import": "./dist/integration-tester.js",
+      "default": "./dist/integration-tester.js"
     },
     "./msw": {
-      "types": "./dist/src/msw.d.ts",
-      "import": "./src/msw.ts",
-      "node": "./src/msw.ts"
+      "types": "./dist/msw.d.ts",
+      "import": "./dist/msw.js",
+      "default": "./dist/msw.js"
     },
     "./performance": {
-      "types": "./dist/src/performance.d.ts",
-      "import": "./src/performance.ts",
-      "node": "./src/performance.ts"
+      "types": "./dist/performance.d.ts",
+      "import": "./dist/performance.js",
+      "default": "./dist/performance.js"
     },
     "./server/tester-builder": {
-      "types": "./dist/src/tester-builder.d.ts",
-      "import": "./src/tester-builder.ts",
-      "node": "./src/tester-builder.ts"
+      "types": "./dist/tester-builder.d.ts",
+      "import": "./dist/tester-builder.js",
+      "default": "./dist/tester-builder.js"
     },
     "./timestamps": {
-      "types": "./dist/src/timestamps.d.ts",
-      "import": "./src/timestamps.ts",
-      "node": "./src/timestamps.ts"
+      "types": "./dist/timestamps.d.ts",
+      "import": "./dist/timestamps.js",
+      "default": "./dist/timestamps.js"
     },
     "./vitest-setup": {
-      "types": "./dist/src/vitest-setup.d.ts",
-      "import": "./src/vitest-setup.ts",
-      "node": "./src/vitest-setup.ts"
+      "types": "./dist/vitest-setup.d.ts",
+      "import": "./dist/vitest-setup.js",
+      "default": "./dist/vitest-setup.js"
     },
     "./package.json": "./package.json"
   },
-  "types": "./dist/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
-    "dist/src/**/*.d.ts",
-    "!dist/src/**/*.test.d.ts",
-    "!dist/src/**/__fixtures__/**",
+    "dist/**",
     "src/**",
     "!src/**/*.test.ts",
     "!src/**/*.spec.ts",
@@ -156,9 +154,9 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",

@@ -26,8 +26,8 @@
  * ```
  */
 
-import type { IntegrationTesterConfig, TesterDatabase, TesterOptions } from './types';
-import { IntegrationTester } from './integration-tester';
+import type { IntegrationTesterConfig, TesterDatabase, TesterOptions } from './types.js';
+import { IntegrationTester } from './integration-tester.js';
 
 /**
  * Configuration for tester initialization. The schema, database and repository

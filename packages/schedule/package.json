@@ -19,33 +19,33 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./dot": {
-      "types": "./dist/src/dot.d.ts",
-      "import": "./src/dot.ts",
-      "node": "./src/dot.ts"
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
     },
     "./projection": {
-      "types": "./dist/src/projection.d.ts",
-      "import": "./src/projection.ts",
-      "node": "./src/projection.ts"
+      "types": "./dist/projection.d.ts",
+      "import": "./dist/projection.js",
+      "default": "./dist/projection.js"
     },
     "./runtime": {
-      "types": "./dist/src/runtime.d.ts",
-      "import": "./src/runtime.ts",
-      "node": "./src/runtime.ts"
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
     },
     "./orpc": {
-      "types": "./dist/src/orpc.d.ts",
-      "import": "./src/orpc.ts",
-      "node": "./src/orpc.ts"
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
     },
     "./package.json": "./package.json"
   },
-  "types": "./dist/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist/**",
     "src/**",

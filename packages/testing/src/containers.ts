@@ -7,7 +7,7 @@ import type { StartedTestContainer } from 'testcontainers';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { GenericContainer } from 'testcontainers';
 
-import { debugContainers } from './debug';
+import { debugContainers } from './debug.js';
 
 export const POSTGRES_GLOBAL_KEY = '__POSTGRES_CONNECTION_STRING__';
 export const REDIS_GLOBAL_KEY = '__REDIS_CONNECTION_STRING__';

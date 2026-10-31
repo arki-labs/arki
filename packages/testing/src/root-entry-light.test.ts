@@ -33,7 +33,7 @@ function walk(entry: string): { files: string[]; packages: string[] } {
     if (file === undefined || files.has(file)) continue;
     files.add(file);
     for (const spec of runtimeSpecifiers(file)) {
-      if (spec.startsWith('.')) queue.push(`${path.resolve(path.dirname(file), spec)}.ts`);
+      if (spec.startsWith('.')) queue.push(`${path.resolve(path.dirname(file), spec.replace(/\.js$/, ''))}.ts`);
       else packages.add(spec);
     }
   }

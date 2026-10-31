@@ -9,18 +9,18 @@
  */
 
 // Factory system
-export * from './factories';
-export { createFactories } from './factories';
+export * from './factories.js';
+export { createFactories } from './factories.js';
 
 // Enhanced assertions
-export * from './assertions';
-export * from './timestamps';
+export * from './assertions.js';
+export * from './timestamps.js';
 
 // Debug utilities
-export * from './debug';
+export * from './debug.js';
 
 // Performance utilities
-export * from './performance';
+export * from './performance.js';
 
 // The root loads no Docker client, no msw and no `@arki/auth`. These are explicit entries:
 //   '@arki/testing/containers'         testcontainers (setupGlobalTestContainers, startPostgresContainer, ...)

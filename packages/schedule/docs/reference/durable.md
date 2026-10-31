@@ -105,3 +105,7 @@ Feature schedules with `lock:` run under their own lock for the whole handler
 (see "One replica at a time" above). Each process runs at most one tick of a schedule at a time. A run
 that outlasts its interval can still overlap the next tick on another
 replica, because the next tick is queued when the current one starts.
+
+### `ScheduleDurableStartFailed`
+
+The failure that `start()` returns when the durable backend refuses to register the durable schedules (for BullMQ, usually a lost Redis connection). It has the code `schedule.durable_start_failed`. None of the durable schedules will run until you restore the backend and start the runtime again.
