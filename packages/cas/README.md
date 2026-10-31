@@ -15,12 +15,14 @@ Simplify a formula, differentiate it, and read the conditions that the result ne
 ```ts run
 import { derivative } from '@arki/cas/derivative';
 import { simplify } from '@arki/cas/simplify';
+import { orThrow } from '@arki/failure';
 
-const simplified = simplify('x/x');
+// A string can fail, so each verb returns a result or a failure. `orThrow` is the short way to say "this text is known good".
+const simplified = orThrow(simplify('x/x'));
 if (simplified.result.source !== '1') throw new Error('x/x did not simplify to 1');
 if (simplified.conditions.length !== 1) throw new Error('the lost restriction x != 0 must come back as a condition');
 
-const slope = derivative('x^3', 'x');
+const slope = orThrow(derivative('x^3', 'x'));
 if (slope.result.source !== '3 * x^2') throw new Error(`unexpected derivative: ${slope.result.source}`);
 ```
 
@@ -28,12 +30,13 @@ if (slope.result.source !== '3 * x^2') throw new Error(`unexpected derivative: $
 
 ```ts
 import { exactRoots, expand, polynomialIn } from '@arki/cas/polynomial';
+import { orThrow } from '@arki/failure';
 
-expand('(x + 1)^3').result.source; // 'x^3 + 3 * x^2 + 3 * x + 1'
-expand('0.02*x + 5').result.source; // 'x / 50 + 5'
-expand('0.02*x + 5', { numbers: 'decimal' }).result.source; // '0.02 * x + 5'
+orThrow(expand('(x + 1)^3')).result.source; // 'x^3 + 3 * x^2 + 3 * x + 1'
+orThrow(expand('0.02*x + 5')).result.source; // 'x / 50 + 5'
+orThrow(expand('0.02*x + 5', { numbers: 'decimal' })).result.source; // '0.02 * x + 5'
 
-const form = polynomialIn('x/x + x^2 - x - 2', 'x');
+const form = orThrow(polynomialIn('x/x + x^2 - x - 2', 'x'));
 // { kind: 'polynomial', coefficients: [-1, -1, 1] as Exprs, conditions: [x ≠ 0] }
 if (form.kind === 'polynomial') exactRoots(form).roots.map(r => r.value.source); // ['(-sqrt(5) + 1) / 2', '(sqrt(5) + 1) / 2']
 
@@ -66,32 +69,35 @@ Pure TypeScript on `@arki/expr` and `@arki/math`, with no Node built-ins. It run
 
 ## Failure behaviour
 
-Every verb returns a result or throws. A result never holds `NaN`.
+Every verb returns a result, returns a failure (for a string) or throws (for an `Expr`). A result never holds `NaN`.
 
 - **Input outside what the verb handles:** `CasError` with a `code` (`unsupported-function`, `not-differentiable`, `not-in-domain`, `bad-variable`, `not-rational`, `not-polynomial`, `unsupported-constant`), a one-sentence `remediation` and a `span` into the input. Show the span and the remediation.
 - **Over a budget:** `CasLimitError` with `budget`, `limit` and `actual`. Reject the input or raise the budget on purpose.
 - **A rewrite that widened the domain:** not a failure. The result lists `conditions`. Show them next to the answer.
 - **A sign that cannot be decided:** `exactRoots` returns that part as `numeric` with `exact: false`. It never guesses.
-- **Parse errors:** text that is not an expression throws `ParseError` from `@arki/expr`.
+- **Text that does not parse or cannot be handled:** a verb given a string returns a failure instead of throwing. It is `parse`'s own failure, or one of `UnsupportedText`, `OverCasBudget` and `NoCasValue` (the list `CAS_TEXT_FAILURES`). Check with `isFailure` from `@arki/failure`. The failure's `cause` is the error described above. The same verbs given an `Expr` you built still throw.
+
+| Failure           | Code                   | When                                                                                         |
+| ----------------- | ---------------------- | -------------------------------------------------------------------------------------------- |
+| `UnsupportedText` | `cas.unsupported_text` | The text parses, but the verb does not handle it, such as `floor(x)` given to `derivative`.  |
+| `OverCasBudget`   | `cas.over_budget`      | The text went over a cas budget. The `cause` is a `CasLimitError` with `budget` and `limit`. |
+| `NoCasValue`      | `cas.no_value`         | The text parses, but it has no value, such as `x/0`, or a number grew too big.               |
 
 ## Limits
 
 Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). `factor` checks `factorDegree` (128) and `factorDigits` (300 digits in a coefficient) on each square-free part, `liftDigits` (2 000 digits in the Hensel modulus) before lifting and `recombination` (65 536 candidate products) while recombining; bigint arithmetic spends fuel by size, so hostile inputs throw within a second. A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
 
-Boundary example: the default `degree` budget is 1 000. `expand('x^500')` works. `expand('x^1001')` throws `CasLimitError` with `budget: 'degree'`, `limit: 1000` and `actual: 1001`, before any work.
+Boundary example: the default `degree` budget is 1 000. `expand('x^500')` works. `expand('x^1001')` returns `OverCasBudget`, whose `cause` is a `CasLimitError` with `budget: 'degree'`, `limit: 1000` and `actual: 1001`, before any work.
 
 ```ts run
 import { CasLimitError } from '@arki/cas';
 import { expand } from '@arki/cas/polynomial';
+import { isFailure } from '@arki/failure';
 
-expand('x^500');
-let caught: CasLimitError | undefined;
-try {
-  expand('x^1001');
-} catch (error) {
-  if (error instanceof CasLimitError) caught = error;
-}
-if (caught?.budget !== 'degree' || caught.limit !== 1000) throw new Error('the degree budget did not trip at 1001');
+if (isFailure(expand('x^500'))) throw new Error('degree 500 is inside the budget');
+const refused = expand('x^1001');
+if (!isFailure(refused) || !(refused.cause instanceof CasLimitError)) throw new Error('the degree budget did not trip at 1001');
+if (refused.cause.budget !== 'degree' || refused.cause.limit !== 1000) throw new Error('the degree budget did not trip at 1001');
 ```
 
 ## Documentation
@@ -170,15 +176,16 @@ Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied`
 
 ```ts
 import { derivative } from '@arki/cas/derivative';
+import { orThrow } from '@arki/failure';
 
-derivative('x^3 - 2*x^2 + x', 'x').result.source; // '3 * x^2 - 4 * x + 1'
-derivative('sin(x^2)', 'x').result.source; // '2 * x * cos(x^2)'
-derivative('x^2 * y', 'y').result.source; // 'x^2': other names are constants
-derivative('x^5', 'x', { order: 5 }).result.source; // '120'
+orThrow(derivative('x^3 - 2*x^2 + x', 'x')).result.source; // '3 * x^2 - 4 * x + 1'
+orThrow(derivative('sin(x^2)', 'x')).result.source; // '2 * x * cos(x^2)'
+orThrow(derivative('x^2 * y', 'y')).result.source; // 'x^2': other names are constants
+orThrow(derivative('x^5', 'x', { order: 5 })).result.source; // '120'
 derivative('ln(x)', 'x'); // '1 / x', conditions: [x > 0]: ln is only defined there
 derivative('abs(x)', 'x'); // 'sign(x)', conditions: [x ≠ 0 (differentiable)]
-derivative('sin(x^2)', 'x', { simplify: false }).result.source; // 'cos(x^2) * (2 * x)'
-derivative('floor(x)', 'x'); // throws CasError 'not-differentiable', span of floor(x)
+orThrow(derivative('sin(x^2)', 'x', { simplify: false })).result.source; // 'cos(x^2) * (2 * x)'
+derivative('floor(x)', 'x'); // returns UnsupportedText: its cause is CasError 'not-differentiable', span of floor(x)
 ```
 
 Rules: constant, variable, sum, constant multiple, product, quotient, power, exponential (`a^u`, `e^u`, `exp`), general power `f^g`, logarithms (`ln`, `log`, `log(u, b)`, `log10`, `log2`), every trig, inverse trig, hyperbolic and inverse hyperbolic function of expr's `scientific` language, roots (`sqrt`, `cbrt`, `nthRoot`), `abs`, and the chain rule. `floor ceil round fix sign mod` of the variable throw `not-differentiable` (their derivative is 0 almost everywhere, and 0 would hide the jumps); `factorial`, `gamma` and host functions throw `unsupported-function`. Of a constant, any function is 0. Each distinct subterm is derived once (hash-consing), so the cost is linear in the expression's DAG; each order is normalized by the `simplify` rule table before the next.
@@ -187,8 +194,9 @@ Rules: constant, variable, sum, constant multiple, product, quotient, power, exp
 
 ```ts
 import { derivation, ruleFormula, TEMPLATE_KEYS } from '@arki/cas/derivation';
+import { orThrow } from '@arki/failure';
 
-const { steps } = derivation('sin(x^2)', 'x');
+const { steps } = orThrow(derivation('sin(x^2)', 'x'));
 // #0 derivation                    sin(x^2) → 2 * x * cos(x^2)
 //   #1 order 1                     sin(x^2) → 2 * x * cos(x^2)
 //     #2 chain                     sin(x^2) → cos(x^2) * (2 * x)
@@ -268,9 +276,10 @@ No English is built in: `template.key` is the translation key, and `TEMPLATE_KEY
 
 ```ts
 import { factor } from '@arki/cas/polynomial';
+import { orThrow } from '@arki/failure';
 
 factor('x^2/2 - 1/8', 'x'); // content 1/8, factors 2 * x + 1 and 2 * x - 1, complete: true
-factor('x^60 - 1', 'x').factors.length; // 12 cyclotomic factors
+orThrow(factor('x^60 - 1', 'x')).factors.length; // 12 cyclotomic factors
 factor('y*x^2 - y', 'x'); // content y, factors x + 1 and x - 1, complete: true
 factor('x^2 - y', 'x'); // content 1, factor x^2 - y, complete: false
 ```

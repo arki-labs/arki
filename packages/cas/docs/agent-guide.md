@@ -20,8 +20,9 @@ Read `llms.txt` first for the map. When this guide and `AGENTS.md` disagree, `AG
 
 ```ts
 import { simplify } from '@arki/cas/simplify';
+import { orThrow } from '@arki/failure';
 
-const { result, conditions } = simplify('sqrt(x^2)', { assume: { x: 'nonnegative' } });
+const { result, conditions } = orThrow(simplify('sqrt(x^2)', { assume: { x: 'nonnegative' } }));
 // result.source is 'x'; conditions holds x >= 0 (assumed)
 ```
 
@@ -43,6 +44,7 @@ const { result, conditions } = simplify('sqrt(x^2)', { assume: { x: 'nonnegative
 - A result can have more cases than the input. Always render `conditions`.
 - `x^1000` trips the `digits` budget before the `degree` budget. Raise budgets on purpose, through options.
 - The root entry holds types and errors only. Import verbs from their subpath.
+- A verb given a string returns a failure instead of throwing. Check it with `isFailure` from `@arki/failure`, or use `orThrow` when the text is known good. The same verb given an `Expr` throws.
 
 ## Errors
 
@@ -55,6 +57,14 @@ const { result, conditions } = simplify('sqrt(x^2)', { assume: { x: 'nonnegative
 | `CasError` `not-rational`, `not-polynomial` | The input has the wrong shape               | Pass a rational function or a polynomial         |
 | `CasError` `unsupported-constant`           | A constant cas cannot zero-test             | Replace it with a name                           |
 | `CasLimitError`                             | A budget was exceeded                       | Reject the input, or raise the budget on purpose |
+
+Text failures, returned by a verb given a string (`CAS_TEXT_FAILURES`; `parse`'s own failure can come back too):
+
+| Failure           | Meaning                                                    | What to do                                  |
+| ----------------- | ---------------------------------------------------------- | ------------------------------------------- |
+| `UnsupportedText` | The text parses, but the verb does not handle it           | Show `cause.code` and the span of the cause |
+| `OverCasBudget`   | The text went over a budget (`cause` is a `CasLimitError`) | Reject the input, or raise the budget       |
+| `NoCasValue`      | The text has no value, such as `x/0`                       | Tell the user the expression has no value   |
 
 ## Verify
 
