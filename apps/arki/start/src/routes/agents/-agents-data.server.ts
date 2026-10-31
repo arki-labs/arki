@@ -16,6 +16,8 @@ import { summarizeProtocol } from './-protocol-summary';
  */
 export async function readProtocolPage() {
   return await compileMarkdown(demoteHeadings(demoteHeadings(protocol)), {
+    // The protocol is a file in this repo, so its raw HTML is kept.
+    trustedHtml: true,
     rewriteLink: href => (href.startsWith('http') || href.startsWith('#') ? undefined : null),
   });
 }

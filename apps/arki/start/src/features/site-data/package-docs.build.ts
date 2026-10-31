@@ -46,7 +46,7 @@ export async function compileDoc(
   cache: (compute: () => Promise<CompiledMarkdown>) => Promise<CompiledMarkdown>,
   rewriteLink?: CompileMarkdownOptions['rewriteLink'],
 ) {
-  const { html, headings } = await cache(() => compileMarkdown(document.content, { rewriteLink }));
+  const { html, headings } = await cache(() => compileMarkdown(document.content, { rewriteLink, trustedHtml: true }));
   const firstH1 = headings.find(heading => heading.depth === 1)?.text;
   const title = document.title ?? firstH1 ?? document._meta.fileName.replace(/\.md$/, '');
   return { html, headings, title };
