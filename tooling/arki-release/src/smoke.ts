@@ -139,6 +139,8 @@ export function exportSpecs(manifest: z.infer<typeof manifestSchema>): string[] 
 
 /** The text consumer-smoke.mjs prints after the spec of a skipped bundler-only entry. */
 const BUNDLER_ONLY_SKIP = 'bundler-only entry';
+/** How many with-peers installs smoke runs while each one reveals a further optional peer. */
+const MAX_PEER_ROUNDS = 4;
 
 /**
  * The `arki.bundlerOnly` claim as import specs. These entries load only inside
@@ -361,24 +363,42 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
 
     // --- Optional peers: clear error without, works with ---
     if (peerSkips.size > 0) {
-      const peerRanges = new Map<string, string>();
-      for (const pkg of installed) {
-        for (const peer of peerSkips.get(pkg.name) ?? []) {
-          // A peer from the candidate (@arki/admin, peered by journal and queue)
-          // keeps its tarball spec: npm refuses a direct dependency whose spec
-          // differs from its override (EOVERRIDE).
-          peerRanges.set(peer, tarballOf.has(peer) ? fileSpec(peer) : (pkg.manifest.peerDependencies?.[peer] ?? '*'));
-        }
-      }
       const withPeers = path.join(consumer, 'with-peers');
       await mkdir(withPeers);
-      await writeFile(
-        path.join(withPeers, 'package.json'),
-        JSON.stringify({ name: 'arki-smoke-peers', private: true, type: 'module', dependencies: { ...dependencies, ...Object.fromEntries(peerRanges) }, overrides }, null, 2),
-      );
-      const peerInstall = await run('npm', ['install', '--no-audit', '--no-fund'], { cwd: withPeers });
       await cp(path.join(smokeDir, 'consumer-smoke.mjs'), path.join(withPeers, 'consumer-smoke.mjs'));
-      const peerRun = peerInstall.code === 0 ? await run('node', ['consumer-smoke.mjs'], { cwd: withPeers }) : peerInstall;
+      const installWithPeers = async () => {
+        const peerRanges = new Map<string, string>();
+        for (const pkg of installed) {
+          for (const peer of peerSkips.get(pkg.name) ?? []) {
+            // A peer from the candidate (@arki/admin, peered by journal and queue)
+            // keeps its tarball spec: npm refuses a direct dependency whose spec
+            // differs from its override (EOVERRIDE).
+            peerRanges.set(peer, tarballOf.has(peer) ? fileSpec(peer) : (pkg.manifest.peerDependencies?.[peer] ?? '*'));
+          }
+        }
+        await writeFile(
+          path.join(withPeers, 'package.json'),
+          JSON.stringify({ name: 'arki-smoke-peers', private: true, type: 'module', dependencies: { ...dependencies, ...Object.fromEntries(peerRanges) }, overrides }, null, 2),
+        );
+        const install = await run('npm', ['install', '--no-audit', '--no-fund'], { cwd: withPeers });
+        return { install, result: install.code === 0 ? await run('node', ['consumer-smoke.mjs'], { cwd: withPeers }) : install };
+      };
+      // An entry names only the first optional peer it misses, so installing that one can
+      // reveal the next (`@arki/db/eslint` needs `@typescript-eslint/utils`, then `typescript`).
+      // Install again while a run names a new peer of a package that already skipped one.
+      let { install: peerInstall, result: peerRun } = await installWithPeers();
+      for (let round = 1; round < MAX_PEER_ROUNDS && peerInstall.code === 0; round++) {
+        let found = false;
+        for (const l of parseSmokeOutput(peerRun.stdout)) {
+          const peer = /optional peer (\S+) not installed/.exec(l.rest)?.[1];
+          const peers = peerSkips.get(packageOfSpec(l.spec));
+          if (peer === undefined || peers === undefined || peers.has(peer)) continue;
+          peers.add(peer);
+          found = true;
+        }
+        if (!found) break;
+        ({ install: peerInstall, result: peerRun } = await installWithPeers());
+      }
       for (const [name, peers] of peerSkips) {
         const lines = parseSmokeOutput(peerRun.stdout).filter(l => packageOfSpec(l.spec) === name);
         // A bundler-only SKIP is expected here too: the Vite build covers it.

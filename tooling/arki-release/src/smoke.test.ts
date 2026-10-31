@@ -210,6 +210,34 @@ describe('runSmoke', () => {
     expect(envelope.status).toBe('success');
   });
 
+  it('installs a second optional peer that only shows once the first one is there', async () => {
+    // Why: an entry names only the first peer it misses. @arki/db/eslint needs
+    // @typescript-eslint/utils and then typescript; installing only the first failed
+    // a package that works with both, and blocked the infra wave.
+    const dir = makeCandidate(['@arki/journal']);
+    const peerManifest = pkg('@arki/journal', '1.0.0', {
+      peerDependencies: { zod: '^4', valibot: '^1' },
+      peerDependenciesMeta: { zod: { optional: true }, valibot: { optional: true } },
+    });
+    const needsZod: Fixture = { manifest: peerManifest, files: { 'index.js': "import 'zod';\n" } };
+    const inner = fakeRunner({ packed: { journal: peerManifest }, installed: { '@arki/journal': needsZod } });
+    const runner: ExecRunner = (command, args, opts) => {
+      if (command === 'npm' && args[0] === 'install' && opts.cwd.endsWith('with-peers')) {
+        const deps = (JSON.parse(readFileSync(path.join(opts.cwd, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }).dependencies;
+        const target = path.join(opts.cwd, 'node_modules', '@arki', 'journal');
+        mkdirSync(target, { recursive: true });
+        writeFileSync(path.join(target, 'package.json'), JSON.stringify(peerManifest));
+        writeFileSync(path.join(target, 'index.js'), 'valibot' in deps ? 'export const ok = 1;\n' : "import 'valibot';\n");
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      }
+      return inner.runner(command, args, opts);
+    };
+    const envelope = await runSmoke(base(dir, runner));
+    const item = envelope.items.find(i => i.name === '@arki/journal');
+    expect(item?.checks.find(c => c.id === 'optional-peer')).toMatchObject({ status: 'pass', detail: expect.stringContaining('zod, valibot') });
+    expect(envelope.status).toBe('success');
+  });
+
   it('installs an optional peer that is in the candidate from its tarball, not its peer range', async () => {
     // Why: @arki/journal peers on @arki/admin (^0.3.0) and both are in the candidate.
     // The with-peers step listed admin as a dependency with the range while
