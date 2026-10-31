@@ -60,6 +60,7 @@ type ManifestFixture = ParsedManifest & {
   readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
   readonly bundleDependencies?: readonly string[];
   readonly engines?: Readonly<Record<string, string>>;
+  readonly arki?: unknown;
 };
 
 function fixture(overrides: Partial<ManifestFixture> = {}): ManifestFixture {
@@ -448,5 +449,24 @@ describe('materializeManifest — boundary cases', () => {
     const codes = result.errors.map(e => e.code).sort();
     // Two RELEASE_E005s (one for missing default-catalog entry, one for missing named catalog).
     expect(codes).toEqual(['RELEASE_E003', 'RELEASE_E004', 'RELEASE_E005', 'RELEASE_E005']);
+  });
+
+  it('keeps the arki claim, because the consumer smoke reads bundlerOnly from the installed package.json', () => {
+    // Why: without it the tarball loses `bundlerOnly` and the smoke imports
+    // @arki/auth/react under plain Node, which fails the whole wave.
+    const claim = { runtimes: ['node', 'browser'], bundlerOnly: ['./react'] };
+    const result = materializeManifest(fixture({ arki: claim }), ctx());
+    expect(result.manifest.arki).toEqual(claim);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('refuses a bad arki claim with RELEASE_E008 instead of shipping it', () => {
+    // Why: a typo like `runtimes: ['nodejs']` would ship a claim the smoke and
+    // the runtime checks cannot read; it must stop the release, not slip through.
+    const result = materializeManifest(fixture({ arki: { runtimes: ['nodejs'] } }), ctx());
+    const fatal = result.errors.find(e => e.code === 'RELEASE_E008');
+    expect(fatal?.severity).toBe('error');
+    expect(fatal?.message).toContain('runtimes.0');
+    expect(result.manifest.arki).toBeUndefined();
   });
 });

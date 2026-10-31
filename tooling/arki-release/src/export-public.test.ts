@@ -10,9 +10,11 @@
  * Each test isolates its own temp dir so they can run in parallel.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ReleaseConfig } from './types';
@@ -212,6 +214,41 @@ describe('exportPublicTree', () => {
 
     const written = readJson(path.join(tmp, baseConfig.publicTreePath, 'packages/assert/package.json'));
     expect(written).toMatchObject({ bin: { 'arki-assert': './dist/cli.js' } });
+  });
+
+  it('keeps arki.bundlerOnly, so the consumer smoke skips that entry under node instead of failing', async () => {
+    // Why: the smoke reads the INSTALLED package.json. When the exporter dropped
+    // `arki`, @arki/auth and @arki/tanstack-start tarballs lost the claim and
+    // their bundler-only entries were imported under Node and failed.
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      type: 'module',
+      exports: { '.': './dist/index.js', './react': './dist/react.js' },
+      files: ['dist'],
+      arki: { bundlerOnly: ['./react'] },
+    });
+    writeFixtureFile(tmp, 'packages/assert/README.md', '# @arki/assert\n');
+    writeFixtureFile(tmp, 'packages/assert/dist/index.js', 'export const ok = 1;\n');
+    writeFixtureFile(tmp, 'packages/assert/dist/react.js', "throw new Error('loads only inside a bundler');\n");
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+
+    const exported = path.join(tmp, baseConfig.publicTreePath, 'packages/assert');
+    expect(readJson(path.join(exported, 'package.json'))).toMatchObject({ arki: { bundlerOnly: ['./react'] } });
+
+    // Install the exported package by hand and run the real consumer smoke on it.
+    const consumer = path.join(tmp, 'consumer');
+    cpSync(exported, path.join(consumer, 'node_modules/@arki/assert'), { recursive: true });
+    cpSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'smoke/consumer-smoke.mjs'),
+      path.join(consumer, 'consumer-smoke.mjs'),
+    );
+    const smoke = spawnSync(process.execPath, ['consumer-smoke.mjs'], { cwd: consumer, encoding: 'utf8' });
+    expect(smoke.stdout).toContain('PASS');
+    expect(smoke.stdout).toMatch(/SKIP \S+ \S+ @arki\/assert\/react \(bundler-only entry/);
+    expect(smoke.status).toBe(0);
   });
 
   it('produces byte-identical output on consecutive runs (determinism)', async () => {

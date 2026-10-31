@@ -116,6 +116,8 @@ interface RawManifest {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly optionalDependencies?: Readonly<Record<string, string>>;
+  /** The `"arki"` claim, unchecked here: the materializer parses it with `arkiClaimSchema`. */
+  readonly arki?: unknown;
 }
 
 /**
@@ -484,6 +486,7 @@ function synthesizeParsedManifest(item: InventoryItem, raw: RawManifest): Parsed
     dependencies: raw.dependencies,
     peerDependencies: raw.peerDependencies,
     optionalDependencies: raw.optionalDependencies,
+    arki: raw.arki,
   };
   const base: ParsedManifest = {
     manifestPath: item.manifestPath,
@@ -542,6 +545,7 @@ async function readRawManifest(absolutePath: string): Promise<RawManifest> {
     dependencies: narrowStringRecord(m['dependencies']),
     peerDependencies: narrowStringRecord(m['peerDependencies']),
     optionalDependencies: narrowStringRecord(m['optionalDependencies']),
+    arki: m['arki'],
   };
 }
 
@@ -1164,6 +1168,7 @@ function serializePublishableManifest(manifest: PublishableManifest): Record<str
   }
   out['publishConfig'] = manifest.publishConfig;
   if (manifest.engines !== undefined) out['engines'] = manifest.engines;
+  if (manifest.arki !== undefined) out['arki'] = manifest.arki;
   return out;
 }
 

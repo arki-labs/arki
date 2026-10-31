@@ -177,6 +177,8 @@ npm view @arki/<pkg> version
 
 List only entries that truly need a bundler. Every other entry must still import in Node and Bun. Each key must be in `exports`, spelled the same (`./react`, not `react`). A key that is not there fails with `SMOKE_E010`.
 
+The smoke reads the claim from the INSTALLED `package.json`, so the claim must be in the tarball. The materializer keeps `arki` in the published manifest (since 2026-10-31; before that it was dropped and bundler-only entries still failed under Node). A claim that does not match `arkiClaimSchema` (`tooling/library/src/manifest.ts`) stops the export with `RELEASE_E008`. Check a tarball with `tar -xOzf <tgz> package/package.json | jq .arki`.
+
 ## "Stable release gate: BLOCKED" but I can't tell why
 
 **Symptom:** Scorecard says BLOCKED; gate decision shows multiple packages with multiple blockers.

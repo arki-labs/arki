@@ -21,11 +21,14 @@
  *       - unresolvable workspace deps (RELEASE_E004 — fatal),
  *       - unresolved catalogs   (RELEASE_E005 — fatal),
  *       - missing description    (RELEASE_E006 — warning, stubbed),
- *       - input `private: true`  (RELEASE_E007 — fatal).
+ *       - input `private: true`  (RELEASE_E007 — fatal),
+ *       - a bad `arki` claim     (RELEASE_E008 — fatal).
  *   - Strip `private`, `devDependencies`, `scripts`, `prettier`,
  *     `workspaces`, `packageManager`, `imports` from the published shape.
  *   - Merge `keywords` (input first, then defaults — deduplicated).
  *   - Merge `publishConfig` (input wins on conflict).
+ *   - Keep the `arki` claim: the consumer smoke reads it from the
+ *     installed package.json (`bundlerOnly` entries skip Node and Bun).
  *
  * Purity: no I/O, no globals. The function returns
  * {@link MaterializationResult}; the caller (Task 5) decides whether to
@@ -33,6 +36,8 @@
  */
 
 import debugFactory from 'debug';
+
+import { arkiClaimSchema } from '@arki/library-tooling/src/manifest';
 
 import { isCatalogRef, resolveCatalogRef } from './catalogs';
 import type { ParsedManifest } from './inventory';
@@ -62,6 +67,8 @@ export const MANIFEST_ERROR_CODES = {
   missingDescription: 'RELEASE_E006',
   /** Input manifest has `private: true` — refuse to materialize for publish. */
   privateInput: 'RELEASE_E007',
+  /** The `"arki"` claim does not match `arkiClaimSchema`. */
+  invalidArkiClaim: 'RELEASE_E008',
 } as const;
 
 /** Which dependency bucket is being processed — affects peer-dep ranges. */
@@ -133,6 +140,7 @@ export function materializeManifest(
   const homepage = pickString(inputRaw.homepage, ctx.metadataDefaults.homepage);
   const license = pickString(inputRaw.license, ctx.metadataDefaults.license);
   const publishConfig = mergePublishConfig(inputRaw.publishConfig, ctx);
+  const arki = resolveArkiClaim(input.name, inputRaw.arki, errors);
 
   const manifest: PublishableManifest = {
     name: input.name,
@@ -162,6 +170,7 @@ export function materializeManifest(
       ? { bundleDependencies: inputRaw.bundleDependencies }
       : {}),
     ...(inputRaw.engines !== undefined ? { engines: inputRaw.engines } : {}),
+    ...(arki !== undefined ? { arki } : {}),
   };
 
   return { manifest, errors };
@@ -207,6 +216,8 @@ interface ManifestRaw {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly optionalDependencies?: Readonly<Record<string, string>>;
+  /** Parsed by {@link resolveArkiClaim}, never trusted as typed. */
+  readonly arki?: unknown;
 }
 
 /**
@@ -243,6 +254,7 @@ function readManifestRaw(input: ParsedManifest): ManifestRaw {
     dependencies: raw.dependencies,
     peerDependencies: raw.peerDependencies,
     optionalDependencies: raw.optionalDependencies,
+    arki: raw.arki,
   };
 }
 
@@ -364,6 +376,29 @@ function resolveWorkspaceDep(
     return `^${version}`;
   }
   return version;
+}
+
+/**
+ * Parse the `"arki"` claim so it ships in the tarball. A claim that does not
+ * match `arkiClaimSchema` is RELEASE_E008 (fatal) and is left out.
+ */
+function resolveArkiClaim(
+  name: string,
+  raw: unknown,
+  errors: ReleaseError[],
+): PublishableManifest['arki'] {
+  if (raw === undefined) return undefined;
+  const parsed = arkiClaimSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  errors.push({
+    code: MANIFEST_ERROR_CODES.invalidArkiClaim,
+    severity: 'error',
+    message: `${name} has an invalid \`"arki"\` claim: ${parsed.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`,
+    target: name,
+    remediation:
+      'Fix `"arki"` in package.json: `runtimes` lists engines from node/bun/deno/browser/hermes, `bundlerOnly` lists exports keys like "./react".',
+  });
+  return undefined;
 }
 
 /**

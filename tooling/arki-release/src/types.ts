@@ -5,6 +5,10 @@
  * envelope, and the implementation modules introduced in later tasks.
  */
 
+import type { z } from 'zod';
+
+import type { arkiClaimSchema } from '@arki/library-tooling/src/manifest';
+
 import type { ReadinessResult } from './readiness';
 
 /**
@@ -511,6 +515,12 @@ export type PublishableManifest = {
   readonly bundleDependencies?: readonly string[];
   readonly publishConfig: Readonly<Record<string, unknown>>;
   readonly engines?: Readonly<Record<string, string>>;
+  /**
+   * The `"arki"` claim (`runtimes`, `bundlerOnly`). It must reach the tarball:
+   * the consumer smoke reads it from the INSTALLED package.json to skip
+   * bundler-only entries under plain Node and Bun.
+   */
+  readonly arki?: z.output<typeof arkiClaimSchema>;
 };
 
 /**
