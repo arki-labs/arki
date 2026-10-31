@@ -194,8 +194,8 @@ export class KV {
   ): Failure | { readonly value: SchemaOutput<Schema> | undefined } {
     if (stored === undefined) return { value: undefined };
     const parsed = parse(schema, stored);
-    if (isFailure(parsed) && InvalidInput.is(parsed)) {
-      return KvValueInvalid({ key, issues: formatIssues(parsed.data.issues) });
+    if (isFailure(parsed)) {
+      return InvalidInput.is(parsed) ? KvValueInvalid({ key, issues: formatIssues(parsed.data.issues) }) : parsed;
     }
     return { value: parsed };
   }
@@ -550,6 +550,8 @@ function findLimiter(entries: readonly LimiterEntry[], options: object): Limiter
   return undefined;
 }
 
+/** What `getRateLimiter(...).consume()` rejects with when the limit is hit; check it with `instanceof`. */
+export { RateLimiterRes } from 'rate-limiter-flexible';
 export { KvCancelled, KvCloseFailed, KvUnavailable, KvValueInvalid } from './errors.js';
 
 // Re-export factory functions

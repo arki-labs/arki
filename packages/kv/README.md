@@ -40,7 +40,7 @@ This needs a Redis at that URL, so the block is compiled and not run. In an app,
 
 ## Runtime support
 
-Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which need sockets. It does not run in a browser, Deno or Hermes. `@arki/kv/errors` has no Redis import. `RateLimitExceededError` can be matched anywhere.
+Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which need sockets. It does not run in a browser, Deno or Hermes. `@arki/kv/errors` has no Redis import.
 
 ## Usage
 
@@ -74,8 +74,7 @@ const kvOrNull = createKVInstance('pizzeria');
 ### Rate limiting
 
 ```ts
-import { createKV } from '@arki/kv';
-import { RateLimitExceededError } from '@arki/kv/errors';
+import { createKV, RateLimiterRes } from '@arki/kv';
 
 const kv = createKV('pizzeria');
 const userId = 'usr_ada';
@@ -84,8 +83,8 @@ const limiter = kv.getRateLimiter('login', { points: 5, duration: 60 });
 try {
   await limiter.consume(userId);
 } catch (cause) {
-  if (cause instanceof RateLimitExceededError) {
-    // 429 + Retry-After headers from `cause.getHttpHeaders(5)`.
+  if (cause instanceof RateLimiterRes) {
+    // 429. `cause.msBeforeNext` is the wait in ms: send it as `Retry-After` (seconds).
   }
 }
 ```
@@ -130,14 +129,14 @@ Upgrade with all old writers stopped: drain active requests, inventory legacy pe
 | --- | --- |
 | `@arki/kv` | `KV`, `createKV`, `createRateLimitKV` |
 | `@arki/kv/env` | `env`, the validated variables |
-| `@arki/kv/errors` | `RateLimitExceededError`, `KV_INITIALIZATION_ERROR_CODES`, `KVInitializationError` |
+| `@arki/kv/errors` | `KV_INITIALIZATION_ERROR_CODES`, `KVInitializationError` |
 | `@arki/kv/instance` | `initializeKV`, `createKVInstance` |
 | `@arki/kv/redis/idempotency` | `redisResponseCache`, the response cache for `@arki/http/idempotency` |
 | `@arki/kv/dot` | `kv()`, `kv.optional()`, the Dot unit |
 
 ## Failure behaviour
 
-- A rate limit hit throws `RateLimitExceededError`. Answer 429 and send `cause.getHttpHeaders(points)`.
+- A rate limit hit rejects `consume()` with the limiter's own `RateLimiterRes` (re-exported from `@arki/kv`). Answer 429 and send `Retry-After` from `cause.msBeforeNext / 1000`.
 - A missing URL: `createKV` throws. `createKVInstance` returns `null` in development and throws a `KVInitializationError` in production. Match on `error.code` (`KV_INIT_E001` to `KV_INIT_E003`).
 - The Dot unit fails boot with `ARKI_KV_PLUGIN_E001` (no URL) or `ARKI_KV_PLUGIN_E002` (the probe failed).
 - If the rate-limiter Redis client is not ready, the limiter uses memory instead of throwing. Your code keeps working. Persistence is briefly lost.

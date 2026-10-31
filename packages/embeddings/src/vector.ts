@@ -27,8 +27,7 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let aa = 0;
   let bb = 0;
-  for (let index = 0; index < a.length; index++) {
-    const x = a[index] ?? 0;
+  for (const [index, x] of a.entries()) {
     const y = b[index] ?? 0;
     dot += x * y;
     aa += x * x;

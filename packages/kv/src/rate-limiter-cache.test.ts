@@ -10,7 +10,7 @@
 import type { IRateLimiterOptions } from 'rate-limiter-flexible';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { KV } from './index.js';
+import { KV, RateLimiterRes } from './index.js';
 
 let kv: KV;
 
@@ -78,5 +78,12 @@ describe('KV.getRateLimiter() cache', () => {
     await get('carry', options).consume('user');
     const result = await get('carry', { ...options }).consume('user');
     expect(result.consumedPoints).toBe(2);
+  });
+
+  it('rejects with the limiter\'s own RateLimiterRes once the points are spent', async () => {
+    const limiter = get('refused', { points: 1, duration: 60 });
+    await limiter.consume('user');
+    const refusal: unknown = await limiter.consume('user').catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(RateLimiterRes);
   });
 });

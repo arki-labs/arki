@@ -10,7 +10,7 @@ import { AccessDenied, authed, AuthenticationRequired } from '@arki/auth';
 import { ZodError } from '@arki/contracts';
 import { step } from '@arki/dot/orpc';
 import { errorMap } from '@arki/failure/orpc';
-import { RateLimitExceededError } from '@arki/kv/errors';
+import { RateLimiterRes } from '@arki/kv';
 
 import type { RestrictedResource, UserPermission, UserRole } from '../features/auth';
 import type { ORPCContext } from './context';
@@ -51,7 +51,7 @@ const errorHandlingMiddleware = o.middleware(async ({ next }) => {
   try {
     return await next();
   } catch (error) {
-    if (error instanceof RateLimitExceededError) {
+    if (error instanceof RateLimiterRes) {
       await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
       throw new ORPCError('TOO_MANY_REQUESTS', {
         message: 'Rate limit exceeded. Try again later.',

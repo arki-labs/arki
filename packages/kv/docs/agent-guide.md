@@ -23,7 +23,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. `const limiter = kv.getRateLimiter('login', { points: 5, duration: 60 })`. Hold the limiter. Do not rebuild it per call.
 2. `await limiter.consume(userId)` inside a `try`.
-3. On `RateLimitExceededError`, answer 429 with `cause.getHttpHeaders(5)`.
+3. When the caught value is `instanceof RateLimiterRes` (import it from `@arki/kv`), answer 429 with `Retry-After` set to `cause.msBeforeNext / 1000`.
 
 ### Use Redis for idempotency keys
 

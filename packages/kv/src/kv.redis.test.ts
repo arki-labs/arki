@@ -12,6 +12,8 @@ import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
+import { AsyncSchema } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import { KvCancelled, KvCloseFailed, KvUnavailable, KvValueInvalid } from './errors.js';
 import { KV } from './index.js';
@@ -230,6 +232,25 @@ describe('get checks the stored value against the schema', () => {
     expect(await kv.mget([a, missing], z.number())).toEqual([1, undefined]);
     const wrong = await kv.mget([a, b], z.number());
     expect(KvValueInvalid.is(wrong)).toBe(true);
+    await closeCleanly(kv);
+  });
+});
+
+describe('a schema failure that is not a wrong shape is returned, never read as the value', () => {
+  // A Standard Schema whose `validate` returns a Promise: `parse` cannot run it synchronously.
+  const asyncSchema: StandardSchemaV1<unknown, number> = {
+    '~standard': { version: 1, vendor: 'test', validate: async () => ({ value: 1 }) },
+  };
+
+  it('get and mget return the failure itself', async () => {
+    const kv = new KV(url, 'async-schema-ns');
+    const key = fresh('async');
+    expect(await kv.set(key, 1, 100)).toBe(true);
+    // Before the fix the failure was wrapped as the stored value and returned as if it were data.
+    const got = await kv.get(key, asyncSchema);
+    expect(AsyncSchema.is(got)).toBe(true);
+    const many = await kv.mget([key], asyncSchema);
+    expect(AsyncSchema.is(many)).toBe(true);
     await closeCleanly(kv);
   });
 });

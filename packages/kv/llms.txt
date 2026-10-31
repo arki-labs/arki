@@ -7,9 +7,9 @@ A TTL on `KV` is seconds. A TTL on the idempotency cache is milliseconds.
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/kv`: A Redis-backed key-value store and rate-limiter client (`KV`) with an in-memory fallback. `KV`, `createKV`, `createRateLimitKV`.
+- `@arki/kv`: A Redis-backed key-value store and rate-limiter client (`KV`) with an in-memory fallback. `KV`, `createKV`, `createRateLimitKV`, `RateLimiterRes` (what `consume()` rejects with at the limit).
 - `@arki/kv/env`: The validated KV and Redis environment variables (`KV_URL`, `RATE_LIMIT_REDIS_URL`, ...). `env`.
-- `@arki/kv/errors`: `RateLimitExceededError` and the initialization error codes. `KVInitializationError`, `KV_INITIALIZATION_ERROR_CODES`, `RateLimitExceededError`.
+- `@arki/kv/errors`: the initialization error codes. `KVInitializationError`, `KV_INITIALIZATION_ERROR_CODES`.
 - `@arki/kv/instance`: Lazy-singleton helpers that build a `KV` from the environment. `createKVInstance`, `initializeKV`. Nothing is built at import.
 - `@arki/kv/redis/idempotency`: The HTTP response cache on Redis: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `redisResponseCache`; types `RedisResponseCacheOptions`.
 - `@arki/kv/dot`: DOT adapter for @arki/kv. `KV_PLUGIN_ERROR_CODES`, `kv`; types `KvDotOptions`, `KvServices`.
