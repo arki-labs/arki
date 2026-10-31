@@ -5,7 +5,7 @@
  * from `./providers/provider-error.js`.
  */
 import { z } from '@arki/contracts';
-import { defineFailure } from '@arki/failure';
+import { defineFailure, UnexpectedFailure } from '@arki/failure';
 
 /** What a caller asked a subscription to do, in `SubscriptionInvalidState`. */
 const subscriptionActionSchema = z.enum([
@@ -182,3 +182,11 @@ export const PaymentsConfigurationInvalid = /* @__PURE__ */ defineFailure('payme
   message: 'Payments setting {setting} is invalid: {problem}',
   remediation: 'Pass the capability or setting it names when the app builds the service.',
 });
+
+/**
+ * The thrown form of `payments.configuration_invalid`, for a setting the app passed when it built a
+ * service. Boot checks throw this; nothing at runtime does.
+ */
+export function misconfigured(setting: string, problem: string) {
+  return new UnexpectedFailure(PaymentsConfigurationInvalid({ setting, problem }));
+}

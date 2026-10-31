@@ -8,12 +8,11 @@ import type { Failure } from '@arki/failure';
 import { z } from '@arki/contracts';
 import { now } from '@arki/date';
 import { isFailure } from '@arki/failure';
-import { assert } from '@arki/schema';
 
 import type { Refund } from '../../refunds/types.js';
 import type { PaymentRepository } from '../repository.js';
 import { refundAmountOf } from '../../refunds/repository.js';
-import { NotificationFailed } from '../failures.js';
+import { misconfigured, NotificationFailed } from '../failures.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 import { observePayments } from '../telemetry.js';
 
@@ -66,13 +65,20 @@ const emailConfigSchema = z.object({
   }),
 });
 
+/** Throws `payments.configuration_invalid` for `setting` when `config` does not match `schema`; the problem lists each bad field. */
+function checkNotificationConfig(config: unknown, schema: z.ZodType, setting: string): void {
+  const checked = schema.safeParse(config);
+  if (checked.success) return;
+  throw misconfigured(setting, checked.error.issues.map(issue => `${issue.path.join('.') || '(config)'}: ${issue.message}`).join('; '));
+}
+
 /** Refund notifications by mail, sent through the transport the app passes in. */
 export class EmailNotificationService implements NotificationService {
   private readonly config: EmailNotificationConfig;
 
-  /** Throws `AssertError` for a config without a transport, reads, an admin address or a valid support address. */
+  /** Throws `payments.configuration_invalid` for a config without a transport, reads, an admin address or a valid support address. */
   constructor(config: EmailNotificationConfig) {
-    assert(config, emailConfigSchema, { at: 'notifications.email' });
+    checkNotificationConfig(config, emailConfigSchema, 'notifications.email');
     this.config = config;
   }
 
@@ -153,9 +159,9 @@ const slackConfigSchema = z.object({
 export class SlackNotificationService implements NotificationService {
   private readonly config: SlackNotificationConfig;
 
-  /** Throws `AssertError` for a config without a valid webhook URL, channels or admin URL. */
+  /** Throws `payments.configuration_invalid` for a config without a valid webhook URL, channels or admin URL. */
   constructor(config: SlackNotificationConfig) {
-    assert(config, slackConfigSchema, { at: 'notifications.slack' });
+    checkNotificationConfig(config, slackConfigSchema, 'notifications.slack');
     this.config = config;
   }
 
@@ -280,7 +286,7 @@ const multiConfigSchema = z
   .refine(config => config.email !== undefined || config.slack !== undefined, 'multi needs email, slack or both');
 
 /**
- * Builds the notification service a config names. Throws `AssertError` at boot for a config that
+ * Builds the notification service a config names. Throws `payments.configuration_invalid` at boot for a config that
  * cannot send: no transport, no webhook URL, a bad address, or a `multi` with no channel.
  *
  * @example
@@ -303,7 +309,7 @@ export function createNotificationService(config: NotificationServiceConfig): No
       return new SlackNotificationService(config.slack);
     }
     case 'multi': {
-      assert(config, multiConfigSchema, { at: 'notifications.multi' });
+      checkNotificationConfig(config, multiConfigSchema, 'notifications.multi');
       const services: NotificationService[] = [];
       if (config.email) services.push(new EmailNotificationService(config.email));
       if (config.slack) services.push(new SlackNotificationService(config.slack));

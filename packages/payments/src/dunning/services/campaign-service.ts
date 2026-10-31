@@ -2,11 +2,12 @@ import type { SQL } from 'drizzle-orm';
 import { eq, inArray, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
-import type { Money } from '@arki/money';
+import type { Money, MoneyFailure } from '@arki/money';
 import { z } from '@arki/contracts';
 import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import { invariant, isFailure } from '@arki/failure';
+import { Currency } from '@arki/money';
 import { ensure } from '@arki/schema';
 
 import type { CoreTables } from '../../core/tables.js';
@@ -96,7 +97,10 @@ function eligibleCustomers(rows: unknown): EligibleCustomer[] {
 }
 
 /** The payment row `checkAndStopOnPaymentSuccess` reads; node-postgres sends `bigint` as text. */
-const paymentRowSchema = z.object({ amount_minor: z.union([z.number(), z.string()]), currency: z.string() });
+const paymentRowSchema = z.object({
+  amount_minor: z.union([z.number().int(), z.string().regex(/^-?\d+$/)]),
+  currency: z.string(),
+});
 
 /**
  * Service for managing dunning campaigns
@@ -531,7 +535,12 @@ export class DunningCampaignService {
     for (const executionDb of scheduledExecutions) {
       try {
         const execution = executionDb;
-        await this.executeIndividualExecution(execution);
+        const stopped = await this.executeIndividualExecution(execution);
+        if (isFailure(stopped)) {
+          // The message went out and the execution is complete; only the stop check met a bad stored payment
+          logger.error('Payment success check failed', { executionId: executionDb.id, code: stopped.code });
+          report.failed.push(tickFault(executionDb.id, stopped));
+        }
       } catch (error) {
         logger.error('Failed to execute campaign', {
           executionId: executionDb.id,
@@ -550,9 +559,10 @@ export class DunningCampaignService {
   }
 
   /**
-   * Execute a single scheduled execution
+   * Execute a single scheduled execution. Returns the `MoneyFailure` of a stored payment the stop
+   * check could not read; the execution itself is then complete and nothing was cancelled.
    */
-  private async executeIndividualExecution(execution: DunningExecution): Promise<void> {
+  private async executeIndividualExecution(execution: DunningExecution): Promise<MoneyFailure | undefined> {
     // Update status to running
     await this.executionRepo.updateStatus(execution.id, 'running');
 
@@ -593,8 +603,9 @@ export class DunningCampaignService {
 
     // Check if payment was successful and stop subsequent executions if configured
     if (campaign.settings.stopOnPaymentSuccess) {
-      await this.checkAndStopOnPaymentSuccess(execution);
+      return this.checkAndStopOnPaymentSuccess(execution);
     }
+    return undefined;
   }
 
   /**
@@ -859,9 +870,11 @@ export class DunningCampaignService {
   }
 
   /**
-   * Check if payment was successful and stop subsequent executions
+   * Check if payment was successful and stop subsequent executions. The payment row is read and
+   * checked first, so a stored currency `@arki/money` refuses returns its `MoneyFailure` before any
+   * execution is cancelled. A row of another shape than the query selects is a bug (`AssertError`).
    */
-  private async checkAndStopOnPaymentSuccess(execution: DunningExecution): Promise<void> {
+  private async checkAndStopOnPaymentSuccess(execution: DunningExecution): Promise<MoneyFailure | undefined> {
     // Check if the customer has made a successful payment since the execution started
     const paymentResult = await this.db.execute(sql`
       SELECT p.id, p.amount_minor, p.currency, p.created_at
@@ -874,37 +887,39 @@ export class DunningCampaignService {
     `);
 
     const recentSuccessfulPayments = paymentResult.rows || [];
-    if (recentSuccessfulPayments.length > 0) {
-      logger.info('Payment success detected, stopping dunning campaign', {
-        customerId: execution.customerId,
-      });
+    if (recentSuccessfulPayments.length === 0) return undefined;
 
-      // Cancel future scheduled executions for this customer and campaign
-      const scheduledExecutions = await this.executionRepo.findScheduledExecutions(100);
+    const payment = ensure(recentSuccessfulPayments[0], paymentRowSchema, { at: 'payments.row' });
+    const currency = Currency.parse(payment.currency.toUpperCase());
+    if (isFailure(currency)) return currency;
+    const revenueRecovered = fromMinorColumn(payment.amount_minor, currency.code);
 
-      for (const scheduledExec of scheduledExecutions) {
-        if (
-          scheduledExec.customerId === execution.customerId &&
-          scheduledExec.campaignId === execution.campaignId &&
-          scheduledExec.scheduledAt &&
-          isAfter(scheduledExec.scheduledAt, now())
-        ) {
-          await this.executionRepo.updateStatus(
-            scheduledExec.id,
-            'cancelled',
-            undefined,
-            'Cancelled due to successful payment',
-          );
-        }
+    logger.info('Payment success detected, stopping dunning campaign', {
+      customerId: execution.customerId,
+    });
+
+    // Cancel future scheduled executions for this customer and campaign
+    const scheduledExecutions = await this.executionRepo.findScheduledExecutions(100);
+
+    for (const scheduledExec of scheduledExecutions) {
+      if (
+        scheduledExec.customerId === execution.customerId &&
+        scheduledExec.campaignId === execution.campaignId &&
+        scheduledExec.scheduledAt &&
+        isAfter(scheduledExec.scheduledAt, now())
+      ) {
+        await this.executionRepo.updateStatus(
+          scheduledExec.id,
+          'cancelled',
+          undefined,
+          'Cancelled due to successful payment',
+        );
       }
-
-      // Update campaign analytics with successful recovery
-      const payment = paymentRowSchema.parse(recentSuccessfulPayments[0]);
-      await this.updateCampaignAnalytics(execution.campaignId, {
-        paymentsRecovered: 1,
-        revenueRecovered: fromMinorColumn(payment.amount_minor, payment.currency),
-      });
     }
+
+    // Update campaign analytics with successful recovery
+    await this.updateCampaignAnalytics(execution.campaignId, { paymentsRecovered: 1, revenueRecovered });
+    return undefined;
   }
 
   /**
@@ -1035,7 +1050,11 @@ export class DunningCampaignService {
 
         // Execute the retry
         const execution = executionDb;
-        await this.executeIndividualExecution(execution);
+        const stopped = await this.executeIndividualExecution(execution);
+        if (isFailure(stopped)) {
+          logger.error('Payment success check failed', { executionId: executionDb.id, code: stopped.code });
+          report.failed.push(tickFault(executionDb.id, stopped));
+        }
       } catch (error) {
         logger.error('Retry failed for execution', {
           executionId: executionDb.id,

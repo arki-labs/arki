@@ -281,8 +281,8 @@ describe('auto-approval limits per currency', () => {
   );
 
   it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
-    expect(() => serviceWith({ USD: '10.001' })).toThrow(expect.objectContaining({ code: 'ARKI_SCHEMA_E004' }));
-    expect(() => serviceWith({ NOPE: '10' })).toThrow(expect.objectContaining({ code: 'ARKI_SCHEMA_E004' }));
+    expect(() => serviceWith({ USD: '10.001' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
+    expect(() => serviceWith({ NOPE: '10' })).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
   });
 });
 

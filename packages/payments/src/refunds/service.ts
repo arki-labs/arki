@@ -9,7 +9,7 @@ import { isJournalError } from '@arki/journal';
 import { getLogger } from '@arki/log';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
-import { ensure, parse } from '@arki/schema';
+import { parse } from '@arki/schema';
 
 import type { NotificationService } from '../core/notifications/service.js';
 import type { PaymentRepository } from '../core/repository.js';
@@ -19,6 +19,7 @@ import type { RefundId } from './primitives.js';
 import type { RefundRepository, RefundsDatabase } from './repository.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
+import { misconfigured } from '../core/failures.js';
 import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
 import { refundRejectionReasonSchema } from './contracts.js';
 import {
@@ -137,10 +138,15 @@ export class RefundService {
   ) {
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
     this.systemUserId = config.systemUserId;
-    // A bad limit is a configuration fault: `AssertError` (`ARKI_SCHEMA_E004`) when the service is built
-    this.autoApproveLimits = ensure(config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS, refundAutoApproveLimitsSchema, {
-      at: 'refunds.autoApproveLimits',
-    });
+    // A bad limit is a configuration fault: `payments.configuration_invalid` when the service is built
+    const limits = refundAutoApproveLimitsSchema.safeParse(config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS);
+    if (!limits.success) {
+      throw misconfigured(
+        'refunds.autoApproveLimits',
+        limits.error.issues.map(issue => `${issue.path.join('.') || '(limits)'}: ${issue.message}`).join('; '),
+      );
+    }
+    this.autoApproveLimits = limits.data;
   }
 
   async requestRefund(data: RefundRequestData) {

@@ -14,7 +14,6 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
-import { AssertError } from '@arki/schema';
 
 import type { Refund } from '../../refunds/types.js';
 import type { AppDb } from '../../test-support.js';
@@ -296,7 +295,7 @@ describe('createNotificationService refuses a config that cannot send, when it i
         }),
     ],
     ['multi with no channel', () => createNotificationService({ type: 'multi' })],
-  ])('%s throws AssertError', (_name, build) => {
-    expect(build).toThrow(AssertError);
+  ])('%s throws payments.configuration_invalid', (_name, build) => {
+    expect(build).toThrow(expect.objectContaining({ code: 'payments.configuration_invalid' }));
   });
 });

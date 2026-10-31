@@ -2,14 +2,14 @@ import type { Instant } from '@arki/date';
 import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
 import type { Failure } from '@arki/failure';
 import { z } from '@arki/contracts';
-import { isFailure, UnexpectedFailure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { CoreWrites } from '../journal.js';
 import type { BasePaymentProvider } from '../providers/base-provider.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentId, SubscriptionId } from '../types.js';
-import { PaymentsConfigurationInvalid } from '../failures.js';
+import { misconfigured } from '../failures.js';
 import { paymentAmount } from '../money.js';
 import { ReferenceNotFound } from '../providers/provider-error.js';
 
@@ -116,10 +116,6 @@ function checkRulesHaveSenders(rules: readonly DunningRule[], senders: DunningSe
       throw misconfigured('senders.sendWebhook', `rule ${rule.id} calls a webhook`);
     }
   }
-}
-
-function misconfigured(setting: string, problem: string) {
-  return new UnexpectedFailure(PaymentsConfigurationInvalid({ setting, problem }));
 }
 
 const DEFAULT_DUNNING_CONFIG: DunningConfiguration = {

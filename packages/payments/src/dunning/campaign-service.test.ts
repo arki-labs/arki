@@ -578,12 +578,12 @@ describe('a scheduled execution in a named schema', () => {
   });
 });
 
-describe('a tick reports the executions whose run threw', () => {
+describe('a tick reports a stored payment the stop check cannot read', () => {
   /**
-   * A succeeded payment in a currency that does not exist makes the post-send payment check throw.
-   * The send itself is never reached with a fault: a bad timezone or a failing sender is caught inside.
+   * A succeeded payment in a currency that does not exist. The message already went out, so the
+   * execution stays complete; the stop check returns the money failure before it cancels anything.
    */
-  async function throwingExecution(label: string, row: Partial<typeof tables.dunningExecutions.$inferInsert>) {
+  async function executionWithBadPayment(label: string, row: Partial<typeof tables.dunningExecutions.$inferInsert>) {
     const buyer = await newCustomer(label);
     const campaignId = await createdCampaign(`Tick: ${label}`);
     const campaign = await service.getCampaign(campaignId);
@@ -598,38 +598,52 @@ describe('a tick reports the executions whose run threw', () => {
       status: 'succeeded',
       createdAt: now(),
     });
+    const base = { campaignId, templateId, customerId: buyer.id, triggerType: 'manual', triggerData: {} } as const;
     const [inserted] = await db
       .insert(tables.dunningExecutions)
-      .values({ campaignId, templateId, customerId: buyer.id, triggerType: 'manual', triggerData: {}, scheduledAt: sub(now(), { minutes: 1 }), ...row })
+      .values({ ...base, scheduledAt: sub(now(), { minutes: 1 }), ...row })
       .returning();
-    if (!inserted) throw new Error('execution not inserted');
+    const [later] = await db
+      .insert(tables.dunningExecutions)
+      .values({ ...base, status: 'scheduled', scheduledAt: add(now(), { hours: 24 }) })
+      .returning();
+    if (!inserted || !later) throw new Error('execution not inserted');
 
-    return inserted.id;
+    return { id: inserted.id, laterId: later.id, campaignId };
   }
 
-  it('processScheduledExecutions lists the execution that threw, with its message and no code', async () => {
-    const id = await throwingExecution('tick-scheduled', { status: 'scheduled' });
+  async function statusOf(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    const [row] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, id));
+    return row?.status;
+  }
+
+  it('processScheduledExecutions lists the money failure, keeps the execution complete and cancels nothing', async () => {
+    const { id, laterId, campaignId } = await executionWithBadPayment('tick-scheduled', { status: 'scheduled' });
 
     const report = await service.processScheduledExecutions(1000);
 
-    expect(report.processed).toBeGreaterThanOrEqual(1);
     const fault = report.failed.find(entry => entry.id === id);
-    expect(fault?.code).toBeNull();
-    expect(fault?.message).toMatch(/\S/);
-    const [row] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, id));
-    expect(row?.status).toBe('failed');
-    expect(row?.errorMessage).toBe(fault?.message);
+    expect(fault?.code).toBe('money.unknown_currency');
+    expect(await statusOf(id)).toBe('completed');
+    expect(await statusOf(laterId)).toBe('scheduled');
+    const analyticsRows = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(analyticsRows.every(row => row.paymentsRecovered === 0)).toBe(true);
   });
 
-  it('retryFailedExecutions lists the retry that threw again', async () => {
-    const id = await throwingExecution('tick-retry', { status: 'failed', retryCount: 0, nextRetryAt: sub(now(), { minutes: 1 }) });
+  it('retryFailedExecutions lists the same failure and cancels nothing', async () => {
+    const { id, laterId } = await executionWithBadPayment('tick-retry', {
+      status: 'failed',
+      retryCount: 0,
+      nextRetryAt: sub(now(), { minutes: 1 }),
+    });
 
     const report = await service.retryFailedExecutions(1000);
 
-    expect(report.processed).toBeGreaterThanOrEqual(1);
-    const fault = report.failed.find(entry => entry.id === id);
-    expect(fault?.code).toBeNull();
-    expect(fault?.message).toMatch(/\S/);
+    expect(report.failed.find(entry => entry.id === id)?.code).toBe('money.unknown_currency');
+    expect(await statusOf(laterId)).toBe('scheduled');
   });
 });
 
