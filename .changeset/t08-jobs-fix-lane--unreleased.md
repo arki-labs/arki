@@ -1,5 +1,4 @@
 ---
-'@arki/queue': minor
 '@arki/offline': minor
 '@arki/content-build': minor
 ---
