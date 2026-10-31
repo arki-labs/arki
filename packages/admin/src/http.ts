@@ -13,9 +13,9 @@
 import type { RouteBundle } from '@arki/http';
 import { raw, route, routes } from '@arki/http';
 
-import type { CreateFleetHandlerOptions } from './server';
-import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
-import { createFleetHandler } from './server';
+import type { CreateFleetHandlerOptions } from './server.ts';
+import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract.ts';
+import { createFleetHandler } from './server.ts';
 
 /**
  * The STATIC half — list this in the fleet plugin's `actions:` so the

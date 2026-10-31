@@ -38,7 +38,7 @@ Set all four variables, or none. With none set, `/api/foreman/*` answers 404 and
 
 | Variable              | What                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `pizzeria:prod`.                           |
+| `FOREMAN_APP_ID`      | App slug. With the environment it forms the audience, e.g. `pizzeria:prod`.                            |
 | `FOREMAN_ENVIRONMENT` | Optional `prod`, `staging` or `dev`. Overrides what `foremanEnvironmentFromNodeEnv(NODE_ENV)` returns. |
 | `FOREMAN_APP_KEY`     | The app's identity key. It signs every response.                                                       |
 | `FOREMAN_READ_KEY`    | Foreman's read public key. `_NEXT` holds the new key while rotating.                                   |
@@ -239,6 +239,17 @@ The dispatcher answers a `ModuleError` with the module's own status and code, an
 
 `redactSecrets` also lives in `@arki/admin/module`. A module runs error text through it before it reaches the wire.
 
+## Schemas and helpers
+
+These are for callers that build or check protocol messages themselves.
+
+- `describeModule(module)` (`@arki/admin/module`) returns the module as JSON: JSON Schemas for every input and output, and a `schemaHash` per read, action and signal.
+- `moduleDescriptionSchema`, `readDescriptionSchema`, `signalDescriptionSchema` and `panelDescriptionSchema` (`@arki/admin/module`) parse a module, a read, a signal and a panel as an app's manifest reports them. Foreman parses the manifest with them, because the wire is untrusted.
+- `riskClassSchema` (`@arki/admin/module`) is how dangerous a capability is: `read`, `low`, `medium` or `high`.
+- `jsonValueSchema` and `jsonObjectSchema` (`@arki/admin/module`) accept any JSON value and any JSON object.
+- `settledReceiptSchema` (`@arki/admin/receipts`) is an applied or failed receipt. `storedReceiptSchema` also accepts a pending one.
+- `signRequest(input)` (`@arki/admin/client`) signs one request envelope. `createForemanClient` uses it for every call.
+
 ## Limits
 
 - One proposal covers 1 target by default (`DEFAULT_MAX_TARGETS`). An action can raise `maxTargets` to at most 5 (`MAX_TARGETS_LIMIT`).
@@ -258,5 +269,26 @@ Report bugs and ask questions at https://github.com/arki-labs/arki/issues.
 ## Failures
 
 The signed client (`createForemanClient`), the Coolify clients, `fetchFleetSnapshot` and `parseWebhookHint` return `@arki/failure` failures for expected outcomes; they do not throw. Match on `failure.code`: `admin.unauthenticated`, `admin.scope_denied`, `admin.writes_disabled`, `admin.stale_approval`, `admin.unknown_capability`, `admin.receipts_unavailable`, `admin.execution_in_progress`, `admin.invalid_request`, `admin.protocol_unsupported`, `admin.target_mismatch`, `admin.unreachable`, `admin.invalid_output`, `admin.handler_failed`, and `admin.module_refused` (an error a module declared; its own code and HTTP status are in `data`). All are exported from `@arki/admin/module`. On the wire the protocol keeps its stable `ARKI_ADMIN_E0NN` code; `wireCodeOf(failure.code)` gives it. `AdminError` is thrown only for bugs: invalid keys or configuration, a client without an execute key, invalid scopes.
+
+Each failure is a value you can match with `failure.code` or call to build one. The list lives in `ADMIN_FAILURES` (`@arki/admin/module`).
+
+| Export                     | Code                          | When it is returned                                                                           |
+| -------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `AdminUnauthenticated`     | `admin.unauthenticated`       | The request failed authentication. The app log names the failed check.                        |
+| `AdminScopeDenied`         | `admin.scope_denied`          | The signed scopes do not cover the permission of the read or action.                          |
+| `AdminWritesDisabled`      | `admin.writes_disabled`       | The app runs with `FOREMAN_WRITES=off`, so it refuses every execute.                          |
+| `AdminStaleApproval`       | `admin.stale_approval`        | The approval pinned a different action contract than the app runs now.                        |
+| `AdminUnknownCapability`   | `admin.unknown_capability`    | No route, read or action with that id on the app, or no resource at that Coolify path.        |
+| `AdminReceiptsUnavailable` | `admin.receipts_unavailable`  | An execute was refused before it ran, because no receipt could be recorded.                   |
+| `AdminExecutionInProgress` | `admin.execution_in_progress` | An execute with this execution id is still running, or stopped before it recorded an outcome. |
+| `AdminInvalidRequest`      | `admin.invalid_request`       | The input does not match the schema of the read or action.                                    |
+| `AdminProtocolUnsupported` | `admin.protocol_unsupported`  | The other side does not speak the protocol version this side needs.                           |
+| `AdminTargetMismatch`      | `admin.target_mismatch`       | A response did not prove it came from the expected target, so the client refused it.          |
+| `AdminUnreachable`         | `admin.unreachable`           | The target or Coolify could not be reached, or answered a redirect or server error.           |
+| `AdminInvalidOutput`       | `admin.invalid_output`        | A response is outside the contract: not protocol JSON, or a shape that fails its schema.      |
+| `AdminHandlerFailed`       | `admin.handler_failed`        | The app's own read, preview or execute code failed. Details stay in the app's log.            |
+| `AdminModuleRefused`       | `admin.module_refused`        | The app refused with an error its module declared. Its code and HTTP status are in `data`.    |
+
+`adminFailureOfWire(wireCode, detail)` turns an `ARKI_ADMIN_E0NN` wire code back into its failure. It returns `undefined` for a code that is not a protocol code.
 
 `createFleetHandler` answers a provider error as `502 { "error": "snapshot_failed" }` and a snapshot outside the contract as `500 { "error": "invalid_snapshot" }`. The cause goes to the log (`DEBUG=arki:admin:fleet`), never to the caller.

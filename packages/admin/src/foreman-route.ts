@@ -25,15 +25,15 @@
  */
 import { parse } from '@arki/schema';
 
-import type { NonceStore } from './dispatcher';
-import type { ForemanEnv } from './env';
-import type { ForemanAppOptions } from './foreman-app';
-import type { ForemanEnvironment } from './protocol';
-import type { ReceiptKV, StoredReceipt } from './receipts';
-import { foremanConfigFromEnv, foremanEnvironmentFromNodeEnv } from './env';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { createForemanHandlerFromEnv, foremanOff } from './foreman-app';
-import { kvReceiptStore } from './receipts';
+import type { NonceStore } from './dispatcher.ts';
+import type { ForemanEnv } from './env.ts';
+import type { ForemanAppOptions } from './foreman-app.ts';
+import type { ForemanEnvironment } from './protocol.ts';
+import type { ReceiptKV, StoredReceipt } from './receipts.ts';
+import { foremanConfigFromEnv, foremanEnvironmentFromNodeEnv } from './env.ts';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
+import { createForemanHandlerFromEnv, foremanOff } from './foreman-app.ts';
+import { kvReceiptStore } from './receipts.ts';
 
 type ForemanHandler = (request: Request) => Promise<Response>;
 

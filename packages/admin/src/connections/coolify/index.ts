@@ -4,20 +4,20 @@ export {
   type CoolifyClient,
   type CoolifyClientOptions,
   type CoolifyVersionProbe,
-} from './client';
+} from './client.ts';
 export {
   COOLIFY_RUNTIME_PROBE_KEY,
   createCoolifyEnvWriter,
   type CoolifyEnvEntry,
   type CoolifyEnvWriter,
-} from './env-writer';
-export { confirmHint } from './reconcile';
+} from './env-writer.ts';
+export { confirmHint } from './reconcile.ts';
 export type {
   CoolifyApplication,
   CoolifyDeployment,
   CoolifyEnvironment,
   CoolifyProject,
   CoolifyServer,
-} from './schemas';
-export { applicationSignal, deploymentSignal, serverSignal, type CoolifySignal } from './signals';
-export { parseWebhookHint, verifyWebhookSecret, type CoolifyHint, type CoolifyHintKind } from './webhook';
+} from './schemas.ts';
+export { applicationSignal, deploymentSignal, serverSignal, type CoolifySignal } from './signals.ts';
+export { parseWebhookHint, verifyWebhookSecret, type CoolifyHint, type CoolifyHintKind } from './webhook.ts';

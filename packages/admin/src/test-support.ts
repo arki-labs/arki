@@ -7,7 +7,7 @@ import { isFailure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { parse } from '@arki/schema';
 
-import { wireCodeOf } from './failures';
+import { wireCodeOf } from './failures.ts';
 
 type Entry = { value: unknown; expiresAt: number | undefined };
 

@@ -7,7 +7,7 @@ import type { SchemaWithJson, StandardSchemaV1 } from '@arki/schema';
 import { z } from '@arki/contracts';
 import { withJsonSchema } from '@arki/schema';
 
-import { ADMIN_ERROR_CODES, AdminError, defineAction, defineRead, defineSignal } from './module';
+import { ADMIN_ERROR_CODES, AdminError, defineAction, defineRead, defineSignal } from './module.ts';
 
 /** A hand-written Standard Schema: a string that arrives as `"3"` and leaves as the number 3. */
 const handWritten: StandardSchemaV1<string, number> = {

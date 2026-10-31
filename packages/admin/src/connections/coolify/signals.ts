@@ -1,4 +1,4 @@
-import type { CoolifyApplication, CoolifyDeployment, CoolifyServer } from './schemas';
+import type { CoolifyApplication, CoolifyDeployment, CoolifyServer } from './schemas.ts';
 
 /** Same names as the columns of Foreman's `signals` table (minus ids Foreman assigns). */
 export type CoolifySignal = {

@@ -5,14 +5,14 @@
  */
 import { getLogger } from '@arki/log';
 
-import type { CoreModulesOptions } from './core';
-import type { CreateForemanHandlerOptions } from './dispatcher';
-import type { ForemanEnv } from './env';
-import type { ForemanEnvironment } from './protocol';
-import { withCoreModules } from './core';
-import { createForemanHandler } from './dispatcher';
-import { foremanConfigFromEnv } from './env';
-import { ADMIN_ERROR_CODES } from './errors';
+import type { CoreModulesOptions } from './core.ts';
+import type { CreateForemanHandlerOptions } from './dispatcher.ts';
+import type { ForemanEnv } from './env.ts';
+import type { ForemanEnvironment } from './protocol.ts';
+import { withCoreModules } from './core.ts';
+import { createForemanHandler } from './dispatcher.ts';
+import { foremanConfigFromEnv } from './env.ts';
+import { ADMIN_ERROR_CODES } from './errors.ts';
 
 const logger = getLogger('arki:admin');
 

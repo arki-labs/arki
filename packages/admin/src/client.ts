@@ -24,10 +24,10 @@ import { SystemClock } from '@arki/clock';
 import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 
-import type { JsonValue } from './json';
-import type { ForemanManifest, KeyUse, PermitClaim } from './protocol';
-import type { AdminFailure } from './failures';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
+import type { JsonValue } from './json.ts';
+import type { ForemanManifest, KeyUse, PermitClaim } from './protocol.ts';
+import type { AdminFailure } from './failures.ts';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
 import {
   adminFailureOfWire,
   AdminInvalidOutput,
@@ -35,8 +35,8 @@ import {
   AdminProtocolUnsupported,
   AdminTargetMismatch,
   AdminUnreachable,
-} from './failures';
-import { sha256 } from './json';
+} from './failures.ts';
+import { sha256 } from './json.ts';
 import {
   audienceSchema,
   errorBodySchema,
@@ -59,7 +59,7 @@ import {
   toBase64Url,
   utf8,
   verifyProof,
-} from './protocol';
+} from './protocol.ts';
 
 export type {
   Envelope,
@@ -69,7 +69,7 @@ export type {
   ProviderReadiness,
   ResponseProof,
   WritesMode,
-} from './protocol';
+} from './protocol.ts';
 export {
   envelopeSchema,
   FOREMAN_BASE_PATH,
@@ -82,7 +82,7 @@ export {
   NONCE_TTL_SECONDS,
   permitClaimSchema,
   scopeCovers,
-} from './protocol';
+} from './protocol.ts';
 
 /** One enrolled target, as Foreman's registry stores it. */
 export type ForemanTarget = {

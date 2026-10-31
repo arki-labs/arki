@@ -13,12 +13,12 @@ import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
 
-import type { CreateForemanClientOptions, PermitClaim } from './client';
-import type { CreateForemanHandlerOptions, NonceStore } from './dispatcher';
-import type { AdminErrorCode, JsonValue, Permit } from './module';
-import { createForemanClient, generateForemanKeyPair, signRequest } from './client';
-import { createForemanHandler } from './dispatcher';
-import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module';
+import type { CreateForemanClientOptions, PermitClaim } from './client.ts';
+import type { CreateForemanHandlerOptions, NonceStore } from './dispatcher.ts';
+import type { AdminErrorCode, JsonValue, Permit } from './module.ts';
+import { createForemanClient, generateForemanKeyPair, signRequest } from './client.ts';
+import { createForemanHandler } from './dispatcher.ts';
+import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module.ts';
 import {
   errorBodySchema,
   FOREMAN_HEADERS,
@@ -28,9 +28,9 @@ import {
   signEnvelope,
   toBase64Url,
   utf8,
-} from './protocol';
-import { kvReceiptStore } from './receipts';
-import { memoryKv, refusal } from './test-support';
+} from './protocol.ts';
+import { kvReceiptStore } from './receipts.ts';
+import { memoryKv, refusal } from './test-support.ts';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;

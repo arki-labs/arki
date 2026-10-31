@@ -6,4 +6,4 @@
  * Server-only helpers (request handler, federation fetch) live in
  * `@arki/admin/server`.
  */
-export * from './contract';
+export * from './contract.ts';

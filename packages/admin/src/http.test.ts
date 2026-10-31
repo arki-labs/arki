@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest';
 
 import { buildEngine, toOpenApi } from '@arki/http';
 
-import type { FleetSnapshot } from './contract';
-import { FLEET_ENDPOINT_PATH } from './contract';
-import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures';
-import { fleetRoutes, fleetSnapshotRoute } from './http';
-import { fetchFleetSnapshot } from './server';
+import type { FleetSnapshot } from './contract.ts';
+import { FLEET_ENDPOINT_PATH } from './contract.ts';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures.ts';
+import { fleetRoutes, fleetSnapshotRoute } from './http.ts';
+import { fetchFleetSnapshot } from './server.ts';
 
 const TOKEN = 'fleet-secret';
 const URL_ = `https://novelette.test${FLEET_ENDPOINT_PATH}`;

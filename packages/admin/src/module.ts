@@ -46,14 +46,14 @@ import { z } from '@arki/contracts';
 import { InvalidInput, isFailure, orThrow, serialize } from '@arki/failure';
 import { formatIssues, hasJsonSchema, parseAsync } from '@arki/schema';
 
-import type { JsonObject } from './json';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { jsonObjectSchema, schemaHash } from './json';
+import type { JsonObject } from './json.ts';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
+import { jsonObjectSchema, schemaHash } from './json.ts';
 
-export type { AdminErrorCode } from './errors';
-export { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors';
-export type { ModuleError } from './errors';
-export type { AdminFailure } from './failures';
+export type { AdminErrorCode } from './errors.ts';
+export { ADMIN_ERROR_CODES, AdminError, isModuleError, moduleError } from './errors.ts';
+export type { ModuleError } from './errors.ts';
+export type { AdminFailure } from './failures.ts';
 export {
   ADMIN_FAILURES,
   AdminExecutionInProgress,
@@ -72,9 +72,9 @@ export {
   AdminWritesDisabled,
   adminFailureOfWire,
   wireCodeOf,
-} from './failures';
-export type { JsonObject, JsonValue } from './json';
-export { canonicalJson, jsonObjectSchema, jsonValueSchema, schemaHash } from './json';
+} from './failures.ts';
+export type { JsonObject, JsonValue } from './json.ts';
+export { canonicalJson, jsonObjectSchema, jsonValueSchema, schemaHash } from './json.ts';
 
 // ---------------------------------------------------------------------------
 // Vocabulary

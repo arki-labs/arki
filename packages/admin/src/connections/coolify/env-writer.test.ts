@@ -9,8 +9,8 @@ import { z } from 'zod';
 
 import { isFailure, orThrow } from '@arki/failure';
 
-import { AdminInvalidOutput, AdminInvalidRequest, AdminProtocolUnsupported } from '../../failures';
-import { COOLIFY_RUNTIME_PROBE_KEY, createCoolifyEnvWriter } from './index';
+import { AdminInvalidOutput, AdminInvalidRequest, AdminProtocolUnsupported } from '../../failures.ts';
+import { COOLIFY_RUNTIME_PROBE_KEY, createCoolifyEnvWriter } from './index.ts';
 
 const BASE = 'https://coolify.example.invalid';
 const APP = 'app00000example';

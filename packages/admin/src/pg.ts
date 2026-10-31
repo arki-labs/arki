@@ -20,8 +20,8 @@ import { index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
 import { parse } from '@arki/schema';
 
-import type { ForemanStore } from './foreman-route';
-import { DEFAULT_RECEIPT_TTL_SECONDS } from './receipts';
+import type { ForemanStore } from './foreman-route.ts';
+import { DEFAULT_RECEIPT_TTL_SECONDS } from './receipts.ts';
 
 export type ForemanStoreTableOptions = {
   /** The app's Postgres schema, when its tables live in one (`pgSchema('shop')`). Defaults to `public`. */

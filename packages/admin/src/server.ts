@@ -14,10 +14,10 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { getLogger } from '@arki/log';
 
-import type { FetchLike } from './client';
-import type { FleetSnapshot } from './contract';
-import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
-import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures';
+import type { FetchLike } from './client.ts';
+import type { FleetSnapshot } from './contract.ts';
+import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract.ts';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnreachable } from './failures.ts';
 
 const logger = getLogger('arki:admin:fleet');
 
@@ -190,12 +190,12 @@ export async function fetchFleetSnapshot(
   }
 }
 
-export type { FleetSnapshot } from './contract';
+export type { FleetSnapshot } from './contract.ts';
 
 // Protocol 2 — the signed dispatcher (portable; re-exported here because apps mount it server-side).
-export type { CreateForemanHandlerOptions, NonceStore, PublicKeyRing } from './dispatcher';
-export { createForemanHandler } from './dispatcher';
-export type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
+export type { CreateForemanHandlerOptions, NonceStore, PublicKeyRing } from './dispatcher.ts';
+export { createForemanHandler } from './dispatcher.ts';
+export type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol.ts';
 export {
   FOREMAN_BASE_PATH,
   FOREMAN_PROTOCOL_VERSION,
@@ -203,8 +203,8 @@ export {
   foremanManifestSchema,
   generateForemanKeyPair,
   NONCE_TTL_SECONDS,
-} from './protocol';
-export type { ForemanAppOptions } from './foreman-app';
+} from './protocol.ts';
+export type { ForemanAppOptions } from './foreman-app.ts';
 export type {
   ReceiptAnswer,
   ReceiptClaimResult,
@@ -214,8 +214,8 @@ export type {
   PendingReceipt,
   SettledReceipt,
   StoredReceipt,
-} from './receipts';
-export { kvReceiptStore, RECEIPT_WINDOW_SECONDS } from './receipts';
-export { createForemanHandlerFromEnv } from './foreman-app';
-export type { ForemanRouteOptions, ForemanStore } from './foreman-route';
-export { createForemanRoute, memoryForemanStore } from './foreman-route';
+} from './receipts.ts';
+export { kvReceiptStore, RECEIPT_WINDOW_SECONDS } from './receipts.ts';
+export { createForemanHandlerFromEnv } from './foreman-app.ts';
+export type { ForemanRouteOptions, ForemanStore } from './foreman-route.ts';
+export { createForemanRoute, memoryForemanStore } from './foreman-route.ts';

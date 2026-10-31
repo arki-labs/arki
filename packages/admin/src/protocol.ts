@@ -24,9 +24,9 @@
  */
 import { z } from '@arki/contracts';
 
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { jsonValueSchema, requireWebCrypto } from './json';
-import { moduleDescriptionSchema } from './module';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
+import { jsonValueSchema, requireWebCrypto } from './json.ts';
+import { moduleDescriptionSchema } from './module.ts';
 
 /** The protocol version this module speaks. Protocol 1 is `GET /api/fleet` with a Bearer token. */
 export const FOREMAN_PROTOCOL_VERSION = 2;

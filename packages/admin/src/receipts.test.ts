@@ -13,15 +13,15 @@ import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
 import { defineFailure, orThrow } from '@arki/failure';
 
-import type { PermitClaim } from './client';
-import type { ForemanEnv } from './env';
-import type { Permit } from './module';
-import { AdminModuleRefused, AdminUnreachable } from './failures';
-import type { ReceiptStore } from './receipts';
-import { createForemanClient, generateForemanKeyPair } from './client';
-import { withCoreModules } from './core';
-import { createForemanHandler } from './dispatcher';
-import { foremanEnvShape } from './env';
+import type { PermitClaim } from './client.ts';
+import type { ForemanEnv } from './env.ts';
+import type { Permit } from './module.ts';
+import { AdminModuleRefused, AdminUnreachable } from './failures.ts';
+import type { ReceiptStore } from './receipts.ts';
+import { createForemanClient, generateForemanKeyPair } from './client.ts';
+import { withCoreModules } from './core.ts';
+import { createForemanHandler } from './dispatcher.ts';
+import { foremanEnvShape } from './env.ts';
 import {
   ADMIN_ERROR_CODES,
   defineAction,
@@ -29,9 +29,9 @@ import {
   defineRead,
   describeModule,
   moduleError,
-} from './module';
-import { kvReceiptStore, RECEIPT_WINDOW_SECONDS, receiptAnswerSchema } from './receipts';
-import { memoryKv, refusal } from './test-support';
+} from './module.ts';
+import { kvReceiptStore, RECEIPT_WINDOW_SECONDS, receiptAnswerSchema } from './receipts.ts';
+import { memoryKv, refusal } from './test-support.ts';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;

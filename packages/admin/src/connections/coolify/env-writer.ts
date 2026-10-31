@@ -2,10 +2,10 @@ import { z } from 'zod';
 
 import { getLogger } from '@arki/log';
 
-import type { CoolifyClientOptions } from './client';
+import type { CoolifyClientOptions } from './client.ts';
 import { isFailure } from '@arki/failure';
 
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
+import { ADMIN_ERROR_CODES, AdminError } from '../../errors.ts';
 import {
   AdminInvalidOutput,
   AdminInvalidRequest,
@@ -13,8 +13,8 @@ import {
   AdminUnauthenticated,
   AdminUnknownCapability,
   AdminUnreachable,
-} from '../../failures';
-import { coolifyOptionsSchema } from './client';
+} from '../../failures.ts';
+import { coolifyOptionsSchema } from './client.ts';
 
 /**
  * Writes environment variables to Coolify applications, for provisioning keys. It is separate

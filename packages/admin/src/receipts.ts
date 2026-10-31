@@ -25,11 +25,11 @@ import { z } from '@arki/contracts';
 import type { Failure } from '@arki/failure';
 import { isFailure, orThrow } from '@arki/failure';
 
-import type { ForemanModule } from './module';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { jsonValueSchema } from './json';
-import { defineModule, defineRead } from './module';
-import { audienceSchema, executionIdSchema } from './protocol';
+import type { ForemanModule } from './module.ts';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
+import { jsonValueSchema } from './json.ts';
+import { defineModule, defineRead } from './module.ts';
+import { audienceSchema, executionIdSchema } from './protocol.ts';
 
 export const RECEIPTS_MODULE_ID = 'core.receipts';
 /** The read Foreman calls to settle a lost execute answer. */

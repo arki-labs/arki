@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { CreateForemanClientOptions } from './client';
-import type { FetchFleetSnapshotOptions } from './server';
+import type { CreateForemanClientOptions } from './client.ts';
+import type { FetchFleetSnapshotOptions } from './server.ts';
 
 // Only what the clients call. Not assignable to `typeof fetch`, which is the point.
 const wrapper = (_url: URL, _init: RequestInit) => Promise.resolve(new Response());

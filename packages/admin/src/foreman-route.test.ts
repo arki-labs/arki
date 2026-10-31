@@ -9,13 +9,13 @@ import { z } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
 import { KvUnavailable } from '@arki/kv/errors';
 
-import type { ForemanEnv } from './env';
-import type { ForemanStore } from './foreman-route';
-import { AdminHandlerFailed } from './failures';
-import { createForemanClient, generateForemanKeyPair, signRequest } from './client';
-import { createForemanRoute, memoryForemanStore } from './foreman-route';
-import { defineAction, defineModule, describeModule } from './module';
-import { storedReceiptSchema } from './receipts';
+import type { ForemanEnv } from './env.ts';
+import type { ForemanStore } from './foreman-route.ts';
+import { AdminHandlerFailed } from './failures.ts';
+import { createForemanClient, generateForemanKeyPair, signRequest } from './client.ts';
+import { createForemanRoute, memoryForemanStore } from './foreman-route.ts';
+import { defineAction, defineModule, describeModule } from './module.ts';
+import { storedReceiptSchema } from './receipts.ts';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 

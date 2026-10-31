@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { AdminInvalidRequest } from '../../failures';
-import { timingSafeEqual } from './constant-time';
+import { AdminInvalidRequest } from '../../failures.ts';
+import { timingSafeEqual } from './constant-time.ts';
 
 /** What a webhook claims to be about. It is a claim, never a fact. */
 export type CoolifyHintKind = 'deployment' | 'application' | 'server' | 'unknown';

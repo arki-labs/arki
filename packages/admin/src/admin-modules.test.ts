@@ -14,18 +14,18 @@ import { orThrow } from '@arki/failure';
 import { defineFeature } from '@arki/dot/feature';
 import { buildEngine } from '@arki/http';
 
-import type { FleetHealth } from './contract';
-import type { NonceStore } from './dispatcher';
-import type { ForemanEnv } from './env';
-import type { ForemanAppOptions } from './foreman-app';
-import type { JsonValue } from './module';
-import { createForemanClient, generateForemanKeyPair } from './client';
-import { foreman } from './dot';
-import { foremanConfigFromEnv } from './env';
-import { createForemanHandlerFromEnv } from './foreman-app';
-import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module';
-import { kvReceiptStore } from './receipts';
-import { memoryKv, refusal } from './test-support';
+import type { FleetHealth } from './contract.ts';
+import type { NonceStore } from './dispatcher.ts';
+import type { ForemanEnv } from './env.ts';
+import type { ForemanAppOptions } from './foreman-app.ts';
+import type { JsonValue } from './module.ts';
+import { createForemanClient, generateForemanKeyPair } from './client.ts';
+import { foreman } from './dot.ts';
+import { foremanConfigFromEnv } from './env.ts';
+import { createForemanHandlerFromEnv } from './foreman-app.ts';
+import { ADMIN_ERROR_CODES, defineAction, defineModule, defineRead, describeModule } from './module.ts';
+import { kvReceiptStore } from './receipts.ts';
+import { memoryKv, refusal } from './test-support.ts';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 

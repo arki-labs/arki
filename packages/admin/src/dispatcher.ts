@@ -32,12 +32,12 @@ import type { Failure } from '@arki/failure';
 import { isFailure, revive, serialize, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
-import type { AdminErrorCode } from './errors';
-import type { AnyAction, AnyRead, ForemanModule, Permit } from './module';
-import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol';
-import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts';
-import type { AdminFailure } from './failures';
-import { ADMIN_ERROR_CODES, AdminError, isModuleError } from './errors';
+import type { AdminErrorCode } from './errors.ts';
+import type { AnyAction, AnyRead, ForemanModule, Permit } from './module.ts';
+import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol.ts';
+import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts.ts';
+import type { AdminFailure } from './failures.ts';
+import { ADMIN_ERROR_CODES, AdminError, isModuleError } from './errors.ts';
 import {
   adminFailureOfWire,
   AdminInvalidRequest,
@@ -52,9 +52,9 @@ import {
   AdminUnknownCapability,
   AdminWritesDisabled,
   wireCodeOf,
-} from './failures';
-import { canonicalJson, jsonValueSchema, sha256 } from './json';
-import { describeModule } from './module';
+} from './failures.ts';
+import { canonicalJson, jsonValueSchema, sha256 } from './json.ts';
+import { describeModule } from './module.ts';
 import {
   audienceSchema,
   envelopeSchema,
@@ -79,7 +79,7 @@ import {
   utf8,
   verifyEnvelope,
   writesModeSchema,
-} from './protocol';
+} from './protocol.ts';
 
 const logger = getLogger('arki:admin');
 

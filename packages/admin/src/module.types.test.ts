@@ -4,8 +4,8 @@ import type { ActionSource } from '@arki/dot/unit';
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
-import type { ForemanDotAction, ForemanModule, Permit } from './module';
-import { defineAction, defineModule, defineRead, describeModule } from './module';
+import type { ForemanDotAction, ForemanModule, Permit } from './module.ts';
+import { defineAction, defineModule, defineRead, describeModule } from './module.ts';
 
 type Ctx = { tenant: string };
 

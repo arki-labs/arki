@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { isFailure, orThrow } from '@arki/failure';
 
-import { AdminError } from '../../errors';
+import { AdminError } from '../../errors.ts';
 import {
   AdminInvalidOutput,
   AdminInvalidRequest,
   AdminUnauthenticated,
   AdminUnknownCapability,
   AdminUnreachable,
-} from '../../failures';
+} from '../../failures.ts';
 import {
   APP_UUID,
   applications,
@@ -21,8 +21,8 @@ import {
   SERVER_UUID,
   servers,
   unreachableServer,
-} from './fixtures';
-import { confirmHint, createCoolifyClient, parseWebhookHint, verifyWebhookSecret } from './index';
+} from './fixtures/index.ts';
+import { confirmHint, createCoolifyClient, parseWebhookHint, verifyWebhookSecret } from './index.ts';
 
 const TOKEN = '12|super-secret-token-value';
 const BASE = 'https://coolify.example.invalid';

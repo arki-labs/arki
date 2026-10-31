@@ -5,10 +5,10 @@
  */
 import { z } from '@arki/contracts';
 
-import type { CreateForemanHandlerOptions } from './dispatcher';
-import type { ForemanEnvironment } from './protocol';
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { foremanEnvironmentSchema, writesModeSchema } from './protocol';
+import type { CreateForemanHandlerOptions } from './dispatcher.ts';
+import type { ForemanEnvironment } from './protocol.ts';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
+import { foremanEnvironmentSchema, writesModeSchema } from './protocol.ts';
 
 /**
  * Spread into the app's env schema (`defineEnv({ server: { ...foremanEnvShape } })`).

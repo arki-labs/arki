@@ -1,10 +1,10 @@
 import { isFailure } from '@arki/failure';
 
-import type { CoolifyClient, CoolifyFailure } from './client';
-import type { CoolifySignal } from './signals';
-import type { CoolifyHint } from './webhook';
-import { AdminUnknownCapability } from '../../failures';
-import { applicationSignal, deploymentSignal, serverSignal } from './signals';
+import type { CoolifyClient, CoolifyFailure } from './client.ts';
+import type { CoolifySignal } from './signals.ts';
+import type { CoolifyHint } from './webhook.ts';
+import { AdminUnknownCapability } from '../../failures.ts';
+import { applicationSignal, deploymentSignal, serverSignal } from './signals.ts';
 
 /**
  * Turn a hint into signals by asking the Coolify API. The webhook's own content is never

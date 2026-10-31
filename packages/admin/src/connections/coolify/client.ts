@@ -4,8 +4,8 @@ import { getLogger } from '@arki/log';
 
 import { isFailure } from '@arki/failure';
 
-import { ADMIN_ERROR_CODES, AdminError } from '../../errors';
-import { AdminInvalidOutput, AdminUnauthenticated, AdminUnknownCapability, AdminUnreachable } from '../../failures';
+import { ADMIN_ERROR_CODES, AdminError } from '../../errors.ts';
+import { AdminInvalidOutput, AdminUnauthenticated, AdminUnknownCapability, AdminUnreachable } from '../../failures.ts';
 import {
   coolifyApplicationListSchema,
   coolifyApplicationSchema,
@@ -15,7 +15,7 @@ import {
   coolifyProjectListSchema,
   coolifyServerListSchema,
   coolifyServerSchema,
-} from './schemas';
+} from './schemas.ts';
 
 const logger = getLogger('arki:admin:coolify');
 

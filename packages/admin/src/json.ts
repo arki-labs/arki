@@ -7,7 +7,7 @@
  */
 import { z } from '@arki/contracts';
 
-import { ADMIN_ERROR_CODES, AdminError } from './errors';
+import { ADMIN_ERROR_CODES, AdminError } from './errors.ts';
 
 /** Any JSON value. Validates finite numbers and plain objects/arrays only. */
 export const jsonValueSchema = z.json();

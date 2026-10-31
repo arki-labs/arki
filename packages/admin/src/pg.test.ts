@@ -12,8 +12,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
 
-import { foremanStoreTable, pgForemanStore } from './pg';
-import { storedReceiptSchema } from './receipts';
+import { foremanStoreTable, pgForemanStore } from './pg.ts';
+import { storedReceiptSchema } from './receipts.ts';
 
 const table = foremanStoreTable();
 const clients: PGlite[] = [];

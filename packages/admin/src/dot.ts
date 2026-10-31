@@ -28,9 +28,9 @@
 import type { RouteBundle } from '@arki/http';
 import { raw, route, routes } from '@arki/http';
 
-import type { ForemanAppOptions } from './foreman-app';
-import { createForemanHandlerFromEnv } from './foreman-app';
-import { FOREMAN_BASE_PATH } from './protocol';
+import type { ForemanAppOptions } from './foreman-app.ts';
+import { createForemanHandlerFromEnv } from './foreman-app.ts';
+import { FOREMAN_BASE_PATH } from './protocol.ts';
 
 // The dispatcher checks the signed path against the real request path, so these
 // are contracts bound to the request (`ctx.req`) rather than a Hono prefix mount,

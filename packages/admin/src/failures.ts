@@ -14,8 +14,8 @@ import { z } from 'zod';
 
 import { defineFailure } from '@arki/failure';
 
-import type { AdminErrorCode } from './errors';
-import { ADMIN_ERROR_CODES } from './errors';
+import type { AdminErrorCode } from './errors.ts';
+import { ADMIN_ERROR_CODES } from './errors.ts';
 
 /** What went wrong, in one sentence. Never a secret, a key or a body. */
 const detailData = z.object({ detail: z.string() });

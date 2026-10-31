@@ -10,14 +10,14 @@
  */
 import { z } from '@arki/contracts';
 
-import type { FleetHealth } from './contract';
-import type { AnyForemanModule, ForemanModule } from './module';
-import type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
-import type { ReceiptStore } from './receipts';
-import { fleetHealthCheckSchema, fleetHealthSchema } from './contract';
-import { defineModule, defineRead, describeModule } from './module';
-import { FOREMAN_PROTOCOL_VERSION, foremanManifestSchema } from './protocol';
-import { receiptsModule } from './receipts';
+import type { FleetHealth } from './contract.ts';
+import type { AnyForemanModule, ForemanModule } from './module.ts';
+import type { ForemanEnvironment, ForemanManifest, ProviderReadiness, WritesMode } from './protocol.ts';
+import type { ReceiptStore } from './receipts.ts';
+import { fleetHealthCheckSchema, fleetHealthSchema } from './contract.ts';
+import { defineModule, defineRead, describeModule } from './module.ts';
+import { FOREMAN_PROTOCOL_VERSION, foremanManifestSchema } from './protocol.ts';
+import { receiptsModule } from './receipts.ts';
 
 export const CORE_PERMISSION = 'core:read';
 export const CORE_HEALTH_MODULE_ID = 'core.health';

@@ -5,10 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { createForemanClient, generateForemanKeyPair } from './client';
-import { refusal } from './test-support';
-import { ADMIN_ERROR_CODES } from './module';
-import { fetchFleetSnapshot } from './server';
+import { createForemanClient, generateForemanKeyPair } from './client.ts';
+import { refusal } from './test-support.ts';
+import { ADMIN_ERROR_CODES } from './module.ts';
+import { fetchFleetSnapshot } from './server.ts';
 
 const INTERNAL = 'http://169.254.169.254/latest/meta-data';
 

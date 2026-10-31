@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from '@arki/contracts';
 import { defineFailure } from '@arki/failure';
 
-import type { AdminErrorCode, ModuleDescription, Permit } from './module';
+import type { AdminErrorCode, ModuleDescription, Permit } from './module.ts';
 import {
   ADMIN_ERROR_CODES,
   AdminError,
@@ -16,7 +16,7 @@ import {
   describeModule,
   moduleDescriptionSchema,
   schemaHash,
-} from './module';
+} from './module.ts';
 
 type Ctx = { tenant: string };
 

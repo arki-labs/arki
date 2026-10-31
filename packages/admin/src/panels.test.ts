@@ -2,9 +2,9 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import type { BoardOutput, PanelTone, RowsCell, RowsOutput } from './panels';
-import { defineModule, defineRead, describeModule } from './module';
-import { boardOutputSchema, PANEL_RENDERER, rowsOutputSchema } from './panels';
+import type { BoardOutput, PanelTone, RowsCell, RowsOutput } from './panels.ts';
+import { defineModule, defineRead, describeModule } from './module.ts';
+import { boardOutputSchema, PANEL_RENDERER, rowsOutputSchema } from './panels.ts';
 
 describe('panel shapes', () => {
   it('accepts a board whose card could not be measured, so an app never has to invent a zero', () => {

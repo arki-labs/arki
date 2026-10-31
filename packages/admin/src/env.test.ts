@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { foremanEnvironmentFromNodeEnv } from './env';
-import { audienceSchema, foremanEnvironmentSchema } from './protocol';
+import { foremanEnvironmentFromNodeEnv } from './env.ts';
+import { audienceSchema, foremanEnvironmentSchema } from './protocol.ts';
 
 /** A process env with no NODE_ENV in it. */
 const emptyProcessEnv: NodeJS.ProcessEnv = {};
