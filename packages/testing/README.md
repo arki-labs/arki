@@ -76,12 +76,23 @@ The full list with every export name is in [llms.txt](llms.txt).
 
 ## Failure behaviour
 
-Every helper throws a plain `Error` (or `TypeError` for a wrong value type) when a check fails, so the test fails with the message. Nothing returns a failure value, because a failed assertion is the test result.
+Every helper throws a plain `Error` (or `TypeError` for a wrong value type) when a check fails, so the test fails with the message. A failed assertion is the test result. Only the Ollama calls and the stack manifest return a failure value, listed below.
 
 - Assertions name the field, the expected value and the actual value in the message.
 - `IntegrationTester` methods throw `Tester not initialized. Call setup() first.` before `setup()`.
 - A scorer that cannot score throws `UnscorableError`. It is never a pass, and `.not` does not turn it into one.
 - `setupMswServer` fails a test that makes a request no handler matches.
+
+These return `@arki/failure` failures instead of throwing:
+
+| Export                 | From                  | When it is returned                                                                                |
+| ---------------------- | --------------------- | -------------------------------------------------------------------------------------------------- |
+| `OllamaUnavailable`    | `@arki/testing/ai`    | Ollama did not answer: it is not running, the call timed out, or it answered with an error status. |
+| `OllamaAnswerInvalid`  | `@arki/testing/ai`    | Ollama answered, but not in the asked shape: not JSON, not the schema, or not one vector per text. |
+| `StackNotStarted`      | `@arki/testing/stack` | `readManifest` found `ARKI_STACK` empty: the test did not run through `playwright test`.           |
+| `StackManifestInvalid` | `@arki/testing/stack` | `readManifest` found text in `ARKI_STACK` that is not the manifest `stackSetup` writes.            |
+
+`OLLAMA_FAILURES` lists every failure a judge or an embedder call returns. A scorer turns either one into an `unscorable` score, never a pass. `READ_MANIFEST_FAILURES` lists every failure `readManifest` returns.
 
 ## Limits
 

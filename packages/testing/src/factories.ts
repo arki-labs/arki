@@ -112,7 +112,7 @@ export type Factory<T> = {
  *
  * // Builder pattern
  * const game2 = gameFactory()
- *   .with('name', 'Sudoku')
+ *   .with('name', 'Checkers')
  *   .with('status', 'draft')
  *   .build();
  * ```
