@@ -28,7 +28,8 @@ export type EngineRuntime = {
   readonly secret: string | undefined;
   readonly production: boolean;
   readonly trustedOrigins: readonly string[];
-  readonly clientIpHeader: string | undefined;
+  /** The one header the engine reads the client address from. Never a caller-set default. */
+  readonly clientIpHeader: string;
 };
 
 export type EngineCallbacks = {
@@ -213,7 +214,8 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
       disableOriginCheck: false,
       disableCSRFCheck: false,
       database: { generateId: false },
-      ...(runtime.clientIpHeader !== undefined && { ipAddress: { ipAddressHeaders: [runtime.clientIpHeader] } }),
+      // Always named: the engine's default is the caller-set `x-forwarded-for`.
+      ipAddress: { ipAddressHeaders: [runtime.clientIpHeader] },
     },
   };
 }

@@ -1,13 +1,23 @@
-import type { AnyRedirect } from '@tanstack/react-router';
+import type { AnyRouter, Redirect } from '@tanstack/react-router';
 
 type SessionPrefetchFn = () => Promise<unknown>;
 
 /**
  * Builds the redirect thrown when there is no session. The app calls TanStack Router's own
- * `redirect()`, so the target is checked against the app's routes:
- * `() => redirect({ to: '/auth/$', params: { _splat: 'sign-in' } })`.
+ * `redirect()`, so the target and its `search` are checked against the app's routes:
+ * `() => redirect({ to: '/sign-in', search: { redirect: location.href } })`.
+ *
+ * The type parameters are the redirect's own, inferred from the callback. A fixed `AnyRedirect`
+ * refused a typed `search` under `exactOptionalPropertyTypes` whenever the app's router types
+ * came from another install than this package's (a linked checkout, another patch release).
  */
-export type SignInRedirect = () => AnyRedirect;
+export type SignInRedirect<
+  TRouter extends AnyRouter,
+  TFrom extends string,
+  TTo extends string | undefined,
+  TMaskFrom extends string,
+  TMaskTo extends string,
+> = () => Redirect<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>;
 
 /**
  * Builds a `beforeLoad`-compatible auth guard backed by the supplied SSR
@@ -20,11 +30,16 @@ export type SignInRedirect = () => AnyRedirect;
  * access to the request headers.
  *
  * @example
- * export const requireAuth = createRequireAuth(prefetchSessionFn, () =>
- *   redirect({ to: '/auth/$', params: { _splat: 'sign-in' } }),
- * );
+ * beforeLoad: ({ location }) =>
+ *   createRequireAuth(prefetchSessionFn, () => redirect({ to: '/sign-in', search: { redirect: location.href } }))(),
  */
-export function createRequireAuth(prefetchSessionFn: SessionPrefetchFn, signIn: SignInRedirect) {
+export function createRequireAuth<
+  TRouter extends AnyRouter,
+  TFrom extends string,
+  TTo extends string | undefined,
+  TMaskFrom extends string,
+  TMaskTo extends string,
+>(prefetchSessionFn: SessionPrefetchFn, signIn: SignInRedirect<TRouter, TFrom, TTo, TMaskFrom, TMaskTo>) {
   return async function requireAuth() {
     const session = await prefetchSessionFn();
     if (!session) {

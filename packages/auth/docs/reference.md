@@ -41,6 +41,8 @@ Link lifetimes are fixed: magic link 5 minutes, password reset 15 minutes, email
 
 `runtime().clientIp.header` names the one header your ingress sets to the client address, such as `cf-connecting-ip`. The rate limiter reads only that header, so a spoofed `x-forwarded-for` cannot pick a new bucket.
 
+Without `clientIp`, the limiter trusts no request header, `x-forwarded-for` included (the engine's own default reads it, and any caller can write it). It keys on the socket address the runtime puts on the request as `request.ip` (srvx does, under TanStack Start, Nitro and h3). When the request carries none, as with `signInWithIdToken` (headers only), every caller shares one budget: one client can then use up the budget for all, so set `clientIp` in production behind a proxy.
+
 ## The principal and sessions
 
 ```ts skip="a type sketch: the field types are elided, so it does not compile"

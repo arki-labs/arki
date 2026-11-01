@@ -7,7 +7,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/auth`: the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the constants and the principal and definition types. `AUTH_ERROR_CODES`, `AUTH_FAILURES`, `AUTH_POLICY_FAILURES`, `AUTH_PRINCIPAL_FAILURES`, `AUTH_SECRET_MIN_LENGTH`, `AccessDenied`, `AuthError`, `AuthenticationRateLimited`, `AuthenticationRequired`, `AuthenticationUnavailable`, `PASSWORD_MIN_LENGTH`, `ResourceMissing`; and 42 more.
+- `@arki/auth`: the browser-safe vocabulary: `defineAuth`, `definePolicies`, the error codes, the constants and the principal and definition types. `AUTH_ERROR_CODES`, `AUTH_FAILURES`, `AUTH_POLICY_FAILURES`, `AUTH_PRINCIPAL_FAILURES`, `AUTH_SECRET_MIN_LENGTH`, `AccessDenied`, `AuthError`, `AuthenticationRateLimited`, `AuthenticationRequired`, `AuthenticationUnavailable`, `PASSWORD_MIN_LENGTH`, `ResourceMissing`; and 44 more.
 - `@arki/auth/ids`: the auth id types and their generators. `createAccountId`, `createSessionId`, `createUserId`, `createVerificationId`; types `AccountId`, `AuthRequestId`, `SessionId`, `UserId`, `VerificationId`.
 - `@arki/auth/zod`: Zod schemas for the auth ids and an email address, for apps that validate input with Zod. `accountIdSchema`, `authRequestIdSchema`, `emailSchema`, `organizationIdSchema`, `sessionIdSchema`, `teamIdSchema`, `userIdSchema`, `verificationIdSchema`.
 - `@arki/auth/password`: Password hashing with scrypt, in pure JavaScript (`@noble/hashes`), so it runs in every runtime without a native module. `hashPassword`, `verifyPassword`.
@@ -19,7 +19,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 - `@arki/auth/dot`: @arki/auth in a Dot app. `auth`; types `AuthOf`.
 - `@arki/auth/orpc`: ownership checks and policy checks for oRPC procedures. `assertFound`, `assertOwnedOrForbidden`, `assertOwnedOrNotFound`, `can`; types `Owned`, `PolicyGuard`, `PolicyLoader`.
 - `@arki/auth/http`: the principal as an `@arki/http` step, and policy checks as a handler wrapper. `authFailureHeaders`, `authorize`, `principalFromHeaders`; types `PrincipalSource`.
-- `@arki/auth/react`: Auth UI: the auth client, the sign-in form (with its handler factory). `SignInForm`, `createAuthClient`, `createSignInHandlers`, `resolveAuthClientBaseUrl`; types `AuthCapabilities`, `AuthClient`, `AuthClientOptions`, `SignInCapableAuthClient`, `SignInFormProps`, `SignInFormSource`, `SignInHandlerOptions`, `SignInHandlers`; and 1 more.
+- `@arki/auth/react`: Auth UI: the auth client, the sign-in form (with its handler factory). `SignInForm`, `createAuthClient`, `createSignInHandlers`, `resolveAuthClientBaseUrl`; types `AuthCapabilities`, `AuthClient`, `AuthClientOptions`, `SignInCapableAuthClient`, `SignInFormProps`, `SignInFormSource`, `SignInHandlerOptions`, `SignInHandlers`; and 2 more.
 - `@arki/auth/react/templates`: Auth page templates. `AuthErrorPageTemplate`, `LoginTemplate1`, `SignOutTemplate`, `VerifyRequestTemplate`.
 - `@arki/auth/tanstack-start`: `ArkiAuthProvider`, `TanStackAuthProvider`, `createRequireAuth`, `tanstackStart`; types `ImageComponentProps`, `LinkComponentProps`, `SignInRedirect`, `TanStackAuthProviderProps`.
 - `@arki/auth/testing`: a real auth on an in-memory PGlite (or libSQL), with every mail kept in a sink. `TEST_AUTH_SECRET`, `actingAs`, `lastLink`, `lastMagicLink`, `testAuth`; types `TestAuth`, `TestAuthBindings`, `TestDatabase`, `TestDb`.
@@ -47,6 +47,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 - Read the caller with `auth.principal(headers)`. Never call the engine (`auth.engine`, `better-auth`) from app code.
 - The table makes every id (`generateId: false`). An id column without a `$defaultFn` breaks sign-up.
 - Production needs `rateLimit: { store: kv }`, a secret of 32+ characters, and `mail` when a method sends mail. Each one missing fails at boot.
+- Behind a proxy set `runtime().clientIp.header`. Without it no header counts, `x-forwarded-for` included: limits key on the socket address (`request.ip`) or one shared budget.
 - `user.fields` names columns that exist on your user table. Types come from the table, never from the definition.
 - `workspaces` needs the workspace tables and the `activeOrganizationId` and `activeTeamId` session columns (`ARKI_AUTH_E007`).
 - A cookie and a bearer token on one request is `ARKI_AUTH_E401`, not the cookie's user.

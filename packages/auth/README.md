@@ -229,7 +229,17 @@ function AuthPage() {
 }
 ```
 
-The form shows only the methods the definition enables.
+The form shows only the methods the definition enables. `createSignInHandlers` takes the client `createAuthClient` returns as it is, also in an app compiled with `exactOptionalPropertyTypes`.
+
+To guard a route, pass `createRequireAuth` your session server function and a callback that builds the router's own `redirect`. The redirect's route types are inferred, so a typed "come back here" `search` is checked against your routes:
+
+```tsx skip="needs a TanStack Start app"
+// start/src/routes/studio/route.tsx
+export const Route = createFileRoute('/studio')({
+  beforeLoad: ({ location }) =>
+    createRequireAuth(getSessionFn, () => redirect({ to: '/sign-in', search: { redirect: location.href } }))(),
+});
+```
 
 ### Recipe 4: test code that needs a session
 
@@ -430,7 +440,7 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 - **A failed verify mail at sign-up is not E006.** The engine sends that mail in the background and only logs a failure. Asking for the mail again (`/send-verification-email`) and every magic-link request do return E006.
 - **A magic link to an unknown email is a sign-up.** The request answers the same for known and unknown emails. With `magicLink: { signUp: false }` the link is refused when it is used, and no user is made.
 - **The limiter store.** The rate limiter keeps its counts in your `@arki/kv` store, through the engine's `customStorage` hook, using only `getRateLimiter`. A store error answers 503. But when Redis is not ready at the moment `@arki/kv` creates a limiter, `@arki/kv` hands back an in-memory limiter, and this package cannot see that. Until `@arki/kv` can refuse instead, make sure Redis is up before the first request.
-- **The limiter counts per client address**, not per account. Set `runtime().clientIp.header` behind a proxy.
+- **The limiter counts per client address**, not per account. Behind a proxy, set `runtime().clientIp.header` to the one header the proxy writes. Without it, no request header is trusted, `x-forwarded-for` included: the limiter keys on the socket address the runtime puts on the request (`request.ip` from srvx, which TanStack Start, Nitro and h3 use), and when there is none, every caller shares one budget. `signInWithIdToken` gets headers only, so without the header its callers always share one budget.
 - **`rateLimit: false` is refused in production.** `testAuth` uses it by default.
 - **`rateLimit: { store: 'memory' }` counts per process.** Each replica has its own budget, so N replicas allow N times the attempts, and a restart resets the counts. Boot logs a warning naming the app. Use it only for a single-instance app with no Redis.
 - **Workspaces need two session columns** (`activeOrganizationId`, `activeTeamId`) as well as the workspace tables.

@@ -12,6 +12,7 @@ import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES } from '../errors.js';
 import { testAuth } from '../testing/index.js';
+import { SOCKET_ADDRESS_HEADER } from './build.js';
 
 const GOOGLE_CERTS = 'https://www.googleapis.com/oauth2/v3/certs';
 /** The audience Google writes into tokens for this app: the test client id `testAuth` gives Google. */
@@ -224,6 +225,25 @@ describe('auth.signInWithIdToken rate limit', () => {
       });
       const otherClient = await auth.signInWithIdToken({ provider: 'google', idToken, headers: from('203.0.113.8') });
       expect(otherClient).not.toBeNull();
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('without clientIp.header, no forged header picks a new bucket', async () => {
+    // WHY: an id-token call carries headers only, no socket. Without a configured header every
+    // caller shares one budget; a header the caller writes must not buy a fresh one.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    try {
+      const idToken = await googleIdToken(google, {});
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const headers = new Headers({ 'x-forwarded-for': `198.51.100.${attempt}` });
+        await auth.signInWithIdToken({ provider: 'google', idToken, headers });
+      }
+      const forged = new Headers({ [SOCKET_ADDRESS_HEADER]: '198.51.100.99', 'x-forwarded-for': '198.51.100.99' });
+      await expect(auth.signInWithIdToken({ provider: 'google', idToken, headers: forged })).rejects.toMatchObject({
+        code: AUTH_ERROR_CODES.rateLimited,
+      });
     } finally {
       await dispose();
     }

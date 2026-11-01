@@ -10,6 +10,7 @@ import { dialectOf } from '@arki/db/dialect';
 import { isFailure } from '@arki/failure';
 
 import { is, recordSchema } from '@arki/schema';
+import { z } from 'zod';
 import type { AuthDefinition, AuthMethod, IdTokenMethodsOf, ResolvedDefinition, SocialMethod } from '../definition.js';
 import type { AuthErrorCode } from '../errors.js';
 import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.js';
@@ -250,15 +251,45 @@ const isAuthErrorCode = (value: unknown): value is AuthErrorCode =>
   typeof value === 'string' && AUTH_ERROR_CODE_NAMES.has(value);
 
 /**
+ * The header the engine reads the client address from when the app names no `clientIp.header`.
+ * Only this package writes it: the handler sets it to the socket address and drops any value a
+ * caller sent. So without a configured header no request header, `x-forwarded-for` included,
+ * can pick a rate-limit bucket.
+ */
+export const SOCKET_ADDRESS_HEADER = 'x-arki-auth-socket-address';
+
+/** The socket address a runtime puts on the request: `request.ip` from srvx (TanStack Start, Nitro, h3). */
+const socketAddressSchema = z.string().min(1);
+
+/**
+ * The request the engine sees when no `clientIp.header` is configured: the socket address in
+ * {@link SOCKET_ADDRESS_HEADER}, or no address at all (every caller then shares one budget).
+ */
+async function withSocketAddress(request: Request): Promise<Request> {
+  const ip: unknown = Reflect.get(request, 'ip');
+  const address = is(ip, socketAddressSchema) ? ip : undefined;
+  if (address === undefined && !request.headers.has(SOCKET_ADDRESS_HEADER)) return request;
+  const headers = new Headers(request.headers);
+  headers.delete(SOCKET_ADDRESS_HEADER);
+  if (address !== undefined) headers.set(SOCKET_ADDRESS_HEADER, address);
+  // Field by field, not `new Request(request, ...)`: a runtime's own request class (srvx on Node)
+  // is not a native `Request`. Auth bodies are small JSON, so the body is read whole.
+  const body = request.method === 'GET' || request.method === 'HEAD' ? null : await request.arrayBuffer();
+  return new Request(request.url, { method: request.method, headers, body, signal: request.signal });
+}
+
+/**
  * The caller's headers for an in-process engine call. Browser-only headers are dropped: they would
- * make the engine treat a server call as a form post and check its origin. The rest, the client-IP
- * header and user agent included, pass as they are.
+ * make the engine treat a server call as a form post and check its origin. A caller's
+ * {@link SOCKET_ADDRESS_HEADER} is dropped too: headers carry no socket. The rest, the configured
+ * client-IP header and user agent included, pass as they are.
  */
 function engineHeadersOf(headers: Headers): Headers {
   const result = new Headers(headers);
   for (const name of headers.keys()) {
     if (/^(?:cookie|origin|referer|authorization|content-length|sec-fetch-.*)$/.test(name)) result.delete(name);
   }
+  result.delete(SOCKET_ADDRESS_HEADER);
   result.set('content-type', 'application/json');
   return result;
 }
@@ -363,7 +394,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         secret: runtime.secret,
         production: runtime.production,
         trustedOrigins: runtime.trustedOrigins ?? [],
-        clientIpHeader: runtime.clientIp?.header,
+        clientIpHeader: runtime.clientIp?.header ?? SOCKET_ADDRESS_HEADER,
       },
       db: bindings.db,
       provider: dialectOf(bindings.db) ?? invalid('`db` is neither a Drizzle Postgres nor a Drizzle SQLite database.'),
@@ -468,7 +499,8 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
   /** The principal of a request whose credentials may be wrong; events never fail the request. */
   const principalOrNull = (headers: Headers): Promise<P | null> => principal(headers).catch(() => null);
 
-  async function handler(request: Request): Promise<Response> {
+  async function handler(incoming: Request): Promise<Response> {
+    const request = runtime.clientIp === undefined ? await withSocketAddress(incoming) : incoming;
     const path = enginePath(request);
     if (closedPaths.has(path.replace(/\/+$/, ''))) return new Response(null, { status: 404 });
     const method = signInMethodOf(path, resolved.methods);

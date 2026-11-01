@@ -2,14 +2,16 @@
  * Rate limits reach the wire, are shared by replicas, fail closed, and key on the trusted client
  * address only. Brute force on sign-in is the attack these tests stand in for.
  */
+import { serve } from 'srvx';
 import { describe, expect, it } from 'vitest';
 
-import { PASSWORD, post } from '../../__fixtures__/http.js';
+import { ORIGIN, PASSWORD, post } from '../../__fixtures__/http.js';
 import { failingStore, sharedStore } from '../../__fixtures__/rate-limit-store.js';
 import { authTables } from '../../__fixtures__/tables.js';
 import { defineAuth } from '../../definition.js';
 import { AUTH_ERROR_CODES } from '../../errors.js';
 import { testAuth } from '../../testing/index.js';
+import { SOCKET_ADDRESS_HEADER } from '../build.js';
 
 const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], verifyEmail: 'none' });
 
@@ -104,6 +106,51 @@ describe('rate limits', () => {
       const otherClient = await signIn(auth, { 'cf-connecting-ip': '203.0.113.8' });
       expect(otherClient.status).not.toBe(429);
     } finally {
+      await dispose();
+    }
+  });
+
+  it('without clientIp.header, a forged x-forwarded-for or socket-address header does not pick a new bucket', async () => {
+    // WHY: the engine's default reads `x-forwarded-for`, which any caller writes. A fresh value per
+    // request bought a fresh budget, so the sign-in limit never fired.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await signIn(auth, { 'x-forwarded-for': `198.51.100.${attempt}` });
+      }
+      const forwarded = await signIn(auth, { 'x-forwarded-for': '198.51.100.99' });
+      expect(forwarded.status).toBe(429);
+      const socketHeader = await signIn(auth, { [SOCKET_ADDRESS_HEADER]: '198.51.100.98' });
+      expect(socketHeader.status).toBe(429);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('without clientIp.header, the socket address the runtime gives keys the budget', async () => {
+    // WHY: with no proxy header the socket is the only address a caller cannot forge. Keying on
+    // it keeps one client's lockout from locking out every other client.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    // `::` takes IPv4 and IPv6, so 127.0.0.1 and ::1 are two real sockets of one server.
+    const server = serve({ fetch: request => auth.handler(request), hostname: '::', port: 0, silent: true });
+    try {
+      await server.ready();
+      const port = server.url === undefined ? '' : new URL(server.url).port;
+      const signInFrom = (host: string, headers: HeadersInit) =>
+        fetch(`http://${host}:${port}/api/auth/sign-in/email`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: ORIGIN, ...headers },
+          body: JSON.stringify({ email: 'ada@notes.test', password: PASSWORD }),
+        });
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await signInFrom('127.0.0.1', { 'x-forwarded-for': `198.51.100.${attempt}` });
+      }
+      const sameSocket = await signInFrom('127.0.0.1', { 'x-forwarded-for': '198.51.100.99' });
+      expect(sameSocket.status).toBe(429);
+      const otherSocket = await signInFrom('[::1]', {});
+      expect(otherSocket.status).not.toBe(429);
+    } finally {
+      await server.close(true);
       await dispose();
     }
   });

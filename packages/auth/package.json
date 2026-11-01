@@ -189,6 +189,7 @@
     "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
     "rate-limiter-flexible": "catalog:",
+    "srvx": "^1.0.6",
     "vitest": "catalog:"
   },
   "peerDependencies": {

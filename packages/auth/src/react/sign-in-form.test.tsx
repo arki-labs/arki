@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { AuthDefinition } from '../definition.js';
-import type { SignInHandlers } from './sign-in-form.js';
+import type { SignInCapableAuthClient, SignInHandlers } from './sign-in-form.js';
 import { SignInRefused } from '../boundary-failures.js';
 import { defineAuth } from '../definition.js';
 import { createSignInHandlers, SignInForm } from './sign-in-form.js';
@@ -63,7 +63,7 @@ describe('SignInForm', () => {
 describe('createSignInHandlers', () => {
   // WHY: a failed sign-in used to become `new Error(server text)`, so a wrong password, an unverified
   // email and a rate limit looked the same and showed the server's own words. Each is a distinct reason now.
-  const clientFailing = (error: { status?: number; code?: string; message?: string }) => ({
+  const clientFailing = (error: { status: number; statusText: string; code?: string; message?: string }) => ({
     signIn: {
       email: () => Promise.resolve({ error }),
       magicLink: () => Promise.resolve({ error }),
@@ -72,10 +72,10 @@ describe('createSignInHandlers', () => {
   });
 
   it.each([
-    [{ status: 401, message: 'Invalid email or password' }, 'credentials'],
-    [{ status: 403, code: 'EMAIL_NOT_VERIFIED', message: 'Email not verified' }, 'unverified'],
-    [{ status: 429, message: 'Too many requests' }, 'rateLimited'],
-    [{ status: 500, message: 'database exploded at db.internal' }, 'unknown'],
+    [{ status: 401, statusText: 'Unauthorized', message: 'Invalid email or password' }, 'credentials'],
+    [{ status: 403, statusText: 'Forbidden', code: 'EMAIL_NOT_VERIFIED', message: 'Email not verified' }, 'unverified'],
+    [{ status: 429, statusText: 'Too Many Requests', message: 'Too many requests' }, 'rateLimited'],
+    [{ status: 500, statusText: 'Internal Server Error', message: 'database exploded at db.internal' }, 'unknown'],
   ] as const)('maps %o to the %s reason and drops the server text', async (error, reason) => {
     const handlers = createSignInHandlers(clientFailing(error), { redirectTo: '/', onSignedIn: vi.fn() });
     const refused = await handlers.onPasswordSignIn('a@b.test', 'pw');
@@ -87,13 +87,21 @@ describe('createSignInHandlers', () => {
 
   it('signs in only when the call succeeded', async () => {
     const signedIn = vi.fn();
-    const ok = { signIn: { email: () => Promise.resolve({ error: null }), social: () => Promise.resolve({}) } };
+    const ok = { signIn: { email: () => Promise.resolve({ error: null }), social: () => Promise.resolve({ error: null }) } };
     const handlers = createSignInHandlers(ok, { redirectTo: '/', onSignedIn: signedIn });
     expect(await handlers.onPasswordSignIn('a@b.test', 'pw')).toBeUndefined();
     expect(signedIn).toHaveBeenCalledTimes(1);
 
-    const failing = createSignInHandlers(clientFailing({ status: 401 }), { redirectTo: '/', onSignedIn: signedIn });
+    const failing = createSignInHandlers(clientFailing({ status: 401, statusText: 'Unauthorized' }), { redirectTo: '/', onSignedIn: signedIn });
     expect(await failing.onPasswordSignIn('a@b.test', 'pw')).toMatchObject({ code: SignInRefused.code });
     expect(signedIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the error type of the real engine client, never `any`', () => {
+    // WHY: the adapter takes its result type from the engine client. `ReturnType` of the engine's
+    // generic method is `any`, which would accept every client and check nothing.
+    type EngineError = Awaited<ReturnType<SignInCapableAuthClient['signIn']['email']>>['error'];
+    expectTypeOf<EngineError>().not.toBeAny();
+    expectTypeOf<NonNullable<EngineError>>().toHaveProperty('status').toEqualTypeOf<number>();
   });
 });

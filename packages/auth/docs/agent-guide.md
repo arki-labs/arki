@@ -195,6 +195,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - Never cast a session user (`user.id as UserId`, `user as UserModel`). The principal is already typed from the table.
 - The table makes every id. The engine runs with `generateId: false`, so an id column needs a `$defaultFn` (an `@arki/auth/ids` factory has one).
 - Production refuses `rateLimit: false` and a missing `rateLimit`. Tests get `rateLimit: false` from `testAuth`.
+- Behind a proxy, set `runtime().clientIp.header`. Without it no request header counts, `x-forwarded-for` included: the limiter keys on the socket address the runtime gives (`request.ip`), or every caller shares one budget.
 - The origin and CSRF checks are always on, also under `NODE_ENV=test`. Requests a test sends to `auth.handler` carry an `origin` header equal to the app URL, as a browser's do.
 - A magic link to an unknown email signs that person up. Set `magicLink: { signUp: false }` for sign-in-only links; the request still answers 200 and the link is refused when it is used.
 - A template validator defect throws `schema.validator_defect` at the auth callback boundary. It is not converted to a delivery refusal.

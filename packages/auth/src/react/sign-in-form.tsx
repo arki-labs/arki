@@ -23,6 +23,7 @@ import { Input } from '@arki/ui/input';
 import { Label } from '@arki/ui/label';
 
 import type { AuthDefinition, SocialMethod } from '../definition.js';
+import type { AuthClient } from './client.js';
 import { SignInRefused } from '../boundary-failures.js';
 import { authCapabilities } from './capabilities.js';
 
@@ -549,10 +550,20 @@ export function SignInForm({
 /* -------------------------------------------------------------------------- */
 
 /**
- * Minimal shape of a better-auth call result the adapter inspects. `status` is the HTTP status
- * and `code` better-auth's error code (`EMAIL_NOT_VERIFIED`); the server's `message` is not read.
+ * The `error` of an engine sign-in call, taken from the client `createAuthClient` returns, so it
+ * cannot drift from it: `null` on success, else `status` (the HTTP status) and `code` (the
+ * engine's error code, such as `EMAIL_NOT_VERIFIED`). The server's `message` is not read.
  */
-type AuthClientResult = { error?: { status?: number | null; code?: string | null } | null };
+type EngineSignInError = Awaited<ReturnType<typeof _engineClient.signIn.email<{ throw: false }>>>['error'];
+
+/**
+ * Type-only: names the engine client so its generic `email` can be instantiated. `ReturnType` of
+ * the uninstantiated method is `any`, which would accept every shape and check nothing.
+ */
+declare const _engineClient: AuthClient<AuthDefinition>;
+
+/** The part of a sign-in call result the adapter reads. */
+type AuthClientResult = { readonly error: EngineSignInError };
 
 /**
  * Structural subset of a better-auth client the adapter needs. Methods use
