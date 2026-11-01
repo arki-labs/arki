@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
+import { AdminModuleRefused } from '@arki/admin/module';
 import { orThrow } from '@arki/failure';
 
 import { attemptId, jobId } from '../id.js';
@@ -224,7 +225,7 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
           permit: claim('exe_wire', 'journal.retryJob', typeof revision === 'string' ? revision : ''),
         },
       ),
-    ).rejects.toMatchObject({ code: 'ARKI_JOURNAL_E001' });
+    ).resolves.toMatchObject({ code: AdminModuleRefused.code, data: { code: 'ARKI_JOURNAL_E001', httpStatus: 409 } });
     expect(lastStatus()).toBe(409);
   });
 });
@@ -246,7 +247,7 @@ describe('T(journal-foreman) a workflow run owns its jobs', () => {
           permit: claim('exe_owned', 'journal.retryJob', typeof revision === 'string' ? revision : ''),
         },
       ),
-    ).rejects.toMatchObject({ code: JOURNAL_JOBS_ERROR_CODES.managed });
+    ).resolves.toMatchObject({ code: AdminModuleRefused.code, data: { code: JOURNAL_JOBS_ERROR_CODES.managed, httpStatus: 409 } });
     expect(lastStatus()).toBe(409);
     expect(JOURNAL_JOBS_ERROR_CODES.managed).toBe('ARKI_JOURNAL_E006');
 

@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import type { SettledReceipt } from '@arki/admin/receipts';
 import { defineAction, defineModule } from '@arki/admin/module';
+import { isFailure } from '@arki/failure';
 
 import { initJournal } from '../index.js';
 import { journalTables } from '../pg.js';
@@ -77,8 +78,9 @@ describe('T(journal-foreman-receipts) the journal store', () => {
         { jobId: 'job_1' },
         { scopes: ['queue:write'], permit: permit('exe_journal', 'queue.retryJob', 'rev_3') },
       );
-    await expect(execute()).rejects.toThrow();
-    await expect(execute()).rejects.toThrow();
+    // The answer is lost on the wire both times; the client returns that as a failure value.
+    expect(isFailure(await execute())).toBe(true);
+    expect(isFailure(await execute())).toBe(true);
     expect(await receiptOf('exe_journal')).toMatchObject({ status: 'applied', result: { requeued: true } });
     expect(runs).toBe(1);
   });

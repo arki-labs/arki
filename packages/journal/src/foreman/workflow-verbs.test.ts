@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
-import { ADMIN_ERROR_CODES } from '@arki/admin/module';
+import { AdminScopeDenied } from '@arki/admin/module';
 import { isFailure, orThrow } from '@arki/failure';
 
 import { CommandConflict, WorkflowBusy } from '../errors.js';
@@ -143,14 +143,14 @@ describe('permissions', () => {
 
     for (const [id, input, scope] of verbs) {
       const others = scopes.filter(other => other !== scope);
-      await expect(foreman.preview(id, input, [WORKFLOW_PERMISSIONS.read, ...others])).rejects.toMatchObject({
-        code: ADMIN_ERROR_CODES.scopeDenied,
+      await expect(foreman.preview(id, input, [WORKFLOW_PERMISSIONS.read, ...others])).resolves.toMatchObject({
+        code: AdminScopeDenied.code,
       });
       expect(lastStatus()).toBe(403);
 
       const { revision } = z.object({ revision: z.string() }).parse(await foreman.preview(id, input, [scope]));
       const executionId = newId('exe_wire');
-      await foreman.execute(id, input, { scopes: [scope], permit: claim(executionId, id, revision) });
+      orThrow(await foreman.execute(id, input, { scopes: [scope], permit: claim(executionId, id, revision) }));
       expect(await receiptOf(executionId)).toMatchObject({ status: 'applied', actionId: id });
     }
     expect(await runOf(runId)).toMatchObject({ run: { tags: ['vip'] }, metadata: '{"step":"two"}' });

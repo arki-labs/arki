@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { z } from 'zod';
 
 import type { Permit } from '@arki/admin/module';
+import { AdminModuleRefused } from '@arki/admin/module';
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { isFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 import { backoff } from '@arki/resilience';
@@ -294,7 +295,7 @@ describe('signal', () => {
     // A signal no wait of the run's version takes is refused before approval.
     await expect(
       foreman.preview('workflow.signal', { runId: id, name: 'nobody', payload: {}, reason: 'x' }, ['workflow:signal']),
-    ).rejects.toMatchObject({ code: CODES.badSignal });
+    ).resolves.toMatchObject({ code: AdminModuleRefused.code, data: { code: CODES.badSignal, httpStatus: 400 } });
     expect(lastStatus()).toBe(400);
 
     // The payload is checked by the run's own version when the action runs, and nothing is stored.

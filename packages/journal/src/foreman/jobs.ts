@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 
-import type { Permit } from '@arki/admin/module';
+import type { ModuleError, Permit } from '@arki/admin/module';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { StandardSchemaV1 } from '@arki/schema';
 import {
@@ -522,7 +522,7 @@ export function jobsModule<
     permission: `journal:${string}`;
     risk: 'low' | 'medium' | 'high';
     /** The refusal for a job that is gone. */
-    missing: (jobId: string) => AdminError;
+    missing: (jobId: string) => ModuleError;
     /** Throws the coded refusal when the job is not in the state this action needs. */
     require: (row: HotJob) => void;
     consequence: (row: HotJob) => string;
