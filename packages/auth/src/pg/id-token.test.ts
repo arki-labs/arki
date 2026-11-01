@@ -12,7 +12,7 @@ import { authTables } from '../__fixtures__/tables.js';
 import { defineAuth } from '../definition.js';
 import { AUTH_ERROR_CODES } from '../errors.js';
 import { testAuth } from '../testing/index.js';
-import { SOCKET_ADDRESS_HEADER } from './build.js';
+import { CLIENT_KEY_HEADER } from './security/client-key.js';
 
 const GOOGLE_CERTS = 'https://www.googleapis.com/oauth2/v3/certs';
 /** The audience Google writes into tokens for this app: the test client id `testAuth` gives Google. */
@@ -240,10 +240,26 @@ describe('auth.signInWithIdToken rate limit', () => {
         const headers = new Headers({ 'x-forwarded-for': `198.51.100.${attempt}` });
         await auth.signInWithIdToken({ provider: 'google', idToken, headers });
       }
-      const forged = new Headers({ [SOCKET_ADDRESS_HEADER]: '198.51.100.99', 'x-forwarded-for': '198.51.100.99' });
+      const forged = new Headers({ [CLIENT_KEY_HEADER]: '198.51.100.99', 'x-forwarded-for': '198.51.100.99' });
       await expect(auth.signInWithIdToken({ provider: 'google', idToken, headers: forged })).rejects.toMatchObject({
         code: AUTH_ERROR_CODES.rateLimited,
       });
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('counts on a clientAddress the caller passes: one address is refused, another passes', async () => {
+    // WHY: a native sign-in carries headers only. The server knows the socket; passing it keeps one
+    // client's failures from using up the budget of every other client.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    try {
+      const idToken = await googleIdToken(google, {});
+      const from = (clientAddress: string) =>
+        auth.signInWithIdToken({ provider: 'google', idToken, headers: new Headers(), clientAddress });
+      for (let attempt = 0; attempt < 3; attempt++) await from('203.0.113.7');
+      await expect(from('203.0.113.7')).rejects.toMatchObject({ code: AUTH_ERROR_CODES.rateLimited });
+      await expect(from('203.0.113.8')).resolves.not.toBeNull();
     } finally {
       await dispose();
     }

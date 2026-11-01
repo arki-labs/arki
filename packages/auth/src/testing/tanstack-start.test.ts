@@ -90,7 +90,7 @@ describe('createE2EHandler', () => {
   it('answers 404 when the auth runs in production, even if enabled', async () => {
     const production = harness.rebuild({
       rateLimit: { store: { getRateLimiter: () => new RateLimiterMemory({ points: 100, duration: 10 }) } },
-      runtime: { production: true },
+      runtime: { production: true, clientIp: { header: 'cf-connecting-ip' } },
     });
     const handler = createE2EHandler({ auth: production, enabled: true, defaultEmail: 'e2e@notes.test' });
     const response = await call(handler);

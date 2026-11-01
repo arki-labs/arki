@@ -324,6 +324,12 @@ export type IdTokenSignIn<D> = {
   readonly nonce?: string;
   /** The request's headers: the session records its IP address and user agent from them. */
   readonly headers: Headers;
+  /**
+   * The client's address, when the caller knows it from a source it trusts (the socket, its own
+   * proxy). The sign-in rate limit counts on it. Without it and without `runtime().clientIp`, every
+   * id-token sign-in shares one budget: headers alone carry no address this package can trust.
+   */
+  readonly clientAddress?: string;
 };
 
 /** A native sign-in: the bearer token the app keeps, and the principal it stands for. */

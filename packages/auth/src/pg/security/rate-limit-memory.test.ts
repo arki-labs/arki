@@ -25,7 +25,12 @@ const client = new PGlite('memory://');
 const db = drizzle({ client });
 afterAll(() => client.close());
 const mail = mailer({ transport: mailSink(), from: 'Notes <hi@notes.test>' });
-const runtime = () => ({ url: 'http://localhost:3000', secret: 'y'.repeat(40), production: true });
+const runtime = () => ({
+  url: 'http://localhost:3000',
+  secret: 'y'.repeat(40),
+  production: true,
+  clientIp: { header: 'cf-connecting-ip' },
+});
 
 const signIn = (auth: { handler: (request: Request) => Promise<Response> }) =>
   post(auth, '/sign-in/email', { email: 'ada@notes.test', password: PASSWORD }, { 'cf-connecting-ip': '203.0.113.7' });

@@ -19,6 +19,7 @@ import { PASSWORD_MIN_LENGTH } from '../constants.js';
 import { AUTH_ERROR_CODES, AuthError, isAuthError } from '../errors.js';
 import { AUTH_BASE_PATH } from './events.js';
 import { LINK_MINUTES } from './mail.js';
+import { CLIENT_KEY_KIND_HEADER } from './security/client-key.js';
 
 export type SocialProviders = NonNullable<BetterAuthOptions['socialProviders']>;
 
@@ -156,9 +157,12 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
       // Every session the engine writes goes through here: every sign-in path and `actingAs`.
       session: {
         create: {
-          ...(sessionCreating !== undefined && {
-            before: async (session, ctx) => ({ data: await sessionCreating(session, ctx?.request) }),
-          }),
+          before: async (session, ctx) => {
+            const columns = sessionCreating === undefined ? {} : await sessionCreating(session, ctx?.request);
+            // An account key is not where the client is: never record it as the session's address.
+            const accountKeyed = ctx?.request?.headers.get(CLIENT_KEY_KIND_HEADER) === 'account';
+            return { data: accountKeyed ? { ...columns, ipAddress: null } : columns };
+          },
           after: session => callbacks.sessionCreated(session),
         },
       },

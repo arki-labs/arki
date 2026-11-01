@@ -35,6 +35,7 @@ describe('assertAuthBoots', () => {
               secret: process.env['AUTH_SECRET'],
               production: process.env['NODE_ENV'] === 'production',
               providers: { google: { clientId: 'id', clientSecret: 'secret' } },
+              clientIp: { header: 'cf-connecting-ip' },
             }),
           }),
         }),

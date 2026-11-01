@@ -54,7 +54,7 @@ describe('actingAs', () => {
     try {
       const production = rebuild({
         rateLimit: { store: { getRateLimiter: () => new RateLimiterMemory({ points: 100, duration: 10 }) } },
-        runtime: { production: true },
+        runtime: { production: true, clientIp: { header: 'cf-connecting-ip' } },
       });
       await expect(actingAs(production, { email: 'ada@notes.test' })).rejects.toMatchObject({
         code: AUTH_ERROR_CODES.testingInProduction,

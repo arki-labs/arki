@@ -5,13 +5,15 @@
 import { serve } from 'srvx';
 import { describe, expect, it } from 'vitest';
 
-import { ORIGIN, PASSWORD, post } from '../../__fixtures__/http.js';
+import { fakeLog } from '@arki/log/testing';
+
+import { cookiesOf, ORIGIN, PASSWORD, post } from '../../__fixtures__/http.js';
 import { failingStore, sharedStore } from '../../__fixtures__/rate-limit-store.js';
 import { authTables } from '../../__fixtures__/tables.js';
 import { defineAuth } from '../../definition.js';
 import { AUTH_ERROR_CODES } from '../../errors.js';
 import { testAuth } from '../../testing/index.js';
-import { SOCKET_ADDRESS_HEADER } from '../build.js';
+import { CLIENT_KEY_HEADER, CLIENT_KEY_KIND_HEADER } from './client-key.js';
 
 const definition = defineAuth({ app: { name: 'Notes', key: 'notes' }, methods: ['password'], verifyEmail: 'none' });
 
@@ -110,7 +112,7 @@ describe('rate limits', () => {
     }
   });
 
-  it('without clientIp.header, a forged x-forwarded-for or socket-address header does not pick a new bucket', async () => {
+  it('without clientIp.header, a forged x-forwarded-for or client-key header does not pick a new bucket', async () => {
     // WHY: the engine's default reads `x-forwarded-for`, which any caller writes. A fresh value per
     // request bought a fresh budget, so the sign-in limit never fired.
     const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
@@ -120,8 +122,8 @@ describe('rate limits', () => {
       }
       const forwarded = await signIn(auth, { 'x-forwarded-for': '198.51.100.99' });
       expect(forwarded.status).toBe(429);
-      const socketHeader = await signIn(auth, { [SOCKET_ADDRESS_HEADER]: '198.51.100.98' });
-      expect(socketHeader.status).toBe(429);
+      const keyHeader = await signIn(auth, { [CLIENT_KEY_HEADER]: '198.51.100.98', [CLIENT_KEY_KIND_HEADER]: 'account' });
+      expect(keyHeader.status).toBe(429);
     } finally {
       await dispose();
     }
@@ -153,5 +155,63 @@ describe('rate limits', () => {
       await server.close(true);
       await dispose();
     }
+  });
+
+  it('without clientIp.header or a socket address, two accounts do not share a bucket', async () => {
+    // WHY: with one shared key, a client that fails sign-in three times locked every user out of
+    // sign-in. Keyed on the target account, only the attacked account waits.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    const as = (email: string) => post(auth, '/sign-in/email', { email, password: 'wrong password!' });
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) await as('ada@notes.test');
+      const ada = await as('ada@notes.test');
+      expect(ada.status).toBe(429);
+      const adaAgain = await as('ADA@notes.test');
+      expect(adaAgain.status).toBe(429);
+      const bob = await as('bob@notes.test');
+      expect(bob.status).not.toBe(429);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('a session made on an account key records no client address', async () => {
+    // WHY: the account key is a derived private address, not where the client is. Recording it
+    // would put a made-up address into the session list and the security log.
+    const { auth, dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    try {
+      await auth.testing.signIn({ email: 'carol@notes.test' }, { password: PASSWORD });
+      const signedIn = await post(auth, '/sign-in/email', { email: 'carol@notes.test', password: PASSWORD });
+      expect(signedIn.status).toBe(200);
+      const principal = await auth.principal(new Headers({ cookie: cookiesOf(signedIn) }));
+      expect(principal?.session.ipAddress).toBeNull();
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('in development without clientIp, boots and logs one warning naming the app', async () => {
+    // WHY: development keeps the shared sign-up key so a local run needs no proxy, but the
+    // developer learns at boot that production will refuse this setup.
+    using logs = fakeLog();
+    const { dispose } = await testAuth(definition, { tables: authTables, rateLimit: { store: sharedStore() } });
+    try {
+      const warnings = logs.records.filter(record => record.levelName === 'warn' && record.category === 'arki:auth');
+      expect(warnings.map(record => record.message())).toEqual([expect.stringContaining('runtime().clientIp')]);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('refuses to boot in production without clientIp when sign-up is on (E009)', async () => {
+    // WHY: sign-up has no account to count on. Without a client address every visitor would share
+    // one sign-up budget, so production must name the header its proxy writes.
+    const booted = testAuth(definition, {
+      tables: authTables,
+      rateLimit: { store: sharedStore() },
+      runtime: { production: true },
+    });
+    await expect(booted).rejects.toMatchObject({ code: AUTH_ERROR_CODES.clientAddressRequired });
+    await expect(booted).rejects.toThrow('set `runtime().clientIp`');
   });
 });

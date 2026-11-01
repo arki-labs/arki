@@ -1,5 +1,5 @@
 /**
- * Stable error codes. Boot mistakes (`E001`–`E003`, `E007`) throw while the auth is built; `E008`
+ * Stable error codes. Boot mistakes (`E001`–`E003`, `E007`, `E009`) throw while the auth is built; `E008`
  * is a procedure whose contract does not declare its policy; the rest are request-time failures
  * that the transports turn into their wire shape.
  */
@@ -61,6 +61,14 @@ export const AUTH_ERROR_CODES = {
    */
   policyNotDeclared: 'ARKI_AUTH_E008',
   /**
+   * Production with the `password` method and no `runtime().clientIp`: sign-up would have no
+   * client address or account to count its rate limit on, so every visitor would share one budget.
+   *
+   * @fix Set `runtime().clientIp` to the header your proxy writes the client address to, such as `{ header: 'cf-connecting-ip' }`.
+   * @verify bun run test -- src/pg/security/rate-limit.test.ts
+   */
+  clientAddressRequired: 'ARKI_AUTH_E009',
+  /**
    * No principal, or a cookie and a bearer token on one request.
    *
    * @fix Sign in, and send either the cookie or the bearer token, not both.
@@ -102,6 +110,7 @@ const STATUS_BY_CODE: Readonly<Record<AuthErrorCode, number>> = {
   ARKI_AUTH_E006: 500,
   ARKI_AUTH_E007: 500,
   ARKI_AUTH_E008: 500,
+  ARKI_AUTH_E009: 500,
   ARKI_AUTH_E401: 401,
   ARKI_AUTH_E403: 403,
   ARKI_AUTH_E429: 429,

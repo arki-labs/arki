@@ -47,7 +47,7 @@ The old API (`defineAuthBackend`, `./schema`, `./create-auth` and the rest) is s
 - Read the caller with `auth.principal(headers)`. Never call the engine (`auth.engine`, `better-auth`) from app code.
 - The table makes every id (`generateId: false`). An id column without a `$defaultFn` breaks sign-up.
 - Production needs `rateLimit: { store: kv }`, a secret of 32+ characters, and `mail` when a method sends mail. Each one missing fails at boot.
-- Behind a proxy set `runtime().clientIp.header`. Without it no header counts, `x-forwarded-for` included: limits key on the socket address (`request.ip`) or one shared budget.
+- Set `runtime().clientIp.header`. Without it no header counts: limits key on the socket address, else the account; production with `password` refuses to boot (`ARKI_AUTH_E009`).
 - `user.fields` names columns that exist on your user table. Types come from the table, never from the definition.
 - `workspaces` needs the workspace tables and the `activeOrganizationId` and `activeTeamId` session columns (`ARKI_AUTH_E007`).
 - A cookie and a bearer token on one request is `ARKI_AUTH_E401`, not the cookie's user.

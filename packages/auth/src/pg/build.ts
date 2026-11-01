@@ -10,7 +10,6 @@ import { dialectOf } from '@arki/db/dialect';
 import { isFailure } from '@arki/failure';
 
 import { is, recordSchema } from '@arki/schema';
-import { z } from 'zod';
 import type { AuthDefinition, AuthMethod, IdTokenMethodsOf, ResolvedDefinition, SocialMethod } from '../definition.js';
 import type { AuthErrorCode } from '../errors.js';
 import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.js';
@@ -50,6 +49,7 @@ import {
 import { additionalFieldsFromColumns } from './fields.js';
 import { authMail } from './mail.js';
 import { assertAuthSecret } from './secret.js';
+import { CLIENT_KEY_HEADER, withClientKey, withoutCallerClientKey, withoutClientKey } from './security/client-key.js';
 import { kvRateLimitStorage } from './security/kv-storage.js';
 import { createSessions } from './sessions.js';
 import { observeAuth } from './telemetry.js';
@@ -251,45 +251,17 @@ const isAuthErrorCode = (value: unknown): value is AuthErrorCode =>
   typeof value === 'string' && AUTH_ERROR_CODE_NAMES.has(value);
 
 /**
- * The header the engine reads the client address from when the app names no `clientIp.header`.
- * Only this package writes it: the handler sets it to the socket address and drops any value a
- * caller sent. So without a configured header no request header, `x-forwarded-for` included,
- * can pick a rate-limit bucket.
- */
-export const SOCKET_ADDRESS_HEADER = 'x-arki-auth-socket-address';
-
-/** The socket address a runtime puts on the request: `request.ip` from srvx (TanStack Start, Nitro, h3). */
-const socketAddressSchema = z.string().min(1);
-
-/**
- * The request the engine sees when no `clientIp.header` is configured: the socket address in
- * {@link SOCKET_ADDRESS_HEADER}, or no address at all (every caller then shares one budget).
- */
-async function withSocketAddress(request: Request): Promise<Request> {
-  const ip: unknown = Reflect.get(request, 'ip');
-  const address = is(ip, socketAddressSchema) ? ip : undefined;
-  if (address === undefined && !request.headers.has(SOCKET_ADDRESS_HEADER)) return request;
-  const headers = new Headers(request.headers);
-  headers.delete(SOCKET_ADDRESS_HEADER);
-  if (address !== undefined) headers.set(SOCKET_ADDRESS_HEADER, address);
-  // Field by field, not `new Request(request, ...)`: a runtime's own request class (srvx on Node)
-  // is not a native `Request`. Auth bodies are small JSON, so the body is read whole.
-  const body = request.method === 'GET' || request.method === 'HEAD' ? null : await request.arrayBuffer();
-  return new Request(request.url, { method: request.method, headers, body, signal: request.signal });
-}
-
-/**
  * The caller's headers for an in-process engine call. Browser-only headers are dropped: they would
- * make the engine treat a server call as a form post and check its origin. A caller's
- * {@link SOCKET_ADDRESS_HEADER} is dropped too: headers carry no socket. The rest, the configured
- * client-IP header and user agent included, pass as they are.
+ * make the engine treat a server call as a form post and check its origin. A caller's client-key
+ * headers are dropped too. The rest, the configured client-IP header and user agent included, pass
+ * as they are. A `clientAddress` the caller vouches for goes into the header the engine reads.
  */
-function engineHeadersOf(headers: Headers): Headers {
-  const result = new Headers(headers);
+function engineHeadersOf(headers: Headers, clientKey: { readonly header: string; readonly address?: string }): Headers {
+  const result = withoutClientKey(headers);
   for (const name of headers.keys()) {
     if (/^(?:cookie|origin|referer|authorization|content-length|sec-fetch-.*)$/.test(name)) result.delete(name);
   }
-  result.delete(SOCKET_ADDRESS_HEADER);
+  if (clientKey.address !== undefined) result.set(clientKey.header, clientKey.address);
   result.set('content-type', 'application/json');
   return result;
 }
@@ -351,6 +323,22 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     invalid('`rateLimit: false` is for tests and local dev; production needs `rateLimit: { store: kv }`.');
   }
   const rateLimitStore = bindings.rateLimit === false ? undefined : bindings.rateLimit?.store;
+  // Without `clientIp`, a request with no socket address and no account (sign-up) has only one
+  // shared key, and one client could use up sign-up for everyone.
+  if (runtime.clientIp === undefined && rateLimitStore !== undefined && resolved.methods.includes('password')) {
+    if (runtime.production) {
+      throw new AuthError(
+        AUTH_ERROR_CODES.clientAddressRequired,
+        "[@arki/auth] No client address: set `runtime().clientIp` to the header your proxy writes the client address to (for example `{ header: 'cf-connecting-ip' }`). Without it, sign-up has no address or account to count on, so every visitor would share one sign-up budget.",
+      );
+    }
+    log.warn(
+      'Auth "{app}" has no `runtime().clientIp`: rate limits count on the socket address, else on the account, and sign-up without a socket address shares one budget. Production refuses this (ARKI_AUTH_E009).',
+      { app: resolved.app.name, key: resolved.app.key },
+    );
+  }
+  /** The one header the engine reads the client key from. */
+  const clientIpHeader = runtime.clientIp?.header ?? CLIENT_KEY_HEADER;
   if (rateLimitStore === 'memory') {
     log.warn(
       'Auth "{app}" counts rate limits in memory, per process: each replica has its own budget. Bind a shared `@arki/kv` store to share one.',
@@ -394,7 +382,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
         secret: runtime.secret,
         production: runtime.production,
         trustedOrigins: runtime.trustedOrigins ?? [],
-        clientIpHeader: runtime.clientIp?.header ?? SOCKET_ADDRESS_HEADER,
+        clientIpHeader,
       },
       db: bindings.db,
       provider: dialectOf(bindings.db) ?? invalid('`db` is neither a Drizzle Postgres nor a Drizzle SQLite database.'),
@@ -498,9 +486,16 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
 
   /** The principal of a request whose credentials may be wrong; events never fail the request. */
   const principalOrNull = (headers: Headers): Promise<P | null> => principal(headers).catch(() => null);
+  const userIdOf = async (headers: Headers): Promise<string | undefined> => {
+    const signedIn = await principalOrNull(headers);
+    return signedIn?.user.id;
+  };
 
   async function handler(incoming: Request): Promise<Response> {
-    const request = runtime.clientIp === undefined ? await withSocketAddress(incoming) : incoming;
+    const request =
+      runtime.clientIp === undefined
+        ? await withClientKey(incoming, { path: enginePath(incoming), userIdOf })
+        : await withoutCallerClientKey(incoming);
     const path = enginePath(request);
     if (closedPaths.has(path.replace(/\/+$/, ''))) return new Response(null, { status: 404 });
     const method = signInMethodOf(path, resolved.methods);
@@ -546,7 +541,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     isIdTokenMethod(provider) && resolved.methods.includes(provider);
 
   async function signInWithIdToken(input: IdTokenSignIn<D>): Promise<IdTokenSession<P> | null> {
-    const { provider, idToken, nonce, headers } = input;
+    const { provider, idToken, nonce, headers, clientAddress } = input;
     // Read as a plain string: a caller without the types can pass anything.
     const name: string = provider;
     if (!isSocialMethod(name) || !supportsIdToken(name)) {
@@ -566,7 +561,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     const response = await engine.handler(
       new Request(new URL(`${AUTH_BASE_PATH}/sign-in/social`, runtime.url), {
         method: 'POST',
-        headers: engineHeadersOf(headers),
+        headers: engineHeadersOf(headers, { header: clientIpHeader, ...(clientAddress !== undefined && { address: clientAddress }) }),
         body: JSON.stringify({ provider, idToken: { token: idToken, ...(nonce !== undefined && { nonce }) } }),
       }),
     );

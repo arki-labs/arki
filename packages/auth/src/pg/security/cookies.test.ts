@@ -21,7 +21,7 @@ describe('session cookie', () => {
           getRateLimiter: (_id, { points = 100, duration = 10 }) => new RateLimiterMemory({ points, duration }),
         },
       },
-      runtime: { production: true, url: 'https://notes.test' },
+      runtime: { production: true, url: 'https://notes.test', clientIp: { header: 'cf-connecting-ip' } },
     });
     try {
       const response = await post(

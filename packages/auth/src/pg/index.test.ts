@@ -105,7 +105,12 @@ describe('createAuth refuses at boot', () => {
           tables: authTables,
           mail,
           rateLimit: { store },
-          runtime: () => ({ ...local, production: true, secret: 'y'.repeat(40) }),
+          runtime: () => ({
+            ...local,
+            production: true,
+            secret: 'y'.repeat(40),
+            clientIp: { header: 'cf-connecting-ip' },
+          }),
         }),
       ),
     ).toBe(undefined);
