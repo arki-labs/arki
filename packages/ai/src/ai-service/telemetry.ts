@@ -14,6 +14,11 @@
  * in the process record its prompt and completion; per-call keeps tracing
  * opt-in, limited to the call sites that spread this helper.
  *
+ * The SDK uses a call's own `integrations` in place of the global ones. So the
+ * fragment also lists every integration the app registered with
+ * `registerTelemetry()` (`@arki/ai/sdk`), read at each call: the app's hooks see
+ * every `@arki/ai` call, next to the spans.
+ *
  * On by default. The integration reports to the global OpenTelemetry tracer provider, so spans
  * appear exactly when the app has registered one (an in-process tracer counts; no OTLP endpoint is
  * needed) and cost nothing more than no-op calls when it has not. `AI_TELEMETRY=off` turns it off:
@@ -22,7 +27,7 @@
  * trace instead of a guessing game.
  */
 
-import type { TelemetryOptions } from 'ai';
+import type { Telemetry, TelemetryOptions } from 'ai';
 import { OpenTelemetry } from '@ai-sdk/otel';
 
 let integration: OpenTelemetry | undefined;
@@ -30,6 +35,11 @@ let integration: OpenTelemetry | undefined;
 /** `AI_TELEMETRY=off` in the environment. Browsers and Hermes have no `process`, so it is on there. */
 function telemetryOff(): boolean {
   return typeof process !== 'undefined' && process.env['AI_TELEMETRY'] === 'off';
+}
+
+/** The integrations the app registered with `registerTelemetry()`, at the moment of the call. */
+function registeredIntegrations(): readonly Telemetry[] {
+  return globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
 }
 
 /**
@@ -49,7 +59,7 @@ export function aiTelemetry(functionId?: string): { telemetry: TelemetryOptions 
     telemetry: {
       recordInputs: true,
       recordOutputs: true,
-      integrations: [integration],
+      integrations: [integration, ...registeredIntegrations()],
       ...(functionId ? { functionId } : {}),
     },
   };

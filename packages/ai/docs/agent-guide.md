@@ -103,6 +103,7 @@ Use `llm(() => config)` from `@arki/ai/dot`. It provides `llm` (an `LLMProviderW
 - Do not log a cost from a hardcoded model name.
 - Pass the provider when you price a call (`priceOf` or `calculateLLMCost(..., { provider })`). Without it a local model is priced at the hosted default rate.
 - Generation spans carry prompts and completions whenever a tracer provider is registered. Set `AI_TELEMETRY=off` where prompts must not reach traces.
+- A `registerTelemetry` hook (`@arki/ai/sdk`) sees every `@arki/ai` call, next to the spans. Register it once at boot; it is read at each call.
 - `ToolOutputError` is thrown by the runtime in place of a bad tool result. The model never sees the bad value.
 - Do not promise browser support for the server entries.
 

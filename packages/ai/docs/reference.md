@@ -22,6 +22,7 @@ const summary = await llm.generateStructuredData('Summarise: ...', z.object({ ti
 - `generateStructuredResult` and `generateTextResult` make the same calls and return `{ value, usage, provider, model }`. `usage` has the AI SDK's `inputTokens` and `outputTokens` (summed over all steps; `undefined` when the provider does not report them). Price them with `priceOf` from `@arki/ai/cost`.
 - `probeLLMProvider()` checks the same provider and model before a call: Ollama answers and has the model, an OpenAI-compatible `baseURL` answers, or a cloud key is set. It returns `ProviderUnavailable` instead of throwing.
 - Spans: every call reports `gen_ai` spans (with the prompt and completion) to the registered OpenTelemetry tracer provider. With none registered nothing is recorded. `AI_TELEMETRY=off` turns them off.
+- Hooks: integrations registered with `registerTelemetry` (`@arki/ai/sdk`) see every call too. The span integration is passed per call, and the SDK uses a call's own list in place of the global one, so each call lists the registered integrations next to it, read at the call.
 - `StructuredGenerator` (import it from `@arki/ai/ai-service/structured-generation`) wraps a provider with `generateSummary`, `answerQuestion`, `classifyText`, `extractEntities` and `analyzeSentiment`.
 
 ## Embeddings and the vector index

@@ -195,6 +195,7 @@ Check a returned value with `isFailure` from `@arki/failure`, or a definition's 
 - **Reconciliation is capped per run.** `runVectorReconciliation` handles at most `ROW_CAP_PER_RUN` (50) rows and `TOMBSTONE_CAP_PER_RUN` (200) tombstones per call. With 10 000 pending tombstones you need 50 calls (cron runs) to clear them.
 - **Only a durable index acknowledges erasure.** With no `QDRANT_URL` the index is in memory (`durable: false`), and tombstones stay pending.
 - **Spans record prompts.** Generation calls report `gen_ai` spans, prompts and completions included, whenever an OpenTelemetry tracer provider is registered. `AI_TELEMETRY=off` turns them off.
+- **Your `registerTelemetry` hooks still fire.** Each call passes its span integration, and the SDK then ignores the global ones. So each call also passes every integration registered with `registerTelemetry` (`@arki/ai/sdk`), read at the call: your hooks (tokens, cost) and the spans both see it.
 - **The probe does not test a key.** `probeLLMProvider` checks that a cloud key is set, not that the provider accepts it. A wrong key still fails at the first call.
 - **Usage can be missing.** `usage.inputTokens` and `usage.outputTokens` are `undefined` when the provider does not report them. Do not read that as zero.
 - **The fake is not a model.** `createFakeLLMProvider` answers from a script. A test of what a model would reason passes or fails for the wrong reason.

@@ -4,6 +4,7 @@ import { generateText } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { registerTelemetry } from '../sdk';
 import { aiTelemetry } from './telemetry';
 
 const exporter = new InMemorySpanExporter();
@@ -30,6 +31,7 @@ describe('aiTelemetry', () => {
   afterEach(() => {
     exporter.reset();
     vi.unstubAllEnvs();
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = undefined;
   });
 
   afterAll(() => {
@@ -81,5 +83,23 @@ describe('aiTelemetry', () => {
     await generateText({ model: model(), prompt: 'private prompt' });
 
     expect(exporter.getFinishedSpans()).toHaveLength(0);
+  });
+
+  it('still calls the hooks the app registered with registerTelemetry, next to the spans', async () => {
+    // WHY: the SDK uses a call's own integrations in place of the global ones. When every call
+    // started passing the span integration, an app's `registerTelemetry` hook (provider, tokens,
+    // cost per call) went silent. Both must fire.
+    const calls: { provider: string; inputTokens: number | undefined }[] = [];
+    registerTelemetry({
+      onLanguageModelCallEnd: event => {
+        calls.push({ provider: event.provider, inputTokens: event.usage.inputTokens });
+      },
+    });
+
+    await generateText({ model: model(), prompt: 'ping', ...aiTelemetry('test.registered') });
+
+    expect(calls).toEqual([{ provider: 'mock-provider', inputTokens: 3 }]);
+    const root = exporter.getFinishedSpans().find(span => span.attributes['gen_ai.agent.name'] === 'test.registered');
+    expect(root).toBeDefined();
   });
 });
