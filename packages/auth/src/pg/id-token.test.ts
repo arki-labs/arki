@@ -265,6 +265,27 @@ describe('auth.signInWithIdToken rate limit', () => {
     }
   });
 
+  it("with clientIp: { from: 'socket' } in production, refuses a sign-in without clientAddress (E010)", async () => {
+    // WHY: an id-token call has no socket. In production that would mean one shared budget, so
+    // the caller must pass the address it knows.
+    const { auth, dispose } = await testAuth(definition, {
+      tables: authTables,
+      rateLimit: { store: sharedStore() },
+      runtime: { production: true, clientIp: { from: 'socket' } },
+    });
+    try {
+      const idToken = await googleIdToken(google, {});
+      await expect(auth.signInWithIdToken({ provider: 'google', idToken, headers: new Headers() })).rejects.toMatchObject({
+        code: AUTH_ERROR_CODES.socketAddressMissing,
+      });
+      await expect(
+        auth.signInWithIdToken({ provider: 'google', idToken, headers: new Headers(), clientAddress: '203.0.113.7' }),
+      ).resolves.not.toBeNull();
+    } finally {
+      await dispose();
+    }
+  });
+
   it('fails closed with E503 when the store fails, never a pass', async () => {
     const { auth, db, dispose } = await testAuth(definition, {
       tables: authTables,

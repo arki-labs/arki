@@ -61,13 +61,23 @@ export const AUTH_ERROR_CODES = {
    */
   policyNotDeclared: 'ARKI_AUTH_E008',
   /**
-   * Production with the `password` method and no `runtime().clientIp`: sign-up would have no
-   * client address or account to count its rate limit on, so every visitor would share one budget.
+   * Production with no `runtime().clientIp`. Every method creates accounts (password and
+   * magic-link sign-up, a first social sign-in) or mails an address the caller picks (password
+   * reset, magic link), and those requests would have no client address to count on.
    *
-   * @fix Set `runtime().clientIp` to the header your proxy writes the client address to, such as `{ header: 'cf-connecting-ip' }`.
+   * @fix Set `runtime().clientIp` to `{ header: '<the header your proxy writes>' }`, or `{ from: 'socket' }` without a proxy.
    * @verify bun run test -- src/pg/security/rate-limit.test.ts
    */
   clientAddressRequired: 'ARKI_AUTH_E009',
+  /**
+   * `clientIp: { from: 'socket' }` in production, and the request carries no socket address
+   * (`request.ip`), or an id-token sign-in came without `clientAddress`. The request is refused:
+   * without an address its rate limit would be shared by every caller.
+   *
+   * @fix Serve through a runtime that sets `request.ip` (srvx: TanStack Start, Nitro, h3), or use `clientIp: { header }` behind a proxy. Pass `clientAddress` to `signInWithIdToken`.
+   * @verify bun run test -- src/pg/security/rate-limit.test.ts
+   */
+  socketAddressMissing: 'ARKI_AUTH_E010',
   /**
    * No principal, or a cookie and a bearer token on one request.
    *
@@ -111,6 +121,7 @@ const STATUS_BY_CODE: Readonly<Record<AuthErrorCode, number>> = {
   ARKI_AUTH_E007: 500,
   ARKI_AUTH_E008: 500,
   ARKI_AUTH_E009: 500,
+  ARKI_AUTH_E010: 500,
   ARKI_AUTH_E401: 401,
   ARKI_AUTH_E403: 403,
   ARKI_AUTH_E429: 429,

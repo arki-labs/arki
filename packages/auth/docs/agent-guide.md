@@ -64,7 +64,7 @@ export const authn = auth(authDefinition, {
     url: env.URL,
     secret: env.AUTH_SECRET,
     production: env.NODE_ENV === 'production',
-    // The header your proxy writes the client address to. Production with `password` refuses to boot without it (E009).
+    // The header your proxy writes the client address to, or `{ from: 'socket' }` with no proxy. Production refuses to boot without it (E009).
     clientIp: { header: 'cf-connecting-ip' },
   }),
 });
@@ -201,7 +201,7 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 - Never cast a session user (`user.id as UserId`, `user as UserModel`). The principal is already typed from the table.
 - The table makes every id. The engine runs with `generateId: false`, so an id column needs a `$defaultFn` (an `@arki/auth/ids` factory has one).
 - Production refuses `rateLimit: false` and a missing `rateLimit`. Tests get `rateLimit: false` from `testAuth`.
-- Set `runtime().clientIp.header` to the header your proxy writes. Without it no request header counts, `x-forwarded-for` included: the limiter keys on the socket address (`request.ip`), else on the target account (body `email` or signed-in user), else one shared key (sign-up). Production with `password` refuses to boot without it (`ARKI_AUTH_E009`). Pass `clientAddress` to `signInWithIdToken`.
+- Set `runtime().clientIp`: `{ header: '<name>' }` behind a proxy, `{ from: 'socket' }` without one. Production refuses to boot without it (`ARKI_AUTH_E009`), and with `{ from: 'socket' }` refuses a request that has no socket address (`ARKI_AUTH_E010`). Without it in development, no request header counts: the limiter keys on the socket address, else the target account (signed-in user, else the body `email` on sign-in, reset request and magic-link sign-in), else one shared key. Pass `clientAddress` to `signInWithIdToken`.
 - The origin and CSRF checks are always on, also under `NODE_ENV=test`. Requests a test sends to `auth.handler` carry an `origin` header equal to the app URL, as a browser's do.
 - A magic link to an unknown email signs that person up. Set `magicLink: { signUp: false }` for sign-in-only links; the request still answers 200 and the link is refused when it is used.
 - A template validator defect throws `schema.validator_defect` at the auth callback boundary. It is not converted to a delivery refusal.
@@ -224,7 +224,8 @@ Follow [the migration guide](migration.md). It maps every old name to the new on
 | `ARKI_AUTH_E006` | The mailer failed to send an auth mail. 500 with a generic message.                                                    | Check the mail transport. The user may ask again.                                         |
 | `ARKI_AUTH_E007` | `workspaces` is on without its tables or session columns. Boot.                                                        | Add `createWorkspaceTables` and the two session columns.                                  |
 | `ARKI_AUTH_E008` | `can` checks a policy the procedure's contract meta does not name. 500, a bug.                                         | Add `.meta({ policy: '<group>.<action>' })` to the contract, with the same name as `can`. |
-| `ARKI_AUTH_E009` | Production with `password` and no `runtime().clientIp`: sign-up would share one rate-limit budget. Boot.            | Set `runtime().clientIp` to the header your proxy writes, such as `{ header: 'cf-connecting-ip' }`. |
+| `ARKI_AUTH_E009` | Production with no `runtime().clientIp`: sign-up and mail requests would share one rate-limit budget. Boot.           | Set `runtime().clientIp` to `{ header: '<the proxy header>' }`, or `{ from: 'socket' }` with no proxy. |
+| `ARKI_AUTH_E010` | `clientIp: { from: 'socket' }` in production, and the request (or an id-token sign-in) has no address. 500.          | Serve through srvx (`request.ip`), use `{ header }` behind a proxy, pass `clientAddress`. |
 | `ARKI_AUTH_E401` | No principal, or a cookie and a bearer token together. 401.                                                            | Sign in. Send one credential per request.                                                 |
 | `ARKI_AUTH_E403` | `role()` or `verified` refused. 403.                                                                                   | Expected for users without the role or a verified email.                                  |
 | `ARKI_AUTH_E429` | The rate limiter refused. 429 with `Retry-After`.                                                                      | Wait the given seconds.                                                                   |

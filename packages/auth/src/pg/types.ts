@@ -101,6 +101,16 @@ type ProvidersFor<D> = [SocialMethodsOf<D>] extends [never]
       readonly providers: { readonly [K in SocialMethodsOf<D>]: ProviderCredentials<K> } & DisabledProviders<D>;
     };
 
+/**
+ * Where the rate limiter reads the client address: the one header your proxy writes the client
+ * address to (`{ header: 'cf-connecting-ip' }`), or the socket the runtime gives
+ * (`{ from: 'socket' }`, `request.ip` from srvx under TanStack Start, Nitro and h3). One or the
+ * other, never both: boot checks the value against its schema.
+ */
+export type ClientIpSource =
+  | { readonly header: string; readonly from?: undefined }
+  | { readonly from: 'socket'; readonly header?: undefined };
+
 /** Values read at boot (from env), never at import. */
 export type AuthRuntime<D> = {
   /** The URL this backend answers on. */
@@ -111,8 +121,11 @@ export type AuthRuntime<D> = {
   readonly secret: string | undefined;
   readonly production: boolean;
   readonly trustedOrigins?: readonly string[];
-  /** The one header the ingress sets to the client address. Others, like a spoofed `x-forwarded-for`, are ignored. */
-  readonly clientIp?: { readonly header: string };
+  /**
+   * Where the client address comes from. Others, like a spoofed `x-forwarded-for`, are ignored.
+   * Production needs it (`ARKI_AUTH_E009`).
+   */
+  readonly clientIp?: ClientIpSource;
 } & ProvidersFor<D>;
 
 /** The input of an auth link mail: the `@arki/mail/templates/auth` link input, plus the brand's site. */

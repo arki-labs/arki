@@ -49,7 +49,14 @@ import {
 import { additionalFieldsFromColumns } from './fields.js';
 import { authMail } from './mail.js';
 import { assertAuthSecret } from './secret.js';
-import { CLIENT_KEY_HEADER, withClientKey, withoutCallerClientKey, withoutClientKey } from './security/client-key.js';
+import {
+  CLIENT_KEY_HEADER,
+  clientIpSchema,
+  socketAddressOf,
+  withClientKey,
+  withoutCallerClientKey,
+  withoutClientKey,
+} from './security/client-key.js';
 import { kvRateLimitStorage } from './security/kv-storage.js';
 import { createSessions } from './sessions.js';
 import { observeAuth } from './telemetry.js';
@@ -323,20 +330,26 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     invalid('`rateLimit: false` is for tests and local dev; production needs `rateLimit: { store: kv }`.');
   }
   const rateLimitStore = bindings.rateLimit === false ? undefined : bindings.rateLimit?.store;
-  // Without `clientIp`, a request with no socket address and no account (sign-up) has only one
-  // shared key, and one client could use up sign-up for everyone.
-  if (runtime.clientIp === undefined && rateLimitStore !== undefined && resolved.methods.includes('password')) {
+  if (runtime.clientIp !== undefined && !is(runtime.clientIp, clientIpSchema)) {
+    invalid("`runtime().clientIp` is `{ header: '<name>' }` or `{ from: 'socket' }`, never both.");
+  }
+  // Every method creates accounts (password and magic-link sign-up, a first social sign-in) or
+  // mails an address the caller picks (password reset, magic link). Without a client address those
+  // requests share one key, and one client could use it up for everyone.
+  if (runtime.clientIp === undefined && rateLimitStore !== undefined) {
     if (runtime.production) {
       throw new AuthError(
         AUTH_ERROR_CODES.clientAddressRequired,
-        "[@arki/auth] No client address: set `runtime().clientIp` to the header your proxy writes the client address to (for example `{ header: 'cf-connecting-ip' }`). Without it, sign-up has no address or account to count on, so every visitor would share one sign-up budget.",
+        "[@arki/auth] No client address: set `runtime().clientIp` to `{ header: '<the header your proxy writes the client address to>' }` (for example `cf-connecting-ip`), or to `{ from: 'socket' }` when no proxy sits in front. Without it, sign-up and mail requests have no address to count on, so every visitor would share one budget.",
       );
     }
     log.warn(
-      'Auth "{app}" has no `runtime().clientIp`: rate limits count on the socket address, else on the account, and sign-up without a socket address shares one budget. Production refuses this (ARKI_AUTH_E009).',
+      'Auth "{app}" has no `runtime().clientIp`: rate limits count on the socket address, else on the account, else one shared key. Production refuses this (ARKI_AUTH_E009).',
       { app: resolved.app.name, key: resolved.app.key },
     );
   }
+  /** Production with `from: 'socket'`: a request without a socket address is refused, never shared. */
+  const socketRequired = runtime.production && runtime.clientIp?.from === 'socket';
   /** The one header the engine reads the client key from. */
   const clientIpHeader = runtime.clientIp?.header ?? CLIENT_KEY_HEADER;
   if (rateLimitStore === 'memory') {
@@ -486,14 +499,24 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
 
   /** The principal of a request whose credentials may be wrong; events never fail the request. */
   const principalOrNull = (headers: Headers): Promise<P | null> => principal(headers).catch(() => null);
+  const noSocketAddress = () => {
+    log.error('Auth "{app}" refused a request with no socket address (request.ip): clientIp is set to the socket.', {
+      app: resolved.app.name,
+    });
+    return new AuthError(
+      AUTH_ERROR_CODES.socketAddressMissing,
+      "[@arki/auth] `clientIp: { from: 'socket' }` needs the socket address (`request.ip`): serve through srvx (TanStack Start, Nitro, h3) or use `{ header }` behind a proxy. An id-token sign-in passes `clientAddress`.",
+    );
+  };
   const userIdOf = async (headers: Headers): Promise<string | undefined> => {
     const signedIn = await principalOrNull(headers);
     return signedIn?.user.id;
   };
 
   async function handler(incoming: Request): Promise<Response> {
+    if (socketRequired && socketAddressOf(incoming) === undefined) return jsonError(noSocketAddress());
     const request =
-      runtime.clientIp === undefined
+      runtime.clientIp?.header === undefined
         ? await withClientKey(incoming, { path: enginePath(incoming), userIdOf })
         : await withoutCallerClientKey(incoming);
     const path = enginePath(request);
@@ -550,6 +573,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     if (!resolved.sessions.bearer) {
       invalid('`signInWithIdToken` needs `sessions: { bearer: true }`: the native app keeps a bearer token.');
     }
+    if (socketRequired && clientAddress === undefined) throw noSocketAddress();
     const requestId = requestIdOf(headers);
     const refused = async (reason: SignInFailure) => {
       if (!isFailure(requestId)) await emit.signInFailed({ method: provider, reason, requestId });
