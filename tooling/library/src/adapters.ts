@@ -39,6 +39,8 @@ export const ADAPTERS = new Set([
   'google',
   'mistral',
   'bedrock',
+  // `@arki/mail/outbox` needs its optional peers `@arki/journal` and `@arki/dot`.
+  'outbox',
 ]);
 
 /** True when the export subpath (`./react`, `./comparison/server`) is an adapter entry: its first segment is in {@link ADAPTERS}. */
