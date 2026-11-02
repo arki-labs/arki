@@ -76,6 +76,11 @@
       "import": "./dist/dot.js",
       "default": "./dist/dot.js"
     },
+    "./outbox": {
+      "types": "./dist/outbox.d.ts",
+      "import": "./dist/outbox.js",
+      "default": "./dist/outbox.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",

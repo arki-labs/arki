@@ -17,7 +17,8 @@
 - `@arki/mail/react/templates/magic-link-minimal`: `MinimalMagicLinkEmail`, `default`.
 - `@arki/mail/pg`: Mail that commits with the business write. `MAIL_JOB`, `mailOutbox`; types `EnqueueOptions`, `MailOutbox`, `MailOutboxOptions`, `MailTx`.
 - `@arki/mail/pg/testing`: Assertions on queued mail, for tests. `mailQueueAssertions`; types `QueuedMail`.
-- `@arki/mail/dot`: @arki/mail in a Dot app. `mail`, `mailJobs`, `mailOutboxPlugin`; types `MailOutboxPluginOptions`.
+- `@arki/mail/dot`: @arki/mail in a Dot app. `mail`.
+- `@arki/mail/outbox`: Queued mail in a Dot app. `mailJobs`, `mailOutboxPlugin`; types `MailOutboxPluginOptions`.
 - `@arki/mail/testing`: Test helpers. `mailSink`, `transportContract`; types `MailSink`, `SentRecord`, `TransportHarness`.
 <!-- llms:end -->
 

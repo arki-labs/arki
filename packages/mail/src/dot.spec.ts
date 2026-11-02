@@ -16,8 +16,9 @@ import { openJournalDb } from '@arki/journal/testing';
 
 import type { MailerOptions } from './mailer.js';
 import type { MailMessage, MailTransport } from './types.js';
-import { mail, mailJobs, mailOutboxPlugin } from './dot.js';
+import { mail } from './dot.js';
 import { logTransport } from './log-transport.js';
+import { mailJobs, mailOutboxPlugin } from './outbox.js';
 import { defineTemplate } from './template.js';
 
 const tables = journalTables();

@@ -67,7 +67,8 @@ Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
 - `@arki/mail/node/ses`: the SES transport.
 - `@arki/mail/react`: `renderReact`.
 - `@arki/mail/pg`: `mailOutbox`. `@arki/mail/pg/testing`: `mailQueueAssertions`.
-- `@arki/mail/dot`: `mail`, `mailOutboxPlugin`, `mailJobs`.
+- `@arki/mail/dot`: `mail`. It loads without `@arki/journal`.
+- `@arki/mail/outbox`: `mailOutboxPlugin`, `mailJobs`. Needs `@arki/journal`.
 - `@arki/mail/testing`: `mailSink`, `transportContract`.
 
 ## Failure behaviour
@@ -260,7 +261,8 @@ await journal.worker(db, { jobs: outbox.runner });
 ## Dot
 
 ```ts skip="needs a Dot app with a journal"
-import { mail, mailJobs, mailOutboxPlugin } from '@arki/mail/dot';
+import { mail } from '@arki/mail/dot';
+import { mailJobs, mailOutboxPlugin } from '@arki/mail/outbox';
 
 defineApp('shop')
   .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Analytical Pizza <hello@pizza.example>' })))
@@ -270,6 +272,7 @@ defineApp('shop')
 
 - `mail(options)` provides `mail`. Pass a function so the manifest and `dot explain` never read your keys.
 - `mailOutboxPlugin({ tables })` provides `mailOutbox` and needs `mail`. Without it the app does not compile.
+- `mailOutboxPlugin` and `mailJobs` come from `@arki/mail/outbox`, which needs `@arki/journal`. An app that only sends mail imports `@arki/mail/dot` and does not install the journal.
 - `mailJobs()` gives `journalWorker` the queued-mail runner.
 
 ## Testing

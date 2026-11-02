@@ -62,7 +62,12 @@ The row holds the rendered message. Each retry passes the job id as the idempote
 
 ### Wire mail into a Dot app
 
+`mail` comes from `@arki/mail/dot` and loads without `@arki/journal`. Queued mail (`mailOutboxPlugin`, `mailJobs`) comes from `@arki/mail/outbox`, which needs the journal.
+
 ```ts skip="needs a Dot app with a journal"
+import { mail } from '@arki/mail/dot';
+import { mailJobs, mailOutboxPlugin } from '@arki/mail/outbox';
+
 defineApp('shop')
   .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
   .infra(mailOutboxPlugin({ tables }))
@@ -124,7 +129,7 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 turbo run build typecheck lint test --filter=@arki/mail
 cd packages/mail && bun run test:docs
 cd packages/mail && bun run test:runtimes
-dot explain --json | jq .data.services   # in an app using @arki/mail/dot: lists mail and mailOutbox
+dot explain --json | jq .data.services   # in an app using @arki/mail/dot and /outbox: lists mail and mailOutbox
 dot doctor --json | jq .data             # in that app: no missing mail service
 ```
 
