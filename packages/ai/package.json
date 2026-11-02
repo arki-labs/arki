@@ -1,6 +1,6 @@
 {
   "name": "@arki/ai",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first AI for TypeScript apps: provider-agnostic generation, embeddings, a vector index with erasure, and a tool-loop runtime.",
   "repository": {
     "type": "git",
