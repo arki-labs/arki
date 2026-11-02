@@ -13,6 +13,28 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 6 — AI (ai) @ 3355f1b (2026-11-02)
+
+<!-- candidate: ai-3355f1b -->
+
+**Packages shipped** (3, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/embeddings | 0.1.0 | 1 |
+| @arki/ai | 0.2.1 | 2 |
+| @arki/chat-ui | 0.2.0 | 3 |
+
+**Source commit**: `3355f1b9471763cafce71d211be73363377108f6`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (3 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `demo:drop-studio` success, `demo:faultline` success, `docs:@arki/ai` success, `docs:@arki/chat-ui` success, `docs:@arki/embeddings` success, `published:@arki/ai` success, `published:@arki/chat-ui` success, `published:@arki/embeddings` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/ai-3355f1b/candidate.json`.
+
+---
+
 ## Wave 4 — Infrastructure Adapters (infrastructure-adapters) @ b609c8f (2026-11-02)
 
 <!-- candidate: infrastructure-adapters-b609c8f -->
