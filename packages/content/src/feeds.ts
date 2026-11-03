@@ -1,5 +1,5 @@
-import type { Feed, FeedItem } from './rss/index';
-import { generateRss } from './rss/generate';
+import type { Feed, FeedItem } from './rss/index.js';
+import { generateRss } from './rss/generate.js';
 
 export type FeedSiteOptions = {
   appTitle: string;

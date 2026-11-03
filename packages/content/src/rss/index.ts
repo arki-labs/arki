@@ -1,4 +1,4 @@
-export { parseFeed } from './parser';
+export { parseFeed } from './parser.js';
 export type {
   Feed,
   FeedExtension,
@@ -7,5 +7,5 @@ export type {
   FeedLink,
   FeedPerson,
   ParseFeedOptions,
-} from './types';
-export { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types';
+} from './types.js';
+export { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types.js';

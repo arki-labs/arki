@@ -8,8 +8,8 @@ import type {
   FeedLink,
   FeedPerson,
   ParseFeedOptions,
-} from './types';
-import { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types';
+} from './types.js';
+import { FeedLimitExceeded, FeedMalformed, FeedTooLarge, FeedUnsupported } from './types.js';
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ITEMS = 10_000;

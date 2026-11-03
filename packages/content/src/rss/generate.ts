@@ -1,4 +1,4 @@
-import type { Feed, FeedExtensions, FeedItem, FeedLink, FeedPerson } from './types';
+import type { Feed, FeedExtensions, FeedItem, FeedLink, FeedPerson } from './types.js';
 
 export type GenerateFeedOptions = {
   /** Pretty-print with two-space indentation. Default true. */
