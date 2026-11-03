@@ -1,11 +1,36 @@
 {
   "name": "@arki/tsconfig",
   "version": "0.1.0",
-  "private": false,
-  "files": [
-    "*.json"
+  "description": "Shared TypeScript configs for ARKI projects: a strict base, plus React, Next.js and internal-package presets.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "tooling/typescript"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "tsconfig",
+    "typescript",
+    "config"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "private": false,
   "dependencies": {
     "typescript": "catalog:"
-  }
+  },
+  "files": [
+    "base.json",
+    "internal-package.json",
+    "next.json",
+    "react.json",
+    "README.md",
+    "LICENSE"
+  ]
 }

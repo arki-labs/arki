@@ -1,6 +1,6 @@
 # @arki/library-tooling
 
-Private tooling for the `@arki/*` packages. It ships bins only, no library entry.
+Checks and generators for the `@arki/*` packages, published as `@arki/library-tooling`. It ships bins that run TypeScript source, plus the schemas for the generated indexes.
 
 | Bin                  | What it does                                                                                                                            | Where it runs                                                      |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |

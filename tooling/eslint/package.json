@@ -1,6 +1,27 @@
 {
   "name": "@arki/eslint-config",
   "version": "0.1.0",
+  "description": "Shared ESLint flat configs for ARKI projects: base, library, React and TanStack Start presets, plus the feature-layer rules.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "tooling/eslint"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "eslint",
+    "eslint-config",
+    "lint",
+    "config"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "private": false,
   "type": "module",
   "exports": {
@@ -10,6 +31,16 @@
     "./react": "./react.js",
     "./tanstack-start": "./tanstack-start.js"
   },
+  "files": [
+    "base.js",
+    "feature-layers.js",
+    "library.js",
+    "react.js",
+    "tanstack-start.js",
+    "types.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "clean": "git clean -xdf .cache .cache .turbo node_modules",
     "format": "prettier --check . --ignore-path ../../.gitignore",

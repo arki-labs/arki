@@ -1,6 +1,27 @@
 {
   "name": "@arki/playwright-config",
   "version": "0.1.0",
+  "description": "Shared Playwright config factory for ARKI projects: createPlaywrightConfig sets the test dir, Chromium project, dev web server and CI defaults. TypeScript source, so Playwright loads it directly.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "tooling/playwright"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "playwright",
+    "playwright-config",
+    "e2e",
+    "config"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "private": false,
   "type": "module",
   "exports": {
@@ -8,6 +29,12 @@
       "default": "./src/index.ts"
     }
   },
+  "files": [
+    "src/**",
+    "!src/**/*.test.*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "clean": "git clean -xdf .cache .turbo node_modules",
     "format": "prettier --check . --ignore-path ../../.gitignore",

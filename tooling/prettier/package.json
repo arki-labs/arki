@@ -1,11 +1,37 @@
 {
   "name": "@arki/prettier-config",
   "version": "0.1.0",
+  "description": "Shared Prettier config for ARKI projects: import sorting, package.json ordering and Tailwind class sorting.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "tooling/prettier"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "prettier",
+    "prettier-config",
+    "format",
+    "config"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "private": false,
   "type": "module",
   "exports": {
     ".": "./index.js"
   },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "clean": "git clean -xdf .cache .turbo node_modules",
     "format": "prettier --check . --ignore-path ../../.gitignore",
