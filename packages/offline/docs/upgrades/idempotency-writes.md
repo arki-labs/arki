@@ -20,7 +20,7 @@ alphabet. Stored historical prefix-compatible values remain valid.
 
 Both default and namespaced tables require an explicit ID for direct inserts:
 
-```ts
+```ts skip="fragment: runs inside the app's own insert function, with its db and record"
 import { isFailure } from '@arki/failure';
 import { idempotencyKeyId, idempotencyKeys } from '@arki/offline/orpc';
 
