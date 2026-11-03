@@ -1,0 +1,24 @@
+# @arki/content-build
+
+> Build-time content pipeline: content-collections config, preset collections (posts, legal pages, FAQs, changelog), a Vite plugin and the `arki-content` CLI.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/content-build/config`: `addIdToHeadings`, `compileMDX`, `compileMarkdown`, `defineCollection`, `defineContentConfig`, `resolveImageBlurDataURL`; types `CompileMarkdownOptions`, `CompiledMarkdown`, `GetTypeByName`, `MarkdownHeading`, `Meta`.
+- `@arki/content-build/presets`: `changelogs`, `faqs`, `legals`, `marketing`, `posts`; types `Changelog`, `Faq`, `Legal`, `Post`.
+- `@arki/content-build/vite`: `contentPlugin`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): compiling plain markdown with `compileMarkdown`.
+
+## By task
+- Compile GitHub markdown (READMEs, docs) to HTML: `compileMarkdown` from `@arki/content-build/config`. It returns `html` and `headings`.
+- Define collections: use the preset collections from `@arki/content-build/presets`.
+- Wire the build into Vite: `@arki/content-build/vite`.
+
+## Rules that bite
+- `compileMarkdown` is plain markdown, not MDX. MDX fails on `<` and `{` in prose, plain markdown keeps them as text.
+- Use `rewriteLink` to turn relative `./x.md` links into site routes.
+- The collections it generates are read by `@arki/content` and rendered by `@arki/content-react`.

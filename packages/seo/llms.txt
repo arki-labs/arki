@@ -1,0 +1,24 @@
+# @arki/seo
+
+> SEO building blocks for web apps: metadata, robots.txt, sitemap.xml and llms.txt builders, JSON-LD components, and a TanStack Start head adapter.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/seo`: Portable SEO helpers and types: tool metadata, robots.txt, sitemap.xml and llms.txt builders. `createToolMetadata`, `generateLlmsFullTxt`, `generateLlmsTxt`, `renderRobotsTxt`, `renderSitemapIndex`, `renderUrlset`, `robotsTxtResponse`, `sitemapIndexResponse`, `sitemapResponse`; types `ActionableInsightsData`, `ArticleData`, `ArticleMetaData`; and 29 more.
+- `@arki/seo/react`: SEO structured data components for schema.org JSON-LD markup, reusable UI components for FAQ and related items sections, and SEO content sections. `ActionableInsights`, `ArticleSchema`, `BreadcrumbSchema`, `DeepDiveShowcase`, `EducationalContent`, `ExampleShowcase`, `FAQCompact`, `FAQSchema`, `FAQSection`, `FAQVisible`, `HowToSchema`, `ItemListSchema`; and 9 more.
+- `@arki/seo/tanstack-start`: SEO and Metadata Components for TanStack Start. `Head`, `Meta`, `Scripts`; types `HeadProps`, `MetaProps`, `ScriptsProps`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): the three entries and an example.
+
+## By task
+- Page metadata and text files: `createToolMetadata`, `renderRobotsTxt`, `renderUrlset`, `renderSitemapIndex`, `generateLlmsTxt` from `@arki/seo`.
+- JSON-LD and SEO sections: `OrganizationSchema`, `FAQSchema`, `JsonLdScript`, `FAQSection` from `@arki/seo/react`.
+- Route head in TanStack Start: `Meta()` from `@arki/seo/tanstack-start`.
+
+## Rules that bite
+- The root entry has no React and no required peers.
+- `@arki/seo/react` needs `react`, `@arki/ui`, `@arki/icons` and `@tanstack/react-router` (optional peers).
+- `Meta()` builds the `head().meta` array. Put it in the route's `head`.

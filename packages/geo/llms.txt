@@ -1,0 +1,26 @@
+# @arki/geo
+
+> Geospatial toolkit: coordinate and distance maths that run anywhere, geocoding with provider fallback and a cache, and React hooks and Google Maps components.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/geo`: Main exports (server-side + shared). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 39 more.
+- `@arki/geo/react`: Client-side exports (React hooks and components). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 45 more.
+- `@arki/geo/geocoding`: `GEOCODING_PROVIDERS`, `GeocodingService`, `addressComponentsSchema`, `createGeocodingService`, `geocodeResultSchema`, `geocodingEnv`; types `AddressComponents`, `BatchGeocodeEntry`, `GeocodeOutcome`, `GeocodeResult`, `GeocodingCache`, `GeocodingConfig`; and 3 more.
+- `@arki/geo/react/google-maps`: Google Maps integration. `COLOR_SETS`, `DEFAULT_BOUNDS_PADDING`, `DEFAULT_MAP_CENTER`, `DEFAULT_MAP_CONFIG`, `DEFAULT_MAP_ID`, `DEFAULT_MAP_ZOOM`, `GoogleInfoWindow`, `GoogleMap`, `GoogleMapsProvider`, `GoogleMarker`, `GooglePin`, `HIGHLIGHTED_BOUNDS_PADDING`; and 63 more.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): quick start, geocoding, failures and limits.
+
+## By task
+- Distance and coordinates: the root entry `@arki/geo`.
+- Address to coordinates: `geocode`, `reverseGeocode`, `batchGeocode` from `@arki/geo/geocoding`.
+- Maps in the browser: `@arki/geo/react` and `@arki/geo/react/google-maps`.
+
+## Rules that bite
+- Failures are returned, not thrown. Check them with `.is(value)`: `AddressNotFound`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderUnreachable`, `ProviderRejected`, `GeocodingCancelled`, `InvalidCoordinates`.
+- `geocode` tries the next provider when one finds nothing. Missing addresses and failures are not cached.
+- Distance is straight-line haversine on a sphere, error up to about 0.5%. No routing.
+- `react`, `react-dom` and `@vis.gl/react-google-maps` are optional peers for the React entries.

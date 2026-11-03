@@ -1,0 +1,31 @@
+# @arki/offline
+
+> Offline-first toolkit for ARKI apps: persisted query cache, a mutation queue with replay, local collections, PWA helpers, status hooks and a dev panel.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/offline/query`: `PersistedQueryClientProvider`, `QueryCachePersistFailed`, `createIdbPersister`, `createPersistedQueryClient`, `useIsRestoring`; types `CreateIdbPersisterOptions`, `CreatePersistedQueryClientOptions`, `IdbPersister`, `PersistedQueryClient`, `PersistedQueryClientProviderProps`.
+- `@arki/offline/mutations`: @arki/offline/mutations. `DRAIN_FAILURES`, `ENQUEUE_FAILURES`, `OFFLINE_QUEUE_FAILURES`, `OfflineQueueProvider`, `QUEUE_STORAGE_FAILURES`, `QueueAcceptanceUnconfirmed`, `QueueEffectUnconfirmed`, `QueueEncodingFailure`, `QueuePersistenceUnconfirmed`, `QueueStorageCorrupt`, `QueueStorageUnavailable`, `QueueTransportUnavailable`; and 32 more.
+- `@arki/offline/collections`: `createLocalCollection`, `createMemoryCollection`; types `LocalCollectionConfig`, `MemoryCollectionConfig`.
+- `@arki/offline/pwa`: `createStrategy`, `registerOfflineRoutes`; types `ApiRouteConfig`, `AppShellConfig`, `FetchStrategy`, `RegisterOfflineRoutesOptions`, `StaticAssetConfig`, `StrategyConfig`.
+- `@arki/offline/status`: `OfflineBanner`, `useOnlineStatus`, `useQueueDepth`; types `OfflineBannerProps`, `OfflineBannerState`, `OnlineStatus`.
+- `@arki/offline/orpc`: `IDEMPOTENCY_STORE_FAILURES`, `IdempotencyRepository`, `IdempotencyStoreUnconfirmed`, `SqliteIdempotencyRepository`, `createIdempotencyTable`, `idempotency`, `idempotencyKeyId`, `idempotencyKeys`, `offlineSafe`; types `IdempotencyDatabase`, `IdempotencyKeyId`, `IdempotencyKeysTable`; and 6 more.
+- `@arki/offline/devtools`: `OfflineDevPanel`.
+- `@arki/offline/preset`: `createOfflineRuntime`; types `CacheOnlyConfig`, `OfflineRuntime`, `OfflineRuntimeConfig`, `QueueConfig`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): the three tiers, collections, status, troubleshooting.
+
+## By task
+- Keep reads across reloads (Tier 1): `createIdbPersister`, `PersistedQueryClientProvider` from `@arki/offline/query`.
+- Queue writes while offline (Tier 2): `@arki/offline/mutations` and the idempotency marker in `@arki/offline/orpc`.
+- Cache the app shell: `registerOfflineRoutes` from `@arki/offline/pwa`.
+- Wire it all: `createOfflineRuntime()` from `@arki/offline/preset`.
+- Local data: `@arki/offline/collections`. Online state: `@arki/offline/status`. Debug panel: `@arki/offline/devtools`.
+
+## Rules that bite
+- A replayed write can run twice. Handlers must be idempotent; see the README on idempotency keys.
+- Tier 3 (true local-first sync) is deferred.
+- The dev panel is dev-only and costs nothing in production.

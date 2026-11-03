@@ -1,31 +1,46 @@
 # @arki/fs
 
-> File storage for arki apps: S3/R2/local adapters, and the files table — a Postgres or SQLite upload recipe where the row exists before any byte and nothing is ready until the server saw the object.
+> File storage for arki apps: S3, R2 and local adapters, and the files table, a Postgres or SQLite upload recipe where the row exists before any byte and nothing is ready until the server saw the object.
 
-## Entries
-- @arki/fs/files — fileId (`fil_`), uploadRequest, uploadTicket, fileRecord, signedFileUrl, FileUnavailable, UploadPending, FileWrongState, UploadMismatch, FILE_ERROR_CODES, FileStorageError, uploadFile(client, blob, { onProgress, signal }). Portable (Node, Bun, Deno, browser, Hermes).
-- @arki/fs/pg — filesTable(pgColumns(schema?), { owner, name? }), fileStorage(db, adapter, options), toFileRecord(row), types FilesTable<D, TOwner>, FileRow<T>, OwnerOf<T>, FilePolicy<T>. Server. Peers: @arki/db, drizzle-orm.
-- @arki/fs/sqlite — the same on SQLite (libSQL): filesTable(sqliteColumns({ prefix? }), { owner, name? }), fileStorage(libsqlDb, adapter, options). Sweepers in different processes take turns (one writer). Server. Peers: @arki/db, drizzle-orm.
-- @arki/fs/orpc — filesContract (createUpload, confirmUpload, url, remove), filesRouter(implementer.files, { storage, actor }). Peers: @orpc/contract, @orpc/server.
-- @arki/fs/testing — memoryUploadAdapter(); browserPut(url, body, headers) plays the browser PUT.
-- @arki/fs/storage — createStorage, createS3StorageAdapter, createR2Storage (both SignedUploadAdapter), createLocalStorageAdapter (plain StorageAdapter, cannot sign uploads).
+## Import paths
 
-## The five calls (each takes the acting owner id first)
-1. createUpload(actor, { mime, size }) → { fileId, url, method: 'PUT', headers, expiresAt }. Row is written first (pending).
-2. Browser PUTs the body to url with headers unchanged (Content-Type, If-None-Match: *; both signed, plus Content-Length).
-3. confirmUpload(actor, fileId) → row | UploadPending | FileWrongState | UploadMismatch. HEADs the object; size and type must match; idempotent.
-4. url(actor, fileId, { expiresIn?, disposition?, filename? }) → { url, expiresAt } | FileWrongState. Ready files only. Store the FileId, never the URL.
-5. remove(actor, fileId) → { physical: 'done' | 'scheduled' }. Every call can also return FileUnavailable. cleanupOrphans({ batch }) → { removed, failed, more } from a locked schedule.
+<!-- llms:start -->
+- `@arki/fs/env`: `env`.
+- `@arki/fs/local/delete`: Pass-through of the `del` package. `deleteAsync`, `deleteSync`; types `Options`, `ProgressData`.
+- `@arki/fs/local/dir`: `getParentDirName`.
+- `@arki/fs/local/glob`: Pass-through of the `glob` package. `glob`, `globIterate`, `globStream`.
+- `@arki/fs/local/read-file`: Reads a whole file synchronously and decodes it. `readFile`.
+- `@arki/fs/local/read-first-line`: The first line, or undefined for an empty file. `readFirstLine`.
+- `@arki/fs/local/write`: Pass-through of Node `appendFile`. `writeToTheFileEnd`.
+- `@arki/fs/s3`: `initializeStorage`.
+- `@arki/fs/storage`: Storage - Factory. `FILE_READ_FAILURES`, `STORAGE_READ_FAILURES`, `STORAGE_WRITE_FAILURES`, `StorageCancelled`, `StorageNotFound`, `StorageRejected`, `StorageUnavailable`, `StorageWriteUncertain`, `createLocalStorageAdapter`, `createR2Storage`, `createS3StorageAdapter`, `createStorage`; and 13 more.
+- `@arki/fs/storage/index`: Storage - Factory. `FILE_READ_FAILURES`, `STORAGE_READ_FAILURES`, `STORAGE_WRITE_FAILURES`, `StorageCancelled`, `StorageNotFound`, `StorageRejected`, `StorageUnavailable`, `StorageWriteUncertain`, `createLocalStorageAdapter`, `createR2Storage`, `createS3StorageAdapter`, `createStorage`; and 13 more.
+- `@arki/fs/storage/local-adapter`: `LocalStorageAdapter`, `createLocalStorageAdapter`.
+- `@arki/fs/storage/r2`: Storage - Cloudflare R2 Preset. `createR2Storage`; types `R2StorageConfig`.
+- `@arki/fs/storage/s3-adapter`: `S3StorageAdapter`, `createS3StorageAdapter`.
+- `@arki/fs/storage/types`: types `LocalStorageConfig`, `S3StorageConfig`, `SignedUploadAdapter`, `SignedUrlOptions`, `StorageAdapter`, `StorageCallOptions`, `StorageConfig`, `StorageReadFailure`, `StorageWriteFailure`, `StoreOptions`, `StoredFile`, `StoredFileMetadata`.
+- `@arki/fs/files`: the portable half of the files table. `CONFIRM_UPLOAD_FAILURES`, `CREATE_UPLOAD_FAILURES`, `FILE_ERROR_CODES`, `FILE_READ_FAILURES`, `FILE_URL_FAILURES`, `FileStorageError`, `FileUnavailable`, `FileWrongState`, `REMOVE_FILE_FAILURES`, `STORAGE_READ_FAILURES`, `STORAGE_WRITE_FAILURES`, `StorageCancelled`; and 25 more.
+- `@arki/fs/orpc`: the files table over oRPC, contract-first. `filesContract`, `filesRouter`, `filesUploadClient`; types `FilesContract`.
+- `@arki/fs/pg`: the files table on Postgres. `fileStorage`, `filesTable`, `toFileRecord`; types `CleanupOptions`, `CleanupResult`, `FilePolicy`, `FileRow`, `FileStorage`, `FileStorageOptions`, `FilesDb`, `FilesTable`, `FilesTableOptions`; and 1 more.
+- `@arki/fs/sqlite`: the files table on SQLite (libSQL). `fileStorage`, `filesTable`, `toFileRecord`; types `CleanupOptions`, `CleanupResult`, `FilePolicy`, `FileRow`, `FileStorage`, `FileStorageOptions`, `FilesDb`, `FilesTable`, `FilesTableOptions`; and 1 more.
+- `@arki/fs/testing`: `memoryUploadAdapter`; types `MemoryUploadAdapter`.
+<!-- llms:end -->
 
-## Guarantees
-G1 no URL before its pending row commits. G2 ready only after size+type matched the stored object. G3 keys are server-derived. G4 PUT grants are create-only. G5 every URL expires. G6 confirm and sweep never both win. G7 every expired pending row and every deleting row is eventually removed (backoff up to 1 day).
-Not promised: no 2PC, no instant revocation of issued GET URLs, a PUT later than expires_at + grace after a removal can orphan an object, MIME is declared not sniffed.
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [README](README.md): the long overview and peers per entry.
 
-## Failures (returned, never thrown; from @arki/failure)
-FileUnavailable fs.file_unavailable 404 (missing/not yours/other bucket/policy refused: one failure, no existence leak) · UploadPending fs.upload_pending 409 (PUT not landed; confirm again later) · FileWrongState fs.file_wrong_state 409 · UploadMismatch fs.upload_mismatch 422 (row now deleting). Check with isFailure(result). filesContract lists them per procedure (errorMap).
+## By task
+- Upload from a browser: `uploadFile` (`@arki/fs/files`) against `filesContract` and `filesRouter` (`@arki/fs/orpc`).
+- Store file rows: `filesTable` and `fileStorage` from `@arki/fs/pg`, or `@arki/fs/sqlite` (libSQL).
+- Pick a bucket: `createS3StorageAdapter`, `createR2Storage`, `createLocalStorageAdapter` from `@arki/fs/storage`.
+- Test uploads: `memoryUploadAdapter`, `browserPut` from `@arki/fs/testing`.
 
-## Error codes (FileStorageError.code, thrown faults)
-ARKI_FS_E001 invalid · E006 unsupported (local adapter) · E007 storage (retry). E002–E005 are retired.
-
-## Rules
-Pass the root Drizzle db, never a transaction. Never call storage I/O inside a DB transaction. Never mark a file ready from client success. Never use exists() or an ETag as proof. Local adapter is refused; use MinIO or a dev R2 bucket.
+## Rules that bite
+- The five calls are `createUpload`, `confirmUpload`, `url`, `remove` and `cleanupOrphans`. Each takes the acting owner id first.
+- Failures are returned, never thrown: `FileUnavailable`, `UploadPending`, `FileWrongState`, `UploadMismatch`. Check with `isFailure`.
+- Never mark a file ready from client success. `confirmUpload` checks size and type against the stored object.
+- Store the `FileId`, never the URL. Every URL expires.
+- Pass the root Drizzle db, never a transaction. Never do storage I/O inside a DB transaction.
+- The local adapter cannot sign uploads. Use MinIO or a dev R2 bucket.
+- Thrown faults carry `FileStorageError.code`: `ARKI_FS_E001`, `E006`, `E007`.

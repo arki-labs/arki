@@ -1,0 +1,23 @@
+# @arki/content-react
+
+> React components for content pages: render compiled MDX, articles, changelog timelines, code blocks, GitHub and tweet embeds, and search posts as the reader types.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/content-react`: `Article`, `ChangelogCard`, `ChangelogPagination`, `ChangelogTimeline`, `ContentSection`, `DateTime`, `EmbeddedCard`, `FileTree`, `GitHubIssue`, `GitHubPullRequest`, `ITEMS_PER_PAGE`, `MarkdownImage`; and 19 more.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): quick start, the component list and limits.
+
+## By task
+- Show a post or MDX: `Article`, `Mdx`, `ContentSection`, `mdxComponents`.
+- Show a changelog: `ChangelogTimeline`, `ChangelogPagination`, `ChangelogCard`.
+- Search posts while typing: `useSearch` (300 ms debounce, aborts a request in flight).
+
+## Rules that bite
+- Entries are bundler-only. They import `@arki/ui` and `@arki/icons`, which ship TypeScript source. Use Vite or another bundler.
+- Peer dependency: `react` 18 or 19.
+- `useSearch` returns `SearchUnavailable` or `SearchResponseMalformed` as values and leaves `result` empty. It needs a `/posts/search` route that returns a JSON list of posts.
+- It renders what `@arki/content-build` produces. For feeds, sorting or the index use `@arki/content`.

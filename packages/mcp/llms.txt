@@ -1,0 +1,25 @@
+# @arki/mcp
+
+> MCP servers and MCP Apps for ARKI, served as plain Request to Response handlers. Unreleased until the agent docs are written.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/mcp`: types `Access`, `Effect`, `McpTool`, `ToolCall`, `ToolName`.
+- `@arki/mcp/contract`: `asTool`; types `McpMeta`.
+- `@arki/mcp/orpc`: `ADAPTER_FAILURES`, `ApprovalRequired`, `Cancelled`, `Forbidden`, `InvalidInput`, `InvalidResult`, `ResultTooLarge`, `fromRpc`; types `RpcTools`, `Snake`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): measured runtimes and the OAuth tables.
+- [Contracts](docs/contracts.md): the contract notes.
+
+## By task
+- Types for tools and calls: `McpTool`, `ToolCall`, `Access`, `Effect` from `@arki/mcp`.
+- Mark a contract procedure as a tool: `asTool` from `@arki/mcp/contract`.
+- Expose an oRPC router as MCP tools: `fromRpc` from `@arki/mcp/orpc`. It returns its failures as values (`Forbidden`, `ApprovalRequired`, `InvalidInput`, `ResultTooLarge`).
+
+## Rules that bite
+- The package is private (`"private": true`) until the agent docs land. Do not depend on it from a published package.
+- Runtimes measured: Node and Bun pass, Deno passes when bundled. The root entry is not for a browser tab.
+- OAuth tables come from `@better-auth/oauth-provider`. This package owns no tables.

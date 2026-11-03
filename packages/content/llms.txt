@@ -1,0 +1,25 @@
+# @arki/content
+
+> Content helpers for blogs and docs: parse and write RSS and Atom feeds, build a search index over posts, and sort the collections an app generates at build time. No framework dependency.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/content`: `buildChangelogFeed`, `buildPostFeed`, `contentQueries`, `createPostSearchIndex`, `loadPostSearchIndex`, `postSearchOptions`, `searchPosts`; types `ContentQueries`, `FeedChangelogEntry`, `FeedPost`, `FeedSiteOptions`, `GeneratedCollections`; and 3 more.
+- `@arki/content/rss`: `FeedLimitExceeded`, `FeedMalformed`, `FeedTooLarge`, `FeedUnsupported`, `parseFeed`; types `Feed`, `FeedExtension`, `FeedExtensions`, `FeedItem`, `FeedLink`, `FeedPerson`, `ParseFeedOptions`.
+- `@arki/content/rss/generate`: `generateAtom`, `generateFeed`, `generateRss`; types `GenerateFeedOptions`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): the overview, with a runnable quick start.
+
+## By task
+- Read a feed: `parseFeed` from `@arki/content/rss`; write one with `generateRss` from `@arki/content/rss/generate`.
+- Search posts: `createPostSearchIndex` then `searchPosts`. Save the index at build time and load it with `loadPostSearchIndex`.
+- Sort generated collections: `contentQueries` from `@arki/content`.
+
+## Rules that bite
+- `parseFeed` returns a failure value and never throws. Check it with `isFailure` from `@arki/failure`.
+- It refuses DOCTYPE and entity declarations, and reads at most 10 MiB and 10,000 items unless you pass `maxBytes` or `maxItems`.
+- The search index lives in memory. It is not for a large corpus.
+- To compile MDX use `@arki/content-build`. To render content use `@arki/content-react`.

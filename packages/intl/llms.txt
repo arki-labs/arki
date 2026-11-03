@@ -1,0 +1,29 @@
+# @arki/intl
+
+> Locale helpers for web apps: ISO language lookups, a bidirectional slug registry for localized URLs, message dictionary loading, and a TanStack Start locale provider on use-intl.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/intl/language`: `getAll639_1`, `getAll639_2B`, `getAll639_2T`, `getAll639_3`, `getEnglishName`, `getIsoCodesFromNativeName`, `getName`, `getNativeName`, `isLanguageCode`, `isValid`; types `LanguageIsoCode`.
+- `@arki/intl/dictionaries`: `loadMessagesFromMultipleDictionaries`.
+- `@arki/intl/types`: Configuration for a single locale supported by an app. types `AppLocaleConfig`, `LocalizedResourceSlug`.
+- `@arki/intl/react`: types `LinkComponent`.
+- `@arki/intl/tanstack-start`: `AppLocaleProvider`, `LocaleProvider`, `hasLocale`, `useLocale`, `useTranslations`.
+- `@arki/intl/slug-registry`: `SlugRegistry`.
+<!-- llms:end -->
+
+## Start here
+- [README](README.md): quick start and the table of public imports.
+
+## By task
+- Language names: `getEnglishName`, `getNativeName`, `isLanguageCode` from `@arki/intl/language`.
+- Localized URLs: `SlugRegistry` from `@arki/intl/slug-registry` (`getSlug`, `getResourceId`, `getLocalizedUrl`).
+- Merge messages: `loadMessagesFromMultipleDictionaries` from `@arki/intl/dictionaries`.
+- Mount locale in TanStack Start: `AppLocaleProvider`, `LocaleProvider`, `useLocale` from `@arki/intl/tanstack-start`.
+
+## Rules that bite
+- Lookups return `undefined` when nothing matches. `getLocalizedUrl` returns the English URL when the target is the default locale or has no slug.
+- Built-in messages exist for `en` and `de` only. Pass the rest through `messages` or `featureDictionaries`.
+- No pluralization or date and number formatting. Use `use-intl` for that.
+- Only `@arki/intl/tanstack-start` needs `react` (optional peer).
