@@ -1,6 +1,6 @@
 {
   "name": "@arki/tanstack-start",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "TanStack Start wiring for Arki apps: router and query client defaults, the server entry, typed oRPC client utils and hooks, PWA, devtools and error pages.",
   "keywords": [
