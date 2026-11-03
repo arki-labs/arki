@@ -1,6 +1,6 @@
-import { Icon } from './icon';
-import { Text, TextClassContext } from './text';
-import { cn } from '../lib/cn';
+import { Icon } from './icon.js';
+import { Text, TextClassContext } from './text.js';
+import { cn } from '../lib/cn.js';
 import type { Icon as PhosphorIcon } from 'phosphor-react-native';
 import * as React from 'react';
 import { View } from 'react-native';

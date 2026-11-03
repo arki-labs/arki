@@ -1,7 +1,7 @@
-import { Icon } from './icon';
-import { NativeOnlyAnimatedView } from './native-only-animated-view';
-import { TextClassContext } from './text';
-import { cn } from '../lib/cn';
+import { Icon } from './icon.js';
+import { NativeOnlyAnimatedView } from './native-only-animated-view.js';
+import { TextClassContext } from './text.js';
+import { cn } from '../lib/cn.js';
 import * as ContextMenuPrimitive from '@rn-primitives/context-menu';
 import { Check, CaretDown, CaretRight, CaretUp } from 'phosphor-react-native';
 import * as React from 'react';

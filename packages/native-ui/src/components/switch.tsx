@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import * as SwitchPrimitives from '@rn-primitives/switch';
 import { Platform } from 'react-native';
 

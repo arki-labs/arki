@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /**
+     * Emit JavaScript and declarations for every entry, so Metro and Node load compiled code.
+     * Every relative import names its `.js` file, so the emitted `dist/` loads as plain ESM.
+     * `react-jsx` compiles JSX to plain calls; the editor config keeps `react-native` for type checks.
+     */
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "rootDir": ".",
+    "outDir": "./dist",
+    "allowImportingTsExtensions": false,
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.test-d.ts"]
+}

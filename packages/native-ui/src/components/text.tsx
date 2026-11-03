@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import * as Slot from '@rn-primitives/slot';
 import { cva  } from 'class-variance-authority';
 import type {VariantProps} from 'class-variance-authority';

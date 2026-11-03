@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from 'phosphor-react-native';
 import { styled } from 'nativewind';
 

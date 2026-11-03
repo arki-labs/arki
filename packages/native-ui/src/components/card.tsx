@@ -1,5 +1,5 @@
-import { Text, TextClassContext } from './text';
-import { cn } from '../lib/cn';
+import { Text, TextClassContext } from './text.js';
+import { cn } from '../lib/cn.js';
 import { View  } from 'react-native';
 import type {ViewProps} from 'react-native';
 

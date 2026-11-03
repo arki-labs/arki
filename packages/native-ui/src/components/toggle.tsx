@@ -1,6 +1,6 @@
-import { Icon } from './icon';
-import { TextClassContext } from './text';
-import { cn } from '../lib/cn';
+import { Icon } from './icon.js';
+import { TextClassContext } from './text.js';
+import { cn } from '../lib/cn.js';
 import * as TogglePrimitive from '@rn-primitives/toggle';
 import { cva  } from 'class-variance-authority';
 import type {VariantProps} from 'class-variance-authority';

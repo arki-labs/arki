@@ -1,281 +1,83 @@
 # @arki/native-ui
 
-A comprehensive React Native UI component library based on [React Native Reusables](https://reactnativereusables.com/), providing accessible, customizable components with NativeWind styling.
+React Native UI components for ARKI. They are the [React Native Reusables](https://reactnativereusables.com/) components, styled with [NativeWind](https://www.nativewind.dev/) and built on [rn-primitives](https://github.com/roninoss/rn-primitives) for accessibility. The package also ships small helpers for class names, strings and colors.
 
-## Overview
+## Install
 
-This package provides:
-- 🎨 **NativeWind Integration**: Tailwind CSS styling for React Native
-- ♿ **Accessibility First**: Built on top of rn-primitives for proper accessibility
-- 🔧 **Fully Customizable**: Components live in your codebase, not node_modules
-- 📦 **Self-Contained**: All utilities and primitives bundled
-
-## Installation
-
-This package is part of the workspace and uses catalog dependencies:
-
-```bash
+```sh
+npm install @arki/native-ui
+# or
+bun add @arki/native-ui
+# or
 pnpm add @arki/native-ui
 ```
 
-### Peer Dependencies
+Your app must already have these peer dependencies: `react`, `react-native`, `nativewind`, `react-native-reanimated`, `react-native-gesture-handler` and `react-native-svg`. NativeWind must be set up in your app: follow the [NativeWind guide](https://www.nativewind.dev/getting-started/react-native).
 
-Ensure your project has these installed:
-- `react` (catalog:react19)
-- `react-native` (catalog:expo)
-- `react-native-reanimated` (catalog:expo)
-- `react-native-gesture-handler` (catalog:expo)
-- `react-native-svg` (catalog:expo)
+## Quick start
 
-### NativeWind Setup
+Import a component from the package root or from its own path. Pass NativeWind `className` strings.
 
-This library requires NativeWind v4 to be configured in your project. Follow the [NativeWind setup guide](https://www.nativewind.dev/getting-started/react-native).
+```tsx skip="needs a React Native runtime and NativeWind, which this docs check does not start"
+import { Button, Text } from '@arki/native-ui';
 
-## Package Structure
-
-```
-@arki/native-ui/
-├── src/
-│   ├── lib/           # Utilities
-│   │   ├── cn.ts      # Classname merging utility
-│   │   ├── utils.ts   # Helper functions
-│   │   └── colors.ts  # Color utilities
-│   ├── primitives/    # Accessibility primitives (to be added)
-│   └── components/    # UI components (to be added)
-```
-
-## Available Utilities
-
-### `cn()` - Classname Utility
-
-Merges Tailwind CSS classes with proper precedence:
-
-```typescript
-import { cn } from '@arki/native-ui/lib/cn';
-
-cn('px-2 py-1', 'px-4') // => 'py-1 px-4'
-cn('text-red-500', isActive && 'text-blue-500')
-```
-
-### Utils
-
-```typescript
-import { getInitials, truncate, formatFileSize } from '@arki/native-ui/lib/utils';
-
-getInitials('John Doe') // => 'JD'
-truncate('Long text here', 10) // => 'Long te...'
-formatFileSize(1024) // => '1 KB'
-```
-
-### Colors
-
-```typescript
-import { hexToRgba, lightenColor, darkenColor } from '@arki/native-ui/lib/colors';
-
-hexToRgba('#FF0000', 0.5) // => 'rgba(255, 0, 0, 0.5)'
-lightenColor('#FF0000', 20) // Lighten by 20%
-darkenColor('#FF0000', 20) // Darken by 20%
-```
-
-## Adding Components
-
-Components from React Native Reusables can be added manually. Here's the process:
-
-### 1. Find the Component
-
-Visit [React Native Reusables](https://reactnativereusables.com/docs/components) and locate the component you want.
-
-### 2. Check Dependencies
-
-Each component page lists:
-- **Package dependencies**: npm packages to install
-- **Registry dependencies**: Other components it depends on
-
-### 3. Copy Component Code
-
-Navigate to the [GitHub repository](https://github.com/mrzachnugent/react-native-reusables) and find the component in `packages/registry/src/components/ui/`.
-
-### 4. Adapt Imports
-
-When copying a component, update these import patterns:
-
-```typescript
-// From:
-import { cn } from '@/lib/utils';
-import * as Primitive from '@rn-primitives/accordion';
-
-// To:
-import { cn } from '~/lib/cn';
-import * as Primitive from '~/primitives/accordion';
-```
-
-### 5. Copy Required Primitives
-
-If the component uses primitives (like `@rn-primitives/accordion`), you need to:
-
-1. Find the primitive in [@roninoss/rn-primitives](https://github.com/roninoss/rn-primitives)
-2. Copy the primitive to `src/primitives/[primitive-name]/`
-3. Ensure it exports an `index.tsx` file
-
-### 6. Add to Exports
-
-Update `src/index.ts` to export your new component:
-
-```typescript
-export * from './components/button';
-export * from './primitives/accordion';
-```
-
-## Example: Adding the Button Component
-
-Here's a complete example of adding the Button component:
-
-### Step 1: Copy the Component
-
-From the RN Reusables repo, copy `button.tsx` to `src/components/button.tsx`.
-
-### Step 2: Update Imports
-
-```typescript
-// src/components/button.tsx
-import * as React from 'react';
-import { Pressable } from 'react-native';
-import { cva, type VariantProps } from 'class-variance-authority';
-import { cn } from '~/lib/cn';
-
-const buttonVariants = cva(
-  'flex-row items-center justify-center rounded-md',
-  {
-    variants: {
-      variant: {
-        default: 'bg-primary',
-        destructive: 'bg-destructive',
-        outline: 'border border-input bg-background',
-        secondary: 'bg-secondary',
-        ghost: 'bg-transparent',
-        link: 'bg-transparent',
-      },
-      size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
-        icon: 'h-10 w-10',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
-  }
-);
-
-export interface ButtonProps
-  extends React.ComponentPropsWithoutRef<typeof Pressable>,
-    VariantProps<typeof buttonVariants> {}
-
-const Button = React.forwardRef<
-  React.ElementRef<typeof Pressable>,
-  ButtonProps
->(({ className, variant, size, ...props }, ref) => {
+export function SaveButton({ onPress }: { onPress: () => void }) {
   return (
-    <Pressable
-      className={cn(buttonVariants({ variant, size, className }))}
-      ref={ref}
-      {...props}
-    />
-  );
-});
-Button.displayName = 'Button';
-
-export { Button, buttonVariants };
-```
-
-### Step 3: Export
-
-Add to `src/index.ts`:
-
-```typescript
-export * from './components/button';
-```
-
-### Step 4: Use It
-
-```typescript
-import { Button } from '@arki/native-ui';
-import { Text } from 'react-native';
-
-function MyScreen() {
-  return (
-    <Button variant="default" size="lg">
-      <Text>Click me</Text>
+    <Button variant="outline" onPress={onPress}>
+      <Text>Save</Text>
     </Button>
   );
 }
 ```
 
-## Available Components to Add
+The helpers need no React Native, so this block runs.
 
-Based on React Native Reusables documentation, you can add:
+```ts
+import { cn } from '@arki/native-ui/lib/cn';
+import { getInitials, truncate } from '@arki/native-ui/lib/utils';
+import { hexToRgba } from '@arki/native-ui/lib/colors';
 
-### Core Components
-- ✅ Utilities (cn, utils, colors)
-- ⏳ Button
-- ⏳ Input
-- ⏳ Text
-- ⏳ Badge
-- ⏳ Card
+export const demo = {
+  classes: cn('px-2 py-1', 'px-4'), // 'py-1 px-4'
+  initials: getInitials('Ada Lovelace'), // 'AL'
+  short: truncate('A long pizza menu title', 10),
+  overlay: hexToRgba('#FF0000', 0.5), // 'rgba(255, 0, 0, 0.5)'
+};
+```
 
-### Layout Components
-- ⏳ Separator
-- ⏳ Aspect Ratio
-- ⏳ Skeleton
+## When not to use this
 
-### Form Components
-- ⏳ Checkbox
-- ⏳ Radio Group
-- ⏳ Switch
-- ⏳ Textarea
-- ⏳ Label
-- ⏳ Select
+- You build for the web. These components render with React Native and `rn-primitives`. Use `@arki/ui` for the web.
+- You do not use NativeWind. The components style themselves with `className` strings and need it.
+- You want to edit component source in your own repo. This package ships compiled code. Copy the file from React Native Reusables instead.
 
-### Overlay Components
-- ⏳ Alert
-- ⏳ Alert Dialog
-- ⏳ Dialog
-- ⏳ Popover
-- ⏳ Tooltip
-- ⏳ Hover Card
+## Runtime support
 
-### Navigation Components
-- ⏳ Tabs
-- ⏳ Accordion
-- ⏳ Collapsible
-- ⏳ Context Menu
-- ⏳ Dropdown Menu
-- ⏳ Menubar
+React Native with Expo or Metro. The component entries import `react-native`, so they do not load in plain Node, Deno or a browser. The helpers in `lib/cn`, `lib/utils` and `lib/colors` import no React Native code and run on any runtime.
 
-### Feedback Components
-- ⏳ Progress
-- ⏳ Avatar
-- ⏳ Toggle
-- ⏳ Toggle Group
+## Public imports
 
-## Resources
+| Import | What it gives you |
+| --- | --- |
+| `@arki/native-ui` | Every component and helper below. |
+| `@arki/native-ui/components/<name>` | One component: `accordion`, `alert`, `alert-dialog`, `aspect-ratio`, `avatar`, `badge`, `button`, `card`, `checkbox`, `collapsible`, `context-menu`, `dialog`, `dropdown-menu`, `hover-card`, `icon`, `input`, `label`, `menubar`, `native-only-animated-view`, `popover`, `progress`, `radio-group`, `select`, `separator`, `skeleton`, `switch`, `tabs`, `text`, `textarea`, `toggle`, `toggle-group`, `tooltip`. |
+| `@arki/native-ui/lib/cn` | `cn(...classes)`: merges Tailwind classes; later classes win. |
+| `@arki/native-ui/lib/utils` | `getInitials`, `truncate`, `formatFileSize`, `debounce`. |
+| `@arki/native-ui/lib/colors` | `isValidHexColor`, `hexToRgba`, `lightenColor`, `darkenColor`. |
 
-- [React Native Reusables Docs](https://reactnativereusables.com/docs)
-- [React Native Reusables GitHub](https://github.com/mrzachnugent/react-native-reusables)
-- [rn-primitives GitHub](https://github.com/roninoss/rn-primitives)
-- [NativeWind Documentation](https://www.nativewind.dev)
+### Helpers
 
-## Contributing
+- `cn('px-2 py-1', 'px-4')` returns `'py-1 px-4'`. It uses `clsx` and `tailwind-merge`.
+- `getInitials('John Doe')` returns `'JD'`. A single word gives its first two letters.
+- `truncate(text, length)` shortens long text. `formatFileSize(bytes)` formats a byte count.
+- `debounce(fn, delay)` returns the debounced function. Call `.cancel()` on it to drop the pending call, for example on unmount.
+- `hexToRgba('#FF0000', 0.5)` returns `'rgba(255, 0, 0, 0.5)'`. `lightenColor(hex, percent)` and `darkenColor(hex, percent)` return a changed hex color.
 
-When adding components:
-1. Follow the existing code style
-2. Add TypeScript types for all props
-3. Include JSDoc comments for complex components
-4. Test on both iOS and Android
-5. Update this README with the new component
+## Failure behaviour
 
-## License
+None of the helpers throws on normal input. `isValidHexColor` returns a boolean. Components follow React Native: bad props are a type error, not a runtime failure.
 
-MIT
+## Limits
+
+- Dark mode and theme tokens come from your NativeWind and Tailwind setup. This package defines no theme.
+- `Icon` wraps [Phosphor React Native](https://github.com/duongdev/phosphor-react-native) icons. Pass the icon with the `as` prop.

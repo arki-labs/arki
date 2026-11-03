@@ -1,7 +1,7 @@
-import { Icon } from './icon';
-import { TextClassContext } from './text';
-import { toggleVariants } from './toggle';
-import { cn } from '../lib/cn';
+import { Icon } from './icon.js';
+import { TextClassContext } from './text.js';
+import { toggleVariants } from './toggle.js';
+import { cn } from '../lib/cn.js';
 import * as ToggleGroupPrimitive from '@rn-primitives/toggle-group';
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';

@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import * as RadioGroupPrimitive from '@rn-primitives/radio-group';
 import { Platform } from 'react-native';
 

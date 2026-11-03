@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import * as LabelPrimitive from '@rn-primitives/label';
 import { Platform } from 'react-native';
 

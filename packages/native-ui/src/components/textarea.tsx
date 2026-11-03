@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../lib/cn.js';
 import { Platform, TextInput  } from 'react-native';
 import type {TextInputProps} from 'react-native';
 

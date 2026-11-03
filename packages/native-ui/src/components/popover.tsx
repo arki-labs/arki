@@ -1,6 +1,6 @@
-import { NativeOnlyAnimatedView } from './native-only-animated-view';
-import { TextClassContext } from './text';
-import { cn } from '../lib/cn';
+import { NativeOnlyAnimatedView } from './native-only-animated-view.js';
+import { TextClassContext } from './text.js';
+import { cn } from '../lib/cn.js';
 import * as PopoverPrimitive from '@rn-primitives/popover';
 import * as React from 'react';
 import { Platform, StyleSheet } from 'react-native';
