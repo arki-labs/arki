@@ -1,20 +1,42 @@
 {
   "name": "@arki/content-build",
   "version": "0.1.0",
-  "private": false,
+  "description": "Build-time content pipeline: content-collections config, preset collections (posts, legal pages, FAQs, changelog), GitHub-flavoured markdown compiler and the arki-content CLI.",
+  "keywords": [
+    "arki",
+    "content",
+    "mdx",
+    "markdown",
+    "content-collections",
+    "vite",
+    "cli"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/content-build"
+  },
+  "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
     "./config": {
       "types": "./dist/src/config.d.ts",
+      "import": "./dist/src/config.js",
       "default": "./dist/src/config.js"
     },
     "./presets": {
       "types": "./dist/src/presets.d.ts",
+      "import": "./dist/src/presets.js",
       "default": "./dist/src/presets.js"
     },
     "./vite": {
       "types": "./dist/src/vite.d.ts",
+      "import": "./dist/src/vite.js",
       "default": "./dist/src/vite.js"
     },
     "./package.json": "./package.json"
@@ -22,6 +44,19 @@
   "bin": {
     "arki-content": "./dist/src/cli.js"
   },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/*.stories.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
@@ -30,6 +65,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -79,5 +115,8 @@
     "vite": {
       "optional": true
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -6,7 +6,7 @@ Build-time content pipeline for our apps: content-collections config, preset col
 
 `compileMarkdown` compiles GitHub-flavoured markdown to HTML. Use it for markdown written for GitHub, such as package READMEs and docs. MDX would fail on `<` and `{` in prose; plain markdown keeps them as text.
 
-```ts
+```ts skip="fragment: document comes from a content-collections transform"
 import { compileMarkdown } from '@arki/content-build/config';
 
 const { html, headings } = await compileMarkdown(document.content, {
