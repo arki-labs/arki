@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const examples = ['server.ts', 'client.ts', 'sqlite.ts'].map(file => read(`../examples/files/${file}`)).join('\n');
-const blocks = [...read('../README.md').matchAll(/```ts\n([\s\S]*?)```/g)].map(match => match[1]?.trim() ?? '');
+const blocks = [...read('../README.md').matchAll(/```ts[^\n]*\n([\s\S]*?)```/g)].map(match => match[1]?.trim() ?? '');
 
 describe('README.md', () => {
   it('has ts blocks to check', () => {
