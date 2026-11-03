@@ -217,6 +217,7 @@
     "!src/**/*.test.*",
     "!dist/**/*.test.*",
     "README.md",
+    "docs/**",
     "llms.txt",
     "LICENSE",
     "package.json"
