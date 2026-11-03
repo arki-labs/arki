@@ -1,0 +1,156 @@
+# @arki/geo API reference
+
+Every exported value, grouped by import path. Types are not listed. The `/react` path re-exports the framework free helpers of the root path and adds the hooks listed under it.
+
+## @arki/geo
+
+- `AddressNotFound`: Every provider that answered found nothing for this address. Not cached, so a later lookup asks again.
+- `BoundsError`: Error thrown when bounds calculations fail.
+- `CONVERSION_FACTORS`: Conversion factors.
+- `EARTH_RADIUS_KM`: Earth radius in kilometers.
+- `EARTH_RADIUS_MI`: Earth radius in miles.
+- `GeoError`: Base error class for all geo-related errors.
+- `GeocodingCancelled`: The lookup was cancelled through its `AbortSignal`. This is not a provider fault.
+- `InvalidCoordinates`: Coordinates, or text that should hold coordinates, are not a valid latitude and longitude. Nothing was looked up.
+- `MapProviderError`: Error thrown when map provider initialization fails.
+- `NoAddressAtLocation`: Every provider that answered found no address at these coordinates, such as a point at sea. Not cached.
+- `ProviderRateLimited`: No provider answered and at least one said it is over its limit. `retryAfterMs` is that provider's `Retry-After`, when it sent one.
+- `ProviderRejected`: No provider answered and at least one refused the request: a bad or missing key, a denied account, or a malformed request. Retrying gives the same answer.
+- `ProviderUnreachable`: No provider answered: each was down, timed out, or sent an unreadable answer. A later retry may work.
+- `bearingToDirection`: Get compass direction from bearing.
+- `boundsContains`: Check if bounds1 contains bounds2.
+- `boundsIntersect`: Check if two bounds intersect.
+- `calculateBearing`: Calculate the bearing (direction) from point1 to point2.
+- `calculateDestination`: Calculate destination point given distance and bearing from start point.
+- `calculateDistance`: Calculate the great-circle distance between two points using the Haversine formula.
+- `calculateMidpoint`: Calculate the midpoint between two coordinates.
+- `convertDistance`: Convert distance between units.
+- `coordinatesEqual`: Check if two coordinates are approximately equal.
+- `coordinatesFromUrl`: Parse coordinates from URL parameter.
+- `coordinatesToUrl`: Convert coordinates to URL-safe string.
+- `createBoundsFromCoordinates`: Create bounds from an array of coordinates.
+- `createBoundsFromRadius`: Create bounds from a center point and radius.
+- `decimalToDMS`: Convert Decimal Degrees to Degrees, Minutes, Seconds.
+- `dmsToDecimal`: Convert Degrees, Minutes, Seconds to Decimal Degrees.
+- `extendBounds`: Extend bounds to include a coordinate.
+- `formatBounds`: Format bounds as a string.
+- `formatCoordinates`: Format coordinates as a human-readable string.
+- `formatCoordinatesDMS`: Format coordinates in Degrees, Minutes, Seconds (DMS) format.
+- `fromStandardCoordinates`: Convert standard coordinates to alternative formats.
+- `getBoundsCenter`: Get the center coordinate of bounds.
+- `getBoundsRadius`: Get the approximate radius of bounds in kilometers Uses the distance from center to the furthest corner.
+- `isCoordinateInBounds`: Check if a coordinate is within bounds.
+- `isValidCoordinates`: Check whether coordinates are finite and within range.
+- `normalizeCoordinates`: Normalize coordinates to valid ranges.
+- `normalizeLatitude`: Normalize latitude to -90 to 90 range (clamped).
+- `normalizeLongitude`: Normalize longitude to the -180 to 180 range by wrapping around the globe. Runs in constant time for any finite input.
+- `padBounds`: Pad bounds by a percentage.
+- `parseCoordinates`: Parse coordinates from a string.
+- `providerAttemptSchema`: One provider's failed try, kept so a failure that ends the lookup still shows every provider.
+- `roundCoordinates`: Round coordinates to specified precision.
+- `toStandardCoordinates`: Convert coordinates from one format to Google Maps format Handles various input formats: - {latitude, longitude} - {lat, lng} - {lat, lon}.
+- `validateCoordinates`: Validate coordinates.
+
+## @arki/geo/react
+
+- `AddressNotFound`: Every provider that answered found nothing for this address. Not cached, so a later lookup asks again.
+- `BoundsError`: Error thrown when bounds calculations fail.
+- `CONVERSION_FACTORS`: Conversion factors.
+- `EARTH_RADIUS_KM`: Earth radius in kilometers.
+- `EARTH_RADIUS_MI`: Earth radius in miles.
+- `GeoError`: Base error class for all geo-related errors.
+- `GeocodingCancelled`: The lookup was cancelled through its `AbortSignal`. This is not a provider fault.
+- `InvalidCoordinates`: Coordinates, or text that should hold coordinates, are not a valid latitude and longitude. Nothing was looked up.
+- `MapProviderError`: Error thrown when map provider initialization fails.
+- `NoAddressAtLocation`: Every provider that answered found no address at these coordinates, such as a point at sea. Not cached.
+- `ProviderRateLimited`: No provider answered and at least one said it is over its limit. `retryAfterMs` is that provider's `Retry-After`, when it sent one.
+- `ProviderRejected`: No provider answered and at least one refused the request: a bad or missing key, a denied account, or a malformed request. Retrying gives the same answer.
+- `ProviderUnreachable`: No provider answered: each was down, timed out, or sent an unreadable answer. A later retry may work.
+- `bearingToDirection`: Get compass direction from bearing.
+- `boundsContains`: Check if bounds1 contains bounds2.
+- `boundsIntersect`: Check if two bounds intersect.
+- `calculateBearing`: Calculate the bearing (direction) from point1 to point2.
+- `calculateDestination`: Calculate destination point given distance and bearing from start point.
+- `calculateDistance`: Calculate the great-circle distance between two points using the Haversine formula.
+- `calculateMidpoint`: Calculate the midpoint between two coordinates.
+- `convertDistance`: Convert distance between units.
+- `coordinatesEqual`: Check if two coordinates are approximately equal.
+- `coordinatesFromUrl`: Parse coordinates from URL parameter.
+- `coordinatesToUrl`: Convert coordinates to URL-safe string.
+- `createBoundsFromCoordinates`: Create bounds from an array of coordinates.
+- `createBoundsFromRadius`: Create bounds from a center point and radius.
+- `decimalToDMS`: Convert Decimal Degrees to Degrees, Minutes, Seconds.
+- `dmsToDecimal`: Convert Degrees, Minutes, Seconds to Decimal Degrees.
+- `extendBounds`: Extend bounds to include a coordinate.
+- `formatBounds`: Format bounds as a string.
+- `formatCoordinates`: Format coordinates as a human-readable string.
+- `formatCoordinatesDMS`: Format coordinates in Degrees, Minutes, Seconds (DMS) format.
+- `fromStandardCoordinates`: Convert standard coordinates to alternative formats.
+- `getBoundsCenter`: Get the center coordinate of bounds.
+- `getBoundsRadius`: Get the approximate radius of bounds in kilometers Uses the distance from center to the furthest corner.
+- `isCoordinateInBounds`: Check if a coordinate is within bounds.
+- `isValidCoordinates`: Check whether coordinates are finite and within range.
+- `normalizeCoordinates`: Normalize coordinates to valid ranges.
+- `normalizeLatitude`: Normalize latitude to -90 to 90 range (clamped).
+- `normalizeLongitude`: Normalize longitude to the -180 to 180 range by wrapping around the globe. Runs in constant time for any finite input.
+- `padBounds`: Pad bounds by a percentage.
+- `parseCoordinates`: Parse coordinates from a string.
+- `providerAttemptSchema`: One provider's failed try, kept so a failure that ends the lookup still shows every provider.
+- `roundCoordinates`: Round coordinates to specified precision.
+- `toStandardCoordinates`: Convert coordinates from one format to Google Maps format Handles various input formats: - {latitude, longitude} - {lat, lng} - {lat, lon}.
+- `useBoundsFromCoordinates`: Hook to calculate and work with bounds.
+- `useBoundsFromRadius`: Hook to create bounds from a center point and radius.
+- `useCoordinates`: Hook to manage coordinate state with validation. A refused change keeps the old coordinates and sets `error`.
+- `useDistance`: Hook to calculate distance between two coordinates.
+- `validateCoordinates`: Validate coordinates.
+
+## @arki/geo/geocoding
+
+- `GEOCODING_PROVIDERS`: Every supported provider, written once. The type, the env enum and the cache schema all read it.
+- `GeocodingService`: the geocoding service class. It has `geocode`, `reverseGeocode` and `batchGeocode`, tries the primary provider then the fallbacks, and caches results in an optional key value store.
+- `addressComponentsSchema`: Address components following Schema.org PostalAddress structure. `locality` is the city, `region` the state or province, `country` an ISO 3166-1 alpha-2 code.
+- `createGeocodingService`: Create geocoding service instance from configuration.
+- `geocodeResultSchema`: Result from geocoding operation. Also the shape read back from the cache.
+- `geocodingEnv`: the environment definition for geocoding: the provider, fallback providers, provider API keys and cache settings (enabled, TTL, key prefix).
+
+## @arki/geo/react/google-maps
+
+- `COLOR_SETS`: Predefined color sets for different use cases.
+- `DEFAULT_BOUNDS_PADDING`: Default bounds padding in pixels.
+- `DEFAULT_MAP_CENTER`: Default map center (middle of the world).
+- `DEFAULT_MAP_CONFIG`: Default map configuration for common use cases.
+- `DEFAULT_MAP_ID`: Default map ID for standard maps.
+- `DEFAULT_MAP_ZOOM`: Default map zoom level.
+- `GoogleInfoWindow`: GoogleInfoWindow component Displays an info window at the specified position.
+- `GoogleMap`: GoogleMap component A simplified wrapper around Google Maps with sensible defaults.
+- `GoogleMapsProvider`: GoogleMapsProvider component Wraps APIProvider from @vis.gl/react-google-maps with validation and error handling.
+- `GoogleMarker`: GoogleMarker component Displays a marker on the map at the specified position.
+- `GooglePin`: GooglePin component Default pin visualization for markers.
+- `HIGHLIGHTED_BOUNDS_PADDING`: Highlighted bounds padding (more zoom for detail).
+- `LOCATION_PICKER_CONFIG`: Map configuration for location selection.
+- `LocationPicker`: LocationPicker component An interactive map that allows users to select a location by clicking. Optionally shows an actual/correct location and supports Street.
+- `MARKER_COLORS`: Default marker colors (8-color palette for rounds/items).
+- `POLYLINE_ANIMATION_INTERVAL`: Default polyline animation interval (ms).
+- `POLYLINE_DASH_LENGTH`: Default polyline dash length.
+- `POLYLINE_GAP_LENGTH`: Default polyline gap length.
+- `RESULTS_MAP_CONFIG`: Map configuration for result visualization.
+- `STATIC_MAP_CONFIG`: Map configuration for disabled interaction.
+- `StreetViewChecker`: StreetViewChecker component Asynchronously checks if Google Street View is available at the specified location.
+- `StreetViewPanorama`: StreetViewPanorama component Renders a Google Street View panorama at the specified location.
+- `createDashedPolylineConfig`: Create dashed polyline configuration.
+- `createMapConfig`: Create custom map configuration.
+- `createMarchingAntsAnimation`: Create marching ants animation for a polyline.
+- `createPolylinePath`: Create polyline path from two points.
+- `createSolidPolylineConfig`: Create solid polyline configuration.
+- `formatCoordinates`: Format coordinates as a human-readable string.
+- `formatCoordinatesWithCardinals`: Format coordinates with cardinal directions.
+- `formatZoomLevel`: Format zoom level to descriptive text.
+- `getAllMarkerColors`: Get all marker colors.
+- `getMarkerColor`: Get a color from the marker palette by index.
+- `parseCoordinates`: Parse coordinates from a string.
+- `useApiIsLoaded`: Hook to check if the Google Maps API is loaded This hook re-exports useApiIsLoaded from @vis.gl/react-google-maps.
+- `useGoogleMap`: Hook to access the current Google Map instance This hook wraps useMap from @vis.gl/react-google-maps.
+- `useGoogleMaps`: Hook to access the Google Maps JavaScript API library This hook wraps useMapsLibrary from @vis.gl/react-google-maps and provides better error handling.
+- `useMapBounds`: Hook to manage map bounds Provides utilities for calculating and fitting bounds to show multiple locations.
+- `useMapOverlay`: Hook to manage map overlay state Provides state and handlers for: - Expand/collapse on hover - Pin to keep expanded - Fullscreen mode - Resizing with 8-point h.
+- `usePolylineAnimation`: Hook to manage animated polylines on a map Creates and animates polylines with a "marching ants" effect.
