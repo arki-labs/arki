@@ -1,40 +1,70 @@
 {
   "name": "@arki/seo",
   "version": "0.1.0",
-  "private": false,
+  "description": "SEO building blocks for web apps: metadata, robots.txt, sitemap.xml and llms.txt builders, JSON-LD schema components, and a TanStack Start head adapter.",
+  "license": "MIT",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/arki-labs/arki.git",
     "directory": "packages/seo"
   },
-  "license": "MIT",
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "seo",
+    "json-ld",
+    "sitemap",
+    "robots",
+    "llms-txt",
+    "metadata"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
-  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
-      "import": "./src/react/index.ts",
-      "default": "./src/react/index.ts"
+      "import": "./dist/src/react/index.js",
+      "default": "./dist/src/react/index.js"
     },
     "./tanstack-start": {
       "types": "./dist/src/tanstack-start.d.ts",
-      "import": "./src/tanstack-start.ts",
-      "default": "./src/tanstack-start.ts"
+      "import": "./dist/src/tanstack-start.js",
+      "default": "./dist/src/tanstack-start.js"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "!dist/src/**/*.test-d.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.test-d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:docs": "arki-doc-examples",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -79,5 +109,10 @@
     "react-dom": {
       "optional": true
     }
+  },
+  "arki": {
+    "bundlerOnly": [
+      "./react"
+    ]
   }
 }

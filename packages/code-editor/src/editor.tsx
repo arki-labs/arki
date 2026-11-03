@@ -47,22 +47,22 @@ export type CodeEditorProps = {
   lineNumbers?: boolean;
 };
 
+const languageExtensions: Partial<Record<CodeEditorLanguage, () => Extension>> = {
+  json: () => json(),
+  yaml: () => yaml(),
+  xml: () => xml(),
+  markdown: () => markdown(),
+  typescript: () => javascript({ typescript: true }),
+  javascript: () => javascript(),
+  css: () => css(),
+  html: () => html(),
+  python: () => python(),
+  sql: () => sql(),
+};
+
+/** `toml` and `text` have no entry, so they render without highlighting. */
 function getLanguageExtension(language: CodeEditorLanguage): Extension | null {
-  switch (language) {
-    case 'json':       return json();
-    case 'yaml':       return yaml();
-    case 'xml':        return xml();
-    case 'markdown':   return markdown();
-    case 'typescript': return javascript({ typescript: true });
-    case 'javascript': return javascript();
-    case 'css':        return css();
-    case 'html':       return html();
-    case 'python':     return python();
-    case 'sql':        return sql();
-    case 'toml':
-    case 'text':
-    default:           return null;
-  }
+  return languageExtensions[language]?.() ?? null;
 }
 
 /**

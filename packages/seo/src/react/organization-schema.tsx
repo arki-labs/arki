@@ -1,7 +1,7 @@
 import type { Organization, WithContext } from 'schema-dts';
 
-import type { OrganizationSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { OrganizationSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * Organization schema for the homepage.

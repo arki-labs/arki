@@ -7,9 +7,9 @@ type ToolMetadataInput = {
   path: string;
   /** Optional keywords for OG/Twitter metadata */
   keywords?: string[];
-  /** Site name, e.g., 'UCSSR' */
+  /** Site name, e.g., 'Acme CSS' */
   siteName: string;
-  /** Full site URL, e.g., 'https://ucssr.com' */
+  /** Full site URL, e.g., 'https://example.com' */
   siteUrl: string;
 };
 

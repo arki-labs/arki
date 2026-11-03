@@ -1,7 +1,7 @@
 import type { FAQPage, WithContext } from 'schema-dts';
 
-import type { FAQSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { FAQSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * FAQPage schema for FAQ sections.

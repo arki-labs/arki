@@ -1,7 +1,7 @@
 import type { HowTo, WithContext } from 'schema-dts';
 
-import type { HowToSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { HowToSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * HowTo schema for step-by-step guides.

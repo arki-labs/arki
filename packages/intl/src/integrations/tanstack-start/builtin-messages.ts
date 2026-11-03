@@ -1,5 +1,5 @@
-import deMessages from '../../dictionaries/de';
-import enMessages from '../../dictionaries/en';
+import deMessages from '../../dictionaries/de.js';
+import enMessages from '../../dictionaries/en.js';
 
 export type MessageBag = Record<string, unknown>;
 

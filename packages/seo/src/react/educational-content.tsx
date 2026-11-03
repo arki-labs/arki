@@ -1,6 +1,6 @@
 import { cn } from '@arki/ui/cn';
 
-import type { EducationalSection } from '../types';
+import type { EducationalSection } from '../types.js';
 
 type EducationalContentProps = {
   /** Array of educational sections to render */

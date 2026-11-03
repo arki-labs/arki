@@ -1,7 +1,7 @@
 import type { WebSite, WithContext } from 'schema-dts';
 
-import type { WebSiteSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { WebSiteSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * WebSite schema with optional SearchAction for sitelinks search box.

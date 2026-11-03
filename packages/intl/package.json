@@ -1,49 +1,85 @@
 {
   "name": "@arki/intl",
   "version": "0.1.0",
-  "private": false,
+  "description": "Locale helpers for web apps: ISO language lookups, a localized slug registry, message dictionary loading, and a TanStack Start locale provider.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/intl"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "intl",
+    "i18n",
+    "locale",
+    "language",
+    "slug"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
     "./language": {
       "types": "./dist/src/language.d.ts",
-      "import": "./src/language.ts",
-      "node": "./src/language.ts"
+      "import": "./dist/src/language.js",
+      "default": "./dist/src/language.js"
     },
     "./dictionaries": {
       "types": "./dist/src/dictionaries.d.ts",
-      "import": "./src/dictionaries.ts",
-      "node": "./src/dictionaries.ts"
+      "import": "./dist/src/dictionaries.js",
+      "default": "./dist/src/dictionaries.js"
     },
     "./types": {
       "types": "./dist/src/types.d.ts",
-      "import": "./src/types.ts",
-      "browser": "./src/types.ts"
+      "import": "./dist/src/types.js",
+      "default": "./dist/src/types.js"
     },
     "./react": {
       "types": "./dist/src/react.d.ts",
-      "import": "./src/react.ts",
-      "browser": "./src/react.ts"
+      "import": "./dist/src/react.js",
+      "default": "./dist/src/react.js"
     },
     "./tanstack-start": {
       "types": "./dist/src/integrations/tanstack-start/index.d.ts",
-      "import": "./src/integrations/tanstack-start/index.ts",
-      "browser": "./src/integrations/tanstack-start/index.ts"
+      "import": "./dist/src/integrations/tanstack-start/index.js",
+      "default": "./dist/src/integrations/tanstack-start/index.js"
     },
     "./slug-registry": {
       "types": "./dist/src/slug-registry.d.ts",
-      "import": "./src/slug-registry.ts",
-      "browser": "./src/slug-registry.ts"
+      "import": "./dist/src/slug-registry.js",
+      "default": "./dist/src/slug-registry.js"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "!dist/src/**/*.test-d.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.test-d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:docs": "arki-doc-examples",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -61,7 +97,6 @@
     "react": "catalog:react",
     "vitest": "catalog:"
   },
-  "sideEffects": false,
   "peerDependencies": {
     "react": "^18 || ^19"
   },

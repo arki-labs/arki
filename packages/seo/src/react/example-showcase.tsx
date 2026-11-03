@@ -2,7 +2,7 @@ import type React from 'react';
 
 import { cn } from '@arki/ui/cn';
 
-import type { ExampleItem } from '../types';
+import type { ExampleItem } from '../types.js';
 
 type ExampleShowcaseProps = {
   /** Section title. Defaults to "Examples" */

@@ -12,7 +12,7 @@ SEO building blocks for web apps. Metadata, robots.txt, sitemap.xml and llms.txt
 
 ## Example
 
-```tsx
+```tsx skip="needs TanStack Router and a React app"
 import { createToolMetadata } from '@arki/seo';
 import { FAQSchema, OrganizationSchema } from '@arki/seo/react';
 import { Meta } from '@arki/seo/tanstack-start';

@@ -1,6 +1,6 @@
 import { cn } from '@arki/ui/cn';
 
-import type { ActionableInsightsData } from '../types';
+import type { ActionableInsightsData } from '../types.js';
 
 type ActionableInsightsProps = ActionableInsightsData & {
   /** Additional CSS class names */

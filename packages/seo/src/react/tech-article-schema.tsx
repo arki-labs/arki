@@ -1,7 +1,7 @@
 import type { TechArticle, WithContext } from 'schema-dts';
 
-import { JsonLdScript } from './json-ld-script';
-import type { TechArticleSchemaProps } from '../types';
+import { JsonLdScript } from './json-ld-script.js';
+import type { TechArticleSchemaProps } from '../types.js';
 
 /**
  * TechArticle JSON-LD structured data for variant guide pages.

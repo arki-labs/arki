@@ -4,8 +4,8 @@ import { PaletteIcon } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 import { Popover, PopoverContent, PopoverTrigger } from '@arki/ui/popover';
 
-import type { EditorThemeId, ThemeConfig } from './themes';
-import { themes } from './themes';
+import type { EditorThemeId, ThemeConfig } from './themes.js';
+import { themes } from './themes.js';
 
 const lightThemes = themes.filter((t) => t.variant === 'light');
 const darkThemes = themes.filter((t) => t.variant === 'dark');

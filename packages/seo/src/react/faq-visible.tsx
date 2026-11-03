@@ -1,7 +1,7 @@
 import { cn } from '@arki/ui/cn';
 
-import { FAQSchema } from './faq-schema';
-import type { FAQItem } from '../types';
+import { FAQSchema } from './faq-schema.js';
+import type { FAQItem } from '../types.js';
 
 type FAQVisibleProps = {
   /** Section title. Defaults to "Frequently Asked Questions" */

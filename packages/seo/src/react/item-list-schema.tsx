@@ -1,7 +1,7 @@
 import type { ItemList, WithContext } from 'schema-dts';
 
-import type { ItemListSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { ItemListSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * ItemList schema for category pages listing multiple items.

@@ -1,4 +1,4 @@
-import type { LocalizedResourceSlug } from './types';
+import type { LocalizedResourceSlug } from './types.js';
 
 /**
  * Bidirectional registry that maps resource IDs to localized slugs and back.

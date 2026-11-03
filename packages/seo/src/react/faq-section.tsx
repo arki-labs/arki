@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { CaretDown } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
-import { FAQSchema } from './faq-schema';
+import { FAQSchema } from './faq-schema.js';
 
 type FAQItem = {
   question: string;

@@ -1,7 +1,7 @@
 import type { Article, WithContext } from 'schema-dts';
 
-import type { ArticleSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { ArticleSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * A date as ISO text, a string as given, or `undefined` for an Invalid Date: `toISOString()` throws

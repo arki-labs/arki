@@ -1,6 +1,6 @@
 import { cn } from '@arki/ui/cn';
 
-import type { DeepDiveExample } from '../types';
+import type { DeepDiveExample } from '../types.js';
 
 type DeepDiveShowcaseProps = {
   /** Section title. Defaults to "In-Depth Examples" */

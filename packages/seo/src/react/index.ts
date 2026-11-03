@@ -21,27 +21,27 @@
  */
 
 // JSON-LD Schema Components (Server Components)
-export { ArticleSchema } from './article-schema';
-export { BreadcrumbSchema } from './breadcrumb-schema';
-export { FAQSchema } from './faq-schema';
-export { HowToSchema } from './howto-schema';
-export { ItemListSchema } from './item-list-schema';
-export { JsonLdScript } from './json-ld-script';
-export { OrganizationSchema } from './organization-schema';
-export { SoftwareApplicationSchema } from './software-application-schema';
-export { TechArticleSchema } from './tech-article-schema';
-export { WebSiteSchema } from './website-schema';
+export { ArticleSchema } from './article-schema.js';
+export { BreadcrumbSchema } from './breadcrumb-schema.js';
+export { FAQSchema } from './faq-schema.js';
+export { HowToSchema } from './howto-schema.js';
+export { ItemListSchema } from './item-list-schema.js';
+export { JsonLdScript } from './json-ld-script.js';
+export { OrganizationSchema } from './organization-schema.js';
+export { SoftwareApplicationSchema } from './software-application-schema.js';
+export { TechArticleSchema } from './tech-article-schema.js';
+export { WebSiteSchema } from './website-schema.js';
 
 // UI Components (Client Components)
-export { FAQCompact, FAQSection } from './faq-section';
-export { RelatedItems, RelatedItemsCompact } from './related-items';
+export { FAQCompact, FAQSection } from './faq-section.js';
+export { RelatedItems, RelatedItemsCompact } from './related-items.js';
 
 // SEO Content Components (Server Components — no JS, fully rendered in HTML)
-export { ActionableInsights } from './actionable-insights';
-export { DeepDiveShowcase } from './deep-dive-showcase';
-export { EducationalContent } from './educational-content';
-export { ExampleShowcase } from './example-showcase';
-export { FAQVisible } from './faq-visible';
-export { ToolSEOContent } from './tool-seo-content';
+export { ActionableInsights } from './actionable-insights.js';
+export { DeepDiveShowcase } from './deep-dive-showcase.js';
+export { EducationalContent } from './educational-content.js';
+export { ExampleShowcase } from './example-showcase.js';
+export { FAQVisible } from './faq-visible.js';
+export { ToolSEOContent } from './tool-seo-content.js';
 
-export type { ToolSEOContentProps } from './tool-seo-content';
+export type { ToolSEOContentProps } from './tool-seo-content.js';

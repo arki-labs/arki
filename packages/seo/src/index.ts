@@ -10,11 +10,11 @@
  */
 
 // Metadata Helpers
-export { createToolMetadata } from './metadata-helpers';
+export { createToolMetadata } from './metadata-helpers.js';
 
 // Robots.txt Helpers
-export { renderRobotsTxt, robotsTxtResponse } from './robots-helpers';
-export type { RobotsTxtOptions } from './robots-helpers';
+export { renderRobotsTxt, robotsTxtResponse } from './robots-helpers.js';
+export type { RobotsTxtOptions } from './robots-helpers.js';
 
 // Sitemap.xml Helpers
 export {
@@ -22,11 +22,11 @@ export {
   renderUrlset,
   sitemapIndexResponse,
   sitemapResponse,
-} from './sitemap';
-export type { ChangeFreq, SitemapEntry, SitemapIndexEntry } from './sitemap';
+} from './sitemap.js';
+export type { ChangeFreq, SitemapEntry, SitemapIndexEntry } from './sitemap.js';
 
 // LLM Discovery Utilities
-export { generateLlmsFullTxt, generateLlmsTxt } from './llms-txt';
+export { generateLlmsFullTxt, generateLlmsTxt } from './llms-txt.js';
 
 export type {
   ActionableInsightsData,
@@ -57,4 +57,4 @@ export type {
   SoftwareApplicationSchemaProps,
   TechArticleSchemaProps,
   WebSiteSchemaProps,
-} from './types';
+} from './types.js';

@@ -1,6 +1,6 @@
 const generalDictionaries = {
-  en: () => import('./dictionaries/en').then(mod => mod.default),
-  de: () => import('./dictionaries/de').then(mod => mod.default),
+  en: () => import('./dictionaries/en.js').then(mod => mod.default),
+  de: () => import('./dictionaries/de.js').then(mod => mod.default),
 } as const;
 
 type MessageCollection = {

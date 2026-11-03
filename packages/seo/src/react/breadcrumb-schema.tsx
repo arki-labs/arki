@@ -1,7 +1,7 @@
 import type { BreadcrumbList, WithContext } from 'schema-dts';
 
-import type { BreadcrumbSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { BreadcrumbSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * BreadcrumbList schema for navigation breadcrumbs.

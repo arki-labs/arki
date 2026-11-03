@@ -36,8 +36,8 @@ type LlmsFullTxtInput = LlmsTxtInput & {
  * @example
  * ```ts
  * const content = generateLlmsTxt({
- *   name: 'UCSSR',
- *   tagline: 'The Union of CSS Resources',
+ *   name: 'Acme CSS',
+ *   tagline: 'Free CSS tools in your browser',
  *   description: 'Free online CSS tools...',
  *   sections: [
  *     { heading: 'Tools', items: [{ title: 'Gradient Generator', url: '...', description: '...' }] },

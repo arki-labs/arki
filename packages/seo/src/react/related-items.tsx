@@ -9,7 +9,7 @@ import { Badge } from '@arki/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@arki/ui/card';
 import { cn } from '@arki/ui/cn';
 
-import { ItemListSchema } from './item-list-schema';
+import { ItemListSchema } from './item-list-schema.js';
 
 type RelatedItem = {
   key: string;

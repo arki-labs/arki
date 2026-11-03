@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
-import { builtinMessagesFor } from './builtin-messages';
-import type { MessageBag } from './builtin-messages';
-import { LocaleProvider } from './context';
+import { builtinMessagesFor } from './builtin-messages.js';
+import type { MessageBag } from './builtin-messages.js';
+import { LocaleProvider } from './context.js';
 
 /**
  * Drop-in intl provider for TanStack Start apps.

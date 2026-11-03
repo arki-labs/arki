@@ -2,12 +2,12 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@arki/ui/cn';
 
-import { ActionableInsights } from './actionable-insights';
-import { DeepDiveShowcase } from './deep-dive-showcase';
-import { EducationalContent } from './educational-content';
-import { ExampleShowcase } from './example-showcase';
-import { FAQVisible } from './faq-visible';
-import { HowToSchema } from './howto-schema';
+import { ActionableInsights } from './actionable-insights.js';
+import { DeepDiveShowcase } from './deep-dive-showcase.js';
+import { EducationalContent } from './educational-content.js';
+import { ExampleShowcase } from './example-showcase.js';
+import { FAQVisible } from './faq-visible.js';
+import { HowToSchema } from './howto-schema.js';
 import type {
   ActionableInsightsData,
   DeepDiveExample,
@@ -15,7 +15,7 @@ import type {
   ExampleItem,
   FAQItem,
   HowToStep,
-} from '../types';
+} from '../types.js';
 
 /** Props for the ToolSEOContent composite component */
 export type ToolSEOContentProps = {

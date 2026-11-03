@@ -1,7 +1,7 @@
 import type { SoftwareApplication, WithContext } from 'schema-dts';
 
-import type { SoftwareApplicationSchemaProps } from '../types';
-import { JsonLdScript } from './json-ld-script';
+import type { SoftwareApplicationSchemaProps } from '../types.js';
+import { JsonLdScript } from './json-ld-script.js';
 
 /**
  * SoftwareApplication schema for web-based tools and applications.
