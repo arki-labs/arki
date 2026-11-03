@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /**
+     * Emit JavaScript and declarations for every entry, so plain Node can load the package.
+     * Every relative import names its `.js` file, so the emitted `dist/` loads as plain ESM.
+     */
+    "emitDeclarationOnly": false,
+    "allowImportingTsExtensions": false,
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.test-d.ts",
+    "**/__fixtures__/**",
+    "**/__tests__/**"
+  ]
+}
