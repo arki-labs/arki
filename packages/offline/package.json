@@ -151,7 +151,8 @@
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
     "README.md",
-    "docs/**",
+    "docs/api.md",
+    "docs/upgrades/**",
     "llms.txt",
     "LICENSE"
   ],
