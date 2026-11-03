@@ -1,7 +1,7 @@
-export { createOfflineRuntime } from './createOfflineRuntime.ts';
+export { createOfflineRuntime } from './createOfflineRuntime.js';
 export type {
   OfflineRuntimeConfig,
   OfflineRuntime,
   CacheOnlyConfig,
   QueueConfig,
-} from './createOfflineRuntime.ts';
+} from './createOfflineRuntime.js';

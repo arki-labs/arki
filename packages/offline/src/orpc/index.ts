@@ -1,16 +1,16 @@
-export type { OfflineSafeMeta } from './offline-safe-marker';
-export { offlineSafe } from './offline-safe-marker';
+export type { OfflineSafeMeta } from './offline-safe-marker.js';
+export { offlineSafe } from './offline-safe-marker.js';
 
-export { createIdempotencyTable } from './idempotency-table';
-export type { IdempotencyKeyId, IdempotencyKeysTable, SqliteIdempotencyKeysTable } from './idempotency-table';
-export { idempotencyKeys } from './idempotency-keys';
-export { idempotencyKeyId } from './idempotency-id';
-export { IdempotencyStoreUnconfirmed, IDEMPOTENCY_STORE_FAILURES } from './idempotency-failures';
-export type { IdempotencyStoreFailure } from './idempotency-failures';
+export { createIdempotencyTable } from './idempotency-table.js';
+export type { IdempotencyKeyId, IdempotencyKeysTable, SqliteIdempotencyKeysTable } from './idempotency-table.js';
+export { idempotencyKeys } from './idempotency-keys.js';
+export { idempotencyKeyId } from './idempotency-id.js';
+export { IdempotencyStoreUnconfirmed, IDEMPOTENCY_STORE_FAILURES } from './idempotency-failures.js';
+export type { IdempotencyStoreFailure } from './idempotency-failures.js';
 
-export { IdempotencyRepository } from './idempotency-repository';
-export type { IdempotencyDatabase } from './idempotency-repository';
-export { SqliteIdempotencyRepository } from './idempotency-repository-sqlite';
-export type { SqliteIdempotencyDatabase } from './idempotency-repository-sqlite';
-export { idempotency } from './idempotency';
-export type { IdempotencyStore, IdempotentContext } from './idempotency';
+export { IdempotencyRepository } from './idempotency-repository.js';
+export type { IdempotencyDatabase } from './idempotency-repository.js';
+export { SqliteIdempotencyRepository } from './idempotency-repository-sqlite.js';
+export type { SqliteIdempotencyDatabase } from './idempotency-repository-sqlite.js';
+export { idempotency } from './idempotency.js';
+export type { IdempotencyStore, IdempotentContext } from './idempotency.js';

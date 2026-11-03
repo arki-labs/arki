@@ -3,13 +3,13 @@ import type { ReactNode } from 'react';
 import { isServer, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement, Fragment, useState } from 'react';
 
-import type { AnyRpcClient, OfflineMutationQueue } from '../mutations/queue.ts';
-import { OfflineDevPanel } from '../devtools/DevPanel.tsx';
-import { OfflineQueueProvider } from '../mutations/OfflineQueueProvider.tsx';
-import { createOfflineMutationQueue } from '../mutations/queue.ts';
-import type { QueryCachePersistFailed } from '../query/failures.ts';
-import { createPersistedQueryClient } from '../query/createPersistedQueryClient.ts';
-import { PersistedQueryClientProvider } from '../query/PersistedQueryClientProvider.tsx';
+import type { AnyRpcClient, OfflineMutationQueue } from '../mutations/queue.js';
+import { OfflineDevPanel } from '../devtools/DevPanel.js';
+import { OfflineQueueProvider } from '../mutations/OfflineQueueProvider.js';
+import { createOfflineMutationQueue } from '../mutations/queue.js';
+import type { QueryCachePersistFailed } from '../query/failures.js';
+import { createPersistedQueryClient } from '../query/createPersistedQueryClient.js';
+import { PersistedQueryClientProvider } from '../query/PersistedQueryClientProvider.js';
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -2,9 +2,9 @@ import { and, eq, gt } from 'drizzle-orm';
 import type { AnyRelations } from 'drizzle-orm';
 import type { PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 
-import type { IdempotencyStoreFailure } from './idempotency-failures';
-import { storeIdempotentResponse } from './idempotency-store';
-import type { IdempotencyKeysTable } from './idempotency-table';
+import type { IdempotencyStoreFailure } from './idempotency-failures.js';
+import { storeIdempotentResponse } from './idempotency-store.js';
+import type { IdempotencyKeysTable } from './idempotency-table.js';
 
 /** Any async Postgres drizzle database: node-postgres in production, PGlite in tests and local runs. */
 export type IdempotencyDatabase = PgAsyncDatabase<PgQueryResultHKT, AnyRelations>;

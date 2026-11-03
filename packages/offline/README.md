@@ -28,7 +28,7 @@ import { createIdbPersister } from '@arki/offline/query';
 export const idbPersister = createIdbPersister({ storageKey: 'myapp-query' });
 ```
 
-```tsx
+```tsx skip="fragment: uses the app own router, database, queue or service worker"
 // src/lib/orpc/client.tsx
 import { PersistedQueryClientProvider } from '@arki/offline/query';
 import { idbPersister } from '~/lib/offline';
@@ -42,7 +42,7 @@ export function ORPCReactProvider({ children }) {
 }
 ```
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // src/service-worker.ts
 import '@arki/tanstack-start/pwa/sw';
 import { registerOfflineRoutes } from '@arki/offline/pwa';
@@ -61,7 +61,7 @@ New apps generated from `turbo gen` get Tier 1 out of the box.
 
 On top of Tier 1, mutations made while offline are serialized to IndexedDB and replayed in FIFO order when connectivity returns. Each mutation carries an idempotency key; the server deduplicates replays.
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 import { createOfflineRuntime } from '@arki/offline/preset';
 
 // src/lib/offline.ts
@@ -88,13 +88,13 @@ The replay request carries the session signed in *at replay*, not the one that q
 
 `actorId` must answer synchronously from local state (it runs offline). Feed it from your session store, and call `queue.drain()` when the user signs in.
 
-**The server checks too.** The browser's check cannot see a session cookie that changes after it, right before the request leaves. So every replay also sends `Offline-Actor` (the user who queued it) next to `Idempotency-Key`. The `idempotency()` middleware from `@arki/offline/orpc` refuses a replay with 403 when `Offline-Actor` differs from the session user, when it is missing while someone is signed in, or when it is present with no session. The queue dead-letters a 403. Calls without `Idempotency-Key` are not replays and pass unchecked. If your RPC adapter maps headers into per-call context (as Avocabo's does), forward `Offline-Actor` too.
+**The server checks too.** The browser's check cannot see a session cookie that changes after it, right before the request leaves. So every replay also sends `Offline-Actor` (the user who queued it) next to `Idempotency-Key`. The `idempotency()` middleware from `@arki/offline/orpc` refuses a replay with 403 when `Offline-Actor` differs from the session user, when it is missing while someone is signed in, or when it is present with no session. The queue dead-letters a 403. Calls without `Idempotency-Key` are not replays and pass unchecked. If your RPC adapter maps headers into per-call context, forward `Offline-Actor` too.
 
 **Unknown session (offline reload).** After a reload without network the app often cannot tell who is signed in yet. Then `actorId()` answers `undefined`, which is different from `null` (the session says signed out). The queue remembers every id `actorId()` returns on the device (key `<storageKey>:last-actor`). A write queued while `actorId()` is `undefined` is bound to that last actor; if no actor was ever seen on the device it stays `null`. The replay rules above do not change, so such a write is sent only once that last user is signed in again, and is dead-lettered as `ACTOR_MISMATCH` for anyone else.
 
 **Sign-out forgets the last actor.** When `actorId()` answers `null`, the remembered id is deleted. On a shared device this matters: after Ada signs out, a write queued by whoever uses the device next is bound to nobody, never to Ada, so it can never replay under her account. Feed `undefined` only while your session is still loading (for better-auth: `isPending`), never as a stand-in for signed out.
 
-```tsx
+```tsx skip="fragment: uses the app own router, database, queue or service worker"
 // src/root-provider.tsx — components read the client with useQueryClient()
 <offline.Provider>{children}</offline.Provider>
 ```
@@ -105,7 +105,7 @@ The replay request carries the session signed in *at replay*, not the one that q
 
 Every procedure queued by Tier 2 **must** be safe to execute twice with the same result. Declare it **once, on the contract**, with `offlineSafe(p)`:
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // features/posts/entrypoints/rpc.ts — the browser-safe contract
 import { oc } from '@orpc/contract';
 import { offlineSafe } from '@arki/offline/orpc';
@@ -120,7 +120,7 @@ export const postsRpcContract = {
 
 Install the `idempotency(repo)` middleware **once**, where the app builds its implementer:
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // core/orpc.ts (server)
 import { IdempotencyRepository, idempotency } from '@arki/offline/orpc';
 
@@ -141,7 +141,7 @@ It acts only on procedures whose contract meta says `offlineSafe: true`; every o
 
 On the client, pass the procedure's utils leaf — built from the contract with `createOrpcUtils` (`@arki/tanstack-start/orpc/client`), so it carries the procedure's identity:
 
-```tsx
+```tsx skip="fragment: uses the app own router, database, queue or service worker"
 // lib/orpc/client.tsx
 export const orpc = createOrpcUtils(rpcContract, rpcClient);
 
@@ -177,7 +177,7 @@ Run `turbo db:migrations:generate --filter=@myapp/backend` after adding the tabl
 
 The table is written once. `idempotencyKeys` is the Postgres table in the default schema. For another Postgres schema or for SQLite, build it from a column kit; the SQLite repository is its own class, because Drizzle's Postgres and SQLite query builders are different classes.
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // Postgres, in a schema
 import { createIdempotencyTable } from '@arki/offline/orpc';
 import { pgColumns } from '@arki/db/pg';
@@ -185,7 +185,7 @@ import { pgColumns } from '@arki/db/pg';
 export const idempotencyKeys = createIdempotencyTable(pgColumns(appSchema));
 ```
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // SQLite (libSQL)
 import { SqliteIdempotencyRepository, createIdempotencyTable, idempotency } from '@arki/offline/orpc';
 import { sqliteColumns } from '@arki/db/sqlite';
@@ -240,7 +240,7 @@ Schema validation is mandatory — items that don't conform throw `"Insert valid
 
 ## Status primitives
 
-```tsx
+```tsx skip="fragment: uses the app own router, database, queue or service worker"
 import { useOnlineStatus, useQueueDepth, OfflineBanner } from '@arki/offline/status';
 
 // Online status with last-change timestamp
@@ -265,7 +265,7 @@ const depth = useQueueDepth();
 
 ## Dev panel
 
-```tsx
+```tsx skip="fragment: uses the app own router, database, queue or service worker"
 import { OfflineDevPanel } from '@arki/offline/devtools';
 
 // Mount alongside your root provider:
@@ -287,7 +287,7 @@ The panel shows: online/offline status, queue depth, sending indicator, dead-let
 
 The `cacheName` strings in `registerOfflineRoutes` control cache versioning. Include a build ID in cache names to force a fresh cache on deploy:
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 registerOfflineRoutes({
   apiRoutes: [{ cacheName: `myapp-api-${import.meta.env.VITE_BUILD_ID ?? 'dev'}` }],
 });
@@ -297,7 +297,7 @@ registerOfflineRoutes({
 
 Pass a `buster` to `createIdbPersister` or `createPersistedQueryClient`. The buster invalidates the entire IDB cache when it changes — useful for schema-breaking API changes:
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 createIdbPersister({ storageKey: 'myapp-query', buster: import.meta.env.VITE_BUILD_ID });
 ```
 
@@ -314,7 +314,7 @@ Use `OfflineDevPanel` in development to inspect dead-letter entries in real time
 
 ### Dead-letter recovery in production
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 const entries = await queue.deadLetter.list();
 // Retry a specific entry after fixing the underlying issue:
 await queue.deadLetter.retry(entries[0].id);
@@ -330,7 +330,7 @@ Each queued mutation gets a securely generated 21-character URL-safe ID with the
 
 A handler is idempotent when running it twice produces the same observable state. Common patterns:
 
-```ts
+```ts skip="fragment: uses the app own router, database, queue or service worker"
 // ✅ Upsert — safe to replay
 .handler(async ({ input, context }) => {
   await db.insert(posts).values({ id: input.id, ...input })

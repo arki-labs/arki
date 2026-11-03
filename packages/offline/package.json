@@ -1,66 +1,75 @@
 {
   "name": "@arki/offline",
   "version": "0.0.0",
-  "private": false,
-  "sideEffects": false,
+  "description": "Offline-first building blocks for TanStack apps: a persisted query cache, a replayable mutation queue with dead letters, local collections, PWA caching, and an oRPC idempotency guard.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/offline"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "offline",
+    "offline-first",
+    "pwa",
+    "tanstack-query",
+    "tanstack-db",
+    "mutation-queue"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
     "./query": {
       "types": "./dist/src/query/index.d.ts",
-      "browser": "./src/query/index.ts",
-      "import": "./src/query/index.ts",
-      "default": "./src/query/index.ts"
+      "import": "./dist/src/query/index.js",
+      "default": "./dist/src/query/index.js"
     },
     "./mutations": {
       "types": "./dist/src/mutations/index.d.ts",
-      "browser": "./src/mutations/index.ts",
-      "import": "./src/mutations/index.ts",
-      "default": "./src/mutations/index.ts"
+      "import": "./dist/src/mutations/index.js",
+      "default": "./dist/src/mutations/index.js"
     },
     "./collections": {
       "types": "./dist/src/collections/index.d.ts",
-      "browser": "./src/collections/index.ts",
-      "import": "./src/collections/index.ts",
-      "default": "./src/collections/index.ts"
+      "import": "./dist/src/collections/index.js",
+      "default": "./dist/src/collections/index.js"
     },
     "./pwa": {
       "types": "./dist/src/pwa/index.d.ts",
-      "browser": "./src/pwa/index.ts",
-      "import": "./src/pwa/index.ts",
-      "default": "./src/pwa/index.ts"
+      "import": "./dist/src/pwa/index.js",
+      "default": "./dist/src/pwa/index.js"
     },
     "./status": {
       "types": "./dist/src/status/index.d.ts",
-      "browser": "./src/status/index.ts",
-      "import": "./src/status/index.ts",
-      "default": "./src/status/index.ts"
+      "import": "./dist/src/status/index.js",
+      "default": "./dist/src/status/index.js"
     },
     "./orpc": {
-      "types": "./src/orpc/index.ts",
-      "node": "./src/orpc/index.ts",
-      "browser": "./src/orpc/index.browser.ts",
-      "default": "./src/orpc/index.browser.ts"
+      "types": "./dist/src/orpc/index.d.ts",
+      "node": "./dist/src/orpc/index.js",
+      "browser": "./dist/src/orpc/index.browser.js",
+      "default": "./dist/src/orpc/index.browser.js"
     },
     "./devtools": {
       "types": "./dist/src/devtools/index.d.ts",
-      "browser": "./src/devtools/index.ts",
-      "import": "./src/devtools/index.ts",
-      "default": "./src/devtools/index.ts"
+      "import": "./dist/src/devtools/index.js",
+      "default": "./dist/src/devtools/index.js"
     },
     "./preset": {
       "types": "./dist/src/preset/index.d.ts",
-      "browser": "./src/preset/index.ts",
-      "import": "./src/preset/index.ts",
-      "default": "./src/preset/index.ts"
+      "import": "./dist/src/preset/index.js",
+      "default": "./dist/src/preset/index.js"
     },
     "./package.json": "./package.json"
-  },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "src/*"
-      ]
-    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -70,6 +79,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:docs": "arki-doc-examples",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
@@ -133,5 +143,19 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
+  },
+  "files": [
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "README.md",
+    "LICENSE"
+  ],
+  "arki": {
+    "bundlerOnly": [
+      "./pwa"
+    ]
   }
 }

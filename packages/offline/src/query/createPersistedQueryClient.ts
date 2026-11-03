@@ -3,9 +3,9 @@ import { QueryClient } from '@tanstack/react-query';
 
 import { persistQueryClientSave } from '@tanstack/query-persist-client-core';
 
-import type { IdbPersister } from './idb-persister.ts';
-import { createIdbPersister } from './idb-persister.ts';
-import type { QueryCachePersistFailed } from './failures.ts';
+import type { IdbPersister } from './idb-persister.js';
+import { createIdbPersister } from './idb-persister.js';
+import type { QueryCachePersistFailed } from './failures.js';
 
  
 /// <reference path="./vite-env.d.ts" />

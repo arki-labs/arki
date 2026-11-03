@@ -7,8 +7,8 @@ import { attempt, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 import { parse } from '@arki/schema';
 
-import { offlineSerializer } from '../serializer.ts';
-import { QueryCachePersistFailed } from './failures.ts';
+import { offlineSerializer } from '../serializer.js';
+import { QueryCachePersistFailed } from './failures.js';
 
 /** Enable with `DEBUG=arki:offline:query`. */
 const debugPersister = getLogger('arki:offline:query');

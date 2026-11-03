@@ -2,7 +2,7 @@ import { ID_GENERATION_FAILURES, z } from '@arki/contracts';
 import { defineFailure, UnexpectedDefect } from '@arki/failure';
 import type { FailureOf } from '@arki/failure';
 
-import { mutationIdempotencyKey, queuedMutationId } from './identity.ts';
+import { mutationIdempotencyKey, queuedMutationId } from './identity.js';
 
 /**
  * The existing offline queue could not be read.

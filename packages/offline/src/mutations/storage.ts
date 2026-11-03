@@ -1,12 +1,12 @@
 import { get, set, del } from 'idb-keyval';
 import type { z } from '@arki/contracts';
 
-import { queuedMutationSchema } from './model.ts';
-import type { QueuedMutation } from './model.ts';
-import { QueueStorageCorrupt, QueueStorageUnavailable, QueuePersistenceUnconfirmed, QueueEncodingFailure } from './failures.ts';
-import type { QueueStorageFailure } from './failures.ts';
-import { observeQueue } from './telemetry.ts';
-import { offlineSerializer } from '../serializer.ts';
+import { queuedMutationSchema } from './model.js';
+import type { QueuedMutation } from './model.js';
+import { QueueStorageCorrupt, QueueStorageUnavailable, QueuePersistenceUnconfirmed, QueueEncodingFailure } from './failures.js';
+import type { QueueStorageFailure } from './failures.js';
+import { observeQueue } from './telemetry.js';
+import { offlineSerializer } from '../serializer.js';
 
 export type QueueStorage = {
   read(): Promise<QueuedMutation[] | QueueStorageFailure>;

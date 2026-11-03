@@ -1,5 +1,5 @@
-export { createLocalCollection } from './createLocalCollection.ts';
-export type { LocalCollectionConfig } from './createLocalCollection.ts';
+export { createLocalCollection } from './createLocalCollection.js';
+export type { LocalCollectionConfig } from './createLocalCollection.js';
 
-export { createMemoryCollection } from './createMemoryCollection.ts';
-export type { MemoryCollectionConfig } from './createMemoryCollection.ts';
+export { createMemoryCollection } from './createMemoryCollection.js';
+export type { MemoryCollectionConfig } from './createMemoryCollection.js';

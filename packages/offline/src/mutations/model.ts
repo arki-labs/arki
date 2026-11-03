@@ -1,5 +1,5 @@
 import { z } from '@arki/contracts';
-import { mutationIdempotencyKey, queuedMutationId } from './identity.ts';
+import { mutationIdempotencyKey, queuedMutationId } from './identity.js';
 
 export const queuedMutationSchema = z.object({
   id: queuedMutationId.schema,

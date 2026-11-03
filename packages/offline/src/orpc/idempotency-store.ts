@@ -3,10 +3,10 @@ import type { Span } from '@opentelemetry/api';
 
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-import { idempotencyKeyId } from './idempotency-id';
-import type { IdempotencyKeyId } from './idempotency-id';
-import { IdempotencyStoreUnconfirmed } from './idempotency-failures';
-import type { IdempotencyStoreFailure } from './idempotency-failures';
+import { idempotencyKeyId } from './idempotency-id.js';
+import type { IdempotencyKeyId } from './idempotency-id.js';
+import { IdempotencyStoreUnconfirmed } from './idempotency-failures.js';
+import type { IdempotencyStoreFailure } from './idempotency-failures.js';
 
 const TTL_DAYS = 7;
 

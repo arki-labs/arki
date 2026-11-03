@@ -20,7 +20,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 
-import type { OfflineMutationQueue } from './queue.ts';
+import type { OfflineMutationQueue } from './queue.js';
 
 // ---------------------------------------------------------------------------
 // Context

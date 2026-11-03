@@ -5,14 +5,14 @@
  * The queue itself is network-agnostic; the replay loop (replay.ts)
  * drives network I/O and event listener wiring.
  */
-import { observeEnqueue, observeQueue } from './telemetry.ts';
+import { observeEnqueue, observeQueue } from './telemetry.js';
 import { isFailure, UnexpectedDefect } from '@arki/failure';
 
-import { mutationIdempotencyKey, queuedMutationId } from './identity.ts';
-import type { QueuedMutationId } from './identity.ts';
-import type { QueuedMutation, EnqueueReceipt } from './model.ts';
-import { QueueAcceptanceUnconfirmed, QueuePersistenceUnconfirmed } from './failures.ts';
-import type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.ts';
+import { mutationIdempotencyKey, queuedMutationId } from './identity.js';
+import type { QueuedMutationId } from './identity.js';
+import type { QueuedMutation, EnqueueReceipt } from './model.js';
+import { QueueAcceptanceUnconfirmed, QueuePersistenceUnconfirmed } from './failures.js';
+import type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.js';
 
 import type { Identified, InputOf, Operation } from '@arki/contracts/orpc';
 import { operationOf } from '@arki/contracts/orpc';
@@ -21,14 +21,14 @@ import { getLogger } from '@arki/log';
 import { backoff } from '@arki/resilience';
 import type { Backoff } from '@arki/resilience';
 
-import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.ts';
+import type { OfflineSafeMeta } from '../orpc/offline-safe-marker.js';
 
-import { createLastActorStore, createQueueStorage } from './storage.ts';
-import type { LastActorStore, QueueStorage } from './storage.ts';
-import { createDeadLetterStore } from './dead-letter.ts';
-import type { DeadLetterStore } from './dead-letter.ts';
-import { createReplayLoop } from './replay.ts';
-import type { ReplayLoop } from './replay.ts';
+import { createLastActorStore, createQueueStorage } from './storage.js';
+import type { LastActorStore, QueueStorage } from './storage.js';
+import { createDeadLetterStore } from './dead-letter.js';
+import type { DeadLetterStore } from './dead-letter.js';
+import { createReplayLoop } from './replay.js';
+import type { ReplayLoop } from './replay.js';
 
 const log = getLogger('arki:offline:mutations');
 
@@ -45,7 +45,7 @@ function reportListenerError(): void {
 // Public types
 // ---------------------------------------------------------------------------
 
-export type { QueuedMutation, QueueErrorCode, EnqueueReceipt } from './model.ts';
+export type { QueuedMutation, QueueErrorCode, EnqueueReceipt } from './model.js';
 
 export type QueueEvent =
   | { type: 'enqueued'; entry: QueuedMutation }

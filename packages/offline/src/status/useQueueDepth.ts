@@ -1,4 +1,4 @@
-import { useQueueStatus } from '../mutations/hooks.ts';
+import { useQueueStatus } from '../mutations/hooks.js';
 
 /**
  * Convenience hook returning the number of mutations currently in the queue.

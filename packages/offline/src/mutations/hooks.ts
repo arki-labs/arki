@@ -9,11 +9,11 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import type { Identified, InputOf } from '@arki/contracts/orpc';
 
 import { isFailure } from '@arki/failure';
-import type { EnqueueFailure, OfflineQueueFailure } from './failures.ts';
-import type { EnqueueReceipt, OfflineMutationQueue } from './queue.ts';
+import type { EnqueueFailure, OfflineQueueFailure } from './failures.js';
+import type { EnqueueReceipt, OfflineMutationQueue } from './queue.js';
 
-import type { OfflineSafeOperation, QueueEvent } from './queue.ts';
-import { useOfflineQueue } from './OfflineQueueProvider.tsx';
+import type { OfflineSafeOperation, QueueEvent } from './queue.js';
+import { useOfflineQueue } from './OfflineQueueProvider.js';
 
 // ---------------------------------------------------------------------------
 // useQueueStatus

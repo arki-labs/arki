@@ -16,12 +16,12 @@ import { isFailure, UnexpectedDefect } from '@arki/failure';
 import type { Backoff } from '@arki/resilience';
 import { is } from '@arki/schema';
 
-import type { DeadLetterStore } from './dead-letter.ts';
-import type { DrainFailure, QueueStorageFailure } from './failures.ts';
-import type { AnyRpcClient, QueuedMutation, QueueEvent } from './queue.ts';
-import type { QueueStorage } from './storage.ts';
-import { QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.ts';
-import { observeQueue } from './telemetry.ts';
+import type { DeadLetterStore } from './dead-letter.js';
+import type { DrainFailure, QueueStorageFailure } from './failures.js';
+import type { AnyRpcClient, QueuedMutation, QueueEvent } from './queue.js';
+import type { QueueStorage } from './storage.js';
+import { QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.js';
+import { observeQueue } from './telemetry.js';
 
 // ---------------------------------------------------------------------------
 // Types

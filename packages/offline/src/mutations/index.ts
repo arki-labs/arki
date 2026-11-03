@@ -14,31 +14,31 @@ export type {
   OfflineSafeOperation,
   OfflineMutationQueueOptions,
   OfflineMutationQueue,
-} from './queue.ts';
-export { createOfflineMutationQueue } from './queue.ts';
+} from './queue.js';
+export { createOfflineMutationQueue } from './queue.js';
 
 // Storage primitives (exported for testing / custom integrations)
-export type { QueueStorage } from './storage.ts';
-export { createQueueStorage } from './storage.ts';
+export type { QueueStorage } from './storage.js';
+export { createQueueStorage } from './storage.js';
 
 // Dead-letter store
-export type { DeadLetterStore, DeadLetterEntry } from './dead-letter.ts';
-export { createDeadLetterStore } from './dead-letter.ts';
+export type { DeadLetterStore, DeadLetterEntry } from './dead-letter.js';
+export { createDeadLetterStore } from './dead-letter.js';
 
 // Replay loop
-export type { ReplayLoop, ReplayLoopOptions } from './replay.ts';
-export { createReplayLoop } from './replay.ts';
+export type { ReplayLoop, ReplayLoopOptions } from './replay.js';
+export { createReplayLoop } from './replay.js';
 
 // React provider + context hook
-export type { OfflineQueueProviderProps } from './OfflineQueueProvider.tsx';
-export { OfflineQueueProvider, useOfflineQueue } from './OfflineQueueProvider.tsx';
+export type { OfflineQueueProviderProps } from './OfflineQueueProvider.js';
+export { OfflineQueueProvider, useOfflineQueue } from './OfflineQueueProvider.js';
 
 // React hooks
-export type { QueueStatus, UseOfflineMutationResult } from './hooks.ts';
-export { useQueueStatus, useOfflineMutation } from './hooks.ts';
+export type { QueueStatus, UseOfflineMutationResult } from './hooks.js';
+export { useQueueStatus, useOfflineMutation } from './hooks.js';
 
-export { queuedMutationId, mutationIdempotencyKey } from './identity.ts';
-export type { QueuedMutationId, MutationIdempotencyKey } from './identity.ts';
-export { ENQUEUE_FAILURES, DRAIN_FAILURES, QUEUE_STORAGE_FAILURES, OFFLINE_QUEUE_FAILURES, QueueStorageUnavailable, QueueAcceptanceUnconfirmed, QueueStorageCorrupt, QueuePersistenceUnconfirmed, QueueEncodingFailure, QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.ts';
-export type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.ts';
-export type { EnqueueReceipt, QueueSnapshot } from './queue.ts';
+export { queuedMutationId, mutationIdempotencyKey } from './identity.js';
+export type { QueuedMutationId, MutationIdempotencyKey } from './identity.js';
+export { ENQUEUE_FAILURES, DRAIN_FAILURES, QUEUE_STORAGE_FAILURES, OFFLINE_QUEUE_FAILURES, QueueStorageUnavailable, QueueAcceptanceUnconfirmed, QueueStorageCorrupt, QueuePersistenceUnconfirmed, QueueEncodingFailure, QueueEffectUnconfirmed, QueueTransportUnavailable } from './failures.js';
+export type { EnqueueFailure, DrainFailure, QueueStorageFailure, OfflineQueueFailure } from './failures.js';
+export type { EnqueueReceipt, QueueSnapshot } from './queue.js';

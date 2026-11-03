@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { registerRoute, NavigationRoute, Route } from 'workbox-routing';
-import { createStrategy } from './strategies.ts';
-import type { FetchStrategy } from './strategies.ts';
+import { createStrategy } from './strategies.js';
+import type { FetchStrategy } from './strategies.js';
 
 export type AppShellConfig = {
   strategy?: 'networkFirst' | 'staleWhileRevalidate';

@@ -2,7 +2,8 @@
   "extends": "@arki/tsconfig/internal-package.json",
   "compilerOptions": {
     "lib": ["ES2023", "ES2022", "dom", "dom.iterable"],
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "rootDir": "."
   },
   "include": ["src", "__tests__", "vitest.config.ts"],
   "exclude": ["node_modules"]

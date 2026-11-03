@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { useSyncExternalStore, useCallback } from 'react';
-import { useOnlineStatus } from './useOnlineStatus.ts';
-import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.tsx';
-import type { QueueEvent } from '../mutations/queue.ts';
+import { useOnlineStatus } from './useOnlineStatus.js';
+import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.js';
+import type { QueueEvent } from '../mutations/queue.js';
 
 export type OfflineBannerState = {
   online: boolean;

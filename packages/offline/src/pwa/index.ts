@@ -1,10 +1,10 @@
-export { registerOfflineRoutes } from './register-routes.ts';
+export { registerOfflineRoutes } from './register-routes.js';
 export type {
   RegisterOfflineRoutesOptions,
   AppShellConfig,
   ApiRouteConfig,
   StaticAssetConfig,
-} from './register-routes.ts';
+} from './register-routes.js';
 
-export { createStrategy } from './strategies.ts';
-export type { FetchStrategy, StrategyConfig } from './strategies.ts';
+export { createStrategy } from './strategies.js';
+export type { FetchStrategy, StrategyConfig } from './strategies.js';

@@ -1,11 +1,11 @@
 import { isFailure } from '@arki/failure';
-import type { OfflineQueueFailure } from '../mutations/failures.ts';
+import type { OfflineQueueFailure } from '../mutations/failures.js';
 
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
-import { useOnlineStatus } from '../status/useOnlineStatus.ts';
-import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.tsx';
-import type { QueuedMutation } from '../mutations/queue.ts';
+import { useOnlineStatus } from '../status/useOnlineStatus.js';
+import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.js';
+import type { QueuedMutation } from '../mutations/queue.js';
 
 /**
  * Floating debug panel for inspecting the offline mutation queue.

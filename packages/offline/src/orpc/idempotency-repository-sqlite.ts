@@ -2,9 +2,9 @@ import { and, eq, gt } from 'drizzle-orm';
 import type { AnyRelations } from 'drizzle-orm';
 import type { SQLiteAsyncDatabase } from 'drizzle-orm/sqlite-core';
 
-import type { IdempotencyStoreFailure } from './idempotency-failures';
-import { storeIdempotentResponse } from './idempotency-store';
-import type { SqliteIdempotencyKeysTable } from './idempotency-table';
+import type { IdempotencyStoreFailure } from './idempotency-failures.js';
+import { storeIdempotentResponse } from './idempotency-store.js';
+import type { SqliteIdempotencyKeysTable } from './idempotency-table.js';
 
 /** Any async SQLite drizzle database (libSQL) or transaction — only what the repository uses. */
 export type SqliteIdempotencyDatabase = Pick<SQLiteAsyncDatabase<'async', unknown, AnyRelations>, 'select' | 'insert'>;

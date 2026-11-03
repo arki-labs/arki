@@ -1,7 +1,7 @@
-export { useOnlineStatus } from './useOnlineStatus.ts';
-export type { OnlineStatus } from './useOnlineStatus.ts';
+export { useOnlineStatus } from './useOnlineStatus.js';
+export type { OnlineStatus } from './useOnlineStatus.js';
 
-export { useQueueDepth } from './useQueueDepth.ts';
+export { useQueueDepth } from './useQueueDepth.js';
 
-export { OfflineBanner } from './OfflineBanner.tsx';
-export type { OfflineBannerProps, OfflineBannerState } from './OfflineBanner.tsx';
+export { OfflineBanner } from './OfflineBanner.js';
+export type { OfflineBannerProps, OfflineBannerState } from './OfflineBanner.js';

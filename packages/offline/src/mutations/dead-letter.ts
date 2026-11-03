@@ -1,11 +1,11 @@
 import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
-import { queuedMutationSchema } from './model.ts';
-import type { QueuedMutation } from './model.ts';
-import type { QueuedMutationId } from './identity.ts';
-import type { QueueStorageFailure } from './failures.ts';
-import { readOfflineState, writeOfflineState } from './storage.ts';
-import { observeQueue } from './telemetry.ts';
+import { queuedMutationSchema } from './model.js';
+import type { QueuedMutation } from './model.js';
+import type { QueuedMutationId } from './identity.js';
+import type { QueueStorageFailure } from './failures.js';
+import { readOfflineState, writeOfflineState } from './storage.js';
+import { observeQueue } from './telemetry.js';
 
 const deadLetterEntrySchema = z.object({
   mutation: queuedMutationSchema,

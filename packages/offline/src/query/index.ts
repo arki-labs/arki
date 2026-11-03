@@ -1,16 +1,16 @@
-export { createIdbPersister } from './idb-persister.ts';
-export type { CreateIdbPersisterOptions, IdbPersister } from './idb-persister.ts';
+export { createIdbPersister } from './idb-persister.js';
+export type { CreateIdbPersisterOptions, IdbPersister } from './idb-persister.js';
 
-export { QueryCachePersistFailed } from './failures.ts';
+export { QueryCachePersistFailed } from './failures.js';
 
-export { createPersistedQueryClient } from './createPersistedQueryClient.ts';
+export { createPersistedQueryClient } from './createPersistedQueryClient.js';
 export type {
   CreatePersistedQueryClientOptions,
   PersistedQueryClient,
-} from './createPersistedQueryClient.ts';
+} from './createPersistedQueryClient.js';
 
-export { PersistedQueryClientProvider } from './PersistedQueryClientProvider.tsx';
-export type { PersistedQueryClientProviderProps } from './PersistedQueryClientProvider.tsx';
+export { PersistedQueryClientProvider } from './PersistedQueryClientProvider.js';
+export type { PersistedQueryClientProviderProps } from './PersistedQueryClientProvider.js';
 
 // `useIsRestoring` reads the `IsRestoringProvider` context that
 // `PersistedQueryClientProvider` sets while the persisted cache hydrates from

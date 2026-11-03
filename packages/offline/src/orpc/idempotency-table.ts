@@ -1,7 +1,7 @@
 import type { ColumnKit, Dialect } from '@arki/db/columns';
 
-import type { IdempotencyKeyId } from './idempotency-id';
-export type { IdempotencyKeyId } from './idempotency-id';
+import type { IdempotencyKeyId } from './idempotency-id.js';
+export type { IdempotencyKeyId } from './idempotency-id.js';
 
 const TABLE_NAME = 'offline_idempotency_keys';
 const UNIQUE_INDEX_NAME = 'offline_idk_key_path_user_idx';

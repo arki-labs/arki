@@ -5,7 +5,7 @@ import { ORPCError } from '@orpc/server';
 import { getLogger } from '@arki/log';
 import { isFailure } from '@arki/failure';
 
-import type { IdempotencyRepository } from './idempotency-repository';
+import type { IdempotencyRepository } from './idempotency-repository.js';
 
 const log = getLogger('arki:offline:orpc');
 
