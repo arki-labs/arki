@@ -13,6 +13,38 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 7 — Content and Platform (content-and-platform) @ 4ffe4dc (2026-11-03)
+
+<!-- candidate: content-and-platform-4ffe4dc -->
+
+**Packages shipped** (13, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/code-editor | 0.1.3 | 1 |
+| @arki/content | 0.2.0 | 2 |
+| @arki/content-build | 0.2.0 | 3 |
+| @arki/fs | 0.2.0 | 4 |
+| @arki/geo | 0.2.0 | 5 |
+| @arki/intl | 0.2.0 | 6 |
+| @arki/mcp | 0.1.0 | 7 |
+| @arki/native-ui | 0.1.0 | 8 |
+| @arki/offline | 0.1.0 | 9 |
+| @arki/payments-native | 0.1.1 | 10 |
+| @arki/pubsub | 0.2.0 | 11 |
+| @arki/seo | 0.1.1 | 12 |
+| @arki/content-react | 0.2.0 | 13 |
+
+**Source commit**: `4ffe4dcce85244cc9fe75adf68ed8d1e67a66a6e`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (13 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `docs:@arki/code-editor` success, `docs:@arki/content-build` success, `docs:@arki/content-react` success, `docs:@arki/content` success, `docs:@arki/fs` success, `docs:@arki/geo` success, `docs:@arki/intl` success, `docs:@arki/mcp` success, `docs:@arki/native-ui` success, `docs:@arki/offline` success, `docs:@arki/payments-native` success, `docs:@arki/pubsub` success, `docs:@arki/seo` success, `published:@arki/code-editor` success, `published:@arki/content-build` success, `published:@arki/content-react` success, `published:@arki/content` success, `published:@arki/fs` success, `published:@arki/geo` success, `published:@arki/intl` success, `published:@arki/mcp` success, `published:@arki/native-ui` success, `published:@arki/offline` success, `published:@arki/payments-native` success, `published:@arki/pubsub` success, `published:@arki/seo` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/content-and-platform-4ffe4dc/candidate.json`.
+
+---
+
 ## Wave 5 — Specialized (specialized) @ 5a725a6 (2026-11-03)
 
 <!-- candidate: specialized-5a725a6 -->
