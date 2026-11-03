@@ -16,7 +16,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildDependencyGraph, collectReachableArkiDeps } from './dependency-graph';
-import { classifyManifests, runInventory } from './inventory';
+import { classifyManifests, discoverManifests, runInventory } from './inventory';
 import type { ReleaseConfig } from './types';
 
 /** Minimal config used by most tests. Customised per-test where needed. */
@@ -41,6 +41,25 @@ function writeManifest(root: string, dir: string, manifest: Record<string, unkno
   mkdirSync(target, { recursive: true });
   writeFileSync(path.join(target, 'package.json'), JSON.stringify(manifest, null, 2));
 }
+
+describe('discoverManifests across release roots', () => {
+  it('finds a package under tooling/ whose folder differs from its npm name', async () => {
+    // Why: @arki/tsconfig lives in tooling/typescript; the folder, not the name, is where it is released from.
+    const root = mkdtempSync(path.join(tmpdir(), 'arki-inventory-roots-'));
+    try {
+      writeManifest(root, 'packages/log', { name: '@arki/log', version: '1.0.0' });
+      writeManifest(root, 'tooling/typescript', { name: '@arki/tsconfig', version: '1.0.0' });
+      writeManifest(root, 'fleet/shared', { name: '@arki/fleet-leak', version: '1.0.0' });
+      const { manifests } = await discoverManifests(root);
+      expect(manifests.map(m => [m.name, m.manifestPath])).toEqual([
+        ['@arki/log', path.join('packages/log', 'package.json')],
+        ['@arki/tsconfig', path.join('tooling/typescript', 'package.json')],
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('runInventory', () => {
   let tmp: string;

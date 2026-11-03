@@ -23,12 +23,13 @@ import { promisify } from 'node:util';
 import debugFactory from 'debug';
 
 import { COMMUNITY_FILES, ISSUE_TEMPLATE_DIR } from './export-public';
+import { RELEASE_ROOTS } from './inventory';
 
 const debug = debugFactory('arki:release:snapshot');
 const run = promisify(execFile);
 
 /** Everything the exporter reads from the repository root, community files included. */
-const SNAPSHOT_PATHS = ['packages', 'package.json', 'arki.release.config.ts', ...COMMUNITY_FILES, ISSUE_TEMPLATE_DIR] as const;
+const SNAPSHOT_PATHS = [...RELEASE_ROOTS, 'package.json', 'arki.release.config.ts', ...COMMUNITY_FILES, ISSUE_TEMPLATE_DIR] as const;
 const BUILD_OUTPUT_DIR = 'dist';
 
 export type SourceSnapshot = {
@@ -77,17 +78,18 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
 
 /** Repo-relative paths that differ from `commit`: changed tracked files plus untracked, non-ignored ones. */
 async function changedFiles(rootCwd: string, commit: string): Promise<readonly string[]> {
-  const changed = await git(rootCwd, ['diff', '--name-only', commit, '--', 'packages']);
-  const untracked = await git(rootCwd, ['ls-files', '--others', '--exclude-standard', '--', 'packages']);
+  const changed = await git(rootCwd, ['diff', '--name-only', commit, '--', ...RELEASE_ROOTS]);
+  const untracked = await git(rootCwd, ['ls-files', '--others', '--exclude-standard', '--', ...RELEASE_ROOTS]);
   return `${changed}\n${untracked}`.split('\n').filter(file => file.length > 0);
 }
 
-/** Every directory under `packages/` in the snapshot that holds a `package.json`, repo-relative. */
+/** Every directory under `RELEASE_ROOTS` in the snapshot that holds a `package.json`, repo-relative. */
 async function packageDirs(snapshotDir: string): Promise<readonly string[]> {
-  const entries = await readdir(path.join(snapshotDir, 'packages'), { recursive: true, withFileTypes: true }).catch(
-    () => [],
+  const perRoot = await Promise.all(
+    RELEASE_ROOTS.map(root => readdir(path.join(snapshotDir, root), { recursive: true, withFileTypes: true }).catch(() => [])),
   );
-  return entries
+  return perRoot
+    .flat()
     .filter(entry => entry.isFile() && entry.name === 'package.json')
     .map(entry => path.relative(snapshotDir, entry.parentPath).split(path.sep).join('/'));
 }

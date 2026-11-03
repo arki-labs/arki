@@ -19,6 +19,7 @@ import path from 'node:path';
 import { readmeSectionProblem } from '@arki/library-tooling/src/docs';
 import { z } from 'zod';
 
+import { RELEASE_ROOTS } from './inventory';
 import type { ReleaseConfig, ReleaseError, ScorecardDimensionResult } from './types';
 
 export const READINESS_ERROR_CODES = {
@@ -154,6 +155,8 @@ export type ReadinessBaseline = Readonly<Record<string, readonly ReadinessItemId
 export type ReadinessInput = {
   /** Supplies `tiers`. */
   readonly config: TierSource;
+  /** Repository root; `repository.directory` is checked against the package folder's path from it. */
+  readonly root: string;
   /** Absolute package directory (contains package.json). */
   readonly dir: string;
   readonly external?: ExternalResults;
@@ -232,14 +235,14 @@ function readmeOrder(dir: string): Check {
   return problem === undefined ? { ok: true, detail: 'H2 order matches' } : { ok: false, detail: problem };
 }
 
-function repoDirectory(manifest: Manifest, dir: string): Check {
-  const expected = `packages/${path.basename(dir)}`;
+function repoDirectory(manifest: Manifest, root: string, dir: string): Check {
+  const expected = path.relative(root, dir).split(path.sep).join('/');
   const repo = manifest.repository;
   const actual = typeof repo === 'object' ? repo.directory : undefined;
   return { ok: actual === expected, detail: `repository.directory is ${actual ?? 'missing'}, want ${expected}` };
 }
 
-function diskChecks(dir: string, manifest: Manifest): Record<(typeof DISK_ITEM_IDS)[number], Check> {
+function diskChecks(root: string, dir: string, manifest: Manifest): Record<(typeof DISK_ITEM_IDS)[number], Check> {
   return {
     'file-readme': hasFile(dir, 'README.md'),
     'file-changelog': hasFile(dir, 'CHANGELOG.md'),
@@ -254,7 +257,7 @@ function diskChecks(dir: string, manifest: Manifest): Record<(typeof DISK_ITEM_I
       detail: `keywords ${(manifest.keywords?.length ?? 0) > 0 ? 'set' : 'missing'}`,
     },
     'pkg-homepage': nonEmpty(manifest.homepage, 'homepage'),
-    'pkg-repository-directory': repoDirectory(manifest, dir),
+    'pkg-repository-directory': repoDirectory(manifest, root, dir),
     'pkg-funding': { ok: Boolean(manifest.funding), detail: `funding ${manifest.funding ? 'set' : 'missing'}` },
     'pkg-side-effects': {
       ok: manifest.sideEffects !== undefined,
@@ -295,7 +298,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
     return { name, tier, items: [], dimension: { status: 'pass', details: 'untiered: readiness not evaluated', evidence: [] } };
   }
 
-  const checks = diskChecks(input.dir, raw.manifest);
+  const checks = diskChecks(input.root, input.dir, raw.manifest);
   const items: ReadinessItem[] = READINESS_ITEM_IDS.map((id) => {
     const base = isDisk(id)
       ? { status: (checks[id].ok ? 'pass' : 'fail') as ItemStatus, detail: checks[id].detail }
@@ -308,7 +311,7 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
     return { id, ...base, blocking: !optional && base.status !== 'n/a', baselined: false };
   });
 
-  return { name, tier, items, dimension: summarize(name, items) };
+  return { name, tier, items, dimension: summarize(name, path.relative(input.root, input.dir), items) };
 }
 
 function isDisk(id: ReadinessItemId): id is (typeof DISK_ITEM_IDS)[number] {
@@ -324,7 +327,7 @@ function readManifest(dir: string): { ok: true; manifest: Manifest } | { ok: fal
   }
 }
 
-function summarize(name: string, items: readonly ReadinessItem[]): ScorecardDimensionResult {
+function summarize(name: string, folder: string, items: readonly ReadinessItem[]): ScorecardDimensionResult {
   const evidence: ReleaseError[] = [];
   let failed = 0;
   let missing = 0;
@@ -332,7 +335,7 @@ function summarize(name: string, items: readonly ReadinessItem[]): ScorecardDime
   for (const item of items) {
     if (item.status === 'fail' && item.blocking) {
       failed++;
-      evidence.push({ code: READINESS_ERROR_CODES.itemFailed, severity: 'error', message: `${item.id}: ${item.detail}`, remediation: `Fix "${item.id}" in packages/${name.replace('@arki/', '')}.`, target: name });
+      evidence.push({ code: READINESS_ERROR_CODES.itemFailed, severity: 'error', message: `${item.id}: ${item.detail}`, remediation: `Fix "${item.id}" in ${folder}.`, target: name });
     } else if (item.status === 'missing' && item.blocking) {
       missing++;
       evidence.push({ code: READINESS_ERROR_CODES.itemMissing, severity: 'warning', message: `${item.id}: ${item.detail}`, remediation: `Run the command that produces "${item.id}" and pass its result in.`, target: name });
@@ -366,20 +369,23 @@ export function loadReadinessBaseline(file: string): ReadinessBaseline {
   return parsed.data;
 }
 
-/** Directories of public packages (`private` not true) under `<root>/packages`. */
+/** Directories of public packages (`private` not true) under each of `RELEASE_ROOTS`. */
 export function listPublicPackageDirs(root: string): string[] {
-  const base = path.join(root, 'packages');
-  return readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && existsSync(path.join(base, e.name, 'package.json')))
-    .map((e) => path.join(base, e.name))
-    .filter((dir) => {
-      try {
-        return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).private !== true;
-      } catch {
-        return false;
-      }
-    })
-    .sort();
+  return RELEASE_ROOTS.flatMap((releaseRoot) => {
+    const base = path.join(root, releaseRoot);
+    if (!existsSync(base)) return [];
+    return readdirSync(base, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && existsSync(path.join(base, e.name, 'package.json')))
+      .map((e) => path.join(base, e.name))
+      .filter((dir) => {
+        try {
+          return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).private !== true;
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+  });
 }
 
 /** Evaluate every public package under `root`. */
@@ -390,8 +396,9 @@ export function evaluateReadinessForRoot(
   external: Readonly<Record<string, ExternalResults>> = {},
 ): ReadinessResult[] {
   return listPublicPackageDirs(root).map((dir) => {
-    const short = `@arki/${path.basename(dir)}`;
-    return evaluateReadiness({ config, dir, baseline: baseline[short] ?? [], external: external[short] });
+    const read = readManifest(dir);
+    const name = read.ok ? read.manifest.name : `@arki/${path.basename(dir)}`;
+    return evaluateReadiness({ config, root, dir, baseline: baseline[name] ?? [], external: external[name] });
   });
 }
 

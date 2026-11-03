@@ -671,7 +671,7 @@ async function evaluateReleaseDimensions(
   inputs: ReleaseInputs,
 ): Promise<ReleaseEvaluation> {
   const packageDir = packageDirOf(opts.cwd, item);
-  const dir = path.basename(packageDir);
+  const dir = path.relative(opts.cwd, packageDir);
   const parsed = scoredManifestSchema.safeParse(JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8')));
   const manifest = parsed.success ? parsed.data : { name: item.name, version: item.version };
   const uses = demosUsing(inputs.registry, item.name);
@@ -710,6 +710,7 @@ async function evaluateReleaseDimensions(
 
   const readiness = evaluateReadiness({
     config: opts.config,
+    root: opts.cwd,
     dir: packageDir,
     external: readinessExternal(item.name, uses, docsFresh, docExamples === null, inputs.candidate, inputs.mirror),
     baseline: inputs.baseline[item.name] ?? [],
@@ -823,7 +824,7 @@ async function evaluateDocsFreshFor(
       code: SCORECARD_ERROR_CODES.docsScriptMissing,
       severity: 'warning',
       message: `${item.name}: no \`test:docs\` script, so doc examples are not checked.`,
-      remediation: `Add \`"test:docs": "arki-doc-examples"\` to packages/${path.basename(packageDir)}/package.json.`,
+      remediation: `Add \`"test:docs": "arki-doc-examples"\` to ${path.dirname(item.manifestPath)}/package.json.`,
       target: item.name,
     });
   }
@@ -832,7 +833,7 @@ async function evaluateDocsFreshFor(
       code: FRESH_ERROR_CODES.llmsImportPaths,
       severity: 'warning',
       message: `${item.name}: the library docs check could not run, so llms.txt import paths are unchecked.`,
-      remediation: `Run \`arki-library-check\` in packages/${path.basename(packageDir)} and fix what it reports.`,
+      remediation: `Run \`arki-library-check\` in ${path.dirname(item.manifestPath)} and fix what it reports.`,
       target: item.name,
     });
   }

@@ -255,6 +255,7 @@ export type BenchFreshInput = {
   /** Repository root, where git runs. */
   readonly root: string;
   readonly pkg: string;
+  /** Package folder, repo-relative. */
   readonly dir: string;
   /** From `isLeafLibrary` (readiness.ts); other packages are not applicable. */
   readonly leaf: boolean;
@@ -282,7 +283,7 @@ export async function evaluateBenchFresh(input: BenchFreshInput): Promise<Scorec
       ],
     };
   }
-  const last = (await git(['log', '-1', '--format=%H', '--', `packages/${dir}/src`], cwd)).stdout.trim();
+  const last = (await git(['log', '-1', '--format=%H', '--', `${dir}/src`], cwd)).stdout.trim();
   if (last === '') return { status: 'pass', details: 'no source commits to compare against', evidence: [] };
   const full = await git(['rev-parse', '--verify', `${sha}^{commit}`], cwd);
   // Fresh when the last source change is the provenance commit or an ancestor of it.
@@ -290,13 +291,13 @@ export async function evaluateBenchFresh(input: BenchFreshInput): Promise<Scorec
   if (fresh) return { status: 'pass', details: `bench provenance ${sha} is at or after the last source change`, evidence: [] };
   return {
     status: 'fail',
-    details: `bench provenance ${sha} is older than the last change to packages/${dir}/src`,
+    details: `bench provenance ${sha} is older than the last change to ${dir}/src`,
     evidence: [
       error(
         FRESH_ERROR_CODES.benchStale,
         'error',
         pkg,
-        `bench numbers were measured at ${sha}, but packages/${dir}/src changed at ${last.slice(0, 10)}.`,
+        `bench numbers were measured at ${sha}, but ${dir}/src changed at ${last.slice(0, 10)}.`,
         'Founder idle run (F-5): re-run the benchmarks and commit the regenerated README block. CI never regenerates it.',
       ),
     ],

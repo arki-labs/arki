@@ -569,7 +569,7 @@ export type ExportOptions = {
   readonly leakScan?: boolean;
   readonly includeBlockedByLeak?: boolean;
   /**
-   * When `true`, omit the `workspaces: ['packages/*']` field from the
+   * When `true`, omit the `workspaces: ['packages/*', 'tooling/*']` field from the
    * materialized root `package.json`. Default `false` (write workspaces
    * field — needed for the `arki-labs/arki` clone-and-`bun install`
    * use case).

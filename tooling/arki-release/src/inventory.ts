@@ -58,6 +58,13 @@ export const INVENTORY_ERROR_CODES = {
   fleetDependency: 'INV_E006',
 } as const;
 
+/**
+ * Top-level folders that hold releasable packages. `fleet/*` (`@fleet/*`) is shared across our
+ * apps and never released, so it is not listed. A package's folder is wherever its
+ * `package.json` sits, not `<root>/<short name>`.
+ */
+export const RELEASE_ROOTS = ['packages', 'tooling'] as const;
+
 /** A parsed manifest (a thin wrapper around the on-disk JSON shape). */
 export interface ParsedManifest {
   /** Absolute or workspace-relative manifest path. */
@@ -111,7 +118,7 @@ export interface RunInventoryOptions {
 }
 
 /**
- * Walk `packages/**` under `cwd`, parse each `package.json`, and return
+ * Walk `RELEASE_ROOTS` (`packages/**`, `tooling/**`) under `cwd`, parse each `package.json`, and return
  * the manifest list. Diagnostics (e.g. files with no `name`) are returned
  * separately so the caller can surface them in the envelope.
  *
@@ -124,12 +131,10 @@ export async function discoverManifests(cwd: string): Promise<{
   readonly manifests: readonly ParsedManifest[];
   readonly diagnostics: readonly ReleaseError[];
 }> {
-  // Only `packages/`: `fleet/*` (`@fleet/*`) is shared across our apps and never released.
-  const packagesRoot = path.join(cwd, 'packages');
   const manifests: ParsedManifest[] = [];
   const diagnostics: ReleaseError[] = [];
 
-  const found = await walkForManifests(packagesRoot);
+  const found = (await Promise.all(RELEASE_ROOTS.map(root => walkForManifests(path.join(cwd, root))))).flat();
   for (const absPath of found) {
     const rel = path.relative(cwd, absPath);
     let json: unknown;

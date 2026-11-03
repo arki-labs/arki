@@ -25,8 +25,8 @@ const config = { tiers: { stack: ['@arki/dot'], libraries: ['@arki/math'] } };
 const README = README_SECTIONS.map((s) => `## ${s}\n\ntext\n`).join('\n');
 
 /** A tier 2 leaf package ("math") that passes every disk item. */
-function makePackage(mutate: (pkg: Record<string, unknown>) => void = () => {}): string {
-  const dir = path.join(root, 'packages', 'math');
+function makePackage(mutate: (pkg: Record<string, unknown>) => void = () => {}, folder = 'packages/math'): string {
+  const dir = path.join(root, folder);
   mkdirSync(path.join(dir, 'docs'), { recursive: true });
   for (const f of ['README.md', 'CHANGELOG.md', 'LICENSE', 'llms.txt', 'AGENTS.md', 'docs/agent-guide.md']) {
     writeFileSync(path.join(dir, f), f === 'README.md' ? README : 'x');
@@ -36,7 +36,7 @@ function makePackage(mutate: (pkg: Record<string, unknown>) => void = () => {}):
     description: 'Math',
     keywords: ['math'],
     homepage: 'https://arki.dev',
-    repository: { type: 'git', url: 'x', directory: 'packages/math' },
+    repository: { type: 'git', url: 'x', directory: folder },
     funding: 'https://example.com',
     sideEffects: false,
     engines: { node: '>=22' },
@@ -57,9 +57,19 @@ describe('evaluateReadiness', () => {
     const dir = makePackage((p) => {
       p.repository = { type: 'git', url: 'x' };
     });
-    const r = evaluateReadiness({ config, dir });
+    const r = evaluateReadiness({ config, root, dir });
     expect(status(r, 'pkg-repository-directory')).toBe('fail');
     expect(r.dimension.status).toBe('fail');
+  });
+
+  it('checks repository.directory against the real folder, even when it is not packages/<name>', () => {
+    // Why: @arki/tsconfig lives in tooling/typescript; demanding packages/tsconfig would force a folder move.
+    const dir = makePackage(() => {}, 'tooling/typescript');
+    expect(status(evaluateReadiness({ config, root, dir }), 'pkg-repository-directory')).toBe('pass');
+    const wrong = makePackage((p) => {
+      p.repository = { type: 'git', url: 'x', directory: 'packages/typescript' };
+    }, 'tooling/typescript');
+    expect(status(evaluateReadiness({ config, root, dir: wrong }), 'pkg-repository-directory')).toBe('fail');
   });
 
   it('accepts a subpath-only package when every code subpath declares types', () => {
@@ -68,16 +78,16 @@ describe('evaluateReadiness', () => {
     const typed = makePackage((p) => {
       p.exports = { './cn': { types: './dist/cn.d.ts', import: './src/cn.ts' }, './styles.css': './src/styles.css', './package.json': './package.json' };
     });
-    expect(status(evaluateReadiness({ config, dir: typed }), 'types')).toBe('pass');
+    expect(status(evaluateReadiness({ config, root, dir: typed }), 'types')).toBe('pass');
     const untyped = makePackage((p) => {
       p.exports = { './cn': { types: './dist/cn.d.ts', import: './src/cn.ts' }, './button': { import: './src/button.tsx' } };
     });
-    expect(status(evaluateReadiness({ config, dir: untyped }), 'types')).toBe('fail');
+    expect(status(evaluateReadiness({ config, root, dir: untyped }), 'types')).toBe('fail');
   });
 
   it('passes every disk item for a complete package and reports external items as missing', () => {
     // Why: a package must not look ready on evidence another module never produced.
-    const r = evaluateReadiness({ config, dir: makePackage() });
+    const r = evaluateReadiness({ config, root, dir: makePackage() });
     expect(r.items.filter((i) => i.status === 'fail')).toEqual([]);
     expect(status(r, 'install-smoke')).toBe('missing');
     expect(r.dimension.status).toBe('warn');
@@ -86,12 +96,12 @@ describe('evaluateReadiness', () => {
   it('is pass once every blocking external result is in', () => {
     // Why: the dimension must be reachable; optional proofs must not hold it back.
     const external = { 'install-smoke': 'pass', 'docs-fresh': 'pass', 'mirror-tag': 'pass', 'mirror-release': 'pass', 'mirror-integrity': 'pass', runtimes: 'pass' } as const;
-    expect(evaluateReadiness({ config, dir: makePackage(), external }).dimension.status).toBe('pass');
+    expect(evaluateReadiness({ config, root, dir: makePackage(), external }).dimension.status).toBe('pass');
   });
 
   it('skips runtimes for packages that depend on other @arki packages', () => {
     // Why: only leaf libraries promise the five-runtime matrix.
-    const r = evaluateReadiness({ config, dir: makePackage((p) => { p.dependencies = { '@arki/log': '^0.1.0' }; }) });
+    const r = evaluateReadiness({ config, root, dir: makePackage((p) => { p.dependencies = { '@arki/log': '^0.1.0' }; }) });
     expect(status(r, 'runtimes')).toBe('n/a');
   });
 
@@ -99,7 +109,7 @@ describe('evaluateReadiness', () => {
     // Why: one missing LICENSE must block even if 20 other items pass.
     const dir = makePackage();
     rmSync(path.join(dir, 'LICENSE'));
-    expect(evaluateReadiness({ config, dir }).dimension.status).toBe('fail');
+    expect(evaluateReadiness({ config, root, dir }).dimension.status).toBe('fail');
   });
 
   it('a baselined failure is non-blocking and a stale baseline entry is reported', () => {
@@ -107,7 +117,7 @@ describe('evaluateReadiness', () => {
     const dir = makePackage((p) => {
       delete p.funding;
     });
-    const r = evaluateReadiness({ config, dir, baseline: ['pkg-funding', 'pkg-engines'] });
+    const r = evaluateReadiness({ config, root, dir, baseline: ['pkg-funding', 'pkg-engines'] });
     expect(status(r, 'pkg-funding')).toBe('fail');
     expect(r.items.find((i) => i.id === 'pkg-funding')).toMatchObject({ blocking: false, baselined: true });
     expect(status(r, 'pkg-engines')).toBe('baseline-stale');
@@ -118,7 +128,7 @@ describe('evaluateReadiness', () => {
     // Why: agents and readers rely on the same section order in every package.
     const dir = makePackage();
     writeFileSync(path.join(dir, 'README.md'), '## Quick start\n\n## Install\n');
-    const r = evaluateReadiness({ config, dir });
+    const r = evaluateReadiness({ config, root, dir });
     expect(status(r, 'readme-h2-order')).toBe('fail');
   });
 
@@ -132,7 +142,7 @@ describe('evaluateReadiness', () => {
     const dir = makePackage((p) => {
       p.name = '@arki/live';
     });
-    expect(evaluateReadiness({ config, dir }).items).toEqual([]);
+    expect(evaluateReadiness({ config, root, dir }).items).toEqual([]);
   });
 });
 
@@ -141,12 +151,12 @@ describe('baseline and table', () => {
     // Why: the seed baseline must hold exactly today's gaps.
     const dir = makePackage();
     rmSync(path.join(dir, 'llms.txt'));
-    expect(generateReadinessBaseline([evaluateReadiness({ config, dir })])).toEqual({ '@arki/math': ['file-llms-txt'] });
+    expect(generateReadinessBaseline([evaluateReadiness({ config, root, dir })])).toEqual({ '@arki/math': ['file-llms-txt'] });
   });
 
   it('renders one fixed-width row per package', () => {
     // Why: scorecard --table must stay scannable in a terminal.
-    const table = renderReadinessTable([evaluateReadiness({ config, dir: makePackage() })]);
+    const table = renderReadinessTable([evaluateReadiness({ config, root, dir: makePackage() })]);
     const lines = table.split('\n');
     expect(lines[1]).toContain('@arki/math');
     expect(lines[1]).toContain('ok');

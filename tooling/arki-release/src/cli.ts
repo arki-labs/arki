@@ -679,7 +679,7 @@ async function runImpactHandler(args: ParsedCliArgs): Promise<number> {
       }
       packages.push({
         name: manifest.name,
-        dir: path.basename(path.dirname(manifest.manifestPath)),
+        dir: path.dirname(manifest.manifestPath),
         version: manifest.version,
         npmVersion: 'versions' in found ? (found.versions.at(-1) ?? null) : null,
         lastShippedCommit: lastShipped.get(manifest.name) ?? null,
@@ -1181,7 +1181,7 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
  *   --include-blocked-by-leak   Attempt packages classified
  *                               `blocked-by-leak` in addition to
  *                               `public-candidate`. Useful for diagnosis.
- *   --no-workspaces-root        Omit `workspaces: ['packages/*']` from
+ *   --no-workspaces-root        Omit `workspaces: ['packages/*', 'tooling/*']` from
  *                               the materialized root `package.json`.
  *                               Use this when the tree will be the
  *                               source of `npm publish` — npm's

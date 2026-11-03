@@ -209,15 +209,15 @@ function missingReasonErrors(kind: ImpactKind, pkg: string, scan: ReasonScan, wh
 
 export type DocsImpactInput = {
   readonly pkg: string;
-  /** Package folder name under `packages/`. */
+  /** Package folder, repo-relative (`packages/kv`, `tooling/typescript`). */
   readonly dir: string;
-  /** Output of `git diff --name-only base..HEAD -- packages/<dir>`; `null` when the package never shipped. */
+  /** Output of `git diff --name-only base..HEAD -- <dir>`; `null` when the package never shipped. */
   readonly changedFiles: readonly string[] | null;
   readonly changesets: readonly Changeset[];
 };
 
 export function touchesDocs(dir: string, changedFiles: readonly string[]): boolean {
-  const prefix = `packages/${dir}/`;
+  const prefix = `${dir}/`;
   return changedFiles.some(file => {
     if (!file.startsWith(prefix)) return false;
     const rel = file.slice(prefix.length);
@@ -271,7 +271,7 @@ export async function resolveBase(input: {
 }): Promise<string | null> {
   if (input.lastShippedCommit !== null) return input.lastShippedCommit;
   if (input.npmVersion === null) return null;
-  const manifest = `packages/${input.dir}/package.json`;
+  const manifest = `${input.dir}/package.json`;
   const versionLine = `"version": "${input.npmVersion}"`;
   // -G also matches the commit that bumped the version away, so take the
   // newest match whose package.json still holds the npm version afterwards.
@@ -285,7 +285,7 @@ export async function resolveBase(input: {
 }
 
 export async function changedSince(root: string, base: string, dir: string, git: GitRunner): Promise<string[]> {
-  const out = await git(['diff', '--name-only', `${base}..HEAD`, '--', `packages/${dir}`], { cwd: root });
+  const out = await git(['diff', '--name-only', `${base}..HEAD`, '--', dir], { cwd: root });
   return out.stdout.split('\n').map(l => l.trim()).filter(l => l !== '');
 }
 

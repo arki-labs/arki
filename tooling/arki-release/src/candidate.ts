@@ -22,7 +22,7 @@ import { z } from 'zod';
 
 import { docExamplesReportSchema } from './doc-examples-report-schema';
 import { exportPublicTree } from './export-public';
-import { discoverManifests } from './inventory';
+import { discoverManifests, RELEASE_ROOTS } from './inventory';
 import { createEnvelope } from './json-output';
 import { npmVersionLookup, pendingPackages, planOrder } from './order';
 import type { OrderItem } from './order';
@@ -336,7 +336,7 @@ export async function runCandidate(options: RunCandidateOptions): Promise<Candid
   const treeFailures = exported.errors.filter(e => e.severity === 'error');
   if (treeFailures.length > 0) return failure(label, 'Exporting the public tree failed.', [...treeFailures], sourceCommit);
   for (const item of order.items) {
-    const folder = path.join(treeDir, 'packages', item.name.replace(/^@arki\//, ''));
+    const folder = path.join(treeDir, dirOf.get(item.name) ?? '');
     const built = exported.packages.some(p => p.name === item.name && p.status === 'exported') && (await isDirectory(path.join(folder, 'dist')));
     if (!built) {
       errors.push({
@@ -352,7 +352,7 @@ export async function runCandidate(options: RunCandidateOptions): Promise<Candid
 
   // 3b. Write the indexes every tarball carries, from the exported bytes.
   for (const item of order.items) {
-    const problem = await writeIndexes(path.join(treeDir, 'packages', item.name.replace(/^@arki\//, '')));
+    const problem = await writeIndexes(path.join(treeDir, dirOf.get(item.name) ?? ''));
     if (problem !== null) {
       errors.push(buildError(`${item.name}: writing ${INDEX_FILES.join(' and ')} failed: ${problem}`, item.name, 'Fix the package build (its dist/ types and package.json), then run candidate again.'));
     }
@@ -362,7 +362,7 @@ export async function runCandidate(options: RunCandidateOptions): Promise<Candid
   // 4. Pack each package and hash the tarball.
   const packages: CandidatePackage[] = [];
   for (const item of order.items) {
-    const packed = await packOne(npm, item, path.join(treeDir, 'packages', item.name.replace(/^@arki\//, '')), tarballsDir);
+    const packed = await packOne(npm, item, path.join(treeDir, dirOf.get(item.name) ?? ''), tarballsDir);
     if ('error' in packed) errors.push(packed.error);
     else packages.push(packed.pkg);
   }
@@ -426,7 +426,7 @@ async function pickSeeds(
     return { seeds: wave.packages.filter(name => pending.names.has(name)) };
   }
   const git = options.gitRunner ?? defaultGitRunner;
-  const diff = await git(['diff', '--name-only', target.ref, 'HEAD', '--', 'packages'], { cwd });
+  const diff = await git(['diff', '--name-only', target.ref, 'HEAD', '--', ...RELEASE_ROOTS], { cwd });
   if (diff.code !== 0) {
     return {
       error: buildError(`git diff against ${target.ref} failed: ${diff.stderr.trim()}`, target.ref, 'Pass a ref that exists, for example origin/master.'),

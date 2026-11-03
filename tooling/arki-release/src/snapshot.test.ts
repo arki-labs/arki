@@ -31,6 +31,7 @@ beforeEach(() => {
   write('packages/clean/package.json', '{"name":"@arki/clean","version":"0.0.1"}\n');
   write('packages/edited/package.json', '{"name":"@arki/edited","version":"0.0.1"}\n');
   write('packages/ui/chat/package.json', '{"name":"@arki/chat","version":"0.0.1"}\n');
+  write('tooling/config/package.json', '{"name":"@arki/config-pkg","version":"0.0.1"}\n');
   write('apps/private/secret.ts', 'never exported\n');
   write('SECURITY.md', 'committed policy\n');
   write('CONTRIBUTING.md', 'committed guide\n');
@@ -40,6 +41,7 @@ beforeEach(() => {
   write('packages/clean/dist/index.js', 'built clean\n');
   write('packages/edited/dist/index.js', 'built from uncommitted source\n');
   write('packages/ui/chat/dist/index.js', 'built chat\n');
+  write('tooling/config/dist/index.js', 'built config\n');
 });
 
 afterEach(async () => {
@@ -71,6 +73,7 @@ describe('createSourceSnapshot', () => {
 
     expect(readFileSync(path.join(snapshot.dir, 'packages/clean/dist/index.js'), 'utf8')).toBe('built clean\n');
     expect(readFileSync(path.join(snapshot.dir, 'packages/ui/chat/dist/index.js'), 'utf8')).toBe('built chat\n');
+    expect(readFileSync(path.join(snapshot.dir, 'tooling/config/dist/index.js'), 'utf8')).toBe('built config\n');
     // Its build may come from the uncommitted source, so it must not ship.
     expect(existsSync(path.join(snapshot.dir, 'packages/edited/dist'))).toBe(false);
     expect(existsSync(path.join(snapshot.dir, 'packages/edited/src'))).toBe(false);

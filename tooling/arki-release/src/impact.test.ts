@@ -24,7 +24,7 @@ function cs(body: string, bumps: Record<string, 'patch' | 'minor' | 'major'> = {
 
 const docsInput = (changedFiles: string[] | null, changesets: Changeset[]) => ({
   pkg: '@arki/math',
-  dir: 'math',
+  dir: 'packages/math',
   changedFiles,
   changesets,
 });
@@ -136,13 +136,13 @@ describe('base and runImpact', () => {
 
   it('prefers the last shipped candidate commit over a version search', async () => {
     // Why: the candidate commit is the exact shipped state.
-    const base = await resolveBase({ root: '/repo', dir: 'math', npmVersion: '1.0.0', lastShippedCommit: 'feed', git });
+    const base = await resolveBase({ root: '/repo', dir: 'packages/math', npmVersion: '1.0.0', lastShippedCommit: 'feed', git });
     expect(base).toBe('feed');
   });
 
   it('falls back to the commit that set the npm version', async () => {
     // Why: packages shipped before candidates existed still need a base.
-    expect(await resolveBase({ root: '/repo', dir: 'math', npmVersion: '1.0.0', lastShippedCommit: null, git })).toBe('abc123');
+    expect(await resolveBase({ root: '/repo', dir: 'packages/math', npmVersion: '1.0.0', lastShippedCommit: null, git })).toBe('abc123');
   });
 
   it('skips the commit that bumped the npm version away', async () => {
@@ -156,7 +156,7 @@ describe('base and runImpact', () => {
       }
       return { code: 1, stdout: '', stderr: '' };
     };
-    expect(await resolveBase({ root: '/repo', dir: 'math', npmVersion: '1.0.0', lastShippedCommit: null, git: bumped })).toBe('abc123');
+    expect(await resolveBase({ root: '/repo', dir: 'packages/math', npmVersion: '1.0.0', lastShippedCommit: null, git: bumped })).toBe('abc123');
   });
 
   it('fails the run for a package with source-only changes', async () => {
@@ -166,7 +166,7 @@ describe('base and runImpact', () => {
     writeFileSync(path.join(root, '.changeset', 'a.md'), "---\n'@arki/math': minor\n---\n\nChange.\n");
     const env = await runImpact({
       root,
-      packages: [{ name: '@arki/math', dir: 'math', version: '0.4.1', npmVersion: '0.4.0', lastShippedCommit: null }],
+      packages: [{ name: '@arki/math', dir: 'packages/math', version: '0.4.1', npmVersion: '0.4.0', lastShippedCommit: null }],
       git,
       demosUsing: () => [],
       candidateChecks: {},
@@ -211,7 +211,7 @@ describe('changesets consumed by `changeset version`', () => {
   const score = (lastShippedCommit: string) =>
     runImpact({
       root: repo,
-      packages: [{ name: '@arki/math', dir: 'math', version: '0.5.0', npmVersion: '0.4.0', lastShippedCommit }],
+      packages: [{ name: '@arki/math', dir: 'packages/math', version: '0.5.0', npmVersion: '0.4.0', lastShippedCommit }],
       git: defaultGitRunner,
       demosUsing: () => ['calculator'],
       candidateChecks: {},

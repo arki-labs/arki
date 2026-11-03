@@ -389,7 +389,7 @@ describe('exportPublicTree', () => {
     const rootPkg = readJson(path.join(outDir, 'package.json')) as Record<string, unknown>;
     expect(rootPkg['name']).toBe('arki-public');
     expect(rootPkg['private']).toBe(true);
-    expect(rootPkg['workspaces']).toEqual(['packages/*']);
+    expect(rootPkg['workspaces']).toEqual(['packages/*', 'tooling/*']);
 
     const gitignore = readFileSync(path.join(outDir, '.gitignore'), 'utf8');
     expect(gitignore).toMatch(/node_modules\//);
@@ -573,22 +573,22 @@ describe('exportPublicTree', () => {
     expect(listTreeRelative(path.join(tmp, baseConfig.publicTreePath, 'packages/ui'))).toContain('dist/index.js');
   });
 
-  it('fails loudly when the source folder differs from the npm name, because the tree is not flat', async () => {
+  it('keeps a package at its real folder when the folder is not the npm name, so repository.directory stays true', async () => {
+    // Why: @arki/ui lives in tooling/design here; moving it to packages/ui in the public tree would break its source link.
     writeRoot(tmp);
-    writePkg(tmp, 'base', {
-      name: '@arki/ui',
-      version: '1.0.0',
-      type: 'module',
-      main: 'dist/index.js',
-      types: 'dist/index.d.ts',
-      files: ['dist'],
-    });
-    writeFixtureFile(tmp, 'packages/base/dist/index.js', 'export const ok = true;\n');
+    writeFixtureFile(
+      tmp,
+      'tooling/design/package.json',
+      JSON.stringify({ name: '@arki/ui', version: '1.0.0', type: 'module', main: 'dist/index.js', types: 'dist/index.d.ts', files: ['dist'] }, null, 2),
+    );
+    writeFixtureFile(tmp, 'tooling/design/dist/index.js', 'export const ok = true;\n');
+    writeFixtureFile(tmp, 'tooling/design/dist/index.d.ts', 'export declare const ok: boolean;\n');
 
     const envelope = await exportPublicTree({ rootCwd: tmp, config: uiConfig });
 
-    expect(envelope.summary.exported).toBe(0);
-    expect(envelope.errors.map(error => error.code)).toContain('EXPORT_E007');
+    expect(envelope.summary.exported).toBe(1);
+    expect(envelope.items.map(item => item.destPath)).toEqual([path.join(baseConfig.publicTreePath, 'tooling/design')]);
+    expect(listTreeRelative(path.join(tmp, baseConfig.publicTreePath, 'tooling/design'))).toContain('dist/index.js');
   });
 
   it('refuses the whole export when an @arki/* package depends on @fleet/*, because npm could never resolve it', async () => {
