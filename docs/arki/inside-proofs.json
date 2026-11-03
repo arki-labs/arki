@@ -223,5 +223,20 @@
     "path": "packages/date/README.md",
     "lines": "3",
     "anchor": "b6c8676368bc252f"
+  },
+  "auth.one-declaration": {
+    "path": "packages/auth/README.md",
+    "lines": "3",
+    "anchor": "10cfa7d0de101157"
+  },
+  "mail.same-transaction": {
+    "path": "packages/mail/README.md",
+    "lines": "3",
+    "anchor": "9b59230c59cabd48"
+  },
+  "live.table-hints": {
+    "path": "packages/live/README.md",
+    "lines": "3",
+    "anchor": "ba8a314d2a61b31b"
   }
 }
