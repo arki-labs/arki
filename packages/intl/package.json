@@ -1,6 +1,6 @@
 {
   "name": "@arki/intl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Locale helpers for web apps: ISO language lookups, a localized slug registry, message dictionary loading, and a TanStack Start locale provider.",
   "license": "MIT",
   "type": "module",

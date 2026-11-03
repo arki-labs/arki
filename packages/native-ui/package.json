@@ -1,6 +1,6 @@
 {
   "name": "@arki/native-ui",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "React Native UI components for ARKI: accessible, NativeWind-styled building blocks (button, dialog, select, tabs and more) on rn-primitives, plus small class-name, string and color helpers.",
   "license": "MIT",
   "private": false,

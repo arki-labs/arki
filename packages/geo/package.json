@@ -1,6 +1,6 @@
 {
   "name": "@arki/geo",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Geospatial toolkit for ARKI: coordinates and distance maths, cached geocoding with typed failures, and React map components.",
   "license": "MIT",
   "private": false,

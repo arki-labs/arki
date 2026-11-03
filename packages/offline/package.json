@@ -1,6 +1,6 @@
 {
   "name": "@arki/offline",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Offline-first building blocks for TanStack apps: a persisted query cache, a replayable mutation queue with dead letters, local collections, PWA caching, and an oRPC idempotency guard.",
   "license": "MIT",
   "type": "module",

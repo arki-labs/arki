@@ -1,6 +1,6 @@
 {
   "name": "@arki/payments-native",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RevenueCat in-app purchases for React Native apps: configure, load the pro offering, purchase and restore, with failures returned as values instead of thrown.",
   "license": "MIT",
   "private": false,

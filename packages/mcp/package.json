@@ -1,6 +1,6 @@
 {
   "name": "@arki/mcp",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "MCP servers and MCP Apps for ARKI — tools from oRPC procedures with their middleware intact, typed access, confirmations, a test client and the Dot mcpServer() plugin.",
   "license": "MIT",

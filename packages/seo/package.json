@@ -1,6 +1,6 @@
 {
   "name": "@arki/seo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SEO building blocks for web apps: metadata, robots.txt, sitemap.xml and llms.txt builders, JSON-LD schema components, and a TanStack Start head adapter.",
   "license": "MIT",
   "type": "module",

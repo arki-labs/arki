@@ -1,6 +1,6 @@
 {
   "name": "@arki/content-build",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Build-time content pipeline: content-collections config, preset collections (posts, legal pages, FAQs, changelog), GitHub-flavoured markdown compiler and the arki-content CLI.",
   "keywords": [
     "arki",
