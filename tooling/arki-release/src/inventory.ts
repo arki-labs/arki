@@ -19,7 +19,7 @@
  *     belong to later tasks.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import debugFactory from 'debug';
@@ -118,14 +118,15 @@ export interface RunInventoryOptions {
 }
 
 /**
- * Walk `RELEASE_ROOTS` (`packages/**`, `tooling/**`) under `cwd`, parse each `package.json`, and return
- * the manifest list. Diagnostics (e.g. files with no `name`) are returned
- * separately so the caller can surface them in the envelope.
+ * Read the workspace packages under `RELEASE_ROOTS` (`packages/*`, `tooling/*`) under `cwd`,
+ * parse each `package.json`, and return the manifest list. Diagnostics (e.g. files with no
+ * `name`) are returned separately so the caller can surface them in the envelope.
  *
- * - Excludes any path that contains a `node_modules` or `dist` segment.
- * - Uses Node's `readdir` recursively — portable across Bun and Vitest
- *   runners. (Bun.Glob is faster but isn't available under the Vitest
- *   Node runtime that owns the test suite.)
+ * - Only direct children, as the root `workspaces` globs say: a nested `package.json` (a test
+ *   fixture such as `tooling/library/fixtures/doc-package`) is not a package, and changesets
+ *   rejects its name.
+ * - Uses Node's `readdir` — portable across Bun and Vitest runners. (Bun.Glob is faster but
+ *   isn't available under the Vitest Node runtime that owns the test suite.)
  */
 export async function discoverManifests(cwd: string): Promise<{
   readonly manifests: readonly ParsedManifest[];
@@ -134,7 +135,7 @@ export async function discoverManifests(cwd: string): Promise<{
   const manifests: ParsedManifest[] = [];
   const diagnostics: ReleaseError[] = [];
 
-  const found = (await Promise.all(RELEASE_ROOTS.map(root => walkForManifests(path.join(cwd, root))))).flat();
+  const found = (await Promise.all(RELEASE_ROOTS.map(root => workspaceManifests(path.join(cwd, root))))).flat();
   for (const absPath of found) {
     const rel = path.relative(cwd, absPath);
     let json: unknown;
@@ -173,31 +174,21 @@ export async function discoverManifests(cwd: string): Promise<{
 }
 
 /**
- * Recursive directory walk that returns every `package.json` under `root`,
- * skipping `node_modules` and `dist` directories at any nesting depth.
+ * Every `<root>/<dir>/package.json` that exists, one level deep (the `<root>/*` workspace glob).
  *
  * Returns `[]` when `root` doesn't exist — letting callers treat an
  * empty `packages/` dir as "no manifests" rather than an error.
  */
-async function walkForManifests(root: string): Promise<readonly string[]> {
-  const out: string[] = [];
+async function workspaceManifests(root: string): Promise<readonly string[]> {
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch {
-    return out;
+    return [];
   }
-  for (const entry of entries) {
-    const full = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
-      const nested = await walkForManifests(full);
-      out.push(...nested);
-    } else if (entry.isFile() && entry.name === 'package.json') {
-      out.push(full);
-    }
-  }
-  return out;
+  const candidates = entries.filter(entry => entry.isDirectory()).map(entry => path.join(root, entry.name, 'package.json'));
+  const present = await Promise.all(candidates.map(file => stat(file).then(s => s.isFile(), () => false)));
+  return candidates.filter((_, i) => present[i]);
 }
 
 const DEPENDENCY_BUCKETS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;

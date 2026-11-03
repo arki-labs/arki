@@ -50,6 +50,8 @@ describe('discoverManifests across release roots', () => {
       writeManifest(root, 'packages/log', { name: '@arki/log', version: '1.0.0' });
       writeManifest(root, 'tooling/typescript', { name: '@arki/tsconfig', version: '1.0.0' });
       writeManifest(root, 'fleet/shared', { name: '@arki/fleet-leak', version: '1.0.0' });
+      // Why: a nested fixture is not a workspace package; passing its name to `changeset version --ignore` fails the ship.
+      writeManifest(root, 'tooling/library/fixtures/doc-package', { name: '@arki/doc-package', version: '0.0.0' });
       const { manifests } = await discoverManifests(root);
       expect(manifests.map(m => [m.name, m.manifestPath])).toEqual([
         ['@arki/log', path.join('packages/log', 'package.json')],
