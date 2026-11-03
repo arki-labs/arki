@@ -151,6 +151,7 @@
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
     "README.md",
+    "llms.txt",
     "LICENSE"
   ],
   "arki": {

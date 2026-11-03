@@ -217,6 +217,7 @@
     "!src/**/*.test.*",
     "!dist/**/*.test.*",
     "README.md",
+    "llms.txt",
     "LICENSE",
     "package.json"
   ],
@@ -275,5 +276,10 @@
     "react-native-gesture-handler": "catalog:expo",
     "react-native-reanimated": "catalog:expo",
     "react-native-svg": "catalog:expo"
+  },
+  "arki": {
+    "runtimes": [
+      "hermes"
+    ]
   }
 }

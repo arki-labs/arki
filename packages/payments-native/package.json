@@ -69,5 +69,10 @@
   },
   "peerDependencies": {
     "react-native-purchases": ">=8"
+  },
+  "arki": {
+    "runtimes": [
+      "hermes"
+    ]
   }
 }

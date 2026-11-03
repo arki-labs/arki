@@ -51,6 +51,7 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "README.md",
+    "llms.txt",
     "LICENSE",
     "package.json"
   ],

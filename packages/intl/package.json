@@ -67,6 +67,7 @@
     "!src/**/*.test.*",
     "!src/**/*.test-d.ts",
     "README.md",
+    "llms.txt",
     "CHANGELOG.md",
     "LICENSE",
     "package.json"
