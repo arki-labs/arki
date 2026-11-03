@@ -8,11 +8,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../constants';
-import { GoogleMap, GoogleMarker, GooglePin } from '../../primitives';
-import type { Coordinates, MapCameraChangedEvent } from '../../types';
-import type { LocationPickerProps } from './types';
-import { StreetViewChecker } from './StreetViewChecker';
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../constants.js';
+import { GoogleMap, GoogleMarker, GooglePin } from '../../primitives/index.js';
+import type { Coordinates, MapCameraChangedEvent } from '../../types/index.js';
+import type { LocationPickerProps } from './types.js';
+import { StreetViewChecker } from './StreetViewChecker.js';
 
 /**
  * LocationPicker component

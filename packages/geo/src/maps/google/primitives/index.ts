@@ -5,17 +5,17 @@
  * with sensible defaults and simplified APIs.
  */
 
-export { GoogleMapsProvider } from './GoogleMapsProvider';
-export type { GoogleMapsProviderProps } from './GoogleMapsProvider';
+export { GoogleMapsProvider } from './GoogleMapsProvider.js';
+export type { GoogleMapsProviderProps } from './GoogleMapsProvider.js';
 
-export { GoogleMap } from './GoogleMap';
-export type { GoogleMapProps } from './GoogleMap';
+export { GoogleMap } from './GoogleMap.js';
+export type { GoogleMapProps } from './GoogleMap.js';
 
-export { GoogleMarker } from './GoogleMarker';
-export type { GoogleMarkerProps } from './GoogleMarker';
+export { GoogleMarker } from './GoogleMarker.js';
+export type { GoogleMarkerProps } from './GoogleMarker.js';
 
-export { GooglePin } from './GooglePin';
-export type { GooglePinProps } from './GooglePin';
+export { GooglePin } from './GooglePin.js';
+export type { GooglePinProps } from './GooglePin.js';
 
-export { GoogleInfoWindow } from './GoogleInfoWindow';
-export type { GoogleInfoWindowProps } from './GoogleInfoWindow';
+export { GoogleInfoWindow } from './GoogleInfoWindow.js';
+export type { GoogleInfoWindowProps } from './GoogleInfoWindow.js';

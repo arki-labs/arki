@@ -1,3 +1,3 @@
-export * from './useBounds';
-export * from './useCoordinates';
-export * from './useDistance';
+export * from './useBounds.js';
+export * from './useCoordinates.js';
+export * from './useDistance.js';

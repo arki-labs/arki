@@ -2,7 +2,7 @@
  * LocationPicker component types
  */
 
-import type { Coordinates } from '../../types';
+import type { Coordinates } from '../../types/index.js';
 
 export type LocationPickerProps = {
   /**

@@ -6,15 +6,15 @@
 
 import { unreachable } from '@arki/failure';
 
-import type { StorageConfig } from './types';
-import { createLocalStorageAdapter } from './local-adapter';
-import { createS3StorageAdapter } from './s3-adapter';
+import type { StorageConfig } from './types.js';
+import { createLocalStorageAdapter } from './local-adapter.js';
+import { createS3StorageAdapter } from './s3-adapter.js';
 
-export { createLocalStorageAdapter } from './local-adapter';
-export { createS3StorageAdapter } from './s3-adapter';
-export { createR2Storage } from './r2';
-export type { R2StorageConfig } from './r2';
-export type * from './types';
+export { createLocalStorageAdapter } from './local-adapter.js';
+export { createS3StorageAdapter } from './s3-adapter.js';
+export { createR2Storage } from './r2.js';
+export type { R2StorageConfig } from './r2.js';
+export type * from './types.js';
 export * from './failures.js';
 
 /**

@@ -21,7 +21,7 @@ import { invariant, isFailure } from '@arki/failure';
 import type { KV } from '@arki/kv';
 import { getLogger } from '@arki/log';
 
-import { isValidCoordinates } from '../core/coordinates';
+import { isValidCoordinates } from '../core/coordinates.js';
 import {
   AddressNotFound,
   GeocodingCancelled,
@@ -30,15 +30,15 @@ import {
   ProviderRateLimited,
   ProviderRejected,
   ProviderUnreachable,
-} from '../core/failures';
-import type { ProviderAttempt } from '../core/failures';
-import { geocodeResultSchema } from './types';
+} from '../core/failures.js';
+import type { ProviderAttempt } from '../core/failures.js';
+import { geocodeResultSchema } from './types.js';
 import type {
   AddressComponents,
   GeocodeResult,
   GeocodingConfig,
   GeocodingProvider,
-} from './types';
+} from './types.js';
 
 const log = getLogger('arki:geo');
 

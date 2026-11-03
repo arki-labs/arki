@@ -1,6 +1,6 @@
-import { InvalidCoordinates } from './failures';
-import { parseCoordinates } from './coordinates';
-import type { Coordinates } from './types';
+import { InvalidCoordinates } from './failures.js';
+import { parseCoordinates } from './coordinates.js';
+import type { Coordinates } from './types.js';
 
 /**
  * Convert Degrees, Minutes, Seconds to Decimal Degrees

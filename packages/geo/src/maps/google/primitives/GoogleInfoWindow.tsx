@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react';
 import { InfoWindow } from '@vis.gl/react-google-maps';
 
-import type { Coordinates } from '../types';
+import type { Coordinates } from '../types/index.js';
 
 export type GoogleInfoWindowProps = {
   /**

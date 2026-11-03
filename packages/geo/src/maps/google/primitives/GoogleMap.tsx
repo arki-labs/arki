@@ -10,9 +10,9 @@
 import type { ReactNode } from 'react';
 import { Map } from '@vis.gl/react-google-maps';
 
-import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ID, DEFAULT_MAP_ZOOM } from '../constants';
-import type { Coordinates } from '../types';
-import type { MapCameraChangedEvent, MapMouseEvent } from '../types';
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ID, DEFAULT_MAP_ZOOM } from '../constants.js';
+import type { Coordinates } from '../types/index.js';
+import type { MapCameraChangedEvent, MapMouseEvent } from '../types/index.js';
 
 export type GoogleMapProps = {
   /**

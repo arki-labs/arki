@@ -2,8 +2,8 @@
 
 import { useMemo } from 'react';
 
-import { calculateDistance } from '../../core/distance';
-import type { Coordinates, DistanceUnit } from '../../core/types';
+import { calculateDistance } from '../../core/distance.js';
+import type { Coordinates, DistanceUnit } from '../../core/types.js';
 
 /**
  * Hook to calculate distance between two coordinates

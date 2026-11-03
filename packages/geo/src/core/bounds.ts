@@ -1,6 +1,6 @@
-import { calculateDestination, calculateDistance } from './distance';
-import { BoundsError } from './errors';
-import type { Bounds, Coordinates } from './types';
+import { calculateDestination, calculateDistance } from './distance.js';
+import { BoundsError } from './errors.js';
+import type { Bounds, Coordinates } from './types.js';
 
 /**
  * Create bounds from an array of coordinates

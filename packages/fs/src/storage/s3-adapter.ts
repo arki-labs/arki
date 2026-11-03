@@ -19,7 +19,7 @@ import type {
   StoredFile,
   StoreOptions,
 } from './types.js';
-import { env } from '../env';
+import { env } from '../env.js';
 import { StorageCancelled } from './failures.js';
 import { observeFs, storageErrorFacts, storageReadFailure, storageWriteFailure } from './operation.js';
 

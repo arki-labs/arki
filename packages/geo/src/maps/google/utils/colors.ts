@@ -2,7 +2,7 @@
  * Color utilities for map markers and elements
  */
 
-import { MARKER_COLORS } from '../constants';
+import { MARKER_COLORS } from '../constants.js';
 
 /**
  * Get a color from the marker palette by index

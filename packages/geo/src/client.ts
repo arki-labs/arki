@@ -6,7 +6,7 @@
  */
 
 // Core utilities (safe to use in browser)
-export * from './core';
+export * from './core/index.js';
 
 // React hooks
-export * from './react';
+export * from './react/index.js';

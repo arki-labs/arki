@@ -1,5 +1,5 @@
-import { InvalidCoordinates } from './failures';
-import type { Coordinates } from './types';
+import { InvalidCoordinates } from './failures.js';
+import type { Coordinates } from './types.js';
 
 /**
  * Check whether coordinates are finite and within range

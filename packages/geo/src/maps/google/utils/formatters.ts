@@ -2,7 +2,7 @@
  * Coordinate and map-related formatters
  */
 
-import type { Coordinates } from '../types';
+import type { Coordinates } from '../types/index.js';
 
 /**
  * Format coordinates to a readable string

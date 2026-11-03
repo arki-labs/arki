@@ -2,8 +2,8 @@
  * Map configuration utilities
  */
 
-import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../constants';
-import type { GoogleMapProps } from '../primitives';
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../constants.js';
+import type { GoogleMapProps } from '../primitives/index.js';
 
 /**
  * Default map configuration for common use cases

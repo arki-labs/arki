@@ -9,7 +9,7 @@
 
 import { useEffect, useId } from 'react';
 
-import type { Coordinates } from '../../types';
+import type { Coordinates } from '../../types/index.js';
 
 export type StreetViewPanoramaProps = {
   /**

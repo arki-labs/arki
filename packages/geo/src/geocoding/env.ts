@@ -1,7 +1,7 @@
 import { defineEnv } from '@arki/env/core';
 import { z } from 'zod';
 
-import { GEOCODING_PROVIDERS } from './types';
+import { GEOCODING_PROVIDERS } from './types.js';
 
 export const geocodingEnv = defineEnv({
   name: '@arki/geo',

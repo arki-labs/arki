@@ -11,43 +11,43 @@
 // Primitives (direct wrappers of @vis.gl)
 // ============================================
 
-export { GoogleMapsProvider, GoogleMap, GoogleMarker, GooglePin, GoogleInfoWindow } from './primitives';
+export { GoogleMapsProvider, GoogleMap, GoogleMarker, GooglePin, GoogleInfoWindow } from './primitives/index.js';
 
-export type { GoogleMapsProviderProps, GoogleMapProps, GoogleMarkerProps, GooglePinProps, GoogleInfoWindowProps } from './primitives';
+export type { GoogleMapsProviderProps, GoogleMapProps, GoogleMarkerProps, GooglePinProps, GoogleInfoWindowProps } from './primitives/index.js';
 
 // ============================================
 // Hooks
 // ============================================
 
-export { useGoogleMaps, useGoogleMap, useApiIsLoaded, useMapBounds, usePolylineAnimation } from './hooks';
+export { useGoogleMaps, useGoogleMap, useApiIsLoaded, useMapBounds, usePolylineAnimation } from './hooks/index.js';
 
-export type { GoogleMapsLibrary, GoogleMapInstance, UseMapBoundsOptions, PolylineData, UsePolylineAnimationOptions } from './hooks';
+export type { GoogleMapsLibrary, GoogleMapInstance, UseMapBoundsOptions, PolylineData, UsePolylineAnimationOptions } from './hooks/index.js';
 
 // ============================================
 // Types (ALL types re-exported)
 // ============================================
 
-export type * from './types';
+export type * from './types/index.js';
 
 // ============================================
 // Utilities
 // ============================================
 
-export * from './utils';
+export * from './utils/index.js';
 
 // ============================================
 // Constants
 // ============================================
 
-export * from './constants';
+export * from './constants.js';
 
 // ============================================
 // Components (High-level, extracted from apps)
 // ============================================
 
-export { LocationPicker, StreetViewChecker, StreetViewPanorama, useMapOverlay } from './components';
+export { LocationPicker, StreetViewChecker, StreetViewPanorama, useMapOverlay } from './components/index.js';
 
-export type { LocationPickerProps, StreetViewCheckerProps, StreetViewPanoramaProps, MapSize, UseMapOverlayReturn, UseMapOverlayOptions } from './components';
+export type { LocationPickerProps, StreetViewCheckerProps, StreetViewPanoramaProps, MapSize, UseMapOverlayReturn, UseMapOverlayOptions } from './components/index.js';
 
 // Note: Additional components to be extracted:
 // export { ResultsMap } from './components/ResultsMap';

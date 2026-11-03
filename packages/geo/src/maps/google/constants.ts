@@ -2,7 +2,7 @@
  * Default configuration constants for Google Maps
  */
 
-import type { Coordinates } from '../../core/types';
+import type { Coordinates } from '../../core/types.js';
 
 /**
  * Default map center (middle of the world)

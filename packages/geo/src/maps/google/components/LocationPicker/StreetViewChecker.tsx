@@ -11,8 +11,8 @@ import { useEffect } from 'react';
 
 import { getLogger } from '@arki/log';
 
-import type { Coordinates } from '../../types';
-import { useApiIsLoaded } from '../../hooks';
+import type { Coordinates } from '../../types/index.js';
+import { useApiIsLoaded } from '../../hooks/index.js';
 
 const log = getLogger('arki:geo');
 

@@ -1,180 +1,144 @@
 {
   "name": "@arki/fs",
   "version": "0.1.3",
+  "description": "File storage for ARKI: local, S3 and R2 adapters, a files table with upload lifecycle, and typed failures returned as values.",
+  "license": "MIT",
   "private": false,
-  "sideEffects": false,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/fs"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "fs",
+    "storage",
+    "s3",
+    "r2",
+    "files",
+    "upload"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
     "./env": {
       "types": "./dist/src/env.d.ts",
-      "import": "./src/env.ts",
-      "node": "./src/env.ts"
+      "import": "./dist/src/env.js",
+      "default": "./dist/src/env.js"
     },
     "./local/delete": {
       "types": "./dist/src/local/delete.d.ts",
-      "import": "./src/local/delete.ts",
-      "node": "./src/local/delete.ts"
+      "import": "./dist/src/local/delete.js",
+      "default": "./dist/src/local/delete.js"
     },
     "./local/dir": {
       "types": "./dist/src/local/dir.d.ts",
-      "import": "./src/local/dir.ts",
-      "node": "./src/local/dir.ts"
+      "import": "./dist/src/local/dir.js",
+      "default": "./dist/src/local/dir.js"
     },
     "./local/glob": {
       "types": "./dist/src/local/glob.d.ts",
-      "import": "./src/local/glob.ts",
-      "node": "./src/local/glob.ts"
+      "import": "./dist/src/local/glob.js",
+      "default": "./dist/src/local/glob.js"
     },
     "./local/read-file": {
       "types": "./dist/src/local/read-file.d.ts",
-      "import": "./src/local/read-file.ts",
-      "node": "./src/local/read-file.ts"
+      "import": "./dist/src/local/read-file.js",
+      "default": "./dist/src/local/read-file.js"
     },
     "./local/read-first-line": {
       "types": "./dist/src/local/read-first-line.d.ts",
-      "import": "./src/local/read-first-line.ts",
-      "node": "./src/local/read-first-line.ts"
+      "import": "./dist/src/local/read-first-line.js",
+      "default": "./dist/src/local/read-first-line.js"
     },
     "./local/write": {
       "types": "./dist/src/local/write.d.ts",
-      "import": "./src/local/write.ts",
-      "node": "./src/local/write.ts"
+      "import": "./dist/src/local/write.js",
+      "default": "./dist/src/local/write.js"
     },
     "./s3": {
       "types": "./dist/src/s3.d.ts",
-      "import": "./src/s3.ts",
-      "node": "./src/s3.ts"
+      "import": "./dist/src/s3.js",
+      "default": "./dist/src/s3.js"
     },
     "./storage": {
       "types": "./dist/src/storage/index.d.ts",
-      "import": "./src/storage/index.ts",
-      "node": "./src/storage/index.ts"
+      "import": "./dist/src/storage/index.js",
+      "default": "./dist/src/storage/index.js"
     },
     "./storage/index": {
       "types": "./dist/src/storage/index.d.ts",
-      "import": "./src/storage/index.ts",
-      "node": "./src/storage/index.ts"
+      "import": "./dist/src/storage/index.js",
+      "default": "./dist/src/storage/index.js"
     },
     "./storage/local-adapter": {
       "types": "./dist/src/storage/local-adapter.d.ts",
-      "import": "./src/storage/local-adapter.ts",
-      "node": "./src/storage/local-adapter.ts"
+      "import": "./dist/src/storage/local-adapter.js",
+      "default": "./dist/src/storage/local-adapter.js"
     },
     "./storage/r2": {
       "types": "./dist/src/storage/r2.d.ts",
-      "import": "./src/storage/r2.ts",
-      "node": "./src/storage/r2.ts"
+      "import": "./dist/src/storage/r2.js",
+      "default": "./dist/src/storage/r2.js"
     },
     "./storage/s3-adapter": {
       "types": "./dist/src/storage/s3-adapter.d.ts",
-      "import": "./src/storage/s3-adapter.ts",
-      "node": "./src/storage/s3-adapter.ts"
+      "import": "./dist/src/storage/s3-adapter.js",
+      "default": "./dist/src/storage/s3-adapter.js"
     },
     "./storage/types": {
       "types": "./dist/src/storage/types.d.ts",
-      "import": "./src/storage/types.ts",
-      "node": "./src/storage/types.ts"
+      "import": "./dist/src/storage/types.js",
+      "default": "./dist/src/storage/types.js"
     },
     "./files": {
       "types": "./dist/src/files/index.d.ts",
-      "import": "./src/files/index.ts",
-      "node": "./src/files/index.ts"
+      "import": "./dist/src/files/index.js",
+      "default": "./dist/src/files/index.js"
     },
     "./orpc": {
       "types": "./dist/src/orpc.d.ts",
-      "import": "./src/orpc.ts",
-      "node": "./src/orpc.ts"
+      "import": "./dist/src/orpc.js",
+      "default": "./dist/src/orpc.js"
     },
     "./pg": {
       "types": "./dist/src/pg/index.d.ts",
-      "import": "./src/pg/index.ts",
-      "node": "./src/pg/index.ts"
+      "import": "./dist/src/pg/index.js",
+      "default": "./dist/src/pg/index.js"
     },
     "./sqlite": {
       "types": "./dist/src/sqlite/index.d.ts",
-      "import": "./src/sqlite/index.ts",
-      "node": "./src/sqlite/index.ts"
+      "import": "./dist/src/sqlite/index.js",
+      "default": "./dist/src/sqlite/index.js"
     },
     "./testing": {
       "types": "./dist/src/testing.d.ts",
-      "import": "./src/testing.ts",
-      "node": "./src/testing.ts"
+      "import": "./dist/src/testing.js",
+      "default": "./dist/src/testing.js"
     },
     "./package.json": "./package.json"
   },
-  "typesVersions": {
-    "*": {
-      "env": [
-        "src/env.ts"
-      ],
-      "files": [
-        "src/files/index.ts"
-      ],
-      "local/delete": [
-        "src/local/delete.ts"
-      ],
-      "local/dir": [
-        "src/local/dir.ts"
-      ],
-      "local/glob": [
-        "src/local/glob.ts"
-      ],
-      "local/read-file": [
-        "src/local/read-file.ts"
-      ],
-      "local/read-first-line": [
-        "src/local/read-first-line.ts"
-      ],
-      "local/write": [
-        "src/local/write.ts"
-      ],
-      "orpc": [
-        "src/orpc.ts"
-      ],
-      "pg": [
-        "src/pg/index.ts"
-      ],
-      "s3": [
-        "src/s3.ts"
-      ],
-      "sqlite": [
-        "src/sqlite/index.ts"
-      ],
-      "storage": [
-        "src/storage/index.ts"
-      ],
-      "storage/index": [
-        "src/storage/index.ts"
-      ],
-      "storage/local-adapter": [
-        "src/storage/local-adapter.ts"
-      ],
-      "storage/r2": [
-        "src/storage/r2.ts"
-      ],
-      "storage/s3-adapter": [
-        "src/storage/s3-adapter.ts"
-      ],
-      "storage/types": [
-        "src/storage/types.ts"
-      ],
-      "testing": [
-        "src/testing.ts"
-      ]
-    }
-  },
   "scripts": {
     "bench": "arki-bench",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",
     "test:pg": "vitest run --config vitest.pg.config.ts",
     "test:runtimes": "tsc -p tsconfig.runtimes.json && arki-runtimes",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "test:docs": "arki-doc-examples"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -235,5 +199,20 @@
     "drizzle-orm": {
       "optional": true
     }
-  }
+  },
+  "files": [
+    "dist/src/**",
+    "!dist/src/**/*.test.*",
+    "!dist/src/**/__tests__/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "docs/**",
+    "llms.txt",
+    "LICENSE",
+    "CHANGELOG.md",
+    "package.json"
+  ]
 }

@@ -4,9 +4,9 @@ import { useCallback, useState } from 'react';
 
 import { getLogger } from '@arki/log';
 
-import { normalizeCoordinates, validateCoordinates } from '../../core/coordinates';
-import { InvalidCoordinates } from '../../core/failures';
-import type { Coordinates } from '../../core/types';
+import { normalizeCoordinates, validateCoordinates } from '../../core/coordinates.js';
+import { InvalidCoordinates } from '../../core/failures.js';
+import type { Coordinates } from '../../core/types.js';
 
 const log = getLogger('arki:geo');
 

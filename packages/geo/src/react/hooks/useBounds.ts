@@ -8,8 +8,8 @@ import {
   getBoundsCenter,
   getBoundsRadius,
   isCoordinateInBounds,
-} from '../../core/bounds';
-import type { Bounds, Coordinates } from '../../core/types';
+} from '../../core/bounds.js';
+import type { Bounds, Coordinates } from '../../core/types.js';
 
 export type UseBoundsReturn = {
   bounds: Bounds | null;

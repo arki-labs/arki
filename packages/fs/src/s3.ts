@@ -6,7 +6,7 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { AwsS3StorageAdapter } from '@flystorage/aws-s3';
 import { FileStorage } from '@flystorage/file-storage';
-import { env } from './env';
+import { env } from './env.js';
 
 export const initializeStorage = (bucketName?: string, optionalPathPrefix?: string, region?: string) => {
   const client = new S3Client({

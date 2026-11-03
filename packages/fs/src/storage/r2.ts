@@ -7,7 +7,7 @@
  * `S3Client` directly.
  */
 
-import { createS3StorageAdapter } from './s3-adapter';
+import { createS3StorageAdapter } from './s3-adapter.js';
 
 export type R2StorageConfig = {
   /** Cloudflare account ID — used to derive the R2 endpoint. */

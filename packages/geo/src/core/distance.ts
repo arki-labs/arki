@@ -1,5 +1,5 @@
-import type { Coordinates, Direction, DistanceUnit } from './types';
-import { CONVERSION_FACTORS, EARTH_RADIUS_KM } from './types';
+import type { Coordinates, Direction, DistanceUnit } from './types.js';
+import { CONVERSION_FACTORS, EARTH_RADIUS_KM } from './types.js';
 
 /**
  * Converts degrees to radians

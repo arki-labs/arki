@@ -2,8 +2,8 @@
  * Polyline utilities
  */
 
-import { POLYLINE_ANIMATION_INTERVAL, POLYLINE_DASH_LENGTH, POLYLINE_GAP_LENGTH } from '../constants';
-import type { Coordinates } from '../types';
+import { POLYLINE_ANIMATION_INTERVAL, POLYLINE_DASH_LENGTH, POLYLINE_GAP_LENGTH } from '../constants.js';
+import type { Coordinates } from '../types/index.js';
 
 /**
  * Create marching ants animation for a polyline

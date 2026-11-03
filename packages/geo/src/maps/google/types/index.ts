@@ -6,12 +6,12 @@
  */
 
 // Re-export ALL types from @vis.gl/react-google-maps
-export * from './primitives';
+export * from './primitives.js';
 
 // Export custom type definitions
-export * from './map';
-export * from './marker';
-export * from './events';
+export * from './map.js';
+export * from './marker.js';
+export * from './events.js';
 
 // Re-export core geo types for convenience
-export type { Coordinates, Bounds, DistanceUnit, Direction } from '../../../core/types';
+export type { Coordinates, Bounds, DistanceUnit, Direction } from '../../../core/types.js';

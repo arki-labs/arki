@@ -2,10 +2,10 @@
  * Google Maps event type definitions
  */
 
-import type { Coordinates } from '../../../core/types';
+import type { Coordinates } from '../../../core/types.js';
 
 // Re-export event types from @vis.gl
-export type { MapCameraChangedEvent, MapEvent, MapMouseEvent } from './primitives';
+export type { MapCameraChangedEvent, MapEvent, MapMouseEvent } from './primitives.js';
 
 /**
  * Custom coordinate event (simplified from MapMouseEvent)

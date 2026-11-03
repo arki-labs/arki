@@ -6,12 +6,12 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 
-import { POLYLINE_ANIMATION_INTERVAL } from '../constants';
-import type { Coordinates } from '../types';
-import { createMarchingAntsAnimation, createDashedPolylineConfig, createPolylinePath } from '../utils/polyline';
-import { getMarkerColor } from '../utils/colors';
-import { useGoogleMap } from './useGoogleMap';
-import { useGoogleMaps } from './useGoogleMaps';
+import { POLYLINE_ANIMATION_INTERVAL } from '../constants.js';
+import type { Coordinates } from '../types/index.js';
+import { createMarchingAntsAnimation, createDashedPolylineConfig, createPolylinePath } from '../utils/polyline.js';
+import { getMarkerColor } from '../utils/colors.js';
+import { useGoogleMap } from './useGoogleMap.js';
+import { useGoogleMaps } from './useGoogleMaps.js';
 
 export type PolylineData = {
   /**

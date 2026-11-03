@@ -4,8 +4,8 @@
 
 import type { ReactNode } from 'react';
 
-import type { Coordinates } from '../../../core/types';
-import type { AdvancedMarkerProps, PinProps } from './primitives';
+import type { Coordinates } from '../../../core/types.js';
+import type { AdvancedMarkerProps, PinProps } from './primitives.js';
 
 /**
  * Google Marker configuration

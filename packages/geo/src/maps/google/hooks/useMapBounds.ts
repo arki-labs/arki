@@ -6,10 +6,10 @@
 
 import { useCallback } from 'react';
 
-import { DEFAULT_BOUNDS_PADDING, HIGHLIGHTED_BOUNDS_PADDING } from '../constants';
-import type { Coordinates } from '../types';
-import { useGoogleMap } from './useGoogleMap';
-import { useApiIsLoaded } from './useApiIsLoaded';
+import { DEFAULT_BOUNDS_PADDING, HIGHLIGHTED_BOUNDS_PADDING } from '../constants.js';
+import type { Coordinates } from '../types/index.js';
+import { useGoogleMap } from './useGoogleMap.js';
+import { useApiIsLoaded } from './useApiIsLoaded.js';
 
 export type UseMapBoundsOptions = {
   /**

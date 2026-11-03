@@ -17,7 +17,7 @@ export type UploadClient = {
   confirmUpload(input: { fileId: FileId }): Promise<FileRecord | FailureOf<(typeof CONFIRM_UPLOAD_FAILURES)[number]>>;
 };
 export type UploadFileOptions = {
-  onProgress?: (sent: number, total: number) => void;
+  onProgress?: (sent: number, total: number) => unknown;
   signal?: AbortSignal;
 };
 
@@ -75,7 +75,9 @@ function putWithXhr(
         if (settled) return;
         // A void callback may still return a promise. Load waits for its reports before confirming.
         progress = progress
-          .then(() => (settled ? undefined : onProgress(event.loaded, event.total)))
+          .then(async () => {
+            if (!settled) await onProgress(event.loaded, event.total);
+          })
           .catch((error: unknown) => {
             done(UnexpectedDefect({ cause: error }));
             try {
