@@ -13,6 +13,31 @@ When the ledger and the tool disagree, **trust the tool**, then correct the ledg
 
 ---
 
+## Wave 5 — Specialized (specialized) @ 5a725a6 (2026-11-03)
+
+<!-- candidate: specialized-5a725a6 -->
+
+**Packages shipped** (6, in publish order):
+
+| Package | Version | Order |
+| ------- | ------- | ----- |
+| @arki/bench | 0.2.0 | 1 |
+| @arki/math | 0.2.0 | 2 |
+| @arki/expr | 0.1.0 | 3 |
+| @arki/money | 0.2.0 | 4 |
+| @arki/cas | 0.1.0 | 5 |
+| @arki/payments | 0.5.0 | 6 |
+
+**Source commit**: `5a725a60c76cbb9f3cd3148eb0bba3167d804520`. Tarballs verified on npm by `dist.integrity`.
+
+**Scorecard at publish**: `OPEN` (6 pass, 0 warn, 0 fail, 0 deferred).
+
+**Candidate checks**: `docs:@arki/bench` success, `docs:@arki/cas` success, `docs:@arki/expr` success, `docs:@arki/math` success, `docs:@arki/money` success, `docs:@arki/payments` success, `published:@arki/bench` success, `published:@arki/cas` success, `published:@arki/expr` success, `published:@arki/math` success, `published:@arki/money` success, `published:@arki/payments` success, `runtimes:@arki/bench` success, `scorecard` success, `smoke` success.
+
+**GitHub mirror**: `sync --apply` runs after this entry; its result is `checks.sync` in `.release/candidates/specialized-5a725a6/candidate.json`.
+
+---
+
 ## Wave 6 — AI (ai) @ 3355f1b (2026-11-02)
 
 <!-- candidate: ai-3355f1b -->
