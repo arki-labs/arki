@@ -20,6 +20,19 @@ import type { Plugin } from 'vite';
 const FLEET_SERVER_ONLY_PACKAGES = ['@arki/admin'] as const;
 
 /**
+ * Every `@arki/*` package, bundled into the SSR build instead of left external.
+ *
+ * Some packages publish TypeScript source as their `import` target
+ * (`@arki/ui`, `@arki/icons`) or reach one from built code (`@arki/seo/react`
+ * imports `@arki/icons/phosphor`). Left external, the SSR output imports them
+ * from `node_modules`, and Node refuses to strip types there
+ * (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`): Nitro's prerender of
+ * `/robots.txt` and `/sitemap.xml` answers 500. Bundled, Vite compiles them
+ * like the app's own code.
+ */
+const BUNDLED_IN_SSR = [/^@arki\//];
+
+/**
  * Makes a request for a missing build asset get Nitro's own 404, which carries
  * no `Cache-Control`.
  *
@@ -60,6 +73,9 @@ const missingAssetsNotCached: NitroModule = {
  * conditions. No-op for the client/SSR bundles themselves — TanStack Start
  * already strips `server.handlers` from the client output.
  *
+ * Bundles every `@arki/*` package into the SSR build, next to the app's own
+ * `ssr.noExternal` entries (Vite merges the lists). See `BUNDLED_IN_SSR`.
+ *
  * Also installs a Nitro module (Nitro's Vite plugin installs any plugin's
  * `nitro` field) so a missing `/assets/*` file is never cached as a 404 for a
  * year. See `missingAssetsNotCached`.
@@ -74,6 +90,9 @@ export function fleetVite(): Plugin & { nitro: NitroModule } {
       return {
         optimizeDeps: {
           exclude: [...FLEET_SERVER_ONLY_PACKAGES],
+        },
+        ssr: {
+          noExternal: BUNDLED_IN_SSR,
         },
       };
     },

@@ -211,7 +211,7 @@ React Compiler is not a helper here: it is `@vitejs/plugin-react`'s own option, 
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `zodCompiled()`    | Server bundle only: prepends `import 'zod/compile'` to the server entry, so every schema the server constructs (oRPC inputs, server function validators, env) parses through a compiled validator. Schemas the compiler cannot model fall back to the interpreter. |
 | `oneChunkPerRoute` | `codeSplittingOptions` that keeps a route's loader in the route's own chunk. The default leaves every loader in the entry chunk, so the first page downloads every route's validators and server-function stubs.                                                   |
-| `fleetVite()`      | Excludes `@arki/admin` from the client dev dep-scan for apps that mount the `/api/fleet` snapshot route.                                                                                                                                                           |
+| `fleetVite()`      | Bundles every `@arki/*` package into the SSR build: some publish TypeScript source, which Node will not load from `node_modules`. Also excludes `@arki/admin` from the client dev dep-scan for apps that mount the `/api/fleet` snapshot route.                      |
 
 ## Behind a TLS proxy: `withForwardedProto` from `@arki/tanstack-start/server`
 

@@ -48,7 +48,7 @@ console.log(withForwardedProto(proxied).url);
 
 1. Add `zodCompiled()` for a compiled zod validator in the server bundle.
 2. Pass `codeSplittingOptions: oneChunkPerRoute` to `tanstackStart`.
-3. Add `fleetVite()` when the app mounts the `/api/fleet` snapshot route.
+3. Add `fleetVite()` when the app uses any `@arki/*` package: it bundles them into the SSR build, because some publish TypeScript source that Node will not load from `node_modules`. It also covers the `/api/fleet` snapshot route.
 
 ### Start Sentry
 

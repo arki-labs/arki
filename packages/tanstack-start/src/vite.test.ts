@@ -7,10 +7,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { InlineConfig } from 'vite';
-import { build, createServer } from 'vite';
+import { build, createServer, resolveConfig } from 'vite';
 import { describe, expect, it } from 'vitest';
 
-import { oneChunkPerRoute, zodCompiled } from './vite';
+import { fleetVite, oneChunkPerRoute, zodCompiled } from './vite';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'vite');
 
@@ -77,5 +77,26 @@ describe('oneChunkPerRoute', () => {
       ['errorComponent'],
       ['notFoundComponent'],
     ]);
+  });
+});
+
+describe('fleetVite', () => {
+  // An @arki package left external is imported from node_modules at prerender, where Node will not
+  // strip the TypeScript some of them publish: the SSR build must bundle every one, and still bundle
+  // what the app lists itself.
+  it('SSR bundles every @arki package next to the app’s own noExternal entries', async () => {
+    const config = await resolveConfig(
+      { root: fixtures, configFile: false, logLevel: 'silent', plugins: [fleetVite()], ssr: { noExternal: ['react-tweet'] } },
+      'build',
+    );
+    const noExternal = config.environments['ssr']?.resolve.noExternal;
+    const bundled = (name: string) =>
+      noExternal === true ||
+      (Array.isArray(noExternal) && noExternal.some(entry => (typeof entry === 'string' ? entry === name : entry.test(name))));
+
+    expect(bundled('@arki/icons')).toBe(true);
+    expect(bundled('@arki/seo')).toBe(true);
+    expect(bundled('react-tweet')).toBe(true);
+    expect(bundled('react')).toBe(false);
   });
 });
