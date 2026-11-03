@@ -1,234 +1,130 @@
-# @arki/geo Package - Quick Reference
+# @arki/geo
 
-## 📋 Summary
+Geospatial toolkit for ARKI apps: coordinate and distance maths that run anywhere, geocoding with
+provider fallback and a cache, and React hooks and Google Maps components for the browser.
 
-Create a unified geospatial package that:
+## Install
 
-- **Consolidates** existing geocoding from `@arki/geo/geocoding`
-- **Extracts** scattered distance calculation utilities
-- **Separates** server-side (Node.js) and client-side (React) code
-- **Prepares** for future maps, geofencing, and spatial features
-
-## 🎯 Key Benefits
-
-1. **No Bundle Bloat** - Frontend imports only lightweight utilities (~2KB), not Node.js geocoding libraries (~150KB)
-2. **Single Source of Truth** - One Haversine distance implementation instead of 2+ scattered versions
-3. **Type Safety** - Standardized `Coordinates` type across all apps
-4. **Future Ready** - Clear structure for adding maps, clustering, routing
-5. **Backward Compatible** - Migration maintains all existing APIs
-
-## 📦 Package Structure
-
-```
-@arki/geo
-├── Main export (server + shared)     → import from '@arki/geo'
-├── Client export (React + core)      → import from '@arki/geo/react'
-├── Core utilities (isomorphic)       → import from '@arki/geo/core'
-└── Geocoding (server-only)           → import from '@arki/geo/geocoding'
+```sh
+bun add @arki/geo
 ```
 
-## 🔑 Core Types
+Peers are optional. Install `react` and `react-dom` for `@arki/geo/react`. Install
+`@vis.gl/react-google-maps` for `@arki/geo/react/google-maps`.
 
-```typescript
-// Standard coordinates (WGS84)
-type Coordinates = {
-  lat: number; // -90 to 90
-  lng: number; // -180 to 180
-};
+| Entry                         | What                                                                 | Runs on                  |
+| ----------------------------- | -------------------------------------------------------------------- | ------------------------ |
+| `@arki/geo`                   | `Coordinates`, `Bounds`, distance, bearing, bounds, formatting, failures | Node, Bun, Deno, browser |
+| `@arki/geo/geocoding`         | `GeocodingService`, `createGeocodingService`, `geocodingEnv`         | server                   |
+| `@arki/geo/react`             | everything in `@arki/geo`, plus `useCoordinates`, `useDistance`, `useBoundsFromCoordinates`, `useBoundsFromRadius` | browser, React |
+| `@arki/geo/react/google-maps` | `GoogleMapsProvider`, `GoogleMap`, `GoogleMarker`, `LocationPicker`, street view and polyline helpers | browser, React |
 
-// Geocoding result
-type GeocodeResult = {
-  coordinates: Coordinates;
-  formattedAddress: string;
-  addressComponents: AddressComponents;
-  placeId?: string;
-  provider: string;
-};
+Import `@arki/geo/geocoding` only on the server. It pulls in the geocoder libraries.
 
-// Bounding box
-type Bounds = {
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-};
+## Quick start
+
+Coordinates are `{ lat, lng }` in WGS84. Distance defaults to kilometres.
+
+```ts run
+import { bearingToDirection, calculateBearing, calculateDistance } from '@arki/geo';
+
+const paris = { lat: 48.8566, lng: 2.3522 };
+const london = { lat: 51.5074, lng: -0.1278 };
+
+const km = calculateDistance(paris, london);
+const miles = calculateDistance(paris, london, 'mi');
+const heading = bearingToDirection(calculateBearing(paris, london));
+
+if (Math.round(km) !== 344 || miles >= km) throw new Error('unexpected distance');
+if (heading !== 'NNW') throw new Error(`unexpected heading ${heading}`);
 ```
 
-## 🚀 Usage Patterns
+Functions that take untrusted input return a failure instead of throwing. `validateCoordinates`
+and `parseCoordinates` give `InvalidCoordinates` for a bad value.
 
-### Backend: Geocoding
+```ts run
+import { InvalidCoordinates, parseCoordinates } from '@arki/geo';
 
-```typescript
+const point = parseCoordinates('48.8566, 2.3522');
+if (InvalidCoordinates.is(point)) throw new Error('should parse');
+if (point.lat !== 48.8566) throw new Error('wrong latitude');
+
+const bad = parseCoordinates('north pole');
+if (!InvalidCoordinates.is(bad)) throw new Error('should fail');
+```
+
+## Geocoding
+
+`createGeocodingService` takes a config and an optional cache. The cache needs `get` and `set`,
+so an `@arki/kv` instance fits. `geocodingEnv` reads the matching environment variables
+(`GEOCODING_PROVIDER`, `GOOGLE_MAPS_API_KEY`, `GEOCODING_CACHE_TTL` and so on).
+
+```ts skip="calls a live geocoding provider"
 import { AddressNotFound } from '@arki/geo';
-import { createGeocodingServiceFromEnv } from '@arki/geo/geocoding';
+import { createGeocodingService } from '@arki/geo/geocoding';
 
-const geocoding = createGeocodingServiceFromEnv(env, kv);
+const geocoding = createGeocodingService({
+  provider: 'nominatim',
+  fallbackProviders: [],
+  google: { enabled: false },
+  mapbox: { enabled: false },
+  nominatim: { enabled: true },
+  locationiq: { enabled: false },
+  here: { enabled: false },
+  opencage: { enabled: false },
+  geocodio: { enabled: false },
+  cache: { enabled: false, ttl: 2_592_000, keyPrefix: 'geo:' },
+});
+
 const result = await geocoding.geocode('1600 Amphitheatre Parkway');
-if (AddressNotFound.is(result)) return result; // no provider knows this address
+if (AddressNotFound.is(result)) throw new Error('no provider knows this address');
 ```
 
-`geocode` returns `AddressNotFound` (`geo.address_not_found`, status 404, data `{ address }`) when every provider that answered found nothing. A provider with no results passes to the next one first. A missing address is not cached. When no provider answers, `geocode` returns `ProviderRateLimited` (with `retryAfterMs` from `Retry-After`), `ProviderUnreachable` (outage or timeout, `timeoutMs` in the config, default 10 s) or `ProviderRejected` (bad key), each with the list of attempts. A caller that aborts gets `GeocodingCancelled`. Import the failures from `@arki/geo`. `batchGeocode` maps each address to what `geocode` returned for it, or returns `GeocodingCancelled`.
+## Failure behaviour
 
-`reverseGeocode(lat, lon)` follows the same rules. It returns `NoAddressAtLocation` (`geo.no_address_at_location`, status 404, data `{ latitude, longitude }`) when every provider that answered found no address there, such as a point at sea (Null Island, at 0, 0, is a good one). It is not cached either. Import it from `@arki/geo`. node-geocoder reports Google's `ZERO_RESULTS` and Nominatim's "Unable to geocode" as errors, not as an empty list. `reverseGeocode` treats those two as "nothing here" too. Any other provider error is a fault.
+Failures are returned as values. Check them with `.is(value)`.
 
-### Backend: Distance
+- `geocode` returns `AddressNotFound` (`geo.address_not_found`, status 404) when every provider that
+  answered found nothing. A provider with no results passes to the next one first. A missing
+  address is not cached.
+- When no provider answers, `geocode` returns `ProviderRateLimited` (with `retryAfterMs` from
+  `Retry-After`), `ProviderUnreachable` (outage or timeout; `timeoutMs` in the config, default
+  10 s) or `ProviderRejected` (bad key). Each carries the list of attempts.
+- A caller that aborts through `signal` gets `GeocodingCancelled`.
+- `reverseGeocode(lat, lon)` follows the same rules. It returns `NoAddressAtLocation`
+  (`geo.no_address_at_location`, status 404) when no provider finds an address, such as a point at sea.
+- `batchGeocode(addresses, concurrency)` maps each address to what `geocode` returned for it.
+- Coordinate helpers return `InvalidCoordinates` for a value out of range or not a number.
 
-```typescript
-import { calculateDistance } from '@arki/geo';
+Import every failure from `@arki/geo`.
 
-const distance = calculateDistance(shop, adasHouse, 'km');
-const isNearby = isWithinRadius(shop, adasHouse, 5); // inside the delivery zone
-```
+## React
 
-### Frontend: Distance Hook
-
-```typescript
+```tsx skip="needs a browser and React rendering"
 import { useDistance } from '@arki/geo/react';
 
-const { distance, bearing, formatted } = useDistance(from, to, {
-  unit: 'km',
-  precision: 2,
-});
+export function Away({ from, to }: { from: { lat: number; lng: number }; to: { lat: number; lng: number } }) {
+  const km = useDistance(from, to, 'km');
+  return <span>{km === null ? 'unknown' : `${km.toFixed(1)} km`}</span>;
+}
 ```
 
-### Frontend: Pure Calculations
+`useDistance` returns `null` when either point is `null`. Apps import the Google Maps components
+from `@arki/geo/react/google-maps` and never import `@vis.gl/react-google-maps` directly.
 
-```typescript
-import { calculateDistance, formatCoordinates } from '@arki/geo/react';
+## When not to use this
 
-const dist = calculateDistance(shop, adasHouse, 'mi');
-```
+- You need routing, travel time or isochrones. This package gives straight-line (great-circle) distance.
+- You need geometry on a projected plane or polygon maths. Use a GIS library.
+- You need Mapbox or Leaflet components. Only Google Maps components ship today.
 
-## 🔄 Migration Checklist
+## Runtime support
 
-### Backend Apps
+The maths in `@arki/geo` is pure and runs on Node, Bun, Deno and browsers. `@arki/geo/geocoding`
+needs Node or Bun. `@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later in a browser.
 
-- [ ] Replace `@arki/geo/geocoding` → `@arki/geo/geocoding`
-- [ ] Replace local distance functions → `@arki/geo`
-- [ ] Update `Coordinates` type to standard format
-- [ ] Update package.json dependencies
+## Limits
 
-### Frontend Apps
-
-- [ ] Replace local distance functions → `@arki/geo/react`
-- [ ] Update `Coordinates` type to standard format
-- [ ] Never import from `@arki/geo` (server-only)
-- [ ] Test bundle size (should be ~2KB)
-
-## ⚠️ Critical Rules
-
-### ✅ DO
-
-- Import from `@arki/geo/react` in frontend code
-- Use standard `{ lat, lng }` coordinates everywhere
-- Use `calculateDistance()` from package, not local implementations
-
-### ❌ DON'T
-
-- Import `@arki/geo` in frontend (will bundle Node.js code)
-- Import `@arki/geo/geocoding` in frontend
-- Create new distance calculation implementations
-
-## 📊 Current Duplications
-
-**Distance Calculations (same Haversine formula):**
-
-1. `apps/games-platform/web` - Frontend (Then & There game)
-2. `apps/kapodopera/backend` - Backend (Location search)
-
-**Will consolidate to:** `@arki/geo/core/distance.ts`
-
-## �️ Map Providers (Enhanced)
-
-### Supported Providers
-
-1. **Google Maps** (@vis.gl/react-google-maps) - Comprehensive, best-in-class
-2. **Apple Maps** (MapKit JS) - Native Apple ecosystem integration
-3. **Mapbox** (react-map-gl) - Custom styling, 3D maps
-4. **Leaflet** (react-leaflet) - Open source, lightweight
-5. **HERE Maps** - Enterprise-grade logistics and routing
-
-### Quick Start
-
-```typescript
-// Google Maps
-import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
-
-<APIProvider apiKey={key}>
-  <Map defaultCenter={{lat: 40.7, lng: -74}} defaultZoom={12}>
-    <AdvancedMarker position={{lat: 40.7, lng: -74}} />
-  </Map>
-</APIProvider>
-
-// Mapbox
-import Map, { Marker } from 'react-map-gl';
-
-<Map
-  mapboxAccessToken={token}
-  initialViewState={{longitude: -74, latitude: 40.7, zoom: 12}}
-  mapStyle="mapbox://styles/mapbox/streets-v12"
->
-  <Marker longitude={-74} latitude={40.7} />
-</Map>
-
-// Leaflet (with OSM - no API key!)
-import { MapContainer, TileLayer, Marker } from 'react-leaflet';
-
-<MapContainer center={[40.7, -74]} zoom={12}>
-  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-  <Marker position={[40.7, -74]} />
-</MapContainer>
-```
-
-### Provider Comparison
-
-| Provider    | Best For        | Free Tier      | Bundle Size | API Key  |
-| ----------- | --------------- | -------------- | ----------- | -------- |
-| Google Maps | General purpose | 28k loads/mo   | ~120KB      | Required |
-| Apple Maps  | Apple devices   | 250k views/day | ~80KB       | Required |
-| Mapbox      | Custom styling  | 50k loads/mo   | ~200KB      | Required |
-| Leaflet     | Open source     | Unlimited      | ~40KB       | Optional |
-| HERE        | Enterprise      | 250k txns/mo   | ~150KB      | Required |
-
-### Server-Side Features
-
-```typescript
-// Generate static map URLs
-import { generateStaticMapUrl } from '@arki/geo/maps/server';
-
-const mapUrl = generateStaticMapUrl('google', {
-  center: { lat: 40.7, lng: -74 },
-  zoom: 12,
-  width: 600,
-  height: 400,
-  markers: [{ position: { lat: 40.7, lng: -74 }, label: 'A' }],
-  apiKey: process.env.GOOGLE_MAPS_API_KEY,
-});
-
-// Use in Server Components
-<img src={mapUrl} alt="Map" />
-```
-
-See **`MAP_PROVIDERS_GUIDE.md`** for complete implementation examples.
-
-## 🔮 Future Features
-
-- **Geofencing**: Point-in-polygon, radius checks
-- **Clustering**: K-means, DBSCAN for marker clustering
-- **Routing**: Simple distance-based routing
-- **Geocoding UI**: Address autocomplete components
-
-## 📅 Timeline
-
-- **Week 1-2**: Create package structure + core utilities
-- **Week 2-3**: Migrate geocoding service
-- **Week 3**: Create React hooks
-- **Week 4-5**: Update all consumers
-- **Week 5**: Documentation
-- **Week 6**: Deprecate `@arki/geo/geocoding`
-
-**Total: 3-4 weeks**
-
-## 📚 Full Documentation
-
-See `GEO_IMPLEMENTATION_PLAN.md` for complete details.
+- Distance uses the haversine formula on a sphere (Earth radius 6371 km). Error is up to about 0.5%.
+- The geocoding cache stores results by a hash of the address. It does not cache failures.
+- Provider rate limits and terms of use are yours to follow.

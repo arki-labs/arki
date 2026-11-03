@@ -6,7 +6,7 @@ any byte is written.
 
 ## Install and peers
 
-`@arki/fs` is a workspace package (`"private": true`). Add it with `bun add @arki/fs` in the app.
+`@arki/fs` is published on npm. Add it with `bun add @arki/fs` in the app.
 
 | Entry                                                       | What                                                        | Runs on                                        | Peers you install                |
 | ----------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------- | -------------------------------- |
@@ -35,7 +35,7 @@ server has looked at the stored object.
 
 Declare the owner id and the table:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // model/ids.ts (browser-safe)
 export const userId = defineId('usr_');
 export type UserId = IdOf<typeof userId>;
@@ -46,7 +46,7 @@ export const files = filesTable(pgColumns(), { owner: userId });
 
 Build the storage once at boot (in a Dot feature, inside its `.infra()` step):
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // infra (boot): built once, shared by every request
 export type R2Env = {
   R2_ACCOUNT_ID: string;
@@ -72,7 +72,7 @@ export function buildStorage(db: FilesDb, env: R2Env) {
 
 Add the four procedures, contract-first:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // contract + router: contract-first, the four procedures come ready-made
 export const appContract = { files: filesContract };
 export type AppContext = { userId: UserId | null };
@@ -93,7 +93,7 @@ export function buildRouter(storage: FileStorage<typeof files>) {
 
 Upload from the browser in one call:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // browser: createUpload → PUT → confirmUpload in one call; keep the FileId
 export async function attach(orpc: AppClient, blob: Blob, onPercent: (percent: number) => void) {
   const file = await uploadFile(filesUploadClient(orpc.files), blob, {
@@ -108,7 +108,7 @@ Keep upload and download URLs out of persisted query caches, logs and analytics.
 
 Read it back. Store the `FileId`, never a URL:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // on read: store the FileId, never the URL
 export async function avatarUrl(storage: FileStorage<typeof files>, viewer: UserId, avatar: `fil_${string}`) {
   const link = await storage.url(viewer, avatar, { disposition: 'inline' });
@@ -230,7 +230,7 @@ Check CORS once by hand in a real browser after setup.
 
 Abandoned uploads and removals are finished by a sweep. Schedule it in the app, one replica at a time:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // the sweep: loop while `more`, inside a time budget
 export async function drain(storage: FileStorage<typeof files>, options: { batch?: number; budgetMs?: number } = {}) {
   const deadline = Date.now() + (options.budgetMs ?? 60_000);
@@ -260,7 +260,7 @@ The rows hold the duty, so a missed tick loses nothing. Two sweepers never take 
 (`createLibsqlDb` from `@arki/db/libsql`). Import from `@arki/fs/sqlite` instead of `@arki/fs/pg`. The
 table is written once; only the kit changes:
 
-```ts
+```ts skip="app fragment: needs the app's database, Dot feature and bucket credentials"
 // model/tables.ts (server): the same table on the SQLite kit; `prefix` stands in for a Postgres schema
 export const files = filesTable(sqliteColumns({ prefix: 'storage_' }), { owner: userId });
 
