@@ -59,7 +59,7 @@
   ],
   "scripts": {
     "bench": "bun run build && arki-bench",
-    "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
+    "build": "tsc -p tsconfig.types.json && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
