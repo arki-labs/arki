@@ -4,8 +4,10 @@ The Playwright config ARKI projects share. It ships TypeScript source, which Pla
 
 ## Install
 
-```sh
-bun add -D @arki/playwright-config @playwright/test
+This config is not published to npm. It is used inside this repo only. A package here adds it as a workspace dependency:
+
+```json
+{ "devDependencies": { "@arki/playwright-config": "workspace:*" } }
 ```
 
 ## Use

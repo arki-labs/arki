@@ -4,8 +4,10 @@ The Vitest base config ARKI projects share. It ships TypeScript source, so Vites
 
 ## Install
 
-```sh
-bun add -D @arki/vitest-config vitest
+This config is not published to npm. It is used inside this repo only. A package here adds it as a workspace dependency:
+
+```json
+{ "devDependencies": { "@arki/vitest-config": "workspace:*" } }
 ```
 
 ## Use

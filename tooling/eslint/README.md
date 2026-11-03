@@ -4,8 +4,10 @@ Shared ESLint flat configs for ARKI projects. Plain JavaScript, no build.
 
 ## Install
 
-```sh
-bun add -D @arki/eslint-config eslint
+This config is not published to npm. It is used inside this repo only. A package here adds it as a workspace dependency:
+
+```json
+{ "devDependencies": { "@arki/eslint-config": "workspace:*" } }
 ```
 
 ## Use

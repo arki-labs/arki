@@ -146,19 +146,8 @@ export const config: ReleaseConfig = {
       packages: ['@arki/embeddings', '@arki/ai', '@arki/chat-ui'],
     },
     {
-      id: 'tooling',
-      label: 'Wave 7 — Tooling',
-      // Joined 2026-11-03: the shared configs and the library checks every
-      // arki package builds with, so outside contributors and apps can use
-      // them from npm. `@arki/arki-release` stays private (the release tool).
-      packages: [
-        '@arki/tsconfig', '@arki/eslint-config', '@arki/prettier-config', '@arki/vitest-config',
-        '@arki/playwright-config', '@arki/library-tooling',
-      ],
-    },
-    {
       id: 'content-and-platform',
-      label: 'Wave 8 — Content and Platform',
+      label: 'Wave 7 — Content and Platform',
       // Joined 2026-11-03: the remaining libraries, leaves first; content-react
       // last (it builds on content and intl).
       packages: [

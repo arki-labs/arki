@@ -4,8 +4,10 @@ The Prettier config ARKI projects share. Plain JavaScript, no build.
 
 ## Install
 
-```sh
-bun add -D @arki/prettier-config prettier
+This config is not published to npm. It is used inside this repo only. A package here adds it as a workspace dependency:
+
+```json
+{ "devDependencies": { "@arki/prettier-config": "workspace:*" } }
 ```
 
 ## Use

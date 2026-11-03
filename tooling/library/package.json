@@ -22,7 +22,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "private": false,
+  "private": true,
   "type": "module",
   "exports": {
     "./api-index-schema": {

@@ -4,8 +4,10 @@ Shared `tsconfig` files for ARKI projects. It ships JSON only. There is no build
 
 ## Install
 
-```sh
-bun add -D @arki/tsconfig typescript
+This config is not published to npm. It is used inside this repo only. A package here adds it as a workspace dependency:
+
+```json
+{ "devDependencies": { "@arki/tsconfig": "workspace:*" } }
 ```
 
 ## Use
