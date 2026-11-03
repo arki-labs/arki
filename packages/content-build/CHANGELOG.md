@@ -14,4 +14,6 @@
 
 ### Patch Changes
 
+- `sharp` moves to `^0.35.5`. Version 0.34 has no prebuilt binary that installs under Node 26, so installing `@arki/content-build` tried to compile sharp from source and failed.
 - e132ad3: Object checks on unknown values now use `is(value, recordSchema)` from `@arki/schema` instead of hand-written `typeof value === 'object'` guards. Behaviour is unchanged.
+

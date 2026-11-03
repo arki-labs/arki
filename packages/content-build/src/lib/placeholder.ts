@@ -1,11 +1,11 @@
-import type sharp from 'sharp';
+import type { Sharp } from 'sharp';
 
 // Pre-generated 8x6 gray placeholder PNG as base64
 // This avoids sharp processing which can fail with certain colorspaces
 const FALLBACK_PLACEHOLDER =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAADklEQVQI12NIS0v7////AGMB5sEJzI0AAAAASUVORK5CYII=';
 
-const createPlaceholder = async (image: sharp.Sharp) => {
+const createPlaceholder = async (image: Sharp) => {
   try {
     const { width, height } = await image.metadata();
     if (!width || !height) {
