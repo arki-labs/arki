@@ -3,14 +3,16 @@
 // folder), install the wave tarballs there, then run it with node AND bun:
 //   node consumer-smoke.mjs && bun consumer-smoke.mjs
 // It imports every `exports` entry of every installed @arki/* package.
-// A missing optional peer, a Bun-only entry under node, or an entry the
+// A missing optional peer, a Bun-only entry under node, an entry the
 // package lists in `arki.bundlerOnly` (it loads only inside a bundler or a
-// worker; the release smoke's Vite build checks it) is reported as SKIP;
-// any other failure exits 1.
+// worker; the release smoke's Vite build checks it), or a package whose
+// `arki.runtimes` claim leaves out this runtime (a React Native package claims
+// only `hermes`) is reported as SKIP; any other failure exits 1.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.join(process.cwd(), 'node_modules', '@arki');
+const runtimeName = typeof Bun === 'undefined' ? 'node' : 'bun';
 const runtime = typeof Bun === 'undefined' ? `node ${process.version}` : `bun ${Bun.version}`;
 let failures = 0;
 
@@ -20,10 +22,16 @@ for (const dir of readdirSync(root).sort()) {
     .filter(([, meta]) => meta.optional === true)
     .map(([name]) => name);
   const bundlerOnly = new Set(manifest.arki?.bundlerOnly ?? []);
+  const claimedRuntimes = manifest.arki?.runtimes;
+  const unclaimed = claimedRuntimes !== undefined && !claimedRuntimes.includes(runtimeName);
   const entries = Object.keys(manifest.exports ?? { '.': null })
     .filter(key => key !== './package.json' && !key.includes('*'));
   for (const entry of entries) {
     const spec = entry === '.' ? manifest.name : `${manifest.name}/${entry.slice(2)}`;
+    if (unclaimed) {
+      console.log(`SKIP ${runtime} ${spec} (runtime not claimed: arki.runtimes is ${claimedRuntimes.join(', ')})`);
+      continue;
+    }
     if (bundlerOnly.has(entry)) {
       console.log(`SKIP ${runtime} ${spec} (bundler-only entry; checked by the Vite build)`);
       continue;

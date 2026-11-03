@@ -375,6 +375,44 @@ describe('runSmoke', () => {
     expect(envelope.items[0]?.checks.find(c => c.id === 'vite-build')).toEqual({ id: 'vite-build', status: 'pass', detail: '1 subpath(s) bundled' });
   });
 
+  it('skips node and bun and the Vite build for a package that claims only hermes', async () => {
+    // Why: @arki/native-ui and @arki/payments-native load react-native, whose Flow source no bare runtime or web bundler parses; their arki.runtimes claim says so.
+    const nativeJournal: Fixture = {
+      manifest: pkg('@arki/journal', '1.0.0', { arki: { runtimes: ['hermes'] } }),
+      files: { 'index.js': "import typeof View from 'react-native';\n" },
+    };
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner, calls } = fakeRunner({ packed: { journal: nativeJournal.manifest }, installed: { '@arki/journal': nativeJournal } });
+    const envelope = await runSmoke(base(dir, runner));
+    expect(envelope.errors).toEqual([]);
+    expect(envelope.items.find(i => i.name === '@arki/journal')?.checks.find(c => c.id === 'import:node')).toEqual({
+      id: 'import:node',
+      status: 'skip',
+      detail: 'arki.runtimes does not claim node',
+    });
+    expect(calls).not.toContain('npx --no-install vite build');
+  });
+
+  it('installs the optional peers of a bundler-only entry before the Vite build', async () => {
+    // Why: @arki/seo/react imports Link from its optional peer @tanstack/react-router; without the peer Vite stubs the module and the build fails.
+    const routedJournal: Fixture = {
+      manifest: pkg('@arki/journal', '1.0.0', {
+        exports: { '.': './index.js', './react': './react.js' },
+        arki: { bundlerOnly: ['./react'] },
+        peerDependencies: { '@tanstack/react-router': '^1.0.0' },
+        peerDependenciesMeta: { '@tanstack/react-router': { optional: true } },
+      }),
+      files: { 'index.js': 'export const j = 1;\n', 'react.js': "export { Link } from '@tanstack/react-router';\n" },
+    };
+    const dir = makeCandidate(['@arki/journal']);
+    const { runner, calls } = fakeRunner({ packed: { journal: routedJournal.manifest }, installed: { '@arki/journal': routedJournal } });
+    const envelope = await runSmoke(base(dir, runner));
+    const peerInstall = calls.indexOf('npm install --no-audit --no-fund --no-save @tanstack/react-router@^1.0.0');
+    expect(peerInstall).toBeGreaterThan(-1);
+    expect(peerInstall).toBeLessThan(calls.indexOf('npx --no-install vite build'));
+    expect(envelope.items[0]?.checks.find(c => c.id === 'vite-peers')?.status).toBe('pass');
+  });
+
   it('runs no Vite build for a compiled wave without bundler-only entries', async () => {
     // Why: compiled packages are proven by node and bun; a needless Vite install only slows every wave down.
     const dir = makeCandidate(['@arki/journal']);

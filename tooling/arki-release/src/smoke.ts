@@ -139,6 +139,8 @@ export function exportSpecs(manifest: z.infer<typeof manifestSchema>): string[] 
 
 /** The text consumer-smoke.mjs prints after the spec of a skipped bundler-only entry. */
 const BUNDLER_ONLY_SKIP = 'bundler-only entry';
+/** The text consumer-smoke.mjs prints for a package whose `arki.runtimes` leaves out the runtime. */
+const RUNTIME_SKIP = 'runtime not claimed';
 /** A consumer-smoke SKIP for a missing optional peer; group 1 is the peer. */
 const OPTIONAL_PEER_SKIP = /optional peer (\S+) not installed/;
 /** How many with-peers installs smoke runs while each one reveals a further optional peer. */
@@ -342,6 +344,8 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
             'A dependency pinned by this package is missing something it uses. Add the dependency to the wave or bump its pin, then re-pack.',
             pkg.name,
           );
+        } else if (mine.length > 0 && mine.every(l => l.verdict === 'SKIP' && l.rest.includes(RUNTIME_SKIP))) {
+          add(pkg.name, check(id, 'skip', `arki.runtimes does not claim ${runtime}`));
         } else {
           const bundlerOnly = mine.filter(l => l.verdict === 'SKIP' && l.rest.includes(BUNDLER_ONLY_SKIP)).length;
           const left = bundlerOnly === 0 ? '' : `; ${bundlerOnly} bundler-only left to the Vite build`;
@@ -426,11 +430,38 @@ export async function runSmoke(options: SmokeOptions): Promise<ReleaseCommandEnv
     // Compiled packages were imported under node and bun above, except the
     // entries they list in `arki.bundlerOnly`; their other optional-peer
     // entries cannot bundle without the peer, so only those entries go in.
+    // A package whose `arki.runtimes` leaves out `browser` (React Native) is
+    // not a web build target.
+    const webPackages = candidateInstalled.filter(p => p.manifest.arki?.runtimes?.includes('browser') ?? true);
+    const bundledPackages = webPackages.filter(p => sourcePackages.has(p.name) || bundlerOnlySpecs(p.manifest).specs.length > 0);
     const bundled = new Set([
-      ...candidateInstalled.filter(p => sourcePackages.has(p.name)).flatMap(p => exportSpecs(p.manifest)),
-      ...candidateInstalled.flatMap(p => bundlerOnlySpecs(p.manifest).specs),
+      ...webPackages.filter(p => sourcePackages.has(p.name)).flatMap(p => exportSpecs(p.manifest)),
+      ...webPackages.flatMap(p => bundlerOnlySpecs(p.manifest).specs),
     ]);
     if (kind === 'source' || bundled.size > 0) {
+      // A bundler-only entry may need its optional peers (seo's `./react` imports
+      // the router), so they are installed next to the tarballs, as an app would.
+      const peers = [
+        ...new Set(
+          bundledPackages.flatMap(p =>
+            Object.entries(p.manifest.peerDependenciesMeta ?? {})
+              .filter(([peer, meta]) => meta.optional === true && !tarballOf.has(peer) && !published.has(peer))
+              .map(([peer]) => `${peer}@${p.manifest.peerDependencies?.[peer] ?? 'latest'}`),
+          ),
+        ),
+      ];
+      if (peers.length > 0) {
+        const peerInstall = await run('npm', ['install', '--no-audit', '--no-fund', '--no-save', ...peers], { cwd: consumer });
+        waveChecks.push(check('vite-peers', peerInstall.code === 0 ? 'pass' : 'fail', peerInstall.code === 0 ? peers.join(', ') : brief(peerInstall)));
+        if (peerInstall.code !== 0) {
+          fail(
+            SMOKE_ERROR_CODES.viteBuildFailed,
+            `Installing the optional peers of the bundled entries failed: ${brief(peerInstall)}`,
+            'Check the peerDependencies ranges of the bundler-only packages.',
+            candidate.wave,
+          );
+        }
+      }
       const viteDir = path.join(consumer, 'vite-fixture');
       await cp(path.join(smokeDir, 'vite-fixture'), viteDir, { recursive: true });
       const imports = [...bundled].map((spec, i) => `import * as m${i} from '${spec}';\nvoid m${i};`);
