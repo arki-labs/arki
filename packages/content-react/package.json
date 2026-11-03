@@ -1,7 +1,7 @@
 {
   "name": "@arki/content-react",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "sideEffects": false,
   "type": "module",
   "exports": {

@@ -165,6 +165,8 @@ export const RELEASE_WAVE_IDS = [
   'infrastructure-adapters',
   'specialized',
   'ai',
+  'tooling',
+  'content-and-platform',
 ] as const;
 export type ReleaseWaveId = (typeof RELEASE_WAVE_IDS)[number];
 

@@ -1,7 +1,7 @@
 {
   "name": "@arki/pubsub",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Publish and subscribe with one contract and a dedicated integration per backend: memory, Postgres LISTEN/NOTIFY, SQLite (a polled table) and Redis.",
   "keywords": [
     "arki",

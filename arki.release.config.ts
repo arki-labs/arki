@@ -145,6 +145,28 @@ export const config: ReleaseConfig = {
       // chat-ui last (it imports ai's types and builds on the Frontend wave).
       packages: ['@arki/embeddings', '@arki/ai', '@arki/chat-ui'],
     },
+    {
+      id: 'tooling',
+      label: 'Wave 7 — Tooling',
+      // Joined 2026-11-03: the shared configs and the library checks every
+      // arki package builds with, so outside contributors and apps can use
+      // them from npm. `@arki/arki-release` stays private (the release tool).
+      packages: [
+        '@arki/tsconfig', '@arki/eslint-config', '@arki/prettier-config', '@arki/vitest-config',
+        '@arki/playwright-config', '@arki/library-tooling',
+      ],
+    },
+    {
+      id: 'content-and-platform',
+      label: 'Wave 8 — Content and Platform',
+      // Joined 2026-11-03: the remaining libraries, leaves first; content-react
+      // last (it builds on content and intl).
+      packages: [
+        '@arki/intl', '@arki/content', '@arki/payments-native', '@arki/content-build', '@arki/native-ui',
+        '@arki/code-editor', '@arki/seo', '@arki/pubsub', '@arki/fs', '@arki/geo', '@arki/mcp', '@arki/offline',
+        '@arki/content-react',
+      ],
+    },
   ],
   // Package tiers, mirroring docs/arki/core-packages.md. Tier 1 is the stack,
   // Tier 2 the standalone libraries; they decide which readiness items bind a

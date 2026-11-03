@@ -1,7 +1,7 @@
 {
   "name": "@arki/code-editor",
   "version": "0.1.2",
-  "private": true,
+  "private": false,
   "license": "MIT",
   "sideEffects": false,
   "type": "module",
