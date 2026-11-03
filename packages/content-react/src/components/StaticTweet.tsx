@@ -1,7 +1,7 @@
 import { XIcon } from '@arki/icons/phosphor';
 
-import DateTime from './DateTime';
-import EmbeddedCard from './EmbeddedCard';
+import DateTime from './DateTime.js';
+import EmbeddedCard from './EmbeddedCard.js';
 
 /**
  * A tweet as the card shows it. `@arki/content-build` writes these props into the compiled MDX from the embed

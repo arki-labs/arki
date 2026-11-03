@@ -1,5 +1,5 @@
 import type { LinkComponent } from '@arki/intl/react';
-import { formatPublished } from '../lib/format-published';
+import { formatPublished } from '../lib/format-published.js';
 
 type TimelineProps = {
   title: string;

@@ -6,7 +6,7 @@ import { Rss } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 
-import { Timeline } from './timeline';
+import { Timeline } from './timeline.js';
 
 /** What the posts timeline reads from each post. A content-build `Post` has these fields. */
 export type TimelinePost = {

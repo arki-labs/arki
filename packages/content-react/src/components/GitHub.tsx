@@ -1,7 +1,7 @@
 import { GithubLogo } from '@arki/icons/phosphor';
 
-import DateTime from './DateTime';
-import EmbeddedCard from './EmbeddedCard';
+import DateTime from './DateTime.js';
+import EmbeddedCard from './EmbeddedCard.js';
 
 /**
  * An issue or pull request as the card shows it. `@arki/content-build` writes these props into the compiled MDX

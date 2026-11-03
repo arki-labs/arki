@@ -4,8 +4,8 @@ import type { PostOverview } from '@arki/content';
 import { isFailure } from '@arki/failure';
 import { useDebouncedValue } from '@arki/ui/hooks/debounce';
 
-import type { SearchFailure } from './search-posts';
-import { searchPosts } from './search-posts';
+import type { SearchFailure } from './search-posts.js';
+import { searchPosts } from './search-posts.js';
 
 /**
  * Searches posts through the app's `/posts/search?query=` route as the reader types (debounced 300ms).

@@ -2,13 +2,13 @@ import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/serv
 import { useTranslations } from 'use-intl';
 
 import type { LinkComponent } from '@arki/intl/react';
-import { formatPublished } from '../lib/format-published';
+import { formatPublished } from '../lib/format-published.js';
 import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 
-import { Mdx } from './mdx';
-import { Timeline } from './timeline';
+import { Mdx } from './mdx.js';
+import { Timeline } from './timeline.js';
 
 /** What the changelog components read from each entry. A content-build `Changelog` has these fields. */
 export type ChangelogEntry = {

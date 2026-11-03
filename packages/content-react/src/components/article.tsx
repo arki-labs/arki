@@ -2,8 +2,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
 import { Badge } from '@arki/ui/badge';
 import { ScrollToTop } from '@arki/ui/scroll-to-top';
 
-import { formatPublished } from '../lib/format-published';
-import { Mdx } from './mdx';
+import { formatPublished } from '../lib/format-published.js';
+import { Mdx } from './mdx.js';
 
 /** What an article reads from a post. A content-build `Post` has these fields. */
 export type ArticlePost = {

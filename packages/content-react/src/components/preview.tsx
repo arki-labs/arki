@@ -2,7 +2,7 @@
 
 import { Button } from '@arki/ui/button';
 
-import { useProcessor } from '../react/use-preprocessor';
+import { useProcessor } from '../react/use-preprocessor.js';
 
 type Props = {
   md?: string;

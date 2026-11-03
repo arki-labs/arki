@@ -1,7 +1,7 @@
 import { MDXContent } from '@content-collections/mdx/react';
 
-import { ContentSection } from './ContentSection';
-import { components } from './mdx-components';
+import { ContentSection } from './ContentSection.js';
+import { components } from './mdx-components.js';
 
 type MdxProps = {
   code: string;

@@ -14,13 +14,13 @@ import { Hash } from '@arki/icons/phosphor';
 import { Callout } from '@arki/ui/callout';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@arki/ui/table';
 
-import type { FileTreeProps } from './FileTree';
-import { FileTree } from './FileTree';
-import { GitHubIssue, GitHubPullRequest } from './GitHub';
-import MarkdownImage from './MarkdownImage';
-import { Notification } from './notification';
-import Pre from './pre';
-import { StaticTweet } from './StaticTweet';
+import type { FileTreeProps } from './FileTree.js';
+import { FileTree } from './FileTree.js';
+import { GitHubIssue, GitHubPullRequest } from './GitHub.js';
+import MarkdownImage from './MarkdownImage.js';
+import { Notification } from './notification.js';
+import Pre from './pre.js';
+import { StaticTweet } from './StaticTweet.js';
 
 type HeadingProps = {
   id?: string;
