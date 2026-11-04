@@ -57,7 +57,7 @@ jobs:
           node-version: '26'
 
       - name: Setup pnpm (for fixture matrix install stage)
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9
           run_install: false
