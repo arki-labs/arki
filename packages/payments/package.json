@@ -413,6 +413,13 @@
     "docs/api-reference.md",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -421,6 +428,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",

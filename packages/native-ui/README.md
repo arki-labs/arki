@@ -55,6 +55,17 @@ export const demo = {
 
 React Native with Expo or Metro. The component entries import `react-native`, so they do not load in plain Node, Deno or a browser. The helpers in `lib/cn`, `lib/utils` and `lib/colors` import no React Native code and run on any runtime.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| purity | fail | unknown | 2026-11-05 |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 | Import | What it gives you |

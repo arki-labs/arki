@@ -52,9 +52,21 @@ ran: 3 rows
 
 `@arki/schedule` ships TypeScript source, so it needs Bun or a bundler. It does not run as plain Node from `node_modules`.
 
-The in-process runtime uses timers and runs on Node 22.12 or newer and Bun. Durable schedules also need Redis, through `@arki/queue`. With `clock: 'host'` the runtime arms no timers, and the host calls `trigger`.
+The in-process runtime uses timers and runs on Node 22.12 or newer, Bun and Deno. Durable schedules also need Redis, through `@arki/queue`. With `clock: 'host'` the runtime arms no timers, and the host calls `trigger`.
 
 Debug logs use the `arki:schedule` category. Show them with `DEBUG=arki:schedule`.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Steps and arounds
 

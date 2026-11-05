@@ -50,6 +50,16 @@ export const resourceId = registry.getResourceId('bmi-rechner', 'de'); // 'bmi-c
 
 The language, slug registry and dictionary entries run on Node, Bun, Deno and browsers. The `tanstack-start` entry needs React.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Failure behaviour
 
 Lookups return `undefined` when nothing matches. `getLocalizedUrl` returns the English URL unchanged when the target locale is the default or has no slug. An unknown locale falls back to the default locale's messages, and keys such as `__proto__` never match.

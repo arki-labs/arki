@@ -54,6 +54,16 @@ false
 
 The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. Default ID generation needs `crypto.getRandomValues`; UUID generation prefers `crypto.randomUUID` and otherwise uses secure random bytes. Plain Hermes has neither. Applications on runtimes without Web Crypto must initialize a provider backed by secure platform entropy that fails closed in every supported mode, including debugging. Contracts cannot certify entropy quality from returned bytes. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Why
 
 Drizzle's `$type<T>()` changes TypeScript types without validating values. Table validators therefore infer only what their runtime schemas check. `jsonColumn(name, schema)` declares JSONB storage from one stable schema and applies it at runtime. Explicit refinements reuse that schema to preserve precise validator types, because Drizzle does not retain schema types on built columns. Existing ID column metadata still checks prefixes at runtime.

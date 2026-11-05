@@ -74,6 +74,13 @@
     "LICENSE",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
@@ -83,6 +90,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",

@@ -48,6 +48,16 @@ Every other entry is Node and Bun.
 
 `./react` and `./react/templates` are the exception. They load only inside a bundler, because they render `@arki/ui` source. `package.json` lists them in `arki.bundlerOnly`, so the release smoke checks them with a Vite build, not a plain Node import.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Recipes
 
 Five tasks cover most apps. Each one builds on the one before.

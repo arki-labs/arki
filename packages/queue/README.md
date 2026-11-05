@@ -74,6 +74,16 @@ To run the same job on Redis, build the queue with `q.createQueue({ connection: 
 
 Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | fail | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Steps and arounds
 
 `.use(step(fn))` and `.use(around(fn))` run plain functions around a job's handler. A step reads the context and returns keys to add, or a failure to refuse the job. An around wraps everything after it.

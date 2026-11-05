@@ -49,6 +49,16 @@ export const label = getTheme('nord').label; // 'Nord'
 
 Browsers, through a bundler. The `themes` entry also loads under Node, Bun and Deno.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Failure behaviour
 
 An unknown theme id returns the `github-dark` theme.

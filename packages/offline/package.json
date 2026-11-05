@@ -80,6 +80,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
@@ -159,6 +160,13 @@
   "arki": {
     "bundlerOnly": [
       "./pwa"
+    ],
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
     ]
   }
 }

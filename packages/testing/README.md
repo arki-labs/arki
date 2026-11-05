@@ -49,9 +49,21 @@ For a backend test against a real database, see [the integration tester](docs/in
 
 ## Runtime support
 
-Runs under Vitest 5 and Bun on Node 22.10 or newer. The package ships TypeScript source, so plain Node cannot load it from `node_modules`: use Vitest, Bun or a bundler. Not for browsers. The containers need a reachable Docker daemon.
+Runs under Vitest 5, Bun and Deno on Node 22.10 or newer. The package ships TypeScript source, so plain Node cannot load it from `node_modules`: use Vitest, Bun or a bundler. Not for browsers. The containers need a reachable Docker daemon.
 
 Debug logs use the `testing:*` categories. Show them with `DEBUG_TESTS=true`.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | fail   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Public imports
 

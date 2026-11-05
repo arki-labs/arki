@@ -1,7 +1,7 @@
 {
   "name": "@arki/contracts",
   "version": "0.4.1",
-  "description": "Shared Zod schemas and Drizzle contract helpers \u2014 branded ID-aware select/insert/update schemas with auto-applied column refinements.",
+  "description": "Shared Zod schemas and Drizzle contract helpers — branded ID-aware select/insert/update schemas with auto-applied column refinements.",
   "keywords": [
     "arki",
     "typescript",
@@ -56,6 +56,15 @@
     "LICENSE",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",

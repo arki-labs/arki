@@ -6,15 +6,23 @@ MCP servers and MCP Apps for ARKI. Unreleased (`"private": true`) until slice 7 
 
 Measured 2026-10-17 by `bun run test:runtimes` (`scripts/smoke.mjs`: `createMcpHandler` from `@modelcontextprotocol/server` 2.3.1 answers `initialize`, `tools/list` and `tools/call` as plain `Request` → `Response`) and by `src/handler.probe.test.ts` (the official client 2.3.1 wired into `handler.fetch`, no socket).
 
-| Leg | Result |
-| --- | --- |
-| node | pass (smoke and probe) |
-| bun | pass (smoke and probe, `bun --bun vitest run`) |
-| deno | pass (bundled, because Deno cannot read `catalog:` versions) |
-| browser | out of scope for the root entry. The SDK calls `crypto.randomUUID`, which a browser only has on a secure origin, and the harness page is not one. A server does not run in a tab. `./contract` (slice 3) must bring this leg back. |
-| hermes | out of scope; a server does not run on React Native |
+Notes on the table below (the node and bun results are in it and in the smoke and the probe):
+
+- deno passes bundled, because Deno cannot read `catalog:` versions.
+- browser is out of scope for the root entry. The SDK calls `crypto.randomUUID`, which a browser only has on a secure origin, and the harness page is not one. A server does not run in a tab. `./contract` (slice 3) must bring this leg back.
+- hermes is out of scope; a server does not run on React Native.
 
 Protocol eras: a client pinned to `2026-07-28` negotiates the modern era; a default client negotiates `2025-11-25` through the handler's built-in `legacy: 'stateless'` fallback. No separate legacy server package is needed.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
 
 ## OAuth tables
 

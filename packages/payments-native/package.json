@@ -52,7 +52,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:docs": "arki-doc-examples"
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

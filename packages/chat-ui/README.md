@@ -58,6 +58,18 @@ The full file is [examples/render-agent-run.tsx](examples/render-agent-run.tsx).
 
 Browsers, and React 18 or 19 (`react` and `react-dom` peers). Components render on the server too, and every file is marked `'use client'`. The package ships TypeScript and TSX source, so your bundler must compile TSX (Vite does). The export condition is `browser`, then `import`. Not for Node scripts without a bundler.
 
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | n/a    | -                     | 2026-11-05 |
+| bun     | n/a    | -                     | 2026-11-05 |
+| deno    | n/a    | -                     | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | n/a    | -                     | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 ## Public imports
 
 One subpath per component file, plus `types` and the stylesheet.

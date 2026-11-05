@@ -83,6 +83,16 @@ export function Example() {
 
 Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 There is no root import. Every component is its own subpath: `@arki/ui/button`, `@arki/ui/dialog`, `@arki/ui/select`, `@arki/ui/table`, `@arki/ui/chart`. [`llms.txt`](./llms.txt) lists all of them with their names. The [component reference](./docs/components.md) says what each export is for.

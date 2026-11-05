@@ -47,6 +47,16 @@ Leave out `runtimeEnv` in a server app. `defineEnv` then reads `globalThis.proce
 
 `@arki/env/node` (encrypted env files) runs on Node, Bun and Deno only. It reads files and starts provider CLIs.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 - `@arki/env/core`: `defineEnv`, `secret`, `reveal`, `Redacted`, `describeEnv`, `isSecretSchema`, `formatIssues`.

@@ -62,6 +62,16 @@ export function SearchBox() {
 
 Browsers and React server rendering, through a bundler. It does not load in plain Node.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 | Import | What it gives you |

@@ -18,3 +18,17 @@ const { html, headings } = await compileMarkdown(document.content, {
 - `headings`: `{ depth, text, id }` for every heading, in order. Ids match GitHub's, so `#anchor` links keep working.
 - Code blocks are highlighted by `rehype-pretty-code` with light and dark themes. Each token carries `--shiki-light` and `--shiki-dark` CSS variables; the app's CSS picks one.
 - `rewriteLink(href)` runs on every link: return a new `href`, `null` to drop the link and keep its text, or `undefined` to keep it.
+
+## Runtime support
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->

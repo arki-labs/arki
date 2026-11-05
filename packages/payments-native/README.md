@@ -54,6 +54,17 @@ After `'purchased'`, the entitlement reaches your backend through the webhook a 
 
 React Native on iOS and Android, through Metro or Expo. `react-native-purchases` is a native module, so the package does not run in plain Node, Deno or a browser. The `react-native` export condition and the default condition both point at the same compiled file.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| purity | fail | unknown | 2026-11-05 |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 Everything comes from `@arki/payments-native`.

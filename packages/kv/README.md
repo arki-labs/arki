@@ -43,7 +43,17 @@ This needs a Redis at that URL, so the block is compiled and not run. In an app,
 
 ## Runtime support
 
-Node and Bun on a server. The client uses `ioredis` and `@keyv/redis`, which need sockets. It does not run in a browser, Deno or Hermes. `@arki/kv/errors` has no Redis import.
+Node, Bun and Deno on a server. The client uses `ioredis` and `@keyv/redis`, which need sockets. It does not run in a browser or Hermes. `@arki/kv/errors` has no Redis import.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
 
 ## Usage
 

@@ -50,6 +50,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
     "test": "vitest run --configLoader runner"
   },
@@ -96,6 +97,9 @@
   "arki": {
     "bundlerOnly": [
       "."
+    ],
+    "runtimes": [
+      "browser"
     ]
   }
 }

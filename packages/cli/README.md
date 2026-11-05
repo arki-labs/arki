@@ -75,6 +75,18 @@ functions you pass and never exits the process. `run(program)` reads
 and exits with the code. `bun run test:runtimes` checks the built `dist/` on
 each runtime.
 
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 ## Public imports
 
 One entry, `@arki/cli`:

@@ -370,3 +370,15 @@ The enqueue boundary emits `offline.queue.enqueue` under the active OTel context
 `QueueStorageCorrupt` preserves invalid stored bytes. `QueuePersistenceUnconfirmed` requires reading local state before repeating a local write. `QueueEffectUnconfirmed` carries the identity of a remotely accepted effect whose cleanup needs reconciliation. Unknown adapter defects stop replay as `UnexpectedDefect`; mark a known network outage with `QueueTransportUnavailable()` so the queue can own its retries. HTTP status refusals retain auth/4xx/5xx policy. An explicit drain resumes an authentication halt.
 
 Background failures reach queue events and `queue.status().failure`; hooks and devtools preserve/display them. Storage, actor persistence, dead-letter operations and drain have default spans under the active context. Query persistence, collections, PWA and runtime capabilities remain separate T08 export audits. This is not package-wide completion.
+
+## Runtime support
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | fail | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | fail | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->

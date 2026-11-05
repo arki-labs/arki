@@ -141,6 +141,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -237,6 +238,11 @@
       "./error",
       "./devtools",
       "./pwa/sw"
+    ],
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
     ]
   }
 }

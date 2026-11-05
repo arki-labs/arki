@@ -59,6 +59,16 @@ The core, `templates/auth` and the `http/*` transports use only `fetch` and run 
 
 Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 - `@arki/mail`: `mailer`, `defineTemplate`, `renderTemplate`, `failover`, `logTransport`, quota stores, the failures, `MailError`, `MAIL_ERROR_CODES` and the types.

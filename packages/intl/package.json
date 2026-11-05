@@ -72,6 +72,15 @@
     "LICENSE",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -80,6 +89,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

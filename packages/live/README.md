@@ -47,6 +47,18 @@ On the server you also need Postgres (tested on 16 and 18) and three things set 
 
 `bun run test:runtimes -- --require-all` loads every entry on Node, Bun, Deno, a browser and Hermes (React Native; set `HERMES_BIN`). The client and React entries need `fetch` with a streaming body: in React Native pass `expo/fetch` as `fetch`. The hub and `liveReceipts` need WebCrypto (`crypto.subtle`). The `pg`, `drizzle`, `orpc`, `http` and `dot` entries are for the server.
 
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 ## Public imports
 
 - `@arki/live`: the portable core. `createLiveHub`, `createLiveClient`, `liveReceipts`, `live`, the wire schemas and `LIVE_ERROR_CODES`.

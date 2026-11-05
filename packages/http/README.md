@@ -68,6 +68,16 @@ To serve it, pass the engine to `listen`. See [Without DOT](#without-dot).
 
 `listen` uses `Bun.serve` under Bun (with the engine's route table, so Bun matches those routes natively) and `@hono/node-server` under Node. The server entry loads `node:async_hooks`. `bun run test:runtimes` runs the client smoke test on every runtime, and `scripts/server-smoke.mjs` runs the engine on Node and Bun.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## The model
 
 A route is split in two:

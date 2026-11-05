@@ -694,6 +694,11 @@
     "LICENSE",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "browser"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc",
@@ -703,6 +708,7 @@
     "lint": "eslint .",
     "test": "vitest run --configLoader runner",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

@@ -77,6 +77,18 @@ With no arguments, `arki-bench` finds `bench/**/*.bench.{ts,mts,js,mjs}` under t
 
 `--runtime` can also measure a suite under another installed runtime such as Deno. That is a measurement target for the suite you wrote, not a support claim for `arki-bench` itself. See [Runtime matrix](#runtime-matrix).
 
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | n/a    | -                     | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 ## Public imports
 
 | Import             | What it gives you                                                                                                      |

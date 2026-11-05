@@ -48,7 +48,19 @@ if (isFailure(result) && CardDeclined.is(result)) {
 
 ## Runtime support
 
-Server only: Node and Bun. The package needs Postgres through Drizzle, the Stripe SDK and `@arki/journal`. It is not meant for browsers, Deno or React Native.
+Server only: Node, Bun and Deno. The package needs Postgres through Drizzle, the Stripe SDK and `@arki/journal`. It is not meant for browsers or React Native.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Public imports
 

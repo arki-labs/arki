@@ -184,6 +184,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -237,6 +238,9 @@
       "./code-block",
       "./markdown-message",
       "./styles/chat.css"
+    ],
+    "runtimes": [
+      "browser"
     ]
   }
 }

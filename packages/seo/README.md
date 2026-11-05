@@ -21,3 +21,15 @@ export const Route = createFileRoute('/')({
   head: () => ({ meta: Meta({ title: 'Analytical Pizza', description: 'Pizza, computed. Ovens open at noon.' }) }),
 });
 ```
+
+## Runtime support
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | fail | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->

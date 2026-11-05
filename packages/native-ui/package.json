@@ -225,6 +225,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

@@ -71,6 +71,16 @@ installed oRPC dependency. This is tracked as framework finding F35 for T11/T16.
 Use `test:runtimes --require-all` to expose the failure; a skipped Hermes leg is
 not evidence of support. Per-entry published-artifact proof remains separate.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Hosted Postgres
 
 Neon, Supabase, PlanetScale Postgres and CockroachDB connect with the default `pg` driver. Queries work through a connection pooler. Session features do not: behind a pooler in transaction mode, `LISTEN` hears nothing and a session lock is held by whoever gets the connection next. So the `db()` plugin publishes a second, small pool, `sessionPool`, on the direct URL.

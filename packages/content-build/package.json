@@ -58,6 +58,13 @@
     "LICENSE",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.types.json && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
@@ -67,6 +74,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

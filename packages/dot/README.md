@@ -114,6 +114,16 @@ The adapter entries need more:
 
 `bun run test:runtimes` boots a small app through the portable API on every leg, from the built `dist/`.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 | Import                   | What it gives you                                                                                              |

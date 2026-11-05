@@ -48,6 +48,15 @@
     "AGENTS.md",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",

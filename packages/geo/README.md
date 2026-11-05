@@ -123,6 +123,16 @@ from `@arki/geo/react/google-maps` and never import `@vis.gl/react-google-maps` 
 The maths in `@arki/geo` is pure and runs on Node, Bun, Deno and browsers. `@arki/geo/geocoding`
 needs Node or Bun. `@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later in a browser.
 
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | fail | Chromium unknown | 2026-11-05 |
+| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Limits
 
 - Distance uses the haversine formula on a sphere (Earth radius 6371 km). Error is up to about 0.5%.

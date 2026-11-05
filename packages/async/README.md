@@ -94,7 +94,19 @@ if (saved.join() !== 'ab' || save.pending) throw new Error(`unexpected: ${saved.
 
 Pure ESM. Runtime dependencies are `@arki/clock`, `@arki/failure`, `@arki/schema` and the OpenTelemetry API; Standard Schema is type-only. It uses `setTimeout`, `clearTimeout`, `AbortController`, `AbortSignal`, `AggregateError` and `Date.now`, at call time. Importing it does nothing. Vitest and Jest fake timers work without setup.
 
-Tested on Node, Bun, Deno and Chromium with `bun run test:runtimes`. Built for React Native (Hermes), which has no `Promise.withResolvers` or `AbortSignal.any`, so this package uses neither. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+Tested on Node, Bun, Deno, Chromium and Hermes with `bun run test:runtimes`. Hermes has no `Promise.withResolvers` or `AbortSignal.any`, so this package uses neither. The Hermes leg needs `HERMES_BIN` and prints `INCOMPLETE` when it is missing.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Public imports
 

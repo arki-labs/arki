@@ -78,7 +78,17 @@ export const { posts, postBySlug, changelogs, legals, faqs } = contentQueries(ge
 
 ## Runtime support
 
-Node, Bun, Deno and browsers. The package has no Node-only imports.
+Browsers. The package has no Node-only imports.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | n/a | - | 2026-11-05 |
+| bun | n/a | - | 2026-11-05 |
+| deno | n/a | - | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
 
 ## Public imports
 

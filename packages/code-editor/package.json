@@ -63,6 +63,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -110,6 +111,9 @@
   "arki": {
     "bundlerOnly": [
       "./theme-picker"
+    ],
+    "runtimes": [
+      "browser"
     ]
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "@arki/log",
   "version": "0.4.0",
-  "description": "Zero-dependency structured logging for every JavaScript runtime \u2014 message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
+  "description": "Zero-dependency structured logging for every JavaScript runtime — message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -64,6 +64,15 @@
     "docs/**",
     "package.json"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",

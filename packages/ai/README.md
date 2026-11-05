@@ -37,7 +37,17 @@ Next: [Set up AI](docs/recipes/set-up-ai.md) takes you from nothing to a first m
 
 ## Runtime support
 
-Node (the workspace tests on Node 26) and Bun. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/drizzle/sqlite`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
+Node (the workspace tests on Node 26), Bun and Deno. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/drizzle/sqlite`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
 
 ## Public imports
 

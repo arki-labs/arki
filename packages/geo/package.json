@@ -51,6 +51,15 @@
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -59,7 +68,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "test:docs": "arki-doc-examples"
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
