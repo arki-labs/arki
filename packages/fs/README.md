@@ -357,12 +357,14 @@ may have partly happened is `StorageWriteUncertain`. `globIterate` returns its f
 return value and `globStream` as its last chunk; neither throws or errors.
 
 The legacy `initializeStorage` Flystorage handle retains its upstream contract. The importing application
-operation owns its throws, cancellation and cleanup. This named foreign bridge does not exempt the owned
+operation owns its throws, cancellation and cleanup. Building the handle runs in an `fs.s3.initialize_storage`
+span; the handle's own Flystorage calls carry no `@arki/fs` span. This named foreign bridge does not exempt the owned
 adapters or lifecycle.
 
 ### Observability
 
-Owned local/S3 calls, readFirstLine, the upload workflow and files lifecycle emit default `@arki/fs` spans,
+Owned local/S3 calls, readFirstLine, the upload workflow, files lifecycle and building the legacy
+`initializeStorage` handle (`fs.s3.initialize_storage`) emit default `@arki/fs` spans,
 `fs.operations` counters and `fs.operation.duration` histograms. Applications own the OTel SDK and context
 manager. Active parent context propagates into composed operations; no SDK is configured by the library.
 Only bounded operation names and canonical `failure.code` are recorded: no paths, keys, URLs, bytes,

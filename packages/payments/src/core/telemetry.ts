@@ -16,7 +16,8 @@ const INSTRUMENTATION = '@arki/payments';
 /**
  * Runs one payments operation inside a `payments.<operation>` span and counts it in
  * `payments.operations` by `operation` and `outcome` (`success`, `failure` for a returned
- * `@arki/failure` value, `error` for a throw). A returned failure also sets `payments.failure_code`.
+ * `@arki/failure` value, `error` for a throw). A returned failure also sets `failure.code`. Its span status
+ * stays unset: a declined card is an answer, not a fault, so alerts on span errors fire only for throws.
  */
 export async function observePayments<T>(
   operation: string,
@@ -31,7 +32,7 @@ export async function observePayments<T>(
     const settled: unknown = result;
     if (isFailure(settled)) {
       outcome = 'failure';
-      span.setAttribute('payments.failure_code', settled.code);
+      span.setAttribute('failure.code', settled.code);
     }
     return result;
   } catch (error) {

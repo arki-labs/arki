@@ -1,13 +1,12 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { Context, ContextManager } from '@opentelemetry/api';
-import { context, metrics, ROOT_CONTEXT, trace } from '@opentelemetry/api';
-import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { afterEach, expect, it, vi } from 'vitest';
+import { context, metrics, trace } from '@opentelemetry/api';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import type { SpanCapture } from '@arki/testing/otel';
 import { orThrow } from '@arki/failure';
+import { captureSpans } from '@arki/testing/otel';
 
 import { deleteSync } from '../local/delete.js';
 import { globIterate } from '../local/glob.js';
@@ -15,51 +14,18 @@ import { StorageRejected } from './failures.js';
 import { createLocalStorageAdapter } from './local-adapter.js';
 import { observeFs } from './operation.js';
 
-class TestContext implements ContextManager {
-  readonly storage = new AsyncLocalStorage<Context>();
-  active() {
-    return this.storage.getStore() ?? ROOT_CONTEXT;
-  }
-  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
-    current: Context,
-    callback: F,
-    receiver?: ThisParameterType<F>,
-    ...args: A
-  ): ReturnType<F> {
-    return this.storage.run(current, () => callback.apply(receiver, args));
-  }
-  bind<T>(_current: Context, target: T): T {
-    return target;
-  }
-  enable() {
-    return this;
-  }
-  disable() {
-    this.storage.disable();
-    return this;
-  }
-}
-
-let provider: BasicTracerProvider | undefined;
+let spans: SpanCapture;
 const directories: string[] = [];
-function install() {
-  const exporter = new InMemorySpanExporter();
-  provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
-  trace.setGlobalTracerProvider(provider);
-  context.setGlobalContextManager(new TestContext());
-  return exporter;
-}
+beforeEach(() => {
+  spans = captureSpans();
+});
 afterEach(async () => {
   vi.restoreAllMocks();
-  context.disable();
-  trace.disable();
-  await provider?.shutdown();
-  provider = undefined;
+  spans[Symbol.dispose]();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
 it('emits a meaningful standalone span and retains an application parent without private attributes', async () => {
-  const exporter = install();
   const directory = await mkdtemp(path.join(tmpdir(), 'private-arki-fs-'));
   directories.push(directory);
   const storage = createLocalStorageAdapter({
@@ -73,16 +39,14 @@ it('emits a meaningful standalone span and retains an application parent without
   );
   orThrow(result);
   parent.end();
-  const span = exporter.getFinishedSpans().find(span => span.name === 'fs.local.put');
-  expect(span?.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
+  expect(spans.named('fs.local.put').parent?.spanContext().spanId).toBe(parent.spanContext().spanId);
   const encoded = JSON.stringify(
-    exporter.getFinishedSpans().map(span => ({ name: span.name, attributes: span.attributes, events: span.events })),
+    spans.finished.map(span => ({ name: span.name, attributes: span.attributes, events: span.events })),
   );
   expect(encoded).not.toMatch(/private-|secret\.audit/);
 });
 
 it('reports default bounded metrics and failure.code without exporting a cause', async () => {
-  const exporter = install();
   const meter = metrics.getMeter('@arki/fs');
   const counter = meter.createCounter('owned');
   const duration = meter.createHistogram('owned');
@@ -95,13 +59,12 @@ it('reports default bounded metrics and failure.code without exporting a cause',
   expect(await observeFs('fs.local.get', () => failure)).toBe(failure);
   expect(add).toHaveBeenCalledWith(1, { operation: 'fs.local.get', 'failure.code': failure.code });
   expect(record).toHaveBeenCalledWith(expect.any(Number), { operation: 'fs.local.get', 'failure.code': failure.code });
-  expect(exporter.getFinishedSpans()[0]?.attributes).toEqual({ 'failure.code': failure.code });
+  expect(spans.finished[0]?.attributes).toEqual({ 'failure.code': failure.code });
 });
 
 it.each(['omit', 'repeat', 'throw-before', 'throw-after', 'reject'] as const)(
   'executes once and preserves failure identity when a context manager misbehaves: %s',
   async mode => {
-    install();
     const failure = StorageRejected();
     let executions = 0;
     vi.spyOn(context, 'with').mockImplementation((_context, callback) => {
@@ -125,7 +88,6 @@ it.each(['omit', 'repeat', 'throw-before', 'throw-after', 'reject'] as const)(
 );
 
 it('isolates throwing metric providers and rejected end reports', async () => {
-  install();
   const tracer = trace.getTracer('@arki/fs');
   const start = tracer.startSpan.bind(tracer);
   vi.spyOn(tracer, 'startSpan').mockImplementation((...args) => {
@@ -143,7 +105,6 @@ it('isolates throwing metric providers and rejected end reports', async () => {
 });
 
 it('the sync and iterating local helpers record the same span and failure code as their siblings', async () => {
-  const exporter = install();
   const directory = await mkdtemp(path.join(tmpdir(), 'arki-fs-telemetry-'));
   directories.push(directory);
   const outside = path.join(directory, 'outside');
@@ -151,8 +112,8 @@ it('the sync and iterating local helpers record the same span and failure code a
   expect(StorageRejected.is(deleteSync(outside))).toBe(true);
   const walk = globIterate('*', { cwd: directory, signal: AbortSignal.abort() });
   for (let next = await walk.next(); !next.done; next = await walk.next()) expect(next.value).toBeUndefined();
-  const spans = exporter.getFinishedSpans().map(span => ({ name: span.name, code: span.attributes['failure.code'] }));
-  expect(spans).toEqual([
+  const recorded = spans.finished.map(span => ({ name: span.name, code: span.attributes['failure.code'] }));
+  expect(recorded).toEqual([
     { name: 'fs.local.delete_paths', code: 'fs.storage_rejected' },
     { name: 'fs.local.glob', code: 'fs.storage_cancelled' },
   ]);

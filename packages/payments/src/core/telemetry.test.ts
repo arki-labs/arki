@@ -5,13 +5,14 @@
  * An operator finds a slow or failing provider call by its span. A declined card is an answer, not
  * an error: its span ends OK with the failure code, so alerts on span errors fire only for faults.
  */
-import { SpanStatusCode, trace } from '@opentelemetry/api';
-import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { SpanStatusCode } from '@opentelemetry/api';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import type { SpanCapture } from '@arki/testing/otel';
 import { now } from '@arki/date';
 import { defineFailure, orThrow } from '@arki/failure';
 import { money } from '@arki/money';
+import { captureSpans } from '@arki/testing/otel';
 
 import type { RecordedStripeRequest } from './providers/stripe-test-support.js';
 import type { Customer } from './types.js';
@@ -20,19 +21,17 @@ import { StripeProvider } from './providers/stripe-provider.js';
 import { createFakeStripeHttp } from './providers/stripe-test-support.js';
 import { observePayments } from './telemetry.js';
 
-const exporter = new InMemorySpanExporter();
-
+let spans: SpanCapture;
 beforeAll(() => {
-  trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }));
+  spans = captureSpans();
 });
-beforeEach(() => exporter.reset());
-afterAll(() => trace.disable());
+beforeEach(() => spans.reset());
+afterAll(() => spans[Symbol.dispose]());
 
 /** The one span the scenario ended. */
 function onlySpan() {
-  const spans = exporter.getFinishedSpans();
-  expect(spans).toHaveLength(1);
-  const [span] = spans;
+  expect(spans.finished).toHaveLength(1);
+  const [span] = spans.finished;
   if (!span) throw new Error('no span ended');
   return span;
 }
@@ -49,13 +48,15 @@ describe('observePayments', () => {
     expect(span.attributes).toEqual({ 'payments.provider': 'test' });
   });
 
-  it('sets payments.failure_code for a returned failure and keeps the span out of error', async () => {
+  it('sets failure.code for a returned failure and keeps the span out of error', async () => {
+    // WHY: dashboards group failures by `failure.code` across every @arki package; a payments-only
+    // name hid payment refusals from them.
     const refused = Refused();
 
     expect(await observePayments('test.refused', {}, () => Promise.resolve(refused))).toBe(refused);
 
     const span = onlySpan();
-    expect(span.attributes['payments.failure_code']).toBe('payments_test.refused');
+    expect(span.attributes).toEqual({ 'failure.code': 'payments_test.refused' });
     expect(span.status.code).toBe(SpanStatusCode.UNSET);
   });
 
@@ -127,7 +128,8 @@ describe('StripeProvider spans', () => {
     expect(payment).toMatchObject({ code: 'payments.card_declined' });
     const span = onlySpan();
     expect(span.name).toBe('payments.stripe.payment_intents.create');
-    expect(span.attributes['payments.failure_code']).toBe('payments.card_declined');
+    // Only the provider and the code: no amount, customer, card or payment method reaches the span.
+    expect(span.attributes).toEqual({ 'payments.provider': 'stripe', 'failure.code': 'payments.card_declined' });
     expect(span.status.code).toBe(SpanStatusCode.UNSET);
   });
 

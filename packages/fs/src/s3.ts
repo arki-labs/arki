@@ -1,21 +1,31 @@
 /**
  * Legacy Flystorage bridge. The returned `FileStorage` is the raw Flystorage object: its methods reject with
- * AWS SDK / Flystorage errors, not canonical `@arki/fs` failures, and carry no spans. Prefer
- * `createS3StorageAdapter` from `@arki/fs/storage/s3-adapter`. The S3 client is built per call, never at import.
+ * AWS SDK / Flystorage errors, not canonical `@arki/fs` failures, and carry no spans. Building it runs in an
+ * `fs.s3.initialize_storage` span. Prefer `createS3StorageAdapter` from `@arki/fs/storage/s3-adapter`. The S3
+ * client is built per call, never at import.
  */
 import { S3Client } from '@aws-sdk/client-s3';
 import { AwsS3StorageAdapter } from '@flystorage/aws-s3';
 import { FileStorage } from '@flystorage/file-storage';
-import { env } from './env.js';
 
-export const initializeStorage = (bucketName?: string, optionalPathPrefix?: string, region?: string) => {
+import { env } from './env.js';
+import { observeFsSync } from './storage/operation.js';
+
+/** Build the Flystorage handle inside an `fs.s3.initialize_storage` span; a throw marks it `UnexpectedDefect`. */
+export const initializeStorage = (bucketName?: string, optionalPathPrefix?: string, region?: string) =>
+  observeFsSync('fs.s3.initialize_storage', () => buildStorage(bucketName, optionalPathPrefix, region));
+
+function buildStorage(bucketName?: string, optionalPathPrefix?: string, region?: string) {
   const client = new S3Client({
     region: env.AWS_REGION,
-    credentials: env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY ? {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      ...(env.AWS_SESSION_TOKEN && { sessionToken: env.AWS_SESSION_TOKEN }),
-    } : undefined,
+    credentials:
+      env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+        ? {
+            accessKeyId: env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+            ...(env.AWS_SESSION_TOKEN && { sessionToken: env.AWS_SESSION_TOKEN }),
+          }
+        : undefined,
     ...(env.AWS_ENDPOINT_URL && { endpoint: env.AWS_ENDPOINT_URL }),
   });
   const adapter = new AwsS3StorageAdapter(client, {
@@ -24,4 +34,4 @@ export const initializeStorage = (bucketName?: string, optionalPathPrefix?: stri
     region: region ?? env.AWS_REGION,
   });
   return new FileStorage(adapter);
-};
+}

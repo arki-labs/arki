@@ -40,39 +40,41 @@ Next: [Set up AI](docs/recipes/set-up-ai.md) takes you from nothing to a first m
 Node (the workspace tests on Node 26), Bun and Deno. The root and the server entries (`/cost`, `/safety`, `/dot`, `/drizzle`, `/drizzle/sqlite`, `/testing`) are source-distributed TypeScript: your bundler or runtime compiles them. Only `@arki/ai/react` targets the browser. Qdrant, the default durable vector store, imports `node:crypto`, so the vector index is not cross-runtime.
 
 <!-- runtimes:start -->
+
 | Runtime | Result | Version tested | Date (UTC) |
-| --- | --- | --- | --- |
-| node | pass | v22.13.1 | 2026-11-05 |
-| bun | pass | 1.4.2 | 2026-11-05 |
-| deno | pass | 2.9.8 | 2026-11-05 |
-| browser | n/a | - | 2026-11-05 |
-| hermes | n/a | - | 2026-11-05 |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
 <!-- runtimes:end -->
 
 ## Public imports
 
-| Import | What it is |
-| --- | --- |
-| `@arki/ai` | Providers and services (`OllamaService`, `OpenAIService`, `AnthropicService` and more), `createLLMProvider` (its `...Result` methods return token usage), `probeLLMProvider`, embeddings, vector index, semantic search, the tool-loop runtime, `createFlow`, failures and errors. |
-| `@arki/ai/cost` | Budgets, a circuit breaker and cost estimates. `priceOf` prices one call and says how (`local`, `list-price` or `default-rate`). |
-| `@arki/ai/safety` | Prompt-injection checks, PII redaction, output filtering. |
-| `@arki/ai/dot` | `vectorIndex` and `llm` plugins for a Dot app. `llm` checks the provider at boot. |
-| `@arki/ai/testing` | `createFakeLLMProvider`: scripted answers and usage, no HTTP. For tests. |
-| `@arki/ai/drizzle` | The erasure tombstone table and its Postgres outbox. |
-| `@arki/ai/drizzle/sqlite` | The same table and outbox on SQLite (libSQL). |
-| `@arki/ai/react` | Chat, streaming text and search components and hooks. |
-| `@arki/ai/react/md` | Markdown rendering for chat output (`react-markdown` with GFM, or Streamdown). |
-| `@arki/ai/env` | The package's environment schema and parsed `env`. |
-| `@arki/ai/sdk` | A re-export of the AI SDK (`ai`), so apps use the version this package was built with. |
-| `@arki/ai/anthropic`, `/google`, `/groq`, `/mistral`, `/openai` | One module per cloud provider, imported directly. |
-| `@arki/ai/mastra` | The bridge to Mastra agents. |
-| `@arki/ai/transcription` | Speech-to-text through Deepgram. |
-| `@arki/ai/runtime/index` | The tool-loop runtime on its own. |
-| `@arki/ai/validation` | The config and input types. Check values with `parse` from `@arki/schema`. |
-| `@arki/ai/zod` | The package's Zod schemas: request bodies (`askQuestionSchema`, `queueOrderSchema`), stored documents (`transcriptDocumentSchema`, `analysisDocumentSchema`), config and `CommonSchemas`. The capability, `validation`, `transcription` and `structured-generation` entries expose plain TS types only. |
-| `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation` | Service types and `StructuredGenerator`. |
-| `@arki/ai/capabilities/ask`, `/episode-analysis`, `/pips`, `/queue` | Ready-made capabilities on a `StructuredLLMProvider`. |
-| `@arki/ai/capabilities/podhop` | PodHop moment selection and narration. Node only: it runs the macOS `say` command. |
+| Import                                                                   | What it is                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@arki/ai`                                                               | Providers and services (`OllamaService`, `OpenAIService`, `AnthropicService` and more), `createLLMProvider` (its `...Result` methods return token usage), `probeLLMProvider`, embeddings, vector index, semantic search, the tool-loop runtime, `createFlow`, failures and errors.                      |
+| `@arki/ai/cost`                                                          | Budgets, a circuit breaker and cost estimates. `priceOf` prices one call and says how (`local`, `list-price` or `default-rate`).                                                                                                                                                                        |
+| `@arki/ai/safety`                                                        | Prompt-injection checks, PII redaction, output filtering.                                                                                                                                                                                                                                               |
+| `@arki/ai/dot`                                                           | `vectorIndex` and `llm` plugins for a Dot app. `llm` checks the provider at boot.                                                                                                                                                                                                                       |
+| `@arki/ai/testing`                                                       | `createFakeLLMProvider`: scripted answers and usage, no HTTP. For tests.                                                                                                                                                                                                                                |
+| `@arki/ai/drizzle`                                                       | The erasure tombstone table and its Postgres outbox.                                                                                                                                                                                                                                                    |
+| `@arki/ai/drizzle/sqlite`                                                | The same table and outbox on SQLite (libSQL).                                                                                                                                                                                                                                                           |
+| `@arki/ai/react`                                                         | Chat, streaming text and search components and hooks.                                                                                                                                                                                                                                                   |
+| `@arki/ai/react/md`                                                      | Markdown rendering for chat output (`react-markdown` with GFM, or Streamdown).                                                                                                                                                                                                                          |
+| `@arki/ai/env`                                                           | The package's environment schema and parsed `env`.                                                                                                                                                                                                                                                      |
+| `@arki/ai/sdk`                                                           | A re-export of the AI SDK (`ai`), so apps use the version this package was built with.                                                                                                                                                                                                                  |
+| `@arki/ai/anthropic`, `/google`, `/groq`, `/mistral`, `/openai`          | One module per cloud provider, imported directly.                                                                                                                                                                                                                                                       |
+| `@arki/ai/mastra`                                                        | The bridge to Mastra agents.                                                                                                                                                                                                                                                                            |
+| `@arki/ai/transcription`                                                 | Speech-to-text through Deepgram.                                                                                                                                                                                                                                                                        |
+| `@arki/ai/runtime/index`                                                 | The tool-loop runtime on its own.                                                                                                                                                                                                                                                                       |
+| `@arki/ai/validation`                                                    | The config and input types. Check values with `parse` from `@arki/schema`.                                                                                                                                                                                                                              |
+| `@arki/ai/zod`                                                           | The package's Zod schemas: request bodies (`askQuestionSchema`, `queueOrderSchema`), stored documents (`transcriptDocumentSchema`, `analysisDocumentSchema`), config and `CommonSchemas`. The capability, `validation`, `transcription` and `structured-generation` entries expose plain TS types only. |
+| `@arki/ai/ai-service/types`, `@arki/ai/ai-service/structured-generation` | Service types and `StructuredGenerator`.                                                                                                                                                                                                                                                                |
+| `@arki/ai/capabilities/ask`, `/episode-analysis`, `/pips`, `/queue`      | Ready-made capabilities on a `StructuredLLMProvider`.                                                                                                                                                                                                                                                   |
+| `@arki/ai/capabilities/podhop`                                           | PodHop moment selection and narration. Node only: it runs the macOS `say` command.                                                                                                                                                                                                                      |
 
 `llms.txt` lists every export. Every import path is listed in `package.json` `exports`; no other path under `src/` resolves. The root entry reaches no Node built-in, so it bundles for the browser.
 
@@ -129,7 +131,9 @@ const draftStory = createFlow<StoryState, StoryContext>({
   nodes: {
     outline: {
       id: 'outline',
-      run: async (_state, context) => ({ outline: await context.write('Outline a short story about a pizza oven that learns to count.') }),
+      run: async (_state, context) => ({
+        outline: await context.write('Outline a short story about a pizza oven that learns to count.'),
+      }),
       next: 'draft',
     },
     draft: {
@@ -181,19 +185,37 @@ SQLite limits that apply here:
 
 ## Failure behaviour
 
-| Result | When | What to do |
-| --- | --- | --- |
-| `RateLimited` (returned, code `ai.rate_limited`, status 429, data `{ retryAfterMs }`) | The local limiter has no free slot. | Wait `retryAfterMs`, then retry. |
-| `BudgetExceeded` (returned, code `ai.budget_exceeded`, status 402) | The estimated cost passes the budget of one period. | Wait for the period to reset, or raise the limit. |
-| `CircuitOpen` (returned by `CostCircuitBreaker.execute`, code `ai.circuit_open`, status 503, data `{ reason, retryAfterMs, cumulativeCostUsd, costThresholdUsd }`) | The breaker is open, or this call would cross `costThresholdUsd`. The operation did not run. | Wait `retryAfterMs`, or raise the threshold. |
-| `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`, code `ai.keyword_search_unavailable`, status 500) | Mode `keyword` with no keyword search provider. | Pass a `KeywordSearchProvider`, or search in `semantic` mode. |
-| `ProviderUnavailable` (returned by `probeLLMProvider`, code `ai.provider_unavailable`, status 503, data `{ provider, model, problem }`) | `problem` is `unreachable` (Ollama or the `baseURL` server does not answer), `model_missing` (Ollama runs without the model) or `missing_key`. The `llm` Dot plugin fails boot with it. | Start Ollama and `ollama pull` the model, or set the provider's key. |
-| `ConfigurationError` (thrown) | A key, model or variable is missing or wrong. | Set what the message names. |
-| `GenerationError`, `EmbeddingError`, `VectorSearchError` (thrown) | The provider or the store is down or refused. | Read `cause`. Retry later. |
-| `ToolOutputError` (thrown, code `TOOL_OUTPUT_ERROR`) | A tool result did not match its `output` schema. The run emits `tool:error`. | Fix the tool's `execute`. |
-| A failure a tool returns | An expected outcome of that tool. | Nothing: the model reads the remediation and tries again. The run emits `tool:failure`. |
+| Result                                                                                                                                                             | When                                                                                                                                                                                    | What to do                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `RateLimited` (returned, code `ai.rate_limited`, status 429, data `{ retryAfterMs }`)                                                                              | The local limiter has no free slot.                                                                                                                                                     | Wait `retryAfterMs`, then retry.                                                        |
+| `BudgetExceeded` (returned, code `ai.budget_exceeded`, status 402)                                                                                                 | The estimated cost passes the budget of one period.                                                                                                                                     | Wait for the period to reset, or raise the limit.                                       |
+| `CircuitOpen` (returned by `CostCircuitBreaker.execute`, code `ai.circuit_open`, status 503, data `{ reason, retryAfterMs, cumulativeCostUsd, costThresholdUsd }`) | The breaker is open, or this call would cross `costThresholdUsd`. The operation did not run.                                                                                            | Wait `retryAfterMs`, or raise the threshold.                                            |
+| `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`, code `ai.keyword_search_unavailable`, status 500)                                          | Mode `keyword` with no keyword search provider.                                                                                                                                         | Pass a `KeywordSearchProvider`, or search in `semantic` mode.                           |
+| `ProviderUnavailable` (returned by `probeLLMProvider`, code `ai.provider_unavailable`, status 503, data `{ provider, model, problem }`)                            | `problem` is `unreachable` (Ollama or the `baseURL` server does not answer), `model_missing` (Ollama runs without the model) or `missing_key`. The `llm` Dot plugin fails boot with it. | Start Ollama and `ollama pull` the model, or set the provider's key.                    |
+| `ConfigurationError` (thrown)                                                                                                                                      | A key, model or variable is missing or wrong.                                                                                                                                           | Set what the message names.                                                             |
+| `GenerationError`, `EmbeddingError`, `VectorSearchError` (thrown)                                                                                                  | The provider or the store is down or refused.                                                                                                                                           | Read `cause`. Retry later.                                                              |
+| `ToolOutputError` (thrown, code `TOOL_OUTPUT_ERROR`)                                                                                                               | A tool result did not match its `output` schema. The run emits `tool:error`.                                                                                                            | Fix the tool's `execute`.                                                               |
+| A failure a tool returns                                                                                                                                           | An expected outcome of that tool.                                                                                                                                                       | Nothing: the model reads the remediation and tries again. The run emits `tool:failure`. |
 
 Check a returned value with `isFailure` from `@arki/failure`, or a definition's `is`: `RateLimited.is(result)`.
+
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                                                                          | When                                                    | Attributes                                                   |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------ |
+| `ai.vector.<operation>` (`upsert`, `search`, `search_sparse`, `retrieve`, `scroll`, `delete`, `delete_batch`) | each Qdrant call                                        | `ai.vector.collection`, `failure.code` on failure            |
+| `ai.transcribe`                                                                                               | each Deepgram transcription                             | `ai.provider`, `failure.code` on failure                     |
+| `ai.mastra.run_tool_loop`                                                                                     | one Mastra tool loop, for the life of its stream        | `failure.code` of the first `run:error`                      |
+| `ai.reconcile`                                                                                                | one `runVectorReconciliation` tick                      | `ai.reconcile.*` counts, `failure.code` of the first failure |
+| `gen_ai` spans (`@ai-sdk/otel`)                                                                               | each generation or tool loop that spreads `aiTelemetry` | model, function id, token usage, finish reason               |
+
+Prompts and model output are not recorded by default. `AI_TELEMETRY_RECORD_CONTENT=on` adds them (the AI SDK's `recordInputs` and `recordOutputs`) to the `gen_ai` spans. `AI_TELEMETRY=off` turns the `gen_ai` spans off. Both are read at each call; browsers and Hermes have no `process`, so there the spans are on and the content is off.
+
+Metrics: none. Token usage is on the `gen_ai` spans and in the hooks registered with `registerTelemetry` (`@arki/ai/sdk`).
+
+Not instrumented: cost, safety, validation and prompt helpers (pure computation, no I/O); the `vectorIndex()` and `llm()` Dot units (Dot spans their boot, the `llm()` probe included, as `dot.unit.boot`).
 
 ## Limits
 
@@ -204,7 +226,7 @@ Check a returned value with `isFailure` from `@arki/failure`, or a definition's 
 - **Rate-limit check comes first.** `streamText` takes a limiter slot before it returns the stream. Check for `RateLimited` before you iterate: a `RateLimited` value is not a stream.
 - **Reconciliation is capped per run.** `runVectorReconciliation` handles at most `ROW_CAP_PER_RUN` (50) rows and `TOMBSTONE_CAP_PER_RUN` (200) tombstones per call. With 10 000 pending tombstones you need 50 calls (cron runs) to clear them.
 - **Only a durable index acknowledges erasure.** With no `QDRANT_URL` the index is in memory (`durable: false`), and tombstones stay pending.
-- **Spans record prompts.** Generation calls report `gen_ai` spans, prompts and completions included, whenever an OpenTelemetry tracer provider is registered. `AI_TELEMETRY=off` turns them off.
+- **Spans leave prompts out.** Generation calls report `gen_ai` spans whenever an OpenTelemetry tracer provider is registered. Prompts, model output, tool arguments and tool results are not on them unless the app sets `AI_TELEMETRY_RECORD_CONTENT=on`. `AI_TELEMETRY=off` turns the spans off.
 - **Your `registerTelemetry` hooks still fire.** Each call passes its span integration, and the SDK then ignores the global ones. So each call also passes every integration registered with `registerTelemetry` (`@arki/ai/sdk`), read at the call: your hooks (tokens, cost) and the spans both see it.
 - **The probe does not test a key.** `probeLLMProvider` checks that a cloud key is set, not that the provider accepts it. A wrong key still fails at the first call.
 - **Usage can be missing.** `usage.inputTokens` and `usage.outputTokens` are `undefined` when the provider does not report them. Do not read that as zero.

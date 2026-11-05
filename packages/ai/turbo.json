@@ -1,13 +1,9 @@
 {
-  "extends": [
-    "//"
-  ],
-  "tags": [
-    "platform"
-  ],
+  "extends": ["//"],
+  "tags": ["platform"],
   "tasks": {
     "test": {
-      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY", "AI_TEST_MODEL"]
+      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY", "AI_TEST_MODEL", "AI_TELEMETRY_RECORD_CONTENT"]
     }
   }
 }

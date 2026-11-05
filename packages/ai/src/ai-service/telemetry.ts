@@ -4,7 +4,7 @@
  * Since AI SDK 7 the `ai` package no longer emits OpenTelemetry spans itself:
  * a call is traced only when an `@ai-sdk/otel` integration receives its
  * lifecycle events. That integration emits `gen_ai.*` spans (model, token
- * usage, and — with `recordInputs`/`recordOutputs` — the prompt + completion).
+ * usage, and — only with `recordInputs`/`recordOutputs` — the prompt + completion).
  * Rather than stamp that wiring across every call site, this single helper
  * centralizes the policy and is spread into the provider-neutral
  * `LanguageModelAdapter`.
@@ -22,9 +22,12 @@
  * On by default. The integration reports to the global OpenTelemetry tracer provider, so spans
  * appear exactly when the app has registered one (an in-process tracer counts; no OTLP endpoint is
  * needed) and cost nothing more than no-op calls when it has not. `AI_TELEMETRY=off` turns it off:
- * the helper then returns an empty object and the SDK call is untouched. The recorded
- * inputs/outputs are exactly what makes a silent mid-chain generation failure visible in the
- * trace instead of a guessing game.
+ * the helper then returns an empty object and the SDK call is untouched.
+ *
+ * Prompts and model output are NOT recorded by default (A-36: prompts and model output are not
+ * collected unless the app opts in). The spans still carry the model, the function id, token usage
+ * and the finish reason. An app opts in with `AI_TELEMETRY_RECORD_CONTENT=on`, for example to see
+ * which prompt a silent mid-chain generation failure got.
  */
 
 import type { Telemetry, TelemetryOptions } from 'ai';
@@ -37,13 +40,22 @@ function telemetryOff(): boolean {
   return typeof process !== 'undefined' && process.env['AI_TELEMETRY'] === 'off';
 }
 
+/**
+ * `AI_TELEMETRY_RECORD_CONTENT=on` in the environment: the app opted in to prompts and model output on
+ * spans. Any other value, or no `process` (browsers, Hermes), keeps them out.
+ */
+function contentRecorded(): boolean {
+  return typeof process !== 'undefined' && process.env['AI_TELEMETRY_RECORD_CONTENT'] === 'on';
+}
+
 /** The integrations the app registered with `registerTelemetry()`, at the moment of the call. */
 function registeredIntegrations(): readonly Telemetry[] {
   return globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
 }
 
 /**
- * Build the `telemetry` fragment for an AI SDK call, or `{}` when `AI_TELEMETRY=off`. Spread the result into the call options:
+ * Build the `telemetry` fragment for an AI SDK call, or `{}` when `AI_TELEMETRY=off`. Prompts and model output
+ * are recorded only with `AI_TELEMETRY_RECORD_CONTENT=on`. Spread the result into the call options:
  *
  * ```ts
  * await generateText({ model, prompt, ...aiTelemetry('ollama.generateText') });
@@ -55,10 +67,11 @@ function registeredIntegrations(): readonly Telemetry[] {
 export function aiTelemetry(functionId?: string): { telemetry: TelemetryOptions } | Record<string, never> {
   if (telemetryOff()) return {};
   integration ??= new OpenTelemetry();
+  const recordContent = contentRecorded();
   return {
     telemetry: {
-      recordInputs: true,
-      recordOutputs: true,
+      recordInputs: recordContent,
+      recordOutputs: recordContent,
       integrations: [integration, ...registeredIntegrations()],
       ...(functionId ? { functionId } : {}),
     },

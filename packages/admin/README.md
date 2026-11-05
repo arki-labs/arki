@@ -262,6 +262,20 @@ These are for callers that build or check protocol messages themselves.
 - `settledReceiptSchema` (`@arki/admin/receipts`) is an applied or failed receipt. `storedReceiptSchema` also accepts a pending one.
 - `signRequest(input)` (`@arki/admin/client`) signs one request envelope. `createForemanClient` uses it for every call.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                   | When                                                                               | Attributes                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `admin.action.execute` | each approved execute this app runs, from the receipt claim to the settled receipt | `admin.action`, `admin.receipt` (`applied`, `failed`, `pending`, `replayed`, `unclaimed`), `failure.code` on failure |
+
+Under `foreman()` or `@arki/http` the span sits under the request's `http.request` span. The input, the result, the execution id, the approver and keys are never attributes.
+
+Metrics: `admin.executions` (counter; `action`, `receipt`, `outcome`).
+
+Not instrumented: signature checks, the manifest, reads and previews (read-only answers; the transport's `http.request` span covers them); `fetchFleetSnapshot` and the client (a `fetch` call, which the app's HTTP instrumentation owns).
+
 ## Limits
 
 - One proposal covers 1 target by default (`DEFAULT_MAX_TARGETS`). An action can raise `maxTargets` to at most 5 (`MAX_TARGETS_LIMIT`).

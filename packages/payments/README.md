@@ -128,6 +128,25 @@ Every consuming app must:
 3. Build its own RPC router from the package's services and the app's protected and public procedures.
 4. Inject env-driven config (`STRIPE_SECRET_KEY`, notification settings) at app boot, not per request.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                                  | When                                                           | Attributes                                                  |
+| --------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
+| `payments.stripe.<resource>.<method>`                                 | each Stripe request (`payments.stripe.payment_intents.create`) | `payments.provider`, `failure.code` on a returned failure   |
+| `payments.webhook.process`                                            | each provider webhook the handler processes                    | `payments.provider`, `failure.code`                         |
+| `payments.webhook.event`                                              | each webhook event it applies                                  | `payments.provider`, `payments.event_type`, `failure.code`  |
+| `payments.notification`                                               | each email or Slack notification                               | `payments.channel`, `payments.notification`, `failure.code` |
+| `payments.notification.send`, `payments.notification.delivery_status` | each dunning message and delivery check                        | `channel`, `provider`, `failure.code`                       |
+| `payments.alert`                                                      | each payment-monitor alert                                     | `payments.alert`, `payments.severity`, `failure.code`       |
+
+A returned failure (a declined card) sets `failure.code` and leaves the span status unset; a throw sets the status to error and records the exception. Amounts, card data, customer ids, payloads and secrets are never attributes.
+
+Metrics: `payments.operations` (counter; `operation`, `outcome` = `success`, `failure` or `error`).
+
+Not instrumented: repositories and journal commands (the app's database driver and `@arki/journal` span them); `DunningService.processDunningEvents` (a batch the app runs under `schedule.run` or `queue.execute`); money, tax and proration math (pure computation).
+
 ## Limits
 
 - A refund is refused after the refund window. The default is 90 days (`refundWindowMs`). A payment 91 days old returns `RefundWindowExceeded`; one 89 days old does not.

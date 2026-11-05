@@ -1,11 +1,10 @@
-import type { IdGenerationFailure } from '@arki/contracts';
 import Stripe from 'stripe';
 
-import type { UserId } from '../user-id.js';
-import { fromUnix, now } from '@arki/date';
+import type { IdGenerationFailure } from '@arki/contracts';
 import type { FailureOf, Result } from '@arki/failure';
-import { isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
+import { fromUnix, now } from '@arki/date';
+import { isFailure } from '@arki/failure';
 import {
   AmountOutOfRange,
   Currency,
@@ -34,22 +33,23 @@ import type {
   SubscriptionPreview,
   WebhookValidationResult,
 } from '../types.js';
+import type { UserId } from '../user-id.js';
 import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
 import type { CardDeclined, IdempotencyConflict } from './provider-error.js';
 import { toMinorColumn } from '../money.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
-import { BasePaymentProvider } from './base-provider.js';
 import { observePayments } from '../telemetry.js';
+import { BasePaymentProvider } from './base-provider.js';
 import {
+  cardDeclinedOf,
+  idempotencyConflictOf,
   InvalidWebhookSignature,
+  mapStripeError,
   PaymentMethodRequired,
   PaymentProviderError,
   PlanPriceNotFlat,
   ReferenceNotFound,
   TaxAddressIncomplete,
-  cardDeclinedOf,
-  idempotencyConflictOf,
-  mapStripeError,
 } from './provider-error.js';
 import { mapStripeEventType } from './stripe-event-types.js';
 
@@ -240,7 +240,7 @@ export class StripeProvider extends BasePaymentProvider {
    * Runs one Stripe request in a `payments.<operation>` span, where `operation` names the Stripe
    * resource and method (`stripe.payment_intents.create`). `answer` turns the errors the call expects
    * (a declined card, a reused idempotency key) into returned failures, which the span records as
-   * `payments.failure_code`; any other Stripe error is thrown as a `PaymentProviderError`.
+   * `failure.code`; any other Stripe error is thrown as a `PaymentProviderError`.
    */
   private async call<T, Answer = never>(
     operation: string,
@@ -542,7 +542,9 @@ export class StripeProvider extends BasePaymentProvider {
 
     const refreshed = this.toPlan(row, price, name);
     if (isFailure(refreshed)) return refreshed;
-    return params.metadata === undefined ? refreshed : { ...refreshed, metadata: { ...row.metadata, ...params.metadata } };
+    return params.metadata === undefined
+      ? refreshed
+      : { ...refreshed, metadata: { ...row.metadata, ...params.metadata } };
   }
 
   /** Stripe prices cannot be deleted, so a deleted plan is archived: the price and its product stop being sold. */
@@ -703,7 +705,8 @@ export class StripeProvider extends BasePaymentProvider {
   ) {
     const current = await this.subscriptionRef(subscriptionId);
     if (isFailure(current)) return current;
-    const requestOptions = options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey };
+    const requestOptions =
+      options.idempotencyKey === undefined ? undefined : { idempotencyKey: options.idempotencyKey };
     const cancellationDetails = options.reason === undefined ? undefined : { comment: options.reason };
 
     const stripeSubscription = await this.call(
@@ -735,10 +738,7 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   /** Updates the Stripe subscription and returns our subscription row as Stripe now has it. */
-  private async updateStripeSubscription(
-    subscriptionId: SubscriptionId,
-    update: Stripe.SubscriptionUpdateParams,
-  ) {
+  private async updateStripeSubscription(subscriptionId: SubscriptionId, update: Stripe.SubscriptionUpdateParams) {
     const current = await this.subscriptionRef(subscriptionId);
     if (isFailure(current)) return current;
     const stripeSubscription = await this.call('stripe.subscriptions.update', () =>
@@ -832,7 +832,10 @@ export class StripeProvider extends BasePaymentProvider {
   /** Our payment from a Stripe payment intent fetched with `expand: ['payment_method', 'latest_charge']`. */
   private toPayment(
     intent: Stripe.PaymentIntent,
-    base: Pick<Payment, 'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'>,
+    base: Pick<
+      Payment,
+      'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'
+    >,
   ): Payment | MoneyFailure {
     const amount = fromStripeAmount(intent.amount, intent.currency);
     if (isFailure(amount)) return amount;
@@ -1166,10 +1169,7 @@ export class StripeProvider extends BasePaymentProvider {
     }
   }
 
-  async createSetupIntent(
-    customerId: CustomerId,
-    options: { idempotencyKey?: string } = {},
-  ) {
+  async createSetupIntent(customerId: CustomerId, options: { idempotencyKey?: string } = {}) {
     const customer = await this.customerRef(customerId);
     if (isFailure(customer)) return customer;
 
@@ -1236,10 +1236,7 @@ export class StripeProvider extends BasePaymentProvider {
     return { clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id };
   }
 
-  async createCustomerPortalSession(
-    providerCustomerId: string,
-    returnUrl: string,
-  ): Promise<{ url: string }> {
+  async createCustomerPortalSession(providerCustomerId: string, returnUrl: string): Promise<{ url: string }> {
     const session = await this.call('stripe.billing_portal.sessions.create', () =>
       this.stripe.billingPortal.sessions.create({ customer: providerCustomerId, return_url: returnUrl }),
     );
@@ -1272,23 +1269,25 @@ export class StripeProvider extends BasePaymentProvider {
     /** Enable Stripe Tax (must be configured on the account) so EU VAT is calculated at checkout. */
     automaticTax?: boolean;
   }): Promise<{ url: string; sessionId: string }> {
-    const session = await this.call('stripe.checkout.sessions.create', () => this.stripe.checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: params.priceId, quantity: 1 }],
-      // `customer` and `customer_email` are mutually exclusive in Checkout.
-      customer: params.providerCustomerId,
-      customer_email: params.providerCustomerId ? undefined : params.customerEmail,
-      client_reference_id: params.clientReferenceId,
-      success_url: params.successUrl,
-      cancel_url: params.cancelUrl,
-      allow_promotion_codes: true,
-      ...(params.automaticTax ? { automatic_tax: { enabled: true } } : {}),
-      subscription_data: {
-        ...(params.trialPeriodDays ? { trial_period_days: params.trialPeriodDays } : {}),
-        ...(params.metadata ? { metadata: params.metadata } : {}),
-      },
-      metadata: params.metadata,
-    }));
+    const session = await this.call('stripe.checkout.sessions.create', () =>
+      this.stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [{ price: params.priceId, quantity: 1 }],
+        // `customer` and `customer_email` are mutually exclusive in Checkout.
+        customer: params.providerCustomerId,
+        customer_email: params.providerCustomerId ? undefined : params.customerEmail,
+        client_reference_id: params.clientReferenceId,
+        success_url: params.successUrl,
+        cancel_url: params.cancelUrl,
+        allow_promotion_codes: true,
+        ...(params.automaticTax ? { automatic_tax: { enabled: true } } : {}),
+        subscription_data: {
+          ...(params.trialPeriodDays ? { trial_period_days: params.trialPeriodDays } : {}),
+          ...(params.metadata ? { metadata: params.metadata } : {}),
+        },
+        metadata: params.metadata,
+      }),
+    );
 
     if (!session.url) {
       throw new PaymentProviderError('unknown', `Stripe Checkout session ${session.id} came back without a URL`);
@@ -1320,24 +1319,28 @@ export class StripeProvider extends BasePaymentProvider {
         value: string;
       }[];
     };
-  }): Promise<{
-    amountTotal: Money;
-    taxAmountExclusive: Money;
-    taxAmountInclusive: Money;
-    taxBreakdown: {
-      amount: Money;
-      rate: number;
-      /** The jurisdiction's display name, such as `California`. Not unique: use `country`, `state` and `level` to tell places apart. */
-      jurisdiction: string;
-      /** Two-letter country code of the jurisdiction. */
-      country: string;
-      /** ISO 3166-2 subdivision code without the country prefix, such as `NY`. Absent for a country-level tax. */
-      state?: string;
-      /** `country`, `state`, `county`, `city` or `district` (Stripe may add more). */
-      level: string;
-      taxCode?: string;
-    }[];
-  } | MoneyFailure | FailureOf<typeof TaxAddressIncomplete>> {
+  }): Promise<
+    | {
+        amountTotal: Money;
+        taxAmountExclusive: Money;
+        taxAmountInclusive: Money;
+        taxBreakdown: {
+          amount: Money;
+          rate: number;
+          /** The jurisdiction's display name, such as `California`. Not unique: use `country`, `state` and `level` to tell places apart. */
+          jurisdiction: string;
+          /** Two-letter country code of the jurisdiction. */
+          country: string;
+          /** ISO 3166-2 subdivision code without the country prefix, such as `NY`. Absent for a country-level tax. */
+          state?: string;
+          /** `country`, `state`, `county`, `city` or `district` (Stripe may add more). */
+          level: string;
+          taxCode?: string;
+        }[];
+      }
+    | MoneyFailure
+    | FailureOf<typeof TaxAddressIncomplete>
+  > {
     const request = toTaxCalculationParams(params);
     if (isFailure(request)) return request;
     const calculation = await this.call('stripe.tax.calculations.create', () =>
@@ -1358,9 +1361,10 @@ export class StripeProvider extends BasePaymentProvider {
         if (isFailure(amount)) return amount;
         taxBreakdown.push({
           amount,
-          rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
-            ? breakdown.tax_rate_details.percentage_decimal
-            : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
+          rate:
+            typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
+              ? breakdown.tax_rate_details.percentage_decimal
+              : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
           jurisdiction: breakdown.jurisdiction.display_name,
           country: breakdown.jurisdiction.country,
           state: breakdown.jurisdiction.state ?? undefined,
@@ -1389,7 +1393,10 @@ export class StripeProvider extends BasePaymentProvider {
 
     const lines = transaction.line_items?.data;
     if (!lines) {
-      throw new PaymentProviderError('unknown', `Stripe tax transaction ${transaction.id} came back without line items`);
+      throw new PaymentProviderError(
+        'unknown',
+        `Stripe tax transaction ${transaction.id} came back without line items`,
+      );
     }
     const currency = Currency.parse(transaction.currency.toUpperCase());
     if (isFailure(currency)) return currency;
@@ -1447,7 +1454,10 @@ export class StripeProvider extends BasePaymentProvider {
    */
   private async reverseTaxTransaction(params: TaxTransactionParams) {
     if (params.originalTransactionId === undefined) {
-      throw new PaymentProviderError('invalid_request', 'A tax refund needs originalTransactionId: the sale it reverses');
+      throw new PaymentProviderError(
+        'invalid_request',
+        'A tax refund needs originalTransactionId: the sale it reverses',
+      );
     }
     const originalTransactionId = params.originalTransactionId;
     const currency = params.currency.toUpperCase();
@@ -1581,15 +1591,15 @@ export class StripeProvider extends BasePaymentProvider {
     if (!reason) return undefined;
 
     const reasonMap: Record<string, Stripe.RefundCreateParams.Reason> = {
-      'customer_request': 'requested_by_customer',
-      'duplicate_charge': 'duplicate',
-      'fraudulent_transaction': 'fraudulent',
-      'service_not_delivered': 'requested_by_customer',
-      'billing_error': 'requested_by_customer',
-      'technical_issue': 'requested_by_customer',
-      'goodwill_gesture': 'requested_by_customer',
-      'chargeback_prevention': 'requested_by_customer',
-      'other': 'requested_by_customer',
+      customer_request: 'requested_by_customer',
+      duplicate_charge: 'duplicate',
+      fraudulent_transaction: 'fraudulent',
+      service_not_delivered: 'requested_by_customer',
+      billing_error: 'requested_by_customer',
+      technical_issue: 'requested_by_customer',
+      goodwill_gesture: 'requested_by_customer',
+      chargeback_prevention: 'requested_by_customer',
+      other: 'requested_by_customer',
     };
 
     return reasonMap[reason] || 'requested_by_customer';

@@ -12,7 +12,10 @@ import { z } from 'zod';
 import { createLLMProvider } from '@arki/ai';
 
 const llm = createLLMProvider();
-const summary = await llm.generateStructuredData('Summarise: ...', z.object({ title: z.string(), points: z.array(z.string()) }));
+const summary = await llm.generateStructuredData(
+  'Summarise: ...',
+  z.object({ title: z.string(), points: z.array(z.string()) }),
+);
 ```
 
 - `schema` is any Standard Schema (zod, valibot, arktype). The model is shown the schema's input JSON Schema. You get the schema's output type back, with transforms run.
@@ -21,7 +24,7 @@ const summary = await llm.generateStructuredData('Summarise: ...', z.object({ ti
 - `OllamaService` uses Ollama's native `format` parameter for constrained decoding, so output matches the schema at the token level.
 - `generateStructuredResult` and `generateTextResult` make the same calls and return `{ value, usage, provider, model }`. `usage` has the AI SDK's `inputTokens` and `outputTokens` (summed over all steps; `undefined` when the provider does not report them). Price them with `priceOf` from `@arki/ai/cost`.
 - `probeLLMProvider()` checks the same provider and model before a call: Ollama answers and has the model, an OpenAI-compatible `baseURL` answers, or a cloud key is set. It returns `ProviderUnavailable` instead of throwing.
-- Spans: every call reports `gen_ai` spans (with the prompt and completion) to the registered OpenTelemetry tracer provider. With none registered nothing is recorded. `AI_TELEMETRY=off` turns them off.
+- Spans: every call reports `gen_ai` spans to the registered OpenTelemetry tracer provider. With none registered nothing is recorded. The prompt and completion are left out unless `AI_TELEMETRY_RECORD_CONTENT=on`. `AI_TELEMETRY=off` turns the spans off.
 - Hooks: integrations registered with `registerTelemetry` (`@arki/ai/sdk`) see every call too. The span integration is passed per call, and the SDK uses a call's own list in place of the global one, so each call lists the registered integrations next to it, read at the call.
 - `StructuredGenerator` (import it from `@arki/ai/ai-service/structured-generation`) wraps a provider with `generateSummary`, `answerQuestion`, `classifyText`, `extractEntities` and `analyzeSentiment`.
 
@@ -30,8 +33,8 @@ const summary = await llm.generateStructuredData('Summarise: ...', z.object({ ti
 Text to vectors is `@arki/embeddings`. This package stores and ranks vectors. The core never reads `process.env`: pass the map in.
 
 ```ts skip="needs an embedder and a vector store"
-import { createVectorIndex } from '@arki/ai';
 import type { Embedder } from '@arki/embeddings';
+import { createVectorIndex } from '@arki/ai';
 
 declare const embedder: Embedder; // from `createEmbedder(...)` in `@arki/embeddings`
 
@@ -54,10 +57,10 @@ const index = createVectorIndex<Payload>(embedder.space, {
 `createAiSdkRuntime` runs a tool loop behind the framework-neutral `AgentRuntime` contract. Define tools with `defineAgentTool`: `execute`'s input type comes from `inputSchema`, and its return type comes from `output`.
 
 ```ts skip="needs a model and the oven service"
+import { createOllama } from 'ai-sdk-ollama';
 import { z } from 'zod';
 
 import { createAiSdkRuntime, defineAgentTool } from '@arki/ai';
-import { createOllama } from 'ai-sdk-ollama';
 
 const ovenTemperature = defineAgentTool({
   name: 'oven_temperature',
@@ -72,7 +75,11 @@ const ovenTemperature = defineAgentTool({
 
 const controller = new AbortController();
 const runtime = createAiSdkRuntime({ model: createOllama()('qwen3.6:latest') });
-for await (const event of runtime.runToolLoop({ prompt: 'Is the oven hot enough for a margherita?', tools: [ovenTemperature], signal: controller.signal })) {
+for await (const event of runtime.runToolLoop({
+  prompt: 'Is the oven hot enough for a margherita?',
+  tools: [ovenTemperature],
+  signal: controller.signal,
+})) {
   // run:start, text:delta, tool:start, tool:result, tool:failure, tool:error, run:finish
 }
 ```
@@ -81,7 +88,7 @@ for await (const event of runtime.runToolLoop({ prompt: 'Is the oven hot enough 
 - **`inputSchema` is any Standard Schema that can emit JSON Schema.** Wrap one that cannot with `withJsonSchema` from `@arki/schema`.
 - **`output` is checked.** The runtime checks each result against `output` before the model sees it. The model gets the parsed value. A mismatch fails that tool call with a `ToolOutputError` (code `TOOL_OUTPUT_ERROR`), which arrives as a `tool:error` event.
 - **Return a failure for an expected outcome.** `execute` may return a failure from `@arki/failure`, such as `CityNotFound({ city })`. The model gets `{ error: { code, message, remediation, data } }`, so the remediation sentence can steer its next call. The `output` check is skipped and the run emits `{ type: 'tool:failure', tool, failure }`. A thrown error is still a `tool:error`. Both runtimes (AI SDK and Mastra) behave the same.
-- **Spans.** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the AI SDK's telemetry (`@ai-sdk/otel`) records one `step N` span per model step and one `execute_tool <name>` span per tool call. With no endpoint, or no OpenTelemetry SDK registered, nothing is recorded.
+- **Spans.** When an OpenTelemetry tracer provider is registered, the AI SDK's telemetry (`@ai-sdk/otel`) records one `step N` span per model step and one `execute_tool <name>` span per tool call. With none registered, or with `AI_TELEMETRY=off`, nothing is recorded. Prompts, tool arguments and tool results stay off the spans unless `AI_TELEMETRY_RECORD_CONTENT=on`.
 
 ## Flows
 

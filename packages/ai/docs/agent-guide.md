@@ -20,7 +20,7 @@ Read this before changing code that calls a model. The [README](../README.md) is
 ```ts skip="needs a running model"
 import { z } from 'zod';
 
-import { RateLimited, createLLMProvider } from '@arki/ai';
+import { createLLMProvider, RateLimited } from '@arki/ai';
 
 const llm = createLLMProvider();
 const result = await llm.generateStructuredData('Name one planet.', z.object({ planet: z.string() }));
@@ -36,7 +36,8 @@ Need the token counts? Call `llm.generateStructuredResult(...)` instead: the sam
 import { createLLMProvider, probeLLMProvider, ProviderUnavailable } from '@arki/ai';
 
 const ready = await probeLLMProvider();
-if (ProviderUnavailable.is(ready)) console.log(ready.data.problem); // 'unreachable' | 'model_missing' | 'missing_key'
+if (ProviderUnavailable.is(ready))
+  console.log(ready.data.problem); // 'unreachable' | 'model_missing' | 'missing_key'
 else console.log(await createLLMProvider(ready).generateText('Say hi.'));
 ```
 
@@ -71,8 +72,8 @@ See [The tool loop](reference.md#the-tool-loop). Define tools with `defineAgentT
 ### Handle a rate limit
 
 ```ts skip="needs a running model"
+import { OpenAIService, RateLimited } from '@arki/ai';
 import { isFailure } from '@arki/failure';
-import { RateLimited, OpenAIService } from '@arki/ai';
 
 const service = new OpenAIService({ model: 'gpt-4o-mini' });
 const stream = await service.streamText('Tell me a story');
@@ -102,39 +103,39 @@ Use `llm(() => config)` from `@arki/ai/dot`. It provides `llm` (an `LLMProviderW
 - Do not iterate a stream before you check for `RateLimited`.
 - Do not log a cost from a hardcoded model name.
 - Pass the provider when you price a call (`priceOf` or `calculateLLMCost(..., { provider })`). Without it a local model is priced at the hosted default rate.
-- Generation spans carry prompts and completions whenever a tracer provider is registered. Set `AI_TELEMETRY=off` where prompts must not reach traces.
+- Generation spans leave prompts and completions out. Set `AI_TELEMETRY_RECORD_CONTENT=on` only where prompts may reach traces (a debug or bench run). `AI_TELEMETRY=off` turns the spans off.
 - A `registerTelemetry` hook (`@arki/ai/sdk`) sees every `@arki/ai` call, next to the spans. Register it once at boot; it is read at each call.
 - `ToolOutputError` is thrown by the runtime in place of a bad tool result. The model never sees the bad value.
 - Do not promise browser support for the server entries.
 
 ## Errors
 
-| Code | Class or failure | Fix |
-| --- | --- | --- |
-| `ai.rate_limited` | `RateLimited` (returned) | Wait `data.retryAfterMs`, retry. |
-| `ai.budget_exceeded` | `BudgetExceeded` (returned) | Wait for the period to reset, or raise the limit. |
-| `ai.circuit_open` | `CircuitOpen` (returned by `CostCircuitBreaker.execute`) | Wait `data.retryAfterMs`, or raise `costThresholdUsd`. |
-| `ai.keyword_search_unavailable` | `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`) | Pass a `KeywordSearchProvider`, or use `semantic` mode. |
-| `ai.provider_unavailable` | `ProviderUnavailable` (returned by `probeLLMProvider`, boot failure of `llm()`) | `data.problem`: `unreachable` → start Ollama or the server; `model_missing` → `ollama pull <model>`; `missing_key` → set the key. |
-| `ai.unauthorized` | `ProviderUnauthorized` (returned) | The provider refused the key (401 or 403), or no key is set. Set a valid key. |
-| `ai.content_filtered` | `ContentFiltered` (returned) | The provider's filter stopped the answer, or the model refused. Change the prompt. |
-| `ai.invalid_output` | `InvalidOutput` (returned) | The answer had no text, bad JSON, or JSON the schema rejects. Simplify the schema or use a stronger model. |
-| `ai.provider_failed` | `ProviderFailed` (returned) | Server error, timeout or network failure. Retry later or fall back to another provider. |
-| `ai.cancelled` | `Cancelled` (returned) | The caller aborted through its `AbortSignal`. Start a new call if you still need the answer. |
-| `ai.all_providers_failed` | `AllProvidersFailed` (returned by the provider router) | Every provider failed; `data.failures` lists each code. Fix each one, or add a provider. |
-| `ai.no_provider_configured` | `NoProviderConfigured` (returned by the provider router) | No provider is enabled or has a key. Enable one, or run Ollama. |
-| `ai.connection_lost` | `ConnectionLost` (returned) | The connection broke before the answer finished. Retry. |
-| `ai.ungrounded_output` | `UngroundedOutput` (returned by the task functions) | The answer is not backed by its source; `data.reason` says why. Retry or use a stronger model. |
-| `ai.flow_timed_out` | `FlowTimedOut` (returned by a flow) | A node ran past its `timeoutMs`. Raise it, or make the node faster. |
-| `ai.flow_step_limit` | `FlowStepLimitReached` (returned by a flow) | The flow passed `maxSteps`, usually a `next` that loops. End the loop or raise `maxSteps`. |
-| `ai.flow_node_failed` | `FlowNodeFailed` (returned by a flow) | A node still threw after all retries. Read `cause`. |
-| `ai.vector_store_unavailable` | `VectorStoreUnavailable` (returned) | The vector store could not be reached. Check that Qdrant is up. |
-| `CONFIGURATION_ERROR` | `ConfigurationError` | Set the variable or option the message names. |
-| `EMBEDDING_ERROR` | `EmbeddingError` | Check the embedding provider, model and dimensions. |
-| `VECTOR_SEARCH_ERROR` | `VectorSearchError` | Check the vector store and the collection. |
-| `GENERATION_ERROR` | `GenerationError` | Check the provider and the model; read `cause`. |
-| `VALIDATION_ERROR` | `ValidationError` | Read `validationErrors` and fix the input. |
-| `TOOL_OUTPUT_ERROR` | `ToolOutputError` | Fix the tool's `execute` so it matches `output`. |
+| Code                            | Class or failure                                                                | Fix                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `ai.rate_limited`               | `RateLimited` (returned)                                                        | Wait `data.retryAfterMs`, retry.                                                                                                  |
+| `ai.budget_exceeded`            | `BudgetExceeded` (returned)                                                     | Wait for the period to reset, or raise the limit.                                                                                 |
+| `ai.circuit_open`               | `CircuitOpen` (returned by `CostCircuitBreaker.execute`)                        | Wait `data.retryAfterMs`, or raise `costThresholdUsd`.                                                                            |
+| `ai.keyword_search_unavailable` | `KeywordSearchUnavailable` (returned by `SemanticSearchService.search`)         | Pass a `KeywordSearchProvider`, or use `semantic` mode.                                                                           |
+| `ai.provider_unavailable`       | `ProviderUnavailable` (returned by `probeLLMProvider`, boot failure of `llm()`) | `data.problem`: `unreachable` → start Ollama or the server; `model_missing` → `ollama pull <model>`; `missing_key` → set the key. |
+| `ai.unauthorized`               | `ProviderUnauthorized` (returned)                                               | The provider refused the key (401 or 403), or no key is set. Set a valid key.                                                     |
+| `ai.content_filtered`           | `ContentFiltered` (returned)                                                    | The provider's filter stopped the answer, or the model refused. Change the prompt.                                                |
+| `ai.invalid_output`             | `InvalidOutput` (returned)                                                      | The answer had no text, bad JSON, or JSON the schema rejects. Simplify the schema or use a stronger model.                        |
+| `ai.provider_failed`            | `ProviderFailed` (returned)                                                     | Server error, timeout or network failure. Retry later or fall back to another provider.                                           |
+| `ai.cancelled`                  | `Cancelled` (returned)                                                          | The caller aborted through its `AbortSignal`. Start a new call if you still need the answer.                                      |
+| `ai.all_providers_failed`       | `AllProvidersFailed` (returned by the provider router)                          | Every provider failed; `data.failures` lists each code. Fix each one, or add a provider.                                          |
+| `ai.no_provider_configured`     | `NoProviderConfigured` (returned by the provider router)                        | No provider is enabled or has a key. Enable one, or run Ollama.                                                                   |
+| `ai.connection_lost`            | `ConnectionLost` (returned)                                                     | The connection broke before the answer finished. Retry.                                                                           |
+| `ai.ungrounded_output`          | `UngroundedOutput` (returned by the task functions)                             | The answer is not backed by its source; `data.reason` says why. Retry or use a stronger model.                                    |
+| `ai.flow_timed_out`             | `FlowTimedOut` (returned by a flow)                                             | A node ran past its `timeoutMs`. Raise it, or make the node faster.                                                               |
+| `ai.flow_step_limit`            | `FlowStepLimitReached` (returned by a flow)                                     | The flow passed `maxSteps`, usually a `next` that loops. End the loop or raise `maxSteps`.                                        |
+| `ai.flow_node_failed`           | `FlowNodeFailed` (returned by a flow)                                           | A node still threw after all retries. Read `cause`.                                                                               |
+| `ai.vector_store_unavailable`   | `VectorStoreUnavailable` (returned)                                             | The vector store could not be reached. Check that Qdrant is up.                                                                   |
+| `CONFIGURATION_ERROR`           | `ConfigurationError`                                                            | Set the variable or option the message names.                                                                                     |
+| `EMBEDDING_ERROR`               | `EmbeddingError`                                                                | Check the embedding provider, model and dimensions.                                                                               |
+| `VECTOR_SEARCH_ERROR`           | `VectorSearchError`                                                             | Check the vector store and the collection.                                                                                        |
+| `GENERATION_ERROR`              | `GenerationError`                                                               | Check the provider and the model; read `cause`.                                                                                   |
+| `VALIDATION_ERROR`              | `ValidationError`                                                               | Read `validationErrors` and fix the input.                                                                                        |
+| `TOOL_OUTPUT_ERROR`             | `ToolOutputError`                                                               | Fix the tool's `execute` so it matches `output`.                                                                                  |
 
 ## Verify
 

@@ -26,28 +26,29 @@
  * `process.env`.
  */
 import type { Clock } from '@arki/clock';
+import type { Failure } from '@arki/failure';
 import { SystemClock } from '@arki/clock';
 import { z } from '@arki/contracts';
-import type { Failure } from '@arki/failure';
 import { isFailure, revive, serialize, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type { AdminErrorCode } from './errors.ts';
+import type { AdminFailure } from './failures.ts';
 import type { AnyAction, AnyRead, ForemanModule, Permit } from './module.ts';
 import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol.ts';
 import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts.ts';
-import type { AdminFailure } from './failures.ts';
+import type { ReceiptOutcome } from './telemetry.ts';
 import { ADMIN_ERROR_CODES, AdminError, isModuleError } from './errors.ts';
 import {
+  AdminExecutionInProgress,
   adminFailureOfWire,
+  AdminHandlerFailed,
   AdminInvalidRequest,
   AdminModuleRefused,
   AdminProtocolUnsupported,
   AdminReceiptsUnavailable,
   AdminScopeDenied,
   AdminStaleApproval,
-  AdminExecutionInProgress,
-  AdminHandlerFailed,
   AdminUnauthenticated,
   AdminUnknownCapability,
   AdminWritesDisabled,
@@ -80,6 +81,7 @@ import {
   verifyEnvelope,
   writesModeSchema,
 } from './protocol.ts';
+import { observeExecute } from './telemetry.ts';
 
 const logger = getLogger('arki:admin');
 
@@ -363,10 +365,16 @@ export function createForemanHandler<TCtx>(
         }),
       ),
     );
-    return executeOnce(receipts, action, actionInput.input, await options.context(request), permit, requestHash, url);
+    const ctx = await options.context(request);
+    return observeExecute(action.id, receipt =>
+      executeOnce(receipts, action, actionInput.input, ctx, permit, requestHash, url, receipt),
+    );
   }
 
-  /** Run an action at most once per execution id, and settle its receipt before answering. */
+  /**
+   * Run an action at most once per execution id, and settle its receipt before answering. `receipt`
+   * hears what became of the receipt, for the `admin.action.execute` span.
+   */
   async function executeOnce(
     store: ReceiptStore,
     action: AnyAction<TCtx>,
@@ -375,6 +383,7 @@ export function createForemanHandler<TCtx>(
     permit: Permit,
     requestHash: string,
     url: URL,
+    receipt: (outcome: ReceiptOutcome) => void,
   ): Promise<unknown> {
     const { executionId } = permit;
     const pending = {
@@ -388,12 +397,16 @@ export function createForemanHandler<TCtx>(
     try {
       claim = await store.claim(pending);
     } catch (error) {
+      receipt('unclaimed');
       return AdminReceiptsUnavailable(
         { detail: 'The receipt store could not take the claim, so the action did not run.' },
         { cause: error },
       );
     }
-    if (!claim.claimed) return replay(claim.receipt, action.id, requestHash, executionId);
+    if (!claim.claimed) {
+      receipt('replayed');
+      return replay(claim.receipt, action.id, requestHash, executionId);
+    }
 
     let result: unknown;
     try {
@@ -402,11 +415,11 @@ export function createForemanHandler<TCtx>(
       const caught = isFailure(error) ? UnexpectedDefect({ cause: error }) : error;
       const at = clock.now().toISOString();
       // The action ran and returned, but broke its own output schema: it did apply.
-      const receipt: SettledReceipt =
+      const settled: SettledReceipt =
         caught instanceof AdminError && caught.code === ADMIN_ERROR_CODES.invalidOutput
           ? { ...pending, status: 'applied', appliedAt: at, result: null }
           : { ...pending, status: 'failed', failedAt: at, error: publicError(caught) };
-      await settle(store, receipt, url);
+      receipt(await settle(store, settled, url));
       if (isFailure(caught)) return caught;
       throw caught;
     }
@@ -415,15 +428,17 @@ export function createForemanHandler<TCtx>(
       const envelope = serialize(result, action.failures);
       const decoded = isFailure(envelope) ? undefined : revive(envelope, action.failures);
       const failure = decoded ?? UnexpectedDefect({ cause: result });
-      await settle(
-        store,
-        {
-          ...pending,
-          status: 'failed',
-          failedAt: clock.now().toISOString(),
-          error: publicError(failure),
-        },
-        url,
+      receipt(
+        await settle(
+          store,
+          {
+            ...pending,
+            status: 'failed',
+            failedAt: clock.now().toISOString(),
+            error: publicError(failure),
+          },
+          url,
+        ),
       );
       return failure;
     }
@@ -431,16 +446,18 @@ export function createForemanHandler<TCtx>(
     // The receipt holds exactly what the response carries: the result after JSON.
     const wire = jsonValueSchema.safeParse(parseJsonBytes(utf8(JSON.stringify(result ?? null))));
     const json = wire.success ? wire.data : null;
-    await settle(
-      store,
-      {
-        ...pending,
-        status: 'applied',
-        appliedAt: clock.now().toISOString(),
-        result: json,
-        resultHash: await sha256(utf8(canonicalJson(json))),
-      },
-      url,
+    receipt(
+      await settle(
+        store,
+        {
+          ...pending,
+          status: 'applied',
+          appliedAt: clock.now().toISOString(),
+          result: json,
+          resultHash: await sha256(utf8(canonicalJson(json))),
+        },
+        url,
+      ),
     );
     return result;
   }
@@ -531,15 +548,17 @@ function parseConfig<TCtx>(options: CreateForemanHandlerOptions<TCtx>): z.output
  * Record the outcome. A store failure here is logged, not thrown: the action already ran,
  * so the true answer still goes out, and the claim stays `pending` (read as unknown).
  */
-async function settle(store: ReceiptStore, receipt: SettledReceipt, url: URL): Promise<void> {
+async function settle(store: ReceiptStore, receipt: SettledReceipt, url: URL): Promise<ReceiptOutcome> {
   try {
     await store.settle(receipt);
+    return receipt.status;
   } catch (error) {
     logger.error('Foreman receipt for {executionId} not settled on {path}; it stays pending', {
       executionId: receipt.executionId,
       path: url.pathname,
       error: error instanceof Error ? error.message : String(error),
     });
+    return 'pending';
   }
 }
 

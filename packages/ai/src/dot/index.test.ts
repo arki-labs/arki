@@ -7,13 +7,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { runDoctor, runExplain } from '@arki/dot/cli';
+import { defineFeature } from '@arki/dot/feature';
 import { defineApp } from '@arki/dot/unit';
 import { fakeEmbedder } from '@arki/embeddings/testing';
 import { isFailure, orThrow } from '@arki/failure';
+import { captureSpans } from '@arki/testing/otel';
 
-import { ProviderUnavailable } from '../failures';
+import { ProviderUnavailable, VectorStoreUnavailable } from '../failures';
 import { createFakeLLMProvider } from '../testing';
 import { MockVectorProvider } from '../vector-search/providers/mock';
+import { runVectorReconciliation } from '../vector-search/reconcile';
 import { llm, vectorIndex } from './index';
 
 type Payload = { userId: string; kind: 'item'; model: string; dimensions: number };
@@ -154,5 +157,48 @@ describe('llm()', () => {
     expect(unprobed.services.llm.provider).toBe('ollama');
     expect(injected.services.llm).toBe(fake);
     await expect(injected.services.llm.generateText('hi')).resolves.toBe('ok');
+  });
+});
+
+describe('ai spans under Dot', () => {
+  const space = {
+    provider: 'fake',
+    model: 'fake-4',
+    dimensions: 4,
+    normalized: true,
+    quantization: 'float32',
+    instructionVersion: 0,
+  } as const;
+
+  /** One reconciliation tick whose index is down: the erasure outbox holds a point the index cannot delete. */
+  const reconcileWithIndexDown = () => () =>
+    runVectorReconciliation<Payload, `vtmb_${string}`>({
+      durable: true,
+      space,
+      embedText: async () => ({ vector: [0, 0, 0, 1], space }),
+      upsertPoint: () => Promise.resolve(),
+      deletePoints: async () => VectorStoreUnavailable({ operation: 'delete', reason: 'index down' }),
+      tombstones: { list: async () => [{ id: 'vtmb_1', pointId: 'citm_gone' }], remove: () => Promise.resolve() },
+      stores: [],
+    });
+
+  it('nests ai.reconcile under the Dot usecase span that ran it, with the failure code', async () => {
+    // WHY: an operator reads a failed reconciliation from the usecase that ran it. If the ai span
+    // started a new trace, the outage would sit in a trace no request or job points to.
+    using spans = captureSpans();
+    const vectors = defineFeature('vectors').usecases({ reconcile: reconcileWithIndexDown }).entrypoints();
+    const app = orThrow(await defineApp('vi-spans').features([vectors]).start());
+
+    const counts = orThrow(await app.services['vectors.usecases'].reconcile());
+    orThrow(await app.dispose());
+
+    expect(counts.phaseAError).toBeDefined();
+    expect(counts.tombstonesDrained).toBe(0);
+    const reconcile = spans.named('ai.reconcile');
+    expect(reconcile.parent?.name).toBe('feature.vectors.reconcile');
+    expect(reconcile.attributes['failure.code']).toBe('ai.vector_store_unavailable');
+    expect(
+      Object.keys(reconcile.attributes).every(key => key === 'failure.code' || key.startsWith('ai.reconcile.')),
+    ).toBe(true);
   });
 });
