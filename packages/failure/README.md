@@ -72,7 +72,7 @@ Node, Bun, Deno, browsers and React Native (Hermes). The core uses no runtime bu
 
 ## Public imports
 
-- `@arki/failure`: `defineFailure`, `isFailure`, `match`, `recover`, `orThrow`, `attempt`, `revive`, `findCause`, `partition`, `collect`, `stoppable`, `unreachable`, `invariant`, `FailureError` and the types.
+- `@arki/failure`: `defineFailure`, `isFailure`, `isFault`, `match`, `recover`, `orThrow`, `attempt`, `revive`, `findCause`, `partition`, `collect`, `stoppable`, `unreachable`, `invariant`, `FailureError` and the types.
 - `@arki/failure/orpc`: `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcFailureDefinitions`, `RPC_FAILURE_DEFINITION`.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules, and `configs.recommended`.
 
@@ -142,6 +142,10 @@ export const NotionUnavailable = defineFailure('export.notion_unavailable', {
 Detection refuses opaque or revoked objects without throwing. `Def.is(value)` also refuses an inaccessible code. An object that cannot prove the canonical failure brand stays an ordinary value; decoding wire failures still requires `revive`.
 
 True for any failure value. Narrows `T | Failure` both ways. Passing a promise is a type error, because a forgotten `await` would always answer "not a failure".
+
+### `isFault(failure)`
+
+True when a returned failure is a fault an operator must act on: its `status` is 500 or higher (a provider is down, a setting is wrong, a bug such as `UnexpectedDefect`). False for an expected outcome the caller handles (4xx: a declined card, a missing record, invalid input). A definition with no `status` defaults to 400, so it is not a fault. Telemetry helpers always set `failure.code` and mark a span as an error only when `isFault(failure)`.
 
 ### Early return
 

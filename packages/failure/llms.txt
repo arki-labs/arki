@@ -4,7 +4,7 @@
 
 ## Import paths
 <!-- llms:start -->
-- `@arki/failure`: typed failures returned as plain values, with no wrapper. `AsyncSchema`, `FAILURE_ERROR_CODES`, `FailureError`, `InvalidEnvelope`, `InvalidInput`, `REVIVAL_FAILURES`, `SCHEMA_FAILURES`, `UnexpectedDefect`, `UnexpectedFailure`, `ValidatorDefect`, `attempt`, `collect`; and 32 more.
+- `@arki/failure`: typed failures returned as plain values, with no wrapper. `AsyncSchema`, `FAILURE_ERROR_CODES`, `FailureError`, `InvalidEnvelope`, `InvalidInput`, `REVIVAL_FAILURES`, `SCHEMA_FAILURES`, `UnexpectedDefect`, `UnexpectedFailure`, `ValidatorDefect`, `attempt`, `collect`; and 33 more.
 - `@arki/failure/eslint`: the `must-use` and `no-blind-accept` rules. `default`, `mustUse`, `noBlindAccept`.
 - `@arki/failure/orpc`: failures at an oRPC boundary. `RPC_FAILURE_DEFINITION`, `errorMap`, `orThrowRpc`, `reviveRpcError`, `rpcError`, `rpcFailureDefinitions`; types `DeclaredErrors`, `ErrorMapOf`.
 - `@arki/failure/schema`: Minimal Standard Schema execution shared by schema parsing and failure revival. `SCHEMA_FAILURES`, `executeSchema`, `isAsyncSchemaFailure`, `isSchemaFailure`, `parse`, `parseAsync`; types `AsyncSchemaFailure`, `SchemaFailure`.
@@ -27,6 +27,7 @@
 ## Rules that bite
 - A discarded call drops its failure. Turn on `failure/must-use`.
 - Check with `isFailure` or `Def.is`. Truthiness does not narrow.
+- `isFault(failure)` is true for status >= 500 (an operator must act); 4xx is an expected outcome. Mark a span as error only for faults.
 - Misuse throws `FailureError`. Do not catch it; fix the call.
 - Wire schemas must synchronously accept their lossless JSON output unchanged.
 - A returned failure does not roll back a transaction.

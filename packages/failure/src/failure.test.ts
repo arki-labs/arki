@@ -5,7 +5,8 @@ import type { StandardSchemaV1 } from '@standard-schema/spec';
 
 import type { DataOf, Failure, FailureOf, Stoppable, SuccessOf } from './failure.js';
 import { FAILURE_ERROR_CODES } from './errors.js';
-import { defineFailure, isFailure, orThrow, stoppable, UnexpectedFailure } from './failure.js';
+import { UnexpectedDefect } from './foundations.js';
+import { defineFailure, isFailure, isFault, orThrow, stoppable, UnexpectedFailure } from './failure.js';
 
 const PostNotFound = defineFailure('post.not_found', {
   status: 404,
@@ -286,4 +287,34 @@ it('definition matching refuses an inaccessible code without throwing', () => {
     },
   });
   expect(PostNotFound.is(opaque)).toBe(false);
+});
+
+describe('isFault', () => {
+  const ProviderDown = defineFailure('payments.provider_down', { status: 503 });
+  const Plain = defineFailure('plain.default');
+
+  it('is false for a 4xx failure the caller handles', () => {
+    expect(isFault(PostNotFound({ id: 'p9' }))).toBe(false);
+    expect(isFault(Unauthorized())).toBe(false);
+  });
+
+  it('is true for a 5xx failure an operator must act on', () => {
+    expect(isFault(ProviderDown())).toBe(true);
+  });
+
+  it('is true for UnexpectedDefect, the failure for a bug', () => {
+    expect(isFault(UnexpectedDefect())).toBe(true);
+  });
+
+  it('is false when no status was given, because the default is 400', () => {
+    expect(Plain.status).toBe(400);
+    expect(isFault(Plain())).toBe(false);
+  });
+
+  it('takes a failure value, not unknown', () => {
+    expectTypeOf(isFault).parameters.toEqualTypeOf<[failure: Failure]>();
+    expectTypeOf(isFault).returns.toEqualTypeOf<boolean>();
+    // @ts-expect-error a success value is not a failure: check with isFailure first
+    isFault({ id: 'p1' });
+  });
 });
