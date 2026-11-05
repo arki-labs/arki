@@ -23,11 +23,17 @@ export type Runtime = (typeof RUNTIMES)[number];
  * - `entryRuntimes`: export keys (`./geocoding`) that run on fewer engines than
  *   the package, each with its engines. Each key must be in `exports`, and each
  *   engine must be in `runtimes`.
+ * - `hermesApp`: a folder in the package holding a small Expo app that renders the
+ *   package's components. A React Native component cannot run on the bare Hermes
+ *   runner (no Fabric, no native modules), so the Hermes leg builds this app in
+ *   release mode and runs it in an iOS simulator when `ARKI_RN_APP=1`. Needs
+ *   `hermes` in `runtimes`.
  */
 export const arkiClaimSchema = z.object({
   runtimes: z.array(z.enum(RUNTIMES)).min(1).optional(),
   bundlerOnly: z.array(z.string().min(1)).min(1).optional(),
   entryRuntimes: z.record(z.string().min(1), z.array(z.enum(RUNTIMES)).min(1)).optional(),
+  hermesApp: z.string().min(1).optional(),
 });
 
 const manifestSchema = z.object({
@@ -62,6 +68,8 @@ export type Manifest = {
   readonly bundlerOnly: ReadonlySet<string>;
   /** `arki.entryRuntimes`: export key to the engines that entry runs on (a subset of `runtimes`). */
   readonly entryRuntimes: ReadonlyMap<string, ReadonlySet<Runtime>>;
+  /** `arki.hermesApp`: the folder of the Expo app the Hermes leg runs in an iOS simulator. */
+  readonly hermesApp: string | undefined;
   /** `"private": true` keeps the package off npm; it defaults to `false`. */
   readonly private: boolean;
   readonly scripts: Readonly<Record<string, string>>;
@@ -93,6 +101,9 @@ export function readManifest(dir: string): Manifest {
   const exportMap = typeof exports === 'string' ? { '.': exports } : (exports ?? {});
   const runtimes = new Set(arki?.runtimes ?? RUNTIMES);
   const problems = entryRuntimeProblems(arki?.entryRuntimes ?? {}, Object.keys(exportMap), runtimes);
+  if (arki?.hermesApp !== undefined && !runtimes.has('hermes')) {
+    problems.push('arki.hermesApp needs hermes in arki.runtimes: the app runs on the Hermes leg');
+  }
   if (problems.length > 0) {
     throw new Error(`${file} is not a valid package manifest: ${problems.join('; ')}`);
   }
@@ -112,6 +123,7 @@ export function readManifest(dir: string): Manifest {
     runtimes,
     bundlerOnly: new Set(arki?.bundlerOnly ?? []),
     entryRuntimes: new Map(Object.entries(arki?.entryRuntimes ?? {}).map(([key, engines]) => [key, new Set(engines)])),
+    hermesApp: arki?.hermesApp,
     private: isPrivate ?? false,
     scripts: scripts ?? {},
     files,

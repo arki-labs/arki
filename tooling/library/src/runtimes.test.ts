@@ -5,12 +5,14 @@ import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 import type { RuntimeRow } from './runtimes';
+import { appResult, pickSimulator, readApp, schemeName, tarballName } from './hermes-app';
 import { HERMES_FAILURE_MARKER, hermesScript, REACT_NATIVE_HOST_MODULE } from './hermes-host';
 import { isReactNativePackage, readManifest, RUNTIMES } from './manifest';
 import {
   entryNotes,
   entrySmokeFile,
   HERMES_BUNDLE_ARGS,
+  hermesVersionLabel,
   isLegInScope,
   METRO_RESOLVE_EXTENSIONS,
   parseRuntimesTable,
@@ -399,5 +401,94 @@ describe('runtimes table in the README', () => {
     expect(() => updateRuntimesSection('<!-- runtimes:end -->\n<!-- runtimes:start -->\n', [], order)).toThrow(
       /exactly one/,
     );
+  });
+});
+
+describe('the Hermes app proof (arki.hermesApp)', () => {
+  function appDir(dependency: string, name = 'Native UI Smoke'): string {
+    const dir = mkdtempSync(path.join(tmpdir(), 'arki-hermes-app-'));
+    writeFileSync(
+      path.join(dir, 'app.json'),
+      JSON.stringify({ expo: { name, ios: { bundleIdentifier: 'dev.arki.smoke' } } }),
+    );
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ dependencies: { '@arki/native-ui': dependency } }));
+    return dir;
+  }
+
+  it('reads the app folder from the claim, so a React Native package can prove its components where Fabric exists', () => {
+    expect(manifestWith({ arki: { runtimes: ['hermes'], hermesApp: 'app' } }).hermesApp).toBe('app');
+    expect(manifestWith({ arki: { runtimes: ['hermes'] } }).hermesApp).toBeUndefined();
+  });
+
+  it('refuses an app on a package that does not claim Hermes, because only the Hermes leg runs it', () => {
+    expect(() => manifestWith({ arki: { runtimes: ['node'], hermesApp: 'app' } })).toThrow(/hermesApp needs hermes/);
+  });
+
+  it('makes the app install the packed package, so the app proves what npm ships and not the workspace source', () => {
+    expect(tarballName('@arki/native-ui')).toBe('arki-native-ui.tgz');
+    expect(readApp(appDir('file:.cache/arki-native-ui.tgz'), '@arki/native-ui')).toEqual({
+      scheme: 'NativeUISmoke',
+      bundleId: 'dev.arki.smoke',
+      tarball: '.cache/arki-native-ui.tgz',
+    });
+    expect(() => readApp(appDir('workspace:*'), '@arki/native-ui')).toThrow(/must depend on/);
+  });
+
+  it('builds the scheme expo prebuild makes, which drops spaces and punctuation from the app name', () => {
+    expect(schemeName('Native UI-Smoke!')).toBe('NativeUISmoke');
+  });
+
+  const devices = JSON.stringify({
+    devices: {
+      'com.apple.CoreSimulator.SimRuntime.iOS-18-6': [
+        { udid: 'old', name: 'iPhone 16', state: 'Shutdown', isAvailable: true },
+      ],
+      'com.apple.CoreSimulator.SimRuntime.iOS-26-5': [
+        { udid: 'pad', name: 'iPad Air', state: 'Shutdown', isAvailable: true },
+        { udid: 'gone', name: 'iPhone 17', state: 'Shutdown', isAvailable: false },
+        { udid: 'new', name: 'iPhone 17 Pro', state: 'Shutdown', isAvailable: true },
+      ],
+      'com.apple.CoreSimulator.SimRuntime.watchOS-26-5': [
+        { udid: 'watch', name: 'Apple Watch', state: 'Booted', isAvailable: true },
+      ],
+    },
+  });
+
+  it('picks an available iPhone on the newest iOS, so the proof runs on the iOS apps ship to', () => {
+    expect(pickSimulator(devices)?.udid).toBe('new');
+  });
+
+  it('reuses a booted iPhone, so a run does not boot a second simulator', () => {
+    const booted = devices.replace('"udid":"old","name":"iPhone 16","state":"Shutdown"', '"udid":"old","name":"iPhone 16","state":"Booted"');
+    expect(pickSimulator(booted)).toMatchObject({ udid: 'old', booted: true });
+  });
+
+  it('honours ARKI_RN_SIMULATOR by name or UDID, and finds nothing for an unknown one', () => {
+    expect(pickSimulator(devices, 'iPhone 16')?.udid).toBe('old');
+    expect(pickSimulator(devices, 'pad')?.name).toBe('iPad Air');
+    expect(pickSimulator(devices, 'iPhone 99')).toBeUndefined();
+  });
+
+  it('passes only on the summary line with no FAIL line, so one broken component fails the leg', () => {
+    expect(appResult('44 smoke checks passed (hermes 250829098.0.17)\n')).toEqual({
+      done: true,
+      passed: true,
+      summary: '44 smoke checks passed (hermes 250829098.0.17)',
+    });
+    expect(appResult('FAIL select content: did not lay out\n43/44 checks laid out (hermes)\n')).toMatchObject({
+      done: true,
+      passed: false,
+    });
+  });
+
+  it('waits while the file is empty or half written, so a slow write is not read as a crash', () => {
+    expect(appResult('').done).toBe(false);
+    expect(appResult('FAIL button: boom\n').done).toBe(false);
+  });
+
+  it('says in the README row which proof ran, so a runner-only pass is never read as a component proof', () => {
+    expect(hermesVersionLabel('V1 250829098.0.17')).toBe('V1 250829098.0.17');
+    expect(hermesVersionLabel('V1 250829098.0.17', 'pass')).toBe('V1 250829098.0.17, runner + iOS release app');
+    expect(hermesVersionLabel('V1 250829098.0.17', 'not run')).toBe('V1 250829098.0.17, runner only (app not run)');
   });
 });

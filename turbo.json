@@ -270,7 +270,9 @@
         "build"
       ],
       "passThroughEnv": [
-        "HERMES_BIN"
+        "HERMES_BIN",
+        "ARKI_RN_APP",
+        "ARKI_RN_SIMULATOR"
       ],
       "cache": false
     },

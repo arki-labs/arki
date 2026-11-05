@@ -18,6 +18,8 @@
  *            is bundled the way Metro does (iOS and native file extensions, JSX in
  *            `.js`), with `react-native` itself given by the host
  *            (`REACT_NATIVE_HOST_MODULE`): this runner has no React Native native runtime.
+ *            A package with `arki.hermesApp` also proves its components in a release
+ *            iOS app on Hermes, in a simulator, when `ARKI_RN_APP=1` (`hermes-app.ts`).
  *
  * Entry smoke files. `scripts/smoke.mjs` proves the package on every engine it
  * claims. An export key in `"arki": { "entryRuntimes": { "./geocoding": [...] } }`
@@ -65,6 +67,7 @@ import { expectImportPure } from '@arki/ts/testing';
 
 import type { Manifest, Runtime } from './manifest';
 import { isAdapterSubpath } from './adapters';
+import { runHermesApp } from './hermes-app';
 import { HERMES_FAILURE_MARKER, hermesScript, REACT_NATIVE_HOST_MODULE } from './hermes-host';
 import { isReactNativePackage, readManifest, runtimeEntry } from './manifest';
 import { complain, say } from './report';
@@ -218,8 +221,14 @@ const OUT = '.cache/runtimes';
 
 type Context = { readonly cwd: string; readonly manifest: Manifest };
 
-function run(command: string, args: readonly string[], cwd: string): { output: string; status: number | null } {
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 180_000 });
+function run(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs = 180_000,
+): { output: string; status: number | null } {
+  // A native build prints far more than spawnSync's default 1 MiB buffer.
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024 });
   if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
     throw new Incomplete(`${command} is not installed`);
   }
@@ -466,6 +475,28 @@ async function hermes(context: Context, unit: SmokeUnit): Promise<void> {
   if (!output) throw new Error('esbuild produced no output for the Hermes script');
   writeFileSync(path.join(context.cwd, script), output.text);
   smoke(binary, [script], context.cwd, HERMES_FAILURE_MARKER);
+  const app = context.manifest.hermesApp;
+  if (unit.entry !== undefined || app === undefined) return;
+  if (process.env['ARKI_RN_APP'] !== '1') {
+    hermesAppProof = 'not run';
+    say(`  components: not run; ARKI_RN_APP=1 builds ${app}/ and runs it in an iOS simulator (Xcode needed)`);
+    return;
+  }
+  say(`  components: building ${app}/ (release, Hermes) and running it in an iOS simulator`);
+  const started = Date.now();
+  say(`  ${await runHermesApp(run, context.cwd, context.manifest.name, app)} in ${String(Math.round((Date.now() - started) / 1000))} s`);
+  hermesAppProof = 'pass';
+}
+
+/** Whether this run proved the components of a package with `arki.hermesApp` in its app. */
+let hermesAppProof: 'pass' | 'not run' | undefined;
+
+/** The Hermes row's version column, saying which proof ran when the package has an app. */
+export function hermesVersionLabel(engine: string, appProof?: 'pass' | 'not run'): string {
+  if (appProof === undefined) return engine;
+  return appProof === 'pass'
+    ? `${engine}, runner + iOS release app`
+    : `${engine}, runner only (app not run)`;
 }
 
 /** The engine's own version string, or `unknown` when it cannot be asked. */
@@ -533,7 +564,7 @@ async function main(): Promise<number> {
   const units = smokeUnits(context.manifest, file => existsSync(path.join(cwd, file)));
 
   const failed: Leg[] = [];
-  const incomplete: Leg[] = [];
+  const incomplete: string[] = [];
   const rows: RuntimeRow[] = [];
   const date = new Date().toISOString().slice(0, 10);
   for (const leg of selectLegs(values.only)) {
@@ -548,8 +579,10 @@ async function main(): Promise<number> {
       if (leg === 'purity') purity(context);
       else await runEngine(leg, context, inScope);
       if (leg !== 'purity') {
-        const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
+        const engine = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
+        const version = leg === 'hermes' ? hermesVersionLabel(engine, hermesAppProof) : engine;
         rows.push({ runtime: leg, result: 'pass', version, date });
+        if (leg === 'hermes' && hermesAppProof === 'not run') incomplete.push('hermes app');
       }
     } catch (error) {
       if (error instanceof Incomplete) {

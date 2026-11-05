@@ -282,6 +282,7 @@
   "arki": {
     "runtimes": [
       "hermes"
-    ]
+    ],
+    "hermesApp": "app"
   }
 }

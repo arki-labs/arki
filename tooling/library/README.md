@@ -191,7 +191,8 @@ arki-error-index [--out dist/errors.json]
   "arki": {
     "runtimes": ["node", "bun", "deno", "browser", "hermes"],
     "bundlerOnly": ["./react"],
-    "entryRuntimes": { "./geocoding": ["node", "bun", "deno"] }
+    "entryRuntimes": { "./geocoding": ["node", "bun", "deno"] },
+    "hermesApp": "app"
   }
 }
 ```
@@ -201,6 +202,19 @@ arki-error-index [--out dist/errors.json]
 - `bundlerOnly`: an export key that loads only inside a bundler (it imports a package that ships TypeScript source, or reads `import.meta.env`). When the key has a `scripts/smoke/<key>.mjs`, `arki-runtimes` runs it as a bundle on every engine (`bun build --target=node` for Node, Bun and Deno).
 - A leg passes only when every smoke file that claims its engine passes. `--write-readme` adds one line per entry smoke file under the table.
 - A package whose `runtimes` is only `hermes` is a React Native package. Bun cannot import `react-native` (Flow source), so purity is left to the Hermes leg. Its Hermes bundle resolves the way Metro does for iOS (`.ios` and `.native` files, JSX in `.js`), and `react-native` itself comes from the host: an empty `NativeModules` and the iOS `Platform`. Any other `react-native` export, and any `react-native/Libraries/...` import, fails the leg, because this runner has no React Native native runtime.
+- `hermesApp`: a folder in a React Native package holding a small Expo app that renders the package's components. Components need Fabric and the native modules of their libraries (react-native-svg, reanimated, react-native-screens), so the bare runner cannot run them. With `ARKI_RN_APP=1` the Hermes leg also runs the app proof (below). Needs `hermes` in `runtimes`.
+
+### The app proof (`ARKI_RN_APP=1`)
+
+For a package with `arki.hermesApp`, the Hermes leg first runs `scripts/smoke.mjs` on the bare runner (keep it to the entries that load there, such as pure helpers). With `ARKI_RN_APP=1` it then:
+
+1. packs the package with `bun pm pack` into `<app>/.cache/<scope>-<name>.tgz`; the app's `package.json` must depend on `"file:.cache/<scope>-<name>.tgz"`, so the app installs what npm would ship;
+2. runs `bun install` in the app. The app is outside the workspace globs, so it has its own `node_modules` and `bun.lock` (gitignored) and the root lockfile does not change;
+3. runs `expo prebuild --platform ios --no-install` and `pod install` when `<app>/ios` is missing (delete `ios/` to regenerate it after a native dependency change);
+4. builds the Release configuration for the iOS simulator with `xcodebuild` (Hermes bytecode, as an App Store build);
+5. installs the app fresh on a simulator, launches it, and reads `Documents/arki-app-smoke.txt` from the app's data folder. The app writes `N smoke checks passed (...)` there, or `FAIL ...` lines. The simulator is `ARKI_RN_SIMULATOR` (name or UDID), else a booted iPhone, else the first iPhone on the newest iOS runtime. A simulator the leg booted is shut down after.
+
+Needs macOS with Xcode, an iOS simulator runtime, CocoaPods (`pod`, not through `bunx`) and Node. A first run takes 10 to 20 minutes (pods and the native build); later runs reuse `ios/` and the build folder. Without `ARKI_RN_APP=1` the Hermes row reads `..., runner only (app not run)` and `--require-all` fails with `INCOMPLETE: hermes app`; after the app passes it reads `..., runner + iOS release app`.
 
 ### `arki-runtimes --write-readme`
 

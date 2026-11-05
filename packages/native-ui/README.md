@@ -55,6 +55,13 @@ export const demo = {
 
 React Native with Expo or Metro. The component entries import `react-native`, so they do not load in plain Node, Deno or a browser. The helpers in `lib/cn`, `lib/utils` and `lib/colors` import no React Native code and run on any runtime.
 
+The Hermes row has two proofs:
+
+- The helpers run on the bare Hermes V1 runner (`scripts/smoke.mjs`).
+- The components run in `app/`, a small Expo app built in release mode on Hermes V1 and run in an iOS simulator. The app installs this package from its packed tarball, renders every component once, opens every overlay (dialog, alert dialog, popover, tooltip, hover card, dropdown menu, context menu, select), and passes only when each one has laid out natively. The menubar renders closed: it opens only on a tap, and the app does not tap. Sub-menus stay closed for the same reason. Run it on a Mac with Xcode: `ARKI_RN_APP=1 bun run test:runtimes`.
+
+The version column says which proof ran: `runner + iOS release app`, or `runner only (app not run)`.
+
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |
 | --- | --- | --- | --- |
@@ -63,7 +70,7 @@ React Native with Expo or Metro. The component entries import `react-native`, so
 | bun | n/a | - | 2026-11-05 |
 | deno | n/a | - | 2026-11-05 |
 | browser | n/a | - | 2026-11-05 |
-| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17, runner + iOS release app | 2026-11-05 |
 <!-- runtimes:end -->
 
 ## Public imports

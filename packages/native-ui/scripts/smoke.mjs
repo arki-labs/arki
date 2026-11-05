@@ -1,18 +1,15 @@
-// Cross-runtime smoke test. Runs the BUILT entries on Hermes via `bun run test:runtimes`
-// (the only engine this package claims). Checks the pure helpers (class merging, colours,
-// initials, debounce) and loads the root entry and the button and text components, which
-// pull in React Native and the rn-primitives.
+// Cross-runtime smoke test. Runs the BUILT helper entries on the bare Hermes runner via
+// `bun run test:runtimes` (the only engine this package claims): class merging, colours,
+// initials, debounce. The components need Fabric and native modules, which that runner
+// does not have; `app/` renders them in a release iOS app instead (`ARKI_RN_APP=1`).
 
+import { cn } from "../dist/src/lib/cn.js";
 import {
-  cn,
   debounce,
   formatFileSize,
   getInitials,
   truncate,
-} from "../dist/src/index.js";
-import { Button } from "../dist/src/components/button.js";
-import { Text } from "../dist/src/components/text.js";
-import { cn as cnFromLib } from "../dist/src/lib/cn.js";
+} from "../dist/src/lib/utils.js";
 import {
   darkenColor,
   hexToRgba,
@@ -40,7 +37,7 @@ const checks = [
     "py-1 px-4",
   ],
   ["cn drops falsy values", cn("a", false && "b", undefined, "c"), "a c"],
-  ["the lib entry is the same cn", cnFromLib === cn, true],
+  ["cn merges a conditional class", cn("p-1", { "m-2": true }), "p-1 m-2"],
   ["initials of two words", getInitials("Ada Lovelace"), "AL"],
   ["initials of one word", getInitials("ada"), "AD"],
   ["truncate shortens text", truncate("abcdefghij", 5).length <= 5, true],
@@ -53,11 +50,6 @@ const checks = [
     "lighten and darken are inverse at the ends",
     `${lightenColor("#000000", 100)}/${darkenColor("#ffffff", 100)}`,
     "#ffffff/#000000",
-  ],
-  [
-    "button and text components load",
-    typeof Button !== "undefined" && typeof Text !== "undefined",
-    true,
   ],
 ];
 

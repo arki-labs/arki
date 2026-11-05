@@ -1,0 +1,28 @@
+{
+  "name": "native-ui-app-smoke",
+  "private": true,
+  "description": "A small Expo app that renders every @arki/native-ui component in a release iOS build on Hermes. arki-runtimes runs it (ARKI_RN_APP=1); it is not part of the workspace.",
+  "main": "index.js",
+  "dependencies": {
+    "@arki/native-ui": "file:.cache/arki-native-ui.tgz",
+    "@rn-primitives/portal": "^1.5.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "expo": "~57.0.27",
+    "expo-file-system": "~57.0.7",
+    "nativewind": "5.0.0-preview.4",
+    "phosphor-react-native": "^3.0.6",
+    "react": "19.3.0",
+    "react-native": "0.86.3",
+    "react-native-css": "3.0.7",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
+    "react-native-worklets": "0.10.1",
+    "tailwindcss": "4.3.3"
+  },
+  "overrides": {
+    "lightningcss": "1.30.1"
+  }
+}

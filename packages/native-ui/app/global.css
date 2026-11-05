@@ -1,0 +1,4 @@
+@import "tailwindcss";
+@import "nativewind/theme";
+
+@source "./node_modules/@arki/native-ui/dist";
