@@ -719,6 +719,7 @@
         "@arki/log": "workspace:*",
         "@arki/resilience": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -921,6 +922,7 @@
         "@arki/kv": "workspace:*",
         "@arki/log": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "@t3-oss/env-core": "catalog:env",
         "node-fetch": "^2.7.0",
         "node-geocoder": "catalog:",
@@ -1337,6 +1339,7 @@
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -1345,6 +1348,7 @@
         "@arki/journal": "workspace:*",
         "@arki/prettier-config": "workspace:*",
         "@arki/resilience": "workspace:*",
+        "@arki/testing": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
         "@aws-sdk/client-sesv2": "catalog:",
@@ -1629,11 +1633,13 @@
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/schema": "workspace:*",
+        "@opentelemetry/api": "catalog:opentelemetry",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/eslint-config": "workspace:*",
         "@arki/prettier-config": "workspace:*",
+        "@arki/testing": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "react-native-purchases": "catalog:",
         "vitest": "catalog:",
