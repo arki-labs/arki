@@ -351,9 +351,10 @@ Only actual ENOENT becomes missing (`null`, `false`, or idempotent delete); ENOT
 
 `readFirstLine` returns the first line, `undefined` at empty EOF, or a canonical read failure. It closes its
 reader/stream on every terminal path and accepts an optional signal. `StorageNotFound` is the missing-file
-outcome. `readFile`, `writeToTheFileEnd`, `deleteAsync` and `glob` (`@arki/fs/local/*`) return the same
-typed storage failures: a missing path is `StorageNotFound`, a refusal is `StorageRejected`, a write that
-may have partly happened is `StorageWriteUncertain`.
+outcome. `readFile`, `writeToTheFileEnd`, `deleteAsync`, `deleteSync`, `glob`, `globIterate` and `globStream`
+(`@arki/fs/local/*`) return the same typed storage failures: a missing path is `StorageNotFound`, a refusal is `StorageRejected`, a write that
+may have partly happened is `StorageWriteUncertain`. `globIterate` returns its failure as the generator's
+return value and `globStream` as its last chunk; neither throws or errors.
 
 The legacy `initializeStorage` Flystorage handle retains its upstream contract. The importing application
 operation owns its throws, cancellation and cleanup. This named foreign bridge does not exempt the owned
@@ -380,3 +381,17 @@ The suite is `bench/files.bench.ts` (`bun run bench`): the signer against a dire
 statements it replaces. No in-process files-table library exists to rank against. Numbers are
 published here only from an idle `bun run bench --profile publish --write-readme` run; none is
 recorded yet.
+
+## Runtime support
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->

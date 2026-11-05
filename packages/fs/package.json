@@ -126,6 +126,13 @@
     },
     "./package.json": "./package.json"
   },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno"
+    ]
+  },
   "scripts": {
     "bench": "arki-bench",
     "build": "tsc -p tsconfig.build.json",

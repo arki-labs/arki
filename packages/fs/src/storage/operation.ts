@@ -105,15 +105,40 @@ function report(run: () => unknown): void {
   }
 }
 
-/** No paths, keys, URLs, names or private causes are reported. SDKs remain application-owned. */
-export async function observeFs<T>(operation: string, run: () => T | Promise<T>): Promise<T> {
-  let span: ReturnType<ReturnType<typeof trace.getTracer>['startSpan']> | undefined;
-  let execution: Promise<T> | undefined;
-  const execute = () => (execution ??= Promise.resolve().then(run));
-  const started = performance.now();
+type FsSpan = ReturnType<ReturnType<typeof trace.getTracer>['startSpan']>;
+
+function startFsSpan(operation: string) {
+  let span: FsSpan | undefined;
   report(() => {
     span = trace.getTracer('@arki/fs').startSpan(operation);
   });
+  return span;
+}
+
+function finishFs(operation: string, span: FsSpan | undefined, started: number, code: string | undefined) {
+  if (code) {
+    const failureCode = code;
+    report(() => span?.setAttribute('failure.code', failureCode));
+    report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+  }
+  report(() => span?.end());
+  // Metrics use the same bounded operation names and failure codes as the spans.
+  report(() => {
+    const meter = metrics.getMeter('@arki/fs');
+    const attributes = { operation, 'failure.code': code ?? 'none' };
+    meter.createCounter('fs.operations').add(1, attributes);
+    meter
+      .createHistogram('fs.operation.duration', { unit: 's' })
+      .record((performance.now() - started) / 1000, attributes);
+  });
+}
+
+/** No paths, keys, URLs, names or private causes are reported. SDKs remain application-owned. */
+export async function observeFs<T>(operation: string, run: () => T | Promise<T>): Promise<T> {
+  let execution: Promise<T> | undefined;
+  const execute = () => (execution ??= Promise.resolve().then(run));
+  const started = performance.now();
+  const span = startFsSpan(operation);
   report(() => span && context.with(trace.setSpan(context.active(), span), execute));
   let code: string | undefined;
   try {
@@ -124,21 +149,28 @@ export async function observeFs<T>(operation: string, run: () => T | Promise<T>)
     code = UnexpectedDefect.code;
     throw error;
   } finally {
-    if (code) {
-      const failureCode = code;
-      report(() => span?.setAttribute('failure.code', failureCode));
-      report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
-    }
-    report(() => span?.end());
-    // Metrics use the same bounded operation names and failure codes as the spans.
-    report(() => {
-      const meter = metrics.getMeter('@arki/fs');
-      const attributes = { operation, 'failure.code': code ?? 'none' };
-      meter.createCounter('fs.operations').add(1, attributes);
-      meter
-        .createHistogram('fs.operation.duration', { unit: 's' })
-        .record((performance.now() - started) / 1000, attributes);
-    });
+    finishFs(operation, span, started, code);
+  }
+}
+
+/** The synchronous twin of {@link observeFs}: the same span, metrics and failure code for a sync operation. */
+export function observeFsSync<T>(operation: string, run: () => T): T {
+  const started = performance.now();
+  const span = startFsSpan(operation);
+  let active = context.active();
+  report(() => {
+    if (span) active = trace.setSpan(context.active(), span);
+  });
+  let code: string | undefined;
+  try {
+    const result = context.with(active, run);
+    if (isFailure<unknown>(result)) code = result.code;
+    return result;
+  } catch (error) {
+    code = UnexpectedDefect.code;
+    throw error;
+  } finally {
+    finishFs(operation, span, started, code);
   }
 }
 

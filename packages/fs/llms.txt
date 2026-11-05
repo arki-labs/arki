@@ -6,9 +6,9 @@
 
 <!-- llms:start -->
 - `@arki/fs/env`: `env`.
-- `@arki/fs/local/delete`: Deletes files and folders by glob (the `del` package) and returns typed storage failures. `deleteAsync`; types `Options`.
+- `@arki/fs/local/delete`: Deletes files and folders by glob (the `del` package) and returns typed storage failures. `deleteAsync`, `deleteSync`; types `Options`, `ProgressData`.
 - `@arki/fs/local/dir`: `getParentDirName`.
-- `@arki/fs/local/glob`: Finds files by glob (the `glob` package) and returns typed storage failures. `glob`; types `GlobOptionsWithFileTypesFalse`.
+- `@arki/fs/local/glob`: Finds files by glob (the `glob` package) and returns typed storage failures. `glob`, `globIterate`, `globStream`; types `GlobOptionsWithFileTypesFalse`.
 - `@arki/fs/local/read-file`: Reads a whole file and decodes it with `encoding` (`utf8`, `latin1`, `win1252`, any iconv-lite name). `readFile`.
 - `@arki/fs/local/read-first-line`: The first line, or undefined for an empty file. `readFirstLine`.
 - `@arki/fs/local/write`: Appends `data` to the end of a file, creating the file when it is missing. `writeToTheFileEnd`.

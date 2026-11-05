@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Context, ContextManager } from '@opentelemetry/api';
@@ -9,6 +9,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { orThrow } from '@arki/failure';
 
+import { deleteSync } from '../local/delete.js';
+import { globIterate } from '../local/glob.js';
 import { StorageRejected } from './failures.js';
 import { createLocalStorageAdapter } from './local-adapter.js';
 import { observeFs } from './operation.js';
@@ -138,4 +140,20 @@ it('isolates throwing metric providers and rejected end reports', async () => {
   const failure = StorageRejected();
   expect(await observeFs('fs.local.get', () => failure)).toBe(failure);
   await Promise.resolve();
+});
+
+it('the sync and iterating local helpers record the same span and failure code as their siblings', async () => {
+  const exporter = install();
+  const directory = await mkdtemp(path.join(tmpdir(), 'arki-fs-telemetry-'));
+  directories.push(directory);
+  const outside = path.join(directory, 'outside');
+  await writeFile(outside, 'kept');
+  expect(StorageRejected.is(deleteSync(outside))).toBe(true);
+  const walk = globIterate('*', { cwd: directory, signal: AbortSignal.abort() });
+  for (let next = await walk.next(); !next.done; next = await walk.next()) expect(next.value).toBeUndefined();
+  const spans = exporter.getFinishedSpans().map(span => ({ name: span.name, code: span.attributes['failure.code'] }));
+  expect(spans).toEqual([
+    { name: 'fs.local.delete_paths', code: 'fs.storage_rejected' },
+    { name: 'fs.local.glob', code: 'fs.storage_cancelled' },
+  ]);
 });
