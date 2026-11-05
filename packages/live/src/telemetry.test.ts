@@ -176,7 +176,7 @@ describe('live.client.connection (client)', () => {
     }
   });
 
-  it('a 401 ends the connection as unauthorized, failed, and the client stops retrying', async () => {
+  it('a 401 ends the connection as unauthorized, status unset, and the client stops retrying', async () => {
     using spans = captureSpans();
     const { fetch } = await rig({ grant: null });
     const statuses: LiveStatus[] = [];
@@ -196,7 +196,8 @@ describe('live.client.connection (client)', () => {
       'http.response.status_code': 401,
       'live.client.outcome': 'unauthorized',
     });
-    expect(connection.status.code).toBe(SpanStatusCode.ERROR);
+    // WHY: a refused session is an expected outcome, not a fault; the reason attribute carries it.
+    expect(connection.status.code).toBe(SpanStatusCode.UNSET);
     const counted = await counter(spans, 'live.client.connections');
     expect(counted.map(point => [point.attributes, point.value])).toEqual([[{ outcome: 'unauthorized' }, 1]]);
   });

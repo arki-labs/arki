@@ -517,7 +517,7 @@ Spans (OpenTelemetry API only; nothing is exported until the app configures an S
 | `live.stream`            | one server stream, from attaching to the hub until it ends; under the request's `http.request` span     | `live.stream.mode` (`resume`, `reset`), `live.stream.end`, `error.type` when attaching or the feed fails |
 | `live.client.connection` | one client connection, from its `fetch` until it ends; an instrumented `fetch` joins the server's trace | `live.client.attempt`, `http.response.status_code`, `live.client.outcome`                                |
 
-`live.stream.end` is `max_age`, `revoked`, `closed`, `gap`, `bye`, `error` or `disconnected`; `gap` and `error` mark the span failed. `live.client.outcome` is `bye`, `retry`, `unauthorized`, `stopped` or `error`; `retry`, `unauthorized` and `error` mark it failed. `error.type` is the `ARKI_LIVE_E…` code or the error class, never the message.
+`live.stream.end` is `max_age`, `revoked`, `closed`, `gap`, `bye`, `error` or `disconnected`; `gap` and `error` mark the span failed. `live.client.outcome` is `bye`, `retry`, `unauthorized`, `stopped` or `error`; `retry` and `error` mark it failed; `unauthorized` is an expected outcome and leaves the status unset. `error.type` is the `ARKI_LIVE_E…` code or the error class, never the message.
 
 Metrics: `live.streams.active` (up-down counter), `live.streams` (counter; `end`), `live.client.connections` (counter; `outcome`).
 

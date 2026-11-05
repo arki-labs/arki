@@ -274,8 +274,9 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(record?.traceId).toBe(hook?.traceId);
   });
 
-  it('reports a returned refusal without inventing an exception event', async () => {
-    // WHY: a 4xx is an expected answer, so the status stays unset; only a fault is an error.
+  it('marks a boot that returns a 4xx failure as an error, with its code and no exception event', async () => {
+    // WHY: a failed boot means the app did not come up, whatever the failure's status; the 4xx rule
+    // for expected answers does not apply to boot.
     const Refused = defineFailure('otel_test.refused');
     const refusal = Refused();
     const result = await defineApp('otel-refusal')
@@ -284,10 +285,26 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(result).toBe(refusal);
     for (const name of ['dot.unit.boot', 'dot.app.boot']) {
       const span = spansByName(name)[0];
-      expect(span?.status.code).toBe(SpanStatusCode.UNSET);
+      expect(span?.status).toEqual({ code: SpanStatusCode.ERROR, message: Refused.code });
       expect(span?.attributes['failure.code']).toBe(Refused.code);
       expect(span?.events.some(event => event.name === 'exception')).toBe(false);
     }
+  });
+
+  it('marks a unit whose start returns a 4xx failure as an error on the unit-start and app-start spans', async () => {
+    // WHY: a failed boot always shows as an error, even when the failure that caused it is a 4xx.
+    const Refused = defineFailure('otel_test.start_refused');
+    const refusal = Refused();
+    const result = await defineApp('otel-start-refusal')
+      .infra(infra({ name: 'refused-start', start: () => refusal }))
+      .start();
+    expect(result).toBe(refusal);
+    const unitStart = spansByName('dot.unit.start')[0];
+    expect(unitStart?.status).toEqual({ code: SpanStatusCode.ERROR, message: Refused.code });
+    expect(unitStart?.attributes['failure.code']).toBe(Refused.code);
+    const boot = spansByName('dot.app.start')[0];
+    expect(boot?.status).toEqual({ code: SpanStatusCode.ERROR, message: Refused.code });
+    expect(boot?.attributes['failure.code']).toBe(Refused.code);
   });
 
   it('marks a returned 5xx fault as an error on the unit and app spans', async () => {

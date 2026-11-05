@@ -139,7 +139,7 @@ export function observeConnection(attempt: number): ConnectionTelemetry {
       ended = true;
       quietly(() => span?.setAttribute('live.client.outcome', outcome));
       if (error !== undefined) quietly(() => span?.setAttribute('error.type', errorType(error)));
-      if (outcome === 'retry' || outcome === 'unauthorized' || outcome === 'error') {
+      if (outcome === 'retry' || outcome === 'error') {
         quietly(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
       }
       quietly(() => metrics.getMeter(SCOPE).createCounter('live.client.connections').add(1, { outcome }));

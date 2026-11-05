@@ -254,7 +254,7 @@ describe('createMastraRuntime spans', () => {
 
   it('records the code of a 4xx run:error failure and leaves the status unset', async () => {
     // WHY: the loop reports a failure as an event, not a throw; the span must still carry its code.
-    // A refused key (401) is an expected answer, not a fault, so the span is not an error.
+    // A rate limit (429) is an expected answer, not a fault, so the span is not an error.
     const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream<LanguageModelV4StreamPart>({
@@ -262,7 +262,14 @@ describe('createMastraRuntime spans', () => {
             { type: 'stream-start', warnings: [] },
             {
               type: 'error',
-              error: new APICallError({ message: 'status 401', url: 'https://x', requestBodyValues: {}, statusCode: 401 }),
+              // Not retryable, so the SDK does not back off and retry before the loop reports it.
+              error: new APICallError({
+                message: 'status 429',
+                url: 'https://x',
+                requestBodyValues: {},
+                statusCode: 429,
+                isRetryable: false,
+              }),
             },
           ],
         }),
@@ -272,7 +279,7 @@ describe('createMastraRuntime spans', () => {
 
     const [span] = exporter.getFinishedSpans();
     expect(span?.status.code).toBe(0);
-    expect(span?.attributes['failure.code']).toBe('ai.unauthorized');
+    expect(span?.attributes['failure.code']).toBe('ai.rate_limited');
   });
 
   it('marks the span as an error for a 5xx run:error failure', async () => {

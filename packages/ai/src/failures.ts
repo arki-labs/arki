@@ -88,12 +88,13 @@ export type KeywordSearchUnavailable = ReturnType<typeof KeywordSearchUnavailabl
 /** Which provider and model a provider failure came from. */
 const providerCall = { provider: z.string(), model: z.string() };
 
-/** The provider refused the credentials (401 or 403), or no API key was set for it.
+/** The provider refused the credentials (401 or 403), or no API key was set for it. This is a configuration
+ * fault of this app, not a bad request from its caller, so the status is 500.
  * @fix Set a valid API key for the provider, or pick a provider you have access to.
  * @verify bun run test -- src/ai-service/provider-failure.test.ts
  */
 export const ProviderUnauthorized = /* @__PURE__ */ defineFailure('ai.unauthorized', {
-  status: 401,
+  status: 500,
   data: z.object({ ...providerCall, status: z.number().optional() }),
   message: '{provider}/{model} refused the credentials',
   remediation: 'Set a valid API key for the provider, or pick a provider you have access to.',
