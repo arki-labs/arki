@@ -5,15 +5,16 @@
  * A journal entity table needs a string key (`id`) and `version`: the
  * journal bumps `version` on every event and uses it to catch write races.
  */
-import { createIdFactory } from '@arki/db/id-factory';
+import { defineId } from '@arki/contracts';
+import { idColumns } from '@arki/db/id-factory';
 import { integer, pgTable, text, timestamp, varchar } from '@arki/db/pg';
 
-export const noteId = createIdFactory('note_');
+export const noteId = defineId('note_');
 /** `noteId.create()` returns the id or an `IdGenerationFailure`, so the id type comes from the column. */
 export type NoteId = (typeof notes.$inferSelect)['id'];
 
 export const notes = pgTable('notes', {
-  id: noteId.primaryColumn(),
+  id: idColumns(noteId).primaryColumn(),
   title: varchar('title', { length: 200 }).notNull(),
   body: text('body').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),

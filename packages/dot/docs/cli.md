@@ -114,7 +114,7 @@ dot dev ▸ runner: vite dev --port 3000 --strictPort (pid 4121)
   module gives the console (`data.page`). It is what the console runs; use it to
   test a page without a browser.
 - **Failure codes:** `dot.dev_db_unreachable`, `dot.dev_runner_failed`,
-  `dot.dev_port_in_use`, `dot.dev_already_running`,
+  `dot.dev_port_in_use`, `dot.dev_already_running`, `dot.dev_state_failed`,
   `dot.dev_remote_db_refused`, `dot.dev_app_started`, `dot.dev_preflight_failed`. With `--output ndjson`,
   the events (`app`, `db`, `migrations`, `preflight`, `runner`, `console`,
   `restart`, `exit`) print one per line when the session ends.

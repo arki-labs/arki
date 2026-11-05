@@ -114,7 +114,11 @@ describe('dot explain: the policy a procedure declares', () => {
       .input(z.object({ id: z.string() })),
   });
   const orders = defineFeature('orders').entrypoints(
-    rpc(orderContract, implement(orderContract), o => ({ refund: o.refund.handler(() => undefined) })),
+    rpc(orderContract, implement(orderContract), o => ({
+      refund: o.refund.handler(() => {
+        /* the refund has no output */
+      }),
+    })),
   );
   const manifest = orThrow(defineApp('policy-explain').features([orders]).configure()).manifest;
 

@@ -60,6 +60,7 @@ export {
   DevPreflightFailed,
   DevRemoteDbRefused,
   DevRunnerFailed,
+  DevStateFailed,
   DoctorFailed,
   ObservabilityNoSdk,
   PreflightFailed,

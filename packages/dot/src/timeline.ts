@@ -25,6 +25,8 @@
  * @see packages/dot/docs/observability.md
  */
 
+import { invariant } from '@arki/failure';
+
 import type { DotDiagnosticsSnapshot, LifecycleDiagnostic } from './diagnostics.js';
 import type { DotLifecycleHook } from './lifecycle.js';
 
@@ -32,10 +34,14 @@ const PHASE_ORDER: readonly DotLifecycleHook[] = ['configure', 'boot', 'start', 
 
 const BAR_CHAR = '█';
 const DEFAULT_BAR_WIDTH = 50;
+const MAX_BAR_WIDTH = 1000;
 const MIN_BAR_FOR_NONZERO = 1;
 
 export type RenderTimelineOptions = {
-  /** Maximum bar width in characters (default `50`). */
+  /**
+   * Maximum bar width in characters (default `50`): a whole number from 1 to 1000.
+   * Any other value is a caller bug and fails an `invariant`.
+   */
   readonly barWidth?: number;
   /**
    * When `true`, also emit any unit's diagnostic `issues[]` underneath
@@ -48,9 +54,14 @@ export type RenderTimelineOptions = {
 /**
  * Render the snapshot's lifecycle records as a per-phase waterfall.
  * Pure — no IO. Caller is responsible for printing the result.
+ * Throws a `FailureError` (`invariant`) when `barWidth` is not a whole number from 1 to 1000.
  */
 export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTimelineOptions = {}): string {
   const barWidth = opts.barWidth ?? DEFAULT_BAR_WIDTH;
+  invariant(
+    Number.isInteger(barWidth) && barWidth >= 1 && barWidth <= MAX_BAR_WIDTH,
+    () => `renderTimeline: barWidth must be a whole number from 1 to ${String(MAX_BAR_WIDTH)}, got ${String(barWidth)}`,
+  );
   const showIssues = opts.showIssues ?? true;
 
   // Group lifecycle entries by phase, preserving execution order within

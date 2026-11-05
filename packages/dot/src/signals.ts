@@ -42,8 +42,11 @@ export type SignalTarget = {
 };
 
 export type HookSignalsOptions = {
-  /** Signals to intercept. Default: `['SIGTERM', 'SIGINT']`. */
-  readonly signals?: readonly string[];
+  /**
+   * Signals to intercept. Default: `['SIGTERM', 'SIGINT']`. Only termination signals a
+   * process can catch: `SIGKILL` and `SIGSTOP` cannot be hooked, so the type leaves them out.
+   */
+  readonly signals?: readonly ('SIGTERM' | 'SIGINT' | 'SIGHUP' | 'SIGQUIT' | 'SIGBREAK' | 'SIGUSR2')[];
   /**
    * Maximum time the drain (`dispose()`) may take before the process is
    * terminated anyway. Default: 10 000 ms.

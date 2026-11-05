@@ -2,7 +2,7 @@
 import type { Failure } from '@arki/failure';
 import type { StandardSchemaV1 } from '@arki/schema';
 import { dynamicScope } from '@arki/async';
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { invariant, isFailure, UnexpectedDefect } from '@arki/failure';
 import { parseAsync } from '@arki/failure/schema';
 
 import type { ActionFailureDefinition, ActionOptions } from './action.js';
@@ -93,8 +93,9 @@ export function bindAction<
             // Untyped JS callers still cannot leak an undeclared business failure.
             return definitions.some(failure => failure.is(outcome)) ? outcome : UnexpectedDefect({ cause: outcome });
           }
-          if (succeeded(outcome)) return complete(outcome);
-          throw new Error('Unreachable action outcome');
+          // A generic `Result` does not narrow to `never`, so the exhaustiveness proof is an invariant.
+          invariant(succeeded(outcome), 'Unreachable action outcome');
+          return complete(outcome);
         }, invocation),
       { attributes: { 'dot.action.id': definition.id, 'dot.binding': invocation.binding } },
     );

@@ -14,7 +14,7 @@ import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import type { Lazy } from '../unit-contract.js';
 import { lazyOf, infra, service, token } from '../unit-contract.js';
-import { testUnit } from '../test-harness.js';
+import { bootTestApp, testUnit } from '../test-harness.js';
 
 type Db = { query(sql: string): readonly string[] };
 type Cache = { get(key: string): string | undefined };
@@ -119,4 +119,15 @@ it('returns provider, boot and logging refusals unchanged through the focused ha
   ]) {
     expect(await testUnit(unit).boot()).toBe(refusal);
   }
+});
+
+it('bootTestApp returns a unit refusal unchanged and boots a satisfied tuple', async () => {
+  const refusal = HarnessRefused();
+  const refused = await bootTestApp([infra({ name: 'boot-refusal', boot: () => refusal })]);
+  expect(HarnessRefused.is(refused)).toBe(true);
+  expect(refused).toBe(refusal);
+
+  const app = orThrow(await bootTestApp([infra({ name: 'answer', provides: { answer: () => 42 } })]));
+  expect(app.services.answer).toBe(42);
+  orThrow(await app.dispose());
 });

@@ -333,6 +333,15 @@ describe('runNew (real run)', () => {
     expect(after).toBe('{"existing": true}');
   });
 
+  it('returns dot.template_missing when the template folder does not exist', async () => {
+    // A broken install must reach the agent as a returned code, not a raw ENOENT rejection.
+    const missingTemplate = join(workDir, 'no-such-template');
+    const result = await runNew({ name: 'fixture', cwd: workDir, templateRoot: missingTemplate });
+
+    expect(result).toMatchObject({ code: 'dot.template_missing', data: { templateRoot: missingTemplate } });
+    await expect(stat(join(workDir, 'fixture'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('returns dot.template_missing when the template folder has no files', async () => {
     const { mkdir } = await import('node:fs/promises');
     const emptyTemplate = join(workDir, 'empty-template');
@@ -725,6 +734,7 @@ describe('templates', () => {
     expect(manifest.name).toBe('fixture');
     expect(manifest.dependencies).toMatchObject({
       '@arki/dot': `^${readDotVersion()}`,
+      '@arki/contracts': `^${TEMPLATE_VERSIONS.contracts}`,
       '@arki/env': `^${TEMPLATE_VERSIONS.env}`,
       '@arki/log': `^${TEMPLATE_VERSIONS.log}`,
       '@arki/db': `^${TEMPLATE_VERSIONS.db}`,
@@ -737,6 +747,7 @@ describe('templates', () => {
     const arkiDeps = Object.keys(manifest.dependencies).filter(dep => dep.startsWith('@arki/'));
     expect(arkiDeps.sort()).toEqual(
       [
+        '@arki/contracts',
         '@arki/db',
         '@arki/dot',
         '@arki/env',

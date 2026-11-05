@@ -1,6 +1,7 @@
 /** Lazy service ownership with typed initialization and cleanup outcomes. */
 import type { Failure, FailureOf, SuccessOf } from '@arki/failure';
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 
 /**
  * An operation tried to initialize a service after its owner closed admission.
@@ -129,7 +130,7 @@ type PublishedLazy = ReturnType<typeof createLazy<unknown, Failure>>;
 
 /** Detect a published lazy handle without claiming its cleanup is infallible. */
 export function isLazy(value: unknown): value is PublishedLazy {
-  return typeof value === 'object' && value !== null && LazyTag in value && value[LazyTag] === true;
+  return is(value, recordSchema) && Reflect.get(value, LazyTag) === true;
 }
 
 /**

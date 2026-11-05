@@ -5,7 +5,7 @@
  * session's file. The events schema is the contract for `--json` readers.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -62,6 +62,35 @@ describe('dev.json', () => {
     const claimed = await claimDevState(workDir, process.pid);
     expect(isFailure(claimed)).toBe(false);
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(expect.objectContaining({ pid: process.pid }));
+  });
+
+  it('returns dot.dev_state_failed when the project folder is read-only', async () => {
+    // A read-only or full folder must reach `dot dev` as a returned code, not a raw EACCES rejection.
+    await chmod(workDir, 0o500);
+    try {
+      const claimed = await claimDevState(workDir, process.pid);
+      expect(isFailure(claimed) && claimed.code).toBe('dot.dev_state_failed');
+      expect(isFailure(claimed) && claimed.data).toEqual({
+        statePath: path.join(workDir, DEV_STATE_PATH),
+        reason: expect.stringContaining('EACCES'),
+      });
+    } finally {
+      await chmod(workDir, 0o700);
+    }
+  });
+
+  it('release resolves when the file cannot be removed, so the session keeps its own result', async () => {
+    const claimed = await claimDevState(workDir, process.pid);
+    if (isFailure(claimed)) throw new Error(claimed.message);
+    const stateDir = path.dirname(claimed.file);
+    await chmod(stateDir, 0o500);
+    try {
+      await expect(releaseDevState(claimed.file, process.pid)).resolves.toBeUndefined();
+    } finally {
+      await chmod(stateDir, 0o700);
+    }
+    // The file is still there: the next `claimDevState` reclaims it once the pid is dead.
+    expect(JSON.parse(await readFile(claimed.file, 'utf8'))).toMatchObject({ pid: process.pid });
   });
 
   it('release leaves a file that names another pid', async () => {

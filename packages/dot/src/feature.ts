@@ -26,6 +26,8 @@
  * `.features()` turns each feature into its units; driving adapters are
  * `entrypoint(...)` values that `.entrypoints()` binds to the mounted feature list.
  */
+import { is, recordSchema } from '@arki/schema';
+
 import type { AnyDefinedFeature } from './define-feature.js';
 import type {
   ActionSource,
@@ -313,15 +315,15 @@ export function bindEntrypoint<const Unit extends AnyUnit>(
  */
 export function sliceOf(ctx: object, f: AnyDefinedFeature): Readonly<Record<string, unknown>> {
   const key = sliceKeyOf(f);
-  const record: unknown = (ctx as Readonly<Record<string, unknown>>)[key];
-  if (typeof record !== 'object' || record === null) {
+  const record: unknown = Reflect.get(ctx, key);
+  if (!is(record, recordSchema)) {
     throw new FeatureError({
       code: FEATURE_ERROR_CODES.missingSlices,
       message: `[feature] the slice record of feature "${f.name}" is not in this hook's context.`,
       remediation: 'Mount the adapter with `.entrypoints(adapter)` after `.features([...])`, so it is bound to the features.',
     });
   }
-  return record as Readonly<Record<string, unknown>>;
+  return record;
 }
 
 const passThroughObserver: DotHandlerObserver = { watching: () => false, run: (_ref, run) => run() };

@@ -37,7 +37,7 @@ drizzle/                  migrations (generated; commit them)
 
 ## Add a feature
 
-1. `src/features/<name>/tables.ts`: the table. A journal entity needs a string `id` (use `createIdFactory`) and `version integer not null default 0`. Export a record: `export const <name>Tables = { ... }`.
+1. `src/features/<name>/tables.ts`: the table. A journal entity needs a string `id` (`idColumns(defineId('<prefix>_')).primaryColumn()`) and `version integer not null default 0`. Export a record: `export const <name>Tables = { ... }`.
 2. Add that record to `composeSchema(...)` in `src/server/db.ts`.
 3. `bun run db:generate`, then commit the new folder in `drizzle/`.
 4. `src/features/<name>/<entity>.ts`: events with `j.event`, the entity with `j.entity`, and commands with `j.command`. A rule that rejects input throws `CommandError(code, message)` from `@arki/journal`.

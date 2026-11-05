@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotLifecycleEvent, DotLifecycleObserver } from './lifecycle-observer.js';
 import { defineApp } from './define-app.js';
+import { renderTimeline } from './timeline.js';
 import { infra } from './unit-contract.js';
 
 describe('DotLifecycleObserver — happy path', () => {
@@ -243,6 +244,26 @@ describe('renderTimeline integration', () => {
       expect(timeline).toContain('b');
       // At least one bar character is rendered
       expect(timeline).toMatch(/█/);
+    } finally {
+      orThrow(await app.dispose());
+    }
+  });
+
+  it('rejects a bar width that is not a whole number from 1 to 1000 with a clear message', async () => {
+    // barWidth is caller code, never outside input: a bad value is a caller bug, named up front
+    // instead of a RangeError from String.prototype.repeat deep in the renderer.
+    const unit = infra({
+      name: 'a',
+      boot() {
+        /* noop */
+      },
+    });
+    const app = orThrow(await defineApp('timeline-width').infra(unit).boot());
+    try {
+      expect(renderTimeline(app.diagnostics, { barWidth: 20 })).toMatch(/█/);
+      for (const barWidth of [Infinity, 1e9, 0, -1, 2.5, Number.NaN]) {
+        expect(() => renderTimeline(app.diagnostics, { barWidth })).toThrow(/barWidth must be a whole number from 1 to 1000/);
+      }
     } finally {
       orThrow(await app.dispose());
     }
