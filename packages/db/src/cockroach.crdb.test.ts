@@ -146,9 +146,12 @@ describe.runIf(process.env['ARKI_DB_CRDB'] === '1')('@arki/db on CockroachDB', (
   }, 60_000);
 
   // Why: records a known gap. CockroachDB has no LISTEN/NOTIFY, so hosts on it must use polling.
-  it('listenOnPool start rejects (CockroachDB has no LISTEN)', async () => {
+  it('listenOnPool start resolves to db.listen_unavailable (CockroachDB has no LISTEN)', async () => {
     const db = open();
     const start = listenOnPool(db.$client, 'x');
-    await expect(start(vi.fn())).rejects.toThrow(/LISTEN/i);
+    await expect(start(vi.fn())).resolves.toMatchObject({
+      code: 'db.listen_unavailable',
+      cause: expect.objectContaining({ message: expect.stringMatching(/LISTEN/i) }),
+    });
   });
 });

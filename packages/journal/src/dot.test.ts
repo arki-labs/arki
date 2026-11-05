@@ -13,6 +13,7 @@ import { z } from 'zod';
 
 import type { DepsOf, EntrypointServicesOf } from '@arki/dot/feature';
 import type { EmptyShape, Provided, UnitSourceGuard } from '@arki/dot/unit';
+import { ListenUnavailable } from '@arki/db/pg';
 import { defineApp, rename } from '@arki/dot';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import { infra, service, token } from '@arki/dot/unit';
@@ -257,6 +258,32 @@ describe('journal(...) in direct mode', () => {
 
     expect(mail.handled).toEqual([]);
     expect(await db.select().from(tables.jobs)).toHaveLength(1);
+  });
+
+  it('fails the app start with the listener failure when `journalWorker({ listen })` cannot listen, so a deaf worker never looks started', async () => {
+    // Why: a worker that cannot hear the wake channel must say so at start, not run deaf.
+    // journalWorker's start hook hands the worker's returned failure to the app's start.
+    const composed = j.compose({ effects: [recorder('dot-listen-refused').effect] });
+    let attempts = 0;
+    // Not tracked: a failed app cannot stop, only be disposed.
+    const app = await orThrow(
+      defineApp('listen-refused')
+        .infra(dbPlugin())
+        .infra(journal({ journal: composed }))
+        .entrypoints(
+          journalWorker({
+            pollMs: POLL_MS,
+            listen: () => {
+              attempts += 1;
+              return ListenUnavailable();
+            },
+          }),
+        )
+        .boot(),
+    );
+    expect(await app.start()).toMatchObject({ code: ListenUnavailable.code });
+    expect(attempts).toBe(1);
+    await orThrow(app.dispose());
   });
 
   it('mounts a second journal through `rename`, so one app can run two journals without a key collision', async () => {

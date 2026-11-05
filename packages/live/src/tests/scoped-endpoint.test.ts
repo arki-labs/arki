@@ -79,7 +79,7 @@ afterEach(async () => {
 async function rig(grant: LiveGrant | null, wrap: (hub: LiveHub) => LiveHub = hub => hub) {
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
   /** `fail`: `authorize` throws, as a session store that is down would. */

@@ -89,7 +89,7 @@ async function run(hidden: boolean): Promise<{ readonly x: Seen[]; readonly y: S
     limits: { batchMs: BATCH_MS, subscriberFrames: SUBSCRIBER_FRAMES },
     receipts: RECEIPTS,
   });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   const endpoint = liveEndpoint({
     hub,

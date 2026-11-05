@@ -97,7 +97,7 @@ async function app() {
 
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   let grant: LiveGrant | null = {};
   const endpoint = liveEndpoint({ hub, manifest: liveManifest(contract), authorize: () => Promise.resolve(grant) });

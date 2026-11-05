@@ -66,6 +66,9 @@
  */
 import { z } from 'zod';
 
+import type { Failure } from '@arki/failure';
+import { isFailure } from '@arki/failure';
+
 import type { CursorCipher, CursorPosition } from './cursor.js';
 import type { LiveReceipts } from './receipts.js';
 import type { LiveCursor, LiveEvent, LiveReceipt, TableTag } from './types.js';
@@ -91,8 +94,13 @@ export type LiveSourceEvent =
       readonly txid?: string;
     };
 
-/** Where hints come from. `start` resolves with the function that stops it. */
-export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Promise<() => Promise<void>> };
+/**
+ * Where hints come from. `start` resolves with the function that stops it, or with a failure when
+ * the source cannot start (`pgSource`: `db.listen_unavailable`); nothing runs then.
+ */
+export type LiveSource = {
+  start(receive: (event: LiveSourceEvent) => void): Promise<(() => Promise<void>) | Failure>;
+};
 
 /**
  * What `authorize` grants one client. `tables` omitted: every table of the manifest. `scopes`, per
@@ -161,8 +169,13 @@ export type LiveFeed =
   | Extract<LiveEvent, { kind: 'change' | 'gap' | 'bye' }>;
 
 export type LiveHub = {
-  /** Makes the cursor key, then starts the source. Rejects with E001 where WebCrypto (`crypto.subtle`) is missing. */
-  start(): Promise<void>;
+  /**
+   * Makes the cursor key, then starts the source. Rejects with E001 where WebCrypto (`crypto.subtle`) is missing.
+   * Resolves to the source's failure when it cannot start (`pgSource`: `db.listen_unavailable`). A start that
+   * fails (returned or thrown) leaves the hub stopped and `idle`, so a later `start()` tries again; a successful
+   * start happens once.
+   */
+  start(): Promise<Failure | undefined>;
   stop(): Promise<void>;
   status(): 'idle' | 'ready' | 'unavailable' | 'stopped';
   /**
@@ -371,7 +384,7 @@ export function createLiveHub(options: {
 
   let state: 'idle' | 'ready' | 'unavailable' | 'stopped' = 'idle';
   /** The source's start, once `start()` was called. */
-  let starting: Promise<void> | undefined;
+  let starting: Promise<Failure | undefined> | undefined;
   let stopping: Promise<void> | undefined;
   let stopSource: (() => Promise<void>) | undefined;
   /** Seals and opens cursors; made by `start()` before the source can report `ready`. */
@@ -774,6 +787,7 @@ export function createLiveHub(options: {
     for (const subscriber of subscribers) finish(subscriber, { kind: 'bye' });
     debugHub.debug('{epoch}: stopping', { epoch });
     try {
+      // eslint-disable-next-line failure/must-use -- a failed start returned its failure to its own caller and left nothing to stop
       await starting;
     } catch {
       // A failed start rejected to its own caller and left nothing to stop.
@@ -827,6 +841,11 @@ export function createLiveHub(options: {
           ),
         );
       }
+      // A failed start leaves nothing running, so a later `start()` tries again (unless stop() ran).
+      const reset = (): void => {
+        starting = undefined;
+        cipher = undefined;
+      };
       // `stop()` waits for this, then stops the source it resolved with. The key comes first, so
       // the source's first `ready` finds it.
       starting = cursorCipher()
@@ -834,9 +853,21 @@ export function createLiveHub(options: {
           cipher = made;
           return options.source.start(receive);
         })
-        .then(stop => {
-          stopSource = stop;
-        });
+        .then(
+          started => {
+            if (isFailure(started)) {
+              debugHub.debug('the source could not start: {code}', { code: started.code });
+              reset();
+              return started;
+            }
+            stopSource = started;
+            return;
+          },
+          (error: unknown) => {
+            reset();
+            throw error;
+          },
+        );
       return starting;
     },
 

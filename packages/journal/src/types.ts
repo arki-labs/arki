@@ -494,14 +494,26 @@ export type Tap<Meta = unknown, AppDb = RootDb, N extends Needs = NoNeeds> = {
 export type Unlisten = () => void | Promise<void>;
 /**
  * How a worker hears the wake channel. The app wires its own client: for `pg`, a dedicated
- * client that runs `LISTEN <channel>` and calls `onMessage(payload)` on each notification; for
- * PGlite, `client.listen(channel, onMessage)`. Start it before `worker.start()` resolves work
- * you care about: `LISTEN` only hears what is sent after it ran, and the worker still polls.
+ * client that runs `LISTEN <channel>` and calls `onMessage(payload)` on each notification
+ * (`listenOnPool` from `@arki/db/pg`); for PGlite, `client.listen(channel, onMessage)`. Start it
+ * before `worker.start()` resolves work you care about: `LISTEN` only hears what is sent after
+ * it ran, and the worker still polls. A listener that cannot start returns its failure.
  */
-export type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Promise<Unlisten>;
+export type WakeListener<ListenFailure extends Failure = Failure> = (
+  onMessage: (payload: string) => void,
+) => Unlisten | ListenFailure | Promise<Unlisten | ListenFailure>;
 
-/** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
-export type JournalWorker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+/**
+ * `start()` resolves to the listener's failure (`ListenFailure`, inferred from `listen`) when it could
+ * not start; the worker then stays stopped and a later `start()` tries again. A listener that throws
+ * leaves it stopped too. `wake()` runs a drain pass now instead of at the next poll. It does nothing
+ * unless the worker is running.
+ */
+export type JournalWorker<ListenFailure extends Failure = Failure> = {
+  start(): Promise<ListenFailure | undefined>;
+  stop(): Promise<void>;
+  wake(): void;
+};
 
 /** What a command hook sees. Frozen. `input` is the parsed input; a hook may read it, not change it. */
 export type CommandHookContext<MetaOut = unknown> = {

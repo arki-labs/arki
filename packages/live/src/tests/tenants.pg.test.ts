@@ -86,7 +86,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('two tenants on %s',
       receipts: RECEIPTS,
     });
     // Resolves once the listener is up: the hub is ready.
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     const endpoint = liveEndpoint({
       hub,
       manifest,

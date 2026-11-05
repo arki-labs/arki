@@ -128,8 +128,9 @@ export function liveQueries<Needs extends NeedsShape & NoReservedKeys, Dimension
         procedures: manifest.length,
       });
     },
-    async start({ live }) {
-      await live.start();
+    // A listener that cannot start fails the app's start with its failure (`db.listen_unavailable`).
+    start({ live }) {
+      return live.start();
     },
     async stop({ live }) {
       endpoint?.close();

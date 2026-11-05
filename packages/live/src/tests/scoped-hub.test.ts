@@ -69,7 +69,7 @@ afterEach(() => {
 async function rig(limits?: LiveLimits) {
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: BATCH_MS, ...limits }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   const start = Date.now();
   const clock = async (until: number): Promise<void> => {

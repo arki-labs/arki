@@ -119,7 +119,7 @@ describe('the replay ring (step 5)', () => {
   it('the hub evicts by age when a stream connects, not only when a frame flushes', async () => {
     const source = fakeSource();
     const hub = createLiveHub({ source, limits: { batchMs: 10, replayMs: 1000 } });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     source.emit({ kind: 'ready' });
     const firstFeed = await hub.open({ signal: new AbortController().signal });
     const first = firstFeed[Symbol.asyncIterator]();
@@ -141,7 +141,7 @@ describe('start (step 2)', () => {
     const source = fakeSource();
     const hub = createLiveHub({ source });
     expect(hub.status()).toBe('idle');
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     expect(hub.status()).toBe('idle');
     await expect(hub.open({ signal: new AbortController().signal })).rejects.toMatchObject({
       code: LIVE_ERROR_CODES.source,
@@ -165,11 +165,14 @@ describe('start (step 2)', () => {
     await vi.waitFor(() => expect(failing.calls.start).toBe(1));
     failing.failListen();
     await expect(start).rejects.toThrow('LISTEN failed');
+    // A failed start left the hub stopped: the next start tries the source again.
+    await expect(hub.start()).rejects.toThrow('LISTEN failed');
+    expect(failing.calls.start).toBe(2);
     await expect(hub.stop()).resolves.toBeUndefined();
     expect(failing.calls.stop).toBe(0);
 
     const twice = createLiveHub({ source: fakeSource() });
-    await twice.start();
+    expect(await twice.start()).toBeUndefined();
     await expect(twice.start()).rejects.toMatchObject({ code: LIVE_ERROR_CODES.config });
     await twice.stop();
     await expect(twice.start()).rejects.toMatchObject({ code: LIVE_ERROR_CODES.config });
@@ -188,7 +191,7 @@ describe('stop (step 10)', () => {
     const hub = createLiveHub({ source: gated.source });
     const start = hub.start();
     gated.listen();
-    await start;
+    expect(await start).toBeUndefined();
     gated.emit({ kind: 'ready' });
 
     const first = hub.stop();
@@ -215,7 +218,7 @@ describe('stop (step 10)', () => {
     await settle();
     expect(stopDone()).toBe(false);
     gated.listen();
-    await start;
+    expect(await start).toBeUndefined();
     // The listener came up after stop(): it must still be torn down, and stop() waits for that.
     await settle();
     expect(gated.calls.stop).toBe(1);
@@ -230,7 +233,7 @@ describe('stop (step 10)', () => {
   it('clears the batch timer and ends blocked streams with bye', async () => {
     const source = fakeSource();
     const hub = createLiveHub({ source, limits: { batchMs: 50 } });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     source.emit({ kind: 'ready' });
     const streamFeed = await hub.open({ signal: new AbortController().signal });
     const stream = streamFeed[Symbol.asyncIterator]();
@@ -251,7 +254,7 @@ describe('a consumer that stops reading', () => {
     // Why: a tab that goes away must free its hub slot at once; a leak keeps a subscriber and its queue per dead tab.
     const source = fakeSource();
     const hub = createLiveHub({ source });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     source.emit({ kind: 'ready' });
     const feed = await hub.open({ signal: new AbortController().signal });
     const stream = feed[Symbol.asyncIterator]();

@@ -50,7 +50,7 @@ afterEach(async () => {
 async function rig(options: { readonly maxAgeMs?: number } = {}) {
   const source = fakeSource();
   const hub: LiveHub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
   const authorize = vi.fn((request: Request): Promise<LiveGrant | null> => {

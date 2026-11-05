@@ -8,6 +8,7 @@
 import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { IdGenerationFailure } from '@arki/contracts';
+import type { Failure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { Cancelled } from '@arki/async';
 import { attempt, isFailure, orThrow } from '@arki/failure';
@@ -828,18 +829,18 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
   /** One wake function per running worker this journal started. */
   const wakers = new Set<() => void>();
 
-  const worker = (
+  const worker = <ListenFailure extends Failure = never>(
     db: AppDb & RootDb,
     opts?: {
       readonly pollMs?: number;
       readonly batchSize?: number;
       readonly leaseSeconds?: number;
-      readonly listen?: WakeListener;
+      readonly listen?: WakeListener<ListenFailure>;
       readonly taps?: boolean;
       readonly services?: HandlerServices;
       readonly jobs?: JobRunner<AppDb>;
     },
-  ): JournalWorker => {
+  ): JournalWorker<ListenFailure> => {
     assertRootDb(db, 'worker');
     deps.checkServices(opts?.services);
     if (deps.tapNames.length > 0 && opts?.listen === undefined && opts?.taps !== false)
@@ -940,11 +941,31 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         stopping = new AbortController();
         wakers.add(wake);
         if (opts?.listen !== undefined) {
-          unlisten = await opts.listen(payload => {
-            wake();
-            if (opts.taps === false) return;
-            dispatching = dispatching.then(() => deps.dispatch(db, payload, opts.services)).catch(quiet);
-          });
+          // A listener that fails (returned or thrown) undoes the start, so a later `start()` tries again.
+          const undo = (): void => {
+            running = false;
+            wakers.delete(wake);
+            stopping = new AbortController();
+          };
+          let listened: Unlisten | ListenFailure;
+          try {
+            listened = await opts.listen(payload => {
+              wake();
+              if (opts.taps === false) return;
+              dispatching = dispatching.then(() => deps.dispatch(db, payload, opts.services)).catch(quiet);
+            });
+          } catch (error) {
+            undo();
+            throw error;
+          }
+          // `Unlisten` is a function and a failure never is: that splits the two, where `isFailure`
+          // cannot narrow the inferred `ListenFailure`.
+          if (typeof listened !== 'function') {
+            undo();
+            debugWorker.debug('start refused: the listener failed: {failed}', { failed: errorText(listened) });
+            return listened;
+          }
+          unlisten = listened;
         }
         debugWorker.debug('start (poll {pollMs}ms{value2})', {
           pollMs,
@@ -952,6 +973,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         });
         loop = run();
         if (deps.sweep !== undefined) sweeping = sweepLoop(deps.sweep);
+        return;
       },
       async stop() {
         running = false;

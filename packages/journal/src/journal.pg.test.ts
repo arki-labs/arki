@@ -414,7 +414,7 @@ describe('listenOnPool on real Postgres', () => {
       pollMs: 60_000,
       listen: listenOnPool(listenPool, tapped.wakeChannel, { retryMs: 50 }),
     });
-    await worker.start();
+    expect(await worker.start()).toBeUndefined();
     try {
       const first = await placeOnB();
       await until(() => seen.length === 1);
@@ -433,6 +433,49 @@ describe('listenOnPool on real Postgres', () => {
     }
     expect(listenPool.totalCount - listenPool.idleCount, 'no client still checked out').toBe(0);
     await listenPool.end();
+  }, 30_000);
+
+  it('a listener Postgres refuses makes start() return db.listen_unavailable and leaves the worker stopped, so a later start() listens', async () => {
+    // Why: a worker that cannot hear the wake channel must say so, not run deaf. Before this, a
+    // failed listen left the worker marked running and every later start() did nothing.
+    const seen: string[] = [];
+    const live = j.tap('pg-retry', order, {
+      OrderPlaced: e => {
+        seen.push(e.entityId);
+      },
+    });
+    const tapped = j.compose({ taps: [live] });
+    const refused = new URL(container.getConnectionUri());
+    refused.password = 'wrong-password';
+    const refusedPool = new pg.Pool({ connectionString: refused.toString(), max: 1 });
+    refusedPool.on('error', () => null);
+    const listenPool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 2 });
+    // The first start meets the refusing pool; the retry meets the working one.
+    let attempts = 0;
+    const worker = tapped.worker(drizzle({ client: listenPool }), {
+      pollMs: 60_000,
+      listen: onMessage => {
+        attempts += 1;
+        return listenOnPool(attempts === 1 ? refusedPool : listenPool, tapped.wakeChannel, { retryMs: 50 })(onMessage);
+      },
+    });
+    try {
+      expect(await worker.start()).toMatchObject({ code: 'db.listen_unavailable' });
+      expect(await worker.start()).toBeUndefined();
+      expect(attempts).toBe(2);
+      const id = orderId(++next);
+      orThrow(
+        await dbB.transaction(tx =>
+          tapped.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
+      );
+      const end = Date.now() + 5000;
+      while (seen.length === 0 && Date.now() < end) await sleep(25);
+      expect(seen).toEqual([id]);
+    } finally {
+      await worker.stop();
+      await Promise.all([listenPool.end(), refusedPool.end()]);
+    }
   }, 30_000);
 });
 

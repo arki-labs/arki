@@ -53,7 +53,8 @@ export function parseHint(
  * `createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog' }) })`. Give it a pool
  * of its own (one client is enough), apart from the app's query pool: the listener holds
  * its client for as long as it runs. The hub is `ready` only once `LISTEN` succeeded, and
- * again, with a new epoch, after every reconnect.
+ * again, with a new epoch, after every reconnect. When the first connection or `LISTEN`
+ * fails, `start` resolves to `db.listen_unavailable` and `hub.start()` passes it on.
  */
 export function pgSource(options: {
   readonly pool: ListenPool;

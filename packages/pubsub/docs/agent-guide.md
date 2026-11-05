@@ -30,6 +30,7 @@ Call `describePubSubContract('name', () => Promise.resolve({ pubsub, transaction
 
 - Channels are `^[a-z0-9_]{1,63}$`; payloads are at most 7999 UTF-8 bytes. Send ids, not documents.
 - `pgPubSub` behind a transaction pooler hears nothing: LISTEN needs a session.
+- `pgPubSub`'s `subscribe` resolves to `db.listen_unavailable` when the channel's first connection or `LISTEN` fails (`PubSub<SubscribeFailure>`; the other backends have none). Check it before you use the result as an `Unsubscribe`.
 - `close()` does not close your database, pool or Redis client.
 - A subscriber callback that throws is logged at `warn`; the others still get the message.
 - The SQLite integration deletes rows older than `retainMs` (default 60 s) on the next publish; a subscriber slower than that misses rows.

@@ -17,6 +17,7 @@ import { oc } from '@orpc/contract';
 import { implement } from '@orpc/server';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
+import pg from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -81,9 +82,16 @@ const appContract = { posts: postsContract };
 const TRIGGERS = liveMigration({ app: 'blog', tables: liveTables(liveManifest(appContract)) }).up;
 
 /** The blog app: PGlite, its tables (with or without triggers), live queries, `http()` on a free port. */
-function blogApp(options: { readonly triggers: boolean; readonly failStart?: boolean }) {
+function blogApp(options: {
+  readonly triggers: boolean;
+  readonly failStart?: boolean;
+  /** The listener's pool: a real `pg` pool that cannot connect (nothing listens on port 1). */
+  readonly unreachableListener?: boolean;
+}) {
   const pglite = new PGlite();
   const pool = pglitePool(pglite);
+  const unreachable = new pg.Pool({ connectionString: 'postgres://app@127.0.0.1:1/app', max: 1 });
+  unreachable.on('error', () => null);
   const database = infra({
     name: 'db',
     provides: { db: () => drizzle({ client: pglite }) },
@@ -106,7 +114,7 @@ function blogApp(options: { readonly triggers: boolean; readonly failStart?: boo
     app: 'blog',
     needs: { db: database.provides.db },
     db: ({ db: handle }) => handle,
-    pool: () => pool,
+    pool: () => (options.unreachableListener === true ? unreachable : pool),
     contract: appContract,
     authorize: () => Promise.resolve({}),
     reauthorize: [tableTag(authors)],
@@ -190,6 +198,13 @@ describe('liveQueries', () => {
       cause: new Error('a later plugin failed to start'),
     });
     expect(changeListeners.active).toBe(before);
+  });
+
+  // Why: an app whose live listener cannot connect must not come up deaf: its start fails with the
+  // typed failure, which names what to fix.
+  it('a listener that cannot connect fails the app start with db.listen_unavailable', async () => {
+    const failure = await blogApp({ triggers: true, unreachableListener: true }).app.start();
+    expect(failure).toMatchObject({ code: 'db.listen_unavailable' });
   });
 
   it('a start that fails later in the app rolls back and gives the listen client back', async () => {

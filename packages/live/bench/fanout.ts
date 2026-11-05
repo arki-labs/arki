@@ -18,6 +18,7 @@
 // envelope per call made in the last 10 s, far under the defaults. Hitting a cap would end the
 // streams with `gap`, and the call would throw instead of returning a wrong count.
 import type { LiveCursor, LiveEvent, LiveFeed, LiveManifest, LiveSourceEvent, TableTag } from '@arki/live';
+import { orThrow } from '@arki/failure';
 import { createLiveClient, createLiveHub, liveReceipts } from '@arki/live';
 import { liveEndpoint } from '@arki/live/http';
 import { fakeSource } from '@arki/live/testing';
@@ -103,7 +104,7 @@ function eventQueue(): { push(event: LiveEvent): void; next(): Promise<LiveEvent
 async function readyHub(limits: { readonly batchMs: number; readonly replayMs: number }) {
   const source = fakeSource();
   const hub = createLiveHub({ source, limits, receipts: RECEIPTS });
-  await hub.start();
+  orThrow(await hub.start());
   source.emit({ kind: 'ready' });
   return { source, hub };
 }

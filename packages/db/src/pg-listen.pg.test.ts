@@ -14,6 +14,8 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import { listenOnPool } from './pg-listen.js';
 
 let container: StartedPostgreSqlContainer;
@@ -47,8 +49,10 @@ describe('listenOnPool on Postgres 16', () => {
     const pool = listenPool('listener_a');
     const states: string[] = [];
     const seen: string[] = [];
-    const stop = await listenOnPool(pool, 'live_a', { retryMs: 50, onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const stop = await orThrow(
+      listenOnPool(pool, 'live_a', { retryMs: 50, onState: state => states.push(state) })(payload =>
+        seen.push(payload),
+      ),
     );
     try {
       expect(states).toEqual(['ready']);
@@ -66,12 +70,27 @@ describe('listenOnPool on Postgres 16', () => {
     expect(pool.totalCount).toBe(0);
   });
 
+  // Why: a listener the server refuses (bad credentials here) is an expected outcome, so the start
+  // resolves to a typed failure the caller can act on, and holds no client afterwards.
+  it('a refused first connection resolves to db.listen_unavailable and holds no client', async () => {
+    const url = new URL(container.getConnectionUri());
+    url.password = 'wrong-password';
+    const pool = new pg.Pool({ connectionString: url.toString(), max: 1 });
+    pool.on('error', () => null);
+    pools.push(pool);
+    const started = await listenOnPool(pool, 'live_refused')(() => null);
+    expect(started).toMatchObject({ code: 'db.listen_unavailable' });
+    expect(pool.totalCount).toBe(0);
+  });
+
   it('waits out a pool with no free client and listens again once one is released', async () => {
     const pool = listenPool('listener_b');
     const states: string[] = [];
     const seen: string[] = [];
-    const stop = await listenOnPool(pool, 'live_b', { retryMs: 50, onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const stop = await orThrow(
+      listenOnPool(pool, 'live_b', { retryMs: 50, onState: state => states.push(state) })(payload =>
+        seen.push(payload),
+      ),
     );
     try {
       await kill('listener_b');
@@ -94,8 +113,10 @@ describe('listenOnPool on Postgres 16', () => {
     const pool = listenPool('listener_c');
     const states: string[] = [];
     const seen: string[] = [];
-    const stop = await listenOnPool(pool, 'live_c', { healthMs: 50, onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const stop = await orThrow(
+      listenOnPool(pool, 'live_c', { healthMs: 50, onState: state => states.push(state) })(payload =>
+        seen.push(payload),
+      ),
     );
     try {
       for (let round = 0; round < 10; round += 1) {

@@ -359,7 +359,7 @@ describe.each([
       source: pgSource({ pool: backend.listenPool, app: 'blog', retryMs: 50 }),
       limits: { batchMs: 5 },
     });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     await expect.poll(() => hub.status(), { timeout: 10_000 }).toBe('ready');
     const feed = await streamOf(hub, {
       view: { scopes: [{ tag: DOCS, name: 'org', keys: 'all' }] },

@@ -146,7 +146,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       receipts: RECEIPTS,
     });
     cleanups.push(() => hub.stop());
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     await expect.poll(() => hub.status(), { timeout: 10_000 }).toBe('ready');
     return { hub, pool };
   }
@@ -232,7 +232,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     await insertPost('before listen');
     expect(await join(a)).toBe(false);
     held.release();
-    await starting;
+    expect(await starting).toBeUndefined();
     expect(hub.status()).toBe('ready');
     expect(await join(a)).toBe(true);
     await converged(a);
@@ -541,7 +541,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     pool.on('acquire', each => acquired.push(each));
     const hub = createLiveHub({ source: pgSource({ pool, app: 'blog', retryMs: 20 }), limits: { batchMs: 5 } });
     cleanups.push(() => hub.stop());
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     await expect.poll(() => hub.status(), { timeout: 10_000 }).toBe('ready');
     const a = client(hub);
     await a.fetchAll();

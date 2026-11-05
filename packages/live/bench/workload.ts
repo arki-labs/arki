@@ -38,6 +38,7 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { environmentManager, QueryClient, QueryObserver, timeoutManager } from '@tanstack/react-query';
 
 import type { LiveFeed, LiveManifest, TableTag } from '@arki/live';
+import { orThrow } from '@arki/failure';
 import { affectedPaths, createLiveHub, liveReceipts } from '@arki/live';
 import { fakeSource } from '@arki/live/testing';
 
@@ -254,7 +255,7 @@ async function framesOf(workload: Workload, commits: readonly Commit[]): Promise
   // With receipts, as in production: each frame names its window's transactions.
   const receipts = liveReceipts({ app: 'bench', secret: 'bench-only-secret-of-32-characters-01' });
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts });
-  await hub.start();
+  orThrow(await hub.start());
   source.emit({ kind: 'ready' });
   const detach = new AbortController();
   const opened = await hub.open({ signal: detach.signal });
@@ -294,7 +295,7 @@ async function scopedFramesOf(workload: Workload, commits: readonly Commit[]): P
   const source = fakeSource();
   const receipts = liveReceipts({ app: 'bench', secret: 'bench-only-secret-of-32-characters-01' });
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts });
-  await hub.start();
+  orThrow(await hub.start());
   source.emit({ kind: 'ready' });
   const detach = new AbortController();
   const tables = WEIGHTS.map(([table]) => tag(table));

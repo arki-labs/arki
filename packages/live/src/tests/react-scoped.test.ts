@@ -79,7 +79,7 @@ async function app(initial: LiveGrant<'org' | 'user'>) {
   const orpc = createTanstackQueryUtils(createRouterClient(router));
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
   const state = { grant: initial };

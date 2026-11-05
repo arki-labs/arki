@@ -108,6 +108,7 @@ export { both };
 - Never declare `live()` on a per-request table (sessions, counters): it refetches on every request. Do declare auth tables the answer depends on (memberships, roles).
 - Shortcuts that break the guarantee: the root `db` inside a `liveRead` handler, DDL at boot, reads on a replica.
 - Never parse or build a cursor: it is sealed. A cursor the hub cannot open resets; a malformed one is a 400.
+- `start()` resolves to the source's failure when it cannot start (`pgSource`: `db.listen_unavailable`); the hub stays `idle` and stopped, so a later `start()` on the same hub tries again (a successful start happens once). `liveQueries()` returns it from its Dot `start`, so the app's start fails with it.
 - The hub needs `crypto.subtle`: `start()` rejects with E001 without it (bare Hermes, a browser page that is not a secure context). So does `liveReceipts()`, which throws E001 at once, also for a secret under 32 characters.
 - The receipts secret comes from the app config, the same on every instance (`openssl rand -base64 32`). Never put a raw txid on the wire or in a mutation's response.
 - `useLiveQuery` on a procedure that is not in the manifest never refreshes; the provider logs E001 once. Mutations get query utils from oRPC too, so the types cannot catch it.

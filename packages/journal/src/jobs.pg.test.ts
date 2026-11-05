@@ -228,7 +228,7 @@ describe('queue rows on Postgres', () => {
         ranAt = Date.now();
       }),
     });
-    await worker.start();
+    expect(await worker.start()).toBeUndefined();
     try {
       await sleep(200);
       const committedAt = Date.now();
@@ -252,7 +252,7 @@ describe('queue rows on Postgres', () => {
         ran.push(job.id);
       }),
     });
-    await worker.start();
+    expect(await worker.start()).toBeUndefined();
     try {
       await sleep(100);
       await dbA.execute(

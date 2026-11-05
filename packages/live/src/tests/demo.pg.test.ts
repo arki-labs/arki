@@ -60,7 +60,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('demo on %s', image 
       limits: { batchMs: 5 },
       receipts: RECEIPTS,
     });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     const endpoint = liveEndpoint({
       hub,
       manifest,

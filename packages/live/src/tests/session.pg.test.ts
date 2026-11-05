@@ -130,7 +130,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       await hub.stop();
       await listenPool.end();
     });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     await expect.poll(() => hub.status(), { timeout: 10_000 }).toBe('ready');
 
     const session: { token: string | undefined; user: string | null } = { token: undefined, user: null };

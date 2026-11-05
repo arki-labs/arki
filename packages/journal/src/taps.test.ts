@@ -24,7 +24,7 @@ afterAll(async () => {
 
 /** How an app wires the wake channel on PGlite. On `pg`, a dedicated client runs `LISTEN` and forwards notifications. */
 const listenOn =
-  (channel: string): WakeListener =>
+  (channel: string): WakeListener<never> =>
   onMessage =>
     client.listen(channel, onMessage);
 
@@ -57,6 +57,42 @@ describe('the wake channel', () => {
       expect(heard).toHaveLength(1);
     } finally {
       await unlisten();
+    }
+  });
+
+  it('a listener that throws rejects start() and leaves the worker stopped, so a later start() listens', async () => {
+    // Why: a failed start that left the worker marked running made every retry a silent no-op,
+    // so the worker never heard the wake channel again.
+    const ran: OrderId[] = [];
+    const mail = j.effect('listen-retry-mail', order, {
+      OrderPlaced: e => {
+        ran.push(e.entityId);
+      },
+    });
+    const journal = j.compose({ effects: [mail] });
+    let attempts = 0;
+    const worker = journal.worker(db, {
+      pollMs: 60_000,
+      listen: onMessage => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('listener bug');
+        return client.listen(journal.wakeChannel, onMessage);
+      },
+    });
+    await expect(worker.start()).rejects.toThrow('listener bug');
+    expect(await worker.start()).toBeUndefined();
+    try {
+      expect(attempts).toBe(2);
+      const id = orderId(++next);
+      orThrow(
+        await db.transaction(tx =>
+          journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+        ),
+      );
+      await waitFor(() => ran.length === 1);
+      expect(ran).toEqual([id]);
+    } finally {
+      await worker.stop();
     }
   });
 

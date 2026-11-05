@@ -110,7 +110,7 @@ function rig(limits: LiveLimits = {}) {
 }
 
 async function startReady(hub: LiveHub, source: ReturnType<typeof fakeSource>): Promise<void> {
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
 }
 
@@ -648,7 +648,7 @@ describe('bounds and lifecycle', () => {
     );
     const source = fakeSource();
     const hub = createLiveHub({ source, epoch: () => 'sameepoch123' });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     source.emit({ kind: 'ready' });
     expect(() => source.emit({ kind: 'ready' })).toThrow(expect.objectContaining({ code: LIVE_ERROR_CODES.config }));
     expect(hub.status()).toBe('unavailable');
@@ -671,7 +671,7 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
         hints += 1;
         source.emit({ kind: 'change', tags: [parsePayload(payload)] });
       });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     let unlisten = await listen();
     source.emit({ kind: 'ready' });
 

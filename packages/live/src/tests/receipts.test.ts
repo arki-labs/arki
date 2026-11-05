@@ -32,7 +32,7 @@ afterEach(async () => {
 async function wireUntilChange(): Promise<string> {
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
-  await hub.start();
+  expect(await hub.start()).toBeUndefined();
   source.emit({ kind: 'ready' });
   cleanups.push(() => hub.stop());
   const endpoint = liveEndpoint({ hub, manifest, authorize: () => Promise.resolve({}) });
@@ -101,7 +101,7 @@ describe('frames carry receipts, never transaction ids', () => {
   it('a hub without receipts names no transaction at all', async () => {
     const source = fakeSource();
     const hub = createLiveHub({ source, limits: { batchMs: 1 } });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     source.emit({ kind: 'ready' });
     cleanups.push(() => hub.stop());
     const opened = await hub.open({ signal: new AbortController().signal });

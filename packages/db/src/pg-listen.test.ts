@@ -10,6 +10,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { orThrow } from '@arki/failure';
+
 import type { ListenClient, ListenPool } from './pg-listen.js';
 import { listenOnPool, ListenUnavailable } from './pg-listen.js';
 
@@ -99,8 +101,10 @@ describe('listenOnPool', () => {
     );
     const states: string[] = [];
     const seen: string[] = [];
-    const starting = listenOnPool(scriptedPool(first), 'odd"name', { onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const starting = orThrow(
+      listenOnPool(scriptedPool(first), 'odd"name', { onState: state => states.push(state) })(payload =>
+        seen.push(payload),
+      ),
     );
     await vi.waitFor(() => expect(first.queries).toEqual(['LISTEN "odd""name"']));
     expect(states).toEqual([]);
@@ -121,8 +125,8 @@ describe('listenOnPool', () => {
     const pool = scriptedPool(first, second);
     const states: string[] = [];
     const seen: string[] = [];
-    const stop = await listenOnPool(pool, 'ch', { retryMs: 50, onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const stop = await orThrow(
+      listenOnPool(pool, 'ch', { retryMs: 50, onState: state => states.push(state) })(payload => seen.push(payload)),
     );
 
     const boom = new Error('socket reset');
@@ -151,8 +155,10 @@ describe('listenOnPool', () => {
   it('an end without an error is a lost connection too', async () => {
     const first = scriptedClient();
     const states: string[] = [];
-    await listenOnPool(scriptedPool(first, scriptedClient()), 'ch', { onState: state => states.push(state) })(
-      ignorePayload,
+    await orThrow(
+      listenOnPool(scriptedPool(first, scriptedClient()), 'ch', { onState: state => states.push(state) })(
+        ignorePayload,
+      ),
     );
     first.end();
     expect(first.releases).toHaveLength(1);
@@ -163,10 +169,12 @@ describe('listenOnPool', () => {
   it('a health check with no answer within healthMs drops the client', async () => {
     const first = scriptedClient(text => (text === 'select 1' ? never() : Promise.resolve()));
     const states: string[] = [];
-    await listenOnPool(scriptedPool(first, scriptedClient()), 'ch', {
-      healthMs: 100,
-      onState: state => states.push(state),
-    })(ignorePayload);
+    await orThrow(
+      listenOnPool(scriptedPool(first, scriptedClient()), 'ch', {
+        healthMs: 100,
+        onState: state => states.push(state),
+      })(ignorePayload),
+    );
 
     await vi.advanceTimersByTimeAsync(100);
     expect(first.queries).toEqual(['LISTEN "ch"', 'select 1']);
@@ -183,10 +191,12 @@ describe('listenOnPool', () => {
       text === 'select 1' && !healthy ? Promise.reject(new Error('terminated')) : Promise.resolve(),
     );
     const states: string[] = [];
-    await listenOnPool(scriptedPool(first, scriptedClient()), 'ch', {
-      healthMs: 100,
-      onState: state => states.push(state),
-    })(ignorePayload);
+    await orThrow(
+      listenOnPool(scriptedPool(first, scriptedClient()), 'ch', {
+        healthMs: 100,
+        onState: state => states.push(state),
+      })(ignorePayload),
+    );
     await vi.advanceTimersByTimeAsync(1000);
     expect(states).toEqual(['ready']);
     healthy = false;
@@ -195,13 +205,16 @@ describe('listenOnPool', () => {
     expect(first.releases).toEqual([new Error('terminated')]);
   });
 
-  it('a first connection that fails rejects the start and retries nothing', async () => {
+  // Why: a listener that cannot start is an expected outcome (bad credentials, no LISTEN), so the
+  // caller gets a typed failure it can act on, not a rejection it has to catch.
+  it('a first LISTEN that fails resolves to db.listen_unavailable and retries nothing', async () => {
     const first = scriptedClient(() => Promise.reject(new Error('permission denied')));
     const pool = scriptedPool(first, scriptedClient());
     const states: string[] = [];
-    const started = listenOnPool(pool, 'ch', { onState: state => states.push(state) })(ignorePayload);
-    await expect(started).rejects.toMatchObject({ code: ListenUnavailable.code });
-    await expect(started).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'permission denied' }) });
+    const started = await listenOnPool(pool, 'ch', { onState: state => states.push(state) })(ignorePayload);
+    expect(started).toMatchObject({ code: 'db.listen_unavailable' });
+    expect(ListenUnavailable.is(started)).toBe(true);
+    expect(started).toMatchObject({ cause: expect.objectContaining({ message: 'permission denied' }) });
     first.fail(new Error('late'));
     await vi.advanceTimersByTimeAsync(5000);
     expect(first.releases).toEqual([new Error('permission denied')]);
@@ -209,14 +222,26 @@ describe('listenOnPool', () => {
     expect(states).toEqual([]);
   });
 
+  it('a first connect that fails resolves to db.listen_unavailable', async () => {
+    const pool = scriptedPool();
+    const started = await listenOnPool(pool, 'ch')(ignorePayload);
+    expect(started).toMatchObject({
+      code: 'db.listen_unavailable',
+      cause: expect.objectContaining({ message: 'pool exhausted' }),
+    });
+    expect(pool.connects()).toBe(1);
+  });
+
   it('a throwing onState observer neither rejects the start nor drops the client', async () => {
     const first = scriptedClient();
     const pool = scriptedPool(first, scriptedClient());
-    const stop = await listenOnPool(pool, 'ch', {
-      onState: () => {
-        throw new Error('observer bug');
-      },
-    })(ignorePayload);
+    const stop = await orThrow(
+      listenOnPool(pool, 'ch', {
+        onState: () => {
+          throw new Error('observer bug');
+        },
+      })(ignorePayload),
+    );
     expect(first.releases).toEqual([]);
     first.fail(new Error('lost'));
     await stop();
@@ -227,8 +252,8 @@ describe('listenOnPool', () => {
     const pool = scriptedPool(first, scriptedClient());
     const states: string[] = [];
     const seen: string[] = [];
-    const stop = await listenOnPool(pool, 'ch', { onState: state => states.push(state) })(payload =>
-      seen.push(payload),
+    const stop = await orThrow(
+      listenOnPool(pool, 'ch', { onState: state => states.push(state) })(payload => seen.push(payload)),
     );
     await stop();
     expect(first.queries).toEqual(['LISTEN "ch"', 'UNLISTEN "ch"']);
@@ -253,10 +278,12 @@ describe('listenOnPool', () => {
         : Promise.resolve(),
     );
     const states: string[] = [];
-    const stop = await listenOnPool(scriptedPool(first, second), 'ch', {
-      retryMs: 10,
-      onState: state => states.push(state),
-    })(ignorePayload);
+    const stop = await orThrow(
+      listenOnPool(scriptedPool(first, second), 'ch', {
+        retryMs: 10,
+        onState: state => states.push(state),
+      })(ignorePayload),
+    );
     first.fail(new Error('gone'));
     await vi.advanceTimersByTimeAsync(10);
     expect(second.queries).toEqual(['LISTEN "ch"']);

@@ -21,6 +21,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import type { ListenPool } from '@arki/db/pg';
 import { orThrow } from '@arki/failure';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
@@ -141,7 +142,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       limits: { batchMs: 5 },
       receipts: RECEIPTS,
     });
-    await hub.start();
+    expect(await hub.start()).toBeUndefined();
     return { hub, pool };
   }
 
@@ -237,8 +238,43 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       code: LIVE_ERROR_CODES.source,
     });
     borrowed.release();
-    await starting;
+    expect(await starting).toBeUndefined();
     try {
+      expect(hub.status()).toBe('ready');
+      const raw = await watch(hub);
+      await writer.execute(sql`update posts set title = title`);
+      await expect.poll(() => raw.tags).toEqual([POSTS]);
+      raw.stop();
+    } finally {
+      await hub.stop();
+    }
+  });
+
+  // Why: a hub whose listener Postgres refuses must say so at start (the Dot boot fails with it),
+  // not sit `idle` behind a rejection nobody can match on.
+  it('a listener Postgres refuses: hub.start() resolves to db.listen_unavailable, the hub stays idle, and the next start on the same hub listens', async () => {
+    const refused = new URL(container.getConnectionUri());
+    refused.password = 'wrong-password';
+    const refusedPool = new pg.Pool({ connectionString: refused.toString(), max: 1 });
+    refusedPool.on('error', () => null);
+    pools.push(refusedPool);
+    const workingPool = newPool('listener_retry');
+    // The first start meets the refusing pool; the retry meets the working one.
+    let connects = 0;
+    const pool: ListenPool = {
+      connect: () => {
+        connects += 1;
+        return connects === 1 ? refusedPool.connect() : workingPool.connect();
+      },
+    };
+    const hub = createLiveHub({ source: pgSource({ pool, app: 'blog' }) });
+    try {
+      expect(await hub.start()).toMatchObject({ code: 'db.listen_unavailable' });
+      expect(hub.status()).toBe('idle');
+      await expect(hub.open({ signal: new AbortController().signal })).rejects.toMatchObject({
+        code: LIVE_ERROR_CODES.source,
+      });
+      expect(await hub.start()).toBeUndefined();
       expect(hub.status()).toBe('ready');
       const raw = await watch(hub);
       await writer.execute(sql`update posts set title = title`);

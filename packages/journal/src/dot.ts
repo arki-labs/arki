@@ -829,8 +829,9 @@ export function journalWorker(
       // Built at boot, not at start: a missing service fails the boot.
       ctx.$state.worker = ctx.journal.worker(ctx.db, { ...workerOptions, services, jobs });
     },
-    async start({ $state }) {
-      await $state.worker?.start();
+    // A listener that cannot start fails the app's start with its failure, like any start hook that returns one.
+    start({ $state }) {
+      return $state.worker?.start();
     },
     async stop({ $state }) {
       await $state.worker?.stop();

@@ -287,7 +287,7 @@ describe('outboxRunner on the journal worker', () => {
       jobs: runner,
       listen: onMessage => client.listen(journal.wakeChannel, onMessage),
     });
-    await worker.start();
+    expect(await worker.start()).toBeUndefined();
     const { id } = orThrow(await db.transaction(tx => schedule.runAfter(tx, welcome, { userId: 'u9' })));
     for (let i = 0; i < 100 && handled.length === 0; i++) await settle();
     await worker.stop();

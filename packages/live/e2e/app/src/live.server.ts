@@ -9,6 +9,7 @@ import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import pg from 'pg';
 
+import { orThrow } from '@arki/failure';
 import { createLiveHub, liveReceipts } from '@arki/live';
 import { liveEndpoint } from '@arki/live/http';
 import { pgSource } from '@arki/live/pg';
@@ -39,7 +40,7 @@ async function startServerApp() {
     limits: { batchMs: 5 },
     receipts,
   });
-  await hub.start();
+  orThrow(await hub.start());
   const endpoint = liveEndpoint({ hub, manifest: liveAppManifest, authorize: () => Promise.resolve({}) });
 
   const impl = implement(appContract);

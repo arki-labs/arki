@@ -9,6 +9,9 @@ import { Redis } from 'ioredis';
 import pg from 'pg';
 import { expectTypeOf, test } from 'vitest';
 
+import type { ListenUnavailable } from '@arki/db/pg';
+import type { Failure } from '@arki/failure';
+
 import type { PubSub, Unsubscribe } from './index.js';
 import { memoryPubSub } from './memory.js';
 import { pgPubSub } from './pg/index.js';
@@ -33,15 +36,20 @@ test('memory has no publishIn', () => {
   void pubsub.publishIn;
 });
 
-test("subscribe fits @arki/journal's WakeListener with no adapter", () => {
-  const pubsub = memoryPubSub();
-  // journal: `type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Promise<Unlisten>`,
+test("subscribe fits @arki/journal's WakeListener with no adapter, pg's failure included", () => {
+  // journal: `type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Failure | Promise<Unlisten | Failure>`,
   // `type Unlisten = () => void | Promise<void>`.
   type Unlisten = () => void | Promise<void>;
-  type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Promise<Unlisten>;
-  const listen = (onMessage: (payload: string) => void) => pubsub.subscribe('wake', onMessage);
+  type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Failure | Promise<Unlisten | Failure>;
+  const memory = memoryPubSub();
+  const listen = (onMessage: (payload: string) => void) => memory.subscribe('wake', onMessage);
   expectTypeOf(listen).toExtend<WakeListener>();
   expectTypeOf(listen).returns.resolves.toEqualTypeOf<Unsubscribe>();
+
+  const pgBacked = pgPubSub({ pool: new pg.Pool() });
+  const listenPg = (onMessage: (payload: string) => void) => pgBacked.subscribe('wake', onMessage);
+  expectTypeOf(listenPg).toExtend<WakeListener>();
+  expectTypeOf(listenPg).returns.resolves.toEqualTypeOf<Unsubscribe | ReturnType<typeof ListenUnavailable>>();
 });
 
 test("sqlitePubSub's publishIn takes the database's own transaction type, inferred", () => {

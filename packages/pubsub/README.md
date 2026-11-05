@@ -50,6 +50,7 @@ await db.transaction(async tx => {
 - A channel is 1 to 63 characters of `[a-z0-9_]`. A payload is at most 7999 bytes in UTF-8 (NOTIFY refuses 8000). Anything else rejects with a `PubSubError` (`channel` or `payload`).
 - After `close()`, calls reject with a `closed` error. `close()` never closes your database, pool or Redis client.
 - `subscribe(channel, fn)` resolves with an `Unsubscribe` that fits `@arki/journal`'s `listen` option: `listen: fn => pubsub.subscribe(channel, fn)`.
+- Postgres: when the channel's first connection or `LISTEN` fails, `subscribe` resolves to `db.listen_unavailable` (`ListenUnavailable` from `@arki/db/pg`) instead, and nothing is subscribed. The journal worker's `start()` returns that failure.
 
 SQLite has one writer, so ids commit in order and the SQLite integration never skips a row. Its next publisher deletes rows older than `retainMs` (default 60 s).
 

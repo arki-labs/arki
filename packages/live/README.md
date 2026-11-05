@@ -160,6 +160,7 @@ import pg from 'pg';
 import { z } from 'zod';
 
 import type { LiveMeta } from '@arki/live';
+import { orThrow } from '@arki/failure';
 import { listen } from '@arki/http';
 import { createLiveHub, live } from '@arki/live';
 import { liveEndpoint } from '@arki/live/http';
@@ -172,7 +173,7 @@ const appContract = { posts: { list: contract.meta(live({ reads: [posts] })).out
 
 const listenPool = new pg.Pool({ connectionString: process.env.DB_URL, max: 1, application_name: 'blog_listener' });
 const hub = createLiveHub({ source: pgSource({ pool: listenPool, app: 'blog' }) });
-await hub.start(); // rejects when the first LISTEN fails
+orThrow(await hub.start()); // db.listen_unavailable when the first LISTEN fails; start() again retries
 
 const endpoint = liveEndpoint({
   hub,
