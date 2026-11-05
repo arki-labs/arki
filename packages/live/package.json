@@ -112,6 +112,7 @@
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -126,6 +127,7 @@
     "@arki/offline": "workspace:*",
     "@arki/playwright-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@orpc/client": "catalog:backend",

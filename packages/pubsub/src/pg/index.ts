@@ -21,6 +21,7 @@ import { getLogger } from '@arki/log';
 import type { OnMessage, TransactionalPubSub } from '../types.js';
 import { deliver } from '../deliver.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
+import { observePublish } from '../telemetry.js';
 
 const log = getLogger('arki:pubsub');
 
@@ -69,14 +70,18 @@ export function pgPubSub(
 
   return {
     async publish(channel, payload) {
-      checkOpen(closed, 'pg');
-      checkMessage(channel, payload);
-      await pool.query('select pg_notify($1, $2)', [channel, payload]);
+      await observePublish('publish', 'pg', async () => {
+        checkOpen(closed, 'pg');
+        checkMessage(channel, payload);
+        await pool.query('select pg_notify($1, $2)', [channel, payload]);
+      });
     },
     async publishIn(tx, channel, payload) {
-      checkOpen(closed, 'pg');
-      checkMessage(channel, payload);
-      await tx.execute(sql`select pg_notify(${channel}, ${payload})`);
+      await observePublish('publish_in', 'pg', async () => {
+        checkOpen(closed, 'pg');
+        checkMessage(channel, payload);
+        await tx.execute(sql`select pg_notify(${channel}, ${payload})`);
+      });
     },
     async subscribe(name, onMessage) {
       checkOpen(closed, 'pg');
@@ -91,7 +96,7 @@ export function pgPubSub(
           options.listen,
         )(payload => {
           for (const callback of callbacks) {
-            deliver(name, callback, payload);
+            deliver('pg', name, callback, payload);
           }
         });
         channel = { callbacks, listening };

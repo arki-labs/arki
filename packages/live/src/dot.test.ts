@@ -27,6 +27,7 @@ import { rpc } from '@arki/dot/orpc';
 import { infra } from '@arki/dot/unit';
 import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { http } from '@arki/http/dot';
+import { captureSpans } from '@arki/testing/otel';
 
 import type * as hubModule from './hub.js';
 import type { LiveMeta } from './index.js';
@@ -219,6 +220,37 @@ describe('liveQueries', () => {
       cause: new Error('a later plugin failed to start'),
     });
     expect(stats).toMatchObject({ connects: 1, releases: 1 });
+  });
+
+  // Why: in a Dot app the stream span must sit in the request's trace, and the app's start must
+  // show the listen once (`db.listen.start`, under the live unit's start), never a second live span.
+  it('in a Dot app a stream is one live.stream span under the request; the listen is under dot.unit.start', async () => {
+    using spans = captureSpans();
+    const { app } = blogApp({ triggers: true });
+    const started = await orThrow(app.start());
+    try {
+      const url = started.services.httpServer.url();
+      if (url === undefined) throw new Error('the server has no url');
+      const client = sseReader(await fetch(new URL('/api/live', url)));
+      expect(await client.next()).toMatchObject({ kind: 'hello' });
+      await client.cancel();
+      await expect.poll(() => spans.finished.filter(span => span.name === 'live.stream').length).toBe(1);
+    } finally {
+      await orThrow(started.dispose());
+    }
+    const chain = (name: string): string[] => {
+      const names: string[] = [];
+      for (let span = spans.named(name).parent; span !== undefined; span = span.parent) names.push(span.name);
+      return names;
+    };
+    // `@arki/http` spans the request; Dot's `http()` serves it in the trace of the app start that opened the server.
+    expect(chain('live.stream')).toEqual(['http.request', 'dot.unit.start', 'dot.app.start']);
+    // The listen is `@arki/db`'s span, once, under the live unit's start: live adds no listen span of its own.
+    const listen = spans.named('db.listen.start');
+    expect(listen.parent?.attributes['dot.unit.name']).toBe('live');
+    expect(spans.finished.filter(span => span.name.startsWith('live.')).map(span => span.name)).toEqual([
+      'live.stream',
+    ]);
   });
 
   it('dot explain shows each procedure live.reads, without booting', () => {

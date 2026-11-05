@@ -127,6 +127,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@testcontainers/redis": "catalog:testing",
     "@types/node": "catalog:node",
     "typescript": "catalog:",

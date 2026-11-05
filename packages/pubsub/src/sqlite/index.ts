@@ -7,15 +7,15 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { SQLiteAsyncDatabase } from 'drizzle-orm/sqlite-core';
 import { and, asc, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
-import { unrefTimer } from '@arki/db/sqlite';
-import { sqliteNowMs } from '@arki/db/sqlite';
+import { sqliteNowMs, unrefTimer } from '@arki/db/sqlite';
 import { getLogger } from '@arki/log';
 
 import type { OnMessage, TransactionalPubSub } from '../types.js';
 import type { PubsubTable } from './table.js';
-import { PubSubError } from '../errors.js';
 import { deliver } from '../deliver.js';
+import { PubSubError } from '../errors.js';
 import { checkChannel, checkMessage, checkOpen } from '../limits.js';
+import { observePoll, observePublish } from '../telemetry.js';
 import { pubsubTable } from './table.js';
 
 export type { PubsubTable } from './table.js';
@@ -86,6 +86,8 @@ export function sqlitePubSub(options: SqlitePubSubOptions<SqlitePubSubDb>): Tran
 
   async function pollOnce(): Promise<void> {
     if (channels.size === 0) return;
+    const startTime = Date.now();
+    let failure: { readonly thrown: unknown } | undefined;
     const rows = await db
       .select({ id: table.id, channel: table.channel, payload: table.payload })
       .from(table)
@@ -93,19 +95,22 @@ export function sqlitePubSub(options: SqlitePubSubOptions<SqlitePubSubDb>): Tran
       .orderBy(asc(table.id))
       .limit(POLL_BATCH)
       .catch((error: unknown) => {
+        failure = { thrown: error };
         log.warn('poll failed, trying again in {intervalMs} ms: {message}', {
           intervalMs,
           message: error instanceof Error ? error.message : String(error),
         });
         return [];
       });
-    for (const row of rows) {
-      cursor = Math.max(cursor, row.id);
-      for (const subscription of channels.get(row.channel) ?? []) {
-        if (row.id <= subscription.after || !channels.get(row.channel)?.has(subscription)) continue;
-        deliver(row.channel, subscription.onMessage, row.payload);
+    observePoll(startTime, failure === undefined ? { rows: rows.length } : { rows: 0, ...failure }, () => {
+      for (const row of rows) {
+        cursor = Math.max(cursor, row.id);
+        for (const subscription of channels.get(row.channel) ?? []) {
+          if (row.id <= subscription.after || !channels.get(row.channel)?.has(subscription)) continue;
+          deliver('sqlite', row.channel, subscription.onMessage, row.payload);
+        }
       }
-    }
+    });
   }
 
   function schedule(): void {
@@ -122,14 +127,18 @@ export function sqlitePubSub(options: SqlitePubSubOptions<SqlitePubSubDb>): Tran
 
   return {
     async publish(channel, payload) {
-      checkOpen(closed, 'sqlite');
-      checkMessage(channel, payload);
-      await insert(db, channel, payload);
+      await observePublish('publish', 'sqlite', async () => {
+        checkOpen(closed, 'sqlite');
+        checkMessage(channel, payload);
+        await insert(db, channel, payload);
+      });
     },
     async publishIn(tx, channel, payload) {
-      checkOpen(closed, 'sqlite');
-      checkMessage(channel, payload);
-      await insert(tx, channel, payload);
+      await observePublish('publish_in', 'sqlite', async () => {
+        checkOpen(closed, 'sqlite');
+        checkMessage(channel, payload);
+        await insert(tx, channel, payload);
+      });
     },
     async subscribe(channel, onMessage) {
       checkOpen(closed, 'sqlite');

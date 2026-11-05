@@ -43,6 +43,7 @@ import type { BaseRequestCtx, RouteBundle, SseContract } from '@arki/http';
 import { buildEngine, HttpError, optional, route, routes, step } from '@arki/http';
 
 import type { LiveFeed, LiveGrant, LiveHub, LiveView } from './hub.js';
+import type { LiveStreamEnd, StreamTelemetry } from './telemetry.js';
 import type { LiveEvent, LiveManifest, LiveScopes, TableTag } from './types.js';
 import { debugHttp } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
@@ -50,6 +51,7 @@ import { pullIterator } from './iterator.js';
 import { tagKey } from './manifest.js';
 import { liveCursorSchema, liveEventSchema, MAX_GRANT_KEYS, scopeKeySchema, tableTagSchema } from './schema.js';
 import { checkScopes, normalizeKey } from './scopes.js';
+import { observeStream } from './telemetry.js';
 
 /** What `authorize` grants a client: its tables (omitted: every table of the manifest) and its keys per scope dimension. */
 export type { LiveGrant } from './hub.js';
@@ -132,7 +134,8 @@ type Recheck = {
 };
 
 /**
- * Hub frames to wire frames for one client. `end` detaches it (idempotent).
+ * Hub frames to wire frames for one client. `end` detaches it (idempotent); it is told when the
+ * hub ended the stream (`gap`, `bye`, a failed feed), for the stream's span.
  * Ending early (a last frame, an error, or `return()`) also returns the hub's feed.
  */
 function framesFor(
@@ -141,21 +144,25 @@ function framesFor(
   stream: {
     readonly expired: () => boolean;
     readonly closed: () => boolean;
-    readonly end: () => void;
+    readonly end: (hubEnd?: { readonly reason: LiveStreamEnd; readonly error?: unknown }) => void;
     readonly recheck: Recheck;
+    readonly telemetry: StreamTelemetry;
   },
 ): AsyncIterableIterator<LiveEvent, void, undefined> {
-  const { expired, closed, end, recheck } = stream;
+  const { expired, closed, end, recheck, telemetry } = stream;
   const source = feed[Symbol.asyncIterator]();
   /** The hub's feed is over on its own (done or failed): nothing to return. */
   let drained = false;
   /** The frame just given was the stream's last. */
   let last = false;
+  /** How the hub ended the stream, when it did. */
+  let hubEnd: { readonly reason: LiveStreamEnd; readonly error?: unknown } | undefined;
   return pullIterator(
     async () => {
       if (last) return { done: true, value: undefined };
       const step = await source.next().catch((error: unknown) => {
         drained = true;
+        hubEnd = { reason: 'error', error };
         throw error;
       });
       if (step.done === true) {
@@ -169,6 +176,7 @@ function framesFor(
       const item = step.value;
       switch (item.kind) {
         case 'begin': {
+          telemetry.begin(item.mode);
           // A re-check started while the stream opened decides before the first frame.
           if (recheck.pending !== undefined) await recheck.pending;
           if (recheck.revoked) {
@@ -199,6 +207,7 @@ function framesFor(
         }
         default: {
           last = true;
+          hubEnd = { reason: item.kind };
           return { done: false, value: item };
         }
       }
@@ -207,7 +216,7 @@ function framesFor(
       try {
         if (!drained) await source.return?.();
       } finally {
-        end();
+        end(hubEnd);
       }
     },
   );
@@ -439,6 +448,7 @@ export function liveEndpoint<Dimension extends string = never>(options: {
     signal: AbortSignal,
   ): Promise<AsyncIterable<LiveEvent>> {
     const detach = new AbortController();
+    const telemetry = observeStream();
     let expired = false;
     const timer = setTimeout(() => {
       expired = true;
@@ -446,13 +456,23 @@ export function liveEndpoint<Dimension extends string = never>(options: {
       end();
     }, maxAgeMs);
     const stream: Stream = { request, view, recheck: { pending: undefined, writes: 0, revoked: false }, end };
-    function end(): void {
+    /** Detaches the stream. The first call names why it ended, for its span: our own reasons first, then the hub's. */
+    function end(hubEnd?: { readonly reason: LiveStreamEnd; readonly error?: unknown }): void {
       clearTimeout(timer);
       streams.delete(stream);
-      signal.removeEventListener('abort', end);
+      signal.removeEventListener('abort', onAbort);
       detach.abort();
+      if (expired) telemetry.end('max_age');
+      else if (stream.recheck.revoked) telemetry.end('revoked');
+      else if (closed) telemetry.end('closed');
+      else if (hubEnd === undefined) telemetry.end('disconnected');
+      else telemetry.end(hubEnd.reason, hubEnd.error);
     }
-    signal.addEventListener('abort', end, { once: true });
+    /** The request went away. */
+    function onAbort(): void {
+      end();
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
     if (signal.aborted) end();
     let feed: AsyncIterable<LiveFeed>;
     try {
@@ -462,7 +482,7 @@ export function liveEndpoint<Dimension extends string = never>(options: {
         signal: detach.signal,
       });
     } catch (error) {
-      end();
+      end({ reason: 'error', error });
       throw toHttpError(error);
     }
     // Closed while `hub.open` ran: no re-check listener is left to watch this stream, so it ends now (fail closed).
@@ -476,7 +496,13 @@ export function liveEndpoint<Dimension extends string = never>(options: {
       procedures: view.manifest.length,
       tables: view.hub.tables?.length ?? 0,
     });
-    return framesFor(feed, view, { expired: () => expired, closed: () => closed, end, recheck: stream.recheck });
+    return framesFor(feed, view, {
+      expired: () => expired,
+      closed: () => closed,
+      end,
+      recheck: stream.recheck,
+      telemetry,
+    });
   }
 
   const grant = async ({ req, url }: BaseRequestCtx) => {

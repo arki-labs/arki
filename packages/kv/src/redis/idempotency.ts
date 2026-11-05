@@ -10,6 +10,10 @@
  * `abandon` are small Lua scripts that check the owner and write in one step, so a slow worker
  * whose key was reconciled and reassigned cannot touch the new entry.
  * Pending reservations never expire. `finish` starts replay retention atomically with `SET PX`.
+ *
+ * Each call runs in a `kv.idempotency.begin`, `kv.idempotency.finish` or `kv.idempotency.abandon` span
+ * (under the request's `http.idempotency` span) and counts in `kv.commands`. The key, owner,
+ * fingerprint and response are never recorded.
  */
 import type { Redis } from 'ioredis';
 
@@ -24,6 +28,8 @@ import {
   storedResponse,
 } from '@arki/http/idempotency';
 import { parse } from '@arki/schema';
+
+import { observeKv } from '../telemetry.js';
 
 export type RedisResponseCacheOptions = {
   /** Prefix for every key. Default `idem:`. */
@@ -68,7 +74,7 @@ const parseHeld = (value: string) => {
 /** A response cache on Redis. Pending reservations have no TTL. */
 export function redisResponseCache(redis: Redis, options: RedisResponseCacheOptions = {}): ResponseCache {
   const prefix = options.prefix ?? 'idem:';
-  return {
+  const cache: ResponseCache = {
     async begin(key, fingerprint, owner) {
       if (owner.length === 0 || owner.includes('\n') || fingerprint.length === 0 || fingerprint.includes('\n'))
         return IdempotencyClaimUnconfirmed();
@@ -122,5 +128,11 @@ export function redisResponseCache(redis: Redis, options: RedisResponseCacheOpti
       }
       return;
     },
+  };
+  return {
+    begin: (key, fingerprint, owner) => observeKv('idempotency.begin', () => cache.begin(key, fingerprint, owner)),
+    finish: (key, owner, response, ttl) =>
+      observeKv('idempotency.finish', () => cache.finish(key, owner, response, ttl)),
+    abandon: (key, owner) => observeKv('idempotency.abandon', () => cache.abandon(key, owner)),
   };
 }

@@ -7,6 +7,7 @@ import { getLogger } from '@arki/log';
 import type { OnMessage, PubSub } from './types.js';
 import { deliver } from './deliver.js';
 import { checkChannel, checkMessage, checkOpen } from './limits.js';
+import { observePublish } from './telemetry.js';
 
 const log = getLogger('arki:pubsub');
 
@@ -21,15 +22,17 @@ export function memoryPubSub(): PubSub {
 
   return {
     async publish(channel, payload) {
-      checkOpen(closed, 'memory');
-      checkMessage(channel, payload);
-      // Taken now: a subscriber that joins before the microtask runs did not see this publish.
-      const receivers = [...(channels.get(channel) ?? [])];
-      queueMicrotask(() => {
-        for (const onMessage of receivers) {
-          if (!channels.get(channel)?.has(onMessage)) continue; // unsubscribed meanwhile
-          deliver(channel, onMessage, payload);
-        }
+      await observePublish('publish', 'memory', async () => {
+        checkOpen(closed, 'memory');
+        checkMessage(channel, payload);
+        // Taken now: a subscriber that joins before the microtask runs did not see this publish.
+        const receivers = [...(channels.get(channel) ?? [])];
+        queueMicrotask(() => {
+          for (const onMessage of receivers) {
+            if (!channels.get(channel)?.has(onMessage)) continue; // unsubscribed meanwhile
+            deliver('memory', channel, onMessage, payload);
+          }
+        });
       });
     },
     async subscribe(channel, onMessage) {

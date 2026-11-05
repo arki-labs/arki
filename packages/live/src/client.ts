@@ -30,11 +30,13 @@
 import { isFailure } from '@arki/failure';
 import { backoff } from '@arki/resilience';
 
+import type { ConnectionTelemetry, LiveConnectionOutcome } from './telemetry.js';
 import type { LiveCursor, LiveEvent } from './types.js';
 import { debugClient } from './debug.js';
 import { isLiveError, LIVE_ERROR_CODES, liveError } from './errors.js';
 import { pullIterator } from './iterator.js';
 import { parseLiveEvent } from './parse.js';
+import { observeConnection } from './telemetry.js';
 
 /** Where the stream is: first connect, open, between connects, refused (401/403), or stopped. */
 export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'unauthorized' | 'closed';
@@ -220,15 +222,28 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
     abort.signal.addEventListener('abort', forward, { once: true });
     if (abort.signal.aborted) forward();
     dropConnection = reason => connection.abort(reason);
+    const telemetry = observeConnection(attempt);
     try {
-      return await connectOnce(connection);
+      const outcome = await telemetry.run(() => connectOnce(connection, telemetry));
+      const ended: Record<Outcome['next'], LiveConnectionOutcome> = {
+        now: 'bye',
+        backoff: 'retry',
+        stop: 'unauthorized',
+      };
+      telemetry.end(ended[outcome.next], outcome.next === 'backoff' ? outcome.reason : undefined);
+      return outcome;
+    } catch (error) {
+      // Mirrors `run`: a stop is no failure, a missing streaming body ends the client, anything else is retried.
+      if (stopped()) telemetry.end('stopped');
+      else telemetry.end(isLiveError(error, LIVE_ERROR_CODES.protocol) ? 'error' : 'retry', error);
+      throw error;
     } finally {
       abort.signal.removeEventListener('abort', forward);
       dropConnection = undefined;
     }
   }
 
-  async function connectOnce(connection: AbortController): Promise<Outcome> {
+  async function connectOnce(connection: AbortController, telemetry: ConnectionTelemetry): Promise<Outcome> {
     const headers = new Headers(await options.headers?.());
     headers.set('accept', 'text/event-stream');
     const response = await fetcher(withCursor(options.url, cursor), {
@@ -237,6 +252,7 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       cache: 'no-store',
       ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
     });
+    telemetry.status(response.status);
     if (response.status === 401 || response.status === 403) {
       await response.body?.cancel();
       debugClient.warn('[{code}] the live stream refused this client ({status}); it stops until its headers change', {

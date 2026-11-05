@@ -58,6 +58,23 @@ SQLite has one writer, so ids commit in order and the SQLite integration never s
 
 `describePubSubContract(name, make)` from `@arki/pubsub/testing` registers the conformance cases with vitest. Every integration here runs it: memory and SQLite (libSQL) in `bun run test`, Postgres and Redis on containers in `bun run test:pg` and `bun run test:redis`.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                 | When                                                                       | Attributes                                                         |
+| -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `pubsub.publish`     | each `publish`, until the backend accepted it                              | `pubsub.backend`, `error.type` on a throw                          |
+| `pubsub.publish_in`  | each `publishIn` inside the caller's transaction                           | `pubsub.backend`, `error.type` on a throw                          |
+| `pubsub.deliver`     | one message to one subscriber, until its callback (or its promise) settles | `pubsub.backend`, `error.type` when the callback throws or rejects |
+| `pubsub.sqlite.poll` | a SQLite poll that read rows or failed; the deliveries nest under it       | `pubsub.backend`, `pubsub.messages`, `error.type` on a failed read |
+
+Metrics: `pubsub.operations` (counter; `operation` = `publish`, `publish_in`, `deliver` or `poll`, `backend`, `outcome`). Every poll is counted, idle ones included.
+
+`error.type` is the `ARKI_PUBSUB_E…` id or the error class, never the message. Never recorded: channel names, payloads.
+
+Not instrumented: `subscribe` — on Postgres the listen is `@arki/db`'s `db.listen.start` (one per channel); the other backends only register a callback or send one `SUBSCRIBE`, and the delivery spans show it works. Idle SQLite polls — one every `intervalMs` would flood traces; they are counted instead.
+
 ## Runtime support
 
 The memory pubsub runs on Node, Bun, Deno, browsers and React Native (Hermes). The Postgres, SQLite and Redis integrations need their client and a server runtime. `bun run test:runtimes` runs a smoke test of the root and `./memory` on every engine; the Hermes leg needs `HERMES_BIN`.

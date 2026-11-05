@@ -508,6 +508,23 @@ Every write that commits through Postgres publishes: a journal command, a reposi
 | PowerSync                                         | The app must read and edit relational data offline for long periods (durable local SQLite), with a sync service. Short offline writes are `@arki/offline`'s queue.       |
 | `@arki/live`                                      | Online screens over any SQL and aggregates, auth in your procedures, your own Postgres, PGlite in tests, no extra service.                                               |
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK). One span per stream's life, never one per frame:
+
+| Span                     | When                                                                                                    | Attributes                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `live.stream`            | one server stream, from attaching to the hub until it ends; under the request's `http.request` span     | `live.stream.mode` (`resume`, `reset`), `live.stream.end`, `error.type` when attaching or the feed fails |
+| `live.client.connection` | one client connection, from its `fetch` until it ends; an instrumented `fetch` joins the server's trace | `live.client.attempt`, `http.response.status_code`, `live.client.outcome`                                |
+
+`live.stream.end` is `max_age`, `revoked`, `closed`, `gap`, `bye`, `error` or `disconnected`; `gap` and `error` mark the span failed. `live.client.outcome` is `bye`, `retry`, `unauthorized`, `stopped` or `error`; `retry`, `unauthorized` and `error` mark it failed. `error.type` is the `ARKI_LIVE_E…` code or the error class, never the message.
+
+Metrics: `live.streams.active` (up-down counter), `live.streams` (counter; `end`), `live.client.connections` (counter; `outcome`).
+
+Never recorded: cursors, grants, scope keys, table names, frame contents, URLs, headers.
+
+Not instrumented: the hub's `LISTEN` — `@arki/db`'s `db.listen.start` spans it (under `dot.unit.start` in a Dot app). Single frames, epochs and the hub's batch windows — per-frame spans would cost more than the frames; a stream's end reason and the counters show gaps and resets. `hub.start` and `hub.stop` — Dot spans them as unit hooks, and their only I/O is the listen.
+
 ## Limits
 
 ### Sizes

@@ -126,6 +126,21 @@ idempotent({ cache: redisResponseCache(redis), scope, routes: [route.post('/orde
 
 Upgrade with all old writers stopped: drain active requests, inventory legacy pending keys, reconcile their application outcomes, and `PERSIST` unresolved keys before reopening traffic. Do not delete a pending key merely because its old TTL elapsed. Mixed writer versions are unsafe because old writers can expire unresolved reservations. Use durable Redis persistence and an eviction policy that preserves reservations; store loss still needs durable application receipts to prevent duplicate business work.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                                      | When                                                                         | Attributes                           |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------ |
+| `kv.<command>`                                                            | each `KV` command (`get`, `set`, `delete`, …), until it answers or times out | `failure.code` on a returned failure |
+| `kv.idempotency.begin`, `kv.idempotency.finish`, `kv.idempotency.abandon` | each `redisResponseCache` call; under `@arki/http`'s `http.idempotency` span | `failure.code` on a returned failure |
+
+Metrics: `kv.commands` (counter; `command`, `outcome`).
+
+Never recorded: keys, values, idempotency owners, fingerprints, responses.
+
+Not instrumented: the rate limiter's `consume` — `getRateLimiter()` returns `rate-limiter-flexible`'s own object, and wrapping a foreign class to add a span would change its type and behaviour; its Redis calls show up with an ioredis instrumentation in the app. Connecting and `close()` — lifecycle, spanned by Dot's `dot.unit.*` hooks when `@arki/kv/dot` opens the client.
+
 ## Environment variables
 
 | Variable                  | Purpose                                       |
