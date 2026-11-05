@@ -14,13 +14,16 @@
  */
 
 import type { Entry, Options } from 'node-geocoder';
-import NodeGeocoder from 'node-geocoder';
 import nodeFetch from 'node-fetch';
+import NodeGeocoder from 'node-geocoder';
 
-import { invariant, isFailure } from '@arki/failure';
 import type { KV } from '@arki/kv';
+import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
+import type { ProviderAttempt } from '../core/failures.js';
+import type { NoteAttributes } from './telemetry.js';
+import type { AddressComponents, GeocodeResult, GeocodingConfig, GeocodingProvider } from './types.js';
 import { isValidCoordinates } from '../core/coordinates.js';
 import {
   AddressNotFound,
@@ -31,14 +34,8 @@ import {
   ProviderRejected,
   ProviderUnreachable,
 } from '../core/failures.js';
-import type { ProviderAttempt } from '../core/failures.js';
+import { observeGeo } from './telemetry.js';
 import { geocodeResultSchema } from './types.js';
-import type {
-  AddressComponents,
-  GeocodeResult,
-  GeocodingConfig,
-  GeocodingProvider,
-} from './types.js';
 
 const log = getLogger('arki:geo');
 
@@ -196,7 +193,7 @@ export class GeocodingService {
 
     this.secrets = [
       ...new Set(
-        [...this.providerOptions.values()].flatMap((options) =>
+        [...this.providerOptions.values()].flatMap(options =>
           'apiKey' in options && options.apiKey ? secretForms(options.apiKey) : [],
         ),
       ),
@@ -213,26 +210,31 @@ export class GeocodingService {
    * when the signal aborts. A cache fault is logged and treated as a miss.
    */
   async geocode(address: string, preferredProvider?: GeocodingProvider, options: GeocodingOptions = {}) {
-    const { signal } = options;
-    if (signal?.aborted) return GeocodingCancelled();
+    return observeGeo('geocode', {}, async note => {
+      const { signal } = options;
+      if (signal?.aborted) return GeocodingCancelled();
 
-    const cacheKey = `${this.cacheKeyPrefix}${this.hashAddress(address)}`;
-    const cached = await this.readCache(cacheKey);
-    if (cached) return cached;
+      const cacheKey = `${this.cacheKeyPrefix}${this.hashAddress(address)}`;
+      const cached = await this.readCache(cacheKey);
+      this.noteCache(note, cached);
+      if (cached) return cached;
 
-    const lookup = await this.lookup(
-      preferredProvider,
-      signal,
-      (geocoder) => geocoder.geocode(address),
-      () => false,
-    );
-    if (lookup.kind === 'cancelled') return GeocodingCancelled();
-    if (lookup.kind === 'found') {
-      await this.writeCache(cacheKey, lookup.result);
-      return lookup.result;
-    }
-    if (lookup.answeredWithNoResults) return AddressNotFound({ address });
-    return this.providerFailure(lookup.attempts);
+      const lookup = await this.lookup(
+        'geocode',
+        preferredProvider,
+        signal,
+        geocoder => geocoder.geocode(address),
+        () => false,
+      );
+      if (lookup.kind === 'cancelled') return GeocodingCancelled();
+      if (lookup.kind === 'found') {
+        note({ 'geo.provider': lookup.result.provider });
+        await this.writeCache(cacheKey, lookup.result);
+        return lookup.result;
+      }
+      if (lookup.answeredWithNoResults) return AddressNotFound({ address });
+      return this.providerFailure(lookup.attempts);
+    });
   }
 
   /**
@@ -249,31 +251,36 @@ export class GeocodingService {
     preferredProvider?: GeocodingProvider,
     options: GeocodingOptions = {},
   ) {
-    const { signal } = options;
-    if (signal?.aborted) return GeocodingCancelled();
-    if (!isValidCoordinates({ lat, lng: lon })) {
-      return InvalidCoordinates({
-        reason: `lat=${lat}, lng=${lon}. Latitude must be between -90 and 90, longitude between -180 and 180.`,
-      });
-    }
+    return observeGeo('reverse_geocode', {}, async note => {
+      const { signal } = options;
+      if (signal?.aborted) return GeocodingCancelled();
+      if (!isValidCoordinates({ lat, lng: lon })) {
+        return InvalidCoordinates({
+          reason: `lat=${lat}, lng=${lon}. Latitude must be between -90 and 90, longitude between -180 and 180.`,
+        });
+      }
 
-    const cacheKey = `${this.cacheKeyPrefix}reverse:${lat},${lon}`;
-    const cached = await this.readCache(cacheKey);
-    if (cached) return cached;
+      const cacheKey = `${this.cacheKeyPrefix}reverse:${lat},${lon}`;
+      const cached = await this.readCache(cacheKey);
+      this.noteCache(note, cached);
+      if (cached) return cached;
 
-    const lookup = await this.lookup(
-      preferredProvider,
-      signal,
-      (geocoder) => geocoder.reverse({ lat, lon }),
-      isNoAddressError,
-    );
-    if (lookup.kind === 'cancelled') return GeocodingCancelled();
-    if (lookup.kind === 'found') {
-      await this.writeCache(cacheKey, lookup.result);
-      return lookup.result;
-    }
-    if (lookup.answeredWithNoResults) return NoAddressAtLocation({ latitude: lat, longitude: lon });
-    return this.providerFailure(lookup.attempts);
+      const lookup = await this.lookup(
+        'reverse_geocode',
+        preferredProvider,
+        signal,
+        geocoder => geocoder.reverse({ lat, lon }),
+        isNoAddressError,
+      );
+      if (lookup.kind === 'cancelled') return GeocodingCancelled();
+      if (lookup.kind === 'found') {
+        note({ 'geo.provider': lookup.result.provider });
+        await this.writeCache(cacheKey, lookup.result);
+        return lookup.result;
+      }
+      if (lookup.answeredWithNoResults) return NoAddressAtLocation({ latitude: lat, longitude: lon });
+      return this.providerFailure(lookup.attempts);
+    });
   }
 
   /**
@@ -291,7 +298,13 @@ export class GeocodingService {
       Number.isInteger(concurrency) && concurrency >= 1,
       () => `batchGeocode concurrency must be a whole number of at least 1, got ${concurrency}`,
     );
-    const { signal } = options;
+    return observeGeo('batch_geocode', { 'geo.batch.size': addresses.length }, () =>
+      this.runBatch(addresses, concurrency, options.signal),
+    );
+  }
+
+  /** `batchGeocode` after its checks, inside its span: each address is its own `geo.geocode` span under it. */
+  private async runBatch(addresses: string[], concurrency: number, signal: AbortSignal | undefined) {
     if (signal?.aborted) return GeocodingCancelled();
     const results = new Map<string, BatchGeocodeEntry>();
     const queue = [...addresses];
@@ -327,6 +340,7 @@ export class GeocodingService {
    * `isNoAddress` says whether a thrown error means "found nothing" instead of "provider fault".
    */
   private async lookup(
+    operation: 'geocode' | 'reverse_geocode',
     preferredProvider: GeocodingProvider | undefined,
     signal: AbortSignal | undefined,
     ask: (geocoder: NodeGeocoder.Geocoder) => Promise<Entry[]>,
@@ -349,35 +363,42 @@ export class GeocodingService {
         // node-geocoder hides the HTTP status and headers, so this fetch records
         // them, and it cuts the request off on cancellation or timeout.
         fetch: (url, init) =>
-          nodeFetch(url, { ...init, signal: requestSignal }).then((response) => {
+          nodeFetch(url, { ...init, signal: requestSignal }).then(response => {
             seen.status = response.status;
             seen.retryAfterMs = retryAfterMs(response.headers.get('retry-after'));
             return response;
           }),
       });
 
-      try {
-        const entries = await ask(geocoder);
-        const result = this.transformResult(entries[0], provider);
-        if (result) return { kind: 'found', result };
-        answeredWithNoResults = true;
-      } catch (error) {
-        if (signal?.aborted) return { kind: 'cancelled' };
-        if (isNoAddress(provider, error)) {
-          answeredWithNoResults = true;
-          continue;
+      // One span per provider call. It returns the result, `null` for "answered, found nothing", or
+      // the failure this one attempt would be on its own, so the span carries its code.
+      const answer = await observeGeo(`${provider}.${operation}`, { 'geo.provider': provider }, async () => {
+        try {
+          const entries = await ask(geocoder);
+          return this.transformResult(entries[0], provider) ?? null;
+        } catch (error) {
+          if (signal?.aborted) return GeocodingCancelled();
+          if (isNoAddress(provider, error)) return null;
+          // Provider messages can carry the request URL (and so the API key), and
+          // the attempt is both logged and returned to the caller.
+          const classified = classify(provider, error, seen);
+          const attempt = { ...classified, message: this.redactSecrets(classified.message) };
+          log.warn('Geocoding with provider {provider} failed ({kind}): {message}', {
+            provider,
+            kind: attempt.kind,
+            message: attempt.message,
+          });
+          attempts.push(attempt);
+          return this.providerFailure([attempt]);
         }
-        // Provider messages can carry the request URL (and so the API key), and
-        // the attempt is both logged and returned to the caller.
-        const classified = classify(provider, error, seen);
-        const attempt = { ...classified, message: this.redactSecrets(classified.message) };
-        log.warn('Geocoding with provider {provider} failed ({kind}): {message}', {
-          provider,
-          kind: attempt.kind,
-          message: attempt.message,
-        });
-        attempts.push(attempt);
+      });
+      if (answer === null) {
+        answeredWithNoResults = true;
+        continue;
       }
+      if (GeocodingCancelled.is(answer)) return { kind: 'cancelled' };
+      if (isFailure(answer)) continue;
+      return { kind: 'found', result: answer };
     }
 
     return { kind: 'failed', answeredWithNoResults, attempts };
@@ -395,9 +416,9 @@ export class GeocodingService {
    */
   private providerFailure(attempts: (ProviderAttempt & { retryAfterMs?: number })[]) {
     const listed = attempts.map(({ provider, kind, message }) => ({ provider, kind, message }));
-    const limited = attempts.find((attempt) => attempt.kind === 'rate_limited');
+    const limited = attempts.find(attempt => attempt.kind === 'rate_limited');
     if (limited) {
-      const waits = attempts.flatMap((attempt) =>
+      const waits = attempts.flatMap(attempt =>
         attempt.kind === 'rate_limited' && attempt.retryAfterMs !== undefined ? [attempt.retryAfterMs] : [],
       );
       return ProviderRateLimited({
@@ -406,11 +427,17 @@ export class GeocodingService {
         retryAfterMs: waits.length > 0 ? Math.min(...waits) : undefined,
       });
     }
-    const unreachable = attempts.find((attempt) => attempt.kind === 'unreachable');
+    const unreachable = attempts.find(attempt => attempt.kind === 'unreachable');
     if (unreachable) return ProviderUnreachable({ provider: unreachable.provider, attempts: listed });
-    const rejected = attempts.find((attempt) => attempt.kind === 'rejected');
+    const rejected = attempts.find(attempt => attempt.kind === 'rejected');
     if (rejected) return ProviderRejected({ provider: rejected.provider, attempts: listed });
     return ProviderUnreachable({ provider: this.primaryProvider, attempts: listed });
+  }
+
+  /** Notes on the lookup span whether the cache answered: `hit`, `miss`, or `off` when there is no cache. */
+  private noteCache(note: NoteAttributes, cached: GeocodeResult | undefined): void {
+    const state = !this.cacheEnabled || !this.kv ? 'off' : cached ? 'hit' : 'miss';
+    note({ 'geo.cache': state });
   }
 
   /** A stored answer, or undefined on a miss. A cache fault or a stored value of the wrong shape is a miss, never an error. */
@@ -455,12 +482,9 @@ export class GeocodingService {
     if (!isValidCoordinates({ lat: latitude, lng: longitude })) return undefined;
 
     const addressComponents: AddressComponents = {
-      streetAddress: entry.streetName
-        ? `${entry.streetNumber || ''} ${entry.streetName}`.trim()
-        : undefined,
+      streetAddress: entry.streetName ? `${entry.streetNumber || ''} ${entry.streetName}`.trim() : undefined,
       locality: entry.city ?? undefined,
-      region:
-        entry.state ?? entry.administrativeLevels?.level1short ?? undefined,
+      region: entry.state ?? entry.administrativeLevels?.level1short ?? undefined,
       postalCode: entry.zipcode ?? undefined,
       country: entry.countryCode ?? undefined,
     };
@@ -489,9 +513,6 @@ export class GeocodingService {
 /**
  * Create geocoding service instance from configuration
  */
-export function createGeocodingService(
-  config: GeocodingConfig,
-  kv?: GeocodingCache,
-): GeocodingService {
+export function createGeocodingService(config: GeocodingConfig, kv?: GeocodingCache): GeocodingService {
   return new GeocodingService(config, kv);
 }

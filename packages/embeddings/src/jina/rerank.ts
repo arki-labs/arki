@@ -1,6 +1,7 @@
 /** A Jina AI reranker over plain `fetch` (`POST /v1/rerank`). No SDK and no peer. */
-import { isFailure } from '@arki/failure';
 import { z } from 'zod';
+
+import { isFailure } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { Reranker } from '../rerank/index.js';
@@ -14,8 +15,9 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
+import { requestSignal, retryAfterMs } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs, requestSignal } from '../http.js';
+import { traceRerank } from '../telemetry.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type JinaRerankerOptions = {
@@ -144,5 +146,12 @@ export function createJinaReranker(input: JinaRerankerOptions): Reranker | Confi
     return { hits, usage: { tokens, requests: 1, cacheHits: 0 } };
   };
 
-  return { provider: 'jina', id, local: false, maxDocuments: MAX_DOCUMENTS, maxInputTokens, rerank } satisfies Reranker;
+  return {
+    provider: 'jina',
+    id,
+    local: false,
+    maxDocuments: MAX_DOCUMENTS,
+    maxInputTokens,
+    rerank: traceRerank('jina', id, rerank),
+  } satisfies Reranker;
 }

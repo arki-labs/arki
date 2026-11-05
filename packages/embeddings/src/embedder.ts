@@ -4,26 +4,27 @@ import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
 import type {
-  EmbedInput,
-  Embedding,
-  EmbedOptions,
   Embedder,
+  Embedding,
   EmbeddingBatch,
   EmbeddingModel,
-  EmbeddingSpace,
   EmbeddingsLogger,
+  EmbeddingSpace,
+  EmbedInput,
+  EmbedOptions,
   Int8Calibration,
   NativeEmbeddings,
   NativeInput,
   Quantization,
 } from './types.js';
-import { QUANTIZATIONS } from './types.js';
 import { Cancelled, InputTooLong, InvalidOutput, UnsupportedInput } from './failures.js';
-import { calibrationId, quantize } from './quantize.js';
-import { spaceOf } from './space.js';
 import { IMAGE_MIME_TYPES, imageMimeType } from './image.js';
+import { calibrationId, quantize } from './quantize.js';
 import { objectSchema, parseOptions, withOptionsJson } from './schemas.js';
+import { spaceOf } from './space.js';
+import { observeEmbeddings } from './telemetry.js';
 import { countTokens } from './tokens.js';
+import { QUANTIZATIONS } from './types.js';
 
 /** Output options an embedder is created with. */
 export type EmbedderOptions = {
@@ -155,14 +156,19 @@ export function buildEmbedder(
         continue;
       }
       // Refused before any request: a text-only model would otherwise drop the image and embed the rest.
-      if (!model.inputs.includes('image') || model.embedInputs === undefined) return UnsupportedInput({ index, part: 'image' });
+      if (!model.inputs.includes('image') || model.embedInputs === undefined)
+        return UnsupportedInput({ index, part: 'image' });
       const mimeType = input.mimeType ?? imageMimeType(input.image);
       // A type the providers reject would come back as a 400 after the request; refuse it here instead.
       if (mimeType === undefined || !IMAGE_MIME_TYPES.has(mimeType)) {
         return UnsupportedInput({ index, part: 'image' });
       }
       // Prefixes are written for text; an image goes in as it is.
-      parts.push(input.text === undefined ? { image: input.image, mimeType } : { text: prefix + input.text, image: input.image, mimeType });
+      parts.push(
+        input.text === undefined
+          ? { image: input.image, mimeType }
+          : { text: prefix + input.text, image: input.image, mimeType },
+      );
       if (input.text !== undefined) texts.push(prefix + input.text);
     }
     if (!truncate) {
@@ -186,7 +192,9 @@ export function buildEmbedder(
     // Set only when an image is present; a model without it was refused above.
     const embedInputs = parts.some(part => part.image !== undefined) ? model.embedInputs : undefined;
     const native =
-      embedInputs === undefined ? await model.embedTexts({ ...request, texts }) : await embedInputs({ ...request, inputs: parts });
+      embedInputs === undefined
+        ? await model.embedTexts({ ...request, texts })
+        : await embedInputs({ ...request, inputs: parts });
     if (isFailure(native)) {
       log.debug('{provider}:{model} refused {count} inputs: {code}', {
         provider: model.provider,
@@ -200,7 +208,11 @@ export function buildEmbedder(
     // Read after the call: a lazily learned revision (Ollama's digest) is part of the space.
     const space = spaceAt(callDimensions, callQuantization ?? 'float32');
     // A dtype made here is made from floats, and the floats are what the provider is held to.
-    const answered = validate(native, inputs.length, plan.made === undefined ? space : { ...space, quantization: 'float32' });
+    const answered = validate(
+      native,
+      inputs.length,
+      plan.made === undefined ? space : { ...space, quantization: 'float32' },
+    );
     if (isFailure(answered)) return answered;
     const vectors = plan.made === undefined ? answered : made(answered, plan.made, calibration);
     if (isFailure(vectors)) return vectors;
@@ -219,7 +231,18 @@ export function buildEmbedder(
       return spaceAt(dimensions, quantization);
     },
     spaceFor: options => spaceAt(options.dimensions ?? dimensions, options.quantization ?? quantization),
-    embed,
+    // One `embeddings.embed` span per call: one provider request, or a refusal before any.
+    embed: (inputs, options) =>
+      observeEmbeddings(
+        'embed',
+        {
+          'embeddings.provider': model.provider,
+          'embeddings.model': model.id,
+          'embeddings.inputs': inputs.length,
+          'embeddings.dimensions': options.dimensions ?? dimensions,
+        },
+        () => embed(inputs, options),
+      ),
   };
 }
 
@@ -263,7 +286,11 @@ function validate(native: NativeEmbeddings, count: number, space: EmbeddingSpace
 }
 
 /** Validated floats converted to the dtype made here. `outputPlan` already checked the sizes. */
-function made(vectors: readonly Embedding['vector'][], to: 'int8' | 'binary', calibration: Int8Calibration | undefined) {
+function made(
+  vectors: readonly Embedding['vector'][],
+  to: 'int8' | 'binary',
+  calibration: Int8Calibration | undefined,
+) {
   const out: Embedding['vector'][] = [];
   for (const vector of vectors) {
     if (!(vector instanceof Float32Array)) return InvalidOutput({ reason: 'expected float vectors to quantize' });

@@ -15,6 +15,7 @@ import type { MailTransport, RecipientOutcome } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { MailRejected } from '../failures.js';
 import { listOf } from '../message.js';
+import { traceTransport } from '../telemetry.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
 import { cloudflareAnswerSchema, codeText, readAnswer } from './answers.js';
 import { postJson } from './post-json.js';
@@ -71,7 +72,7 @@ export function cloudflare(options: CloudflareOptions): MailTransport {
   const id = options.id ?? 'cloudflare';
   const fetchFn = options.fetch ?? globalThis.fetch;
   const url = `${CLOUDFLARE_API_BASE}/accounts/${encodeURIComponent(options.accountId)}/email/sending/send`;
-  return {
+  return traceTransport('cloudflare', {
     id,
     ...(options.quotaPerMonth === undefined ? {} : { quotaPerMonth: options.quotaPerMonth }),
     async send(message, sendOptions) {
@@ -134,5 +135,5 @@ export function cloudflare(options: CloudflareOptions): MailTransport {
         recipients: outcomes,
       });
     },
-  };
+  });
 }

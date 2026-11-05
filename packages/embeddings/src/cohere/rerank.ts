@@ -18,8 +18,9 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
-import { retryAfterMs, requestSignal } from '../http.js';
+import { requestSignal, retryAfterMs } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
+import { traceRerank } from '../telemetry.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type CohereRerankerOptions = {
@@ -204,7 +205,7 @@ function protocolReranker(wire: Wire): Reranker {
     local: false,
     maxDocuments: wire.maxDocuments,
     maxInputTokens: wire.maxInputTokens,
-    rerank,
+    rerank: traceRerank(wire.provider, wire.id, rerank),
   };
 }
 

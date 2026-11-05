@@ -12,9 +12,10 @@
  */
 import type { MailTransport } from '../types.js';
 import { MAIL_ERROR_CODES, MailError } from '../errors.js';
+import { readAnswer, sesErrorSchema, sesResponseHeadersSchema } from '../http/answers.js';
 import { errorField } from '../log.js';
 import { listOf } from '../message.js';
-import { readAnswer, sesErrorSchema, sesResponseHeadersSchema } from '../http/answers.js';
+import { traceTransport } from '../telemetry.js';
 import { everyRecipient, logged, rejection, requestSignal, retryAfterMs, uncertain } from '../transport-failures.js';
 
 export type SesOptions = {
@@ -91,7 +92,7 @@ export function ses(options: SesOptions): MailTransport {
     return { client, SendEmailCommand };
   });
 
-  return {
+  return traceTransport('ses', {
     id,
     ...(options.quotaPerMonth === undefined ? {} : { quotaPerMonth: options.quotaPerMonth }),
     async send(message, sendOptions) {
@@ -145,5 +146,5 @@ export function ses(options: SesOptions): MailTransport {
         return logged(id, sdkFailure(id, error, attempt.reason));
       }
     },
-  };
+  });
 }

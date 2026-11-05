@@ -20,11 +20,7 @@ Configure once after the user is known. Then load the offering, buy a package an
 
 ```ts skip="needs the RevenueCat native module, which only exists inside a React Native app"
 import { isFailure } from '@arki/failure';
-import {
-  configureRevenueCat,
-  getProOffering,
-  purchasePackage,
-} from '@arki/payments-native';
+import { configureRevenueCat, getProOffering, purchasePackage } from '@arki/payments-native';
 
 export async function buyMonthly(userId: string): Promise<'bought' | 'cancelled' | 'unavailable' | 'failed'> {
   configureRevenueCat({ apiKey: 'appl_public_sdk_key', appUserId: userId });
@@ -55,40 +51,58 @@ After `'purchased'`, the entitlement reaches your backend through the webhook a 
 React Native on iOS and Android, through Metro or Expo. `react-native-purchases` is a native module, so the package does not run in plain Node, Deno or a browser. The `react-native` export condition and the default condition both point at the same compiled file.
 
 <!-- runtimes:start -->
-| Runtime | Result | Version tested | Date (UTC) |
-| --- | --- | --- | --- |
-| purity | fail | unknown | 2026-11-05 |
-| node | n/a | - | 2026-11-05 |
-| bun | n/a | - | 2026-11-05 |
-| deno | n/a | - | 2026-11-05 |
-| browser | n/a | - | 2026-11-05 |
-| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+
+| Runtime | Result | Version tested    | Date (UTC) |
+| ------- | ------ | ----------------- | ---------- |
+| purity  | fail   | unknown           | 2026-11-05 |
+| node    | n/a    | -                 | 2026-11-05 |
+| bun     | n/a    | -                 | 2026-11-05 |
+| deno    | n/a    | -                 | 2026-11-05 |
+| browser | n/a    | -                 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17 | 2026-11-05 |
+
 <!-- runtimes:end -->
 
 ## Public imports
 
 Everything comes from `@arki/payments-native`.
 
-| Export | What it does |
-| --- | --- |
-| `configureRevenueCat({ apiKey, appUserId })` | Starts the SDK. `appUserId` must be the id your backend signs users in with, so the webhook can find the user. Call again with a new id to re-identify after sign-in. |
-| `getProOffering()` | The current offering, or `null` when none is set up. |
-| `purchasePackage(pkg)` | Buys a package. Returns `{ status: 'purchased', customerInfo }` or `{ status: 'cancelled' }`. |
-| `restorePurchases()` | Restores earlier purchases and returns RevenueCat's `CustomerInfo`. |
-| `OfferingsUnavailable`, `PurchaseFailed`, `RestoreFailed` | The failure constructors. |
-| `CustomerInfo`, `PurchasesOffering`, `PurchasesPackage`, `PurchaseOutcome`, `ConfigureRevenueCatParams` | Types. |
+| Export                                                                                                  | What it does                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configureRevenueCat({ apiKey, appUserId })`                                                            | Starts the SDK. `appUserId` must be the id your backend signs users in with, so the webhook can find the user. Call again with a new id to re-identify after sign-in. |
+| `getProOffering()`                                                                                      | The current offering, or `null` when none is set up.                                                                                                                  |
+| `purchasePackage(pkg)`                                                                                  | Buys a package. Returns `{ status: 'purchased', customerInfo }` or `{ status: 'cancelled' }`.                                                                         |
+| `restorePurchases()`                                                                                    | Restores earlier purchases and returns RevenueCat's `CustomerInfo`.                                                                                                   |
+| `OfferingsUnavailable`, `PurchaseFailed`, `RestoreFailed`                                               | The failure constructors.                                                                                                                                             |
+| `CustomerInfo`, `PurchasesOffering`, `PurchasesPackage`, `PurchaseOutcome`, `ConfigureRevenueCatParams` | Types.                                                                                                                                                                |
 
 ## Failure behaviour
 
 Functions return a failure instead of throwing. Check with `isFailure` from `@arki/failure`. The SDK error is kept as the failure's `cause`.
 
-| Code | When |
-| --- | --- |
+| Code                                    | When                                                                             |
+| --------------------------------------- | -------------------------------------------------------------------------------- |
 | `payments_native.offerings_unavailable` | `getProOffering` could not load offerings (network, store, bad key). Status 503. |
-| `payments_native.purchase_failed` | The store or RevenueCat refused the purchase. Status 502. |
-| `payments_native.restore_failed` | `restorePurchases` could not restore. Status 502. |
+| `payments_native.purchase_failed`       | The store or RevenueCat refused the purchase. Status 502.                        |
+| `payments_native.restore_failed`        | `restorePurchases` could not restore. Status 502.                                |
 
 A user who backs out of the purchase sheet is not a failure. `purchasePackage` returns `{ status: 'cancelled' }`.
+
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK). Named like the web `@arki/payments` spans (`payments.stripe.<resource>.<method>`):
+
+| Span                                    | When                    | Attributes                                                                                              |
+| --------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `payments.revenuecat.get_offerings`     | each `getProOffering`   | `payments.provider`, `failure.code` on failure                                                          |
+| `payments.revenuecat.purchase_package`  | each `purchasePackage`  | `payments.provider`, `payments.purchase_status` (`purchased` or `cancelled`), `failure.code` on failure |
+| `payments.revenuecat.restore_purchases` | each `restorePurchases` | `payments.provider`, `failure.code` on failure                                                          |
+
+A returned failure sets `failure.code`. All three failures are faults (status 502 or 503), so they also set the span status to error. A cancelled purchase is the user's answer: no failure code, status unset. The API key, the app user id, package and product ids, prices and `CustomerInfo` are never attributes.
+
+Metrics: `payments.operations` (counter; `operation` such as `revenuecat.purchase_package`, `outcome` = `success`, `failure` or `error`).
+
+Not instrumented: `configureRevenueCat` — it only stores the key and user id in the SDK; no request is made.
 
 ## Limits
 

@@ -25,7 +25,13 @@ const checks = [
   ],
   ['offerings failure matches its definition', OfferingsUnavailable.is(offering), true],
   ['a failed purchase is a typed failure', PurchaseFailed.is(purchase), true],
-  ['purchase failure hides the SDK message', JSON.stringify(purchase).includes('native'), false],
+  // The code itself contains "native", so the check reads the JSON keys, not its text.
+  [
+    'purchase failure keeps the SDK error out of its JSON',
+    Object.keys(JSON.parse(JSON.stringify(purchase))).includes('cause'),
+    false,
+  ],
+  ['purchase failure shows its own message', purchase.message, 'The purchase could not be completed.'],
   ['restore without the native store is a typed failure', RestoreFailed.is(restored), true],
 ];
 

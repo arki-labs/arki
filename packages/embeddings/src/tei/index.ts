@@ -3,8 +3,9 @@
  * (`POST /rerank`, a sequence-classification model such as `BAAI/bge-reranker-v2-m3`). Plain
  * `fetch`, no peer. TEI serves one model per server, so the operator states its limits.
  */
-import { isFailure } from '@arki/failure';
 import { z } from 'zod';
+
+import { isFailure } from '@arki/failure';
 
 import type { FetchLike } from '../http.js';
 import type { Reranker } from '../rerank/index.js';
@@ -18,8 +19,9 @@ import {
   RateLimited,
   UnsupportedInput,
 } from '../failures.js';
+import { requestSignal, retryAfterMs } from '../http.js';
 import { functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
-import { retryAfterMs, requestSignal } from '../http.js';
+import { traceRerank } from '../telemetry.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 export type TeiRerankerOptions = {
@@ -176,6 +178,6 @@ export function createTeiReranker(input: TeiRerankerOptions): Reranker | Configu
     local: false,
     maxDocuments,
     maxInputTokens,
-    rerank,
+    rerank: traceRerank('tei', id, rerank),
   };
 }

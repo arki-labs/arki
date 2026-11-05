@@ -2,8 +2,10 @@ import type { CustomerInfo, PurchasesOffering, PurchasesPackage } from 'react-na
 import Purchases from 'react-native-purchases';
 import { z } from 'zod';
 
-import { defineFailure } from '@arki/failure';
+import { defineFailure, isFailure } from '@arki/failure';
 import { is } from '@arki/schema';
+
+import { observeRevenueCat } from './telemetry.js';
 
 /**
  * `@arki/payments-native` — a thin, reusable wrapper around the RevenueCat SDK
@@ -76,15 +78,15 @@ export const RestoreFailed = /* @__PURE__ */ defineFailure('payments_native.rest
  * RevenueCat yet — so a pre-launch app can show its honest "coming soon" instead of an empty sheet.
  * Returns `payments_native.offerings_unavailable` when RevenueCat cannot be reached.
  */
-export async function getProOffering(): Promise<
-  PurchasesOffering | null | ReturnType<typeof OfferingsUnavailable>
-> {
-  try {
-    const offerings = await Purchases.getOfferings();
-    return offerings.current ?? null;
-  } catch (error) {
-    return OfferingsUnavailable({ cause: error });
-  }
+export async function getProOffering(): Promise<PurchasesOffering | null | ReturnType<typeof OfferingsUnavailable>> {
+  return observeRevenueCat('get_offerings', async () => {
+    try {
+      const offerings = await Purchases.getOfferings();
+      return offerings.current ?? null;
+    } catch (error) {
+      return OfferingsUnavailable({ cause: error });
+    }
+  });
 }
 
 /** Outcome of a purchase attempt — cancellation is a normal result, not a failure. */
@@ -101,13 +103,20 @@ const userCancelledSchema = z.object({ userCancelled: z.literal(true) });
 export async function purchasePackage(
   pkg: PurchasesPackage,
 ): Promise<PurchaseOutcome | ReturnType<typeof PurchaseFailed>> {
-  try {
-    const { customerInfo } = await Purchases.purchasePackage(pkg);
-    return { status: 'purchased', customerInfo };
-  } catch (error) {
-    if (is(error, userCancelledSchema)) return { status: 'cancelled' };
-    return PurchaseFailed({ cause: error });
-  }
+  return observeRevenueCat(
+    'purchase_package',
+    async () => {
+      try {
+        const { customerInfo } = await Purchases.purchasePackage(pkg);
+        return { status: 'purchased', customerInfo };
+      } catch (error) {
+        if (is(error, userCancelledSchema)) return { status: 'cancelled' };
+        return PurchaseFailed({ cause: error });
+      }
+    },
+    // A cancellation is the user's answer, not a fault: it is visible here and leaves the status unset.
+    outcome => (isFailure(outcome) ? undefined : { 'payments.purchase_status': outcome.status }),
+  );
 }
 
 /**
@@ -116,9 +125,11 @@ export async function purchasePackage(
  * `payments_native.restore_failed` when RevenueCat cannot restore.
  */
 export async function restorePurchases(): Promise<CustomerInfo | ReturnType<typeof RestoreFailed>> {
-  try {
-    return await Purchases.restorePurchases();
-  } catch (error) {
-    return RestoreFailed({ cause: error });
-  }
+  return observeRevenueCat('restore_purchases', async () => {
+    try {
+      return await Purchases.restorePurchases();
+    } catch (error) {
+      return RestoreFailed({ cause: error });
+    }
+  });
 }

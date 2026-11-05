@@ -125,6 +125,7 @@
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -133,6 +134,7 @@
     "@arki/journal": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/resilience": "workspace:*",
+    "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@aws-sdk/client-sesv2": "catalog:",

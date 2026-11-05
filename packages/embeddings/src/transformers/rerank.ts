@@ -7,14 +7,15 @@ import type * as Transformers from '@huggingface/transformers';
 import type { DataType, DeviceType, ProgressCallback } from '@huggingface/transformers';
 import { z } from 'zod';
 
+import type { SchemaWithJson } from '@arki/schema';
 import { invariant, isFailure, UnexpectedDefect } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import type { SchemaWithJson } from '@arki/schema';
 import { assert } from '@arki/schema';
 
 import type { Reranker, RerankHit } from '../rerank/index.js';
 import { Cancelled, InputTooLong, InvalidOutput, ModelUnavailable, UnsupportedInput } from '../failures.js';
 import { withOptionsJson } from '../schemas.js';
+import { traceRerank } from '../telemetry.js';
 import { deviceSchema, dtypeSchema, progressCallbackSchema } from './fields.js';
 
 export type TransformersRerankerOptions = {
@@ -42,7 +43,10 @@ export type TransformersRerankerOptions = {
 // Annotated: declaration emit cannot name the peer's `ProgressCallback` inside an inferred type. The
 // assignment fails to compile when zod's output does not fit `TransformersRerankerOptions`; the other direction
 // (no field forgotten) is the "keep every options field" test in `schemas.test.ts`.
-export const transformersRerankerOptionsSchema: SchemaWithJson<TransformersRerankerOptions, TransformersRerankerOptions> = withOptionsJson(
+export const transformersRerankerOptionsSchema: SchemaWithJson<
+  TransformersRerankerOptions,
+  TransformersRerankerOptions
+> = withOptionsJson(
   z
     .object({
       id: z.string().min(1).optional(),
@@ -295,7 +299,7 @@ export async function createTransformersReranker(
     maxDocuments: MAX_DOCUMENTS,
     maxInputTokens: room,
     countTokens,
-    rerank,
+    rerank: traceRerank('transformers', id, rerank),
     dispose: async () => {
       if (disposed) return;
       disposed = true;

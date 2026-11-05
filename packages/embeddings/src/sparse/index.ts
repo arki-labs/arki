@@ -7,8 +7,8 @@
  */
 import { z } from 'zod';
 
-import { getLogger } from '@arki/log';
 import { isFailure } from '@arki/failure';
+import { getLogger } from '@arki/log';
 import { assert } from '@arki/schema';
 
 import type { EmbedFailure } from '../failures.js';
@@ -24,10 +24,11 @@ import {
   SpaceMismatch,
   UnsupportedInput,
 } from '../failures.js';
-import { retryAfterMs, requestSignal } from '../http.js';
+import { requestSignal, retryAfterMs } from '../http.js';
 import { NO_INSTRUCTION } from '../instructions.js';
-import { objectSchema, functionSchema, parseOptions, withOptionsJson } from '../schemas.js';
+import { functionSchema, objectSchema, parseOptions, withOptionsJson } from '../schemas.js';
 import { isSameSpace, spaceId } from '../space.js';
+import { observeEmbeddings } from '../telemetry.js';
 import { CHARS_PER_TOKEN } from '../tokens.js';
 
 /**
@@ -56,7 +57,9 @@ export type SparseEmbedOptions = {
 
 /** `SparseEmbedOptions`, checked by the embedder's `embed`; a type test locks it to the type. */
 export const sparseEmbedOptionsSchema = withOptionsJson(
-  z.object({ onTooLong: z.enum(['fail', 'truncate']).optional(), signal: objectSchema<AbortSignal>().optional() }).readonly(),
+  z
+    .object({ onTooLong: z.enum(['fail', 'truncate']).optional(), signal: objectSchema<AbortSignal>().optional() })
+    .readonly(),
 );
 
 /** A sparse model with its server fixed. `embed` is one request of at most `maxBatch` texts, no retry. */
@@ -285,5 +288,16 @@ export function createSparseModel(input: SparseModelOptions): SparseEmbedder | C
     return { vectors, space, usage: { tokens, requests: 1, cacheHits: 0 } };
   };
 
-  return { id, space, maxBatch, maxInputTokens, embed };
+  return {
+    id,
+    space,
+    maxBatch,
+    maxInputTokens,
+    embed: (texts, callOptions) =>
+      observeEmbeddings(
+        'sparse_embed',
+        { 'embeddings.provider': 'tei', 'embeddings.model': id, 'embeddings.inputs': texts.length },
+        () => embed(texts, callOptions),
+      ),
+  };
 }

@@ -12,12 +12,12 @@ bun add @arki/geo
 Peers are optional. Install `react` and `react-dom` for `@arki/geo/react`. Install
 `@vis.gl/react-google-maps` for `@arki/geo/react/google-maps`.
 
-| Entry                         | What                                                                 | Runs on                  |
-| ----------------------------- | -------------------------------------------------------------------- | ------------------------ |
-| `@arki/geo`                   | `Coordinates`, `Bounds`, distance, bearing, bounds, formatting, failures | Node, Bun, Deno, browser |
-| `@arki/geo/geocoding`         | `GeocodingService`, `createGeocodingService`, `geocodingEnv`         | server                   |
-| `@arki/geo/react`             | everything in `@arki/geo`, plus `useCoordinates`, `useDistance`, `useBoundsFromCoordinates`, `useBoundsFromRadius` | browser, React |
-| `@arki/geo/react/google-maps` | `GoogleMapsProvider`, `GoogleMap`, `GoogleMarker`, `LocationPicker`, street view and polyline helpers | browser, React |
+| Entry                         | What                                                                                                               | Runs on                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `@arki/geo`                   | `Coordinates`, `Bounds`, distance, bearing, bounds, formatting, failures                                           | Node, Bun, Deno, browser |
+| `@arki/geo/geocoding`         | `GeocodingService`, `createGeocodingService`, `geocodingEnv`                                                       | server                   |
+| `@arki/geo/react`             | everything in `@arki/geo`, plus `useCoordinates`, `useDistance`, `useBoundsFromCoordinates`, `useBoundsFromRadius` | browser, React           |
+| `@arki/geo/react/google-maps` | `GoogleMapsProvider`, `GoogleMap`, `GoogleMarker`, `LocationPicker`, street view and polyline helpers              | browser, React           |
 
 Import `@arki/geo/geocoding` only on the server. It pulls in the geocoder libraries.
 
@@ -98,6 +98,22 @@ Failures are returned as values. Check them with `.is(value)`.
 
 Import every failure from `@arki/geo`.
 
+## Observability
+
+Spans from `@arki/geo/geocoding` (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                                                 | When                                                                          | Attributes                                                                                                    |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `geo.geocode`, `geo.reverse_geocode`                                                 | each lookup                                                                   | `geo.cache` (`hit`, `miss` or `off`), `geo.provider` of the provider that answered, `failure.code` on failure |
+| `geo.<provider>.geocode`, `geo.<provider>.reverse_geocode` (`geo.nominatim.geocode`) | each provider call, under the lookup; a fallback makes one per provider tried | `geo.provider`, `failure.code` on failure                                                                     |
+| `geo.batch_geocode`                                                                  | each `batchGeocode`; each address is a `geo.geocode` under it                 | `geo.batch.size`, `failure.code` on failure                                                                   |
+
+A returned failure sets `failure.code`. The span status is error only for a fault: `geo.provider_rejected` (502) or `geo.provider_unreachable` (503). Nothing found, invalid coordinates, a rate limit and a cancellation leave it unset. The address, the coordinates, the cache key, provider messages and API keys are never attributes.
+
+Metrics: `geo.operations` (counter; `operation` = `geocode`, `reverse_geocode`, `batch_geocode` or `<provider>.<lookup>`, `outcome` = `success`, `failure` or `error`).
+
+Not instrumented: the cache read and write as their own spans — the lookup span says whether the cache answered (`geo.cache`), and an `@arki/kv` cache spans its own `kv.get` and `kv.set`. The root entry and `./react` — pure computation and map components, no I/O of their own.
+
 ## React
 
 ```tsx skip="needs a browser and React rendering"
@@ -120,17 +136,22 @@ from `@arki/geo/react/google-maps` and never import `@vis.gl/react-google-maps` 
 
 ## Runtime support
 
-The maths in `@arki/geo` is pure and runs on Node, Bun, Deno and browsers. `@arki/geo/geocoding`
-needs Node or Bun. `@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later in a browser.
+The maths in `@arki/geo` is pure and runs on Node, Bun, Deno, browsers and Hermes. `@arki/geo/geocoding`
+runs on Node, Bun and Deno only: `node-geocoder` needs Node's `readline` (package.json `arki.entryRuntimes`).
+`@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later.
 
 <!-- runtimes:start -->
-| Runtime | Result | Version tested | Date (UTC) |
-| --- | --- | --- | --- |
-| node | pass | v22.13.1 | 2026-11-05 |
-| bun | pass | 1.4.2 | 2026-11-05 |
-| deno | pass | 2.9.8 | 2026-11-05 |
-| browser | fail | Chromium unknown | 2026-11-05 |
-| hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+- `./geocoding` runs on node, bun, deno (`scripts/smoke/geocoding.mjs`).
+
 <!-- runtimes:end -->
 
 ## Limits

@@ -171,9 +171,23 @@ A throw from a custom `embed` or an `onProgress` callback is a bug in that code,
 
 `memoryCacheStore({ maxEntries? })` is an in-process LRU (default 10 000 entries) that copies on `set` and on `get`. `kvCacheStore(kv, { prefix? })` from `@arki/embeddings/kv` stores the bytes as base64 through an `@arki/kv` client, so processes share one cache; `ttlMs` becomes whole seconds, and a value that is not base64 reads as a miss.
 
-## Telemetry
+## Observability
 
-`withTelemetry(embedder, { log?, recordInputs? })` emits one `arki.embed` event per `embed` call, at `info`: `provider`, `model`, `dimensions`, `inputs` (the count), `tokenBasis`, `tokens`, `requests`, `cacheHits`, `durationMs` and `outcome` (`'ok'` or the failure's code). `@arki/log` has no span type, so the event is the span; `@arki/log/otel` adds the active trace. Input texts are left out unless `recordInputs: true`, because inputs carry emails, names and tokens. Wrap it outside `withCache` to see hits, inside to see only provider calls.
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK). They are on by default, one per model call:
+
+| Span                      | When                                                                                                                                            | Attributes                                                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `embeddings.embed`        | each `embed` call on an embedder from `createEmbedder` (every built-in model, the fake included): one provider request, or a refusal before any | `embeddings.provider`, `embeddings.model`, `embeddings.inputs` (the count), `embeddings.dimensions`, `failure.code` on failure |
+| `embeddings.sparse_embed` | each `embed` call on a `createSparseModel` embedder                                                                                             | `embeddings.provider`, `embeddings.model`, `embeddings.inputs`, `failure.code` on failure                                      |
+| `embeddings.rerank`       | each request of a built-in reranker; `rerank()` makes one per `maxDocuments` chunk                                                              | `embeddings.provider`, `embeddings.model`, `embeddings.documents` (the count), `failure.code` on failure                       |
+
+A returned failure sets `failure.code`. The span status is error only for a fault: `embeddings.model_unavailable`, `embeddings.invalid_output` or `embeddings.configuration`. A refused input, a rate limit and a cancellation leave it unset. Input texts, images, queries, documents, vectors, scores and API keys are never attributes. `withCache` answers hits without calling the model, so a hit makes no span; `withResilience` retries, so each attempt is a span. In a Dot app the span nests under the usecase or request that called it.
+
+Metrics: `embeddings.operations` (counter; `operation` = `embed`, `sparse_embed` or `rerank`, `provider`, `outcome` = `success`, `failure` or `error`).
+
+`withTelemetry(embedder, { log?, recordInputs? })` adds an opt-in log event on top of the span: one `arki.embed` event per `embed` call, at `info`, with `provider`, `model`, `dimensions`, `inputs` (the count), `tokenBasis`, `tokens`, `requests`, `cacheHits`, `durationMs` and `outcome` (`'ok'` or the failure's code). `@arki/log/otel` adds the active trace. Input texts are left out unless `recordInputs: true`, because inputs carry emails, names and tokens. Wrap it outside `withCache` to see hits, inside to see only provider calls.
+
+Not instrumented: the cache store reads and writes — a `kvCacheStore` goes through `@arki/kv`, which spans them. Vector math, quantization, token counting and text normalization — pure computation.
 
 ## Dot plugin
 

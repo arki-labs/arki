@@ -8,6 +8,7 @@ import { isFailure } from '@arki/failure';
 import type { MailTransport } from '../types.js';
 import type { FetchFn } from './post-json.js';
 import { listOf } from '../message.js';
+import { traceTransport } from '../telemetry.js';
 import { badResponse, everyRecipient, logged, rejection, unsupported } from '../transport-failures.js';
 import { codeText, readAnswer, unosendRefusalSchema, unosendSentSchema } from './answers.js';
 import { postJson } from './post-json.js';
@@ -46,7 +47,7 @@ function errorDetail(body: unknown): { message?: string; providerCode?: string }
 export function unosend(options: UnosendOptions): MailTransport {
   const id = options.id ?? 'unosend';
   const fetchFn = options.fetch ?? globalThis.fetch;
-  return {
+  return traceTransport('unosend', {
     id,
     ...(options.quotaPerMonth === undefined ? {} : { quotaPerMonth: options.quotaPerMonth }),
     async send(message, sendOptions) {
@@ -87,5 +88,5 @@ export function unosend(options: UnosendOptions): MailTransport {
         recipients: everyRecipient(message, 'accepted'),
       });
     },
-  };
+  });
 }

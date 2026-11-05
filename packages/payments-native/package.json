@@ -59,11 +59,13 @@
   "dependencies": {
     "@arki/failure": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "react-native-purchases": "catalog:",
     "vitest": "catalog:"

@@ -6,6 +6,7 @@ import type { FailureOf, Result } from '@arki/failure';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
+import type { MailInvalidMessage } from './failures.js';
 import type { MailTemplate } from './template.js';
 import type {
   Address,
@@ -24,10 +25,10 @@ import type {
 } from './types.js';
 import { invalidConfig, isMailError } from './errors.js';
 import { failover } from './failover.js';
-import type { MailInvalidMessage } from './failures.js';
 import { MailUncertain } from './failures.js';
 import { errorField, log } from './log.js';
 import { checkMessage, listOf, redirect } from './message.js';
+import { observeMail } from './telemetry.js';
 import { renderTemplate } from './template.js';
 
 export type MailerOptions = {
@@ -144,14 +145,24 @@ export function mailer(options: MailerOptions): Mailer {
     return checkMessage(message) ?? message;
   };
 
+  // One `mail.send` span per send; the provider spans of the transport (one per failover attempt) nest under it.
+  const sendAttributes = (template: string | undefined) => ({
+    'mail.transport': transport.id,
+    ...(template === undefined ? {} : { 'mail.template': template }),
+  });
+
   return {
-    async send(template, input, sendOptions) {
-      const composed = await compose(template, input, sendOptions);
-      if (isFailure(composed)) return fail(composed, template.name);
-      return deliver(composed, { idempotencyKey: sendOptions.idempotencyKey, signal: sendOptions.signal });
-    },
+    send: (template, input, sendOptions) =>
+      observeMail('send', sendAttributes(template.name), async () => {
+        const composed = await compose(template, input, sendOptions);
+        if (isFailure(composed)) return fail(composed, template.name);
+        return deliver(composed, { idempotencyKey: sendOptions.idempotencyKey, signal: sendOptions.signal });
+      }),
     compose,
-    sendRaw: (message, sendOptions = {}) => deliver({ ...message, from: message.from ?? defaultFrom }, sendOptions),
+    sendRaw: (message, sendOptions = {}) =>
+      observeMail('send', sendAttributes(message.template), () =>
+        deliver({ ...message, from: message.from ?? defaultFrom }, sendOptions),
+      ),
     render: (template, input, context) => renderTemplate(template, input, context),
   };
 }

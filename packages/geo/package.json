@@ -58,7 +58,14 @@
       "deno",
       "browser",
       "hermes"
-    ]
+    ],
+    "entryRuntimes": {
+      "./geocoding": [
+        "node",
+        "bun",
+        "deno"
+      ]
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -79,6 +86,7 @@
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@t3-oss/env-core": "catalog:env",
     "node-fetch": "^2.7.0",
     "node-geocoder": "catalog:",

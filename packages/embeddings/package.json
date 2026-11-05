@@ -147,6 +147,7 @@
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@arki/schema": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {

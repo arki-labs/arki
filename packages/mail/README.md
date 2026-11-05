@@ -60,13 +60,15 @@ The core, `templates/auth` and the `http/*` transports use only `fetch` and run 
 Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.
 
 <!-- runtimes:start -->
+
 | Runtime | Result | Version tested | Date (UTC) |
-| --- | --- | --- | --- |
-| node | pass | v22.13.1 | 2026-11-05 |
-| bun | pass | 1.4.2 | 2026-11-05 |
-| deno | pass | 2.9.8 | 2026-11-05 |
-| browser | n/a | - | 2026-11-05 |
-| hermes | n/a | - | 2026-11-05 |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
 <!-- runtimes:end -->
 
 ## Public imports
@@ -89,15 +91,15 @@ A template validator that throws or rejects returns canonical `schema.validator_
 
 `send` does not throw for a mail that was not sent. It returns a failure value, defined with `@arki/failure` and exported from `@arki/mail`. A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
 
-| Failure              | Code                   | Status | When                                                                              |
-| -------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------- |
-| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.            |
-| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                 |
-| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`, `retryAfterMs` (its `Retry-After`). |
+| Failure              | Code                   | Status | When                                                                                                                                        |
+| -------------------- | ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.                                                                      |
+| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                                                                           |
+| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`, `retryAfterMs` (its `Retry-After`).                       |
 | `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`, `reason` (`cancelled`, `timeout`, `network`, `unreadable`). |
-| `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written. `data`: `problem`. Nothing was sent.       |
-| `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`. `data`: `bytes`, `maxBytes`. Nothing was queued. |
-| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.      |
+| `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written. `data`: `problem`. Nothing was sent.                                                                 |
+| `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`. `data`: `bytes`, `maxBytes`. Nothing was queued.                                                          |
+| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.                                                                |
 
 A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
 
@@ -134,7 +136,12 @@ import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
 const mail = mailer({ transport: sink, from: 'hello@pizza.example' });
-const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Is this thing on?', text: () => 'It is. Carry on.' });
+const ping = defineTemplate({
+  name: 'ping',
+  input: z.object({}),
+  subject: () => 'Is this thing on?',
+  text: () => 'It is. Carry on.',
+});
 
 sink.failNext(MailUncertain({ transport: 'sink', detail: 'request timed out' }));
 const result = await mail.send(ping, {}, { to: 'ada@example.com' });
@@ -200,13 +207,13 @@ Every transport takes `id` (default: its name) and `quotaPerMonth`. HTTP transpo
 
 How a service's answer maps:
 
-| Answer                           | Result                                        | May the service have taken it? |
-| -------------------------------- | --------------------------------------------- | ------------------------------ |
-| 429 or 5xx                       | `MailRejected`, `data.retryable: true`        | no                             |
-| any other 4xx                    | `MailRejected`, `data.retryable: false`       | no                             |
-| network failure, timeout, abort  | `MailUncertain`, with `data.reason` (`network`, `timeout`, `cancelled`) | yes                  |
-| 2xx that cannot be read          | `MailUncertain`, with `data.upstreamStatus`   | yes                            |
-| a field the service cannot carry | throws `MailError` `E005`, before any request | no                             |
+| Answer                           | Result                                                                  | May the service have taken it? |
+| -------------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
+| 429 or 5xx                       | `MailRejected`, `data.retryable: true`                                  | no                             |
+| any other 4xx                    | `MailRejected`, `data.retryable: false`                                 | no                             |
+| network failure, timeout, abort  | `MailUncertain`, with `data.reason` (`network`, `timeout`, `cancelled`) | yes                            |
+| 2xx that cannot be read          | `MailUncertain`, with `data.upstreamStatus`                             | yes                            |
+| a field the service cannot carry | throws `MailError` `E005`, before any request                           | no                             |
 
 `MailRejected` carries the service's HTTP status as `data.upstreamStatus`, its own error code as `data.providerCode`, what it said as `data.detail`, and its `Retry-After` as `data.retryAfterMs`; the outbox waits at least that long before the next try. Every HTTP transport and `ses` take `timeoutMs` (default 30 000); a request that runs out of time is `MailUncertain` with `data.reason: 'timeout'`.
 
@@ -275,7 +282,9 @@ import { mail } from '@arki/mail/dot';
 import { mailJobs, mailOutboxPlugin } from '@arki/mail/outbox';
 
 defineApp('shop')
-  .infra(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Analytical Pizza <hello@pizza.example>' })))
+  .infra(
+    mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Analytical Pizza <hello@pizza.example>' })),
+  )
   .infra(mailOutboxPlugin({ tables }))
   .entrypoints(journalWorker({ jobs: mailJobs() }));
 ```
@@ -295,7 +304,12 @@ import { mailSink } from '@arki/mail/testing';
 
 const sink = mailSink();
 const mail = mailer({ transport: sink, from: 'hello@pizza.example' });
-const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Is this thing on?', text: () => 'It is. Carry on.' });
+const ping = defineTemplate({
+  name: 'ping',
+  input: z.object({}),
+  subject: () => 'Is this thing on?',
+  text: () => 'It is. Carry on.',
+});
 
 await mail.send(ping, {}, { to: 'ada@example.com' });
 console.info(sink.sentWith(ping).length, sink.sentTo('ada@example.com').length, sink.last()?.message.subject);
@@ -306,6 +320,21 @@ sink.failNext(MailRejected({ transport: 'sink', retryable: false })); // the nex
 - `mailSink()` records each message with its template name and idempotency key.
 - `@arki/mail/pg/testing` has `mailQueueAssertions(db, tables)`: `queued(template?)` and `dead()` read committed rows, so a mail queued in a rolled-back transaction is not there.
 - `transportContract(harness)` from `@arki/mail/testing` runs the shared transport tests against your own transport.
+
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                                                                                           | When                                                                            | Attributes                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `mail.send`                                                                                                                    | each `send` and `sendRaw`                                                       | `mail.transport`, `mail.template` when named, `failure.code` on failure |
+| `mail.<provider>.send` (`mail.resend.send`, `mail.ses.send`, `mail.cloudflare.send`, `mail.unosend.send`, `mail.mailpit.send`) | each request to a provider, under `mail.send`; `failover` makes one per attempt | `mail.provider`, `mail.transport`, `failure.code` on failure            |
+
+A returned failure sets `failure.code`. The span status is error only for a fault: `mail.uncertain` (status 503, no answer). A refusal (`mail.rejected`), a used-up quota or input the template refuses leave it unset. A `MailError` throw (misuse) is recorded and sets the error status. Addresses, subjects, bodies, headers, tags, idempotency keys, message ids and API keys are never attributes. In a Dot app `mail.send` nests under the usecase or request span that sent it.
+
+Metrics: `mail.operations` (counter; `operation` = `send` or `<provider>.send`, `outcome` = `success`, `failure` or `error`).
+
+Not instrumented: `compose` and `render` — pure computation. `logTransport` and the test sink — nothing leaves the process. Quota counters and the outbox tables — they run on the app's database handle, which `@arki/db` and the driver span; queued sends run as journal jobs, which `@arki/journal` spans, and each one is a `mail.send` inside that job.
 
 ## Documentation
 
