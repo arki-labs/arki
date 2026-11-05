@@ -254,12 +254,12 @@ const userProjection = d.projection
 ### Branded IDs
 
 ```ts run
-import { createIdFactory, createPrefixedId } from '@arki/db/id';
+import { defineId } from '@arki/contracts';
+import { createPrefixedId } from '@arki/db/id';
 import { isFailure } from '@arki/failure';
 
 const userId = createPrefixedId('usr_'); // 'usr_…'
-const idFactory = createIdFactory('post_');
-const postId = idFactory.create();
+const postId = defineId('post_').create();
 
 if (isFailure(userId) || isFailure(postId)) throw new Error('This example needs Web Crypto');
 if (!userId.startsWith('usr_') || !postId.startsWith('post_')) throw new Error('prefix missing');
@@ -294,8 +294,8 @@ export const stories = pgTable('stories', {
 });
 ```
 
-`idColumns` has the same column helpers as `createIdFactory` (`primaryColumn`,
-`reference`, `foreignKey`, …), and stamps the declaration's schema on every
+`idColumns` gives the column helpers (`primaryColumn`, `reference`,
+`foreignKey`, …), and stamps the declaration's schema on every
 column so `@arki/contracts/drizzle` select schemas check the prefix at
 runtime. Existing prefixes stay exactly as stored: `defineId('hlgt_')` reads
 the `hlgt_…` rows already there. Never value-import `@arki/db/id` from browser
@@ -308,8 +308,7 @@ with `orThrow` at Drizzle's scalar default callback. A raw insert rejects with
 `UnexpectedFailure` and writes no row. Owned transactions roll back and return the
 original declared ID failure; `TRANSACTION_FAILURES` and `transactionErrorMap`
 include `ID_GENERATION_FAILURES`. Supplying an explicit ID skips its default.
-Legacy `createIdFactory` (`create`/`make`/`new`), `createId`, and `createPrefixedId`
-return the same canonical generation failures. They share the secure generator;
+`createId` and `createPrefixedId` return the same canonical generation failures. They share the secure generator;
 no producer falls back to `Math.random`. Their stored format remains a 24-character
 lowercase alphanumeric body starting with a letter, with the prefix concatenated
 exactly as supplied. Legacy empty and punctuation prefixes remain accepted.

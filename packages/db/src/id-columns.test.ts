@@ -15,7 +15,7 @@ import { createInsertSchema, createSelectSchema, jsonColumn } from '@arki/contra
 import { orThrow, UnexpectedDefect, UnexpectedFailure } from '@arki/failure';
 
 import { createUnitOfWork } from './composition.js';
-import { createIdFactory, idColumns } from './id-factory.js';
+import { idColumns } from './id-factory.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 import { runTransaction, runTransactionOnce } from './transaction.js';
 
@@ -46,8 +46,8 @@ const injectedRows = pgTable('injected_rows', {
   id: injected.primaryColumn(),
   requiredId: injected.requiredColumn('required_id'),
 });
-const legacyId = createIdFactory('legacy:/');
-const legacyRows = pgTable('legacy_rows', { id: legacyId.primaryColumn() });
+const legacyId = defineId('legacy:/');
+const legacyRows = pgTable('legacy_rows', { id: idColumns(legacyId).primaryColumn() });
 const refundId = defineId('id_', { kind: 'billing.refund' });
 const paymentId = defineId('id_', { kind: 'billing.payment' });
 const nominalRows = pgTable('nominal_rows', {
@@ -211,14 +211,7 @@ describe('idColumns', () => {
     expect(decode).toHaveBeenCalledExactlyOnceWith('42', expect.anything());
   });
 
-  it('createIdFactory keeps working for ids declared the old way', () => {
-    const poet = createIdFactory('pt_');
-    expect(poet.create()).toMatch(/^pt_/);
-    expect(poet.make).toBe(poet.create);
-    expect(poet.schema.safeParse('xx_1').success).toBe(false);
-  });
-
-  it('legacy scalar defaults commit successes and roll back preceding writes on entropy refusal', async () => {
+  it('punctuation-prefix scalar defaults commit successes and roll back preceding writes on entropy refusal', async () => {
     const committed = await runTransactionOnce(db, tx => tx.insert(legacyRows).values({}).returning());
     expect(committed).toEqual([{ id: expect.stringMatching(/^legacy:\/[a-z][a-z0-9]{23}$/) }]);
     vi.stubGlobal('crypto', null);

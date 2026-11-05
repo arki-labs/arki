@@ -1,9 +1,9 @@
-/** Prefixed id factories (`createIdFactory`) and `idColumns` for ids declared with `defineId`. */
+/** Prefixed id generators and `idColumns` for ids declared with `defineId`. */
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { varchar } from 'drizzle-orm/pg-core';
 
-import type { IdGenerationFailure } from '@arki/contracts';
-import { createIdBody, z } from '@arki/contracts';
+import type { IdGenerationFailure, z } from '@arki/contracts';
+import { createIdBody } from '@arki/contracts';
 import { isFailure, orThrow } from '@arki/failure';
 
 import type { OnDelete } from './id-columns-shared.js';
@@ -24,7 +24,7 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` |
  * What the column helpers need from an id kind: its schema (stamped on every
  * column, so `@arki/contracts/drizzle` schemas check the prefix at runtime)
  * and its generator (the default of generated columns). `defineId('sty_')`
- * from `@arki/contracts` has both, and so does {@link createIdFactory}.
+ * from `@arki/contracts` has both.
  */
 export type IdColumnSource<TId extends string> = {
   // Zod's canonical output retains brands; its deprecated `_output` alias does not.
@@ -129,61 +129,6 @@ export function idColumns<TSchema extends z.ZodType & z.core.$ZodType<string>>(
   };
 
   return columns;
-}
-
-/**
- * Type-safe ID factory that generates all ID-related utilities at once
- *
- * New code: declare the id with `defineId('pt_')` from `@arki/contracts`
- * (browser-safe, type written once) and get its columns with
- * {@link idColumns}. This factory stays for the ids declared the old way.
- *
- * @deprecated The id type is derived from the prefix alone, so two kinds with the same prefix are
- * interchangeable. `defineId(prefix)` from `@arki/contracts` with {@link idColumns} gives each id its own type.
- *
- * @param prefix - The prefix for the ID type (e.g., 'pt', 'usr', 'ant')
- * @returns An object with create function, schema, and column helpers
- *
- * @example
- * ```typescript
- * const poetId = createIdFactory('pt');
- * export type PoetId = IdOf<typeof poetId>;
- *
- * export const createPoetId = poetId.create;
- * export const poetIdSchema = poetId.schema;
- *
- * export const poets = schema.table('poets', {
- *   id: poetId.primaryColumn(),
- *   // ... other columns
- * });
- * ```
- */
-export function createIdFactory<TPrefix extends string>(prefix: TPrefix) {
-  /** Validate the stored prefix while deriving the output type from that prefix alone. */
-  const schema: z.ZodType<`${TPrefix}${string}`, string> = z.custom<`${TPrefix}${string}`>(
-    value => typeof value === 'string' && value.startsWith(prefix),
-  );
-
-  const create = () => createPrefixedId(prefix);
-
-  return {
-    /**
-     * Creates a new ID with the specified prefix
-     */
-    create,
-    /**
-     * Creates a new ID with the specified prefix
-     */
-    make: create,
-    /**
-     * Creates a new ID with the specified prefix
-     */
-    new: create,
-
-    schema,
-
-    ...idColumns({ schema, create }),
-  };
 }
 
 // Re-export drizzle and zod utilities

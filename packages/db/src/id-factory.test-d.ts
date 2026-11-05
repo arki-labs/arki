@@ -8,19 +8,7 @@ import { createInsertSchema } from '@arki/contracts/drizzle';
 import { defineFailure } from '@arki/failure';
 
 import type { IdColumnSource } from './id-factory.js';
-import { createIdFactory, idColumns } from './id-factory.js';
-
-test('legacy factories derive the id solely from the stored prefix', () => {
-  const _factory = createIdFactory('pt_');
-  expectTypeOf<ReturnType<typeof _factory.create>>().toEqualTypeOf<`pt_${string}` | IdGenerationFailure>();
-  expectTypeOf<typeof _factory.make>().toEqualTypeOf<typeof _factory.create>();
-  expectTypeOf<typeof _factory.new>().toEqualTypeOf<typeof _factory.create>();
-  expectTypeOf<z.input<typeof _factory.schema>>().toEqualTypeOf<string>();
-  expectTypeOf<z.output<typeof _factory.schema>>().toEqualTypeOf<`pt_${string}`>();
-  expectTypeOf<IdOf<typeof _factory>>().toEqualTypeOf<`pt_${string}`>();
-  // @ts-expect-error A prefix cannot prove an arbitrarily narrower caller-supplied id type.
-  createIdFactory<'pt_', 'pt_fixed'>('pt_');
-});
+import { idColumns } from './id-factory.js';
 
 test('ID defaults and foreign-key nullability agree with parsed output', () => {
   const id = defineId('row_');

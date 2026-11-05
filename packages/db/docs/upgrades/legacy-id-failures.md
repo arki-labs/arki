@@ -1,6 +1,6 @@
 # Move legacy IDs to modern declarations
 
-`createId`, `createPrefixedId` and every `createIdFactory` generation alias now
+`createId` and `createPrefixedId` now
 return their successful value or `IdGenerationFailure`, derived from the
 `ID_GENERATION_FAILURES` definitions in `@arki/contracts`.
 
@@ -37,7 +37,7 @@ function prepareRecord() {
 }
 ```
 
-Replace `createIdFactory(prefix)` with `defineId(prefix)`. Put the declaration in a browser-safe module and apply `idColumns(declaration)` only in server table modules. Modern declarations expose `prefix`, `schema`, `create` and `is`; they do not expose legacy `make`, `new` or column helpers. Existing legacy exports remain compatibility entry points with the same typed generation failures.
+`createIdFactory` is removed. Replace `createIdFactory(prefix)` with `defineId(prefix)` from `@arki/contracts`. Put the declaration in a browser-safe module and apply `idColumns(declaration)` only in server table modules. Declarations expose `prefix`, `schema`, `create` and `is`; replace `make()` and `new()` with `create()`, and the factory's column helpers with `idColumns(declaration)`.
 
 Infer successful types from `IdOf<typeof recordId>`. A generator's
 `ReturnType` now includes failures and must not be used as a stored ID type.
@@ -45,12 +45,12 @@ Forward failures unchanged and declare `ID_GENERATION_FAILURES` in an owning
 transport's error map. Never interpolate a fallible call: JavaScript can turn
 a failure into an apparent string ID.
 
-Drizzle requires scalar defaults. The factory's column helpers bridge only at
+Drizzle requires scalar defaults. The `idColumns` helpers bridge only at
 that foreign callback; raw inserts can reject with `UnexpectedFailure`.
 `runTransaction`, `runTransactionOnce` and `createUnitOfWork` roll back and
 restore declared generation failures by identity. Callers using other insertion
 boundaries must own that bridge explicitly.
 
-These legacy prefix types do not yet satisfy A-38's nominal separation for
-identical-format domain kinds. That remains a separate declaration and consumer
-migration; do not claim raw `string` or a renamed string alias is a branded ID.
+A prefix alone does not separate two kinds that share it. Give such kinds a
+`kind` (`defineId('id_', { kind: 'billing.refund' })`); do not claim raw
+`string` or a renamed string alias is a branded ID.

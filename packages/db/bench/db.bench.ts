@@ -13,12 +13,13 @@ import { nanoid } from 'nanoid';
 import { v7 as uuidv7 } from 'uuid';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
+import { defineId } from '@arki/contracts';
 import { orThrow } from '@arki/failure';
-import { createIdFactory, createPrefixedId } from '@arki/db/id';
+import { createPrefixedId } from '@arki/db/id';
 import { defineRelations } from '@arki/db/orm';
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 
-const userId = createIdFactory('usr_');
+const userId = defineId('usr_');
 
 /** Describes the shape of an id: prefix, length and which characters it uses. */
 function idShape(id: string): string {
@@ -99,8 +100,8 @@ export default defineSuite({
       baseline: 'factory',
       cases: c => ({
         factory: c({
-          label: '@arki/db createIdFactory("usr_").create()',
-          package: '@arki/db',
+          label: '@arki/contracts defineId("usr_").create()',
+          package: '@arki/contracts',
           setup: index => index,
           // The benchmark requires a successful scalar; fail the run if entropy is unavailable.
           run: () => orThrow(userId.create()),
@@ -130,7 +131,7 @@ export default defineSuite({
       title: 'Create one random ID of any shape',
       note: 'Different shapes and lengths: shown side by side, not ranked. uuid v7 is time-ordered; randomUUID is v4.',
       cases: {
-        arki: { label: '@arki/db createIdFactory("usr_").create()', package: '@arki/db', run: () => orThrow(userId.create()) },
+        arki: { label: '@arki/contracts defineId("usr_").create()', package: '@arki/contracts', run: () => orThrow(userId.create()) },
         cuid2: {
           label: '@paralleldrive/cuid2 createId (no prefix)',
           package: '@paralleldrive/cuid2',

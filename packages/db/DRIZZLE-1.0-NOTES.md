@@ -290,7 +290,7 @@ side-channel.
 1. **Side-channel symbol.** `@arki/contracts` exports
    `COLUMN_ZOD_SCHEMA = Symbol.for('@arki/contracts/columnZodSchema')`.
    `Symbol.for` keeps it global-registry safe across module copies.
-2. **Producer tags the column.** `@arki/db`'s `createIdFactory` writes its
+2. **Producer tags the column.** `@arki/db`'s `idColumns` writes its
    schema to `builder.config[COLUMN_ZOD_SCHEMA]` for every column it produces
    (`primaryColumn`, `foreignKey`, `optionalForeignKey`, `requiredColumn`,
    `optionalColumn`, `reference`, `optionalReference`).
@@ -432,10 +432,8 @@ Restructure to either:
 
 ### `packages/db/src/id-factory.ts`
 
-`createIdFactory<TPrefix, TId>(prefix)` returns a factory with:
+`idColumns(declaration)` takes a `defineId(prefix)` declaration (its `schema` and `create`) and returns:
 
-- `create()` / `make()` / `new()` — generate a new prefixed ID
-- `schema` — Zod schema validating prefix + branding to `TId`
 - `primaryColumn(name?)` — `varchar(256).notNull().primaryKey().$type<TId>().$defaultFn(...)`
 - `optionalColumn(name)`, `requiredColumn(name)` — typed varchar columns
 - `reference(name)`, `optionalReference(name)` — FK columns without constraint
