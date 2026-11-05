@@ -49,7 +49,9 @@ export function createLocalCollection<
       storageKey,
       schema,
       getKey,
-      storageEventApi: syncBetweenTabs ? undefined : NULL_STORAGE_EVENT_API,
+      // TanStack listens on `window` when it exists. React Native sets `window = global` without
+      // events, so cross-tab sync needs the event API itself.
+      storageEventApi: syncBetweenTabs && typeof globalThis.addEventListener === 'function' ? undefined : NULL_STORAGE_EVENT_API,
     }),
   );
 }

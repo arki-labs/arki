@@ -162,13 +162,43 @@
       "./pwa"
     ],
     "entryRuntimes": {
+      "./devtools": [
+        "node",
+        "bun",
+        "deno",
+        "browser"
+      ],
+      "./mutations": [
+        "node",
+        "bun",
+        "deno",
+        "browser"
+      ],
       "./orpc": [
         "node",
         "bun",
         "deno",
         "browser"
       ],
+      "./preset": [
+        "node",
+        "bun",
+        "deno",
+        "browser"
+      ],
       "./pwa": [
+        "browser"
+      ],
+      "./query": [
+        "node",
+        "bun",
+        "deno",
+        "browser"
+      ],
+      "./status": [
+        "node",
+        "bun",
+        "deno",
         "browser"
       ]
     },

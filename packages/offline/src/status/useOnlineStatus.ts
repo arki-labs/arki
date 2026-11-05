@@ -1,17 +1,21 @@
 import { useSyncExternalStore } from 'react';
 
+// Test the features, not `window`: React Native sets `window = global` and a `navigator` with neither
+// `onLine` nor events. There `onLine` is undefined, so it counts as online.
 const isOnline = (): boolean =>
-  typeof navigator === 'undefined' ? true : navigator.onLine;
+  typeof navigator === 'undefined' || navigator.onLine !== false;
+
+const hasOnlineEvents = typeof globalThis.addEventListener === 'function';
 
 function subscribeToOnlineStatus(callback: () => void): () => void {
-  if (typeof window === 'undefined') return () => {
+  if (!hasOnlineEvents) return () => {
     /* nothing to unsubscribe */
   };
-  window.addEventListener('online', callback);
-  window.addEventListener('offline', callback);
+  globalThis.addEventListener('online', callback);
+  globalThis.addEventListener('offline', callback);
   return () => {
-    window.removeEventListener('online', callback);
-    window.removeEventListener('offline', callback);
+    globalThis.removeEventListener('online', callback);
+    globalThis.removeEventListener('offline', callback);
   };
 }
 
@@ -30,13 +34,13 @@ let cachedSnapshot: OnlineStatus = {
 };
 
 // Refresh the cached snapshot on online/offline events. SSR-safe: only wires
-// listeners in browser environments.
-if (typeof window !== 'undefined') {
+// listeners where the global object has events (browsers).
+if (hasOnlineEvents) {
   const refresh = () => {
     cachedSnapshot = { online: isOnline(), lastChange: Date.now() };
   };
-  window.addEventListener('online', refresh);
-  window.addEventListener('offline', refresh);
+  globalThis.addEventListener('online', refresh);
+  globalThis.addEventListener('offline', refresh);
 }
 
 function getOnlineSnapshot(): OnlineStatus {

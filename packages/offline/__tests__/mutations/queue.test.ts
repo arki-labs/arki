@@ -492,7 +492,7 @@ describe('OfflineMutationQueue', () => {
   // Regression — production Avocabo SSR crash: top-level
   // `createOfflineRuntime` evaluates during SSR, where `indexedDB` is undefined.
   // The factory must not touch idb-keyval at construction when there is no
-  // `window` global. See queue.ts `isBrowser` guard.
+  // IndexedDB (SSR, React Native). See queue.ts `hasIndexedDb` guard.
   it('does not touch idb-keyval during construction when window is undefined (SSR)', () => {
     const originalWindow = (globalThis as { window?: unknown }).window;
     delete (globalThis as { window?: unknown }).window;
