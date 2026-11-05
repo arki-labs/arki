@@ -53,10 +53,18 @@ describe('the job surface, as types', () => {
   });
 
   it('withSchedule takes a retention', () => {
-    j.effect('mail', order, { OrderPaid: () => {} }).withSchedule({
+    j.effect('mail', order, {
+      OrderPaid: () => {
+        /* no-op */
+      },
+    }).withSchedule({
       retention: { completed: false, dead: '30d', retryableFor: '7d' },
     });
-    j.effect('mail', order, { OrderPaid: () => {} }).withSchedule({
+    j.effect('mail', order, {
+      OrderPaid: () => {
+        /* no-op */
+      },
+    }).withSchedule({
       // @ts-expect-error '30x' is not an age
       retention: { completed: '30x' },
     });

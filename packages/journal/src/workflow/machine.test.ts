@@ -58,8 +58,10 @@ const startedData = () => ({
 type RunEvent = ReturnType<(typeof events)[keyof typeof events]>;
 const write = (id: string, ...pending: RunEvent[]) =>
   db.transaction(tx => journal.write(tx, run, id, { meta, events: () => pending }));
-const runRow = async (id: string) =>
-  (await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id)))[0];
+const runRow = async (id: string) => {
+  const rows = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
+  return rows[0];
+};
 const stepRows = (id: string) =>
   db
     .select()
@@ -84,7 +86,8 @@ describe('the workflow.run reducers', () => {
       finishedAt: null,
       version: 1,
     });
-    expect((await runRow(id))?.deadlineAt).toEqual(new Date(clock(600)));
+    const runRowResult4 = await runRow(id);
+    expect(runRowResult4?.deadlineAt).toEqual(new Date(clock(600)));
   });
 
   it('a happy run folds scheduled, parked, signalled and completed into the right state at each point', async () => {
@@ -120,7 +123,8 @@ describe('the workflow.run reducers', () => {
       ),
     );
     expect(await runRow(id)).toMatchObject({ state: 'parked', node: 'settled', waitingFor: 'provider.refund.settled' });
-    expect((await runRow(id))?.wakeAt).toEqual(new Date(clock(300)));
+    const runRowResult3 = await runRow(id);
+    expect(runRowResult3?.wakeAt).toEqual(new Date(clock(300)));
 
     orThrow(
       await write(
@@ -187,7 +191,8 @@ describe('the workflow.run reducers', () => {
         events.NodeSkipped({ path: 'a', phase: 'undo', cause: 'no-undo', reason: 'no undo', actorId: null, at: clock(4) }),
       ),
     );
-    expect((await runRow(id))?.results).toEqual({ a: 1, b: null });
+    const runRowResult2 = await runRow(id);
+    expect(runRowResult2?.results).toEqual({ a: 1, b: null });
   });
 
   it('a dead step leaves the run state alone, because stuck is derived from the step row', async () => {
@@ -220,7 +225,8 @@ describe('the workflow.run reducers', () => {
       ),
     );
     expect(await runRow(id)).toMatchObject({ state: 'compensating', cancelReason: 'customer asked', waitingFor: null });
-    expect((await runRow(id))?.cancelledAt).toEqual(new Date(clock(1)));
+    const runRowResult = await runRow(id);
+    expect(runRowResult?.cancelledAt).toEqual(new Date(clock(1)));
 
     // A node scheduled during compensation (an undo) must not flip the run back to running.
     orThrow(
@@ -452,7 +458,8 @@ describe('the step projection', () => {
         events.NodeScheduled({ path: 'hold', phase: 'undo', attempt: 1, key: 'k:undo', jobId: null, at: clock(4) }),
       ),
     );
-    expect((await stepRows(id)).map(r => [r.path, r.phase, r.status, r.reason])).toEqual([
+    const stepRowsResult = await stepRows(id);
+    expect(stepRowsResult.map(r => [r.path, r.phase, r.status, r.reason])).toEqual([
       ['hold', 'do', 'done', null],
       ['hold', 'undo', 'scheduled', null],
       ['payBack', 'do', 'done', null],

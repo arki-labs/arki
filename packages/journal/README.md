@@ -877,27 +877,30 @@ export const webhookSchema = webhookTables(); // in the schema module: drizzle-k
 export const webhooks = webhookSender({ tables, webhooks: webhookSchema, encryptionKey: env.WEBHOOK_KEY });
 
 // Once, when a partner registers an endpoint. Show the secret to them now: it is never readable again.
-const { id, secret } = await webhooks.subscribe(db, { partner: tenantId, url, events: ['order.placed'] });
+const subscribed = await webhooks.subscribe(db, { partner: tenantId, url, events: ['order.placed'] });
+if (isFailure(subscribed)) return subscribed; // InvalidInput: not public https, or bad input
+const { id, secret } = subscribed;
 
 // In the business transaction: the webhook exists if and only if the order commits.
 await db.transaction(async tx => {
   await journal.run(tx, placeOrder, input, meta);
-  await webhooks.dispatch(tx, { partner: tenantId, event: 'order.placed', payload: { orderId } });
+  orThrow(await webhooks.dispatch(tx, { partner: tenantId, event: 'order.placed', payload: { orderId } }));
 });
 
 journal.worker(db, { jobs: combineRunners(outboxRunner(...), webhooks.runner) });
 ```
 
-- **`dispatch(tx, …)`** needs a transaction. It writes the message once, as the body `{ type, timestamp, data }`, and one delivery row for each active subscription of that partner that lists the event. A payload over `maxPayloadBytes` (default 1 MiB) is refused.
+- **`dispatch(tx, …)`** needs a transaction. It writes the message once, as the body `{ type, timestamp, data }`, and one delivery row for each active subscription of that partner that lists the event. It throws only when given the root database (a caller bug). A payload that is not JSON returns `InvalidInput`; a body over `maxPayloadBytes` (default 1 MiB) returns `journal.webhook_payload_too_large`. Nothing is written for either.
 - **Signing failures** return the exact HTTP failure before delivery, record a failed/dead attempt with its safe code, and never acknowledge the job. Returned failures require an explicit retry predicate such as `.while(WebhookCryptoUnavailable)` on the configured backoff; a throw is retried by that backoff.
-- **Delivery** signs the stored bytes with [Standard Webhooks](https://www.standardwebhooks.com/). `webhook-id` is the message id, the same on every retry and replay, so a receiver dedupes on it (`verifyWebhook` with `standardWebhooks` from `@arki/http/webhooks` accepts it). It posts through `publicFetch()`, so an endpoint cannot reach a private address, even after a DNS change. Each try has `timeoutMs` (default 10 s). Any 2xx is delivered; anything else is retried.
+- **Delivery** signs the stored bytes with [Standard Webhooks](https://www.standardwebhooks.com/). `webhook-id` is the message id, the same on every retry and replay, so a receiver dedupes on it (`verifyWebhook` with `standardWebhooks` from `@arki/http/webhooks` accepts it). It posts through `publicFetch()`, so an endpoint cannot reach a private address, even after a DNS change. Each try has `timeoutMs` (default 10 s). Any 2xx is delivered; anything else is retried, recorded as `journal.webhook_delivery_failed`.
 - **Retries are the worker's.** `retry` (a `Backoff`, default from 5 s doubling to 1 h, 10 retries) sets when the next try runs and when the delivery is dead. A dead delivery stays in `journal_jobs` like any dead job: `journal.jobs(db, { status: 'dead' })` lists it and `journal.retry(db, id, op)` runs it again.
 - **Every try is a row** in `webhook_attempts`: `delivered`, `failed` (with `next_at`), `dead`, or `skipped` (the subscription was disabled). Because delivery is at least once, a crash between the send and the ack can add a second row for one try.
 - **Auto-disable.** `disableAfter` (default 5) dead deliveries in a row disable the subscription. A success resets the count. `enable(db, id)` turns it back on; `disable(db, id)` stops it by hand. A delivery queued before the subscription was disabled is recorded as `skipped`, not sent.
-- **`replay(db, { messageId, subscriptionId })`** sends a stored message again, with the same `webhook-id`. It refuses a subscription of another partner.
+- **`replay(db, { messageId, subscriptionId })`** sends a stored message again, with the same `webhook-id`. A subscription of another partner returns `journal.webhook_other_partner`; an unknown message or subscription returns `journal.webhook_not_found`. Neither queues anything.
 - **`rotateSecret(db, id, { windowSeconds })`** returns a new secret. For `windowSeconds` (default a day) both the old and the new secret sign each delivery, so the partner can switch without losing a message.
 - **Secrets at rest** are sealed with AES-GCM under `encryptionKey` (32 bytes, base64; keep it out of the database). The subscription id is bound in, so a sealed secret copied onto another row does not open.
-- `subscribe` takes public `https` URLs only. `rotateSecret`, `enable`, `disable` and `replay` act on the id they are given: check that the caller owns the subscription first.
+- `subscribe` takes public `https` URLs only: any other URL, or input that fails its schema, returns `InvalidInput` (`schema.invalid_input`) with the issues. `rotateSecret`, `enable` and `disable` return `journal.webhook_not_found` for an unknown id. They and `replay` act on the id they are given: check that the caller owns the subscription first.
+- A wrong `encryptionKey` throws `journal.webhook_configuration_invalid` (as `UnexpectedFailure`) when `webhookSender(...)` is built, so the app fails at boot.
 - `combineRunners(...)` from `@arki/journal` lets one worker run webhook deliveries and other queue jobs. Two runners that claim the same job name throw `BAD_DEFINITION`.
 
 Migration: add `webhookTables()` (or `webhookTables(schema)` next to `journalTables(schema)`) to the schema module, run `drizzle-kit generate`, and apply the migration before the first `subscribe`. It creates `webhook_subscriptions`, `webhook_messages` and `webhook_attempts`; existing tables are unchanged.

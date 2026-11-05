@@ -365,14 +365,18 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
           mailer.send(orderId(Number(job.args)));
           return Promise.resolve();
         },
-        retryDelay: () => undefined,
+        retryDelay: () => {
+          /* no-op */
+        },
       };
     },
   });
 
   it('builds the runner at boot with its needs and runs a queue row in the worker', async () => {
     const sent: string[] = [];
-    let done: () => void = () => undefined;
+    let done: () => void = () => {
+      /* no-op */
+    };
     const ran = new Promise<void>(resolve => {
       done = resolve;
     });
@@ -415,7 +419,9 @@ describe('journalWorker({ jobs }): queue rows from a job runner', () => {
         .infra(
           dbPlugin(),
           journal({ j }),
-          mailerPlugin([], () => undefined),
+          mailerPlugin([], () => {
+            /* no-op */
+          }),
         )
         .features([ordersFeature([])])
         .entrypoints(journalWorker({ jobs: mailerSource({ features: [] }) }))

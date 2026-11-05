@@ -140,7 +140,7 @@ export function createDrain<Meta extends StandardSchemaV1<unknown, Record<string
   deps: DrainDeps<Meta, AppDb, Run>,
 ) {
   const { jobs: jobsTable, jobAttempts: attemptsTable, jobArchive: archiveTable } = deps.tables;
-  const policy = deps.retention ?? resolveRetention(undefined);
+  const policy = deps.retention ?? resolveRetention();
   const effectOverride = effectOverrides(deps.effects);
   const { decodeStoredEvent } = deps.history;
   const known = deps.effects.map(effect => effect.name);

@@ -781,8 +781,10 @@ describe('replay, verify, repair', () => {
       db.select().from(tables.jobArchive).where(sql`${tables.jobArchive.args}->>'id' = ${eventId}`);
     const hotOf = (eventId: string) =>
       db.select().from(tables.jobs).where(sql`${tables.jobs.args}->>'id' = ${eventId}`);
-    expect((await archivedOf(firstId)).map(row => row.effect)).toEqual(['note-mail']);
-    expect((await hotOf(secondId)).map(row => row.effect)).toEqual(['note-mail']);
+    const archivedBefore = await archivedOf(firstId);
+    expect(archivedBefore.map(row => row.effect)).toEqual(['note-mail']);
+    const hotBefore = await hotOf(secondId);
+    expect(hotBefore.map(row => row.effect)).toEqual(['note-mail']);
 
     expect(orThrow(await noting.forget(db, order, id))).toMatchObject({ erased: 2 });
 

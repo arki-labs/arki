@@ -47,9 +47,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await dbA.delete(tables.jobs);
-  await dbA.delete(tables.jobArchive);
-  await dbA.delete(tables.jobOperations);
+  await dbA.delete(tables.jobs).where(sql`true`);
+  await dbA.delete(tables.jobArchive).where(sql`true`);
+  await dbA.delete(tables.jobOperations).where(sql`true`);
 });
 
 const DAY = 86_400_000;
@@ -102,7 +102,10 @@ const deadJob = async (): Promise<string> => {
   });
   return id;
 };
-const archiveIds = async () => (await dbA.select({ id: tables.jobArchive.id }).from(tables.jobArchive)).map(r => r.id);
+const archiveIds = async () => {
+  const selectResult = await dbA.select({ id: tables.jobArchive.id }).from(tables.jobArchive);
+  return selectResult.map(r => r.id);
+};
 const operations = () => dbA.select().from(tables.jobOperations);
 const past = new Date(Date.now() - DAY);
 
@@ -140,17 +143,19 @@ describe('the sweep verbs on two connections', () => {
 
     // And both at once over a fresh backlog: every row archived exactly once, the two operations' ids disjoint.
     const more = await Promise.all(Array.from({ length: 40 }, deadJob));
-    await dbA.delete(tables.jobOperations);
+    await dbA.delete(tables.jobOperations).where(sql`true`);
     const olderThan = new Date(Date.now() - 31 * DAY);
     await Promise.all([
       sweeper.purgeDead(dbA, { olderThan, limit: 25 }, { actor: 'worker-a' }).then(result => orThrow(result)),
       sweeper.purgeDead(dbB, { olderThan, limit: 25 }, { actor: 'worker-b' }).then(result => orThrow(result)),
     ]);
     orThrow(await sweeper.purgeDead(dbA, { olderThan, limit: 100 }, { actor: 'worker-a' }));
-    const touched = (await operations()).flatMap(op => op.jobIds);
+    const operationsResult = await operations();
+    const touched = operationsResult.flatMap(op => op.jobIds);
     expect(touched).toHaveLength(40);
     expect(new Set(touched)).toEqual(new Set(more));
-    expect((await archiveIds()).length).toBe(52);
+    const archiveIdsResult = await archiveIds();
+    expect(archiveIdsResult.length).toBe(52);
   });
 
   it('exportArchive sends each row at least once and never prunes an unexported row while a sink exists', async () => {
@@ -296,9 +301,13 @@ describe('the sweep verbs on two connections', () => {
 describe('the worker sweeper', () => {
   it('the sweeper stops with the worker', async () => {
     const journal = initJournal({ tables, meta: testMeta, retention: { sweep: { every: 0.02 } } }).compose({});
-    const archived = async (id: string) =>
-      (await dbA.select({ id: tables.jobArchive.id }).from(tables.jobArchive).where(eq(tables.jobArchive.id, id)))
-        .length;
+    const archived = async (id: string) => {
+      const rows = await dbA
+        .select({ id: tables.jobArchive.id })
+        .from(tables.jobArchive)
+        .where(eq(tables.jobArchive.id, id));
+      return rows.length;
+    };
     const worker = journal.worker(dbA, { pollMs: 60_000 });
     await worker.start();
     const first = await deadJob();

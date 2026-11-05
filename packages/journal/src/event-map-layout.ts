@@ -70,7 +70,7 @@ export function ownersOf(document: EventMapDocument): ReadonlyMap<string, string
 
 /** The feature names with something to show, sorted. */
 export function featuresOf(document: EventMapDocument): string[] {
-  return [...new Set([...ownersOf(document).values()])].toSorted();
+  return [...new Set(ownersOf(document).values())].sort();
 }
 
 const columnOf = (node: EventMapNode): number | undefined => (node.kind === 'feature' ? undefined : COLUMN_OF[node.kind]);
@@ -95,7 +95,7 @@ export function layoutEventMap(document: EventMapDocument, feature?: string): La
   const owners = ownersOf(document);
   const drawable = document.nodes.filter(node => columnOf(node) !== undefined);
   const owned = (node: EventMapNode): boolean => feature === undefined || owners.get(node.id) === feature;
-  const keep = new Set(drawable.filter(owned).map(node => node.id));
+  const keep = new Set(drawable.filter(node => owned(node)).map(node => node.id));
   const neighbours = new Set<string>();
   if (feature !== undefined)
     for (const edge of document.edges) {
@@ -111,7 +111,9 @@ export function layoutEventMap(document: EventMapDocument, feature?: string): La
   const columns: EventMapNode[][] = COLUMN_TITLES.map(() => []);
   for (const node of shown) columns[columnOf(node) ?? 0]?.push(node);
   const rowOf = new Map<string, number>();
-  const setRows = (column: EventMapNode[]): void => column.forEach((node, row) => rowOf.set(node.id, row));
+  const setRows = (column: EventMapNode[]): void => {
+    for (const [row, node] of column.entries()) rowOf.set(node.id, row);
+  };
   const byName = (a: EventMapNode, b: EventMapNode): number => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
   const average = (node: EventMapNode, fixed: ReadonlySet<string>): number => {
     const rows = edges.flatMap(({ edge }) => {
@@ -133,8 +135,8 @@ export function layoutEventMap(document: EventMapDocument, feature?: string): La
   setRows(columns[0] ?? []);
 
   const placed = new Map<string, PlacedNode>();
-  columns.forEach((column, columnIndex) => {
-    column.forEach((node, row) => {
+  for (const [columnIndex, column] of columns.entries()) {
+    for (const [row, node] of column.entries()) {
       placed.set(node.id, {
         node,
         column: columnIndex,
@@ -142,8 +144,8 @@ export function layoutEventMap(document: EventMapDocument, feature?: string): La
         y: MARGIN_TOP + row * (NODE_HEIGHT + ROW_GAP),
         context: !keep.has(node.id),
       });
-    });
-  });
+    }
+  }
   const placedEdges = edges.flatMap(({ edge, index }) => {
     const { source, target } = flowOf(edge);
     const from = placed.get(source);

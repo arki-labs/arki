@@ -1,6 +1,6 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -19,9 +19,17 @@ const op = { actor: 'retention-test' } as const;
 
 // Two effects on the same event. `quiet` keeps no record of anything; `loud` has no override, so it follows the journal.
 const quiet = j
-  .effect('quiet', order, { OrderPaid: () => {} })
+  .effect('quiet', order, {
+    OrderPaid: () => {
+      /* no-op */
+    },
+  })
   .withSchedule({ retention: { completed: false, dead: false } });
-const loud = j.effect('loud', order, { OrderPaid: () => {} });
+const loud = j.effect('loud', order, {
+  OrderPaid: () => {
+    /* no-op */
+  },
+});
 // The retention is the app's, given once to `initJournal`.
 const withRetention = (retention: JobRetention) =>
   initJournal({ tables, meta: z.object({ actorId: z.string().min(1) }), retention });
@@ -38,9 +46,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(tables.jobs);
-  await db.delete(tables.jobArchive);
-  await db.delete(tables.jobOperations);
+  await db.delete(tables.jobs).where(sql`true`);
+  await db.delete(tables.jobArchive).where(sql`true`);
+  await db.delete(tables.jobOperations).where(sql`true`);
 });
 
 /** One paid order: one job row per effect. */
@@ -71,7 +79,10 @@ const kill = (id: string, ageDays: number) =>
     .set({ deadAt: new Date(Date.now() - ageDays * DAY), attempts: 8, lastError: 'boom' })
     .where(eq(tables.jobs.id, id));
 
-const archived = async () => (await journal.archivedJobs(db)).jobs.map(row => [row.effect, row.outcome]);
+const archived = async () => {
+  const archivedJobsResult = await journal.archivedJobs(db);
+  return archivedJobsResult.jobs.map(row => [row.effect, row.outcome]);
+};
 
 describe('per-effect retention wins over the journal', () => {
   it('at ack: the effect that keeps nothing leaves no archive row, the other follows the journal', async () => {
@@ -101,7 +112,11 @@ describe('per-effect retention wins over the journal', () => {
 
   it('a longer per-effect retryableFor keeps its dead jobs out of a purge that the journal would allow', async () => {
     const patient = j
-      .effect('patient', order, { OrderPaid: () => {} })
+      .effect('patient', order, {
+        OrderPaid: () => {
+          /* no-op */
+        },
+      })
       .withSchedule({ retention: { retryableFor: '90d' } });
     const own = j.compose({ effects: [patient] });
     const id = orderId(++next);
@@ -126,7 +141,11 @@ describe('per-effect retention wins over the journal', () => {
 describe('the boot check', () => {
   it("'untilExported' on an effect without a sink is BAD_DEFINITION, naming the effect", () => {
     const exported = j
-      .effect('ledger-mail', order, { OrderPaid: () => {} })
+      .effect('ledger-mail', order, {
+        OrderPaid: () => {
+          /* no-op */
+        },
+      })
       .withSchedule({ retention: { completed: 'untilExported' } });
     expect(() => j.compose({ effects: [exported] })).toThrow(
       expect.objectContaining({ code: 'BAD_DEFINITION', message: expect.stringContaining('ledger-mail') }),
@@ -142,7 +161,11 @@ describe('the boot check', () => {
 
   it('a bad age on an effect fails at init, not at the first ack', () => {
     const typo = j
-      .effect('typo', order, { OrderPaid: () => {} })
+      .effect('typo', order, {
+        OrderPaid: () => {
+          /* no-op */
+        },
+      })
       // @ts-expect-error '30x' is not an age; the check also runs for callers the type cannot stop
       .withSchedule({ retention: { completed: '30x' } });
     expect(() => j.compose({ effects: [typo] })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));

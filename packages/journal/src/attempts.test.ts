@@ -25,8 +25,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(tables.jobs);
-  await db.delete(tables.jobArchive);
+  await db.delete(tables.jobs).where(sql`true`);
+  await db.delete(tables.jobArchive).where(sql`true`);
 });
 
 const bare = j.compose({});
@@ -97,14 +97,17 @@ describe('attempt rows', () => {
     expect(await attemptsOf(id)).toMatchObject([
       { attempt: 1, outcome: 'retry', error: expect.stringContaining('boom') },
     ]);
-    expect((await attemptsOf(id))[0]?.finishedAt).not.toBeNull();
+    const attempts2 = await attemptsOf(id);
+    expect(attempts2[0]?.finishedAt).not.toBeNull();
 
     // Stale: a slow first worker fails after another worker has reclaimed the job.
     // The retried job above is due again; remove it so the second drain can only take the slow one.
-    await db.delete(tables.jobs);
+    await db.delete(tables.jobs).where(sql`true`);
     const slow = await queueRow('demo');
     let calls = 0;
-    let release: () => void = () => undefined;
+    let release: () => void = () => {
+      /* no-op */
+    };
     const second = new Promise<void>(resolve => {
       release = resolve;
     });
@@ -144,13 +147,17 @@ describe('attempt rows', () => {
             throw new Error('nope');
           },
           undefined,
-          () => undefined,
+          () => {
+            /* no-op */
+          },
         ),
         batchSize: 1,
       })
       .then(result => orThrow(result));
-    expect((await attemptsOf(id)).map(r => r.outcome)).toEqual(['dead']);
-    expect((await jobOf(id))?.deadAt).not.toBeNull();
+    const attempts = await attemptsOf(id);
+    expect(attempts.map(r => r.outcome)).toEqual(['dead']);
+    const job = await jobOf(id);
+    expect(job?.deadAt).not.toBeNull();
   });
 
   it('a reclaim marks the previous attempt superseded', async () => {
@@ -204,7 +211,9 @@ describe('archive at ack', () => {
 
     // Lost lease: another worker reclaims while the first is still running; the first one's late ack does nothing.
     const slow = await queueRow('demo');
-    let release: () => void = () => undefined;
+    let release: () => void = () => {
+      /* no-op */
+    };
     const second = new Promise<void>(resolve => {
       release = resolve;
     });
@@ -237,7 +246,14 @@ describe('archive at ack', () => {
     // Why: an app that opts out must pay nothing and keep nothing.
     const id = await queueRow('demo');
     await bare
-      .drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: false }) }) })
+      .drain(db, {
+        jobs: runner(
+          () => {
+            /* no-op */
+          },
+          { retention: () => ({ completed: false }) },
+        ),
+      })
       .then(result => orThrow(result));
     expect(await jobOf(id)).toBeNull();
     expect(await archiveOf(id)).toBeNull();
@@ -252,20 +268,43 @@ describe('archive at ack', () => {
       seenNames.push(job.name);
       return { completed: '1d' };
     };
-    await bare.drain(db, { jobs: runner(() => undefined, { retention }) }).then(result => orThrow(result));
+    await bare
+      .drain(db, {
+        jobs: runner(
+          () => {
+            /* no-op */
+          },
+          { retention },
+        ),
+      })
+      .then(result => orThrow(result));
     const forever = await queueRow('demo');
     await bare
-      .drain(db, { jobs: runner(() => undefined, { retention: () => ({ completed: 'forever' }) }) })
+      .drain(db, {
+        jobs: runner(
+          () => {
+            /* no-op */
+          },
+          { retention: () => ({ completed: 'forever' }) },
+        ),
+      })
       .then(result => orThrow(result));
     const plain = await queueRow('demo');
-    await bare.drain(db, { jobs: runner(() => undefined) }).then(result => orThrow(result));
+    await bare
+      .drain(db, {
+        jobs: runner(() => {
+          /* no-op */
+        }),
+      })
+      .then(result => orThrow(result));
 
     expect(seenNames).toEqual(['demo']);
     const dayRow = await archiveOf(day);
     const hours = ((dayRow?.keepUntil?.getTime() ?? 0) - (dayRow?.archivedAt.getTime() ?? 0)) / 3_600_000;
     expect(hours).toBeGreaterThan(23);
     expect(hours).toBeLessThan(25);
-    expect((await archiveOf(forever))?.keepUntil).toBeNull();
+    const archive = await archiveOf(forever);
+    expect(archive?.keepUntil).toBeNull();
     const plainRow = await archiveOf(plain);
     const plainDays = ((plainRow?.keepUntil?.getTime() ?? 0) - (plainRow?.archivedAt.getTime() ?? 0)) / 86_400_000;
     expect(plainDays, 'no override takes the journal default, 7 days').toBeGreaterThan(6.9);

@@ -64,8 +64,10 @@ const providerOf = (name: string) =>
 export const withProvider = defineFeature('with-provider').needs({ provider: service<Provider>() });
 
 const newId = () => `wfr_dot_${++counter}`;
-const stateOf = async (id: string) =>
-  (await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id)))[0]?.state;
+const stateOf = async (id: string) => {
+  const rows = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
+  return rows[0]?.state;
+};
 const completed = (id: string) =>
   vi.waitFor(async () => expect(await stateOf(id)).toBe('completed'), { timeout: 5000 });
 
@@ -90,7 +92,8 @@ describe('journalHandlers(core, { workflows }) in a feature', () => {
     const id = newId();
     orThrow(await app.services.journal.run(db, hello.start, { input: {}, id }, caller));
     await completed(id);
-    expect((await app.services.journal.workflows.run(db, id))?.run.output).toBe('hi');
+    const runResult = await app.services.journal.workflows.run(db, id);
+    expect(runResult?.run.output).toBe('hi');
   });
 
   it('a workflow step gets the services of the feature that declared it', async () => {

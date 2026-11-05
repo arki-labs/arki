@@ -200,7 +200,8 @@ describe('two workers race one run', () => {
     expect(await completedOf(id)).toEqual([]);
     second.hold.open();
     await owner;
-    expect((await completedOf(id)).filter(path => path === 'settle')).toEqual(['settle']);
+    const completed2 = await completedOf(id);
+    expect(completed2.filter(path => path === 'settle')).toEqual(['settle']);
     expect(keys).toHaveLength(2);
     expect(new Set(keys).size).toBe(1);
     const [row] = await dbA.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
@@ -228,7 +229,8 @@ describe('two workers race one run', () => {
     await stale;
     await owner;
     expect(bodies).toBe(1);
-    expect((await completedOf(id)).filter(path => path === 'settle')).toEqual(['settle']);
+    const completed = await completedOf(id);
+    expect(completed.filter(path => path === 'settle')).toEqual(['settle']);
   }, 30_000);
 });
 

@@ -63,7 +63,7 @@ const checks = [
   [
     'returned refusal',
     JSON.stringify(CommandNotFound({ detail: 'Order not found' })),
-    '{"code":"journal.not_found","message":"Order not found","data":{"detail":"Order not found"},"status":404}',
+    '{"code":"journal.not_found","message":"Order not found","data":{"detail":"Order not found"},"status":404,"remediation":"Check the resource identifier and use an existing resource visible to this command."}',
   ],
   ['the door binds without a database call', typeof journal.bind({}, { actorId: 'system' }), 'function'],
   [

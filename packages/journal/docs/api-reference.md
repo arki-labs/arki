@@ -20,14 +20,14 @@ The [README](../README.md) and the [agent guide](agent-guide.md) teach the journ
 
 These come from `@arki/journal/http/webhooks`. See [Outgoing webhooks](../README.md#outgoing-webhooks) for the sender itself.
 
-- `WebhookError`: the error class the webhook sender throws. It has a `code` string and a message that starts with `webhooks:`. Import it to catch webhook failures with `instanceof` and then switch on `code`.
-- `WEBHOOK_ERROR_CODES`: the table of codes `WebhookError` uses. Match on these, never on messages.
-  - `badInput` (`ARKI_JOURNAL_WEBHOOK_E001`): an input failed its schema, a payload is not JSON, or a URL is not public https.
-  - `notInTransaction` (`ARKI_JOURNAL_WEBHOOK_E002`): `dispatch` got the root database. It needs the business transaction.
-  - `notFound` (`ARKI_JOURNAL_WEBHOOK_E003`): no subscription or message has this id.
-  - `otherPartner` (`ARKI_JOURNAL_WEBHOOK_E004`): `replay` named a message and a subscription of different partners.
-  - `badEncryptionKey` (`ARKI_JOURNAL_WEBHOOK_E005`): `encryptionKey` is not 32 bytes of base64.
-  - `deliveryFailed` (`ARKI_JOURNAL_WEBHOOK_E006`): the subscriber answered with a status other than 2xx. The worker retries it.
+- The webhook sender returns failures for outside input; match on `code`, never on messages.
+  - `InvalidInput` (`schema.invalid_input`, from `@arki/failure`): `subscribe` or `dispatch` input failed its schema, a URL is not public https, or a payload is not JSON. The issues name the field.
+  - `WebhookNotFound` (`journal.webhook_not_found`): `replay`, `rotateSecret`, `enable` or `disable` named a message or subscription that does not exist. `data` is `{ kind, id }`.
+  - `WebhookOtherPartner` (`journal.webhook_other_partner`): `replay` named a message and a subscription of different partners.
+  - `WebhookPayloadTooLarge` (`journal.webhook_payload_too_large`): the `dispatch` body is over `maxPayloadBytes`. `data` is `{ size, limit }`.
+  - `WebhookDeliveryFailed` (`journal.webhook_delivery_failed`): the subscriber answered with a status other than 2xx. The runner throws it as `UnexpectedFailure` so the worker retries it; `webhook_attempts.error` records it.
+  - `WebhookConfigurationInvalid` (`journal.webhook_configuration_invalid`): `encryptionKey` is not 32 bytes of base64. Thrown as `UnexpectedFailure` when `webhookSender(...)` is built.
+  - `dispatch` given the root database instead of a transaction is a caller bug: it throws `invariant` (`ARKI_FAILURE_E008`).
 
 ## Event map
 

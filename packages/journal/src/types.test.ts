@@ -403,7 +403,11 @@ const needsMail = jd.effect(
     },
   },
 );
-const noNeeds = jd.effect('no-needs', dbOrder, { OrderPaid: () => {} });
+const noNeeds = jd.effect('no-needs', dbOrder, {
+  OrderPaid: () => {
+    /* no-op */
+  },
+});
 const needsClock = jd.effect(
   'needs-clock',
   dbOrder,

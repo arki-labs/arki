@@ -27,7 +27,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(tables.jobs);
+  await db.delete(tables.jobs).where(sql`true`);
 });
 
 /** A journal with no effects: the queue lane must still drain (the journal-less app path). */
@@ -150,9 +150,11 @@ describe('drain with a job runner', () => {
     const id = await queueRow('demo', {});
     expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(2);
     expect(await rowOf(id)).toMatchObject({ attempts: 2, leaseToken: null });
-    expect((await rowOf(id))?.deadAt).toBeInstanceOf(Date);
+    const row = await rowOf(id);
+    expect(row?.deadAt).toBeInstanceOf(Date);
     expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(0);
-    expect((await bare.jobs(db, { status: 'dead', job: 'demo' })).jobs).toHaveLength(1);
+    const jobsResult = await bare.jobs(db, { status: 'dead', job: 'demo' });
+    expect(jobsResult.jobs).toHaveLength(1);
 
     fail = false;
     orThrow(await bare.retry(db, id, { actor: 'jobs-test' }));
@@ -182,7 +184,9 @@ describe('drain with a job runner', () => {
 
   it('never claims a name the runner lacks; strandedJobs shows it per kind and name', async () => {
     const id = await queueRow('renamed.v1', {});
-    const jobs = runner(['demo'], () => undefined);
+    const jobs = runner(['demo'], () => {
+      /* no-op */
+    });
     expect(await bare.drain(db, { jobs }).then(result => orThrow(result))).toBe(0);
     expect(await rowOf(id)).toMatchObject({ attempts: 0 });
     expect(await bare.strandedJobs(db, { jobs })).toEqual([{ kind: 'queue', name: 'renamed.v1', jobs: 1 }]);
@@ -214,7 +218,9 @@ describe('drain with a job runner', () => {
     // Why: a stalled worker can lose its row to another worker. The first must stop and must
     // not delete a row it no longer owns; only the current lease holder acknowledges.
     const id = await queueRow('slow', {});
-    let release: () => void = () => undefined;
+    let release: () => void = () => {
+      /* no-op */
+    };
     const second = new Promise<void>(resolve => {
       release = resolve;
     });

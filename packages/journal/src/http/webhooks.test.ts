@@ -10,7 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable } from '@arki/contracts';
-import { orThrow } from '@arki/failure';
+import { FAILURE_ERROR_CODES, InvalidInput, orThrow } from '@arki/failure';
 import { UnsafeUrl } from '@arki/http/public-fetch';
 import { standardWebhooks, WebhookCryptoUnavailable } from '@arki/http/webhooks';
 import * as webhookSchemes from '@arki/http/webhooks';
@@ -22,7 +22,15 @@ import * as ids from '../id.js';
 import { combineRunners } from '../runners.js';
 import { j, tables } from '../test-support.js';
 import { openJournalDb } from '../testing.js';
-import { WEBHOOK_ERROR_CODES, webhookSender, webhookTables } from './webhooks.js';
+import {
+  WebhookConfigurationInvalid,
+  WebhookDeliveryFailed,
+  WebhookNotFound,
+  WebhookOtherPartner,
+  WebhookPayloadTooLarge,
+  webhookSender,
+  webhookTables,
+} from './webhooks.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -115,7 +123,7 @@ describe('dispatch', () => {
     orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] }));
     orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.paid'] }));
     const off = orThrow(await webhooks.subscribe(db, { partner: 'p-match', url, events: ['order.placed'] }));
-    await webhooks.disable(db, off.id);
+    orThrow(await webhooks.disable(db, off.id));
     orThrow(await webhooks.subscribe(db, { partner: 'p-other', url, events: ['order.placed'] }));
 
     const { deliveries } = orThrow(await dispatchOne(webhooks, 'p-match'));
@@ -130,18 +138,34 @@ describe('dispatch', () => {
       db,
       { partner: 'p', event: 'e', payload: {} },
     ]);
-    await expect(untyped).rejects.toMatchObject({
-      code: WEBHOOK_ERROR_CODES.notInTransaction,
-    });
+    // A caller bug the type already refuses, so it throws instead of returning a failure.
+    await expect(untyped).rejects.toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
   });
 });
 
 describe('dispatch limits', () => {
   it('refuses a payload over maxPayloadBytes: it would be sent to every subscriber on every try', async () => {
     const webhooks = sender(endpoint().fetch, { maxPayloadBytes: 64 });
-    await expect(
-      db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-big', event: 'e', payload: { blob: 'x'.repeat(100) } })),
-    ).rejects.toMatchObject({ code: WEBHOOK_ERROR_CODES.badInput });
+    const refused = await db.transaction(tx =>
+      webhooks.dispatch(tx, { partner: 'p-big', event: 'e', payload: { blob: 'x'.repeat(100) } }),
+    );
+    expect(refused).toMatchObject({ code: WebhookPayloadTooLarge.code, data: { limit: 64 } });
+    expect(await db.select().from(hooks.messages).where(eq(hooks.messages.partner, 'p-big'))).toEqual([]);
+  });
+
+  it('returns InvalidInput for a payload with no JSON form, so nothing unsignable is stored', async () => {
+    const webhooks = sender(endpoint().fetch);
+    for (const payload of [{ amount: 1n }, (() => { const cycle: Record<string, unknown> = {}; cycle.self = cycle; return cycle; })()]) {
+      const refused = await db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-json', event: 'e', payload }));
+      expect(refused).toMatchObject({ code: InvalidInput.code, data: { issues: [{ path: ['payload'] }] } });
+    }
+    expect(await db.select().from(hooks.messages).where(eq(hooks.messages.partner, 'p-json'))).toEqual([]);
+  });
+
+  it('returns InvalidInput for dispatch input that fails its schema', async () => {
+    const webhooks = sender(endpoint().fetch);
+    const refused = await db.transaction(tx => webhooks.dispatch(tx, { partner: '', event: 'e', payload: {} }));
+    expect(refused).toMatchObject({ code: InvalidInput.code, data: { issues: [{ path: ['partner'] }] } });
   });
 });
 
@@ -207,7 +231,7 @@ describe('delivery', () => {
     const { id, secret: oldSecret } = orThrow(await webhooks.subscribe(db, {
       partner: 'p-partial-sign', url: 'https://hooks.example.com/partial', events: ['order.placed'],
     }));
-    const { secret: newSecret } = await webhooks.rotateSecret(db, id, { windowSeconds: 3600 });
+    const { secret: newSecret } = orThrow(await webhooks.rotateSecret(db, id, { windowSeconds: 3600 }));
     orThrow(await dispatchOne(webhooks, 'p-partial-sign'));
     const good = standardWebhooks({ secrets: [newSecret] });
     const refused = standardWebhooks({ secrets: [oldSecret] });
@@ -239,7 +263,11 @@ describe('delivery', () => {
       { status: 'failed', attempt: 1, response: 500 },
       { status: 'dead', attempt: 2, response: 503 },
     ]);
-    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
+    // Each non-2xx answer is recorded under its stable code, so an operator can match on it.
+    const errors = await db.select({ error: hooks.attempts.error }).from(hooks.attempts).where(eq(hooks.attempts.subscriptionId, id));
+    expect(errors.map(row => row.error?.split(':')[0])).toEqual([WebhookDeliveryFailed.code, WebhookDeliveryFailed.code]);
+    const dead = orThrow(await journal.jobs(db, { status: 'dead' }));
+    expect(dead.jobs).toHaveLength(1);
     expect(await subscriptionRow(id)).toMatchObject({ status: 'active', deadLetters: 1 });
   });
 
@@ -259,7 +287,8 @@ describe('delivery', () => {
     await drainAll(webhooks.runner);
 
     expect(await attemptsOf(id)).toEqual([{ status: 'dead', attempt: 1, response: null }]);
-    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
+    const dead = orThrow(await journal.jobs(db, { status: 'dead' }));
+    expect(dead.jobs).toHaveLength(1);
     expect(await subscriptionRow(id)).toMatchObject({ deadLetters: 1 });
   });
 
@@ -302,7 +331,7 @@ describe('delivery', () => {
       }),
     );
     orThrow(await dispatchOne(webhooks, 'p-skip'));
-    await webhooks.disable(db, id);
+    orThrow(await webhooks.disable(db, id));
     await drainAll(webhooks.runner);
     expect(target.received).toEqual([]);
     expect(await attemptsOf(id)).toEqual([{ status: 'skipped', attempt: 1, response: null }]);
@@ -345,9 +374,39 @@ describe('replay', () => {
       }),
     );
     const { messageId } = orThrow(await dispatchOne(webhooks, 'p-a'));
-    await expect(webhooks.replay(db, { messageId, subscriptionId: other.id })).rejects.toMatchObject({
-      code: WEBHOOK_ERROR_CODES.otherPartner,
+    expect(await webhooks.replay(db, { messageId, subscriptionId: other.id })).toMatchObject({
+      code: WebhookOtherPartner.code,
+      data: { messageId, subscriptionId: other.id },
     });
+    expect(await db.select().from(tables.jobs).where(eq(tables.jobs.jobName, 'webhook.deliver.v1'))).toHaveLength(1);
+  });
+
+  it('returns WebhookNotFound for an unknown message or subscription, and queues nothing', async () => {
+    const webhooks = sender(endpoint().fetch);
+    const { id } = orThrow(
+      await webhooks.subscribe(db, { partner: 'p-ghost', url: 'https://hooks.example.com/in', events: ['order.placed'] }),
+    );
+    const { messageId } = orThrow(await dispatchOne(webhooks, 'p-ghost'));
+    const before = await db.select().from(tables.jobs);
+    expect(await webhooks.replay(db, { messageId: 'msg_unknown', subscriptionId: id })).toMatchObject({
+      code: WebhookNotFound.code,
+      data: { kind: 'message', id: 'msg_unknown' },
+    });
+    expect(await webhooks.replay(db, { messageId, subscriptionId: 'whs_unknown' })).toMatchObject({
+      code: WebhookNotFound.code,
+      data: { kind: 'subscription', id: 'whs_unknown' },
+    });
+    expect(await db.select().from(tables.jobs)).toEqual(before);
+  });
+});
+
+describe('subscription admin', () => {
+  it('rotateSecret, enable and disable return WebhookNotFound for an unknown subscription', async () => {
+    const webhooks = sender(endpoint().fetch);
+    const notFound = { code: WebhookNotFound.code, data: { kind: 'subscription', id: 'whs_unknown' } };
+    expect(await webhooks.rotateSecret(db, 'whs_unknown')).toMatchObject(notFound);
+    expect(await webhooks.enable(db, 'whs_unknown')).toMatchObject(notFound);
+    expect(await webhooks.disable(db, 'whs_unknown')).toMatchObject(notFound);
   });
 });
 
@@ -362,7 +421,7 @@ describe('secrets', () => {
         events: ['order.placed'],
       }),
     );
-    const { secret: newSecret } = await webhooks.rotateSecret(db, id, { windowSeconds: 3600 });
+    const { secret: newSecret } = orThrow(await webhooks.rotateSecret(db, id, { windowSeconds: 3600 }));
     expect(newSecret).not.toBe(oldSecret);
     expect(await subscriptionRow(id)).toMatchObject({ secretVersion: 2 });
     orThrow(await dispatchOne(webhooks, 'p-rotate'));
@@ -391,7 +450,7 @@ describe('secrets', () => {
         events: ['order.placed'],
       }),
     );
-    await webhooks.rotateSecret(db, id, { windowSeconds: 0 });
+    orThrow(await webhooks.rotateSecret(db, id, { windowSeconds: 0 }));
     orThrow(await dispatchOne(webhooks, 'p-rotated'));
     await drainAll(webhooks.runner);
     const [request] = target.received;
@@ -430,12 +489,13 @@ describe('secrets', () => {
     orThrow(await db.transaction(tx => webhooks.dispatch(tx, { partner: 'p-seal', event: 'other.event', payload: {} })));
     await drainAll(webhooks.runner);
     expect(target.received).toEqual([]);
-    expect((await journal.jobs(db, { status: 'dead' })).jobs).toHaveLength(1);
+    const dead = orThrow(await journal.jobs(db, { status: 'dead' }));
+    expect(dead.jobs).toHaveLength(1);
   });
 
   it('a wrong encryption key is refused when the sender is built', () => {
     expect(() => webhookSender({ tables, webhooks: hooks, encryptionKey: 'c2hvcnQ=' })).toThrow(
-      expect.objectContaining({ code: WEBHOOK_ERROR_CODES.badEncryptionKey }),
+      expect.objectContaining({ code: WebhookConfigurationInvalid.code }),
     );
   });
 });
@@ -443,11 +503,20 @@ describe('secrets', () => {
 describe('subscribe', () => {
   it('takes public https URLs only', async () => {
     const webhooks = sender(endpoint().fetch);
-    for (const url of ['http://hooks.example.com/in', 'https://127.0.0.1/in', 'https://u:p@hooks.example.com/in']) {
-      await expect(webhooks.subscribe(db, { partner: 'p-url', url, events: ['e'] })).rejects.toMatchObject({
-        code: WEBHOOK_ERROR_CODES.badInput,
+    for (const url of ['http://hooks.example.com/in', 'https://127.0.0.1/in', 'https://u:p@hooks.example.com/in', 'not a url']) {
+      expect(await webhooks.subscribe(db, { partner: 'p-url', url, events: ['e'] })).toMatchObject({
+        code: InvalidInput.code,
+        data: { issues: [{ path: ['url'] }] },
       });
     }
+    expect(await db.select().from(hooks.subscriptions).where(eq(hooks.subscriptions.partner, 'p-url'))).toEqual([]);
+  });
+
+  it('returns InvalidInput for subscribe input that fails its schema', async () => {
+    const webhooks = sender(endpoint().fetch);
+    expect(
+      await webhooks.subscribe(db, { partner: 'p-empty', url: 'https://hooks.example.com/in', events: [] }),
+    ).toMatchObject({ code: InvalidInput.code, data: { issues: [{ path: ['events'] }] } });
   });
 });
 

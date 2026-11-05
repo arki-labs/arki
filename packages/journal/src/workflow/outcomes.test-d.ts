@@ -34,11 +34,11 @@ describe('def.settled, as types', () => {
 
   it('refuses a missing within, a non-number, and a transaction handle', () => {
     // @ts-expect-error -- within is required.
-    void priced.settled(db, 'r', {});
+    void priced.settled(db, 'r', {}); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
     // @ts-expect-error -- within is a number of seconds.
-    void priced.settled(db, 'r', { within: '5s' });
+    void priced.settled(db, 'r', { within: '5s' }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
     // @ts-expect-error -- a transaction is not the root database.
-    void priced.settled(tx, 'r', { within: 5 });
+    void priced.settled(tx, 'r', { within: 5 }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
   });
 });
 
@@ -57,12 +57,12 @@ describe('def.startAndWait, as types', () => {
 
   it('refuses a wrong input, a missing timeout, a wrong meta and a transaction handle', () => {
     // @ts-expect-error -- the input is the workflow's input.
-    void priced.startAndWait(db, { input: { amount: 'x' } }, { meta, timeout: 5 });
+    void priced.startAndWait(db, { input: { amount: 'x' } }, { meta, timeout: 5 }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
     // @ts-expect-error -- timeout is required.
-    void priced.startAndWait(db, { input: { amount: 2 } }, { meta });
+    void priced.startAndWait(db, { input: { amount: 2 } }, { meta }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
     // @ts-expect-error -- meta is the journal's meta.
-    void priced.startAndWait(db, { input: { amount: 2 } }, { meta: { actor: 1 }, timeout: 5 });
+    void priced.startAndWait(db, { input: { amount: 2 } }, { meta: { actor: 1 }, timeout: 5 }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
     // @ts-expect-error -- a transaction is not the root database.
-    void priced.startAndWait(tx, { input: { amount: 2 } }, { meta, timeout: 5 });
+    void priced.startAndWait(tx, { input: { amount: 2 } }, { meta, timeout: 5 }); // eslint-disable-line failure/must-use -- type-only: the call must not compile and never runs
   });
 });

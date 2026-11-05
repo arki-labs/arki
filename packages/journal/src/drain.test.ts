@@ -78,6 +78,7 @@ describe('drain', () => {
     const job = await placeAndPay();
     if (job.eventSeq === null) throw new Error('no event seq');
     const [stored] = await db.select().from(tables.events).where(eq(tables.events.seq, job.eventSeq));
+    // eslint-disable-next-line unicorn/prefer-structured-clone -- a JSON round trip is the point: structuredClone would keep the Dates, the job copy holds ISO strings
     expect(job.args).toEqual(JSON.parse(JSON.stringify(stored)));
     expect(job.args).toMatchObject({ type: 'OrderPaid', data: { amount: 1 }, recordedAt: expect.any(String) });
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);

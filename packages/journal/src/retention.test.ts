@@ -66,7 +66,7 @@ describe('retention ages and keeps', () => {
 
 describe('retention resolution', () => {
   it('the defaults hold when nothing is set: completed 7d, dead 90d, retryable 30d, operations forever, sweep hourly', () => {
-    const policy = resolveRetention(undefined);
+    const policy = resolveRetention();
     expect(policy.retryableForMs).toBe(30 * DAY);
     expect(stored(policy.completed).ageMs).toBe(7 * DAY);
     expect(stored(policy.dead).ageMs).toBe(90 * DAY);
@@ -83,9 +83,9 @@ describe('retention resolution', () => {
   it("per-effect retention wins over the journal's, and the journal's over the default", () => {
     const policy = resolveRetention({ archive: { completed: '2d' }, retryableFor: '10d' });
     // journal beats default
-    expect(stored(keepFor(policy, 'completed', undefined)).ageMs).toBe(2 * DAY);
-    expect(stored(keepFor(policy, 'dead', undefined)).ageMs).toBe(90 * DAY);
-    expect(retryableForMs(policy, undefined)).toBe(10 * DAY);
+    expect(stored(keepFor(policy, 'completed')).ageMs).toBe(2 * DAY);
+    expect(stored(keepFor(policy, 'dead')).ageMs).toBe(90 * DAY);
+    expect(retryableForMs(policy)).toBe(10 * DAY);
     // effect beats journal, only for the class it names
     const effect = { completed: '1d', retryableFor: '2d' } as const;
     expect(stored(keepFor(policy, 'completed', effect)).ageMs).toBe(DAY);
@@ -98,7 +98,7 @@ describe('retention resolution', () => {
   it('dead, discarded and cancelled share the dead class, so an operator removal is kept like a failure', () => {
     const policy = resolveRetention({ archive: { dead: '5d' } });
     for (const outcome of ['dead', 'discarded', 'cancelled'] as const) {
-      expect(stored(keepFor(policy, outcome, undefined)).ageMs).toBe(5 * DAY);
+      expect(stored(keepFor(policy, outcome)).ageMs).toBe(5 * DAY);
     }
   });
 

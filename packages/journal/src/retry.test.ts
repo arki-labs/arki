@@ -67,9 +67,7 @@ afterAll(async () => {
   await client.close();
 });
 
-async function payOnce(
-  journal: typeof slowJournal | typeof pickyJournal | typeof chargeJournal | typeof patientJournal,
-) {
+async function payOnce(journal: typeof slowJournal) {
   const id = orderId(++next);
   orThrow(
     await db.transaction(tx =>
@@ -87,7 +85,7 @@ async function payOnce(
   return job;
 }
 
-async function failingDrain(journal: typeof slowJournal | typeof pickyJournal, error: Error) {
+async function failingDrain(journal: typeof slowJournal, error: Error) {
   failWith = error;
   try {
     expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);
@@ -96,7 +94,10 @@ async function failingDrain(journal: typeof slowJournal | typeof pickyJournal, e
   }
 }
 
-const jobById = async (id: string) => (await db.select().from(tables.jobs).where(eq(tables.jobs.id, id)))[0];
+const jobById = async (id: string) => {
+  const selectResult = await db.select().from(tables.jobs).where(eq(tables.jobs.id, id));
+  return selectResult[0];
+};
 
 describe('effect retry from the schedule', () => {
   it('waits the backoff delay, then dies when upTo runs out', async () => {
@@ -132,7 +133,7 @@ describe('effect retry from the schedule', () => {
 // charge the customer again. So the job dies on the first try, with the failure on record,
 // unless the effect's `while` names that failure as worth another try.
 describe('an effect that returns a failure', () => {
-  async function drainReturning(journal: typeof chargeJournal | typeof patientJournal, value: unknown) {
+  async function drainReturning(journal: typeof chargeJournal, value: unknown) {
     returnWith = value;
     try {
       expect(await journal.drain(db).then(result => orThrow(result))).toBe(1);

@@ -127,13 +127,13 @@ describe('the rules of the options, at definition time and in the types', () => 
       workflow('bad-1', { version: 1, input }).step('s', () => 1, { onFailure: 'continue', output: z.number() }),
     ).toThrow(/lists no failures/);
     expect(() =>
-      workflow('bad-2', { version: 1, input }).step('s', () => (1 as number | ReturnType<typeof Declined>), {
+      workflow('bad-2', { version: 1, input }).step('s', () => (1), {
         output: z.number(),
         failures: [Declined],
       }),
     ).toThrow(/no onFailure/);
     expect(() =>
-      workflow('bad-3', { version: 1, input }).step('s', () => (1 as number | ReturnType<typeof Declined>), {
+      workflow('bad-3', { version: 1, input }).step('s', () => (1), {
         failures: [Declined],
         // @ts-expect-error -- continuing needs an output schema.
         onFailure: 'continue',
@@ -144,7 +144,7 @@ describe('the rules of the options, at definition time and in the types', () => 
   it('finish without a function is a type error when the last result can be a failure, and the definition backstops it', () => {
     expect(() =>
       workflow('ends-failed', { version: 1, input })
-        .step('s', () => (1 as number | ReturnType<typeof Declined>), {
+        .step('s', () => (1), {
           output: z.number(),
           failures: [Declined],
           onFailure: 'continue',

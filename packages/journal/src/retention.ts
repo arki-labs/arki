@@ -181,7 +181,7 @@ export function parseRunKeep(keep: Keep, where: string): ResolvedKeep {
 }
 
 /** Parse the journal-wide policy and fill the defaults. Throws `BAD_DEFINITION` on a bad value. */
-export function resolveRetention(retention: JobRetention | undefined): ResolvedRetention {
+export function resolveRetention(retention?: JobRetention): ResolvedRetention {
   const sweep = retention?.sweep;
   if (
     sweep !== undefined &&
@@ -228,7 +228,7 @@ function resolveSweep(sweep: JobRetention['sweep']): ResolvedRetention['sweep'] 
 export function keepFor(
   policy: ResolvedRetention,
   outcome: ArchiveOutcome,
-  override: EffectRetention | undefined,
+  override?: EffectRetention,
 ): ResolvedKeep {
   if (outcome === 'completed') {
     return override?.completed === undefined ? policy.completed : parseKeep(override.completed);
@@ -258,7 +258,7 @@ export function runKeepUntil(keep: ResolvedKeep, now: Date): Date | null {
 }
 
 /** How long a dead job stays retryable in the hot table, in milliseconds. */
-export function retryableForMs(policy: ResolvedRetention, override: EffectRetention | undefined): number {
+export function retryableForMs(policy: ResolvedRetention, override?: EffectRetention): number {
   return override?.retryableFor === undefined ? policy.retryableForMs : parseAge(override.retryableFor);
 }
 

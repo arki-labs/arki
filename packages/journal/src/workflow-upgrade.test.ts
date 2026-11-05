@@ -47,7 +47,7 @@ describe('the T12 migration on an app with old job rows', () => {
     const found = await db.execute<{ table_name: string }>(
       sql`select table_name from information_schema.tables where table_schema = 'public' and table_name like 'workflow_%'`,
     );
-    expect(found.rows.map(row => row.table_name).sort()).toEqual([
+    expect(found.rows.map(row => row.table_name).toSorted()).toEqual([
       'workflow_runs',
       'workflow_signals',
       'workflow_steps',
@@ -56,8 +56,8 @@ describe('the T12 migration on an app with old job rows', () => {
   });
 
   it('old live and archived job rows keep every value and get run_id = null, so no job is claimed by a run it never belonged to', async () => {
-    const live = (await db.select().from(tables.jobs).where(eq(tables.jobs.id, liveId)))[0];
-    const archived = (await db.select().from(tables.jobArchive).where(eq(tables.jobArchive.id, archivedId)))[0];
+    const [live] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, liveId));
+    const [archived] = await db.select().from(tables.jobArchive).where(eq(tables.jobArchive.id, archivedId));
     expect(live).toMatchObject({ kind: 'queue', jobName: 'demo', args: { n: 1 }, runId: null });
     expect(archived).toMatchObject({ kind: 'queue', jobName: 'demo', outcome: 'completed', runId: null });
   });
@@ -72,7 +72,7 @@ describe('the T12 migration on an app with old job rows', () => {
     const found = await db.execute<{ indexname: string }>(
       sql`select indexname from pg_indexes where indexname in ('journal_jobs_run_id_idx', 'journal_job_archive_run_id_idx')`,
     );
-    expect(found.rows.map(row => row.indexname).sort()).toEqual([
+    expect(found.rows.map(row => row.indexname).toSorted()).toEqual([
       'journal_job_archive_run_id_idx',
       'journal_jobs_run_id_idx',
     ]);

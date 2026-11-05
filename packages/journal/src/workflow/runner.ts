@@ -1010,6 +1010,9 @@ async function runBody(
  * `compose`, returns the step effect and the step projection. The `workflow.run` entity is built here from the
  * journal tables `initJournal` was given, like any entity of the app.
  */
+/** The ended states as a set of plain strings, so a run's state can be tested against it. */
+const endedStates: ReadonlySet<string> = new Set(ENDED_STATES);
+
 export function createWorkflows<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
@@ -1918,13 +1921,13 @@ export function createWorkflows<
       }
       // `all`: the outputs by branch name. `any`: the winner's name and output. Neither can be shaped like a stored refusal.
       const result =
-        node?.kind !== 'parallel'
-          ? list
-            ? checked
-            : checked[0]
-          : node.wait === 'all'
+        node?.kind === 'parallel'
+          ? node.wait === 'all'
             ? Object.fromEntries(branchNames.map((name, at) => [name, checked[at]]))
-            : { branch: branchNames[0], result: checked[0] };
+            : { branch: branchNames[0], result: checked[0] }
+          : list
+            ? checked
+            : checked[0];
       const kept = storable(result, def.limits.payload, `the result of '${plan.path}'`, parent.id);
       if (kept instanceof JournalError) return deadNode(tx, def, parent, plan.path, reasonText(kept), at);
       return completeWait(tx, def, index, parent, kept.value, at);
@@ -2922,7 +2925,7 @@ export function createWorkflows<
       // The run's own version handles the signal, whichever version's `signal` command the caller used.
       const own = definitionOf(row);
       // A wait of the run itself, or of a branch of its `parallel` node: the run's door reaches both.
-      const [waited] = signalWaits(own.nodes).filter(wait => wait.signal === name);
+      const waited = signalWaits(own.nodes).find(wait => wait.signal === name);
       if (waited === undefined) {
         return CommandConflict({
           detail: `run "${args.runId}" is v${row.workflowVersion}, which has no wait for signal '${name}'`,
@@ -4153,7 +4156,7 @@ export function createWorkflows<
         const outcome = await read(db, runId);
         if (outcome === undefined) return CommandNotFound({ detail: `no workflow run "${runId}" of "${def.name}"` });
         if (isFailure(outcome)) return outcome;
-        return ENDED_STATES.some(ended => ended === outcome.run.state) ? outcome : undefined;
+        return endedStates.has(outcome.run.state) ? outcome : undefined;
       });
       return found ?? WorkflowPending({ runId });
     };
@@ -4186,7 +4189,7 @@ export function createWorkflows<
         const outcome = await read(db, runId);
         if (outcome === undefined) return CommandNotFound({ detail: `no workflow run "${runId}" of "${def.name}"` });
         if (isFailure(outcome)) return outcome;
-        return ENDED_STATES.some(ended => ended === outcome.run.state) ? outcome : undefined;
+        return endedStates.has(outcome.run.state) ? outcome : undefined;
       });
       if (found === undefined) return WorkflowPending({ runId });
       if (isFailure(found)) return found;
@@ -5023,7 +5026,7 @@ export function createWorkflows<
      */
     const strandedRetry = defaultEffectRetry.while(reason => !isFailure(reason) && !isStrandedError(reason));
 
-    const stepEffect = <N extends Needs>(needsOf: N, servicesById: ReadonlyMap<string, Services> | undefined) =>
+    const stepEffect = <N extends Needs>(needsOf: N, servicesById?: ReadonlyMap<string, Services>) =>
       ownedEffect(STEP_EFFECT, machine.run, needsOf, {
         NodeScheduled: (event, ctx) => runNode(event, ctx, servicesById),
       }).withSchedule({
@@ -5033,7 +5036,7 @@ export function createWorkflows<
         retry: strandedRetry,
       });
     const effect = {
-      ...stepEffect(needs, undefined),
+      ...stepEffect(needs),
       // Each workflow reads the services of its own feature (or the one flat set a static `services` gives).
       bindPerWorkflow: (servicesOf: (workflow: string) => Services) =>
         stepEffect(

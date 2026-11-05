@@ -341,8 +341,10 @@ const eventsOf = async (runId: string, ...types: readonly string[]) => {
   return types.length === 0 ? rows : rows.filter(row => types.includes(row.type));
 };
 const branchId = (runId: string, node: string, branch: string) => `${runId}/${node}[${branch}]`;
-const branchState = async (runId: string, node: string, branch: string) =>
-  (await stateOf(branchId(runId, node, branch)))?.state;
+const branchState = async (runId: string, node: string, branch: string) => {
+  const row = await stateOf(branchId(runId, node, branch));
+  return row?.state;
+};
 
 describe('parallel: all', () => {
   it('joins every branch into an object by branch name, and branches see the earlier results and the input', async () => {
@@ -359,8 +361,9 @@ describe('parallel: all', () => {
     await drained();
     expect(await stateOf(runId)).toMatchObject({ state: 'completed', output: { left: 'x:x:L', right: 7 } });
     // The node completed once.
+    const completedEvents = await eventsOf(runId, 'NodeCompleted');
     expect(
-      (await eventsOf(runId, 'NodeCompleted')).filter(event => z.object({ path: z.string() }).parse(event.data).path === 'fan'),
+      completedEvents.filter(event => z.object({ path: z.string() }).parse(event.data).path === 'fan'),
     ).toHaveLength(1);
   });
 
@@ -409,6 +412,7 @@ describe('parallel: any', () => {
     await drained();
     orThrow(await h.journal.run(h.db, h.race.signal('fast'), { runId, deliveryId: 'd1', payload: { v: 5 } }, caller));
     probes.killNextStep = true;
+    // eslint-disable-next-line failure/must-use -- the killed step makes this drain fail on purpose; the next lines assert the effect
     await h.drain();
     expect(probes.killNextStep).toBe(false);
     expect(await branchState(runId, 'r', 'slow')).toBe('compensating');
@@ -419,8 +423,9 @@ describe('parallel: any', () => {
     expect(await branchState(runId, 'r', 'slow')).toBe('cancelled');
     expect(await stateOf(runId)).toMatchObject({ state: 'completed', output: { branch: 'fast', result: 5 } });
     expect(probes.undone).toEqual(['slow']);
+    const completedEvents = await eventsOf(runId, 'NodeCompleted');
     expect(
-      (await eventsOf(runId, 'NodeCompleted')).filter(event => z.object({ path: z.string() }).parse(event.data).path === 'r'),
+      completedEvents.filter(event => z.object({ path: z.string() }).parse(event.data).path === 'r'),
     ).toHaveLength(1);
   });
 
@@ -683,8 +688,8 @@ describe('what must not move: .map and old events', () => {
       .loose()
       .parse(planned?.data);
     // The stored plan holds exactly the fields it held before `parallel`.
-    expect(Object.keys(data).sort()).toEqual(['at', 'base', 'children', 'def', 'path']);
-    expect(data.children.map(child => Object.keys(child).sort())).toEqual([['id', 'input'], ['id', 'input']]);
+    expect(Object.keys(data).toSorted()).toEqual(['at', 'base', 'children', 'def', 'path']);
+    expect(data.children.map(child => Object.keys(child).toSorted())).toEqual([['id', 'input'], ['id', 'input']]);
     h.crash();
     for (const n of [0, 1]) {
       orThrow(

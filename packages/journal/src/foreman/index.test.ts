@@ -7,7 +7,7 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Permit } from '@arki/admin/module';
@@ -48,9 +48,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   sent = 0;
-  await db.delete(tables.jobs);
-  await db.delete(tables.jobArchive);
-  await db.delete(tables.jobOperations);
+  await db.delete(tables.jobs).where(sql`true`);
+  await db.delete(tables.jobArchive).where(sql`true`);
+  await db.delete(tables.jobOperations).where(sql`true`);
 });
 
 const permit = (expectedRevision: string): Permit => ({
@@ -173,7 +173,8 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
       module.actions.retryJob.runExecute({ jobId: id }, NO_CTX, permit(preview.revision)),
     ).rejects.toMatchObject({ code: JOURNAL_JOBS_ERROR_CODES.staleRevision });
     expect(JOURNAL_JOBS_ERROR_CODES.staleRevision).toBe('ARKI_JOURNAL_E001');
-    expect((await journal.job(db, id))?.state).toBe('dead');
+    const jobResult4 = await journal.job(db, id);
+    expect(jobResult4?.state).toBe('dead');
     expect(await operations()).toHaveLength(0);
   });
 
@@ -191,7 +192,8 @@ describe('T(journal-foreman) approvals are for what the operator saw', () => {
     await expect(module.actions.retryDead.runExecute(input, NO_CTX, permit(preview.revision))).rejects.toMatchObject({
       code: JOURNAL_JOBS_ERROR_CODES.staleRevision,
     });
-    expect((await journal.job(db, a))?.state).toBe('dead');
+    const jobResult3 = await journal.job(db, a);
+    expect(jobResult3?.state).toBe('dead');
   });
 
   it('retryDead by filter retries exactly the previewed dead jobs and writes one operation row', async () => {
@@ -407,7 +409,8 @@ describe('T(journal-foreman) replay and purge', () => {
     );
     expect(done.jobId).not.toBe(id);
     expect(await journal.job(db, done.jobId)).toMatchObject({ replayOf: id, state: 'ready' });
-    expect((await operations()).find(row => row.action === 'replay')).toMatchObject({
+    const operationsResult = await operations();
+    expect(operationsResult.find(row => row.action === 'replay')).toMatchObject({
       actor: 'usr_alice',
       executionId: 'exe_1',
       reason: 'needed after all',
@@ -423,7 +426,8 @@ describe('T(journal-foreman) replay and purge', () => {
       code: JOURNAL_JOBS_ERROR_CODES.boundTooShort,
     });
     expect(JOURNAL_JOBS_ERROR_CODES.boundTooShort).toBe('ARKI_JOURNAL_E003');
-    expect((await journal.job(db, id))?.state).toBe('dead');
+    const jobResult2 = await journal.job(db, id);
+    expect(jobResult2?.state).toBe('dead');
   });
 
   it('purgeDead previews what the policy will do and archives the old dead jobs under the approver', async () => {
@@ -439,7 +443,8 @@ describe('T(journal-foreman) replay and purge', () => {
     const done = orThrow(await module.actions.purgeDead.runExecute(input, NO_CTX, permit(preview.revision)));
     expect(done).toMatchObject({ archived: 1, deleted: 0 });
     expect(await journal.archivedJob(db, old)).toMatchObject({ outcome: 'dead' });
-    expect((await journal.job(db, recent))?.state).toBe('dead');
+    const jobResult = await journal.job(db, recent);
+    expect(jobResult?.state).toBe('dead');
     expect(await operations()).toEqual([
       expect.objectContaining({ action: 'purgeDead', actor: 'usr_alice', reason: 'tidy up' }),
     ]);

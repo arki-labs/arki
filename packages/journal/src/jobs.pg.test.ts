@@ -138,7 +138,9 @@ describe('queue rows on Postgres', () => {
   });
 
   it('a row in an uncommitted transaction is invisible to a worker on another connection', async () => {
-    const jobs = runner(() => undefined);
+    const jobs = runner(() => {
+      /* no-op */
+    });
     await dbA.transaction(async tx => {
       await tx.insert(tables.jobs).values({ id: orThrow(jobId()), kind: 'queue', jobName: 'demo', args: {} });
       expect(await journal.drain(dbB, { jobs }).then(result => orThrow(result))).toBe(0);
@@ -181,7 +183,9 @@ describe('queue rows on Postgres', () => {
 
   it('a reclaimed lease rejects the stale worker: its renewal aborts it and its ack deletes nothing', async () => {
     const id = await schedule();
-    let release: () => void = () => undefined;
+    let release: () => void = () => {
+      /* no-op */
+    };
     const held = new Promise<void>(resolve => {
       release = resolve;
     });

@@ -15,7 +15,9 @@ const base = (name = 'p') => workflow(name, { version: 1, input });
 describe('shape hashes of the node kinds that existed before parallel', () => {
   const kid = base('kid').step('a', () => 1).finish();
   const cases = {
-    step: base().step('a', () => 1, { undo: () => undefined }).finish(),
+    step: base().step('a', () => 1, { undo: () => {
+      /* no-op */
+    } }).finish(),
     waitFor: base().waitFor('a', { signal: 's', schema: payload }).finish(),
     eventWait: base()
       .waitFor('a', { on: { o: { entity: order, match: () => orderId(1), events: [OrderPlaced] } }, timeout: '1h' })
@@ -61,8 +63,8 @@ describe('the builder refuses a wrong parallel', () => {
     let error: unknown;
     try {
       build();
-    } catch (caught) {
-      error = caught;
+    } catch (error_) {
+      error = error_;
     }
     expect(error).toBeInstanceOf(JournalError);
     expect(error).toMatchObject({ code: 'BAD_DEFINITION' });

@@ -94,12 +94,12 @@ describe('the T13 migration on an app with old job rows', () => {
     const found = await db.execute<{ table_name: string }>(
       sql`select table_name from information_schema.tables where table_schema = 'public' and table_name in ('journal_job_archive', 'journal_job_attempts', 'journal_job_operations')`,
     );
-    expect(found.rows.map(row => row.table_name).sort()).toEqual([...names].sort());
+    expect(found.rows.map(row => row.table_name).toSorted()).toEqual([...names].toSorted());
   });
 
   it('keeps the old pending and dead rows with every old value, so no queued work or failure is lost', async () => {
-    const pending = (await db.select().from(tables.jobs).where(eq(tables.jobs.id, pendingId)))[0];
-    const dead = (await db.select().from(tables.jobs).where(eq(tables.jobs.id, deadId)))[0];
+    const [pending] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, pendingId));
+    const [dead] = await db.select().from(tables.jobs).where(eq(tables.jobs.id, deadId));
     expect(pending).toMatchObject({ kind: 'queue', jobName: 'demo', args: { n: 1 }, attempts: 0, deadAt: null });
     expect(dead).toMatchObject({ kind: 'queue', jobName: 'demo', args: { n: 2 }, attempts: 8, lastError: 'boom' });
     expect(dead?.deadAt).toEqual(deadAt);
@@ -107,9 +107,8 @@ describe('the T13 migration on an app with old job rows', () => {
 
   it('gives old rows enqueued_at = migration time and no replay_of, and invents no attempt history', async () => {
     const rows = await db.select().from(tables.jobs);
-    const [{ migratedAt }] = (await db.execute<{ migratedAt: Date }>(sql`select now() as "migratedAt"`)).rows as [
-      { migratedAt: Date },
-    ];
+    const executeResult = await db.execute<{ migratedAt: Date }>(sql`select now() as "migratedAt"`);
+    const [{ migratedAt }] = executeResult.rows as [{ migratedAt: Date }];
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.replayOf).toBeNull();
@@ -125,8 +124,15 @@ describe('the T13 migration on an app with old job rows', () => {
 
 describe('the new verbs on old rows', () => {
   it('an app on the pre-T13 schema migrates and its old dead rows stay retryable', async () => {
-    const ops = createJobOps({ tables, retention: resolveRetention(undefined), wake: () => {} });
-    expect((await ops.jobs(db, { status: 'dead' })).jobs.map(row => [row.id, row.state])).toEqual([[deadId, 'dead']]);
+    const ops = createJobOps({
+      tables,
+      retention: resolveRetention(),
+      wake: () => {
+        /* no-op */
+      },
+    });
+    const jobsResult = await ops.jobs(db, { status: 'dead' });
+    expect(jobsResult.jobs.map(row => [row.id, row.state])).toEqual([[deadId, 'dead']]);
 
     const { operationId } = orThrow(await ops.retry(db, deadId, { actor: 'upgrade-test' }));
 

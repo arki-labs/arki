@@ -528,7 +528,8 @@ describe("a journal-owned effect that ignores its command's failure", () => {
     expect(dead.map(job => job.effect)).toEqual(['relay-ignores']);
     expect(dead[0]?.attempts, 'dead after one try, not retried').toBe(1);
     expect(dead[0]?.lastError).toContain('journal.conflict');
-    expect((await relays.jobs(effectDb, { effect: 'relay-passes' })).jobs, 'the other job is done').toEqual([]);
+    const jobsResult = await relays.jobs(effectDb, { effect: 'relay-passes' });
+    expect(jobsResult.jobs, 'the other job is done').toEqual([]);
   });
 });
 

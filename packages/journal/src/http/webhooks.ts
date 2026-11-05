@@ -33,10 +33,11 @@ import { z } from 'zod';
 import type { IdGenerationFailure } from '@arki/contracts';
 import type { Backoff } from '@arki/resilience';
 import { defineId } from '@arki/contracts';
-import { findCause, isFailure } from '@arki/failure';
+import { defineFailure, findCause, InvalidInput, invariant, isFailure, UnexpectedFailure } from '@arki/failure';
 import { publicFetch, UnsafeUrl, validatePublicURL } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
+import { parse } from '@arki/schema';
 
 import type { JournalTables } from '../pg.js';
 import type { DbHandle, JobRunner, RootDb, ScheduledJob } from '../types.js';
@@ -46,48 +47,68 @@ import { rollbackOnFailure } from '../rollback.js';
 const subscriptionId = defineId('whs_');
 const webhookMessageId = defineId('msg_');
 
-/** Stable codes for {@link WebhookError}. Match on codes, never parse messages. */
-export const WEBHOOK_ERROR_CODES = {
-  /** An input failed its schema, a payload is not JSON, or a URL is not public https.
-   * @fix Validate the webhook input and JSON payload; use a public HTTPS destination.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  badInput: 'ARKI_JOURNAL_WEBHOOK_E001',
-  /** `dispatch` got the root database. It needs the business transaction.
-   * @fix Dispatch inside the business database transaction and pass its transaction handle.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  notInTransaction: 'ARKI_JOURNAL_WEBHOOK_E002',
-  /** No subscription or message has this id.
-   * @fix Check the subscription or message id and use an existing record.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  notFound: 'ARKI_JOURNAL_WEBHOOK_E003',
-  /** `replay` named a message and a subscription of different partners.
-   * @fix Replay only to a subscription owned by the same partner as the message.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  otherPartner: 'ARKI_JOURNAL_WEBHOOK_E004',
-  /** `encryptionKey` is not 32 bytes of base64.
-   * @fix Configure encryptionKey as a base64-encoded 32-byte key.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  badEncryptionKey: 'ARKI_JOURNAL_WEBHOOK_E005',
-  /** The subscriber answered with a status other than 2xx. The worker retries it.
-   * @fix Inspect the subscriber response and restore its successful 2xx handling; let the worker retry delivery.
-   * @verify bun run test -- src/http/webhooks.test.ts
-   */
-  deliveryFailed: 'ARKI_JOURNAL_WEBHOOK_E006',
-} as const;
+/**
+ * `replay`, `rotateSecret`, `enable` or `disable` named a message or subscription that does not exist.
+ * @fix Check the subscription or message id and use an existing record.
+ * @verify bun run test -- src/http/webhooks.test.ts
+ */
+export const WebhookNotFound = /* @__PURE__ */ defineFailure('journal.webhook_not_found', {
+  status: 404,
+  data: z.object({ kind: z.enum(['message', 'subscription']), id: z.string() }),
+  message: 'No webhook {kind} has the id {id}.',
+  remediation: 'Check the subscription or message id and use an existing record.',
+});
 
-export class WebhookError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string, options?: ErrorOptions) {
-    super(`webhooks: ${message}`, options);
-    this.name = 'WebhookError';
-    this.code = code;
-  }
-}
+/**
+ * `replay` named a message and a subscription of different partners: sending it would leak one
+ * partner's data to another.
+ * @fix Replay only to a subscription owned by the same partner as the message.
+ * @verify bun run test -- src/http/webhooks.test.ts
+ */
+export const WebhookOtherPartner = /* @__PURE__ */ defineFailure('journal.webhook_other_partner', {
+  status: 403,
+  data: z.object({ messageId: z.string(), subscriptionId: z.string() }),
+  message: 'Message {messageId} and subscription {subscriptionId} belong to different partners.',
+  remediation: 'Replay only to a subscription owned by the same partner as the message.',
+});
+
+/**
+ * The body `dispatch` would store is over `maxPayloadBytes`. It is sent to every subscriber on every try.
+ * @fix Send a smaller payload, such as ids the subscriber fetches, or raise maxPayloadBytes.
+ * @verify bun run test -- src/http/webhooks.test.ts
+ */
+export const WebhookPayloadTooLarge = /* @__PURE__ */ defineFailure('journal.webhook_payload_too_large', {
+  status: 413,
+  data: z.object({ size: z.number().int(), limit: z.number().int() }),
+  message: 'The webhook body is {size} bytes, over maxPayloadBytes ({limit}).',
+  remediation: 'Send a smaller payload, such as ids the subscriber fetches, or raise maxPayloadBytes.',
+});
+
+/**
+ * The subscriber answered with a status other than 2xx. The runner throws it as `UnexpectedFailure`, so the
+ * worker retries it under `retry`; it never reaches a caller.
+ * @fix Inspect the subscriber response and restore its 2xx handling; the worker retries the delivery.
+ * @verify bun run test -- src/http/webhooks.test.ts
+ */
+export const WebhookDeliveryFailed = /* @__PURE__ */ defineFailure('journal.webhook_delivery_failed', {
+  status: 502,
+  data: z.object({ subscriptionId: z.string(), responseStatus: z.number().int() }),
+  message: 'Subscription {subscriptionId} answered {responseStatus}.',
+  remediation: 'Inspect the subscriber response and restore its 2xx handling; the worker retries the delivery.',
+});
+
+/**
+ * A `webhookSender` setting cannot work, such as an `encryptionKey` that is not 32 bytes of base64.
+ * Thrown (as `UnexpectedFailure`) when the sender is built at boot, never returned later.
+ * @fix Configure encryptionKey as a base64-encoded 32-byte key.
+ * @verify bun run test -- src/http/webhooks.test.ts
+ */
+export const WebhookConfigurationInvalid = /* @__PURE__ */ defineFailure('journal.webhook_configuration_invalid', {
+  status: 500,
+  data: z.object({ setting: z.string(), problem: z.string() }),
+  message: 'Webhook setting {setting} is invalid: {problem}',
+  remediation: 'Configure encryptionKey as a base64-encoded 32-byte key.',
+});
 
 /**
  * The webhook tables. Call this once in the app's schema module, next to `journalTables()`,
@@ -185,22 +206,33 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const ERROR_TEXT_LIMIT = 1000;
 
-/** A new endpoint: whose events it gets, where, and which ones. */
-export type SubscribeInput = { readonly partner: string; readonly url: string; readonly events: readonly string[] };
-/** One event for a partner's subscribers. `payload` must be JSON. */
-export type DispatchInput = { readonly partner: string; readonly event: string; readonly payload: unknown };
+/** A subscriber URL: public https only, refused here so a partner cannot point deliveries at a private address. */
+const publicHttpsUrl = z.url().superRefine((url, ctx) => {
+  const checked = validatePublicURL(url);
+  // An unparsable URL is already an issue of `z.url()`.
+  if (isFailure(checked)) {
+    if (checked.data.reason !== 'invalid_url') ctx.addIssue({ code: 'custom', message: checked.message });
+  } else if (checked.protocol !== 'https:') ctx.addIssue({ code: 'custom', message: 'The URL must use https.' });
+});
+const subscribeInput = z
+  .object({
+    partner: z.string().min(1).max(256),
+    url: publicHttpsUrl,
+    events: z.array(z.string().min(1).max(128)).min(1).readonly(),
+  })
+  .readonly();
+const dispatchInput = z
+  .object({
+    partner: z.string().min(1).max(256),
+    event: z.string().min(1).max(128),
+    payload: z.unknown(),
+  })
+  .readonly();
 
-// Annotated with the types above, so a schema cannot drift from the type it checks.
-const subscribeInput: z.ZodType<SubscribeInput> = z.object({
-  partner: z.string().min(1).max(256),
-  url: z.url(),
-  events: z.array(z.string().min(1).max(128)).min(1),
-});
-const dispatchInput: z.ZodType<DispatchInput> = z.object({
-  partner: z.string().min(1).max(256),
-  event: z.string().min(1).max(128),
-  payload: z.unknown(),
-});
+/** A new endpoint: whose events it gets, where (public https), and which ones. */
+export type SubscribeInput = z.input<typeof subscribeInput>;
+/** One event for a partner's subscribers. `payload` must be JSON. */
+export type DispatchInput = z.input<typeof dispatchInput>;
 const deliveryArgs = z.object({ messageId: z.string(), subscriptionId: z.string() });
 
 const encoder = new TextEncoder();
@@ -212,15 +244,9 @@ const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
 const errorText = (error: unknown): string =>
   (isFailure(error) ? error.code : error instanceof Error ? error.message : String(error)).slice(0, ERROR_TEXT_LIMIT);
 
-function parse<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `${what}: ${parsed.error.message}`);
-  return parsed.data;
-}
-
-const requireRow = (found: readonly unknown[], what: string, id: string): void => {
-  if (found.length === 0) throw new WebhookError(WEBHOOK_ERROR_CODES.notFound, `no ${what} ${id}`);
-};
+/** `undefined` when the update touched the subscription, else the failure that names it. */
+const subscriptionFound = (updated: readonly unknown[], id: string) =>
+  updated.length === 0 ? WebhookNotFound({ kind: 'subscription', id }) : undefined;
 
 /** Each secret signs the same id and time; Standard Webhooks sends the signatures space-separated. */
 const signedHeaders = async (
@@ -266,7 +292,10 @@ export function webhookSender(options: WebhookSenderOptions) {
     keyBytes = new Uint8Array(0);
   }
   if (keyBytes.length !== KEY_BYTES) {
-    throw new WebhookError(WEBHOOK_ERROR_CODES.badEncryptionKey, `encryptionKey must be ${KEY_BYTES} bytes of base64`);
+    // A configuration fault: the app cannot start sending, so it fails at boot.
+    throw new UnexpectedFailure(
+      WebhookConfigurationInvalid({ setting: 'encryptionKey', problem: `must be ${KEY_BYTES} bytes of base64` }),
+    );
   }
   let imported: Promise<CryptoKey> | undefined;
   const aesKey = (): Promise<CryptoKey> =>
@@ -411,12 +440,12 @@ export function webhookSender(options: WebhookSenderOptions) {
         await db.update(subscriptions).set({ deadLetters: 0 }).where(eq(subscriptions.id, delivery.subscriptionId));
         return;
       }
-      const error = new WebhookError(
-        WEBHOOK_ERROR_CODES.deliveryFailed,
-        `subscription ${delivery.subscriptionId} answered ${response.status}`,
+      // Thrown, not returned: `retry` retries thrown errors, and retries a returned failure only when told to.
+      const failed = new UnexpectedFailure(
+        WebhookDeliveryFailed({ subscriptionId: delivery.subscriptionId, responseStatus: response.status }),
       );
-      await recordFailure(db, job, delivery, response.status, error);
-      throw error;
+      await recordFailure(db, job, delivery, response.status, failed);
+      throw failed;
     },
     retryDelay: (job, error) => nextDelay(job.attempt, error),
   } satisfies JobRunner;
@@ -427,20 +456,13 @@ export function webhookSender(options: WebhookSenderOptions) {
 
     /**
      * Adds an endpoint for a partner's events and returns its signing secret, the only time it
-     * is readable: show it to the partner once. The URL must be public https.
+     * is readable: show it to the partner once. The URL must be public https: anything else, and
+     * input that fails its schema, returns `InvalidInput` with the issues.
      */
-    subscribe: async (
-      db: DbHandle,
-      input: SubscribeInput,
-    ): Promise<{ id: string; secret: string } | IdGenerationFailure> => {
-      const { partner, url, events } = parse(subscribeInput, input, 'subscribe');
-      if (new URL(url).protocol !== 'https:') {
-        throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, 'subscribe: the URL must use https');
-      }
-      const checked = validatePublicURL(url);
-      if (isFailure(checked)) {
-        throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `subscribe: ${checked.message}`, { cause: checked });
-      }
+    subscribe: async (db: DbHandle, input: SubscribeInput) => {
+      const parsed = parse(subscribeInput, input);
+      if (isFailure(parsed)) return parsed;
+      const { partner, url, events } = parsed;
       const id = subscriptionId.create();
       if (isFailure(id)) return id;
       const secret = newSecret();
@@ -451,33 +473,27 @@ export function webhookSender(options: WebhookSenderOptions) {
     /**
      * Writes the message and one delivery per active subscription of this partner and event, in
      * `tx`. A rollback removes them with the business write. The payload is stored once, as the
-     * body `{ type, timestamp, data }` every delivery sends.
+     * body `{ type, timestamp, data }` every delivery sends. Input that fails its schema or a payload
+     * that is not JSON returns `InvalidInput`; a body over `maxPayloadBytes` returns `WebhookPayloadTooLarge`.
      */
-    dispatch: async (
-      tx: WebhookTx,
-      input: DispatchInput,
-    ): Promise<{ messageId: string; deliveries: number } | IdGenerationFailure> => {
-      // The type already refuses the root database; this catches untyped callers.
-      if (typeof Reflect.get(tx, 'rollback') !== 'function') {
-        throw new WebhookError(
-          WEBHOOK_ERROR_CODES.notInTransaction,
-          'dispatch got the root database; pass the business transaction, so the message commits with it',
-        );
-      }
-      const { partner, event, payload } = parse(dispatchInput, input, 'dispatch');
-      let body: string | undefined;
+    dispatch: async (tx: WebhookTx, input: DispatchInput) => {
+      // The type already refuses the root database; this catches untyped callers. A caller bug, so it throws.
+      invariant(
+        typeof Reflect.get(tx, 'rollback') === 'function',
+        'webhooks: dispatch got the root database; pass the business transaction, so the message commits with it',
+      );
+      const parsed = parse(dispatchInput, input);
+      if (isFailure(parsed)) return parsed;
+      const { partner, event, payload } = parsed;
+      let body: string;
       try {
         body = JSON.stringify({ type: event, timestamp: new Date().toISOString(), data: payload });
       } catch (error) {
-        throw new WebhookError(WEBHOOK_ERROR_CODES.badInput, `dispatch: the payload is not JSON: ${errorText(error)}`);
+        // A bigint or a cycle: the payload has no JSON form to store and sign.
+        return InvalidInput({ issues: [{ message: `The payload is not JSON: ${errorText(error)}`, path: ['payload'] }] });
       }
       const size = encoder.encode(body).length;
-      if (size > maxPayloadBytes) {
-        throw new WebhookError(
-          WEBHOOK_ERROR_CODES.badInput,
-          `dispatch: the body is ${size} bytes, over maxPayloadBytes (${maxPayloadBytes})`,
-        );
-      }
+      if (size > maxPayloadBytes) return WebhookPayloadTooLarge({ size, limit: maxPayloadBytes });
       const messageId = webhookMessageId.create();
       if (isFailure(messageId)) return messageId;
       const refusal = rollbackOnFailure<{ messageId: string; deliveries: number } | IdGenerationFailure>();
@@ -508,43 +524,33 @@ export function webhookSender(options: WebhookSenderOptions) {
     /**
      * Sends a stored message again to one subscription of the same partner, with the same
      * `webhook-id`. A disabled subscription records the try as skipped: `enable` it first.
+     * An unknown id returns `WebhookNotFound`; a subscription of another partner, `WebhookOtherPartner`.
      */
-    replay: async (
-      db: DbHandle,
-      input: { messageId: string; subscriptionId: string },
-    ): Promise<{ jobId: string } | IdGenerationFailure> => {
-      const message = await db
+    replay: async (db: DbHandle, input: { messageId: string; subscriptionId: string }) => {
+      const [message] = await db
         .select({ partner: messages.partner })
         .from(messages)
         .where(eq(messages.id, input.messageId));
-      requireRow(message, 'message', input.messageId);
-      const subscription = await db
+      if (message === undefined) return WebhookNotFound({ kind: 'message', id: input.messageId });
+      const [subscription] = await db
         .select({ partner: subscriptions.partner })
         .from(subscriptions)
         .where(eq(subscriptions.id, input.subscriptionId));
-      requireRow(subscription, 'subscription', input.subscriptionId);
-      if (message[0]?.partner !== subscription[0]?.partner) {
-        throw new WebhookError(
-          WEBHOOK_ERROR_CODES.otherPartner,
-          `message ${input.messageId} and subscription ${input.subscriptionId} belong to different partners`,
-        );
-      }
+      if (subscription === undefined) return WebhookNotFound({ kind: 'subscription', id: input.subscriptionId });
+      if (message.partner !== subscription.partner) return WebhookOtherPartner({ messageId: input.messageId, subscriptionId: input.subscriptionId });
       const result = await enqueue(db, input.messageId, [input.subscriptionId]);
       if (isFailure(result)) return result;
       const [queued] = result;
-      if (queued === undefined) throw new WebhookError(WEBHOOK_ERROR_CODES.notFound, 'replay queued nothing');
+      invariant(queued !== undefined, 'webhooks: enqueue of one subscription returned no job id');
       return { jobId: queued };
     },
 
     /**
      * A new signing secret. The old one keeps signing too for `windowSeconds` (default a day),
-     * so the partner can switch without dropping a message. Returns the new secret once.
+     * so the partner can switch without dropping a message. Returns the new secret once, or
+     * `WebhookNotFound` for an unknown id.
      */
-    rotateSecret: async (
-      db: DbHandle,
-      subscriptionId: string,
-      rotation: { readonly windowSeconds?: number } = {},
-    ): Promise<{ secret: string }> => {
+    rotateSecret: async (db: DbHandle, subscriptionId: string, rotation: { readonly windowSeconds?: number } = {}) => {
       const windowSeconds = rotation.windowSeconds ?? 86_400;
       const secret = newSecret();
       const updated = await db
@@ -558,28 +564,27 @@ export function webhookSender(options: WebhookSenderOptions) {
         })
         .where(eq(subscriptions.id, subscriptionId))
         .returning({ id: subscriptions.id });
-      requireRow(updated, 'subscription', subscriptionId);
-      return { secret };
+      return subscriptionFound(updated, subscriptionId) ?? { secret };
     },
 
-    /** Turns a subscription back on and clears its dead-letter count. */
-    enable: async (db: DbHandle, subscriptionId: string): Promise<void> => {
+    /** Turns a subscription back on and clears its dead-letter count. `WebhookNotFound` for an unknown id. */
+    enable: async (db: DbHandle, subscriptionId: string) => {
       const updated = await db
         .update(subscriptions)
         .set({ status: 'active', deadLetters: 0, disabledAt: null })
         .where(eq(subscriptions.id, subscriptionId))
         .returning({ id: subscriptions.id });
-      requireRow(updated, 'subscription', subscriptionId);
+      return subscriptionFound(updated, subscriptionId);
     },
 
-    /** Stops deliveries: new messages skip it, queued ones record `skipped`. */
-    disable: async (db: DbHandle, subscriptionId: string): Promise<void> => {
+    /** Stops deliveries: new messages skip it, queued ones record `skipped`. `WebhookNotFound` for an unknown id. */
+    disable: async (db: DbHandle, subscriptionId: string) => {
       const updated = await db
         .update(subscriptions)
         .set({ status: 'disabled', disabledAt: sql`coalesce(${subscriptions.disabledAt}, now())` })
         .where(eq(subscriptions.id, subscriptionId))
         .returning({ id: subscriptions.id });
-      requireRow(updated, 'subscription', subscriptionId);
+      return subscriptionFound(updated, subscriptionId);
     },
   };
 }

@@ -36,7 +36,8 @@ async function createEnvironment(stranded: number) {
       insert into journal_jobs (id, kind, job_name, args, dead_at)
       select 'job_s' || n, 'queue', case when n % 2 = 0 then 'renamed.v0' else 'bench' end, '{}'::jsonb,
              case when n % 2 = 0 then null else now() end
-      from generate_series(1, ${stranded}) as n`);
+      from generate_series(1, ${stranded}) as n
+    `);
   return db;
 }
 
@@ -69,7 +70,9 @@ async function viaDrain(db: Db, args: unknown): Promise<string> {
       seen.push(job.args);
       return Promise.resolve();
     },
-    retryDelay: () => undefined,
+    retryDelay: () => {
+      /* no-op */
+    },
   };
   await schedule(db, args);
   orThrow(await journal.drain(db, { jobs: runner, batchSize: 1 }));

@@ -46,8 +46,10 @@ import type {
 } from '@arki/dot/unit';
 import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
 import { getTableName } from 'drizzle-orm';
+import { z } from 'zod';
 import { entrypoint, instanceOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotUnitError, infra, service } from '@arki/dot/unit';
+import { is, recordSchema } from '@arki/schema';
 
 import type { Journal, JournalDefinitions } from './api.js';
 import type {
@@ -276,8 +278,6 @@ export function journalHandlers<
   };
 }
 
-const isServices = (value: unknown): value is Services => typeof value === 'object' && value !== null;
-
 /** The contribution's boot step: hand the feature's deps over, after checking each handler finds its own. */
 function bindServices(
   effects: readonly { readonly name: string; readonly needs: Needs }[],
@@ -286,7 +286,7 @@ function bindServices(
 ): (deps: unknown) => JournalSlicePayload {
   // The kernel hands the feature's deps over untyped, so they are read by name here.
   return deps => {
-    const given = isServices(deps) ? deps : {};
+    const given: Services = is(deps, recordSchema) ? deps : {};
     // Checked at the feature's boot, so a missing service never waits for the first job.
     for (const effect of effects) givenServices('effect', effect, given);
     for (const tap of taps) givenServices('tap', tap, given);
@@ -366,43 +366,21 @@ export type JournalDriven<
   AppDb extends RootDb,
 > = ReturnType<typeof journalFromFeatures<Meta, Tx, AppDb>>;
 
-const isHandler = (value: unknown): boolean =>
-  typeof value === 'object' &&
-  value !== null &&
-  'name' in value &&
-  typeof value.name === 'string' &&
-  'run' in value &&
-  typeof value.run === 'function';
-
-const isHandlerList = (value: unknown): boolean => Array.isArray(value) && value.every(item => isHandler(item));
-
-const isWorkflow = (value: unknown): boolean =>
-  typeof value === 'object' &&
-  value !== null &&
-  'name' in value &&
-  typeof value.name === 'string' &&
-  'version' in value &&
-  typeof value.version === 'number' &&
-  'nodes' in value &&
-  Array.isArray(value.nodes);
-
-const isWorkflowList = (value: unknown): boolean => Array.isArray(value) && value.every(item => isWorkflow(item));
-
-/** A slice's static `handlers` are read untyped from the feature, so their shape is checked here. */
-function isJournalDeclarations(value: unknown): value is JournalDeclarations {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'projections' in value &&
-    isHandlerList(value.projections) &&
-    'effects' in value &&
-    isHandlerList(value.effects) &&
-    'taps' in value &&
-    isHandlerList(value.taps) &&
-    'workflows' in value &&
-    isWorkflowList(value.workflows)
-  );
-}
+/** A function value. Zod has no plain schema for one, so `z.custom` holds the one `typeof` test. */
+const callableSchema = z.custom<(...args: never[]) => unknown>(value => typeof value === 'function');
+const handlerShape = z.looseObject({ name: z.string(), run: callableSchema });
+const workflowShape = z.looseObject({ name: z.string(), version: z.number(), nodes: z.array(z.unknown()) });
+const declarationsShape = z.looseObject({
+  projections: z.array(handlerShape),
+  effects: z.array(handlerShape),
+  taps: z.array(handlerShape),
+  workflows: z.array(workflowShape),
+});
+/**
+ * A slice's static `handlers`, read untyped from the feature: `is(value, journalDeclarationsSchema)`
+ * checks their shape. Only journalHandlers and journalProjections make them, so the shape stands for the type.
+ */
+const journalDeclarationsSchema = z.custom<JournalDeclarations>(value => declarationsShape.safeParse(value).success);
 
 function badSlice(feature: AnyDefinedFeature, what: string): DotUnitError {
   return new DotUnitError({
@@ -456,7 +434,7 @@ function declaredBy(feature: AnyDefinedFeature): readonly unknown[] {
   return declared;
 }
 
-/** A contribution's static `handlers`, read untyped: `isJournalDeclarations` checks them. */
+/** A contribution's static `handlers`, read untyped: `journalDeclarationsSchema` checks them. */
 const handlersOf = (contribution: AnyApplicationContribution): unknown =>
   'handlers' in contribution ? contribution.handlers : undefined;
 
@@ -538,7 +516,7 @@ function eventMap(features: readonly AnyDefinedFeature[]): EventMapGraph {
   for (const feature of features) {
     const qualify = qualifyBy(feature.name);
     for (const declared of declaredBy(feature)) {
-      if (!isJournalDeclarations(declared)) continue;
+      if (!is(declared, journalDeclarationsSchema)) continue;
       const owner = node({ id: `feature:${feature.name}`, kind: 'feature', name: feature.name });
       const owned = (id: string): void => edge({ kind: 'owned-by', from: id, to: owner });
       for (const projection of declared.projections) {
@@ -623,7 +601,7 @@ function readDeclarations(features: readonly AnyDefinedFeature[]): {
       continue;
     }
     for (const declared of all) {
-      if (!isJournalDeclarations(declared))
+      if (!is(declared, journalDeclarationsSchema))
         throw badSlice(feature, 'handlers are not lists of projections, effects and taps');
       for (const { name } of declared.projections) claimName('projection', owners, name, feature);
       // An instance's effects and taps are renamed here, so the duplicate check, the services lookup,
@@ -783,7 +761,7 @@ export type JobsSource<TNeeds extends NeedsShape> = {
 /** The services a feature's `journal` slice published at its boot. */
 function sliceServices(ctx: object, feature: AnyDefinedFeature): Services {
   const payload = sliceOf(ctx, feature).journal;
-  if (typeof payload !== 'object' || payload === null || !('services' in payload) || !isServices(payload.services))
+  if (!is(payload, recordSchema) || !is(payload.services, recordSchema))
     throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers');
   return payload.services;
 }

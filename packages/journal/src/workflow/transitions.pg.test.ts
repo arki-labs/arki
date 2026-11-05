@@ -197,7 +197,8 @@ describe('limits.transitions', () => {
   it('the backfill of the upgrade note gives an open run the count its events say', async () => {
     orThrow(await h.journal.run(db, h.roomy.start, { id: 'run_backfill', input: { rounds: 100 } }, caller));
     await play(2);
-    const counted = (await runRow('run_backfill'))?.transitions;
+    const runRowResult2 = await runRow('run_backfill');
+    const counted = runRowResult2?.transitions;
     expect(counted).toBeGreaterThan(1);
 
     // A run that was open before the column existed has the default, 0. The statement is the one in docs/upgrades/0.3.0-to-0.4.0.md.
@@ -207,8 +208,10 @@ describe('limits.transitions', () => {
         select count(*) from journal_events e
         where e.kind = 'workflow.run' and e.entity_id = r.id and e.type = 'NodeScheduled'
           and e.data->>'phase' = 'do' and (e.data->>'attempt')::int = 1
-      ) where r.finished_at is null`);
-    expect((await runRow('run_backfill'))?.transitions).toBe(counted);
+      ) where r.finished_at is null
+    `);
+    const runRowResult = await runRow('run_backfill');
+    expect(runRowResult?.transitions).toBe(counted);
   });
 
   it('a retry of a step is not a transition', async () => {

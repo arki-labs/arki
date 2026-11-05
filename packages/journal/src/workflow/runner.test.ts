@@ -170,23 +170,25 @@ async function settle(limit = 40) {
   throw new Error('the run did not settle');
 }
 
-const runRow = async (id: string) =>
-  (await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id)))[0];
-const stepRow = async (id: string, path: string) =>
-  (
-    await db
-      .select()
-      .from(tables.workflowSteps)
-      .where(and(eq(tables.workflowSteps.runId, id), eq(tables.workflowSteps.path, path)))
-  )[0];
-const eventTypes = async (id: string) =>
-  (
-    await db
-      .select({ type: tables.events.type })
-      .from(tables.events)
-      .where(eq(tables.events.entityId, id))
-      .orderBy(asc(tables.events.seq))
-  ).map(row => row.type);
+const runRow = async (id: string) => {
+  const rows = await db.select().from(tables.workflowRuns).where(eq(tables.workflowRuns.id, id));
+  return rows[0];
+};
+const stepRow = async (id: string, path: string) => {
+  const rows = await db
+    .select()
+    .from(tables.workflowSteps)
+    .where(and(eq(tables.workflowSteps.runId, id), eq(tables.workflowSteps.path, path)));
+  return rows[0];
+};
+const eventTypes = async (id: string) => {
+  const rows = await db
+    .select({ type: tables.events.type })
+    .from(tables.events)
+    .where(eq(tables.events.entityId, id))
+    .orderBy(asc(tables.events.seq));
+  return rows.map(row => row.type);
+};
 const jobsOf = (id: string) => db.select().from(tables.jobs).where(eq(tables.jobs.runId, id));
 
 describe('start and the step effect', () => {
@@ -233,17 +235,21 @@ describe('start and the step effect', () => {
     const queued = await jobsOf(id);
     expect(queued).toHaveLength(1);
     expect(queued[0]?.effect).toBe('workflow.step');
-    expect((await stepRow(id, 'double'))?.jobId).toBe(queued[0]?.id);
+    const stepRowResult5 = await stepRow(id, 'double');
+    expect(stepRowResult5?.jobId).toBe(queued[0]?.id);
     await settle();
-    expect((await jobsOf(id)).length).toBe(0);
+    const jobs = await jobsOf(id);
+    expect(jobs.length).toBe(0);
   });
 
   it('a step is running while its body runs, derived from the lease of its job: the row still says scheduled', async () => {
     const id = newId('running');
     orThrow(await journal.run(db, running.start, { input: {}, id }, caller));
     await settle();
-    expect((await runRow(id))?.results).toEqual({ look: { status: 'running', stored: 'scheduled', hasJob: true } });
-    expect((await stepRow(id, 'look'))?.status).toBe('done');
+    const runRowResult3 = await runRow(id);
+    expect(runRowResult3?.results).toEqual({ look: { status: 'running', stored: 'scheduled', hasJob: true } });
+    const stepRowResult4 = await stepRow(id, 'look');
+    expect(stepRowResult4?.status).toBe('done');
   });
 
   it('starting twice with one id and one input is one run, and another input is refused', async () => {
@@ -319,7 +325,8 @@ describe('when and next', () => {
     const step = await stepRow(id, 'b');
     expect(step?.status).toBe('failed');
     expect(step?.error).toContain('BAD_DEFINITION');
-    expect((await runRow(id))?.state).toBe('running');
+    const runRowResult2 = await runRow(id);
+    expect(runRowResult2?.state).toBe('running');
   });
 });
 
@@ -347,9 +354,11 @@ describe('failure, retry and the key', () => {
     expect(tries.map(entry => entry.attempt)).toEqual([1, 2, 3]);
     expect(new Set(tries.map(entry => entry.key))).toEqual(new Set([`${id}:provider:do`]));
     expect(await stepRow(id, 'provider')).toMatchObject({ status: 'failed', attempt: 3 });
-    expect((await stepRow(id, 'provider'))?.error).toContain(UnexpectedDefect.code);
+    const stepRowResult3 = await stepRow(id, 'provider');
+    expect(stepRowResult3?.error).toContain(UnexpectedDefect.code);
     expect(await runRow(id)).toMatchObject({ state: 'running', node: 'provider' });
-    expect((await eventTypes(id)).filter(type => type === 'NodeFailed')).toHaveLength(3);
+    const eventTypesResult2 = await eventTypes(id);
+    expect(eventTypesResult2.filter(type => type === 'NodeFailed')).toHaveLength(3);
     const [dead] = await jobsOf(id);
     expect(dead?.deadAt).toBeInstanceOf(Date);
     expect(await stepRow(id, 'after')).toBeUndefined();
@@ -360,7 +369,8 @@ describe('failure, retry and the key', () => {
     orThrow(await journal.run(db, charge.start, { input: { paymentId: 'pay_7' }, id }, caller));
     await settle();
     expect(ranOf('charge').filter(entry => entry.key === 'charge:pay_7')).toHaveLength(1);
-    expect((await stepRow(id, 'charge'))?.key).toBe('charge:pay_7');
+    const stepRowResult2 = await stepRow(id, 'charge');
+    expect(stepRowResult2?.key).toBe('charge:pay_7');
   });
 
   it('a step that runs past its timeout is aborted and returns a typed Deadline', async () => {
@@ -382,7 +392,8 @@ describe('payload limit', () => {
     const step = await stepRow(id, 'big');
     expect(step?.status).toBe('failed');
     expect(step?.error).toContain('WORKFLOW_LIMIT');
-    expect((await runRow(id))?.results).toEqual({});
+    const runRowResult = await runRow(id);
+    expect(runRowResult?.results).toEqual({});
   });
 
   it('a start input over limits.payload is a returned conflict, not a thrown error, and writes no run', async () => {
@@ -430,7 +441,8 @@ describe('the checkpoint fence', () => {
     await staleJournal.drain(db).then(result => orThrow(result));
     expect(ranOf('slow').filter(entry => entry.key.startsWith(id))).toHaveLength(1);
     expect(await eventTypes(id)).toEqual(['RunStarted', 'NodeScheduled']);
-    expect((await stepRow(id, 'slow'))?.status).toBe('scheduled');
+    const stepRowResult = await stepRow(id, 'slow');
+    expect(stepRowResult?.status).toBe('scheduled');
     const [job] = await jobsOf(id);
     expect(job?.lastError).toContain(TransactionDefect.code);
   });
@@ -475,7 +487,8 @@ describe('a crash between the body and the checkpoint', () => {
     expect(tries).toHaveLength(2);
     expect(tries[0]?.key).toBe(tries[1]?.key);
     expect(await runRow(id)).toMatchObject({ state: 'completed', results: { chargeCard: { chargeId: 'ch_1' } } });
-    expect((await eventTypes(id)).filter(type => type === 'NodeCompleted')).toHaveLength(1);
+    const eventTypesResult = await eventTypes(id);
+    expect(eventTypesResult.filter(type => type === 'NodeCompleted')).toHaveLength(1);
     await crashJournal.drain(db).then(result => orThrow(result));
     expect(ranOf('chargeCard').filter(entry => entry.key.startsWith(id))).toHaveLength(2);
   });

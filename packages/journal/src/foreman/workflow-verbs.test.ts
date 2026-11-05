@@ -129,9 +129,11 @@ describe('permissions', () => {
     );
     const runId = await startParked();
     const delayed = orThrow(await start(quick, newId('acc'), { delay: '1h' })).runId;
+    // A mutable array: the wire input is JSON, and a readonly tuple from `as const` is not.
+    const tags: string[] = ['vip'];
     const verbs = [
       ['workflow.setMetadata', { runId, change: { kind: 'set', patch: { step: 'two' } } }, 'workflow:metadata'],
-      ['workflow.addTags', { runId, tags: ['vip'] }, 'workflow:metadata'],
+      ['workflow.addTags', { runId, tags }, 'workflow:metadata'],
       ['workflow.reschedule', { runId: delayed, delay: '2h', reason: 'customer asked' }, 'workflow:reschedule'],
       ['workflow.replay', { runId, reason: 'bad data fixed' }, 'workflow:replay'],
       ['workflow.limits.pause', { name: 'test.fv.spare', reason: 'incident' }, 'workflow:limits'],

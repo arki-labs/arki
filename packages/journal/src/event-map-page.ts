@@ -51,7 +51,7 @@ function nodeSvg(placed: PlacedNode): string {
 }
 
 /** One SVG: the whole graph (`view` is `""`) or one feature's slice. */
-function viewSvg(document: EventMapDocument, feature: string | undefined): string {
+function viewSvg(document: EventMapDocument, feature?: string): string {
   const layout = layoutEventMap(document, feature);
   const headings = COLUMN_TITLES.map(
     (title, column) =>
@@ -68,7 +68,7 @@ function viewSvg(document: EventMapDocument, feature: string | undefined): strin
   return (
     `<svg class="map" data-view="${escapeHtml(feature ?? '')}"${hidden} width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}" role="group" aria-label="Event map${feature === undefined ? '' : `, feature ${escapeHtml(feature)}`}">` +
     `<defs><marker id="${escapeHtml(markerId)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>` +
-    `${headings}${edges}${layout.nodes.map(nodeSvg).join('')}</svg>`
+    `${headings}${edges}${layout.nodes.map(placed => nodeSvg(placed)).join('')}</svg>`
   );
 }
 
@@ -280,7 +280,7 @@ export function eventMapPage(document: unknown): string {
     '<option value="">All features</option>',
     ...features.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`),
   ].join('');
-  const views = [viewSvg(shown, undefined), ...features.map(name => viewSvg(shown, name))].join('');
+  const views = [viewSvg(shown), ...features.map(name => viewSvg(shown, name))].join('');
   return (
     `<style>${STYLE}</style><div class="em" id="event-map">` +
     `<div><h1>Event map</h1><p class="lede">${eventCount} events, ${shown.nodes.length} nodes, ${shown.edges.length} edges. Commands write events; events feed reactions, workflows and waits; workflows run commands.</p></div>` +
@@ -288,6 +288,6 @@ export function eventMapPage(document: unknown): string {
     problems +
     `<div class="stage"><div class="scroll">${views}</div><aside class="details" aria-live="polite"></aside></div>` +
     `<p class="legend">Solid lines write or fold, dashed lines wait for an event, dotted lines run a command. Click a node to follow its edges; click it again to clear.</p>` +
-    `<script type="application/json" id="event-map-data">${scriptJson({ ...shown, flows: shown.edges.map(flowOf) })}</script><script>${SCRIPT}</script></div>`
+    `<script type="application/json" id="event-map-data">${scriptJson({ ...shown, flows: shown.edges.map(edge => flowOf(edge)) })}</script><script>${SCRIPT}</script></div>`
   );
 }
