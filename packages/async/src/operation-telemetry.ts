@@ -2,7 +2,7 @@ import type { Context } from '@opentelemetry/api';
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import packageMetadata from '@arki/async/package.json' with { type: 'json' };
-import { isFailure } from '@arki/failure';
+import { isFailure, isFault } from '@arki/failure';
 
 import { systemClock } from './system-clock.js';
 
@@ -58,9 +58,12 @@ export function operationTelemetry(name: string) {
       if (ended) return;
       ended = true;
       const failure = isFailure(outcome) ? outcome : undefined;
-      observe(() => span?.setStatus({ code: failure === undefined ? SpanStatusCode.OK : SpanStatusCode.ERROR }));
-      if (failure !== undefined)
+      // A returned failure is an error only when it is a fault (5xx); a 4xx leaves the status unset.
+      if (failure === undefined) observe(() => span?.setStatus({ code: SpanStatusCode.OK }));
+      else {
         observe(() => span?.setAttributes({ 'failure.code': failure.code, 'failure.status': failure.status }));
+        if (isFault(failure)) observe(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+      }
       observe(() => {
         if (started === undefined) return;
         metrics

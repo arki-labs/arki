@@ -141,6 +141,10 @@ it('records actual refusal codes and never invokes pre-cancelled work', async ()
     .toEqual([UnexpectedDefect.code, CircuitOpen.code, Cancelled.code]);
   expect(exporter.getFinishedSpans().filter(span => span.name === 'resilience.circuit_breaker').map(span => span.attributes['failure.code']))
     .toEqual([UnexpectedDefect.code, CircuitOpen.code]);
+  // A caller's own cancel (499) is an expected outcome, not a fault: alerts on span errors must not fire
+  // for it. An open breaker (503) and a defect are faults an operator must see.
+  expect(exporter.getFinishedSpans().filter(span => span.name === 'resilience.execute').map(span => span.status.code))
+    .toEqual([SpanStatusCode.ERROR, SpanStatusCode.ERROR, SpanStatusCode.UNSET]);
 });
 
 it('ends deadline and capacity spans when owned execution settles, without waiting for abandoned work', async () => {
@@ -158,6 +162,9 @@ it('ends deadline and capacity spans when owned execution settles, without waiti
   const capacity = exporter.getFinishedSpans().filter(span => span.name === 'resilience.bulkhead');
   expect(capacity).toHaveLength(2);
   expect(capacity[0]?.attributes['failure.code']).toBe(BulkheadRejected.code);
+  // A full bulkhead (429) is load shedding the caller handles, not a fault; a timeout (504) is a fault.
+  expect(capacity[0]?.status.code).toBe(SpanStatusCode.UNSET);
+  expect(exporter.getFinishedSpans().find(span => span.name === 'resilience.timeout')?.status.code).toBe(SpanStatusCode.ERROR);
   expect(capacity[1]?.status.code).toBe(SpanStatusCode.UNSET);
 });
 

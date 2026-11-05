@@ -3,6 +3,7 @@ import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import type { Failure } from '@arki/failure';
 import packageMetadata from '@arki/async/package.json' with { type: 'json' };
+import { isFault } from '@arki/failure';
 
 import { Cancelled, Deadline } from './errors.js';
 import { runObservedContext } from './operation-telemetry.js';
@@ -41,9 +42,13 @@ export function scopeTelemetry() {
         });
       });
       observe(() => {
-        span?.setStatus({ code: outcome === undefined ? SpanStatusCode.OK : SpanStatusCode.ERROR });
-        if (outcome !== undefined)
+        // A failed scope is an error only when its failure is a fault (5xx); a 4xx such as `Cancelled`
+        // is an expected outcome and leaves the status unset.
+        if (outcome === undefined) span?.setStatus({ code: SpanStatusCode.OK });
+        else {
           span?.setAttributes({ 'failure.code': outcome.code, 'failure.status': outcome.status });
+          if (isFault(outcome)) span?.setStatus({ code: SpanStatusCode.ERROR });
+        }
       });
       observe(() => {
         if (started === undefined) return;

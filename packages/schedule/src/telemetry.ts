@@ -1,6 +1,8 @@
 import type { Span } from '@opentelemetry/api';
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
+import { isFault } from '@arki/failure';
+
 import type { ScheduleRunResult } from './runtime.js';
 
 /** Instrumentation never owns execution or changes a scheduling outcome. */
@@ -30,9 +32,20 @@ export async function observeSchedule(name: string, run: () => Promise<ScheduleR
   pending ??= run();
   try {
     const result = await pending;
-    const failed = result.status === 'refused' || result.status === 'handler-failed' || result.status === 'lock-failed';
+    const failure =
+      result.status === 'refused'
+        ? result.failure
+        : result.status === 'handler-failed' || result.status === 'lock-failed'
+          ? result.cause
+          : undefined;
     observe(() => span?.setAttribute('schedule.outcome', result.status));
-    observe(() => span?.setStatus({ code: failed ? SpanStatusCode.ERROR : SpanStatusCode.OK }));
+    // A failure always sets `failure.code`. Only a fault (5xx) sets the error status: an expected
+    // refusal (4xx) is an answer, not an error, so its status stays unset.
+    if (failure === undefined) observe(() => span?.setStatus({ code: SpanStatusCode.OK }));
+    else {
+      observe(() => span?.setAttribute('failure.code', failure.code));
+      if (isFault(failure)) observe(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+    }
     observe(() =>
       metrics
         .getMeter('@arki/schedule')

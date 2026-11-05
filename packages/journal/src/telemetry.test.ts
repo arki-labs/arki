@@ -23,12 +23,16 @@ const caller = { actorId: 'usr_test' };
 const SECRET = 'never-collect-this';
 
 const Declined = defineFailure('test.telemetry_declined', { status: 409, data: z.object({ reason: z.string() }) });
+const LedgerDown = defineFailure('test.telemetry_ledger_down', { status: 503 });
 
 const approve = j.command('test.telemetry.approve', z.object({ note: z.string() }), { writes: [] }, () =>
   Promise.resolve({ approved: true }),
 );
 const decline = j.command('test.telemetry.decline', z.object({ note: z.string() }), { writes: [] }, ({ note }) =>
   Promise.resolve(Declined({ reason: note })),
+);
+const breakDown = j.command('test.telemetry.break_down', z.object({ note: z.string() }), { writes: [] }, () =>
+  Promise.resolve(LedgerDown()),
 );
 
 const report = j
@@ -94,14 +98,23 @@ describe('journal.command', () => {
     expect(leaks(span)).toBe(false);
   });
 
-  it('a returned refusal is a classified failure with its code, not an exception event', async () => {
+  it('a returned 4xx refusal sets its code but leaves the status unset: an expected answer must not page anyone', async () => {
     const result = await journal.run(db, decline, { note: SECRET }, caller);
     expect(Declined.is(result)).toBe(true);
     const span = only('journal.command');
     expect(span.attributes).toMatchObject({ 'journal.outcome': 'failure', 'failure.code': Declined.code });
-    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
     expect(span.events).toEqual([]);
     expect(leaks(span)).toBe(false);
+  });
+
+  it('a returned 5xx fault sets its code and the error status: an operator must act on it', async () => {
+    const result = await journal.run(db, breakDown, { note: SECRET }, caller);
+    expect(LedgerDown.is(result)).toBe(true);
+    const span = only('journal.command');
+    expect(span.attributes).toMatchObject({ 'journal.outcome': 'failure', 'failure.code': LedgerDown.code });
+    expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: LedgerDown.code });
+    expect(span.events).toEqual([]);
   });
 
   it('a tracer that throws changes nothing: the command runs once and returns its own result', async () => {

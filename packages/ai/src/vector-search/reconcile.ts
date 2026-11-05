@@ -42,7 +42,8 @@
  */
 import type { EmbeddingSpace, EmbedFailure } from '@arki/embeddings';
 import { spaceId } from '@arki/embeddings';
-import { isFailure } from '@arki/failure';
+import type { Failure } from '@arki/failure';
+import { isFailure, isFault } from '@arki/failure';
 
 import { debugVector } from '../debug.js';
 import { VectorStoreUnavailable } from '../failures.js';
@@ -151,8 +152,10 @@ export function runVectorReconciliation<P extends VectorPointPayload, TId extend
 ): Promise<ReconcileCounts> {
   return observeAi('ai.reconcile', async span => {
     let firstFailureCode: string | undefined;
-    const counts = await reconcile(deps, caps, code => {
-      firstFailureCode ??= code;
+    let faulted = false;
+    const counts = await reconcile(deps, caps, failure => {
+      firstFailureCode ??= failure.code;
+      faulted ||= isFault(failure);
     });
     span.setAttributes({
       'ai.reconcile.tombstones_drained': counts.tombstonesDrained,
@@ -161,7 +164,11 @@ export function runVectorReconciliation<P extends VectorPointPayload, TId extend
       'ai.reconcile.retracted': counts.retracted,
       'ai.reconcile.failed': counts.failed,
     });
-    if (firstFailureCode !== undefined) failSpan(span, firstFailureCode);
+    // `failure.code` is the first failure's; the status is error only when some failure was a fault.
+    if (firstFailureCode !== undefined) {
+      if (faulted) failSpan(span, firstFailureCode);
+      else span.setAttribute('failure.code', firstFailureCode);
+    }
     return counts;
   });
 }
@@ -169,7 +176,7 @@ export function runVectorReconciliation<P extends VectorPointPayload, TId extend
 async function reconcile<P extends VectorPointPayload, TId extends string>(
   deps: ReconcileDeps<P, TId>,
   caps: ReconcileCaps,
-  onFailure: (code: string) => void,
+  onFailure: (failure: Failure) => void,
 ): Promise<ReconcileCounts> {
   const tombstoneCap = caps.tombstoneCap ?? TOMBSTONE_CAP_PER_RUN;
   const rowCap = caps.rowCap ?? ROW_CAP_PER_RUN;
@@ -184,9 +191,9 @@ async function reconcile<P extends VectorPointPayload, TId extends string>(
   };
 
   /** Count one failed unit of work and tell the span. */
-  function recordFailure(failure: { code: string }, units: number): void {
+  function recordFailure(failure: Failure, units: number): void {
     counts.failed += units;
-    onFailure(failure.code);
+    onFailure(failure);
   }
 
   // ── Phase A: tombstone drain — first, and gating ──

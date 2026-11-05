@@ -1,6 +1,6 @@
 import type { Attributes, Context } from '@opentelemetry/api';
 import { context, metrics, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 import { startTiming, elapsedTime } from './timing.js';
 
 /** Reporting has no authority over execution, including foreign asynchronous reporters. */
@@ -110,7 +110,8 @@ export async function withPolicySpan<Value>(
       outcome = failed ? 'failure' : 'success';
       if (failed) {
         observe(() => span?.setAttribute('failure.code', result.code));
-        observe(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+        // An expected outcome (4xx, such as a full bulkhead) is an answer: only a 5xx sets error status.
+        if (isFault(result)) observe(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
       }
     });
     return result;

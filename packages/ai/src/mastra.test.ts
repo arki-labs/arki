@@ -252,8 +252,9 @@ describe('createMastraRuntime spans', () => {
     expect(span?.status.code).not.toBe(2);
   });
 
-  it('marks the span failed with the code of the run:error failure', async () => {
-    // WHY: the loop reports a failure as an event, not a throw; the span must still show it.
+  it('records the code of a 4xx run:error failure and leaves the status unset', async () => {
+    // WHY: the loop reports a failure as an event, not a throw; the span must still carry its code.
+    // A refused key (401) is an expected answer, not a fault, so the span is not an error.
     const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream<LanguageModelV4StreamPart>({
@@ -270,7 +271,37 @@ describe('createMastraRuntime spans', () => {
     await collect(createMastraRuntime({ model }).runToolLoop({ prompt: 'x' }));
 
     const [span] = exporter.getFinishedSpans();
-    expect(span?.status.code).toBe(2);
+    expect(span?.status.code).toBe(0);
     expect(span?.attributes['failure.code']).toBe('ai.unauthorized');
+  });
+
+  it('marks the span as an error for a 5xx run:error failure', async () => {
+    // WHY: a provider outage is a fault an operator must see; error status is what alerts read.
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<LanguageModelV4StreamPart>({
+          chunks: [
+            { type: 'stream-start', warnings: [] },
+            {
+              type: 'error',
+              // Not retryable, so the SDK does not back off and retry before the loop reports it.
+              error: new APICallError({
+                message: 'status 503',
+                url: 'https://x',
+                requestBodyValues: {},
+                statusCode: 503,
+                isRetryable: false,
+              }),
+            },
+          ],
+        }),
+      }),
+    });
+    const events = await collect(createMastraRuntime({ model }).runToolLoop({ prompt: 'x' }));
+    const last = events.at(-1);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.status.code).toBe(2);
+    expect(span?.attributes['failure.code']).toBe(last?.type === 'run:error' ? last.failure.code : 'missing');
   });
 });

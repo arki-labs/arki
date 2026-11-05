@@ -141,7 +141,7 @@ Spans (OpenTelemetry API only; nothing is exported until the app configures an S
 | `payments.notification.send`, `payments.notification.delivery_status` | each dunning message and delivery check                        | `channel`, `provider`, `failure.code`                       |
 | `payments.alert`                                                      | each payment-monitor alert                                     | `payments.alert`, `payments.severity`, `failure.code`       |
 
-A returned failure (a declined card) sets `failure.code` and leaves the span status unset; a throw sets the status to error and records the exception. Amounts, card data, customer ids, payloads and secrets are never attributes.
+A returned failure sets `failure.code`. It sets the span status to error only when it is a fault (`isFault`: status 500 or higher, such as a provider outage); a 4xx such as a declined card leaves the status unset. A throw sets the status to error and records the exception. Amounts, card data, customer ids, payloads and secrets are never attributes.
 
 Metrics: `payments.operations` (counter; `operation`, `outcome` = `success`, `failure` or `error`).
 

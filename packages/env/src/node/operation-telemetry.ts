@@ -1,7 +1,7 @@
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import packageMetadata from '@arki/env/package.json' with { type: 'json' };
-import { isFailure } from '@arki/failure';
+import { isFailure, isFault } from '@arki/failure';
 
 function observe<Value>(fn: () => Value) {
   try {
@@ -15,7 +15,11 @@ function observe<Value>(fn: () => Value) {
   }
 }
 
-/** Safe execution-boundary telemetry; never records paths, references, values, keys or raw causes. */
+/**
+ * Safe execution-boundary telemetry; never records paths, references, values, keys or raw causes.
+ * A returned failure sets `failure.code`; the status is error for a throw, and for a returned failure
+ * only when it is a fault (`isFault`, status 500 or higher). A 4xx leaves the status unset.
+ */
 export function nodeOperation<Value>(name: string, run: () => Value): Value {
   const span = observe(() => trace.getTracer('@arki/env', packageMetadata.version).startSpan(`env.${name}`));
   const active = observe(() => (span === undefined ? context.active() : trace.setSpan(context.active(), span)));
@@ -39,8 +43,13 @@ export function nodeOperation<Value>(name: string, run: () => Value): Value {
     return result;
   } finally {
     const outcome: unknown = result;
-    const failed = isFailure(outcome) || (invocation.outcome !== undefined && 'cause' in invocation.outcome);
-    observe(() => span?.setStatus({ code: failed ? SpanStatusCode.ERROR : SpanStatusCode.OK }));
+    const thrown = invocation.outcome !== undefined && 'cause' in invocation.outcome;
+    const failure = isFailure(outcome) ? outcome : undefined;
+    const failed = failure !== undefined || thrown;
+    if (failure !== undefined) observe(() => span?.setAttribute('failure.code', failure.code));
+    if (thrown || (failure !== undefined && isFault(failure)))
+      observe(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+    else if (!failed) observe(() => span?.setStatus({ code: SpanStatusCode.OK }));
     observe(() =>
       metrics
         .getMeter('@arki/env', packageMetadata.version)

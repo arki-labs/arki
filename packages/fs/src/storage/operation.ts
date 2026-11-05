@@ -1,7 +1,7 @@
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { z } from 'zod';
 
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 
 import { StorageCancelled, StorageRejected, StorageUnavailable, StorageWriteUncertain } from './failures.js';
 
@@ -115,11 +115,18 @@ function startFsSpan(operation: string) {
   return span;
 }
 
-function finishFs(operation: string, span: FsSpan | undefined, started: number, code: string | undefined) {
+/** Every failure sets `failure.code`; only a fault (a throw, or a returned 5xx) sets error status. */
+function finishFs(
+  operation: string,
+  span: FsSpan | undefined,
+  started: number,
+  code: string | undefined,
+  fault: boolean,
+) {
   if (code) {
     const failureCode = code;
     report(() => span?.setAttribute('failure.code', failureCode));
-    report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
+    if (fault) report(() => span?.setStatus({ code: SpanStatusCode.ERROR }));
   }
   report(() => span?.end());
   // Metrics use the same bounded operation names and failure codes as the spans.
@@ -141,15 +148,20 @@ export async function observeFs<T>(operation: string, run: () => T | Promise<T>)
   const span = startFsSpan(operation);
   report(() => span && context.with(trace.setSpan(context.active(), span), execute));
   let code: string | undefined;
+  let fault = false;
   try {
     const result = await execute();
-    if (isFailure<unknown>(result)) code = result.code;
+    if (isFailure<unknown>(result)) {
+      code = result.code;
+      fault = isFault(result);
+    }
     return result;
   } catch (error) {
     code = UnexpectedDefect.code;
+    fault = true;
     throw error;
   } finally {
-    finishFs(operation, span, started, code);
+    finishFs(operation, span, started, code, fault);
   }
 }
 
@@ -162,15 +174,20 @@ export function observeFsSync<T>(operation: string, run: () => T): T {
     if (span) active = trace.setSpan(context.active(), span);
   });
   let code: string | undefined;
+  let fault = false;
   try {
     const result = context.with(active, run);
-    if (isFailure<unknown>(result)) code = result.code;
+    if (isFailure<unknown>(result)) {
+      code = result.code;
+      fault = isFault(result);
+    }
     return result;
   } catch (error) {
     code = UnexpectedDefect.code;
+    fault = true;
     throw error;
   } finally {
-    finishFs(operation, span, started, code);
+    finishFs(operation, span, started, code, fault);
   }
 }
 

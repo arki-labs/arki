@@ -72,9 +72,20 @@ describe('author telemetry', () => {
     const lookup = spans.find(span => span.name === 'lookup');
     expect(lookup?.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
     expect(lookup?.instrumentationScope.name).toBe('@arki/dot/catalog#eu');
-    expect(lookup?.status.code).toBe(SpanStatusCode.ERROR);
+    // A 403 is an expected answer, not a fault: the code is recorded, the status stays unset.
+    expect(lookup?.status.code).toBe(SpanStatusCode.UNSET);
     expect(lookup?.attributes['failure.code']).toBe(refusal.code);
     expect(lookup?.events).toEqual([]);
+  });
+
+  it('marks a returned 5xx fault as an error with its code', async () => {
+    // WHY: a fault (status 500 or higher) needs an operator, so it must show as a span error.
+    const Down = defineFailure('telemetry.down', { status: 503 });
+    const fault = Down();
+    expect(await telemetryFor({ name: 'catalog' }).span('lookup', () => Promise.resolve(fault))).toBe(fault);
+    const lookup = exporter.getFinishedSpans().find(span => span.name === 'lookup');
+    expect(lookup?.status).toEqual({ code: SpanStatusCode.ERROR, message: Down.code });
+    expect(lookup?.attributes['failure.code']).toBe(Down.code);
   });
 });
 
@@ -232,7 +243,8 @@ it('keeps resource telemetry in the unit lifetime through cleanup and preserves 
   expect(activeIds).toEqual([owner?.spanContext().spanId, owner?.spanContext().spanId]);
   expect(owner?.events.map(event => event.name)).toEqual(['connection.opened', 'connection.closed']);
   expect(owner?.events.every(event => event.attributes?.['dot.unit.name'] === 'connection')).toBe(true);
-  expect(owner?.status.code).toBe(SpanStatusCode.ERROR);
+  // The 403 cleanup refusal is an expected outcome: its code is kept, the status stays unset.
+  expect(owner?.status.code).toBe(SpanStatusCode.UNSET);
   expect(owner?.attributes['failure.code']).toBe(refusal.code);
   expect(JSON.stringify(owner?.attributes)).not.toContain('private cleanup detail');
   expect([opened, closed]).toEqual([1, 1]);

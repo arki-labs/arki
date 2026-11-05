@@ -138,12 +138,23 @@ test('records an ai.transcribe span for a transcription', async () => {
   expect(span?.status.code).not.toBe(2);
 });
 
-test('marks the ai.transcribe span failed with the code of the returned failure', async () => {
-  // WHY: a refused call is returned, not thrown; the span must still show it as failed.
+test('records the code of a returned 4xx failure on the ai.transcribe span, status unset', async () => {
+  // WHY: a rate limit is an expected answer the caller retries, not a fault: the code is recorded,
+  // but the span is not an error, so alerts on span errors do not fire for it.
   respond(() => new Response('{}', { status: 429 }));
   expect(isFailure(await transcribeDiarizedAudio(new Uint8Array([1]), options))).toBe(true);
 
   const [span] = exporter.getFinishedSpans();
-  expect(span?.status.code).toBe(2);
+  expect(span?.status.code).toBe(0);
   expect(span?.attributes['failure.code']).toBe('ai.rate_limited');
+});
+
+test('marks the ai.transcribe span as an error for a returned fault (5xx)', async () => {
+  // WHY: a provider that fails is a fault an operator must see; error status is what alerts read.
+  respond(() => new Response('{}', { status: 503 }));
+  expect(isFailure(await transcribeDiarizedAudio(new Uint8Array([1]), options))).toBe(true);
+
+  const [span] = exporter.getFinishedSpans();
+  expect(span?.status.code).toBe(2);
+  expect(span?.attributes['failure.code']).toBe('ai.provider_failed');
 });

@@ -38,6 +38,7 @@ function onlySpan() {
 
 describe('observePayments', () => {
   const Refused = defineFailure('payments_test.refused');
+  const Unavailable = defineFailure('payments_test.unavailable', { status: 503 });
 
   it('ends a payments.<operation> span with an unset status on success', async () => {
     expect(await observePayments('test.ok', { 'payments.provider': 'test' }, () => Promise.resolve(42))).toBe(42);
@@ -48,9 +49,9 @@ describe('observePayments', () => {
     expect(span.attributes).toEqual({ 'payments.provider': 'test' });
   });
 
-  it('sets failure.code for a returned failure and keeps the span out of error', async () => {
+  it('sets failure.code for a returned 4xx failure and keeps the span out of error', async () => {
     // WHY: dashboards group failures by `failure.code` across every @arki package; a payments-only
-    // name hid payment refusals from them.
+    // name hid payment refusals from them. A 4xx refusal is an answer, not a fault: no error status.
     const refused = Refused();
 
     expect(await observePayments('test.refused', {}, () => Promise.resolve(refused))).toBe(refused);
@@ -58,6 +59,18 @@ describe('observePayments', () => {
     const span = onlySpan();
     expect(span.attributes).toEqual({ 'failure.code': 'payments_test.refused' });
     expect(span.status.code).toBe(SpanStatusCode.UNSET);
+  });
+
+  it('sets the error status for a returned fault (5xx), keeping failure.code', async () => {
+    // WHY: a provider outage returned as a value is still a fault an operator must see; alerts read
+    // the error status, so a 5xx must set it even though nothing was thrown.
+    const outage = Unavailable();
+
+    expect(await observePayments('test.unavailable', {}, () => Promise.resolve(outage))).toBe(outage);
+
+    const span = onlySpan();
+    expect(span.attributes).toEqual({ 'failure.code': 'payments_test.unavailable' });
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
   });
 
   it('records the exception, sets the error status and rethrows the same error', async () => {

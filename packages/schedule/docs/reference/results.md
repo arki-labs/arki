@@ -62,7 +62,10 @@ name is the actual registered name.
 Each scheduling attempt creates one `schedule.run` OpenTelemetry span, inherits
 the active context and records its classified outcome and duration. No SDK or
 exporter is installed by this library. Attributes include the declared schedule
-name and outcome; handler payloads, lock keys and private error causes are absent.
+name, outcome and, for a refusal or failure, `failure.code`. Only a fault
+(`isFault`: status 500 or higher, such as a handler defect) sets the span status
+to error; an expected refusal (4xx) leaves it unset. Handler payloads, lock keys
+and private error causes are absent.
 Metric dimensions contain only the bounded scheduling outcome. Handler code can
 use the standard active span for custom events. Observer failures, including a
 context manager failing after invoking its callback, never replace the result or

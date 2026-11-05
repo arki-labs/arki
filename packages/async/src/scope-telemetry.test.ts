@@ -159,6 +159,15 @@ it('preserves exact primary and cleanup members while exporting only public fail
   expect(JSON.stringify([span?.attributes, span?.events])).not.toContain(cause.secret);
 });
 
+it('records a returned 4xx failure on the scope span without marking it an error', async () => {
+  // WHY: a 4xx is an answer the caller handles, not a fault; error status would page an operator.
+  const result = await scoped({}, () => Refused());
+  expect(Refused.is(result)).toBe(true);
+  const span = exporter.getFinishedSpans()[0];
+  expect(span?.status.code).toBe(SpanStatusCode.UNSET);
+  expect(span?.attributes['failure.code']).toBe(Refused.code);
+});
+
 it.each([
   ['signal', Cancelled],
   ['deadline', Deadline],
@@ -183,6 +192,8 @@ it.each([
     expect(finalized).toBe(1);
     const span = exporter.getFinishedSpans()[0];
     expect(span?.attributes['failure.code']).toBe(definition.code);
+    // WHY: cancellation (499) is an expected outcome, so no error; a missed deadline (504) is a fault.
+    expect(span?.status.code).toBe(option === 'deadline' ? SpanStatusCode.ERROR : SpanStatusCode.UNSET);
     expect(span?.attributes['async.scope.cancelled']).toBe(option === 'signal');
     expect(span?.attributes['async.scope.deadline']).toBe(option === 'deadline');
     expect(JSON.stringify(span?.attributes)).not.toContain('private reason');

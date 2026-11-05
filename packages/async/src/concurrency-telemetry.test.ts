@@ -87,10 +87,13 @@ it('classifies cancellation/deadline and direct Failure values without exception
   clock.advance(1);
   expect(Deadline.is(await pending)).toBe(true);
   const spans = exporter.getFinishedSpans();
+  // WHY: only a fault (status 500+) is an error. A 4xx refusal (400) and a cancellation (499) are
+  // expected outcomes the caller handles: their code is recorded and the status stays unset. A missed
+  // deadline (504) is a fault.
   expect(spans.map(span => span.status.code)).toEqual([
-    SpanStatusCode.ERROR,
+    SpanStatusCode.UNSET,
     SpanStatusCode.OK,
-    SpanStatusCode.ERROR,
+    SpanStatusCode.UNSET,
     SpanStatusCode.ERROR,
   ]);
   expect(spans.map(span => span.attributes['failure.code'])).toEqual([

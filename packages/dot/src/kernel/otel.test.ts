@@ -19,7 +19,7 @@
 
 import type { Context, ContextManager } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
-import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
+import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -275,6 +275,7 @@ describe('@arki/dot OTel instrumentation', () => {
   });
 
   it('reports a returned refusal without inventing an exception event', async () => {
+    // WHY: a 4xx is an expected answer, so the status stays unset; only a fault is an error.
     const Refused = defineFailure('otel_test.refused');
     const refusal = Refused();
     const result = await defineApp('otel-refusal')
@@ -283,9 +284,24 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(result).toBe(refusal);
     for (const name of ['dot.unit.boot', 'dot.app.boot']) {
       const span = spansByName(name)[0];
-      expect(span?.status.code).toBe(2);
+      expect(span?.status.code).toBe(SpanStatusCode.UNSET);
       expect(span?.attributes['failure.code']).toBe(Refused.code);
       expect(span?.events.some(event => event.name === 'exception')).toBe(false);
+    }
+  });
+
+  it('marks a returned 5xx fault as an error on the unit and app spans', async () => {
+    // WHY: a fault (status 500 or higher) needs an operator, so it must show as a span error.
+    const Down = defineFailure('otel_test.down', { status: 503 });
+    const fault = Down();
+    const result = await defineApp('otel-fault')
+      .infra(infra({ name: 'down', boot: () => fault }))
+      .boot();
+    expect(result).toBe(fault);
+    for (const name of ['dot.unit.boot', 'dot.app.boot']) {
+      const span = spansByName(name)[0];
+      expect(span?.status).toEqual({ code: SpanStatusCode.ERROR, message: Down.code });
+      expect(span?.attributes['failure.code']).toBe(Down.code);
     }
   });
 

@@ -56,8 +56,10 @@ Close inherits its invocation context, rather than retaining the startup span.
 
 No SDK setup is needed in this package. Configure the application's
 OpenTelemetry provider/context manager to export spans and propagate context
-through asynchronous work. Failures record `failure.code` and error status;
-no paths, PIDs, owner IDs, exception messages or private causes are exported.
+through asynchronous work. Failures record `failure.code`; error status is set
+only for a fault (a throw, or a returned failure with status 500 or higher), so
+an expected 4xx outcome leaves the status unset. No paths, PIDs, owner IDs,
+exception messages or private causes are exported.
 Missing or defective instrumentation cannot change a result, duplicate work,
 or release an unconfirmed owner. General transaction/provider observability
 remains T08 work. This slice adds no browser, Hermes, native Deno, Node26 or

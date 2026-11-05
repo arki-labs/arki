@@ -13,6 +13,7 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ModelUnavailable, spaceId } from '@arki/embeddings';
+import { defineFailure } from '@arki/failure';
 
 import { VectorStoreUnavailable } from '../failures';
 import type { MismatchedRow, ReconcileDeps, ReconcileRow, ReconcileStore } from './reconcile';
@@ -31,6 +32,9 @@ type TombstoneId = `vtmb_${string}`;
 
 /** The outage a dep returns when its backend cannot be reached. */
 const outage = (reason: string) => VectorStoreUnavailable({ operation: 'test', reason });
+
+/** An expected 4xx answer from a dep: not a fault. */
+const Refused = defineFailure('reconcile_test.refused', { status: 409 });
 
 const MODEL = 'qwen3-embedding:0.6b';
 const SPACE = {
@@ -410,6 +414,18 @@ describe('runVectorReconciliation — spans', () => {
     const [span] = exporter.getFinishedSpans();
     expect(span?.status.code).toBe(2);
     expect(span?.attributes['failure.code']).toBe('ai.vector_store_unavailable');
+  });
+
+  it('records failure.code but leaves the status unset when only 4xx failures were returned', async () => {
+    // WHY: a 4xx is an expected answer, not a fault; error status would page an operator for nothing.
+    const deps = makeDeps({ deletePoints: vi.fn().mockResolvedValue(Refused()) });
+    deps.tombstones.list.mockResolvedValue([{ id: 'vtmb_1', pointId: 'citm_gone' }]);
+
+    await runVectorReconciliation(deps);
+
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.status.code).toBe(0);
+    expect(span?.attributes['failure.code']).toBe('reconcile_test.refused');
   });
 
   it('marks the span failed as a defect and rethrows when a dep throws', async () => {

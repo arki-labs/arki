@@ -5,7 +5,7 @@
 import type { Span } from '@opentelemetry/api';
 import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, isFault } from '@arki/failure';
 
 /** Runs one reporting call. An SDK that throws cannot reach the caller. */
 function quietly(report: () => unknown): void {
@@ -18,7 +18,8 @@ function quietly(report: () => unknown): void {
 
 /**
  * Run one KV command inside a `kv.<command>` span and count it in `kv.commands` by outcome. A returned
- * failure marks the span failed and sets `failure.code`; a throw is recorded and rethrown unchanged.
+ * failure sets `failure.code`, and error status only when it is a fault (`isFault`: status 500 or
+ * higher); a throw is recorded, marks the span failed and is rethrown unchanged.
  */
 export async function observeKv<T>(command: string, execute: () => Promise<T>): Promise<T> {
   let span: Span | undefined;
@@ -32,7 +33,8 @@ export async function observeKv<T>(command: string, execute: () => Promise<T>): 
     if (isFailure(settled)) {
       outcome = 'error';
       quietly(() => span?.setAttribute('failure.code', settled.code));
-      quietly(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: settled.code }));
+      // An expected outcome (4xx) is an answer, not a fault: only a 5xx sets error status.
+      if (isFault(settled)) quietly(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: settled.code }));
     }
     return result;
   } catch (error) {

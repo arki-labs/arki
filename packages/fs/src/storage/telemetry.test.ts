@@ -1,18 +1,18 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { context, metrics, trace } from '@opentelemetry/api';
+import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { SpanCapture } from '@arki/testing/otel';
-import { orThrow } from '@arki/failure';
+import { orThrow, UnexpectedDefect } from '@arki/failure';
 import { captureSpans } from '@arki/testing/otel';
 
 import { deleteSync } from '../local/delete.js';
 import { globIterate } from '../local/glob.js';
-import { StorageRejected } from './failures.js';
+import { StorageRejected, StorageUnavailable } from './failures.js';
 import { createLocalStorageAdapter } from './local-adapter.js';
-import { observeFs } from './operation.js';
+import { executeFs, observeFs, observeFsSync } from './operation.js';
 
 let spans: SpanCapture;
 const directories: string[] = [];
@@ -60,6 +60,26 @@ it('reports default bounded metrics and failure.code without exporting a cause',
   expect(add).toHaveBeenCalledWith(1, { operation: 'fs.local.get', 'failure.code': failure.code });
   expect(record).toHaveBeenCalledWith(expect.any(Number), { operation: 'fs.local.get', 'failure.code': failure.code });
   expect(spans.finished[0]?.attributes).toEqual({ 'failure.code': failure.code });
+});
+
+// A rejected or missing file (4xx) is an answer the caller handles, not a fault: it must not trip alerts
+// on span errors. A store that is down (5xx) or a throw is a fault an operator must see.
+it('a returned 4xx sets failure.code and leaves the status unset; a 5xx or a throw sets error', async () => {
+  expect(StorageRejected.is(await observeFs('fs.local.get', () => StorageRejected()))).toBe(true);
+  expect(StorageRejected.is(observeFsSync('fs.local.delete_paths', () => StorageRejected()))).toBe(true);
+  expect(StorageUnavailable.is(await observeFs('fs.s3.get', () => StorageUnavailable()))).toBe(true);
+  expect(StorageUnavailable.is(observeFsSync('fs.local.delete_paths', () => StorageUnavailable()))).toBe(true);
+  const defect = await executeFs('fs.local.put', () => {
+    throw new Error('private defect');
+  });
+  expect(UnexpectedDefect.is(defect)).toBe(true);
+  expect(spans.finished.map(span => [span.attributes['failure.code'], span.status.code])).toEqual([
+    [StorageRejected.code, SpanStatusCode.UNSET],
+    [StorageRejected.code, SpanStatusCode.UNSET],
+    [StorageUnavailable.code, SpanStatusCode.ERROR],
+    [StorageUnavailable.code, SpanStatusCode.ERROR],
+    [UnexpectedDefect.code, SpanStatusCode.ERROR],
+  ]);
 });
 
 it.each(['omit', 'repeat', 'throw-before', 'throw-after', 'reject'] as const)(

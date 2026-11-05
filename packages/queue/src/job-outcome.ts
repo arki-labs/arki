@@ -8,6 +8,7 @@ import {
   InvalidInput,
   isAsyncSchemaFailure,
   isFailure,
+  isFault,
   UnexpectedDefect,
   UnexpectedFailure,
   ValidatorDefect,
@@ -51,7 +52,8 @@ async function withJobSpan<Value>(job: JobLike, run: () => Promise<Value>, metad
       if (isFailure<unknown>(result))
         observe(() => {
           span?.setAttribute('failure.code', result.code);
-          span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code });
+          // An expected outcome (4xx) leaves the status unset; only a fault (5xx) is an error.
+          if (isFault(result)) span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code });
         });
       return result;
     } finally {

@@ -21,6 +21,7 @@ import { foreman } from './dot.ts';
 import { createForemanHandlerFromEnv } from './foreman-app.ts';
 import { defineAction, defineModule, describeModule } from './module.ts';
 import { kvReceiptStore } from './receipts.ts';
+import { observeExecute } from './telemetry.ts';
 import { memoryKv } from './test-support.ts';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
@@ -33,6 +34,7 @@ const T0 = new Date('2026-10-14T12:00:00Z');
 const SCOPES = ['queue:*'];
 
 const JobChanged = defineFailure('admin.test_job_changed', { status: 409, message: 'The job changed.' });
+const StoreDown = defineFailure('admin.test_store_down', { status: 503 });
 
 let readPair: KeyPair;
 let executePair: KeyPair;
@@ -180,12 +182,23 @@ describe('admin.action.execute', () => {
     expect(await execute(client, 'queue.dropJob', 'exe_refused')).toMatchObject({ code: 'admin.module_refused' });
 
     const span = spans.named('admin.action.execute');
-    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    // WHY: a 409 is an answer the operator acts on, not a fault; error status would page on refusals.
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
     expect(span.attributes).toEqual({
       'admin.action': 'queue.dropJob',
       'admin.receipt': 'failed',
       'failure.code': 'admin.test_job_changed',
     });
+  });
+
+  it('sets error status for a returned fault (5xx), keeping failure.code', async () => {
+    // WHY: a 5xx means the app or a dependency is broken; alerts on span errors must fire for it.
+    const result = await observeExecute('queue.retryJob', () => Promise.resolve(StoreDown()));
+
+    expect(result).toMatchObject({ code: 'admin.test_store_down' });
+    const span = spans.named('admin.action.execute');
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.attributes['failure.code']).toBe('admin.test_store_down');
   });
 
   it('marks a repeated execution id as replayed: the action ran once, the second answer came from its receipt', async () => {

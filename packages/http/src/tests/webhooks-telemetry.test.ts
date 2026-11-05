@@ -5,7 +5,7 @@ import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { orThrow, UnexpectedDefect } from '@arki/failure';
+import { defineFailure, orThrow, UnexpectedDefect } from '@arki/failure';
 
 import { observeWebhook } from '../webhook-telemetry.js';
 import { standardWebhooks, verifyWebhook, WebhookSignatureMismatch } from '../webhooks.js';
@@ -89,14 +89,26 @@ describe('webhook telemetry', () => {
     parent.end();
   });
 
-  it('records only the exact refusal code and preserves its identity', async () => {
+  it('records only the exact refusal code, preserves its identity and leaves a 4xx status unset', async () => {
+    // WHY: a bad signature is an expected answer to the sender, not a fault to page anyone about.
     const exporter = installTelemetry();
     const refusal = WebhookSignatureMismatch({ cause: new Error('private cause') });
     expect(await observeWebhook('http.webhook.verify', () => refusal)).toBe(refusal);
     const span = exporter.getFinishedSpans()[0];
     expect(span?.attributes).toEqual({ 'failure.code': refusal.code });
-    expect(span?.status).toEqual({ code: SpanStatusCode.ERROR });
+    expect(span?.status).toEqual({ code: SpanStatusCode.UNSET });
     expect(span?.events).toEqual([]);
+  });
+
+  it('marks a returned 5xx fault as an error with its code', async () => {
+    // WHY: a fault (status 500 or higher) needs an operator, so it must show as a span error.
+    const exporter = installTelemetry();
+    const SecretStoreDown = defineFailure('test.webhook.secret_store_down', { status: 503 });
+    const fault = SecretStoreDown();
+    expect(await observeWebhook('http.webhook.verify', () => fault)).toBe(fault);
+    const span = exporter.getFinishedSpans()[0];
+    expect(span?.attributes).toEqual({ 'failure.code': fault.code });
+    expect(span?.status).toEqual({ code: SpanStatusCode.ERROR });
   });
 
   it.each(['omit', 'repeat', 'throw-before', 'throw-after', 'reject'])(

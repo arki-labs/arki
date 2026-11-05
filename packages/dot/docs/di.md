@@ -445,9 +445,10 @@ Each usecase call runs in an OpenTelemetry span named
 tracing code, and the usecase types do not change.
 
 - **Returns a failure** (an `@arki/failure` value, directly or through a
-  promise): status ERROR, with the attributes `failure.code` and
-  `failure.status`. No exception is recorded — a failure is an expected
-  outcome, not a bug.
+  promise): the attributes `failure.code` and `failure.status`. The status
+  is ERROR only for a fault (`isFault`: status 500 or higher); an expected
+  outcome (4xx) leaves it unset. No exception is recorded — a returned
+  failure is not a bug.
 - **Throws or rejects:** the exception is recorded, status ERROR, and the
   same value is rethrown.
 - **Anything else:** status OK.

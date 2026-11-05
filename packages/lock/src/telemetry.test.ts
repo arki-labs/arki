@@ -1,13 +1,16 @@
-import { context, metrics, trace } from '@opentelemetry/api';
+import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { InMemoryMetricExporter, MeterProvider, PeriodicExportingMetricReader, AggregationTemporality } from '@opentelemetry/sdk-metrics';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { UnexpectedDefect } from '@arki/failure';
 
+import { LockHeld } from './errors.js';
+
 import { createLocks } from './index.js';
 import { memoryStore } from './memory.js';
 import { defaultScheduler } from './scheduler.js';
+import { observeLock } from './telemetry.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -35,6 +38,22 @@ describe('default lock observability', () => {
     const operations = metricData.find(metric => metric.descriptor.name === 'lock.operations');
     expect(operations?.dataPoints).toEqual(expect.arrayContaining([expect.objectContaining({ attributes: { operation: 'try_run', outcome: 'success' }, value: 1 })]));
     await meter.shutdown();
+    await tracer.shutdown();
+  });
+
+  // A held lock is an answer the caller handles, not a fault: alerts on span errors must not fire
+  // for contention. A 5xx (a broken store, a bug) is a fault an operator must see.
+  it('a returned 4xx sets failure.code and leaves the status unset; a returned 5xx sets error', async () => {
+    const spans = new InMemorySpanExporter();
+    const tracer = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spans)] });
+    trace.setGlobalTracerProvider(tracer);
+    expect(LockHeld.is(await observeLock('try_run', () => Promise.resolve(LockHeld({ waitedMs: 0 }))))).toBe(true);
+    expect(UnexpectedDefect.is(await observeLock('try_run', () => Promise.resolve(UnexpectedDefect())))).toBe(true);
+    const [held, defect] = spans.getFinishedSpans();
+    expect(held?.attributes['failure.code']).toBe(LockHeld.code);
+    expect(held?.status.code).toBe(SpanStatusCode.UNSET);
+    expect(defect?.attributes['failure.code']).toBe(UnexpectedDefect.code);
+    expect(defect?.status.code).toBe(SpanStatusCode.ERROR);
     await tracer.shutdown();
   });
 

@@ -9,7 +9,7 @@ import { PgBoss } from 'pg-boss';
 import { afterEach, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { RandomSourceUnavailable, z } from '@arki/contracts';
-import { InvalidInput, orThrow, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
+import { defineFailure, InvalidInput, orThrow, UnexpectedDefect, ValidatorDefect } from '@arki/failure';
 
 import type { FlowEnqueueFailure } from './flow-jobs.ts';
 import type { QueueJobId } from './job-id.ts';
@@ -18,6 +18,7 @@ import type { FlowEnqueueResult } from './types/builder.ts';
 import { withEnqueueSpan } from './enqueue-span.ts';
 import { QueueAcceptanceUnknown, QueueUnavailable } from './errors.ts';
 import { initQueue } from './init.ts';
+import { executeJob } from './job-outcome.ts';
 import { createQueueClient } from './queue-client.ts';
 import { createRuntimeLocalQueueInstance } from './runtime-local/create-queue.ts';
 import { triggerValidated } from './trigger.ts';
@@ -152,7 +153,8 @@ it('traces flow validation refusals before transport with the exact public resul
       'messaging.destination.name': 'declared-flow',
       'failure.code': InvalidInput.code,
     });
-    expect(spans[0]?.status).toEqual({ code: SpanStatusCode.ERROR });
+    // Invalid input is a 4xx answer to the caller, not a fault: the status stays unset.
+    expect(spans[0]?.status).toEqual({ code: SpanStatusCode.UNSET });
     expect(spans[0]?.events).toEqual([]);
   } finally {
     await handle.close();
@@ -243,8 +245,32 @@ it('returns exact failure identity and ends one producer span with safe fields',
   expect(spans[0]?.name).toBe('queue.enqueue');
   expect(spans[0]?.kind).toBe(SpanKind.PRODUCER);
   expect(spans[0]?.attributes).toEqual({ 'messaging.destination.name': 'declared-job', 'failure.code': failure.code });
-  expect(spans[0]?.status).toEqual({ code: SpanStatusCode.ERROR });
+  // A 4xx refusal is an expected answer: alerts on span errors must not fire for it.
+  expect(spans[0]?.status).toEqual({ code: SpanStatusCode.UNSET });
   expect(spans[0]?.events).toEqual([]);
+});
+
+it('marks a queue.execute span as an error only for a returned fault, and always records the code', async () => {
+  // WHY: a handler's 4xx refusal is a business answer; only a 5xx fault needs an operator.
+  const exporter = installTelemetry();
+  const Declined = defineFailure('test.queue.declined', { status: 409 });
+  const Upstream = defineFailure('test.queue.upstream_down', { status: 503 });
+  const wire = {
+    name: 'declared-job',
+    data: { n: 1 },
+    attemptsMade: 0,
+    updateProgress: () => Promise.resolve(),
+    log: () => Promise.resolve(),
+  };
+  const declined = q.job.name('declared-job').input(schema).handler(() => Promise.resolve(Declined()));
+  const upstream = q.job.name('declared-job').input(schema).handler(() => Promise.resolve(Upstream()));
+  expect(Declined.is(await executeJob(declined._internal, wire, () => ({})))).toBe(true);
+  expect(Upstream.is(await executeJob(upstream._internal, wire, () => ({})))).toBe(true);
+  const [refusal, fault] = exporter.getFinishedSpans().filter(span => span.name === 'queue.execute');
+  expect(refusal?.attributes['failure.code']).toBe(Declined.code);
+  expect(refusal?.status).toEqual({ code: SpanStatusCode.UNSET });
+  expect(fault?.attributes['failure.code']).toBe(Upstream.code);
+  expect(fault?.status).toEqual({ code: SpanStatusCode.ERROR, message: Upstream.code });
 });
 
 it.each([
@@ -444,11 +470,14 @@ it('traces every unavailable entry without changing unavailable-before-validatio
     expect(await definition.trigger({ n: Number.NaN })).toMatchObject({ code: QueueUnavailable.code });
     const spans = exporter.getFinishedSpans();
     expect(spans).toHaveLength(3);
-    for (const span of spans)
+    for (const span of spans) {
       expect(span.attributes).toEqual({
         'messaging.destination.name': 'declared-job',
         'failure.code': QueueUnavailable.code,
       });
+      // No transport is a 5xx fault an operator must fix, so the span is an error.
+      expect(span.status).toEqual({ code: SpanStatusCode.ERROR });
+    }
     expect(transport.add).not.toHaveBeenCalled();
   } finally {
     await db.close();

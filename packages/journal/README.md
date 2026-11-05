@@ -186,7 +186,7 @@ The command context exposes `commandId` and `correlationId` for logs. To read a 
 | `journal.effect`  | one effect attempt, inside its lease, around the effect hooks                        | `journal.effect.name`, `journal.job.id`, `journal.job.attempt`, `journal.event.type`                                                              |
 | `journal.step`    | the body or the undo of one workflow step attempt, inside its `workflow.step` effect | `journal.workflow.name`, `journal.workflow.version`, `journal.workflow.run_id`, `journal.step.name`, `journal.step.attempt`, `journal.step.phase` |
 
-Each span ends with `journal.outcome`: `ok`, `failure` (a returned failure, with `failure.code`) or `defect` (a throw). A failure is not recorded as an exception event. Inputs, payloads, meta, results and error messages are never attributes. The span is the active span while the work runs, so a command that an effect or a step runs is its child. A tracer or context manager that throws changes nothing: the work runs once and its result passes through.
+Each span ends with `journal.outcome`: `ok`, `failure` (a returned failure, with `failure.code`) or `defect` (a throw). A failure is not recorded as an exception event. A returned failure sets the error status only when it is a fault (`isFault`: status 500 or higher); an expected outcome (4xx) leaves the status unset. A throw always sets it. Inputs, payloads, meta, results and error messages are never attributes. The span is the active span while the work runs, so a command that an effect or a step runs is its child. A tracer or context manager that throws changes nothing: the work runs once and its result passes through.
 
 ### Idempotent commands
 

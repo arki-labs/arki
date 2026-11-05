@@ -94,7 +94,9 @@ average?" needs all units' `dot.unit.boot` spans to share a name.
 | `dot.hook`           | unit  | string | Which hook (same set as `dot.app.phase`)    |
 | `dot.unit.order`     | unit  | int    | Topological order (0-based, deterministic)  |
 
-Typed failures mark the span as failed with canonical failure attributes.
+Typed failures set the canonical failure attributes (`failure.code`, `failure.status`).
+Only a fault (`isFault`: status 500 or higher) sets the span status to error; an
+expected outcome (4xx) leaves it unset.
 Unexpected exceptions are classified as defects; private failure payloads are not
 automatically copied into span attributes. See the outcome handling source below.
 

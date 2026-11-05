@@ -14,7 +14,7 @@
 import type { Attributes, Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 
-import { isFailure } from '@arki/failure';
+import { isFailure, isFault } from '@arki/failure';
 
 /** The span names the journal emits. */
 export const JOURNAL_SPANS = ['journal.command', 'journal.effect', 'journal.step'] as const;
@@ -50,7 +50,8 @@ export async function withJournalSpan<T>(
     if (isFailure<unknown>(result)) {
       outcome('failure');
       observe(() => span?.setAttribute('failure.code', result.code));
-      observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code }));
+      // An expected outcome (4xx) leaves the status unset; only a fault (5xx) is an error.
+      if (isFault(result)) observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code }));
     } else {
       outcome('ok');
     }

@@ -17,6 +17,7 @@ import { superviseUsecase } from './usecase.js';
 const tracer = trace.getTracer('@arki/dot');
 
 const OrderNotFound = defineFailure('order.not_found', { status: 404 });
+const OrderStoreDown = defineFailure('order.store_down', { status: 503 });
 
 const total = () => (prices: readonly number[]) => prices.reduce((sum, price) => sum + price, 0);
 const find = () => (id: string) => Promise.resolve(id === 'o_1' ? { id } : OrderNotFound());
@@ -118,18 +119,20 @@ describe('with an SDK registered', () => {
     orThrow(await app.dispose());
   });
 
-  it('marks a returned failure ERROR with its code and status, and records no exception: a failure is not a bug', async () => {
+  // A 4xx is an expected answer, so the status stays unset; a fault (5xx, such as the supervised
+  // UnexpectedDefect in the next test) is the only returned failure that sets the error status.
+  it('records a returned 4xx failure code and status, leaves the span status unset and records no exception', async () => {
     const { app, usecases } = await bootOrders();
     const failure = await usecases.find('o_404');
     expect(failure).toMatchObject({ code: 'order.not_found', status: 404 });
     const asyncSpan = spanNamed('feature.orders.find');
-    expect(asyncSpan.status).toEqual({ code: SpanStatusCode.ERROR, message: 'order.not_found' });
+    expect(asyncSpan.status).toEqual({ code: SpanStatusCode.UNSET });
     expect(asyncSpan.attributes).toMatchObject({ 'failure.code': 'order.not_found', 'failure.status': 404 });
     expect(asyncSpan.events).toEqual([]);
 
     expect(usecases.findSync('o_404')).toMatchObject({ code: 'order.not_found' });
     const syncSpan = spanNamed('feature.orders.findSync');
-    expect(syncSpan.status.code).toBe(SpanStatusCode.ERROR);
+    expect(syncSpan.status.code).toBe(SpanStatusCode.UNSET);
     expect(syncSpan.events).toEqual([]);
     orThrow(await app.dispose());
   });
@@ -208,7 +211,8 @@ describe('with an SDK registered', () => {
       createHistogram: (name, options) => ({ ...noopMeter.createHistogram(name, options), record: duration }),
     });
     try {
-      const primary = OrderNotFound();
+      // A fault, so the (broken) status reporter is called.
+      const primary = OrderStoreDown();
       const result = withUnitHookSpan({ appName: 'reporter', unitName: 'plugin', hook: 'boot', order: 0 }, () =>
         Promise.resolve(primary),
       );

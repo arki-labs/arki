@@ -222,6 +222,24 @@ describe('local runtime observer isolation', () => {
     },
   );
 
+  // An expected outcome (4xx) is an answer the caller handles, not a fault: it must not trip alerts on
+  // span errors. A returned 5xx is a fault an operator must see, so it sets error status.
+  it('a returned 4xx sets failure.code and leaves the status unset; a returned 5xx sets error, sync and async', async () => {
+    const exporter = installTelemetry();
+    const Refused = defineFailure('test.refused', { status: 409 });
+    expect(Refused.is(await observeDbOperation('db.transaction', () => Refused()))).toBe(true);
+    expect(Refused.is(observeDbSyncOperation('db.migrations.read', () => Refused()))).toBe(true);
+    expect(RandomSourceUnavailable.is(await observeDbOperation('db.local.init', () => RandomSourceUnavailable()))).toBe(true);
+    expect(RandomSourceUnavailable.is(observeDbSyncOperation('db.migrations.read', () => RandomSourceUnavailable()))).toBe(true);
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map(span => [span.attributes['failure.code'], span.status.code])).toEqual([
+      [Refused.code, SpanStatusCode.UNSET],
+      [Refused.code, SpanStatusCode.UNSET],
+      [RandomSourceUnavailable.code, SpanStatusCode.ERROR],
+      [RandomSourceUnavailable.code, SpanStatusCode.ERROR],
+    ]);
+  });
+
   it('keeps the exact thrown defect and never exports its message', async () => {
     const exporter = installTelemetry();
     const error = new Error('private directory and extension details');
@@ -315,6 +333,8 @@ describe('transaction telemetry', () => {
       'db.unit_of_work',
     ]);
     expect(spans[1]?.attributes['failure.code']).toBe('test.refused');
+    // A rolled-back 409 is the caller's answer, not a fault: no error status.
+    expect(spans[1]?.status.code).toBe(SpanStatusCode.UNSET);
     expect(spans[0]?.attributes).toEqual({});
   });
 });

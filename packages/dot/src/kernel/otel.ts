@@ -2,7 +2,7 @@ import type { Span } from '@opentelemetry/api';
 import { context, INVALID_SPAN_CONTEXT, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import packageMetadata from '@arki/dot/package.json' with { type: 'json' };
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 import { nowMs } from './now.js';
@@ -79,13 +79,17 @@ function stringifyForSpan(value: unknown): string {
   }
 }
 
-/** Record returned outcomes without manufacturing exceptions for expected refusals. */
+/**
+ * Record returned outcomes without manufacturing exceptions for expected refusals. A returned failure
+ * always sets `failure.code`; only a fault (`isFault`: status 500 or higher) sets the error status. An
+ * expected outcome (4xx) is an answer, not an error, so its status stays unset.
+ */
 function recordOutcome(span: Span, outcome: unknown): 'ok' | 'failed' {
   if (!isFailure(outcome)) {
     span.setStatus({ code: SpanStatusCode.OK });
     return 'ok';
   }
-  span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.code });
+  if (isFault(outcome)) span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.code });
   span.setAttributes({ 'failure.code': outcome.code, 'failure.status': outcome.status });
   if (UnexpectedDefect.is(outcome) && outcome.cause instanceof Error) span.recordException(outcome.cause);
   return 'failed';
