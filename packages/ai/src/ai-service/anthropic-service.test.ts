@@ -293,3 +293,53 @@ describe('AnthropicService — failures are returned, not thrown', () => {
     expect(functionIds).toEqual(['anthropic.generateStructuredData', 'anthropic.generateText']);
   });
 });
+
+describe('AnthropicService — sampling parameters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rateLimiters.anthropic.resetAll();
+    useModel(answering('ok'));
+  });
+
+  const messages = [{ role: 'user' as const, content: 'hi' }];
+
+  // The API answers 400 when these models receive a non-default temperature.
+  it.each(['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-4-8', 'claude-fable-5-1'])(
+    'omits the default temperature for %s',
+    async (model) => {
+      await orThrow(new AnthropicService({ model }).generateConversation(messages));
+
+      expect(mockedGenerateText).toHaveBeenCalledWith(expect.objectContaining({ temperature: undefined }));
+    },
+  );
+
+  it('drops an explicit temperature on a model that rejects it instead of failing the call', async () => {
+    const reply = await new AnthropicService({ model: 'claude-haiku-5-5' }).generateConversation(messages, {
+      temperature: 0.7,
+    });
+
+    expect(reply).toBe('ok');
+    expect(mockedGenerateText).toHaveBeenCalledWith(expect.objectContaining({ temperature: undefined }));
+  });
+
+  it('keeps the service default and per-call temperature on a model that accepts sampling', async () => {
+    const svc = new AnthropicService({ model: 'claude-haiku-4-5', temperature: 0.4 });
+
+    await orThrow(svc.generateConversation(messages));
+    expect(mockedGenerateText).toHaveBeenLastCalledWith(expect.objectContaining({ temperature: 0.4 }));
+
+    await orThrow(svc.generateConversation(messages, { temperature: 0.9 }));
+    expect(mockedGenerateText).toHaveBeenLastCalledWith(expect.objectContaining({ temperature: 0.9 }));
+  });
+
+  it('applies the same rule to text generation and streaming', async () => {
+    const svc = new AnthropicService({ model: 'claude-haiku-5-5' });
+
+    await orThrow(svc.generateText('hi', { temperature: 0.7 }));
+    expect(mockedGenerateText).toHaveBeenLastCalledWith(expect.objectContaining({ temperature: undefined }));
+
+    useModel(streamingText(['a']));
+    expect(await collect(await orThrow(svc.streamConversation(messages, { temperature: 0.7 })))).toEqual(['a']);
+    expect(mockedStreamText).toHaveBeenCalledWith(expect.objectContaining({ temperature: undefined }));
+  });
+});

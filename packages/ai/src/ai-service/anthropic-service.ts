@@ -64,6 +64,26 @@ function buildSystemParam(systemPrompt: string | SystemPart[] | undefined): stri
   }));
 }
 
+/**
+ * Model-id prefixes of the Claude models that reject `temperature`, `top_p` and `top_k`
+ * (the API answers 400 for any non-default value). Source: claude-api skill, thinking and
+ * effort table (Fable/Mythos 5.x, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, Haiku 5.5). A prefix also
+ * covers later ids of the same family, such as `claude-opus-5-5`.
+ */
+const SAMPLING_REJECTED_MODEL_PREFIXES = [
+  'claude-fable-5',
+  'claude-mythos-5',
+  'claude-opus-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-sonnet-5',
+  'claude-haiku-5',
+] as const;
+
+function acceptsSampling(model: string): boolean {
+  return !SAMPLING_REJECTED_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+}
+
 export class AnthropicService {
   readonly name = 'anthropic';
   private model: string;
@@ -84,6 +104,23 @@ export class AnthropicService {
       '[Anthropic] Service initialized (model: {model}, temperature: {temperature}, maxRetries: {maxRetries})',
       { model: this.model, temperature: this.defaultTemperature, maxRetries: this.defaultMaxRetries },
     );
+  }
+
+  /**
+   * The `temperature` to send: the per-call value, else the service default. `undefined` for a
+   * model that rejects sampling parameters, so the request keeps the model's own sampling. An
+   * explicit per-call value is dropped with a debug log instead of failing the request.
+   */
+  private temperatureFor(requested: number | undefined): number | undefined {
+    if (acceptsSampling(this.model)) return requested ?? this.defaultTemperature;
+
+    if (requested !== undefined) {
+      debugService.debug('[Anthropic] Dropping temperature {temperature}: {model} rejects sampling parameters', {
+        temperature: requested,
+        model: this.model,
+      });
+    }
+    return undefined;
   }
 
   /**
@@ -122,7 +159,7 @@ export class AnthropicService {
   ): Promise<SchemaOutput<S> | ProviderFailure> {
     debugService.debug('[Anthropic] Generating structured data (messages: {messages}, temperature: {temperature})', {
       messages: messages.length,
-      temperature: options.temperature ?? this.defaultTemperature,
+      temperature: this.temperatureFor(options.temperature),
     });
 
     const system = buildSystemParam(options.systemPrompt);
@@ -137,7 +174,7 @@ export class AnthropicService {
           messages,
           output: Output.object({ schema: modelSchema(schema, 'Anthropic structured generation') }),
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          temperature: options.temperature ?? this.defaultTemperature,
+          temperature: this.temperatureFor(options.temperature),
           abortSignal: options.signal,
           ...aiTelemetry('anthropic.generateStructuredData'),
         });
@@ -175,7 +212,7 @@ export class AnthropicService {
         model: anthropic(this.model),
         instructions: options.systemPrompt,
         prompt,
-        temperature: options.temperature ?? this.defaultTemperature,
+        temperature: this.temperatureFor(options.temperature),
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
         ...aiTelemetry('anthropic.generateText'),
@@ -212,7 +249,7 @@ export class AnthropicService {
           instructions: system,
           messages,
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          temperature: options.temperature ?? this.defaultTemperature,
+          temperature: this.temperatureFor(options.temperature),
           abortSignal: options.signal,
           ...aiTelemetry('anthropic.generateConversation'),
         });
@@ -256,7 +293,7 @@ export class AnthropicService {
         model: anthropic(this.model),
         instructions: buildSystemParam(options.systemPrompt),
         messages,
-        temperature: options.temperature ?? this.defaultTemperature,
+        temperature: this.temperatureFor(options.temperature),
         abortSignal: options.signal,
         ...aiTelemetry('anthropic.streamConversation'),
       });
