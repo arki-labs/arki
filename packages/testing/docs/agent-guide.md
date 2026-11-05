@@ -37,6 +37,10 @@ Follow [Integration tester](integration-tester.md): `initTester`, `setupGlobalTe
 
 Follow [the MSW page](msw.md) or [the recipe](recipes/mock-http-api.md).
 
+### Assert spans and metrics
+
+`using spans = captureSpans()` from `@arki/testing/otel`, run the code, then read `spans.named('db.transaction').parent?.name`, `spans.childrenOf(span)` and `await spans.collectMetrics()`. See [the OpenTelemetry page](otel.md).
+
 ### Score AI output
 
 Import scorers from `@arki/testing/ai` and the matcher from `@arki/testing/ai/vitest` (or `/ai/playwright`). `expect(output).toScore(scorer)` passes or fails with the score and reason. `UnscorableError` means the scorer could not run, for example the judge model is missing.
@@ -53,17 +57,19 @@ Use `@arki/testing/e2e` (`e2eConfig`, `stackSetup`, `e2eTest`, `storyFor`) with 
 - `faker` is unseeded by default. Seed it before comparing generated values.
 - MSW handlers reset after every test. Add them inside the test.
 - A request with no MSW handler fails the test. That is the default and the point.
+- `captureSpans` replaces the global tracer and meter providers. Get tracers inside the operation, not at module load, and dispose the capture at the end of the test.
 - Do not weaken a check to make a flaky test pass. Find the cause.
 
 ## Errors
 
 This package defines one error class. Everything else throws a plain `Error` or `TypeError` whose message names the field, expected value and actual value.
 
-| Error                                                | When                                 | Fix                                                                |
-| ---------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ |
-| `UnscorableError`                                    | A scorer could not score the output  | Read `score.reason`. Start the judge model or fix the output shape |
-| `Error: Tester not initialized. Call setup() first.` | A tester method ran before `setup()` | Call `await tester.setup()` in `beforeAll`                         |
-| `Error: Expected ... ` from an assertion             | The check failed                     | Read the field, expected and actual values in the message          |
+| Error                                                               | When                                 | Fix                                                                    |
+| ------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| `UnscorableError`                                                   | A scorer could not score the output  | Read `score.reason`. Start the judge model or fix the output shape     |
+| `Error: Tester not initialized. Call setup() first.`                | A tester method ran before `setup()` | Call `await tester.setup()` in `beforeAll`                             |
+| `Error: Expected ... ` from an assertion                            | The check failed                     | Read the field, expected and actual values in the message              |
+| `Error: captureSpans: expected exactly one finished span named ...` | `named` found no span or several     | Read the listed span names; check the operation ran and ended its span |
 
 ## Verify
 

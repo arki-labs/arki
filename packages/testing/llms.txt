@@ -6,7 +6,7 @@
 
 <!-- llms:start -->
 - `@arki/testing`: Comprehensive Testing Utilities. `FactoryBuilder`, `FactoryRegistry`, `assertArrayEmpty`, `assertArrayLength`, `assertArrayNotEmpty`, `assertArraySorted`, `assertContainsId`, `assertDeepPartialMatch`, `assertErrorThrown`, `assertMatchesSchema`, `assertNoError`, `assertNotContainsId`; and 41 more.
-- `@arki/testing/ai`: scorers, the judge, and the score contract. `UnscorableError`, `containsFacts`, `cosine`, `createEmbedder`, `createJudge`, `defineScorer`, `grounded`, `rubric`, `scoreMatch`, `shape`, `similarTo`; types `AiTools`; and 11 more.
+- `@arki/testing/ai`: scorers, the judge, and the score contract. `OLLAMA_FAILURES`, `OllamaAnswerInvalid`, `OllamaUnavailable`, `UnscorableError`, `containsFacts`, `cosine`, `createEmbedder`, `createJudge`, `defineScorer`, `grounded`, `rubric`, `scoreMatch`; and 15 more.
 - `@arki/testing/ai/playwright`: Playwright's `expect` with `toScore`. `expect`.
 - `@arki/testing/ai/vitest`: importing this file adds `toScore` to Vitest's `expect`. `expect`; types `AiExpect`, `ScoreAssertion`.
 - `@arki/testing/assertions`: Enhanced Assertion Helpers for Testing. `assertArrayEmpty`, `assertArrayLength`, `assertArrayNotEmpty`, `assertArraySorted`, `assertContainsId`, `assertDeepPartialMatch`, `assertErrorThrown`, `assertMatchesSchema`, `assertNoError`, `assertNotContainsId`, `assertOneOf`, `assertPaginationValid`; and 1 more.
@@ -19,10 +19,11 @@
 - `@arki/testing/services/ollama`: the Ollama daemon already running on this machine. `ollama`; types `OllamaOptions`, `OllamaValue`.
 - `@arki/testing/services/postgres`: one Postgres container per run, one migrated template database, and one clone of it per worker (`CREATE DATABASE … TEMPLATE`, tens of milliseconds). `postgres`, `truncateAll`; types `PostgresOptions`, `PostgresRun`, `PostgresWorker`.
 - `@arki/testing/services/redis`: one Redis container per worker. `flushRedis`, `redis`; types `RedisWorker`.
-- `@arki/testing/stack`: the real services a test run needs, declared once per app. `STACK_ENV_KEY`, `defineStack`, `readManifest`, `service`; types `AttachedStack`, `Env`, `Json`, `RunValues`, `RunningStack`, `ServiceMap`, `ServiceScope`, `ServiceSpec`; and 8 more.
+- `@arki/testing/stack`: the real services a test run needs, declared once per app. `READ_MANIFEST_FAILURES`, `STACK_ENV_KEY`, `StackManifestInvalid`, `StackNotStarted`, `defineStack`, `readManifest`, `service`; types `AttachedStack`, `Env`, `Json`, `ReadManifestFailure`, `RunValues`; and 12 more.
 - `@arki/testing/stack/contract`: The provider contract: one suite every service runs. `describeServiceContract`, `leftoverContainers`, `newRunId`; types `ContractOptions`.
 - `@arki/testing/server/integration-tester`: `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests. `IntegrationTester`; types `CreateCallerArgs`, `IntegrationTesterConfig`, `TestUser`, `TestUserRole`, `TesterDatabase`, `TesterOptions`, `TesterUserOverrides`, `TesterUsers`.
 - `@arki/testing/msw`: MSW (Mock Service Worker) primitives for Vitest-based HTTP testing. `HttpHandler`, `HttpResponse`, `RequestHandler`, `delay`, `http`, `passthrough`, `setupMswServer`; types `DefaultBodyType`, `ResponseResolver`, `SetupMswServerOptions`, `SetupServer`, `StrictRequest`; and 1 more.
+- `@arki/testing/otel`: In-memory OpenTelemetry capture for one test: finished spans with their parents, and collected metrics. `captureSpans`; types `CapturedSpan`, `SpanCapture`.
 - `@arki/testing/performance`: Performance Testing Utilities. `assertPerformance`, `benchmarkQuery`, `comparePerformance`, `createPerformanceTracker`, `measurePerformance`, `measureQuery`; types `PerformanceResult`.
 - `@arki/testing/server/tester-builder`: Tester Builder - tRPC-style initialization pattern. `initTester`; types `ContextTesterBuilder`, `InitialTesterBuilder`, `TesterBuilder`, `TesterConfig`.
 - `@arki/testing/timestamps`: Timestamp assertions that accept every moment type an app stores. `assertTimestamps`, `assertUpdatedAfterCreated`, `describeKind`, `epochMilliseconds`, `epochNanoseconds`, `isTimestamp`; types `Timestamp`, `Timestamps`.
@@ -38,6 +39,7 @@
 - [Build test data](docs/agent-guide.md#build-test-data)
 - [Test a backend against a real database](docs/agent-guide.md#test-a-backend-against-a-real-database)
 - [Mock an outside HTTP API](docs/agent-guide.md#mock-an-outside-http-api)
+- [Assert spans and metrics](docs/agent-guide.md#assert-spans-and-metrics)
 - [Score AI output](docs/agent-guide.md#score-ai-output)
 - [Run an end-to-end story against a built app](docs/agent-guide.md#run-an-end-to-end-story-against-a-built-app)
 

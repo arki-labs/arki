@@ -4,6 +4,7 @@
 // The entries that need a test runner or a browser (./vitest-setup, ./ai/vitest,
 // ./ai/playwright, ./e2e, ./containers, ./services/*) are imported to prove they load.
 
+import { metrics, trace } from '@opentelemetry/api';
 import { z } from 'zod';
 
 import { containsFacts, cosine, scoreMatch, shape, UnscorableError } from '../dist/ai/index.js';
@@ -22,6 +23,7 @@ import {
   timeOperation,
 } from '../dist/index.js';
 import { http, HttpResponse } from '../dist/msw.js';
+import { captureSpans } from '../dist/otel.js';
 import { httpFixtures } from '../dist/services/http-fixtures.js';
 import { newRunId } from '../dist/stack/contract.js';
 import { service } from '../dist/stack/index.js';
@@ -85,6 +87,21 @@ const fetched = await fetch(`${started.value.url}/world`).then(response => respo
 await started.stop();
 await started.stop();
 
+// Real OpenTelemetry API calls: the parent must survive an await on every engine.
+const spans = captureSpans();
+const tracer = trace.getTracer('smoke');
+await tracer.startActiveSpan('smoke.outer', async outer => {
+  await Promise.resolve();
+  tracer.startSpan('smoke.inner').end();
+  outer.end();
+});
+metrics.getMeter('smoke').createCounter('smoke.operations').add(3);
+const otelParent = spans.named('smoke.inner').parent?.name;
+const otelCounter = (await spans.collectMetrics()).find(metric => metric.descriptor.name === 'smoke.operations');
+const otelMissing = await refusal(() => spans.named('smoke.absent'));
+spans[Symbol.dispose]();
+const otelAfterDispose = trace.getTracer('smoke').startSpan('smoke.after').isRecording();
+
 const checks = [
   ['factory applies defaults', userFactory(undefined).age, 40],
   ['factory overrides win', userFactory({ age: 1 }).age, 1],
@@ -116,6 +133,10 @@ const checks = [
     's',
   ],
   ['http fixture serves a real request', fetched, 'hello /world'],
+  ['captureSpans links a span to its parent across await', otelParent, 'smoke.outer'],
+  ['captureSpans collects a counter', otelCounter?.dataPoints[0]?.value, 3],
+  ['captureSpans names a missing span', otelMissing.includes('found 0'), true],
+  ['captureSpans dispose leaves no recording provider', otelAfterDispose, false],
 ];
 
 const engine =

@@ -59,7 +59,7 @@ Debug logs use the `testing:*` categories. Show them with `DEBUG_TESTS=true`.
 | ------- | ------ | -------------- | ---------- |
 | node    | pass   | v22.13.1       | 2026-11-05 |
 | bun     | pass   | 1.4.2          | 2026-11-05 |
-| deno    | fail   | 2.9.8          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
 | browser | n/a    | -              | 2026-11-05 |
 | hermes  | n/a    | -              | 2026-11-05 |
 
@@ -83,6 +83,7 @@ The root entry loads no Docker client, no MSW and no `@arki/auth`. The rest are 
 | `@arki/testing/e2e`                                                               | Playwright config, setup and story helpers for a built app                   | `@playwright/test`, Docker                 |
 | `@arki/testing/ai`                                                                | scorers, `createJudge`, `defineScorer`                                       | an Ollama daemon for judge scorers         |
 | `@arki/testing/ai/vitest`, `/ai/playwright`                                       | `expect(...).toScore(scorer)`                                                | Vitest or Playwright                       |
+| `@arki/testing/otel`                                                              | `captureSpans`: finished spans with their parents, and collected metrics     | `@opentelemetry/api`                       |
 
 The full list with every export name is in [llms.txt](llms.txt).
 
@@ -94,6 +95,7 @@ Every helper throws a plain `Error` (or `TypeError` for a wrong value type) when
 - `IntegrationTester` methods throw `Tester not initialized. Call setup() first.` before `setup()`.
 - A scorer that cannot score throws `UnscorableError`. It is never a pass, and `.not` does not turn it into one.
 - `setupMswServer` fails a test that makes a request no handler matches.
+- `captureSpans().named(name)` throws when no finished span or more than one has that name. The message lists every finished span.
 
 These return `@arki/failure` failures instead of throwing:
 
@@ -114,6 +116,7 @@ These return `@arki/failure` failures instead of throwing:
 - **Without a seed, `faker` output differs on every run.** Call `faker.seed(1)` before a test that compares generated values.
 - **`assertTimestampRecent` allows 10 seconds by default.** A timestamp 11 seconds old fails unless you pass `withinSeconds`.
 - **MSW handlers reset after every test.** A handler added with `server.use(...)` in one test is gone in the next.
+- **`captureSpans` sees only tracers and meters taken after it starts.** A tracer cached at module load keeps its old provider. One capture at a time: the providers are process globals.
 
 ## Documentation
 
@@ -121,6 +124,7 @@ These return `@arki/failure` failures instead of throwing:
 - [Factories and assertions](docs/factories-and-assertions.md): the full factory and assertion surface.
 - [Debug and performance](docs/debug-and-performance.md): logging, database dumps, timing and budgets.
 - [HTTP mocking with MSW](docs/msw.md): setup, patterns and why not to stub `fetch`.
+- [OpenTelemetry capture](docs/otel.md): `captureSpans`, parents, metrics, reset and dispose.
 - [Recipe: mock an HTTP API](docs/recipes/mock-http-api.md): one test, one command, expected output.
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.
 - [llms.txt](llms.txt): the import map.

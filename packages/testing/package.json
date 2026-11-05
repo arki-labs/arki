@@ -134,7 +134,12 @@
       "import": "./dist/vitest-setup.js",
       "default": "./dist/vitest-setup.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "import": "./dist/otel.js",
+      "default": "./dist/otel.js"
+    }
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -180,6 +185,8 @@
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
+    "@opentelemetry/sdk-metrics": "catalog:opentelemetry",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "drizzle-orm": "catalog:drizzle",
     "pg": "catalog:drizzle"
   },
@@ -189,6 +196,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
@@ -202,6 +210,7 @@
   },
   "peerDependencies": {
     "@arki/auth": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
@@ -211,6 +220,9 @@
   },
   "peerDependenciesMeta": {
     "@arki/auth": {
+      "optional": true
+    },
+    "@opentelemetry/api": {
       "optional": true
     },
     "@playwright/test": {
