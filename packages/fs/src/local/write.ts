@@ -1,6 +1,24 @@
+/** Appends to a local file and returns typed storage failures. */
+import { appendFile } from 'node:fs/promises';
+
+import { StorageRejected } from '../storage/failures.js';
+import { observeFs, storageErrorFacts, storageWriteFailure } from '../storage/operation.js';
+
 /**
- * Pass-through of Node `appendFile`. It rejects with the raw Node system error (`ENOENT` for a missing
- * directory, `EACCES`, `ENOSPC` for a full disk); nothing is wrapped into a failure. For canonical outcomes
- * use `createLocalStorageAdapter` from `@arki/fs/storage/local-adapter`.
+ * Appends `data` to the end of a file, creating the file when it is missing. Returns nothing on success, or
+ * a failure: `StorageRejected` when nothing was written (a missing directory, `EACCES`, a read-only file
+ * system) and `StorageWriteUncertain` when the append may have partly happened (`ENOSPC`, an I/O fault).
  */
-export { appendFile as writeToTheFileEnd } from 'node:fs/promises';
+export function writeToTheFileEnd(pathToFile: string, data: string | Uint8Array) {
+  return observeFs('fs.local.append', async () => {
+    try {
+      await appendFile(pathToFile, data);
+      return;
+    } catch (error) {
+      // A missing parent directory is a definite refusal: no byte was written.
+      return storageErrorFacts(error)?.code === 'ENOENT'
+        ? StorageRejected({ cause: error })
+        : storageWriteFailure(error);
+    }
+  });
+}

@@ -1,24 +1,34 @@
-import { readFileSync } from 'node:fs';
+/** Reads and decodes a whole local file and returns typed storage failures. */
+import { readFile as readFileBytes } from 'node:fs/promises';
 import iconv from 'iconv-lite';
 
 import { getLogger } from '@arki/log';
 
+import { StorageCancelled, StorageNotFound, StorageRejected } from '../storage/failures.js';
+import { observeFs, storageErrorFacts, storageReadFailure } from '../storage/operation.js';
+
 const log = getLogger('arki:fs');
 
 /**
- * Reads a whole file synchronously and decodes it. This is a load-time reader (bundled data files), so it keeps
- * a documented throw instead of returning a failure.
- *
- * @throws The Node system error (`ENOENT`, `EACCES`, ...) when the file cannot be read, or the iconv-lite
- * error when `encoding` is unknown.
+ * Reads a whole file and decodes it with `encoding` (`utf8`, `latin1`, `win1252`, any iconv-lite name).
+ * Returns the text, or a failure: `StorageNotFound` for a missing path, `StorageRejected` for an unknown
+ * encoding or a refused read (`EACCES`, a directory), `StorageUnavailable` for an I/O fault and
+ * `StorageCancelled` when `signal` aborts.
  */
-export const readFile = (pathToFile: string, encoding: string) => {
-  log.debug('reading file {encoding}', { encoding });
-  const buffer = readFileSync(pathToFile);
-
-  if (encoding === 'utf8') {
-    return buffer.toString();
-  }
-
-  return iconv.decode(buffer, encoding);
-};
+export const readFile = (pathToFile: string, encoding: string, options: { signal?: AbortSignal } = {}) =>
+  observeFs('fs.local.read_file', async () => {
+    if (options.signal?.aborted) return StorageCancelled({ cause: options.signal.reason });
+    if (!iconv.encodingExists(encoding)) {
+      log.debug('unknown encoding {encoding}', { encoding });
+      return StorageRejected();
+    }
+    log.debug('reading file {encoding}', { encoding });
+    try {
+      const buffer = await readFileBytes(pathToFile, { signal: options.signal });
+      return encoding === 'utf8' ? buffer.toString() : iconv.decode(buffer, encoding);
+    } catch (error) {
+      return storageErrorFacts(error)?.code === 'ENOENT'
+        ? StorageNotFound({ cause: error })
+        : storageReadFailure(error, options.signal);
+    }
+  });

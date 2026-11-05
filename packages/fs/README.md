@@ -351,11 +351,13 @@ Only actual ENOENT becomes missing (`null`, `false`, or idempotent delete); ENOT
 
 `readFirstLine` returns the first line, `undefined` at empty EOF, or a canonical read failure. It closes its
 reader/stream on every terminal path and accepts an optional signal. `StorageNotFound` is the missing-file
-outcome. The older synchronous `readFile` helper remains a separate native-helper migration obligation.
+outcome. `readFile`, `writeToTheFileEnd`, `deleteAsync` and `glob` (`@arki/fs/local/*`) return the same
+typed storage failures: a missing path is `StorageNotFound`, a refusal is `StorageRejected`, a write that
+may have partly happened is `StorageWriteUncertain`.
 
-The `del`, `glob` iterator/stream, append-file reexports and legacy `initializeStorage` Flystorage handle
-retain their upstream contracts. The importing application operation owns their throws, stream errors,
-cancellation and cleanup. These named foreign bridges do not exempt the owned adapters or lifecycle.
+The legacy `initializeStorage` Flystorage handle retains its upstream contract. The importing application
+operation owns its throws, cancellation and cleanup. This named foreign bridge does not exempt the owned
+adapters or lifecycle.
 
 ### Observability
 

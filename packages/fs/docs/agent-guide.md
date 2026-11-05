@@ -55,8 +55,8 @@ supervised as `UnexpectedDefect`; no provider fault turns into absence.
 
 Local keys cannot escape through dot segments or descendant symlinks. Keep the canonical base directory
 application-owned; concurrent hostile ancestor replacement is outside the portable adapter's guarantee.
-`readFirstLine` owns errors, empty EOF and cancellation; older synchronous `readFile` remains a separate
-native-helper obligation.
+`readFirstLine` owns errors, empty EOF and cancellation; `readFile`, `writeToTheFileEnd`, `deleteAsync` and
+`glob` return typed storage failures too.
 
 Default spans/counters/durations use `@arki/fs` and bounded operation/failure codes. No private attributes
 or global SDK configuration. Pure declarations and the in-memory testing adapter need no separate spans.
