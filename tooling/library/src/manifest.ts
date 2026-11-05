@@ -18,11 +18,16 @@ export type Runtime = (typeof RUNTIMES)[number];
  * - `runtimes`: the engines the package claims. Missing means all of them.
  * - `bundlerOnly`: export keys (`./react`) that load only inside a bundler or a
  *   worker. The release smoke bundles them with Vite instead of importing them
- *   under plain Node and Bun. Each key must be in `exports`.
+ *   under plain Node and Bun; `arki-runtimes` runs their own smoke file as a
+ *   bundle on every engine. Each key must be in `exports`.
+ * - `entryRuntimes`: export keys (`./geocoding`) that run on fewer engines than
+ *   the package, each with its engines. Each key must be in `exports`, and each
+ *   engine must be in `runtimes`.
  */
 export const arkiClaimSchema = z.object({
   runtimes: z.array(z.enum(RUNTIMES)).min(1).optional(),
   bundlerOnly: z.array(z.string().min(1)).min(1).optional(),
+  entryRuntimes: z.record(z.string().min(1), z.array(z.enum(RUNTIMES)).min(1)).optional(),
 });
 
 const manifestSchema = z.object({
@@ -53,6 +58,10 @@ export type Manifest = {
   readonly sideEffects: boolean | readonly string[] | undefined;
   /** The engines the package claims; every engine when `arki.runtimes` is absent. */
   readonly runtimes: ReadonlySet<Runtime>;
+  /** `arki.bundlerOnly`: export keys that load only inside a bundler. */
+  readonly bundlerOnly: ReadonlySet<string>;
+  /** `arki.entryRuntimes`: export key to the engines that entry runs on (a subset of `runtimes`). */
+  readonly entryRuntimes: ReadonlyMap<string, ReadonlySet<Runtime>>;
   /** `"private": true` keeps the package off npm; it defaults to `false`. */
   readonly private: boolean;
   readonly scripts: Readonly<Record<string, string>>;
@@ -81,9 +90,15 @@ export function readManifest(dir: string): Manifest {
     scripts,
     files,
   } = parsed.data;
+  const exportMap = typeof exports === 'string' ? { '.': exports } : (exports ?? {});
+  const runtimes = new Set(arki?.runtimes ?? RUNTIMES);
+  const problems = entryRuntimeProblems(arki?.entryRuntimes ?? {}, Object.keys(exportMap), runtimes);
+  if (problems.length > 0) {
+    throw new Error(`${file} is not a valid package manifest: ${problems.join('; ')}`);
+  }
   return {
     name,
-    exports: typeof exports === 'string' ? { '.': exports } : (exports ?? {}),
+    exports: exportMap,
     dependencies: dependencies ?? {},
     devDependencies: devDependencies ?? {},
     peerDependencies: peerDependencies ?? {},
@@ -94,11 +109,27 @@ export function readManifest(dir: string): Manifest {
         .map(([peer]) => peer),
     ),
     sideEffects,
-    runtimes: new Set(arki?.runtimes ?? RUNTIMES),
+    runtimes,
+    bundlerOnly: new Set(arki?.bundlerOnly ?? []),
+    entryRuntimes: new Map(Object.entries(arki?.entryRuntimes ?? {}).map(([key, engines]) => [key, new Set(engines)])),
     private: isPrivate ?? false,
     scripts: scripts ?? {},
     files,
   };
+}
+
+/** Why an `arki.entryRuntimes` claim is wrong: a key that is not an export, or an engine the package does not claim. */
+function entryRuntimeProblems(
+  claim: Readonly<Record<string, readonly Runtime[]>>,
+  exportKeys: readonly string[],
+  runtimes: ReadonlySet<Runtime>,
+): string[] {
+  return Object.entries(claim).flatMap(([key, engines]) => [
+    ...(exportKeys.includes(key) ? [] : [`arki.entryRuntimes lists ${key}, but exports has no such key`]),
+    ...engines
+      .filter(engine => !runtimes.has(engine))
+      .map(engine => `arki.entryRuntimes gives ${key} the engine ${engine}, which arki.runtimes does not claim`),
+  ]);
 }
 
 /** Every string leaf of a target, with the condition names on the way to it. */
@@ -127,7 +158,11 @@ export function runtimeEntry(target: ExportTarget): string | undefined {
   )?.value;
 }
 
-/** True when the package depends on nothing from npm (only `workspace:` links, or nothing). */
-export function hasNoNpmDependencies(manifest: Manifest): boolean {
-  return Object.values(manifest.dependencies).every(range => range.startsWith('workspace:'));
+/**
+ * True for a React Native package: one that claims Hermes and no other engine. It
+ * loads `react-native` (itself, or through a peer such as `react-native-purchases`),
+ * whose Flow source only Metro bundles, so its Hermes leg bundles the way Metro does.
+ */
+export function isReactNativePackage(manifest: Manifest): boolean {
+  return manifest.runtimes.size === 1 && manifest.runtimes.has('hermes');
 }

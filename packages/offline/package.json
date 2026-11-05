@@ -161,6 +161,17 @@
     "bundlerOnly": [
       "./pwa"
     ],
+    "entryRuntimes": {
+      "./orpc": [
+        "node",
+        "bun",
+        "deno",
+        "browser"
+      ],
+      "./pwa": [
+        "browser"
+      ]
+    },
     "runtimes": [
       "node",
       "bun",

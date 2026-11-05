@@ -79,7 +79,7 @@ Debug logs use the `arki:queue` category. Show them with `DEBUG=arki:queue`.
 | --- | --- | --- | --- |
 | node | pass | v22.13.1 | 2026-11-05 |
 | bun | pass | 1.4.2 | 2026-11-05 |
-| deno | fail | 2.9.8 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
 | browser | n/a | - | 2026-11-05 |
 | hermes | n/a | - | 2026-11-05 |
 <!-- runtimes:end -->

@@ -182,6 +182,26 @@ Reads every error code under `src/` and writes `dist/errors.json`, the data behi
 arki-error-index [--out dist/errors.json]
 ```
 
+### The `arki` claim in package.json
+
+`arki-runtimes` reads which engines a package and each of its entries run on:
+
+```json
+{
+  "arki": {
+    "runtimes": ["node", "bun", "deno", "browser", "hermes"],
+    "bundlerOnly": ["./react"],
+    "entryRuntimes": { "./geocoding": ["node", "bun", "deno"] }
+  }
+}
+```
+
+- `runtimes`: the engines the package claims. Missing means all five. A leg outside the list prints `out of scope` and gets an `n/a` row.
+- `entryRuntimes`: an export key that runs on fewer engines than the package, with its engines. Each key must be in `exports` and each engine in `runtimes`, or the manifest is refused. Prove the entry in its own file, `scripts/smoke/<key>.mjs` (`./react/google-maps` is `scripts/smoke/react/google-maps.mjs`), and keep it out of `scripts/smoke.mjs`. `arki-runtimes` runs that file only on the entry's engines, and fails when the file is missing.
+- `bundlerOnly`: an export key that loads only inside a bundler (it imports a package that ships TypeScript source, or reads `import.meta.env`). When the key has a `scripts/smoke/<key>.mjs`, `arki-runtimes` runs it as a bundle on every engine (`bun build --target=node` for Node, Bun and Deno).
+- A leg passes only when every smoke file that claims its engine passes. `--write-readme` adds one line per entry smoke file under the table.
+- A package whose `runtimes` is only `hermes` is a React Native package. Bun cannot import `react-native` (Flow source), so purity is left to the Hermes leg. Its Hermes bundle resolves the way Metro does for iOS (`.ios` and `.native` files, JSX in `.js`), and `react-native` itself comes from the host: an empty `NativeModules` and the iOS `Platform`. Any other `react-native` export, and any `react-native/Libraries/...` import, fails the leg, because this runner has no React Native native runtime.
+
 ### `arki-runtimes --write-readme`
 
 Runs the package's runtime tests and writes one row per engine (result, version tested, UTC date) between `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in `README.md`.

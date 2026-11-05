@@ -78,7 +78,8 @@ Founder, during journal store-modes slice 8: "less abstractions, more things lik
 Long form: "Prove portability" in `principles.md` (A-35, A-41). Founder, 2026-10-13: "make sure Bun, Deno, Node, browser and other envs are supported in all."
 
 - The root entry is pure ESM on web-standard globals: no `node:*`, `bun`, `bun:*`, `process`, `Buffer`, `require`, `__dirname`. The `@arki/eslint-config/library` preset forbids them; a package lints with one line: `export { default } from '@arki/eslint-config/library';` (or `library({ adapters: ['src/node/**'] })` for adapter folders).
-- Every package proves its runtimes: `"test:runtimes": "arki-runtimes"` plus `scripts/smoke.mjs` printing `N smoke checks passed`. Legs: purity (each entry in a fresh empty-env process), Node, Bun, Deno (`--no-config`, bundled `--target=node` when it has npm deps), browser (Playwright Chromium), Hermes (`HERMES_BIN`). A missing engine is INCOMPLETE, fatal only with `--require-all`. Deno leg details: `--no-config --node-modules-dir=manual`.
+- Every package proves its runtimes: `"test:runtimes": "arki-runtimes"` plus `scripts/smoke.mjs` printing `N smoke checks passed`. Legs: purity (each entry in a fresh empty-env process), Node, Bun, Deno (unbundled: `--no-config --node-modules-dir=manual`, reading the installed `node_modules`), browser (Playwright Chromium), Hermes (`HERMES_BIN`). A missing engine is INCOMPLETE, fatal only with `--require-all`.
+- An entry that runs on fewer engines than its package claims them in `"arki": { "entryRuntimes": { "./geocoding": ["node", "bun", "deno"] } }` and is proven by its own `scripts/smoke/<key>.mjs`, run only on those engines (`tooling/library/README.md`).
 - Hermes V1 lacks `Array#toSorted/toReversed/toSpliced`, `structuredClone`, most `Intl` constructors and `formatToParts`. Never build an `Intl` object at module load. Probe at runtime and throw `UnsupportedFeatureError` rather than degrade. Never capture a loop variable in a closure (Hermes scopes `let` in a loop to the function); call a named function per iteration.
 - The five-runtime and benchmark rules apply to leaf libraries, not app-layer packages such as queue, payments, auth and mail (A-05).
 - A library whose root is server-side, and that exports what an oRPC contract needs (failures, ids, input and output schemas), offers them through one browser-safe `./contract` entry (A-41). The name is singular; `./contracts` is forbidden (`CONTRACT_E002`). `arki-library-check` bundles every `./contract` for the browser and fails on server code (`CONTRACT_E001`). A `./errors` entry carries no browser promise.
@@ -94,6 +95,7 @@ Long form: "Everything can be observed with OpenTelemetry" in `principles.md` (A
 - Stable names, bounded metric dimensions, safe attributes. Secrets, prompts, model output and user payloads are not collected by default.
 - Each package records which boundaries it instruments and why the others need none.
 - Logging goes through `getLogger('arki:<name>')` from `@arki/log`, never `console.log`. Libraries never call `configure()`. Lifecycle messages (`starting`, `done`) are DEBUG, opted in with `DEBUG=arki:<name>`; INFO is for events a consumer cares about at scale; WARN for degraded success; ERROR for the failing operation (founder, 2026-05-21). Lifecycle lines at INFO broke a CLI subprocess test once.
+- A returned failure always sets `failure.code`; it sets the span status to error only when `isFault(failure)` (status >= 500). Expected outcomes leave the status unset (founder, 2026-11-05).
 
 ## 8. Tests run on real objects
 

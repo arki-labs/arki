@@ -5,13 +5,19 @@ import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 import type { RuntimeRow } from './runtimes';
-import { HERMES_FAILURE_MARKER, hermesScript } from './hermes-host';
-import { readManifest, RUNTIMES } from './manifest';
+import { HERMES_FAILURE_MARKER, hermesScript, REACT_NATIVE_HOST_MODULE } from './hermes-host';
+import { isReactNativePackage, readManifest, RUNTIMES } from './manifest';
 import {
+  entryNotes,
+  entrySmokeFile,
   HERMES_BUNDLE_ARGS,
   isLegInScope,
+  METRO_RESOLVE_EXTENSIONS,
   parseRuntimesTable,
   renderRuntimesTable,
+  RUNTIMES_END,
+  RUNTIMES_START,
+  smokeUnits,
   updateRuntimesSection,
 } from './runtimes';
 
@@ -59,6 +65,118 @@ describe('runtime scope in package.json', () => {
   it('rejects an unknown engine name, so a typo cannot silently drop a leg', () => {
     expect(() => manifestWith({ arki: { runtimes: ['hermess'] } })).toThrow(/not a valid package manifest/);
     expect(() => manifestWith({ arki: { runtimes: [] } })).toThrow(/not a valid package manifest/);
+  });
+});
+
+describe('per-entry engines (arki.entryRuntimes)', () => {
+  const exports = { '.': './dist/index.js', './geocoding': './dist/geocoding.js', './react': './dist/react.js' };
+
+  it('reads the engines of an entry, so an entry that needs Node builtins can claim fewer engines than its package', () => {
+    const manifest = manifestWith({ exports, arki: { entryRuntimes: { './geocoding': ['node', 'bun', 'deno'] } } });
+    expect([...(manifest.entryRuntimes.get('./geocoding') ?? [])]).toEqual(['node', 'bun', 'deno']);
+    expect(manifest.entryRuntimes.has('.')).toBe(false);
+  });
+
+  it('rejects a key that is not an export, so a typo cannot leave the real entry on the package claim', () => {
+    expect(() => manifestWith({ exports, arki: { entryRuntimes: { './geocode': ['node'] } } })).toThrow(
+      /entryRuntimes lists \.\/geocode, but exports has no such key/,
+    );
+  });
+
+  it('rejects an engine the package does not claim, so an entry can only narrow the package claim', () => {
+    expect(() =>
+      manifestWith({ exports, arki: { runtimes: ['node', 'bun'], entryRuntimes: { './geocoding': ['deno'] } } }),
+    ).toThrow(/gives \.\/geocoding the engine deno, which arki.runtimes does not claim/);
+    expect(() => manifestWith({ exports, arki: { entryRuntimes: { './geocoding': [] } } })).toThrow(
+      /not a valid package manifest/,
+    );
+  });
+
+  it('names one smoke file per export key, nested like the key, so two keys never share a file', () => {
+    expect(entrySmokeFile('./geocoding')).toBe('scripts/smoke/geocoding.mjs');
+    expect(entrySmokeFile('./react/google-maps')).toBe('scripts/smoke/react/google-maps.mjs');
+    expect(entrySmokeFile('.')).toBe('scripts/smoke/index.mjs');
+  });
+
+  it('runs an entry smoke file only on its engines and the package smoke on all of them', () => {
+    const manifest = manifestWith({ exports, arki: { entryRuntimes: { './geocoding': ['node', 'bun', 'deno'] } } });
+    const units = smokeUnits(manifest, () => true);
+    expect(units.map(unit => [unit.entry, unit.file, [...unit.runtimes].join(','), unit.bundled])).toEqual([
+      [undefined, 'scripts/smoke.mjs', 'node,bun,deno,browser,hermes', false],
+      ['./geocoding', 'scripts/smoke/geocoding.mjs', 'node,bun,deno', false],
+    ]);
+  });
+
+  it('fails when a narrowed entry has no smoke file, because its claim would have no proof', () => {
+    const manifest = manifestWith({ exports, arki: { entryRuntimes: { './geocoding': ['node'] } } });
+    expect(() => smokeUnits(manifest, file => file === 'scripts/smoke.mjs')).toThrow(
+      /write scripts\/smoke\/geocoding.mjs/,
+    );
+  });
+
+  it('bundles the smoke file of a bundler-only entry on every engine, since a bundler is how that entry loads', () => {
+    const manifest = manifestWith({ exports, arki: { bundlerOnly: ['./react', './geocoding'] } });
+    const units = smokeUnits(manifest, file => file !== 'scripts/smoke/geocoding.mjs');
+    expect(units.map(unit => [unit.entry, unit.bundled, unit.runtimes.size])).toEqual([
+      [undefined, false, 5],
+      ['./react', true, 5],
+    ]);
+  });
+
+  it('writes one README line per entry smoke file and replaces it on the next run', () => {
+    const manifest = manifestWith({
+      exports,
+      arki: { bundlerOnly: ['./react'], entryRuntimes: { './geocoding': ['node', 'bun', 'deno'] } },
+    });
+    const notes = entryNotes(smokeUnits(manifest, () => true));
+    expect(notes).toEqual([
+      '- `./geocoding` runs on node, bun, deno (`scripts/smoke/geocoding.mjs`).',
+      '- `./react` runs on node, bun, deno, browser, hermes, bundled (bundler-only entry) (`scripts/smoke/react.mjs`).',
+    ]);
+    const row = { runtime: 'node', result: 'pass', version: 'v1', date: '2026-01-01' } as const;
+    const readme = `# x\n\n${RUNTIMES_START}\n${RUNTIMES_END}\n`;
+    const once = updateRuntimesSection(readme, [row], ['node'], notes);
+    const twice = updateRuntimesSection(once, [row], ['node'], notes);
+    expect(twice).toBe(once);
+    expect(once.split('./geocoding').length - 1).toBe(1);
+  });
+});
+
+describe('React Native packages', () => {
+  it('treats a Hermes-only package as React Native, so only it is bundled like Metro and skips the Bun import', () => {
+    expect(isReactNativePackage(manifestWith({ arki: { runtimes: ['hermes'] } }))).toBe(true);
+    expect(isReactNativePackage(manifestWith({ arki: { runtimes: ['bun', 'hermes'] } }))).toBe(false);
+    expect(isReactNativePackage(manifestWith({}))).toBe(false);
+  });
+
+  it('resolves the iOS file, then the native file, then the plain one, as Metro does', () => {
+    const order = ['.ios.js', '.native.js', '.js'].map(extension => METRO_RESOLVE_EXTENSIONS.indexOf(extension));
+    expect(order.every(index => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  /** Loads the host module as CommonJS, the way the bundle requires it. */
+  function reactNativeHost(): Record<string, unknown> {
+    const module = { exports: {} as Record<string, unknown> };
+    vm.runInNewContext(REACT_NATIVE_HOST_MODULE, { module, Proxy, Object, Error, String });
+    return module.exports;
+  }
+
+  it('gives no native module, so a library sees the store module as unlinked', () => {
+    const host = reactNativeHost();
+    expect(Object.keys(host['NativeModules'] as object)).toEqual([]);
+  });
+
+  it("selects the iOS value the way React Native's Platform does", () => {
+    const platform = reactNativeHost()['Platform'] as { OS: string; select: (spec: object) => unknown };
+    expect(platform.OS).toBe('ios');
+    expect(platform.select({ ios: 1, native: 2, default: 3 })).toBe(1);
+    expect(platform.select({ native: 2, default: 3 })).toBe(2);
+    expect(platform.select({ default: 3 })).toBe(3);
+  });
+
+  it('throws on any other export, so a smoke never passes on a stand-in for React Native itself', () => {
+    expect(() => reactNativeHost()['View']).toThrow(/react-native View is not in the Hermes smoke host/);
   });
 });
 
@@ -209,6 +327,15 @@ describe('hermesScript', () => {
       'globalThis.queueMicrotask = Object.assign(() => {}, { isReal: true }); globalThis.performance = { isReal: true }; globalThis.URL = class { static isReal = true; };',
     );
     expect(lines).toEqual(['true true true']);
+  });
+
+  it("installs Expo's import.meta registry, so code that reads import.meta.env optionally runs as in an Expo app", async () => {
+    const lines = await runLikeHermes(
+      hermesScript(
+        'print(String(globalThis.__ExpoImportMetaRegistry.url), String(globalThis.__ExpoImportMetaRegistry.env?.DEV));',
+      ),
+    );
+    expect(lines).toEqual(['null undefined']);
   });
 
   it('refuses to construct AbortSignal directly, like the platform', async () => {

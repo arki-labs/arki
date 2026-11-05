@@ -49,11 +49,13 @@ The devtools render nothing in production. `useKeysetQuery` and `useOptimisticMu
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |
 | --- | --- | --- | --- |
-| node | fail | v22.13.1 | 2026-11-05 |
+| node | pass | v22.13.1 | 2026-11-05 |
 | bun | pass | 1.4.2 | 2026-11-05 |
-| deno | fail | 2.9.8 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
 | browser | n/a | - | 2026-11-05 |
 | hermes | n/a | - | 2026-11-05 |
+
+- `./error` runs on node, bun, deno, bundled (bundler-only entry) (`scripts/smoke/error.mjs`).
 <!-- runtimes:end -->
 
 ## Public imports

@@ -252,6 +252,44 @@ if (typeof globalThis.AbortController !== 'function') {
 `;
 
 /**
+ * `globalThis.__ExpoImportMetaRegistry`, as Expo installs it
+ * (`expo/src/winter/ImportMetaRegistry.ts`): `babel-preset-expo` rewrites
+ * `import.meta` to this object, whose `url` is `null` in a release build. It has
+ * no `env`, so code that reads `import.meta.env` must allow it to be missing.
+ * Installed only when missing.
+ */
+const IMPORT_META_SHIM = `
+if (typeof globalThis.__ExpoImportMetaRegistry === 'undefined') {
+  globalThis.__ExpoImportMetaRegistry = { url: null };
+}
+`;
+
+/**
+ * The `react-native` module of the Hermes leg (CommonJS source). The runner has
+ * no React Native native runtime, so React Native's own JavaScript cannot run
+ * here. This module gives only what an iOS release app gives a library that
+ * links no native module of its own: an empty `NativeModules` and the iOS
+ * `Platform` (`OS` and `select`, as `Libraries/Utilities/Platform.ios.js`
+ * defines it). Reading any other export throws, so a smoke never runs on a
+ * stand-in it did not ask for.
+ */
+export const REACT_NATIVE_HOST_MODULE = String.raw`
+const provided = {
+  NativeModules: Object.freeze({}),
+  Platform: Object.freeze({
+    OS: 'ios',
+    select: spec => ('ios' in spec ? spec.ios : 'native' in spec ? spec.native : spec.default),
+  }),
+};
+module.exports = new Proxy(provided, {
+  get(target, name) {
+    if (typeof name === 'symbol' || name === '__esModule' || name === 'default' || name in target) return target[name];
+    throw new Error('react-native ' + String(name) + ' is not in the Hermes smoke host: it needs the React Native native runtime');
+  },
+});
+`;
+
+/**
  * The script Hermes runs for an ESM bundle: host shims first, then the bundle
  * inside an async arrow so top-level `await` works. A rejection prints
  * `HERMES_FAILURE_MARKER` and the error.
@@ -264,6 +302,7 @@ export function hermesScript(esmBundle: string): string {
     PERFORMANCE_SHIM,
     URL_SHIM,
     ABORT_SHIM,
+    IMPORT_META_SHIM,
     '(async () => {',
     esmBundle,
     `})().catch(error => { print('${HERMES_FAILURE_MARKER} ' + (error && error.stack ? error.stack : String(error))); });`,

@@ -25,8 +25,8 @@ export type CreatePersistedQueryClientOptions = {
   /**
    * A buster string that, when changed, invalidates any previously persisted
    * cache. Defaults to `import.meta.env.VITE_BUILD_ID` so a new deploy
-   * automatically busts stale caches.
-   * @default import.meta.env.VITE_BUILD_ID ?? ''
+   * automatically busts stale caches. Outside Vite (no `import.meta.env`) it is `''`.
+   * @default import.meta.env?.VITE_BUILD_ID ?? ''
    */
   buster?: string;
   /**
@@ -80,7 +80,7 @@ export function createPersistedQueryClient(
     storageKey = DEFAULT_STORAGE_KEY,
     maxAge = DEFAULT_MAX_AGE_MS,
     // eslint-disable-next-line turbo/no-undeclared-env-vars -- VITE_BUILD_ID is inlined by Vite at build time, not read from the Turbo env
-    buster = import.meta.env.VITE_BUILD_ID ?? '',
+    buster = import.meta.env?.VITE_BUILD_ID ?? '',
     defaultOptions,
   } = options;
 

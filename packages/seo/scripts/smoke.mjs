@@ -1,7 +1,8 @@
 // Cross-runtime smoke test. Runs the BUILT entries under Node, Bun and Deno via
 // `bun run test:runtimes`, and is bundled for the browser and Hermes.
-// Entries: root (sitemap, robots, llms.txt, metadata), ./react (JSON-LD components
-// rendered on the server), ./tanstack-start (Meta tags and Head).
+// Entries: root (sitemap, robots, llms.txt, metadata), ./tanstack-start (Meta tags and Head).
+// ./react is bundler-only (it imports @arki/ui and @arki/icons, which ship TypeScript source),
+// so scripts/smoke/react.mjs proves it as a bundle on every engine.
 
 import { createElement } from 'react';
 
@@ -13,7 +14,6 @@ import {
   renderUrlset,
   sitemapResponse,
 } from '../dist/src/index.js';
-import { BreadcrumbSchema, FAQSchema } from '../dist/src/react/index.js';
 import { Head, Meta } from '../dist/src/tanstack-start.js';
 
 // Hermes has no DOM renderer (react-dom/server needs MessageChannel), so components render elsewhere only.
@@ -56,11 +56,6 @@ const tags = Meta({
   openGraph: { title: 'Home', images: [{ url: 'https://example.com/i.png', width: 10 }] },
 });
 
-const faqHtml = await render(createElement(FAQSchema, { faqs: [{ question: 'Q</script>?', answer: 'A' }] }));
-const emptyFaq = await render(createElement(FAQSchema, { faqs: [] }));
-const crumbs = await render(
-  createElement(BreadcrumbSchema, { siteUrl: 'https://example.com', items: [{ label: 'Home', href: '/' }] }),
-);
 const head = await render(createElement(Head, { title: 'Hi', meta: [{ name: 'description', content: 'd' }] }));
 
 const checks = [
@@ -94,17 +89,6 @@ const checks = [
   ['meta applies the title template', tags[0].content, 'Home | Acme'],
   ['meta emits noindex', tags.find(tag => tag.name === 'robots')?.content, 'noindex, follow'],
   ['meta emits the image width', tags.find(tag => tag.property === 'og:image:width')?.content, '10'],
-  [
-    'FAQ schema escapes script breakout',
-    faqHtml?.includes('</script>?') === false && faqHtml?.includes('\\u003c/script>?') === true,
-    canRender,
-  ],
-  ['FAQ schema with no questions renders nothing', emptyFaq, canRender ? '' : undefined],
-  [
-    'breadcrumb schema makes absolute urls',
-    crumbs?.includes('"item":"https://example.com/"'),
-    canRender ? true : undefined,
-  ],
   [
     'Head renders title and meta',
     head,

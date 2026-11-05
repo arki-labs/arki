@@ -4,15 +4,28 @@
  * runtime it claims (RFC `arki-structure` §6). Legs, in order:
  *
  *   purity   import every export entry of the built output in a fresh process
- *            with an empty environment (`expectImportPure` from `@arki/ts/testing`)
+ *            with an empty environment (`expectImportPure` from `@arki/ts/testing`).
+ *            A React Native package (`arki.runtimes` is Hermes only) is left to the
+ *            Hermes leg: `react-native` is Flow source that only Metro loads.
  *   node     `node scripts/smoke.mjs`
  *   bun      `bun scripts/smoke.mjs`
- *   deno     unbundled when the package has no npm dependencies, else a
- *            `bun build --target=node` bundle
- *   browser  that bundle in headless Chromium (Playwright)
+ *   deno     `deno run --no-config --node-modules-dir=manual`, unbundled: Deno
+ *            reads the installed `node_modules`, as a Deno app does
+ *   browser  a `bun build --target=browser` bundle in headless Chromium (Playwright)
  *   hermes   an ESM bundle (react-native condition, wrapped for top-level await,
  *            with the host shims of `hermes-host.ts`), run through React Native's
- *            Babel step, under `$HERMES_BIN`
+ *            Babel step, under `$HERMES_BIN`. A React Native package
+ *            is bundled the way Metro does (iOS and native file extensions, JSX in
+ *            `.js`), with `react-native` itself given by the host
+ *            (`REACT_NATIVE_HOST_MODULE`): this runner has no React Native native runtime.
+ *
+ * Entry smoke files. `scripts/smoke.mjs` proves the package on every engine it
+ * claims. An export key in `"arki": { "entryRuntimes": { "./geocoding": [...] } }`
+ * runs on fewer engines: its checks live in `scripts/smoke/geocoding.mjs`
+ * (`entrySmokeFile`), which runs only on those engines, and the package smoke
+ * must not import that entry. An `arki.bundlerOnly` key may have such a file too;
+ * it then runs as a bundle on every engine (`--target=node` for Node, Bun and
+ * Deno), since a bundler is how that entry is loaded.
  *
  * A missing engine prints `INCOMPLETE: <leg> (<reason>)`. That is not a
  * failure unless `--require-all` is given. Any real failure exits 1 and names the leg.
@@ -22,8 +35,10 @@
  *   arki-runtimes [--only node,bun] [--require-all] [--write-readme]
  *
  * `--write-readme` writes one row per engine (result, version tested, UTC date) between
- * `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in README.md. Engines not run
- * in this invocation (`--only`) keep their existing row.
+ * `<!-- runtimes:start -->` and `<!-- runtimes:end -->` in README.md, and one line per
+ * entry smoke file saying where that entry runs. Engines not run in this invocation
+ * (`--only`) keep their existing row. A row passes only when every smoke file that
+ * claims the engine passed.
  *
  * The Hermes leg mirrors an Expo release build (iOS, Hermes V1), because that is how
  * our apps ship: the script goes through `babel-preset-expo` with the caller Metro
@@ -42,15 +57,16 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-
-import { expectImportPure } from '@arki/ts/testing';
+import type { Plugin } from 'esbuild';
 import { transformAsync } from '@babel/core';
 import { build } from 'esbuild';
 
+import { expectImportPure } from '@arki/ts/testing';
+
 import type { Manifest, Runtime } from './manifest';
 import { isAdapterSubpath } from './adapters';
-import { HERMES_FAILURE_MARKER, hermesScript } from './hermes-host';
-import { hasNoNpmDependencies, readManifest, runtimeEntry } from './manifest';
+import { HERMES_FAILURE_MARKER, hermesScript, REACT_NATIVE_HOST_MODULE } from './hermes-host';
+import { isReactNativePackage, readManifest, runtimeEntry } from './manifest';
 import { complain, say } from './report';
 
 const LEGS = ['purity', 'node', 'bun', 'deno', 'browser', 'hermes'] as const;
@@ -59,6 +75,57 @@ type Leg = (typeof LEGS)[number];
 /** True when the package claims the engine behind `leg`. `purity` has no engine and always runs. */
 export function isLegInScope(leg: Leg, runtimes: ReadonlySet<Runtime>): boolean {
   return leg === 'purity' || runtimes.has(leg);
+}
+
+const SMOKE = 'scripts/smoke.mjs';
+
+/** The smoke file of one export key: `./react/google-maps` is `scripts/smoke/react/google-maps.mjs`, `.` is `scripts/smoke/index.mjs`. */
+export function entrySmokeFile(key: string): string {
+  return `scripts/smoke/${key === '.' ? 'index' : key.replace(/^\.\//, '')}.mjs`;
+}
+
+/** One smoke file and the engines it runs on. */
+export type SmokeUnit = {
+  /** The export key the file proves; `undefined` for the package smoke. */
+  readonly entry: string | undefined;
+  readonly file: string;
+  readonly runtimes: ReadonlySet<Runtime>;
+  /** Run as a bundle on every engine, because the entry is `arki.bundlerOnly`. */
+  readonly bundled: boolean;
+};
+
+/**
+ * The smoke files of a package: the package smoke on every claimed engine, the file
+ * of each `entryRuntimes` key on that entry's engines, and the file of each
+ * `bundlerOnly` key that has one, bundled. Throws when an `entryRuntimes` key has no
+ * file, because its claim would then have no proof.
+ */
+export function smokeUnits(manifest: Manifest, exists: (file: string) => boolean): SmokeUnit[] {
+  const units: SmokeUnit[] = [{ entry: undefined, file: SMOKE, runtimes: manifest.runtimes, bundled: false }];
+  for (const [entry, runtimes] of manifest.entryRuntimes) {
+    const file = entrySmokeFile(entry);
+    if (!exists(file)) {
+      throw new Error(`package.json "arki.entryRuntimes" lists ${entry}; write ${file} to prove it on its engines`);
+    }
+    units.push({ entry, file, runtimes, bundled: manifest.bundlerOnly.has(entry) });
+  }
+  for (const entry of manifest.bundlerOnly) {
+    const file = entrySmokeFile(entry);
+    if (manifest.entryRuntimes.has(entry) || !exists(file)) continue;
+    units.push({ entry, file, runtimes: manifest.runtimes, bundled: true });
+  }
+  return units;
+}
+
+/** The README lines under the table: where each entry with its own smoke file runs. */
+export function entryNotes(units: readonly SmokeUnit[]): string[] {
+  return units.flatMap(unit =>
+    unit.entry === undefined
+      ? []
+      : [
+          `- \`${unit.entry}\` runs on ${[...unit.runtimes].join(', ')}${unit.bundled ? ', bundled (bundler-only entry)' : ''} (\`${unit.file}\`).`,
+        ],
+  );
 }
 
 export const RUNTIMES_START = '<!-- runtimes:start -->';
@@ -110,7 +177,12 @@ export function parseRuntimesTable(table: string): RuntimeRow[] {
  * Throws when the markers are missing, repeated or out of order, so a typo
  * never silently skips the update.
  */
-export function updateRuntimesSection(readme: string, fresh: readonly RuntimeRow[], order: readonly string[]): string {
+export function updateRuntimesSection(
+  readme: string,
+  fresh: readonly RuntimeRow[],
+  order: readonly string[],
+  notes: readonly string[] = [],
+): string {
   const starts = readme.split(RUNTIMES_START).length - 1;
   const ends = readme.split(RUNTIMES_END).length - 1;
   const start = readme.indexOf(RUNTIMES_START);
@@ -121,7 +193,8 @@ export function updateRuntimesSection(readme: string, fresh: readonly RuntimeRow
   const kept = parseRuntimesTable(readme.slice(start + RUNTIMES_START.length, end));
   const byRuntime = new Map([...kept, ...fresh].map(row => [row.runtime, row]));
   const rows = [...byRuntime.values()].toSorted((a, b) => order.indexOf(a.runtime) - order.indexOf(b.runtime));
-  return `${readme.slice(0, start + RUNTIMES_START.length)}\n${renderRuntimesTable(rows)}\n${readme.slice(end)}`;
+  const footer = notes.length > 0 ? `\n\n${notes.join('\n')}` : '';
+  return `${readme.slice(0, start + RUNTIMES_START.length)}\n${renderRuntimesTable(rows)}${footer}\n${readme.slice(end)}`;
 }
 
 /** The leg could not run because its engine is missing. */
@@ -141,7 +214,6 @@ const METRO_RELEASE_CALLER = {
 };
 
 const SUMMARY = /smoke checks passed/;
-const SMOKE = 'scripts/smoke.mjs';
 const OUT = '.cache/runtimes';
 
 type Context = { readonly cwd: string; readonly manifest: Manifest };
@@ -169,26 +241,93 @@ function requireSmokeFile({ cwd }: Context): void {
   if (!existsSync(path.join(cwd, SMOKE))) throw new Error(`${SMOKE} is missing`);
 }
 
+/** File extensions Metro tries for an iOS build, in its order: platform file, then native file, then the plain one. */
+const METRO_SOURCE_EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.json'] as const;
+export const METRO_RESOLVE_EXTENSIONS = [
+  ...METRO_SOURCE_EXTENSIONS.map(extension => `.ios${extension}`),
+  ...METRO_SOURCE_EXTENSIONS.map(extension => `.native${extension}`),
+  ...METRO_SOURCE_EXTENSIONS,
+];
+
+/** Gives `react-native` from the host; a deep `react-native/Libraries/...` import needs the native runtime, so it fails the build. */
+const reactNativeHostPlugin: Plugin = {
+  name: 'react-native-host',
+  setup(builder) {
+    builder.onResolve({ filter: /^react-native$/ }, () => ({ path: 'react-native', namespace: 'react-native-host' }));
+    builder.onResolve({ filter: /^react-native\// }, args => ({
+      errors: [
+        {
+          text: `${args.path} (from ${args.importer}) needs the React Native native runtime, which the Hermes runner does not have`,
+        },
+      ],
+    }));
+    builder.onLoad({ filter: /.*/, namespace: 'react-native-host' }, () => ({
+      contents: REACT_NATIVE_HOST_MODULE,
+      loader: 'js',
+    }));
+  },
+};
+
+/** The Hermes bundle of a package that loads `react-native`, resolved and loaded the way Metro does for iOS. */
+async function metroBundle(cwd: string, file: string, outfile: string): Promise<void> {
+  try {
+    await build({
+      absWorkingDir: cwd,
+      entryPoints: [file],
+      outfile,
+      bundle: true,
+      format: 'esm',
+      platform: 'neutral',
+      target: 'esnext',
+      conditions: ['react-native'],
+      mainFields: ['react-native', 'browser', 'main'],
+      resolveExtensions: METRO_RESOLVE_EXTENSIONS,
+      // Metro runs Babel on every file, so React Native libraries ship JSX in `.js` and `.mjs`.
+      loader: { '.js': 'jsx', '.mjs': 'jsx' },
+      jsx: 'automatic',
+      external: ['bun:*'],
+      plugins: [reactNativeHostPlugin],
+      logLevel: 'silent',
+    });
+  } catch (error) {
+    throw new Error(`bundling for hermes failed\n${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
 /**
- * Bundles the smoke file once per engine. Browser and Hermes get the browser
- * build of every dependency (Hermes also the `react-native` condition, since it runs inside React Native); Deno gets the node build, which it runs through its
- * `node:` support (a browser build may touch `document`). `bun:*` stays external:
- * the portable code guards it at runtime.
+ * Bundles a smoke file once per target. Browser and Hermes get the browser build
+ * of every dependency (Hermes also the `react-native` condition, since it runs
+ * inside React Native); `node` is the bundle a bundler-only entry runs on Node,
+ * Bun and Deno. `bun:*` stays external: the portable code guards it at runtime.
  */
 const bundles = new Map<string, string>();
-function bundle(context: Context, name: 'browser' | 'hermes' | 'deno'): string {
-  const cached = bundles.get(name);
+async function bundle(context: Context, unit: SmokeUnit, name: 'browser' | 'hermes' | 'node'): Promise<string> {
+  const key = `${unit.file}:${name}`;
+  const cached = bundles.get(key);
   if (cached) return cached;
-  const outfile = `${OUT}/${name}.js`;
-  const target = name === 'deno' ? '--target=node' : '--target=browser';
-  const format = name === 'hermes' ? HERMES_BUNDLE_ARGS : [];
-  const { output, status } = run(
-    'bun',
-    ['build', SMOKE, target, '--external', 'bun:*', ...format, `--outfile=${outfile}`],
-    context.cwd,
-  );
-  if (status !== 0) throw new Error(`bundling for ${name} failed\n${output}`);
-  bundles.set(name, outfile);
+  const prefix =
+    unit.entry === undefined
+      ? ''
+      : `entry-${path
+          .relative('scripts/smoke', unit.file)
+          .replace(/\.mjs$/, '')
+          .replaceAll('/', '-')}.`;
+  const outfile = `${OUT}/${prefix}${name}.js`;
+  if (name === 'hermes' && isReactNativePackage(context.manifest)) {
+    await metroBundle(context.cwd, unit.file, outfile);
+  } else {
+    const target = name === 'node' ? '--target=node' : '--target=browser';
+    const format = name === 'hermes' ? HERMES_BUNDLE_ARGS : [];
+    const { output, status } = run(
+      'bun',
+      ['build', unit.file, target, '--external', 'bun:*', ...format, `--outfile=${outfile}`],
+      context.cwd,
+    );
+    if (status !== 0) throw new Error(`bundling for ${name} failed\n${output}`);
+  }
+  bundles.set(key, outfile);
   return outfile;
 }
 
@@ -197,6 +336,12 @@ const UNLOADABLE = /Cannot find (?:module|package)|No native build|dlopen|\.node
 
 function purity({ cwd, manifest }: Context): void {
   const entries = new Map<string, string>();
+  // React Native ships Flow source that only Metro loads, so Bun cannot import a React Native package;
+  // its Hermes leg imports the entries in a host with no environment instead.
+  if (isReactNativePackage(manifest)) {
+    say('  a React Native package (arki.runtimes is hermes only): the hermes leg imports its entries');
+    return;
+  }
   for (const [subpath, target] of Object.entries(manifest.exports)) {
     if (subpath.includes('*')) continue;
     const entry = runtimeEntry(target);
@@ -221,19 +366,23 @@ function purity({ cwd, manifest }: Context): void {
   if (unloadable.length > 0) throw new Incomplete(`adapter entries cannot load here: ${unloadable.join(', ')}`);
 }
 
-function deno(context: Context): void {
-  const { cwd, manifest } = context;
-  if (hasNoNpmDependencies(manifest)) {
-    say('  mode: unbundled (no npm dependencies)');
-    smoke('deno', ['run', '--no-config', '--node-modules-dir=manual', '-A', SMOKE], cwd);
+async function nodeLike(command: 'node' | 'bun', context: Context, unit: SmokeUnit): Promise<void> {
+  smoke(command, [unit.bundled ? await bundle(context, unit, 'node') : unit.file], context.cwd);
+}
+
+async function deno(context: Context, unit: SmokeUnit): Promise<void> {
+  if (unit.bundled) {
+    smoke('deno', ['run', '--no-config', '-A', await bundle(context, unit, 'node')], context.cwd);
   } else {
-    say('  mode: bundled for node (npm dependencies; Deno cannot read catalog: versions)');
-    smoke('deno', ['run', '--no-config', '-A', bundle(context, 'deno')], cwd);
+    smoke('deno', ['run', '--no-config', '--node-modules-dir=manual', '-A', unit.file], context.cwd);
   }
 }
 
-async function browser(context: Context): Promise<void> {
-  const file = bundle(context, 'browser');
+/** The page the browser leg runs in. Playwright answers it, so nothing listens on localhost; localhost is a secure context. */
+const BROWSER_PAGE = 'http://localhost/arki-runtimes/';
+
+async function browser(context: Context, unit: SmokeUnit): Promise<void> {
+  const file = await bundle(context, unit, 'browser');
   let chromium;
   try {
     ({ chromium } = await import('@playwright/test'));
@@ -254,7 +403,11 @@ async function browser(context: Context): Promise<void> {
     const page = await session.newPage();
     page.on('console', message => logs.push(message.text()));
     page.on('pageerror', error => logs.push(`pageerror: ${error.message}`));
-    await page.setContent('<!doctype html><title>smoke</title>');
+    // A page with a real origin, as an app has: `about:blank` is opaque, so the browser denies it storage (IndexedDB, localStorage).
+    await page.route(BROWSER_PAGE, route =>
+      route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>smoke</title>' }),
+    );
+    await page.goto(BROWSER_PAGE);
     await page.addScriptTag({ type: 'module', content: readFileSync(path.join(context.cwd, file), 'utf8') });
     const deadline = Date.now() + 60_000;
     while (
@@ -273,14 +426,14 @@ async function browser(context: Context): Promise<void> {
   say(`  ${summary}`);
 }
 
-async function hermes(context: Context): Promise<void> {
+async function hermes(context: Context, unit: SmokeUnit): Promise<void> {
   const binary = process.env['HERMES_BIN'] ?? 'hermes';
   if (spawnSync(binary, ['-version'], { stdio: 'ignore' }).status !== 0) {
     throw new Incomplete('no Hermes binary; set HERMES_BIN');
   }
-  const file = bundle(context, 'hermes');
+  const file = await bundle(context, unit, 'hermes');
   // Hermes has no ES modules, no `console` and no top-level `await`: run the ESM bundle inside an async function.
-  const script = `${OUT}/hermes-run.js`;
+  const script = file.replace(/hermes\.js$/, 'hermes-run.js');
   mkdirSync(path.join(context.cwd, OUT), { recursive: true });
   const source = hermesScript(readFileSync(path.join(context.cwd, file), 'utf8'));
   // Same step Metro runs for a release build; see the header for why Hermes needs it.
@@ -288,7 +441,8 @@ async function hermes(context: Context): Promise<void> {
     babelrc: false,
     configFile: false,
     compact: false,
-    sourceType: 'script',
+    // A bundle that reads `import.meta` parses as a module, so Expo's `import.meta` transform runs as it does in an app.
+    sourceType: 'unambiguous',
     presets: ['babel-preset-expo'],
     caller: METRO_RELEASE_CALLER,
     filename: path.join(context.cwd, script),
@@ -336,10 +490,9 @@ function engineVersion(leg: Leg, cwd: string): string {
   return result.status === 0 && cleaned ? cleaned : 'unknown';
 }
 
-const legRunners: Record<Leg, (context: Context) => void | Promise<void>> = {
-  purity,
-  node: ({ cwd }) => smoke('node', [SMOKE], cwd),
-  bun: ({ cwd }) => smoke('bun', [SMOKE], cwd),
+const legRunners: Record<Runtime, (context: Context, unit: SmokeUnit) => Promise<void>> = {
+  node: (context, unit) => nodeLike('node', context, unit),
+  bun: (context, unit) => nodeLike('bun', context, unit),
   deno,
   browser,
   hermes,
@@ -357,6 +510,14 @@ function selectLegs(only: string | undefined): readonly Leg[] {
   return LEGS.filter(leg => wanted.includes(leg));
 }
 
+/** Runs one engine leg over every smoke file that claims the engine. */
+async function runEngine(leg: Runtime, context: Context, units: readonly SmokeUnit[]): Promise<void> {
+  for (const unit of units) {
+    if (unit.entry !== undefined) say(`  ${unit.entry} (${unit.file}${unit.bundled ? ', bundled' : ''})`);
+    await legRunners[leg](context, unit);
+  }
+}
+
 async function main(): Promise<number> {
   const { values } = parseArgs({
     options: {
@@ -369,6 +530,7 @@ async function main(): Promise<number> {
   const context: Context = { cwd, manifest: readManifest(cwd) };
   mkdirSync(path.join(cwd, OUT), { recursive: true });
   requireSmokeFile(context);
+  const units = smokeUnits(context.manifest, file => existsSync(path.join(cwd, file)));
 
   const failed: Leg[] = [];
   const incomplete: Leg[] = [];
@@ -376,13 +538,15 @@ async function main(): Promise<number> {
   const date = new Date().toISOString().slice(0, 10);
   for (const leg of selectLegs(values.only)) {
     say(`${context.manifest.name} ${leg}`);
-    if (!isLegInScope(leg, context.manifest.runtimes)) {
+    const inScope = leg === 'purity' ? [] : units.filter(unit => unit.runtimes.has(leg));
+    if (leg !== 'purity' && inScope.length === 0) {
       say(`  out of scope: package.json "arki.runtimes" does not list ${leg}`);
-      if (leg !== 'purity') rows.push({ runtime: leg, result: 'n/a', version: '-', date });
+      rows.push({ runtime: leg, result: 'n/a', version: '-', date });
       continue;
     }
     try {
-      await legRunners[leg](context);
+      if (leg === 'purity') purity(context);
+      else await runEngine(leg, context, inScope);
       if (leg !== 'purity') {
         const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
         rows.push({ runtime: leg, result: 'pass', version, date });
@@ -391,19 +555,21 @@ async function main(): Promise<number> {
       if (error instanceof Incomplete) {
         say(`INCOMPLETE: ${leg} (${error.message})`);
         incomplete.push(leg);
-        rows.push({ runtime: leg, result: 'not run', version: '-', date });
+        if (leg !== 'purity') rows.push({ runtime: leg, result: 'not run', version: '-', date });
       } else {
         complain(`FAILED: ${leg}\n${error instanceof Error ? error.message : String(error)}`);
         failed.push(leg);
-        const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
-        rows.push({ runtime: leg, result: 'fail', version, date });
+        if (leg !== 'purity') {
+          const version = leg === 'browser' ? `Chromium ${chromiumVersion ?? 'unknown'}` : engineVersion(leg, cwd);
+          rows.push({ runtime: leg, result: 'fail', version, date });
+        }
       }
     }
   }
 
   if (values['write-readme']) {
     const readme = path.join(cwd, 'README.md');
-    writeFileSync(readme, updateRuntimesSection(readFileSync(readme, 'utf8'), rows, LEGS));
+    writeFileSync(readme, updateRuntimesSection(readFileSync(readme, 'utf8'), rows, LEGS, entryNotes(units)));
     say(`arki-runtimes: wrote the runtimes table to README.md`);
   }
 

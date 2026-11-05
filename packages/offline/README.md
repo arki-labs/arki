@@ -373,12 +373,17 @@ Background failures reach queue events and `queue.status().failure`; hooks and d
 
 ## Runtime support
 
+`@arki/offline/orpc` runs on Node, Bun, Deno and browsers, not Hermes: oRPC needs Web Streams (`TransformStream`), which React Native lacks. `@arki/offline/pwa` runs in browsers only: Workbox reads the worker global `self`.
+
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |
 | --- | --- | --- | --- |
-| node | fail | v22.13.1 | 2026-11-05 |
+| node | pass | v22.13.1 | 2026-11-05 |
 | bun | pass | 1.4.2 | 2026-11-05 |
 | deno | pass | 2.9.8 | 2026-11-05 |
-| browser | fail | Chromium 156.0.8078.4 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
 | hermes | fail | V1 250829098.0.17 | 2026-11-05 |
+
+- `./orpc` runs on node, bun, deno, browser (`scripts/smoke/orpc.mjs`).
+- `./pwa` runs on browser, bundled (bundler-only entry) (`scripts/smoke/pwa.mjs`).
 <!-- runtimes:end -->

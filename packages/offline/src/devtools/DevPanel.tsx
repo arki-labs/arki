@@ -11,13 +11,13 @@ import type { QueuedMutation } from '../mutations/queue.js';
  * Floating debug panel for inspecting the offline mutation queue.
  *
  * Rendered only in development builds (guarded by `import.meta.env.DEV`).
- * In production, the component returns null immediately — tree-shaking
- * eliminates it from the bundle entirely.
+ * In production, and outside Vite (no `import.meta.env`), the component
+ * returns null immediately — tree-shaking eliminates it from a production bundle.
  */
 export function OfflineDevPanel(): ReactNode {
-  // Gate: no-op in production. Vite replaces import.meta.env.DEV at build time.
+  // Gate: no-op in production and outside Vite. Vite replaces import.meta.env at build time.
   // eslint-disable-next-line turbo/no-undeclared-env-vars -- DEV is a Vite build-time constant, not a Turbo env var
-  if (!import.meta.env.DEV) return null;
+  if (!import.meta.env?.DEV) return null;
 
   return <DevPanelImpl />;
 }

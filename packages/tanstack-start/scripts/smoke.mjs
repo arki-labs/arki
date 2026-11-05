@@ -3,8 +3,10 @@
 // database; an oRPC router answers a real RPC request; failures answer with their own status.
 // Entries: ./dot and ./server (the app serves a request, a boot failure answers 503),
 // ./orpc/server (RPC call, CORS headers), ./orpc/client, ./orpc/query, ./router,
-// ./error, ./scripts, ./server-error-overlay, and the entries that need a bundler or
-// browser (./vite, ./config, ./devtools, ./sentry/*, ./pwa, ./pwa/sw, ./pwa/client) are loaded.
+// ./scripts, ./server-error-overlay, and the entries that need a bundler or browser
+// (./vite, ./config, ./devtools, ./sentry/*, ./pwa, ./pwa/sw, ./pwa/client) are loaded.
+// ./error is bundler-only (it imports @arki/ui and @arki/icons, which ship TypeScript source),
+// so scripts/smoke/error.mjs proves it as a bundle on every engine.
 
 import { createElement } from 'react';
 import { oc } from '@orpc/contract';
@@ -24,7 +26,6 @@ import { withServerErrorOverlay } from '../dist/src/server-error-overlay.js';
 import { startServer, withForwardedProto } from '../dist/src/start-server.js';
 
 import '../dist/src/app.config.js';
-import '../dist/src/error.js';
 import '../dist/src/orpc/query.js';
 import '../dist/src/index.js';
 

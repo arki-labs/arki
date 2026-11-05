@@ -1,19 +1,18 @@
 // Cross-runtime smoke test. Runs the BUILT entries under Node, Bun and Deno via
-// `bun run test:runtimes`, and is bundled for the browser and Hermes.
+// `bun run test:runtimes`, and is bundled for the browser and Hermes. ./pwa (Workbox) needs a
+// worker global `self`, and ./orpc needs Web Streams (TransformStream), which React Native lacks, so
+// scripts/smoke/pwa.mjs and scripts/smoke/orpc.mjs prove them on the engines package.json
+// "arki.entryRuntimes" gives them.
 // IndexedDB exists only in the browser leg, so storage answers differ by engine:
 // with IndexedDB the queue persists and replays, without it every storage call returns
 // a typed failure (never a throw). Each check states which one it expects.
 
 import { createElement } from "react";
 import { oc } from "@orpc/contract";
-import { createRouterClient, implement } from "@orpc/server";
 import { z } from "zod";
 import { OPERATION, operations } from "@arki/contracts/orpc";
 
-import * as offlineOrpc from "@arki/offline/orpc";
-import { offlineSafe } from "../dist/src/orpc/offline-safe-marker.js";
 import { createMemoryCollection } from "../dist/src/collections/index.js";
-import { createStrategy } from "../dist/src/pwa/index.js";
 import { createOfflineRuntime } from "../dist/src/preset/index.js";
 import { createPersistedQueryClient } from "../dist/src/query/index.js";
 import {
@@ -21,11 +20,10 @@ import {
   createQueueStorage,
 } from "../dist/src/mutations/index.js";
 import { OfflineBanner } from "../dist/src/status/index.js";
-import "../dist/src/devtools/index.js";
+import { OfflineDevPanel } from "../dist/src/devtools/index.js";
 
 const hasIndexedDb = typeof indexedDB !== "undefined";
 const isBrowser = typeof window !== "undefined";
-const hasServerExports = !isBrowser && typeof HermesInternal === "undefined";
 const canRender = typeof HermesInternal === "undefined";
 const render = async (element) =>
   canRender
@@ -33,6 +31,11 @@ const render = async (element) =>
     : undefined;
 
 // query: the persisted client is built everywhere; saving it needs IndexedDB.
+// Outside Vite there is no import.meta.env: the default buster is "" and the dev panel stays off.
+const defaultBuster = createPersistedQueryClient({
+  storageKey: "smoke-default",
+});
+const devPanelHtml = await render(createElement(OfflineDevPanel));
 const persisted = createPersistedQueryClient({
   storageKey: "smoke-query",
   buster: "v1",
@@ -46,7 +49,12 @@ const encodeOutcome = await storage.write([{ nonsense: true }]);
 const readOutcome = await storage.read();
 
 const contract = {
-  posts: { create: offlineSafe(oc.input(z.object({ title: z.string() }))) },
+  // Marked through meta, as offlineSafe() from ./orpc does: ./orpc does not run on Hermes.
+  posts: {
+    create: oc
+      .meta({ offlineSafe: true })
+      .input(z.object({ title: z.string() })),
+  },
 };
 const createPost = { [OPERATION]: operations(contract).posts.create };
 const calls = [];
@@ -74,47 +82,6 @@ const items = createMemoryCollection({
   initialData: [{ id: "a", name: "Ada" }],
 });
 await items.preload();
-
-// pwa: Workbox strategy handlers.
-const strategy = createStrategy("networkFirst", {
-  cacheName: "smoke-api",
-  maxEntries: 5,
-});
-
-// orpc: the offline-safe marker everywhere; the idempotency middleware only on server engines.
-const marked = offlineOrpc.offlineSafe(oc.input(z.object({ n: z.number() })));
-let middlewareRuns = 0;
-let secondOutcome;
-if (typeof offlineOrpc.idempotency === "function") {
-  const rows = new Map();
-  const store = {
-    find: async (key, path, userId) =>
-      rows.get(`${key}|${path}|${userId}`) ?? null,
-    store: async (key, path, userId, response) =>
-      void rows.set(`${key}|${path}|${userId}`, response),
-  };
-  const impl = implement(contract)
-    .$context()
-    .use(offlineOrpc.idempotency(store));
-  const router = impl.router({
-    posts: {
-      create: impl.posts.create.handler(() => ({
-        id: `post_${String(++middlewareRuns)}`,
-      })),
-    },
-  });
-  const context = {
-    headers: new Headers({
-      "Idempotency-Key": "key-1",
-      "Offline-Actor": "usr_1",
-    }),
-    session: { user: { id: "usr_1" } },
-  };
-  const client = createRouterClient(router, { context });
-  const first = await client.posts.create({ title: "a" });
-  secondOutcome = await client.posts.create({ title: "a" });
-  void first;
-}
 
 // preset + status + devtools.
 const offline = createOfflineRuntime({
@@ -144,6 +111,12 @@ const bannerHtml = await render(
 );
 
 const checks = [
+  ["the default buster is empty outside Vite", defaultBuster.buster, ""],
+  [
+    "the dev panel renders nothing outside a Vite dev build",
+    devPanelHtml,
+    canRender ? "" : undefined,
+  ],
   [
     "persisted client holds queries",
     persisted.queryClient.getQueryData(["k"]),
@@ -168,7 +141,7 @@ const checks = [
   ],
   [
     "enqueue: receipt with IndexedDB, typed failure without",
-    hasIndexedDb ? typeof receipt?.id : typeof receipt?.code,
+    hasIndexedDb ? typeof receipt?.idempotencyKey : typeof receipt?.code,
     "string",
   ],
   [
@@ -188,15 +161,6 @@ const checks = [
     true,
   ],
   ["memory collection holds its initial row", items.get("a")?.name, "Ada"],
-  ["workbox strategy keeps its cache name", strategy.cacheName, "smoke-api"],
-  ["offlineSafe marks the contract", marked["~orpc"].meta.offlineSafe, true],
-  [
-    "idempotency: server engines replay the stored answer, browser has no middleware",
-    typeof offlineOrpc.idempotency === "function"
-      ? `${middlewareRuns}:${secondOutcome?.id}`
-      : "none",
-    hasServerExports ? "1:post_1" : "none",
-  ],
   [
     "runtime query client: refused on the server, real in the browser",
     queryClientOutcome,
