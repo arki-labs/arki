@@ -165,6 +165,52 @@ describe('hermesScript', () => {
     expect(lines).toEqual(['Real true']);
   });
 
+  it('provides queueMicrotask as React Native does, so a package that defers delivery runs on the Hermes leg', async () => {
+    const lines = await runLikeHermes(
+      hermesScript(`
+        const order = [];
+        setTimeout(() => console.log(order.join()), 1);
+        queueMicrotask(() => order.push('micro'));
+        order.push('sync');
+      `),
+      '',
+      20,
+      1,
+    );
+    expect(lines).toEqual(['sync,micro']);
+  });
+
+  it('reports a throw in a queued microtask, so a lost error cannot pass the leg', async () => {
+    const lines = await runLikeHermes(hermesScript("queueMicrotask(() => { throw new Error('micro'); });"), '', 50);
+    expect(lines.join('\n')).toContain(HERMES_FAILURE_MARKER);
+  });
+
+  it('provides performance.now as React Native does, so a stopwatch library does not reach for process.hrtime', async () => {
+    const lines = await runLikeHermes(
+      hermesScript('const start = performance.now(); console.log(typeof start, performance.now() >= start);'),
+    );
+    expect(lines).toEqual(['number true']);
+  });
+
+  it("provides React Native's URL, so URL schemas parse an http base URL on the Hermes leg", async () => {
+    const lines = await runLikeHermes(
+      hermesScript(`
+        const url = new URL('http://user@localhost:8080/v1?q=1#top');
+        console.log(url.protocol, url.hostname, url.port, url.pathname, url.search, url.hash, url.username);
+        console.log(new URL('https://example.com').href, new URL('/a', 'https://example.com/').href);
+      `),
+    );
+    expect(lines).toEqual(['http: localhost 8080 /v1 ?q=1 #top user', 'https://example.com/ https://example.com/a']);
+  });
+
+  it('leaves a host queueMicrotask, performance and URL alone, so the shim never masks the platform', async () => {
+    const lines = await runLikeHermes(
+      hermesScript('console.log(queueMicrotask.isReal, performance.isReal, URL.isReal);'),
+      'globalThis.queueMicrotask = Object.assign(() => {}, { isReal: true }); globalThis.performance = { isReal: true }; globalThis.URL = class { static isReal = true; };',
+    );
+    expect(lines).toEqual(['true true true']);
+  });
+
   it('refuses to construct AbortSignal directly, like the platform', async () => {
     const lines = await runLikeHermes(
       hermesScript('try { new AbortSignal(); } catch (error) { console.log(error.name); }'),

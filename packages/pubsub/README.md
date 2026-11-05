@@ -58,6 +58,22 @@ SQLite has one writer, so ids commit in order and the SQLite integration never s
 
 `describePubSubContract(name, make)` from `@arki/pubsub/testing` registers the conformance cases with vitest. Every integration here runs it: memory and SQLite (libSQL) in `bun run test`, Postgres and Redis on containers in `bun run test:pg` and `bun run test:redis`.
 
+## Runtime support
+
+The memory pubsub runs on Node, Bun, Deno, browsers and React Native (Hermes). The Postgres, SQLite and Redis integrations need their client and a server runtime. `bun run test:runtimes` runs a smoke test of the root and `./memory` on every engine; the Hermes leg needs `HERMES_BIN`.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 ## Errors
 
 | Code      | `errorCode`        | Meaning                                               |

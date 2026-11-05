@@ -10,39 +10,52 @@ import { createOllamaModel } from '../dist/ollama/index.js';
 import { createOpenAICompatibleModel } from '../dist/openai-compatible/index.js';
 import { fakeEmbedder } from '../dist/testing/index.js';
 
+/** A JSON response. Bare Hermes has no `Response` (React Native adds one), so there it is the few fields the models read. */
+function jsonResponse(value) {
+  const body = JSON.stringify(value);
+  if (typeof Response === 'function') return new Response(body);
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => JSON.parse(body),
+    text: async () => body,
+  };
+}
+
 /** Answers `/api/tags` and `/api/embed` the way Ollama does, with 4-dim vectors. */
 async function ollamaStub(url, init) {
   if (url.endsWith('/api/tags')) {
-    return new Response(JSON.stringify({ models: [{ name: 'tiny:latest', digest: 'abc123' }] }));
+    return jsonResponse({ models: [{ name: 'tiny:latest', digest: 'abc123' }] });
   }
   const { input } = JSON.parse(init.body);
   const embeddings = input.map((_, index) => [0.5, 0.5, 0.5, index % 2 === 0 ? 0.5 : -0.5]);
-  return new Response(JSON.stringify({ embeddings, prompt_eval_count: input.length }));
+  return jsonResponse({ embeddings, prompt_eval_count: input.length });
 }
 
 /** Answers `/embeddings` the way an OpenAI-compatible server may: rows in reverse order, keyed by `index`. */
 async function openAICompatibleStub(_url, init) {
   const { input } = JSON.parse(init.body);
   const data = input.map((_, index) => ({ index, embedding: [index + 1, 0, 0, 0] })).reverse();
-  return new Response(JSON.stringify({ data, usage: { prompt_tokens: input.length } }));
+  return jsonResponse({ data, usage: { prompt_tokens: input.length } });
 }
 
-/** Opt-in: a real in-process embed. The import specifier is computed so the browser and Hermes bundles leave it out. */
-async function transformersChecks() {
+/**
+ * Opt-in: a real embed through `./transformers`, in `smoke-transformers.mjs` run as a child process on Node
+ * and Bun. A child process, because Hermes rejects `import()` as a syntax error even in code that never runs
+ * there, and a static import would pull the model runtime into the browser and Hermes bundles.
+ */
+function transformersChecks() {
   const env = globalThis.process?.env ?? {};
   // Deno runs a bundle, where the relative entry does not resolve; Deno is not claimed for this entry.
   if (env.TRANSFORMERS_SMOKE !== '1' || typeof Deno !== 'undefined') return [];
-  const entry = '../dist/transformers/index.js';
-  const { createTransformersModel } = await import(entry);
-  const model = await createTransformersModel(
-    env.TRANSFORMERS_CACHE_DIR ? { cacheDir: env.TRANSFORMERS_CACHE_DIR } : {},
-  );
-  const batch = await embedMany(createEmbedder(model), ['the rain in Spain', 'ploaia din Spania']);
-  await model.dispose?.();
-  return [
-    ['transformers embeds two texts', batch.vectors?.length, 2],
-    ['transformers observes 768 dims', model.dimensions, 768],
-  ];
+  // `getBuiltinModule` and `process.argv[1]`: Hermes rejects `import()` and `import.meta` even in code that never runs there.
+  const { spawnSync } = globalThis.process.getBuiltinModule('node:child_process');
+  const script = globalThis.process.argv[1].replace(/smoke\.mjs$/, 'smoke-transformers.mjs');
+  const result = spawnSync(globalThis.process.execPath, [script], { encoding: 'utf8', env });
+  globalThis.process.stderr.write(result.stderr);
+  if (result.status !== 0) throw new Error(`smoke-transformers.mjs exited ${result.status}`);
+  return JSON.parse(result.stdout.trim().split('\n').at(-1));
 }
 
 async function main() {
@@ -70,7 +83,7 @@ async function main() {
   await embed(cached, 'a');
   const hit = await embed(cached, 'a');
 
-  const transformers = await transformersChecks();
+  const transformers = transformersChecks();
 
   const checks = [
     ...transformers,

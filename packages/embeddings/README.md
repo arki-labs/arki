@@ -79,6 +79,18 @@ export async function embedForIndex(embedder: Embedder, texts: readonly string[]
 - The Hermes leg runs only where `HERMES_BIN` is set.
 - The root imports no provider SDK, no `process.env` and no `node:*`. `./openai`, `./google`, `./mistral` and `./bedrock` load their AI SDK peers on the first call, not at import.
 
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+<!-- runtimes:end -->
+
 Debug logs use the `arki:embeddings` category. Show them with `DEBUG=arki:embeddings`.
 
 ## Public imports

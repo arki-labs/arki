@@ -67,6 +67,18 @@ export async function overlap() {
 
 Node, Bun and Deno. The memory store also runs in browsers and on Hermes. The Postgres, SQLite, Redis and file stores need their client and a server runtime.
 
+Lock tokens come from Web Crypto `getRandomValues`. React Native has none, so install `react-native-get-random-values` and import it before `@arki/lock`. Without it every lock call fails closed with `RandomSourceUnavailable` from `@arki/contracts`, and the callback does not run.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+<!-- runtimes:end -->
+
 ## Public imports
 
 | Entry point           | What it has                                                              | Optional peer you install |

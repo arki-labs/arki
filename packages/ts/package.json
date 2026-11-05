@@ -88,5 +88,14 @@
     "type-fest": "^5.10.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
   }
 }

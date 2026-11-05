@@ -14,7 +14,7 @@ export const keyNameSchema = z.string().min(1, 'must not be empty')
 function keyMember(text: string, offset: number) {
   const delimiter = text.indexOf(':', offset);
   const lengthText = text.slice(offset, delimiter);
-  if (delimiter < 0 || !/^[1-9]\d*$/u.test(lengthText)) return;
+  if (delimiter === -1 || !/^[1-9]\d*$/u.test(lengthText)) return;
   const size = Number(lengthText);
   if (size > MAX_NAME_BYTES) return;
   const start = delimiter + 1;
@@ -22,8 +22,8 @@ function keyMember(text: string, offset: number) {
   let bytes = 0;
   while (end < text.length && bytes < size) {
     const point = text.codePointAt(end) ?? 0;
-    bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point <= 0xFFFF ? 3 : 4;
-    end += point > 0xFFFF ? 2 : 1;
+    bytes += point < 0x80 ? 1 : point < 0x8_00 ? 2 : point <= 0xFF_FF ? 3 : 4;
+    end += point > 0xFF_FF ? 2 : 1;
   }
   const value = text.slice(start, end);
   return bytes === size && keyNameSchema.safeParse(value).success ? { value, end } : undefined;

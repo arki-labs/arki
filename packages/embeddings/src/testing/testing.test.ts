@@ -153,7 +153,9 @@ describe('fromArkiEmbedder', () => {
   it('gives equal texts cosine 1 and different texts less, so similarTo can trust an @arki/embeddings embedder', async () => {
     const embedder = fromArkiEmbedder(fakeEmbedder({ dimensions: 32 }));
 
-    const [first, same, other] = await embedder.embed(['canopy cools streets', 'canopy cools streets', 'bike lanes']);
+    const [first, same, other] = orThrow(
+      await embedder.embed(['canopy cools streets', 'canopy cools streets', 'bike lanes']),
+    );
 
     expect(embedder.model).toBe('fake-32');
     expect(judgeCosine(first ?? [], same ?? [])).toBeCloseTo(1, 6);

@@ -505,7 +505,8 @@ describe('lead: review regressions', () => {
     expect(terms).toBe(3);
     expect(overlaps).toBe(0);
     stop.abort();
-    expect((await done).map(outcome => outcome?.code)).toEqual(['lock.lost', 'lock.lost', 'lock.lost']);
+    const outcomes = await done;
+    expect(outcomes.map(outcome => outcome?.code)).toEqual(['lock.lost', 'lock.lost', 'lock.lost']);
     expect(clock.pendingTimers).toBe(0);
   });
 
