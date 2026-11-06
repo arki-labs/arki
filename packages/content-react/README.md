@@ -45,13 +45,6 @@ export function SearchBox() {
 }
 ```
 
-## What it gives you
-
-- `Article`, `Mdx`, `ContentSection`, `Preview`, `mdxComponents` render posts and MDX.
-- `ChangelogTimeline`, `ChangelogPagination`, `ChangelogCard`, `Timeline`, `PostsTimeline` show dated entries. `searchParamsParsers` and `searchParamsCache` hold the `nuqs` page state for the changelog.
-- `Pre`, `FileTree`, `Notification`, `MarkdownImage`, `DateTime`, `EmbeddedCard`, `GitHubIssue`, `GitHubPullRequest`, `StaticTweet` are the building blocks used inside MDX.
-- `useSearch` searches posts with a 300 ms debounce and aborts a request still in flight. `useProcessor` turns markdown text into React nodes.
-
 ## When not to use this
 
 - You do not use `@arki/ui`. These components use its tokens and parts.
@@ -72,6 +65,13 @@ Browsers and React server rendering, through a bundler. It does not load in plai
 | hermes | n/a | - | 2026-11-05 |
 <!-- runtimes:end -->
 
+## What it gives you
+
+- `Article`, `Mdx`, `ContentSection`, `Preview`, `mdxComponents` render posts and MDX.
+- `ChangelogTimeline`, `ChangelogPagination`, `ChangelogCard`, `Timeline`, `PostsTimeline` show dated entries. `searchParamsParsers` and `searchParamsCache` hold the `nuqs` page state for the changelog.
+- `Pre`, `FileTree`, `Notification`, `MarkdownImage`, `DateTime`, `EmbeddedCard`, `GitHubIssue`, `GitHubPullRequest`, `StaticTweet` are the building blocks used inside MDX.
+- `useSearch` searches posts with a 300 ms debounce and aborts a request still in flight. `useProcessor` turns markdown text into React nodes.
+
 ## Public imports
 
 | Import | What it gives you |
@@ -85,3 +85,13 @@ Browsers and React server rendering, through a bundler. It does not load in plai
 ## Limits
 
 `useSearch` needs a `/posts/search` route that returns a JSON list of posts.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules that bite, the errors and how to verify.
+- [`llms.txt`](llms.txt): the short map an agent reads first.
+- [`AGENTS.md`](AGENTS.md): the laws for changing this package.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version and the failure `code`.

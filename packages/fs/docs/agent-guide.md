@@ -1,4 +1,19 @@
-# Agent guide: add file uploads to a Dot feature
+# Agent guide: @arki/fs
+
+Read `llms.txt` first for the map. This guide is the detail. When this guide and the code disagree, the entry files named in `package.json` `exports` win.
+
+## The model
+
+1. Storage adapters (`createS3StorageAdapter`, `createR2Storage`, `createLocalStorageAdapter`) put, get, list and delete objects. The S3 and R2 adapters sign uploads. The local one cannot.
+2. The files table (`filesTable`, `fileStorage`) is a Postgres or SQLite table. A row exists before any byte is written, and the server derives every key from the row.
+3. The flow is `createUpload`, then a PUT to the signed URL, then `confirmUpload`, then `url`, then `remove`. Every call takes the acting owner id first.
+4. A row is `ready` only after the server read the stored object and size and type matched. The sweep (`cleanupOrphans`) removes expired pending rows and every `deleting` row.
+5. Expected outcomes are returned failures from `@arki/failure`: `FileUnavailable`, `UploadPending`, `FileWrongState`, `UploadMismatch`, and the `Storage*` failures. Only static bad configuration throws `FileStorageError`.
+6. `@arki/fs/orpc` mounts the four procedures contract-first. `@arki/fs/testing` has `memoryUploadAdapter` for tests.
+
+## Task map
+
+### Add file uploads to a Dot feature
 
 Six steps. The full, typechecked wiring is in `examples/files/server.ts` and `examples/files/client.ts`.
 
@@ -19,7 +34,7 @@ Six steps. The full, typechecked wiring is in `examples/files/server.ts` and `ex
 6. **Schedule the sweep**: a `defineSchedule({ name: 'files.cleanup', every: '15m', handler })` whose handler
    loops `storage.cleanupOrphans()` while `more` (about 60 s budget), with `lock: { key: 'files.cleanup', locks }`.
 
-## Traps
+## Rules that bite
 
 - **Store the `FileId`, never a URL.** URLs expire (300 s by default). Call `storage.url` when you render.
 - **Expected outcomes are returned, not thrown.** `confirmUpload` returns `UploadPending` while the PUT is still
@@ -32,6 +47,19 @@ Six steps. The full, typechecked wiring is in `examples/files/server.ts` and `ex
 - **Emit "file attached" after `confirmUpload` returns**, not in the same transaction. For a business delete,
   call `storage.remove` from a journal effect after commit; the sweep covers a late effect.
 - **Do not use the local adapter for uploads.** `fileStorage` refuses it. Use MinIO or a dev R2 bucket.
+
+## Errors
+
+| Code                  | Meaning                                                                                                           | What to do                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `fs.file_unavailable` | Missing, not yours, another bucket binding, or the policy refused.                                                | Show a placeholder. Do not probe which case it was. |
+| `fs.upload_pending`   | The PUT has not landed yet.                                                                                       | Confirm again later.                                |
+| `fs.file_wrong_state` | Not ready, being deleted, or the confirm window passed.                                                           | Start a new upload.                                 |
+| `fs.upload_mismatch`  | Stored size, type or hash differs from the request. The row is now deleting.                                      | Upload again.                                       |
+| `ARKI_FS_E001`        | `FileStorageError`: bad input or configuration (TTL over the cap, size over the limit, MIME not allowed). Thrown. | Correct the value to fit the configured limits.     |
+| `ARKI_FS_E006`        | `FileStorageError`: the adapter cannot sign uploads (the local adapter given to `fileStorage`). Thrown.           | Use S3, R2 or MinIO.                                |
+
+Storage calls also return `StorageUnavailable`, `StorageRejected`, `StorageWriteUncertain`, `StorageCancelled` and `StorageNotFound`. Reconcile `StorageWriteUncertain` before any retry. The README lists them under Failure behaviour.
 
 ## Recovering stuck `deleting` rows
 
@@ -64,3 +92,14 @@ or global SDK configuration. Pure declarations and the in-memory testing adapter
 Run `bun run test`, `bun run typecheck`, `bun run build`, and `bun run lint`; run `test:pg` against owned
 Docker Postgres and `test:live` only with an explicit disposable `ARKI_FS_LIVE_*` bucket. Missing provider
 configuration is a blocker, not a green adapter result.
+
+## Verify
+
+```sh
+bun run build && bun run typecheck && bun run lint && bun run test
+bun run test:docs
+bun run test:pg
+bun ../../tooling/library/src/llms.ts --check
+```
+
+`test:pg` needs owned Docker Postgres. Run `test:live` only with a disposable `ARKI_FS_LIVE_*` bucket.

@@ -1,6 +1,6 @@
 # @arki/mcp
 
-> MCP servers and MCP Apps for ARKI, served as plain Request to Response handlers. Unreleased until the agent docs are written.
+> MCP tools for ARKI built from oRPC contract procedures, with their middleware intact and failures returned as values.
 
 ## Import paths
 
@@ -11,7 +11,9 @@
 <!-- llms:end -->
 
 ## Start here
-- [README](README.md): measured runtimes and the OAuth tables.
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): quick start, measured runtimes and the OAuth tables.
 - [Contracts](docs/contracts.md): the contract notes.
 
 ## By task
@@ -20,6 +22,8 @@
 - Expose an oRPC router as MCP tools: `fromRpc` from `@arki/mcp/orpc`. It returns its failures as values (`Forbidden`, `ApprovalRequired`, `InvalidInput`, `ResultTooLarge`).
 
 ## Rules that bite
-- The package is private (`"private": true`) until the agent docs land. Do not depend on it from a published package.
+- `access` and `hidden` describe listing only. The procedure middleware must still authorize each call.
+- `ToolCall` is trusted context from the host. Nothing in it comes from tool arguments.
+- Match on a failure `code` such as `mcp.forbidden`, never on the message.
 - Runtimes measured: Node and Bun pass, Deno passes when bundled. The root entry is not for a browser tab.
 - OAuth tables come from `@better-auth/oauth-provider`. This package owns no tables.

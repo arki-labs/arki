@@ -2,7 +2,21 @@
 
 Publish and subscribe on named channels, with one contract and a dedicated integration per backend: memory, Postgres LISTEN/NOTIFY, SQLite (a polled table) and Redis. Import the one you use. Delivery is best effort, like NOTIFY. It is not a queue: nothing is stored for a subscriber that was not listening.
 
-## Usage
+## Install
+
+```sh
+npm install @arki/pubsub
+# or
+bun add @arki/pubsub
+# or
+pnpm add @arki/pubsub
+```
+
+Each backend needs its own client. `@arki/pubsub/pg` uses a Postgres session pool. `@arki/pubsub/sqlite` uses a libSQL database. `@arki/pubsub/redis` uses an `ioredis` client. `@arki/pubsub/memory` needs nothing. `ioredis`, `@arki/db` and `drizzle-orm` are optional peers.
+
+## Quick start
+
+Publish on a channel and read it in a subscriber. This is the in-memory backend.
 
 ```ts run
 import { memoryPubSub } from '@arki/pubsub/memory';
@@ -18,6 +32,28 @@ if (received[0] !== 'ord_42') throw new Error('not delivered');
 await unsubscribe();
 await pubsub.close();
 ```
+
+## When not to use this
+
+- You need a queue. Nothing is stored for a subscriber that was not listening, and a message is never replayed. Use `@arki/queue`.
+- You need delivery to every subscriber with no loss. Delivery is best effort, like NOTIFY.
+- You need payloads over 7999 bytes. Send an id and let the subscriber read the rest from the database.
+
+## Runtime support
+
+The memory pubsub runs on Node, Bun, Deno, browsers and React Native (Hermes). The Postgres, SQLite and Redis integrations need their client and a server runtime. `bun run test:runtimes` runs a smoke test of the root and `./memory` on every engine; the Hermes leg needs `HERMES_BIN`.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Integrations
 
@@ -75,23 +111,20 @@ Metrics: `pubsub.operations` (counter; `operation` = `publish`, `publish_in`, `d
 
 Not instrumented: `subscribe` — on Postgres the listen is `@arki/db`'s `db.listen.start` (one per channel); the other backends only register a callback or send one `SUBSCRIBE`, and the delivery spans show it works. Idle SQLite polls — one every `intervalMs` would flood traces; they are counted instead.
 
-## Runtime support
+## Public imports
 
-The memory pubsub runs on Node, Bun, Deno, browsers and React Native (Hermes). The Postgres, SQLite and Redis integrations need their client and a server runtime. `bun run test:runtimes` runs a smoke test of the root and `./memory` on every engine; the Hermes leg needs `HERMES_BIN`.
+| Import                 | What it holds                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `@arki/pubsub`         | The contract: `CHANNEL_PATTERN`, `MAX_PAYLOAD_BYTES`, `PubSubError`, `PUBSUB_ERROR_CODES` and the types. |
+| `@arki/pubsub/memory`  | `memoryPubSub`.                                                                                          |
+| `@arki/pubsub/pg`      | `pgPubSub`.                                                                                              |
+| `@arki/pubsub/sqlite`  | `sqlitePubSub`, `pubsubTable`.                                                                           |
+| `@arki/pubsub/redis`   | `redisPubSub`.                                                                                           |
+| `@arki/pubsub/testing` | `describePubSubContract`, the conformance suite.                                                         |
 
-<!-- runtimes:start -->
+## Failure behaviour
 
-| Runtime | Result | Version tested        | Date (UTC) |
-| ------- | ------ | --------------------- | ---------- |
-| node    | pass   | v22.13.1              | 2026-11-05 |
-| bun     | pass   | 1.4.2                 | 2026-11-05 |
-| deno    | pass   | 2.9.8                 | 2026-11-05 |
-| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
-| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
-
-<!-- runtimes:end -->
-
-## Errors
+A bad call or a closed pubsub throws a `PubSubError`. Match on `code` or `errorCode`, never on the message. A Postgres `subscribe` that cannot open its `LISTEN` resolves to the failure `db.listen_unavailable` instead of throwing.
 
 | Code      | `errorCode`        | Meaning                                               |
 | --------- | ------------------ | ----------------------------------------------------- |
@@ -99,3 +132,22 @@ The memory pubsub runs on Node, Bun, Deno, browsers and React Native (Hermes). T
 | `payload` | `ARKI_PUBSUB_E002` | The payload is 8000 bytes or more.                    |
 | `closed`  | `ARKI_PUBSUB_E003` | The pubsub was closed.                                |
 | `config`  | `ARKI_PUBSUB_E004` | A non-positive `intervalMs` or `retainMs`.            |
+
+## Limits
+
+- A channel is 1 to 63 characters of `[a-z0-9_]`.
+- A payload is at most 7999 bytes in UTF-8.
+- Nothing is stored for a subscriber that was not listening. A message published before `subscribe` resolved is not replayed.
+- Order is kept per channel per publisher.
+- `publishIn` exists on `pgPubSub` and `sqlitePubSub` only.
+- `pgPubSub` needs a session pool, never a transaction pooler.
+- SQLite polls every `intervalMs` (default 250) and deletes rows older than `retainMs` (default 60 s).
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules and the errors.
+- [llms.txt](llms.txt): the import map for agents.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the backend and the error `code`.

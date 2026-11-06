@@ -62,14 +62,6 @@ import { contentQueries } from '@arki/content';
 export const { posts, postBySlug, changelogs, legals, faqs } = contentQueries(generated);
 ```
 
-## What it does
-
-- `parseFeed(xml, options?)` reads RSS 2.0 and Atom. It returns a `Feed` or one of `FeedTooLarge`, `FeedMalformed`, `FeedUnsupported`, `FeedLimitExceeded`. DOCTYPE and entity declarations are refused.
-- `generateRss`, `generateAtom`, `generateFeed` write a `Feed` as text.
-- `buildPostFeed` and `buildChangelogFeed` make an RSS 2.0 feed from posts or changelog entries.
-- `createPostSearchIndex`, `loadPostSearchIndex`, `searchPosts` wrap MiniSearch. The index can be saved with `JSON.stringify` at build time and loaded in the browser.
-- `contentQueries` sorts posts and changelogs newest first, legals by title and FAQs by order. It returns sorted copies.
-
 ## When not to use this
 
 - You need to compile MDX or markdown. Use `@arki/content-build`.
@@ -90,6 +82,14 @@ Browsers. The package has no Node-only imports.
 | hermes | n/a | - | 2026-11-05 |
 <!-- runtimes:end -->
 
+## What it does
+
+- `parseFeed(xml, options?)` reads RSS 2.0 and Atom. It returns a `Feed` or one of `FeedTooLarge`, `FeedMalformed`, `FeedUnsupported`, `FeedLimitExceeded`. DOCTYPE and entity declarations are refused.
+- `generateRss`, `generateAtom`, `generateFeed` write a `Feed` as text.
+- `buildPostFeed` and `buildChangelogFeed` make an RSS 2.0 feed from posts or changelog entries.
+- `createPostSearchIndex`, `loadPostSearchIndex`, `searchPosts` wrap MiniSearch. The index can be saved with `JSON.stringify` at build time and loaded in the browser.
+- `contentQueries` sorts posts and changelogs newest first, legals by title and FAQs by order. It returns sorted copies.
+
 ## Public imports
 
 | Import | What it gives you |
@@ -105,3 +105,13 @@ Parsing returns failures from `@arki/failure` with the codes `content.feed_too_l
 ## Limits
 
 `parseFeed` reads at most 10 MiB of text and 10,000 items by default. Pass `maxBytes` or `maxItems` to change them.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules that bite, the errors and how to verify.
+- [`llms.txt`](llms.txt): the short map an agent reads first.
+- [`AGENTS.md`](AGENTS.md): the laws for changing this package.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version and the failure `code`.

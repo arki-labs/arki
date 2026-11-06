@@ -11,7 +11,10 @@
 <!-- llms:end -->
 
 ## Start here
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): the three entries and an example.
+- [API reference](docs/api.md): every exported value, by import path.
 
 ## By task
 - Page metadata and text files: `createToolMetadata`, `renderRobotsTxt`, `renderUrlset`, `renderSitemapIndex`, `generateLlmsTxt` from `@arki/seo`.

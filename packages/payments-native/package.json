@@ -41,6 +41,8 @@
     "src/**",
     "!src/**/*.test.*",
     "!dist/**/*.test.*",
+    "docs/**",
+    "llms.txt",
     "README.md",
     "LICENSE",
     "package.json"

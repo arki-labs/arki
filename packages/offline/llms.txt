@@ -16,7 +16,10 @@
 <!-- llms:end -->
 
 ## Start here
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
 - [README](README.md): the three tiers, collections, status, troubleshooting.
+- [API reference](docs/api.md): every export, by import path.
 
 ## By task
 - Keep reads across reloads (Tier 1): `createIdbPersister`, `PersistedQueryClientProvider` from `@arki/offline/query`.
@@ -27,5 +30,5 @@
 
 ## Rules that bite
 - A replayed write can run twice. Handlers must be idempotent; see the README on idempotency keys.
-- Tier 3 (true local-first sync) is deferred.
+- Tier 3 (true local-first sync) is not built.
 - The dev panel is dev-only and costs nothing in production.

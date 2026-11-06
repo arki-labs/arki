@@ -15,6 +15,62 @@ Offline-first toolkit for @arki apps. Modular subpath exports — install what y
 
 ---
 
+## Install
+
+```sh
+npm install @arki/offline
+# or
+bun add @arki/offline
+# or
+pnpm add @arki/offline
+```
+
+Peer dependencies: `@tanstack/react-query`, `react`, `@orpc/contract` and `@orpc/server`. `@arki/db` and `drizzle-orm` are for the SQL idempotency store of `@arki/offline/orpc`.
+
+## Quick start
+
+Keep reads across reloads (Tier 1). Persist the TanStack Query cache to IndexedDB.
+
+```ts
+import { createIdbPersister } from '@arki/offline/query';
+
+export const idbPersister = createIdbPersister({ storageKey: 'pizzeria-query' });
+```
+
+The persister needs IndexedDB, so it works in a browser. [Three tiers](#three-tiers) shows how to mount it, queue writes (Tier 2) and wire everything with `createOfflineRuntime()`.
+
+## When not to use this
+
+- You build for React Native and need a persisted query cache or a write queue. Use TanStack's own offline stack there. See [React Native](#react-native).
+- You need true local-first sync with conflict resolution. This package has Tier 1 and Tier 2. Tier 3 is not built.
+- Your writes cannot run twice with the same result. A replayed write can run twice, so a handler must be idempotent.
+
+## Runtime support
+
+`@arki/offline/collections` runs on every engine, Hermes (React Native) included, once the app installs a random source (see [React Native](#react-native)). `./query`, `./mutations`, `./preset`, `./status` and `./devtools` run on Node, Bun, Deno and browsers, not Hermes: they store to IndexedDB, listen to browser `online`/`offline` events, or render DOM elements, and React Native has none of these. `@arki/offline/orpc` runs on Node, Bun, Deno and browsers, not Hermes: oRPC needs Web Streams (`TransformStream`), which React Native lacks. `@arki/offline/pwa` runs in browsers only: Workbox reads the worker global `self`.
+
+The Hermes leg sets the globals React Native sets before it imports `./collections`: `window` and `self` are the global object, and `navigator` is `{ product: 'ReactNative' }`, with no `onLine` and no events. So a guard that takes `window` for a browser fails there as it would in an app.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+
+- `./devtools` runs on node, bun, deno, browser (`scripts/smoke/devtools.mjs`).
+- `./mutations` runs on node, bun, deno, browser (`scripts/smoke/mutations.mjs`).
+- `./orpc` runs on node, bun, deno, browser (`scripts/smoke/orpc.mjs`).
+- `./preset` runs on node, bun, deno, browser (`scripts/smoke/preset.mjs`).
+- `./pwa` runs on browser, bundled (bundler-only entry) (`scripts/smoke/pwa.mjs`).
+- `./query` runs on node, bun, deno, browser (`scripts/smoke/query.mjs`).
+- `./status` runs on node, bun, deno, browser (`scripts/smoke/status.mjs`).
+<!-- runtimes:end -->
+
+---
+
 ## Three tiers
 
 ### Tier 1 — Resilient reads (all apps)
@@ -412,28 +468,57 @@ onlineManager.setEventListener(setOnline => {
 AppState.addEventListener('change', state => focusManager.setFocused(state === 'active'));
 ```
 
----
 
-## Runtime support
+## Public imports
 
-`@arki/offline/collections` runs on every engine, Hermes (React Native) included, once the app installs a random source (see [React Native](#react-native)). `./query`, `./mutations`, `./preset`, `./status` and `./devtools` run on Node, Bun, Deno and browsers, not Hermes: they store to IndexedDB, listen to browser `online`/`offline` events, or render DOM elements, and React Native has none of these. `@arki/offline/orpc` runs on Node, Bun, Deno and browsers, not Hermes: oRPC needs Web Streams (`TransformStream`), which React Native lacks. `@arki/offline/pwa` runs in browsers only: Workbox reads the worker global `self`.
+| Import                      | What it holds                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@arki/offline/query`       | Persisted query client: `createIdbPersister`, `PersistedQueryClientProvider`, `createPersistedQueryClient`. |
+| `@arki/offline/mutations`   | The write queue, its replay loop, dead-letter store, hooks and the queue failures.                     |
+| `@arki/offline/collections` | `createLocalCollection`, `createMemoryCollection`.                                                      |
+| `@arki/offline/pwa`         | Workbox helpers for a service worker: `registerOfflineRoutes`, `createStrategy`.                       |
+| `@arki/offline/status`      | `useOnlineStatus`, `useQueueDepth`, `OfflineBanner`.                                                   |
+| `@arki/offline/orpc`        | `offlineSafe`, the `idempotency()` middleware and the idempotency stores.                              |
+| `@arki/offline/devtools`    | `OfflineDevPanel`, for development.                                                                    |
+| `@arki/offline/preset`      | `createOfflineRuntime()`, which wires the other entries.                                               |
 
-The Hermes leg sets the globals React Native sets before it imports `./collections`: `window` and `self` are the global object, and `navigator` is `{ product: 'ReactNative' }`, with no `onLine` and no events. So a guard that takes `window` for a browser fails there as it would in an app.
+There is no root entry. [`docs/api.md`](docs/api.md) lists every export.
 
-<!-- runtimes:start -->
-| Runtime | Result | Version tested | Date (UTC) |
-| --- | --- | --- | --- |
-| node | pass | v22.13.1 | 2026-11-05 |
-| bun | pass | 1.4.2 | 2026-11-05 |
-| deno | pass | 2.9.8 | 2026-11-05 |
-| browser | pass | Chromium 156.0.8078.4 | 2026-11-05 |
-| hermes | pass | V1 250829098.0.17 | 2026-11-05 |
+## Failure behaviour
 
-- `./devtools` runs on node, bun, deno, browser (`scripts/smoke/devtools.mjs`).
-- `./mutations` runs on node, bun, deno, browser (`scripts/smoke/mutations.mjs`).
-- `./orpc` runs on node, bun, deno, browser (`scripts/smoke/orpc.mjs`).
-- `./preset` runs on node, bun, deno, browser (`scripts/smoke/preset.mjs`).
-- `./pwa` runs on browser, bundled (bundler-only entry) (`scripts/smoke/pwa.mjs`).
-- `./query` runs on node, bun, deno, browser (`scripts/smoke/query.mjs`).
-- `./status` runs on node, bun, deno, browser (`scripts/smoke/status.mjs`).
-<!-- runtimes:end -->
+Operations return failures as values. Check them with `isFailure` from `@arki/failure`. Match on `code`, never on the message.
+
+| Code                                    | When                                                                        |
+| --------------------------------------- | --------------------------------------------------------------------------- |
+| `offline.query_cache_persist_failed`    | IndexedDB refused a cache write (storage full, private mode).               |
+| `offline.queue_storage_unavailable`     | The existing queue could not be read, or there is no IndexedDB.             |
+| `offline.queue_storage_corrupt`         | Stored queue bytes do not match their contract. They are kept, not erased.  |
+| `offline.queue_encoding_failure`        | Offline state could not be serialized.                                      |
+| `offline.queue_persistence_unconfirmed` | A local write was not confirmed. Read local state before you write again.   |
+| `offline.queue_acceptance_unconfirmed`  | The outcome of a queued write could not be confirmed. Reconcile first.      |
+| `offline.queue_effect_unconfirmed`      | The server accepted the write, but local cleanup was not confirmed.         |
+| `offline.queue_transport_unavailable`   | The transport is down. The queue owns the retry.                            |
+| `offline.idempotency_store_unconfirmed` | The database did not confirm the first answer was cached; it may be saved. Never run the completed handler again. |
+
+`queue.enqueue()` returns a receipt or a failure. `queue.drain()` returns nothing or a failure. See [Enqueue outcomes](#enqueue-outcomes).
+
+## Limits
+
+- A replayed write can run twice. Every queued procedure must be safe to run twice with the same result.
+- The retry schedule defaults to exponential from 1 s to 30 s, at most 5 retries. Then the write moves to the dead-letter list.
+- A queued write replays only under the account that made it. A different account dead-letters it as `ACTOR_MISMATCH`.
+- `./query`, `./mutations`, `./preset`, `./status` and `./devtools` are web-only. On React Native only `./collections` and the server side of `./orpc` apply.
+- `./pwa` runs in a browser service worker only.
+- On the server, `offline.Provider` makes a fresh unpersisted query client for each request.
+
+## Documentation
+
+- [API reference](docs/api.md): every export, by import path.
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules and the errors.
+- [Design doc](docs/2026-05-16-arki-offline-design.md): the architecture and the decisions.
+- [Upgrade notes](docs/upgrades/idempotency-writes.md): the idempotency write change.
+- [llms.txt](llms.txt): the import map for agents.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the browser or runtime, and the failure `code`.

@@ -5,9 +5,9 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/journal`: `BATCH_LIMIT`, `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `RUN_FIELD_LIMITS`, `WorkflowBusy`, `WorkflowReadMismatch`, `WorkflowStranded`, `backoff`; and 141 more.
+- `@arki/journal`: `BATCH_LIMIT`, `COMMAND_FAILURES`, `CommandConflict`, `CommandForbidden`, `CommandInvalid`, `CommandNotFound`, `JournalError`, `LIMIT_BOUNDS`, `LIMIT_BUSY_REASONS`, `LIMIT_KEY_TTL`, `RUN_FIELD_LIMITS`, `RUN_OVERRIDE_LIMITS`; and 160 more.
 - http/* (2 paths): The HTTP response cache on Postgres: `@arki/http/idempotency` stores a finished response here and replays it when the same `Idempotency-Key` comes again. `@arki/journal/http`, `@arki/journal/http/webhooks`.
-- one path each: `@arki/journal/pg`, `@arki/journal/foreman`, `@arki/journal/dot`, `@arki/journal/errors`, `@arki/journal/contract`, `@arki/journal/orpc`, `@arki/journal/projection`, `@arki/journal/event-map` (Node only), `@arki/journal/testing`, `@arki/journal/event-log-contract`, `@arki/journal/postgres`, `@arki/journal/kurrentdb`, `@arki/journal/zod`.
+- one path each: `@arki/journal/pg`, `@arki/journal/foreman`, `@arki/journal/dot`, `@arki/journal/errors`, `@arki/journal/contract`, `@arki/journal/orpc`, `@arki/journal/projection`, `@arki/journal/event-map`, `@arki/journal/testing`, `@arki/journal/event-log-contract`, `@arki/journal/postgres`, `@arki/journal/kurrentdb`, `@arki/journal/zod`.
 <!-- llms:end -->
 
 ## Start here
@@ -23,39 +23,33 @@
 - [Add an effect that runs after commit](docs/agent-guide.md#add-an-effect-that-runs-after-commit)
 - [Add a command and run it](docs/agent-guide.md#add-a-command-and-run-it)
 - [Schedule a job in the same transaction](docs/agent-guide.md#schedule-a-job-in-the-same-transaction)
-- Run jobs scheduled by `@arki/queue/outbox`: give `journal.worker(db, { jobs })` or `journalWorker({ jobs })` a runner. See [Queue jobs in the jobs table](README.md#queue-jobs-in-the-jobs-table)
-- [Operate and retain jobs](docs/agent-guide.md#operate-and-retain-jobs): states, paged reads, verbs with `op`, retention, archive sink. Long form: [Operating the jobs](README.md#operating-the-jobs) and [Retention and archive](README.md#retention-and-archive)
-- Inbox and relay recipes: [Inbox](README.md#inbox), [Relay recipe](README.md#relay-recipe)
-- [Add a durable workflow](docs/agent-guide.md#workflows): steps, waits, undo, versions, operators, `workflowHarness`. Long form: [Workflows](README.md#workflows). Must survive a restart or wait for hours → `j.workflow`; steps inside one request → `createFlow` from `@arki/ai`
-- Keep events in another store (another Postgres, an event store): `j.entity(kind, table, { events: log })`. See [Events in another store](README.md#events-in-another-store)
-- Keep only the row, no events: `j.entity(kind, table, { events: 'transient' })`, or `initJournal({ tables, events: 'transient' })` for every entity. See [Transient events](README.md#transient-events)
-- [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), with the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs)
+- Run jobs from `@arki/queue/outbox`: [Queue jobs in the jobs table](README.md#queue-jobs-in-the-jobs-table)
+- [Operate and retain jobs](docs/agent-guide.md#operate-and-retain-jobs); long form [Operating the jobs](README.md#operating-the-jobs), [Retention and archive](README.md#retention-and-archive)
+- Inbox and relay: [Inbox](README.md#inbox), [Relay recipe](README.md#relay-recipe)
+- [Add a durable workflow](docs/agent-guide.md#workflows); long form [Workflows](README.md#workflows). A run that must survive a restart is `j.workflow`; steps inside one request are `createFlow` from `@arki/ai`
+- Events in another store: [Events in another store](README.md#events-in-another-store). Row only, no events: [Transient events](README.md#transient-events)
+- [Find out why a write failed](docs/agent-guide.md#find-out-why-a-write-failed), the [error table](docs/agent-guide.md#errors), the [recovery verbs](docs/agent-guide.md#recovery-verbs)
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
 
 ## Rules that bite
-- The door is `journal.bind(db, meta)`: bind once per request or job, then call `run(command, input)`. You give `meta`; the library never picks an actor.
-- A rule that rejects a request returns a failure (`CommandNotFound({ detail })` and the others, or the app's own). The command rolls back exactly as for a throw, and `journal.run` returns it, typed. An `events` failure comes back from `write`, a child's from `run`: return it from the handler. A command that got one and still returns a success throws `IGNORED_FAILURE` and commits nothing. To handle a refusal on purpose, check it and call `accept(result)` (on the command and the effect context): it lifts only this command's check, once per return of that very value; the refused child stays rolled back. Misuse throws `INVALID_ACCEPT`. A failure is not a `JournalError`. An oRPC app adds `commandErrors()` once, after its own error middleware; it answers a returned failure as an error too.
-- A command declares its events: `j.command(name, input, { writes: [OrderPaid] }, handler)`. `write` takes only those; an undeclared event that gets past the types fails with `BAD_DEFINITION` and nothing commits.
+- The door is `journal.bind(db, meta)`: bind once per request or job, then `run(command, input)`. You give `meta`; the library never picks an actor.
+- A rule that rejects a request returns a failure, typed from `journal.run`, and the command rolls back. Return a child's or `events` failure from the handler. Ignoring one throws `IGNORED_FAILURE`. To handle a refusal on purpose, use `accept(result)`. An oRPC app adds `commandErrors()`.
+- A command declares its events: `{ writes: [OrderPaid] }`. An undeclared event fails with `BAD_DEFINITION` and nothing commits.
 - Await every `write` and `run`. One journal operation per transaction at a time. No `Promise.all` over writes.
-- `drain` and `worker` take the root database, never a transaction.
-- An effect that needs a service lists it: `j.effect(name, entity, { mailer: need<Mailer>() }, on)`. The handler reads `mailer` from its context. A plain app gives the services once, in `j.compose({ services })`. In a Dot feature the effect picks them with `needsOf((_: Deps) => ['mailer'])`, as a plain exported value with `import type { Deps }` from the feature, and is mounted with `.usecases({}, journalHandlers(core, { effects }))`.
-- Any running worker can claim any job. Run the worker in the process that holds what its effects talk to (for example an in-memory emitter).
-- A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. Returning `null` deletes the row. A soft delete is a normal patch.
-- Version 1 means created by the journal. A row that existed before the journal starts at version 2. `adopt` takes a row at any version with no history and makes it version 1; that is also how an entity goes from `events: 'transient'` to `'stored'`.
-- Events are stored unless the entity says `events: 'transient'`. A transient entity still gets reducers, inline projections and effects; async projections and taps on it are refused at `compose`, and replay, verify, repair, forget, rerun and adopt throw `NO_HISTORY`. `workflow.run` always stores its events.
-- `events` also takes an event log. One that cannot join the transaction is forwarded: a `forward` job appends the events after the commit, one entity's jobs in version order. History verbs throw `FORWARD_PENDING` until it ran; `journal.forwardLag(db)` shows what waits. Test an adapter with `eventLogContract` from `@arki/journal/event-log-contract`.
-- `postgresEvents({ db, tables: eventLogTables() })` from `@arki/journal/postgres` keeps events in another Postgres database, with `all` and `erase`. To switch an entity's store: pause its writes, `journal.copyLog(db, entity, { to })`, flip `events`, `reset` its async projections.
-- `kurrentEvents({ client, prefix? })` from `@arki/journal/kurrentdb` keeps events in KurrentDB: one stream per entity (`<kind>-<id>`, no `-` in the kind), `all` over `$all`, no `forget`.
-- Pass ids exactly as they are stored. Events are frozen: copy before you change.
+- `drain` and `worker` take the root database, never a transaction. Run the worker where its effects have their listeners.
+- An effect lists the services it needs with `need<T>()`. Plain apps give them in `j.compose({ services })`; a Dot feature uses `needsOf` and `journalHandlers`.
+- An effect has no `run`. To run a command on an event, start a `j.task` or `j.workflow` with `startOn`, and `startOn.timing` is required.
+- A reducer returns the value the database will store, or the write fails with `VALUE_MISMATCH`. `null` deletes the row.
+- Version 1 means created by the journal. A row from before starts at version 2. `adopt` gives it version 1.
+- Events are stored unless the entity says `events: 'transient'`. A transient entity has no history verbs: they throw `NO_HISTORY`. `workflow.run` always stores its events.
+- Another store: `events: log`, `postgresEvents` or `kurrentEvents` (no `-` in the kind, no `forget`). A log outside the transaction is forwarded; history verbs throw `FORWARD_PENDING` until it ran. Switching stores is a migration with `copyLog`.
+- Pass ids exactly as stored. Events are frozen: copy before you change.
 - A workflow step runs at least once. The step body owns idempotency: pass `ctx.key` to the provider. Compose workflows once per `initJournal()`.
-- A workflow waits for an app event with `.waitFor(name, { on: { [label]: { entity, events, match } }, timeout | until, onTimeout })`. It counts from admission, so an early event is kept, and one event is taken once per run. `onTimeout: 'continue'` gives `null`: a sleep an event cuts short. The wake effect is mounted for you. The table is `workflow_waits`.
-- An event wait stores a pointer `{ via, seq }`, not a copy of the event, so `forget` reaches every run that took the entity's events (parked, running or finished): an event with an `erased` form reads in that form. What a body derives from the event is the workflow's own data.
-- `limits: { transitions }` caps a run (1000 by default). A transition is the first try of a node: each visit in a loop and each `when`-skipped node count, a retry and an undo do not. A node past the cap does not run: the run compensates and ends `failed` with `WorkflowTransitionLimit` (`journal.workflow_transition_limit`). The count is `workflow_runs.transitions`; the upgrade note has the migration and a backfill.
-- An effect has no `run`. An event that must run a command starts a `j.task` or a `j.workflow` with `startOn`. `startOn.timing` is required: `'after-commit'`, or `'with-event'` (the run is written in the event's transaction; `onBusy: 'refuse'` does not compile).
-- A step with `failures: [Declined], onFailure: 'continue', output` keeps a listed returned failure as its result and the run goes on (stored as the failure's envelope, read back as a real failure). A last node that can be a failure needs a `.finish` function: `.finish()` does not compile.
-- `def.settled(db, runId, { within })` returns the typed run once it ended, or the failure `WorkflowPending { runId }`. `def.startAndWait(db, args, { meta, timeout, signal })` starts and waits: the output, `WorkflowRunFailed`, `WorkflowRunCancelled`, or `WorkflowPending`. Seconds, above 0 and at most 30; root database only; a wait never cancels the run.
-- `.parallel(name, { [branch]: b => b.step(...).finish() }, { wait: 'all' | 'any' })` runs branches as child runs of their own definitions, on a snapshot of the parent. `'all'` gives an object by branch; `'any'` gives `{ branch, result }` of the first to complete and cancels the others. A signal for the parent reaches every branch that waits for it; two waits for one name share one schema object. Event waits in a branch count from the parent's start. Each branch run counts its own transitions. A branch can start with `b.output(schema)`; when every branch has one, `def.read` types and checks the node, else it is `unknown`.
-- `def.read` checks and types a sleep (`null`), a command, an event wait, a `.child(name, def)` and a `.map` of a def with an `output` schema (a child chosen by a function is `unknown`).
-- A `.command(name, command, ({ input, results }) => commandInput, { accept?, undo?, when?, retry? })` node commits the command with its checkpoint: exactly once. Its result comes from the command's `output` schema.
+- `.waitFor` waits for an app event and takes each event once per run. It stores a pointer, so `forget` reaches it. The table is `workflow_waits`.
+- `limits: { transitions }` caps a run at 1000 by default. A node past the cap does not run; the run ends `failed` with `WorkflowTransitionLimit`.
+- A step's returned failure fails the step, unless it is listed in `failures` with `onFailure: 'continue'`.
+- `def.settled` and `def.startAndWait` take the root database and wait at most 30 seconds (above 0). A wait never cancels the run.
+- `.parallel` runs branches as child runs; `'all'` gives an object by branch, `'any'` the first to complete.
+- A `.command` node commits its command with its checkpoint: exactly once.
 
 > The design spec (`docs/specs/2026-10-09-journal-design.md`) explains intent. `src/api.ts` defines the signatures. When they differ, `src/api.ts` is right.

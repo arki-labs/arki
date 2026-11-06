@@ -108,3 +108,13 @@ Not instrumented: `configureRevenueCat` — it only stores the key and user id i
 
 - `configureRevenueCat` is the only call that can throw, because it calls the SDK directly. Call it once at app start.
 - One offering: the current (default) one in RevenueCat.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules and the errors.
+- [llms.txt](llms.txt): the import map for agents.
+- [`@arki/payments`](https://www.npmjs.com/package/@arki/payments): the server side, which handles the RevenueCat webhook.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the `react-native-purchases` version, the platform and the failure `code`.

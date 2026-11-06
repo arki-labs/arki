@@ -1,0 +1,30 @@
+# @arki/code-editor
+
+> A CodeMirror 6 editor for React with 13 light and dark themes and a theme picker. It reads no global state; you pass the theme in.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/code-editor/editor`: `CodeEditor`; types `CodeEditorLanguage`, `CodeEditorProps`.
+- `@arki/code-editor/themes`: `getTheme`, `themeMap`, `themes`; types `EditorThemeId`, `ThemeConfig`, `ThemeVariant`.
+- `@arki/code-editor/theme-picker`: `ThemeGroup`, `ThemePicker`, `ThemeSwatch`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview and the examples.
+
+## By task
+
+- [Show an editor](docs/agent-guide.md#show-an-editor)
+- [Let the user pick a theme](docs/agent-guide.md#let-the-user-pick-a-theme)
+- [List themes without React](docs/agent-guide.md#list-themes-without-react)
+
+## Rules that bite
+
+- The editor does not store the theme. Pass `getTheme(id).extension` every time.
+- `getTheme` returns `github-dark` for an unknown id.
+- `toml` and `text` show without highlighting.
+- Use a bundler. The components import TypeScript source from `@arki/ui` and `@arki/icons`.

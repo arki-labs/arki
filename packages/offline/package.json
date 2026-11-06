@@ -153,6 +153,7 @@
     "!src/**/*.spec.*",
     "README.md",
     "docs/api.md",
+    "docs/agent-guide.md",
     "docs/upgrades/**",
     "llms.txt",
     "LICENSE"

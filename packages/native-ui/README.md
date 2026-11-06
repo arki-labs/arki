@@ -99,3 +99,13 @@ None of the helpers throws on normal input. `isValidHexColor` returns a boolean.
 
 - Dark mode and theme tokens come from your NativeWind and Tailwind setup. This package defines no theme.
 - `Icon` wraps [Phosphor React Native](https://github.com/duongdev/phosphor-react-native) icons. Pass the icon with the `as` prop.
+
+## Documentation
+
+- [API reference](docs/api.md): every exported value, by import path.
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules and the errors.
+- [llms.txt](llms.txt): the import map for agents.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, your React Native and NativeWind versions, and whether you run Expo.

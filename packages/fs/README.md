@@ -4,7 +4,7 @@ File storage for arki apps: storage adapters (S3, Cloudflare R2, local disk), lo
 the **files table**: a Postgres-backed upload recipe where the database knows every object before
 any byte is written.
 
-## Install and peers
+## Install
 
 `@arki/fs` is published on npm. Add it with `bun add @arki/fs` in the app.
 
@@ -16,6 +16,41 @@ any byte is written.
 | `@arki/fs/orpc`                                             | `filesContract`, `filesRouter`                              | server; the contract gives clients their types | `@orpc/contract`, `@orpc/server` |
 | `@arki/fs/testing`                                          | `memoryUploadAdapter`                                       | Node, Bun                                      | none                             |
 | `@arki/fs/storage`, `/storage/*`, `/s3`, `/local/*`, `/env` | storage adapters and local helpers                          | Node, Bun                                      | none                             |
+
+## Quick start
+
+The flow is `createUpload → PUT → confirmUpload → url → remove`. The browser does all of it in one call. The server setup (table, storage, router) is in [Files table](#files-table).
+
+```ts skip="compiled by the package typecheck as examples/files/*.ts; needs a database and bucket to run"
+// browser: createUpload → PUT → confirmUpload in one call; keep the FileId
+export async function attach(orpc: AppClient, blob: Blob, onPercent: (percent: number) => void) {
+  const file = await uploadFile(filesUploadClient(orpc.files), blob, {
+    onProgress: (sent, total) => onPercent(total === 0 ? 100 : Math.round((sent / total) * 100)),
+  });
+  return isFailure(file) ? file : file.id;
+}
+```
+
+## When not to use this
+
+- You need to store small values or cache entries. This package stores files and tracks every one in a table.
+- You need a CDN, image resizing or a media pipeline. This package signs uploads and downloads. It does not transform bytes.
+- You need one atomic commit across the database and the store. There is none. The sweep closes the gap.
+- You need to upload a file larger than 5 GB. An upload is a single PUT.
+
+## Runtime support
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested | Date (UTC) |
+| ------- | ------ | -------------- | ---------- |
+| node    | pass   | v22.13.1       | 2026-11-05 |
+| bun     | pass   | 1.4.2          | 2026-11-05 |
+| deno    | pass   | 2.9.8          | 2026-11-05 |
+| browser | n/a    | -              | 2026-11-05 |
+| hermes  | n/a    | -              | 2026-11-05 |
+
+<!-- runtimes:end -->
 
 ## Storage adapters
 
@@ -295,7 +330,19 @@ The local adapter cannot sign uploads, so `fileStorage` refuses it (a compile er
 `@arki/fs/testing`; its `browserPut(url, body, headers)` plays the browser's PUT and enforces the
 signed headers.
 
-## Failures and errors
+## Public imports
+
+The table under [Install](#install) lists each entry with its peers. In short:
+
+- `@arki/fs/files`: file ids, wire schemas, failures, error codes and `uploadFile`. It is portable and has no peers.
+- `@arki/fs/pg` and `@arki/fs/sqlite`: `filesTable`, `fileStorage` and `toFileRecord`.
+- `@arki/fs/orpc`: `filesContract`, `filesRouter` and `filesUploadClient`.
+- `@arki/fs/storage` (also `/storage/*` and `/s3`): `createStorage`, `createS3StorageAdapter`, `createR2Storage`, `createLocalStorageAdapter` and the `Storage*` failures.
+- `@arki/fs/local/*`: `readFile`, `readFirstLine`, `writeToTheFileEnd`, `deleteAsync`, `deleteSync`, `glob`, `globIterate`, `globStream` and `getParentDirName`.
+- `@arki/fs/testing`: `memoryUploadAdapter`.
+- `@arki/fs/env`: the validated storage environment variables.
+
+## Failure behaviour
 
 Outcomes a correct caller must handle are **returned** as failures from `@arki/failure`, never thrown.
 Each storage call returns its value or one of these. Check with `isFailure(result)` or
@@ -371,6 +418,16 @@ Only bounded operation names and canonical `failure.code` are recorded: no paths
 credentials, owner IDs or private causes. Reporter faults cannot replace outcomes or execute work twice.
 Pure URL/path/schema/table construction and in-memory test harnesses need no separate execution spans.
 
+## Limits
+
+- An upload is one PUT. S3 caps one PUT at 5 GB.
+- A PUT URL lives `uploadTtlSeconds` (default 300). A GET URL lives `urlTtlSeconds` (default 300) and never more than `maxUrlTtlSeconds` (default 3600). A longer request is rejected, not clamped.
+- An issued GET URL cannot be revoked. It works until it expires.
+- `verify: 'hash'` downloads the object and holds it in memory to compute the SHA-256.
+- MIME is the declared type, not a sniffed format.
+- The local adapter cannot sign uploads, so `fileStorage` refuses it.
+- See [Not promised](#not-promised) for what the files table does not guarantee.
+
 ## Logging
 
 `getLogger('arki:fs')`. Lifecycle at DEBUG (operation, file id, transition, duration); a failed object
@@ -384,16 +441,14 @@ statements it replaces. No in-process files-table library exists to rank against
 published here only from an idle `bun run bench --profile publish --write-readme` run; none is
 recorded yet.
 
-## Runtime support
+## Documentation
 
-<!-- runtimes:start -->
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules that bite, the errors and how to verify.
+- [API reference](docs/api.md): every export.
+- [Upgrade guides](docs/upgrades): one note per version step.
+- [`llms.txt`](llms.txt): the short map an agent reads first.
+- [`AGENTS.md`](AGENTS.md): the laws for changing this package.
 
-| Runtime | Result | Version tested | Date (UTC) |
-| ------- | ------ | -------------- | ---------- |
-| node    | pass   | v22.13.1       | 2026-11-05 |
-| bun     | pass   | 1.4.2          | 2026-11-05 |
-| deno    | pass   | 2.9.8          | 2026-11-05 |
-| browser | n/a    | -              | 2026-11-05 |
-| hermes  | n/a    | -              | 2026-11-05 |
+## Support
 
-<!-- runtimes:end -->
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the adapter (S3, R2 or local), the database and the failure `code`.

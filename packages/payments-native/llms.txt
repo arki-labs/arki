@@ -1,0 +1,27 @@
+# @arki/payments-native
+
+> RevenueCat in-app purchases for React Native apps: configure, load the pro offering, purchase and restore, with failures returned as values.
+
+## Import paths
+
+<!-- llms:start -->
+- `@arki/payments-native`: `OfferingsUnavailable`, `PurchaseFailed`, `RestoreFailed`, `configureRevenueCat`, `getProOffering`, `purchasePackage`, `restorePurchases`; types `ConfigureRevenueCatParams`, `CustomerInfo`, `PurchaseOutcome`, `PurchasesOffering`, `PurchasesPackage`.
+<!-- llms:end -->
+
+## Start here
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules, the errors. Read it first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the quick start, runtimes and observability.
+
+## By task
+- [Buy a package](docs/agent-guide.md#buy-a-package)
+- [Restore purchases](docs/agent-guide.md#restore-purchases)
+- [Show a placeholder before the offering exists](docs/agent-guide.md#show-a-placeholder-before-the-offering-exists)
+
+## Rules that bite
+- This package is the purchase rail only. It does not read entitlements. Ask your own backend whether the user is Pro.
+- `appUserId` must be the id your backend signs users in with, or the webhook cannot find the user.
+- A failure is a returned value. Check it with `isFailure`. A cancelled purchase is `{ status: 'cancelled' }`, not a failure.
+- `configureRevenueCat` is the only call that can throw. Call it once at app start.
+- Match on the failure `code`, never on the message.

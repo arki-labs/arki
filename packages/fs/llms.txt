@@ -43,4 +43,4 @@
 - Store the `FileId`, never the URL. Every URL expires.
 - Pass the root Drizzle db, never a transaction. Never do storage I/O inside a DB transaction.
 - The local adapter cannot sign uploads. Use MinIO or a dev R2 bucket.
-- Thrown faults carry `FileStorageError.code`: `ARKI_FS_E001`, `E006`, `E007`.
+- Thrown faults carry `FileStorageError.code`: `ARKI_FS_E001` and `ARKI_FS_E006`.

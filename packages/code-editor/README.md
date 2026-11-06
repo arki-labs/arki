@@ -32,14 +32,6 @@ export const dark = themes.filter(theme => theme.variant === 'dark').map(theme =
 export const label = getTheme('nord').label; // 'Nord'
 ```
 
-## Public imports
-
-| Import | What |
-| --- | --- |
-| `@arki/code-editor/editor` | `CodeEditor` and the types `CodeEditorProps` and `CodeEditorLanguage`. Props: `value`, `onChange`, `language`, `readOnly`, `placeholder`, `className`, `ariaLabel`, `theme`, `lineNumbers`. |
-| `@arki/code-editor/themes` | `themes`, `themeMap`, `getTheme(id)` and the types `EditorThemeId`, `ThemeConfig`, `ThemeVariant`. `getTheme` falls back to `github-dark` for an unknown id. |
-| `@arki/code-editor/theme-picker` | `ThemePicker` (a controlled palette popover: `value`, `onChange`, `className`), plus `ThemeGroup` and `ThemeSwatch`. |
-
 ## When not to use this
 
 - You need a full IDE with language servers. This is a text editor with syntax colors.
@@ -59,6 +51,14 @@ Browsers, through a bundler. The `themes` entry also loads under Node, Bun and D
 | hermes | n/a | - | 2026-11-05 |
 <!-- runtimes:end -->
 
+## Public imports
+
+| Import | What |
+| --- | --- |
+| `@arki/code-editor/editor` | `CodeEditor` and the types `CodeEditorProps` and `CodeEditorLanguage`. Props: `value`, `onChange`, `language`, `readOnly`, `placeholder`, `className`, `ariaLabel`, `theme`, `lineNumbers`. |
+| `@arki/code-editor/themes` | `themes`, `themeMap`, `getTheme(id)` and the types `EditorThemeId`, `ThemeConfig`, `ThemeVariant`. `getTheme` falls back to `github-dark` for an unknown id. |
+| `@arki/code-editor/theme-picker` | `ThemePicker` (a controlled palette popover: `value`, `onChange`, `className`), plus `ThemeGroup` and `ThemeSwatch`. |
+
 ## Failure behaviour
 
 An unknown theme id returns the `github-dark` theme.
@@ -66,3 +66,13 @@ An unknown theme id returns the `github-dark` theme.
 ## Limits
 
 Highlighting for `json`, `yaml`, `xml`, `markdown`, `typescript`, `javascript`, `css`, `html`, `python` and `sql`. `toml` and `text` are accepted and shown without highlighting.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules that bite, the errors and how to verify.
+- [`llms.txt`](llms.txt): the short map an agent reads first.
+- [`AGENTS.md`](AGENTS.md): the laws for changing this package.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the browser and the bundler.
