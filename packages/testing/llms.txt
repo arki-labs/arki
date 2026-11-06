@@ -21,13 +21,11 @@
 - `@arki/testing/services/redis`: one Redis container per worker. `flushRedis`, `redis`; types `RedisWorker`.
 - `@arki/testing/stack`: the real services a test run needs, declared once per app. `READ_MANIFEST_FAILURES`, `STACK_ENV_KEY`, `StackManifestInvalid`, `StackNotStarted`, `defineStack`, `readManifest`, `service`; types `AttachedStack`, `Env`, `Json`, `ReadManifestFailure`, `RunValues`; and 12 more.
 - `@arki/testing/stack/contract`: The provider contract: one suite every service runs. `describeServiceContract`, `leftoverContainers`, `newRunId`; types `ContractOptions`.
-- `@arki/testing/server/integration-tester`: `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests. `IntegrationTester`; types `CreateCallerArgs`, `IntegrationTesterConfig`, `TestUser`, `TestUserRole`, `TesterDatabase`, `TesterOptions`, `TesterUserOverrides`, `TesterUsers`.
 - `@arki/testing/msw`: MSW (Mock Service Worker) primitives for Vitest-based HTTP testing. `HttpHandler`, `HttpResponse`, `RequestHandler`, `delay`, `http`, `passthrough`, `setupMswServer`; types `DefaultBodyType`, `ResponseResolver`, `SetupMswServerOptions`, `SetupServer`, `StrictRequest`; and 1 more.
-- `@arki/testing/otel`: In-memory OpenTelemetry capture for one test: finished spans with their parents, and collected metrics. `captureSpans`; types `CapturedSpan`, `SpanCapture`.
 - `@arki/testing/performance`: Performance Testing Utilities. `assertPerformance`, `benchmarkQuery`, `comparePerformance`, `createPerformanceTracker`, `measurePerformance`, `measureQuery`; types `PerformanceResult`.
-- `@arki/testing/server/tester-builder`: Tester Builder - tRPC-style initialization pattern. `initTester`; types `ContextTesterBuilder`, `InitialTesterBuilder`, `TesterBuilder`, `TesterConfig`.
 - `@arki/testing/timestamps`: Timestamp assertions that accept every moment type an app stores. `assertTimestamps`, `assertUpdatedAfterCreated`, `describeKind`, `epochMilliseconds`, `epochNanoseconds`, `isTimestamp`; types `Timestamp`, `Timestamps`.
 - `@arki/testing/vitest-setup`: the Vitest test API re-exported, so a setup file imports from one place. `afterAll`, `afterEach`, `beforeAll`, `beforeEach`, `describe`, `expect`, `it`, `test`, `vi`.
+- `@arki/testing/otel`: In-memory OpenTelemetry capture for one test: finished spans with their parents, and collected metrics. `captureSpans`; types `CapturedSpan`, `SpanCapture`.
 <!-- llms:end -->
 
 ## Start here

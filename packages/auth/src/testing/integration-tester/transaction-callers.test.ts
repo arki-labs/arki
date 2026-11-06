@@ -19,7 +19,7 @@ import { isNotNull, sql } from 'drizzle-orm';
 import { pgTable, serial, text } from 'drizzle-orm/pg-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { createUserId } from '@arki/auth/ids';
+import { createUserId } from '../../ids.js';
 import { initDb } from '@arki/db/builder';
 
 import type { TestUser } from './types';

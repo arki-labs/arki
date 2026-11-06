@@ -1,6 +1,6 @@
 # @arki/testing
 
-Test tooling for TypeScript backends: shared Postgres and Redis containers, an integration tester with role callers and rollback, typed factories, assertions, MSW HTTP mocking, a service stack for end-to-end runs, and scorers for AI output.
+Test tooling for TypeScript backends: shared Postgres and Redis containers, typed factories, assertions, MSW HTTP mocking, a service stack for end-to-end runs, and scorers for AI output.
 
 ## Install
 
@@ -8,7 +8,7 @@ Test tooling for TypeScript backends: shared Postgres and Redis containers, an i
 bun add -D @arki/testing vitest
 ```
 
-Add the peers you use. All are optional: `testcontainers`, `@testcontainers/postgresql` and `@testcontainers/redis` for containers, `msw` for HTTP mocking, `@playwright/test` for `e2e` and `ai/playwright`, `@arki/auth` for the integration tester.
+Add the peers you use. All are optional: `testcontainers`, `@testcontainers/postgresql` and `@testcontainers/redis` for containers, `msw` for HTTP mocking, `@playwright/test` for `e2e` and `ai/playwright`.
 
 ## Quick start
 
@@ -38,7 +38,7 @@ await assertErrorThrown(() => Promise.reject(new Error('user not found')), /not 
 
 `userFactory({ ... })` returns the object. `userFactory()` returns a builder. The imports are `createFactory`, `createMany`, `faker`, `assertPaginationValid`, `assertContainsId` and `assertErrorThrown` from `@arki/testing`. The full file is [examples/factories-and-assertions.ts](examples/factories-and-assertions.ts).
 
-For a backend test against a real database, see [the integration tester](docs/integration-tester.md).
+For a backend test against a real database with role callers and rollback, use `IntegrationTester` and `initTester` from `@arki/auth/testing/integration-tester`.
 
 ## When not to use this
 
@@ -67,15 +67,13 @@ Debug logs use the `testing:*` categories. Show them with `DEBUG_TESTS=true`.
 
 ## Public imports
 
-The root entry loads no Docker client, no MSW and no `@arki/auth`. The rest are explicit entries.
+The root entry loads no Docker client and no MSW. The rest are explicit entries. `IntegrationTester` and `initTester` moved to `@arki/auth/testing/integration-tester`.
 
 | Import                                                                            | Gives you                                                                    | Needs                                      |
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
 | `@arki/testing`                                                                   | factories, assertions, timestamps, debug, performance                        | nothing                                    |
 | `@arki/testing/assertions`, `/factories`, `/timestamps`, `/debug`, `/performance` | one part of the root                                                         | nothing                                    |
 | `@arki/testing/containers`                                                        | `setupGlobalTestContainers`, `startPostgresContainer`, `startRedisContainer` | Docker, testcontainers                     |
-| `@arki/testing/server/tester-builder`                                             | `initTester`                                                                 | `@arki/auth`                               |
-| `@arki/testing/server/integration-tester`                                         | `IntegrationTester` and its types                                            | `@arki/auth`, Docker                       |
 | `@arki/testing/msw`                                                               | `setupMswServer`, `http`, `HttpResponse`                                     | `msw`, Vitest                              |
 | `@arki/testing/vitest-setup`                                                      | the Vitest test API, re-exported                                             | Vitest                                     |
 | `@arki/testing/stack`, `/stack/contract`                                          | declare real services once per app                                           | Vitest                                     |
@@ -92,7 +90,6 @@ The full list with every export name is in [llms.txt](llms.txt).
 Every helper throws a plain `Error` (or `TypeError` for a wrong value type) when a check fails, so the test fails with the message. A failed assertion is the test result. Only the Ollama calls and the stack manifest return a failure value, listed below.
 
 - Assertions name the field, the expected value and the actual value in the message.
-- `IntegrationTester` methods throw `Tester not initialized. Call setup() first.` before `setup()`.
 - A scorer that cannot score throws `UnscorableError`. It is never a pass, and `.not` does not turn it into one.
 - `setupMswServer` fails a test that makes a request no handler matches.
 - `captureSpans().named(name)` throws when no finished span or more than one has that name. The message lists every finished span.
@@ -120,7 +117,6 @@ These return `@arki/failure` failures instead of throwing:
 
 ## Documentation
 
-- [Integration tester](docs/integration-tester.md): real Postgres and Redis, role callers, rollback, seeding.
 - [Factories and assertions](docs/factories-and-assertions.md): the full factory and assertion surface.
 - [Debug and performance](docs/debug-and-performance.md): logging, database dumps, timing and budgets.
 - [HTTP mocking with MSW](docs/msw.md): setup, patterns and why not to stub `fetch`.

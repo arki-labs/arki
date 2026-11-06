@@ -1,5 +1,5 @@
 /**
- * `@arki/testing/server/integration-tester` — `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests.
+ * `@arki/auth/testing/integration-tester` — `IntegrationTester`: a real Postgres and Redis, repositories and role callers for one backend's tests.
  */
 // Fixture setup needs concrete IDs; abort setup if secure generation fails.
 import { orThrow } from '@arki/failure';
@@ -10,8 +10,8 @@ import type { StartedTestContainer } from 'testcontainers';
 import { is, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
-import type { UserId } from '@arki/auth';
-import { createUserId } from '@arki/auth/ids';
+import type { UserId } from '../../ids.js';
+import { createUserId } from '../../ids.js';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
 import { is as matchesSchema, recordSchema } from '@arki/schema';
@@ -25,19 +25,19 @@ import type {
   TestUser,
   TestUserRole,
 } from './types.js';
-import * as assertions from './assertions.js';
+import * as assertions from '@arki/testing/assertions';
 import {
   getGlobalPostgresConnectionString,
   getGlobalRedisConnectionString,
   startPostgresContainer,
   startRedisContainer,
-} from './containers.js';
-import * as debug from './debug.js';
-import { debugTester } from './debug.js';
-import { faker } from './factories.js';
-import * as performance from './performance.js';
-import type { Timestamp, Timestamps } from './timestamps.js';
-import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from './timestamps.js';
+} from '@arki/testing/containers';
+import * as debug from '@arki/testing/debug';
+import { debugTester } from '@arki/testing/debug';
+import { faker } from '@arki/testing/factories';
+import * as performance from '@arki/testing/performance';
+import type { Timestamp, Timestamps } from '@arki/testing/timestamps';
+import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from '@arki/testing/timestamps';
 
 type CallerCollection<TCaller> = {
   public: TCaller;

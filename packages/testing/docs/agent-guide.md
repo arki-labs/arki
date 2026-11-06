@@ -5,8 +5,8 @@ Read this before you add or change a test with `@arki/testing`. The [README](../
 ## The model
 
 - The root entry is light: factories, assertions, timestamps, debug and performance. It needs no Docker.
-- Heavy parts are subpaths: `containers` (Docker), `server/integration-tester` and `server/tester-builder` (`@arki/auth`, Docker), `msw` (`msw`), `e2e` (Playwright, Docker), `ai` (an Ollama daemon for judge scorers).
-- `IntegrationTester` runs against a real Postgres and Redis. `withTransaction` rolls back the tester's own connection.
+- Heavy parts are subpaths: `containers` (Docker), `msw` (`msw`), `e2e` (Playwright, Docker), `ai` (an Ollama daemon for judge scorers).
+- `IntegrationTester` and `initTester` live in `@arki/auth/testing/integration-tester`, because their test users carry an auth `UserId`. They run against a real Postgres and Redis from `./containers`.
 - `stack` and `services/*` declare real services once per app. A service starts once per run (`start`) and may give each worker its own slice (`slice`). Values that cross processes are JSON.
 - The package ships TypeScript source. Run it under Vitest or Bun.
 
@@ -31,7 +31,7 @@ console.log(points.map(point => point.x).join(','));
 
 ### Test a backend against a real database
 
-Follow [Integration tester](integration-tester.md): `initTester`, `setupGlobalTestContainers` in `globalSetup`, then `withTransaction` in each test.
+Use `initTester` from `@arki/auth/testing/integration-tester` (its guide is `docs/integration-tester.md` in `@arki/auth`), with `setupGlobalTestContainers` from `@arki/testing/containers` in `globalSetup`, then `withTransaction` in each test.
 
 ### Mock an outside HTTP API
 

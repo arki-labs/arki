@@ -1,7 +1,7 @@
 {
   "name": "@arki/testing",
   "version": "0.3.0",
-  "description": "Test tooling for TypeScript backends: testcontainers Postgres and Redis, an integration tester, typed factories, assertions, MSW mocking and AI judges.",
+  "description": "Test tooling for TypeScript backends: testcontainers Postgres and Redis, typed factories, assertions, MSW mocking and AI judges.",
   "keywords": [
     "arki",
     "typescript",
@@ -104,11 +104,6 @@
       "import": "./dist/stack/contract.js",
       "default": "./dist/stack/contract.js"
     },
-    "./server/integration-tester": {
-      "types": "./dist/integration-tester.d.ts",
-      "import": "./dist/integration-tester.js",
-      "default": "./dist/integration-tester.js"
-    },
     "./msw": {
       "types": "./dist/msw.d.ts",
       "import": "./dist/msw.js",
@@ -118,11 +113,6 @@
       "types": "./dist/performance.d.ts",
       "import": "./dist/performance.js",
       "default": "./dist/performance.js"
-    },
-    "./server/tester-builder": {
-      "types": "./dist/tester-builder.d.ts",
-      "import": "./dist/tester-builder.js",
-      "default": "./dist/tester-builder.js"
     },
     "./timestamps": {
       "types": "./dist/timestamps.d.ts",
@@ -179,9 +169,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/date": "workspace:*",
-    "@arki/db": "workspace:*",
     "@arki/failure": "workspace:*",
-    "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
@@ -191,7 +179,6 @@
     "pg": "catalog:drizzle"
   },
   "devDependencies": {
-    "@arki/auth": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
@@ -209,7 +196,6 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "@arki/auth": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@playwright/test": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
@@ -219,9 +205,6 @@
     "vitest": "catalog:"
   },
   "peerDependenciesMeta": {
-    "@arki/auth": {
-      "optional": true
-    },
     "@opentelemetry/api": {
       "optional": true
     },

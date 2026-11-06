@@ -2,7 +2,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
 import type { PgAsyncDatabase } from 'drizzle-orm/pg-core';
 
-import type { UserId } from '@arki/auth';
+import type { UserId } from '../../ids.js';
 import type { KV } from '@arki/kv';
 
 export type TestUserRole = 'public' | 'user' | 'moderator' | 'admin';

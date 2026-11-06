@@ -4,9 +4,9 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 ## Laws
 
-1. The root entry (`src/index.ts`) loads no Docker client, no MSW and no `@arki/auth`. Anything that needs one is its own subpath export. Keep `src/root-entry-light.test.ts` green.
+1. The root entry (`src/index.ts`) loads no Docker client and no MSW. Anything that needs one is its own subpath export. Keep `src/root-entry-light.test.ts` green.
 2. Source-distributed: `exports` point at `src/*.ts`, with `dist/src/*.d.ts` for types. Never add a build step the exports depend on.
-3. Optional peers stay optional. Import `testcontainers`, `msw`, `@playwright/test` and `@arki/auth` only from the subpaths that need them.
+3. Optional peers stay optional. Import `testcontainers`, `msw` and `@playwright/test` only from the subpaths that need them. Never depend on `@arki/auth`: auth-aware helpers live in `@arki/auth` (`IntegrationTester` is in `@arki/auth/testing/integration-tester`).
 4. A failed check throws an `Error` that names the field, the expected value and the actual value. Assertions never return a failure value.
 5. Never return a scorer pass when a scorer could not score. Throw `UnscorableError`. `.not` must not turn it into a pass.
 6. No `any`, no `@ts-ignore`, no unsafe cast. `src/no-any.test.ts` enforces it.

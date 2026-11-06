@@ -10,7 +10,7 @@
 
 ```ts skip="needs an app's schema, migrations, context and caller"
 import { initDbWithOptions } from '@arki/db/init';
-import { initTester } from '@arki/testing/server/tester-builder';
+import { initTester } from '@arki/auth/testing/integration-tester';
 
 import type { Database } from '../../db';
 import { createRepositories } from '../../db';
@@ -149,7 +149,7 @@ tester.assertUpdatedAfterCreated(game);
 tester.assertPaginatedResponse(result);
 ```
 
-The tester also exposes `tester.assert`, `tester.debug` and `tester.performance`, which are the helpers in [Factories and assertions](factories-and-assertions.md) and [Debug and performance](debug-and-performance.md), and `tester.faker`.
+The tester also exposes `tester.assert`, `tester.debug` and `tester.performance`, which are the helpers from `@arki/testing` (its guides `docs/factories-and-assertions.md` and `docs/debug-and-performance.md`), and `tester.faker`.
 
 ## Random data
 

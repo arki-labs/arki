@@ -1,8 +1,8 @@
 /**
  * The root entry must stay light
  *
- * `import '@arki/testing'` must not need Docker, msw or `@arki/auth`. Those live behind
- * explicit entries (`./containers`, `./integration-tester`, `./tester-builder`, `./msw`).
+ * `import '@arki/testing'` must not need Docker or msw. Those live behind explicit entries
+ * (`./containers`, `./msw`).
  * This test follows every runtime (non-type) import reachable from `src/index.ts` and fails
  * if one lands on a heavy package or a heavy local file.
  */
@@ -13,8 +13,8 @@ import { describe, expect, it } from 'vitest';
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 
-const HEAVY_PACKAGES = [/^testcontainers/, /^@testcontainers\//, /^msw(\/|$)/, /^@arki\/auth(\/|$)/];
-const HEAVY_FILES = ['containers', 'integration-tester', 'tester-builder', 'msw'];
+const HEAVY_PACKAGES = [/^testcontainers/, /^@testcontainers\//, /^msw(\/|$)/];
+const HEAVY_FILES = ['containers', 'msw'];
 
 // Matches `import ... from 'x'`, `export ... from 'x'` and `import 'x'`, but not `import type` / `export type`.
 const specifierPattern = /^(?:import|export)\s(?!type\s)[^'";]*?from\s+['"]([^'"]+)['"]|^import\s+['"]([^'"]+)['"]/gm;
@@ -48,7 +48,7 @@ describe('root entry', () => {
     for (const heavy of HEAVY_FILES) expect(names).not.toContain(heavy);
   });
 
-  it('reaches no Docker client, msw or @arki/auth at runtime', () => {
+  it('reaches no Docker client or msw at runtime', () => {
     const hits = graph.packages.filter((p) => HEAVY_PACKAGES.some((re) => re.test(p)));
     expect(hits).toEqual([]);
   });

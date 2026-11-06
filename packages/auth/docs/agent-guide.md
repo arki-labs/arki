@@ -191,6 +191,8 @@ try {
 
 For Playwright, mount `createE2EHandler({ auth, enabled, defaultEmail, password })` from `@arki/auth/testing/tanstack-start`. It answers 404 unless `enabled` is `true`, and only signs in `.test` addresses. In each backend, keep one test that calls `assertAuthBoots(() => import('../infra/auth'))` from `@arki/auth/testing/production-boot`.
 
+For a backend's own repositories and role callers on a real Postgres and Redis, use `initTester` from `@arki/auth/testing/integration-tester`. Follow [Integration tester](integration-tester.md).
+
 ### Move an app from the old API
 
 Follow [the migration guide](migration.md). It maps every old name to the new one and lists the per-app steps.

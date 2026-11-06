@@ -37,8 +37,6 @@ import '../dist/services/mailpit.js';
 import '../dist/services/ollama.js';
 import '../dist/services/postgres.js';
 import '../dist/services/redis.js';
-import '../dist/integration-tester.js';
-import '../dist/tester-builder.js';
 
 const refusal = async fn => {
   try {

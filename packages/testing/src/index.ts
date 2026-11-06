@@ -22,9 +22,8 @@ export * from './debug.js';
 // Performance utilities
 export * from './performance.js';
 
-// The root loads no Docker client, no msw and no `@arki/auth`. These are explicit entries:
+// The root loads no Docker client and no msw. These are explicit entries:
 //   '@arki/testing/containers'         testcontainers (setupGlobalTestContainers, startPostgresContainer, ...)
-//   '@arki/testing/server/integration-tester' IntegrationTester and its types, TestUser etc. (needs `@arki/auth`)
-//   '@arki/testing/server/tester-builder'     initTester (needs `@arki/auth`)
+//   (IntegrationTester and initTester moved to '@arki/auth/testing/integration-tester'.)
 //   '@arki/testing/msw'                msw helpers
 //   '@arki/testing/vitest-setup'       vitest setup file

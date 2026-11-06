@@ -59,7 +59,7 @@ console.log(
 Ada Go 2
 ```
 
-`withFactories(factories)` on a tester puts the object on `tester.factory`. See [Integration tester](integration-tester.md).
+`withFactories(factories)` on a tester puts the object on `tester.factory`. The tester is `initTester` from `@arki/auth/testing/integration-tester`.
 
 ## Assertions
 
