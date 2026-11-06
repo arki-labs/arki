@@ -21,10 +21,18 @@ type ToolPanelGroupCtx = {
 
 const ToolPanelGroupContext = createContext<ToolPanelGroupCtx>({
   maximizedPanelId: null,
-  maximize: () => {},
-  restore: () => {},
-  registerPanel: () => {},
-  unregisterPanel: () => {},
+  maximize: () => {
+    /* No provider mounted: nothing to maximize. */
+  },
+  restore: () => {
+    /* No provider mounted: nothing to restore. */
+  },
+  registerPanel: () => {
+    /* No provider mounted: nothing to register. */
+  },
+  unregisterPanel: () => {
+    /* No provider mounted: nothing to unregister. */
+  },
 });
 
 function useToolPanelGroup() {

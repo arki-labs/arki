@@ -1,5 +1,6 @@
 /** KaTeX math, as `BlockMath` and `InlineMath`. */
-import React, { useMemo, type ReactNode, type ComponentType } from 'react';
+import React, { useMemo } from 'react';
+import type { ReactNode, ComponentType } from 'react';
 import KaTeX from 'katex';
 
 type ErrorRenderer = (error: Error) => ReactNode;
@@ -32,11 +33,11 @@ const createMathComponent = (
           throwOnError: !!renderError,
         });
         return { html: rendered, error: undefined };
-      } catch (caught) {
-        if (caught instanceof KaTeX.ParseError || caught instanceof TypeError) {
-          return { error: caught };
+      } catch (error_) {
+        if (error_ instanceof KaTeX.ParseError || error_ instanceof TypeError) {
+          return { error: error_ };
         }
-        throw caught;
+        throw error_;
       }
     }, [formula, errorColor, renderError]);
 

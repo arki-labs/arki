@@ -34,6 +34,7 @@ type PaginationLinkProps = {
 
 function PaginationLink({ className, isActive, size = 'icon', ...props }: PaginationLinkProps) {
   return (
+    // eslint-disable-next-line jsx-a11y/anchor-has-content -- generic wrapper: callers pass the content as children through props.
     <a
       aria-current={isActive ? 'page' : undefined}
       data-slot="pagination-link"

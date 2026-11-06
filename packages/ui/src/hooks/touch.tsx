@@ -1,20 +1,17 @@
 /** `useIsTouchDevice`: true when the main pointer is coarse (a finger). */
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+
+const COARSE_POINTER = '(pointer: coarse)';
+
+function subscribeToPointer(onChange: () => void) {
+  const mediaQuery = window.matchMedia(COARSE_POINTER);
+  mediaQuery.addEventListener('change', onChange);
+  return () => mediaQuery.removeEventListener('change', onChange);
+}
+
+const readPointer = () => window.matchMedia(COARSE_POINTER).matches;
+const readPointerOnServer = () => false;
 
 export function useIsTouchDevice() {
-  const [isTouch, setIsTouch] = useState(false);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(pointer: coarse)');
-    setIsTouch(mediaQuery.matches);
-
-    const handleChange = (e: MediaQueryListEvent) => {
-      setIsTouch(e.matches);
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return isTouch;
+  return useSyncExternalStore(subscribeToPointer, readPointer, readPointerOnServer);
 }

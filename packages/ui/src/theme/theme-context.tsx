@@ -195,7 +195,6 @@ export function ThemeProvider({
         setSystemTheme(e.matches ? 'dark' : 'light');
       };
 
-      setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
       mediaQuery.addEventListener('change', handleChange);
       return () => {
         try {
@@ -250,7 +249,9 @@ export function ThemeProvider({
  */
 const defaultContext: UseThemeReturn = {
   theme: undefined,
-  setTheme: () => {},
+  setTheme: () => {
+    /* No ThemeProvider mounted: nothing to update. */
+  },
   resolvedTheme: undefined,
   systemTheme: undefined,
   themes: defaultThemes,

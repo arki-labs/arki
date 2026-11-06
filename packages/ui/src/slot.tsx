@@ -3,13 +3,11 @@ import * as React from 'react';
 
 import { cn } from './cn';
 
-function mergeRefs<T>(...refs: (React.Ref<T> | undefined)[]): React.RefCallback<T> {
-  return (value) => {
-    refs.forEach((ref) => {
-      if (typeof ref === 'function') ref(value);
-      else if (ref != null) (ref as React.MutableRefObject<T | null>).current = value;
-    });
-  };
+function assignRefs<T>(refs: (React.Ref<T> | undefined)[], value: T | null) {
+  for (const ref of refs) {
+    if (typeof ref === 'function') ref(value);
+    else if (ref != null) ref.current = value;
+  }
 }
 
 type SlotProps = {
@@ -25,13 +23,13 @@ type SlotProps = {
  *
  * - `className` values are concatenated via `cn()`
  * - Event handlers (`on*`) are composed so both parent and child handlers run
- * - Refs are merged with `mergeRefs`
+ * - Refs are merged with `assignRefs`
  * - All other slot props override child props
  */
-export function Slot({ children, ref: slotRef, className: slotClassName, ...slotProps }: SlotProps) {
+export function Slot({ children, ref: slotRefProp, className: slotClassName, ...slotProps }: SlotProps) {
   if (!React.isValidElement(children)) return <>{children}</>;
 
-  const child = children as React.ReactElement<Record<string, unknown>>;
+  const child = children;
   const childProps = child.props as Record<string, unknown>;
   const childRef = (children as { ref?: React.Ref<HTMLElement> }).ref;
 
@@ -48,7 +46,7 @@ export function Slot({ children, ref: slotRef, className: slotClassName, ...slot
       };
     } else {
       // Slot props take precedence; fall back to child value if slot prop is undefined
-      merged[key] = slotVal !== undefined ? slotVal : childVal;
+      merged[key] = slotVal === undefined ? childVal : slotVal;
     }
   }
 
@@ -57,8 +55,10 @@ export function Slot({ children, ref: slotRef, className: slotClassName, ...slot
     merged.className = cn(slotClassName, childClassName) || undefined;
   }
 
-  if (slotRef || childRef) {
-    merged.ref = mergeRefs(slotRef, childRef);
+  if (slotRefProp || childRef) {
+    merged.ref = (node: HTMLElement | null) => {
+      assignRefs([slotRefProp, childRef], node);
+    };
   }
 
   return React.cloneElement(child, merged);

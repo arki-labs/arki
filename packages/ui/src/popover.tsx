@@ -4,7 +4,8 @@
 import * as React from 'react';
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover';
 
-import { withAsChild, type AsChildProp } from './as-child';
+import { withAsChild } from './as-child';
+import type { AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {

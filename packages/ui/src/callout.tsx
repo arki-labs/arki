@@ -6,19 +6,21 @@ import { Check, Info, Siren, Warning } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
-function getIcon(variant: CalloutProps['variant']) {
+const iconClassName = 'my-1.5 mr-2 h-4 w-4 shrink-0';
+
+function CalloutIcon({ variant }: Pick<CalloutProps, 'variant'>) {
   switch (variant) {
     case 'warning': {
-      return Warning;
+      return <Warning className={iconClassName} />;
     }
     case 'success': {
-      return Check;
+      return <Check className={iconClassName} />;
     }
     case 'error': {
-      return Siren;
+      return <Siren className={iconClassName} />;
     }
     default: {
-      return Info;
+      return <Info className={iconClassName} />;
     }
   }
 }
@@ -40,10 +42,9 @@ const calloutVariants = cva('flex rounded-md border px-3 py-2', {
 export type CalloutProps = {} & React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof calloutVariants>;
 
 export function Callout({ variant, children, className, ...props }: CalloutProps) {
-  const Icon = getIcon(variant);
   return (
     <div className={cn(calloutVariants({ variant, className }))} {...props}>
-      <Icon className="my-1.5 mr-2 h-4 w-4 shrink-0" />
+      <CalloutIcon variant={variant} />
       <div>{children}</div>
     </div>
   );

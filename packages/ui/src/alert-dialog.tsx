@@ -4,7 +4,8 @@
 import * as React from 'react';
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog';
 
-import { withAsChild, type AsChildProp } from './as-child';
+import { withAsChild } from './as-child';
+import type { AsChildProp } from './as-child';
 import { buttonVariants } from './button';
 import { cn } from './cn';
 

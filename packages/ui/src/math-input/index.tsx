@@ -54,10 +54,12 @@ export function MathInput({
   const [numerator, setNumerator] = React.useState('');
   const [denominator, setDenominator] = React.useState('');
 
-  // Sync display string when value changes externally
-  React.useEffect(() => {
+  // Sync display string when value changes externally (adjusting state while rendering, not in an effect)
+  const [previousValue, setPreviousValue] = React.useState(value);
+  if (value !== previousValue) {
+    setPreviousValue(value);
     setDisplayValue(numberToDisplay(value));
-  }, [value]);
+  }
 
   const tabList = React.useMemo(() => {
     const tabs: { value: string; label: string }[] = [{ value: 'constants', label: 'Constants' }];

@@ -1,9 +1,9 @@
 /** Aspect ratio: a box that keeps a fixed width-to-height ratio. */
 import * as React from 'react';
 
-interface AspectRatioProps extends React.ComponentProps<'div'> {
+type AspectRatioProps = {
   ratio?: number;
-}
+} & React.ComponentProps<'div'>;
 
 function AspectRatio({ ratio = 1, style, ...props }: AspectRatioProps) {
   return (

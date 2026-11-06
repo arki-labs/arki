@@ -45,7 +45,7 @@ describe('numberToDisplay', () => {
   });
 
   it('maps Euler-Mascheroni to γ', () => {
-    expect(numberToDisplay(0.5772156649015329)).toBe('γ');
+    expect(numberToDisplay(0.577_215_664_901_532_9)).toBe('γ');
   });
 
   it('maps an arbitrary number to its string representation', () => {
@@ -106,7 +106,7 @@ describe('displayToNumber', () => {
   });
 
   it('parses γ to Euler-Mascheroni constant', () => {
-    expect(displayToNumber('γ')).toBe(0.5772156649015329);
+    expect(displayToNumber('γ')).toBe(0.577_215_664_901_532_9);
   });
 
   it('round-trips all constants via numberToDisplay → displayToNumber', () => {

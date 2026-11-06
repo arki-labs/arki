@@ -25,6 +25,7 @@ export type TimelineProps = {
 export const Timeline = React.forwardRef<React.ElementRef<'ol'>, TimelineProps>(
   ({ className, orientation = 'vertical', ...props }, ref) => (
     <TimelineContext.Provider value={{ orientation }}>
+      {/* eslint-disable-next-line jsx-a11y/no-redundant-roles -- keeps list semantics in Safari/VoiceOver, which drops them when list-style is none. */}
       <ol
         ref={ref}
         role="list"

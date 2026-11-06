@@ -1,5 +1,11 @@
 /** `useIsClient`: false on the server and during hydration, true after the first effect. */
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+
+const subscribeToNothing = () => () => {
+  /* The value never changes after hydration, so there is nothing to unsubscribe. */
+};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 /**
  * Hook to detect if we're on the client side after hydration.
@@ -10,11 +16,5 @@ import { useEffect, useState } from 'react';
  * - Avoiding hydration mismatches for dynamic content
  */
 export function useIsClient(): boolean {
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  return isClient;
+  return useSyncExternalStore(subscribeToNothing, clientSnapshot, serverSnapshot);
 }

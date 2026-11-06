@@ -167,7 +167,7 @@ function FormHints<T extends string | number | Date>({
 
   const resolved = hints.map((hint) => {
     if (typeof hint === 'object' && hint !== null && !(hint instanceof Date) && 'value' in hint && 'label' in hint) {
-      return hint as { value: T; label: React.ReactNode };
+      return hint;
     }
     const value = hint as T;
     return { value, label: renderHint?.(value) ?? value.toString() };

@@ -31,6 +31,7 @@ export function DatePicker({ date, setDate, ...props }: DatePickerProps) {
         {date && !Number.isNaN(date.getTime()) ? format(date, 'PPP') : <span>Pick a date</span>}
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" {...props}>
+        {/* eslint-disable-next-line jsx-a11y/no-autofocus -- Calendar is a custom component: autoFocus moves focus to the day grid when the popover opens, which keyboard users need. */}
         <Calendar mode="single" selected={date} onSelect={setDate} autoFocus />
       </PopoverContent>
     </Popover>

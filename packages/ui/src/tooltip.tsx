@@ -5,7 +5,8 @@ import type { FC } from 'react';
 import * as React from 'react';
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 
-import { withAsChild, type AsChildProp } from './as-child';
+import { withAsChild } from './as-child';
+import type { AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function TooltipProvider({

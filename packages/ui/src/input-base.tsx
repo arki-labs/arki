@@ -6,14 +6,12 @@ import * as React from 'react';
 import { Button } from './button';
 import { cn } from './cn';
 
-/** Merge multiple refs into a single callback ref. */
-function mergeRefs<T>(...refs: (React.Ref<T> | undefined)[]): React.RefCallback<T> {
-  return (value) => {
-    refs.forEach((ref) => {
-      if (typeof ref === 'function') ref(value);
-      else if (ref != null) (ref as React.MutableRefObject<T | null>).current = value;
-    });
-  };
+/** Give every ref the same value: a callback ref is called with it, an object ref is set to it. */
+function assignRefs<T>(refs: (React.Ref<T> | undefined)[], value: T | null) {
+  for (const ref of refs) {
+    if (typeof ref === 'function') ref(value);
+    else if (ref != null) ref.current = value;
+  }
 }
 
 /** Call originalHandler then ourHandler, both with the same event. */
@@ -36,7 +34,9 @@ const InputBaseContext = React.createContext<InputBaseContextProps>({
   autoFocus: false,
   controlRef: { current: null },
   disabled: false,
-  onFocusedChange: () => {},
+  onFocusedChange: () => {
+    /* No InputBase mounted: no frame to highlight. */
+  },
 });
 
 const useInputBaseContext = () => React.useContext(InputBaseContext);
@@ -61,15 +61,17 @@ export const InputBase = React.forwardRef<HTMLDivElement, InputBaseProps>(
           onFocusedChange: setFocused,
         }}
       >
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the click only forwards focus to the inner control, which keyboard users reach directly. */}
         <div
           ref={ref}
-          onClick={composeEventHandlers(onClick, (event) => {
+          onClick={(event) => {
+            onClick?.(event);
             // Based on MUI's <InputBase /> implementation.
             // https://github.com/mui/material-ui/blob/master/packages/mui-material/src/InputBase/InputBase.js#L458~L460
             if (controlRef.current && event.currentTarget === event.target) {
               controlRef.current.focus();
             }
-          })}
+          }}
           className={cn(
             'border-input flex min-h-9 cursor-text items-center gap-2 rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors',
             disabled && 'cursor-not-allowed opacity-50',
@@ -97,7 +99,7 @@ export type InputBaseControlProps = React.HTMLAttributes<HTMLElement> & {
 };
 
 export const InputBaseControl = React.forwardRef<HTMLElement, InputBaseControlProps>(
-  ({ onFocus, onBlur, children, ...props }, ref) => {
+  ({ onFocus, onBlur, children, ...props }, refFromParent) => {
     const { controlRef, autoFocus, disabled, onFocusedChange } = useInputBaseContext();
 
     if (!React.isValidElement(children)) return null;
@@ -108,7 +110,9 @@ export const InputBaseControl = React.forwardRef<HTMLElement, InputBaseControlPr
     return React.cloneElement(child, {
       ...child.props,
       ...props,
-      ref: mergeRefs(controlRef as React.Ref<HTMLElement>, ref as React.Ref<HTMLElement>, childRef),
+      ref: (node: HTMLElement | null) => {
+        assignRefs([controlRef, refFromParent, childRef], node);
+      },
       autoFocus: autoFocus,
       disabled: disabled,
       onFocus: composeEventHandlers(onFocus as (event: React.FocusEvent<HTMLElement>) => void, () =>
@@ -152,7 +156,7 @@ export const InputBaseAdornment = React.forwardRef<HTMLDivElement, InputBaseAdor
     const Comp = typeof children === 'string' ? 'p' : 'div';
 
     return (
-      <Comp ref={ref as React.Ref<HTMLDivElement>} className={mergedClassName} {...props}>
+      <Comp ref={ref} className={mergedClassName} {...props}>
         {children}
       </Comp>
     );

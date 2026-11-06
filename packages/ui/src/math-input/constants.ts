@@ -16,7 +16,7 @@ export const MATH_CONSTANTS: readonly MathConstant[] = [
   { value: Math.sqrt(2),               symbol: '√2',  latex: '\\sqrt{2}',   name: 'Square root of 2', category: 'radical'     },
   { value: Math.sqrt(3),               symbol: '√3',  latex: '\\sqrt{3}',   name: 'Square root of 3', category: 'radical'     },
   { value: Math.LN2,                   symbol: 'ln2', latex: '\\ln 2',      name: 'Natural log of 2', category: 'logarithm'   },
-  { value: 0.5772156649015329,         symbol: 'γ',   latex: '\\gamma',     name: 'Euler-Mascheroni', category: 'special'     },
+  { value: 0.577_215_664_901_532_9,         symbol: 'γ',   latex: '\\gamma',     name: 'Euler-Mascheroni', category: 'special'     },
 ] as const;
 
 export const CATEGORY_ORDER: readonly MathConstantCategory[] = [
