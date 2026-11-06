@@ -33,7 +33,10 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "debug": "catalog:"
+    "@arki/library-tooling": "workspace:*",
+    "debug": "catalog:",
+    "typescript": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/db": "workspace:*",
@@ -42,7 +45,6 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/kv": "workspace:*",
-    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
@@ -50,8 +52,6 @@
     "@types/bun": "catalog:",
     "@types/debug": "catalog:",
     "drizzle-orm": "catalog:drizzle",
-    "typescript": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   }
 }

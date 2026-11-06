@@ -107,6 +107,7 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
     "react": "catalog:react",
+    "react-dom": "catalog:react",
     "vitest": "catalog:"
   },
   "peerDependencies": {

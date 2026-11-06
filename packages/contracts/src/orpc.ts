@@ -24,7 +24,8 @@ import { getContractRouter, isContractProcedure } from '@orpc/contract';
 import { is } from '@arki/schema';
 
 import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
-import { objectSchema, operationSchema } from './inspection.js';
+import { objectSchema } from './inspection.js';
+import { operationSchema } from './operation-schema.js';
 
 /** One procedure's identity. The types ride along in a phantom field. */
 export type Operation<TInput, TOutput, TError, TMeta extends Meta> = {

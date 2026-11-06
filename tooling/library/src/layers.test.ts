@@ -122,6 +122,24 @@ describe('checkLayers', () => {
     ]);
   });
 
+  it('leaves a nested project with its own dependencies to its own manifest, but still walks a marker package.json', () => {
+    // WHY: native-ui's real-app leg is an Expo app in `app/` with its own package.json and lockfile. Its imports
+    // are declared there; charging them to the library would force Expo into every workspace install.
+    const root = repo({
+      demo: {
+        tag: 'foundation',
+        files: {
+          'src/index.ts': 'export const core = 1;',
+          'app/package.json': JSON.stringify({ name: 'demo-app', dependencies: { expo: '~57.0.0' } }),
+          'app/index.js': "import 'expo';",
+          'src/esm/package.json': JSON.stringify({ type: 'module' }),
+          'src/esm/extra.ts': "import { left } from 'left-pad';\nexport { left };",
+        },
+      },
+    });
+    expect(checkLayers({ root }).map(f => [f.rule, f.specifier])).toEqual([['L001', 'left-pad']]);
+  });
+
   it('accepts a type-only import of a package backed by its @types package in shipped code', () => {
     const root = repo({
       demo: {

@@ -202,6 +202,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "react-dom": "catalog:react",
     "vite": "catalog:build-tools",
     "vitest": "catalog:"
   },

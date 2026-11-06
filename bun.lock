@@ -277,12 +277,12 @@
       "version": "0.1.0",
       "dependencies": {
         "@arki/expr": "workspace:*",
+        "@arki/failure": "workspace:*",
         "@arki/math": "workspace:*",
       },
       "devDependencies": {
         "@arki/bench": "workspace:*",
         "@arki/eslint-config": "workspace:*",
-        "@arki/failure": "workspace:*",
         "@arki/library-tooling": "workspace:*",
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
@@ -293,6 +293,7 @@
         "mathjs": "catalog:",
         "nerdamer": "^2.0.0",
         "size-limit": "^14.2.0",
+        "typescript": "catalog:",
         "vitest": "catalog:",
       },
     },
@@ -411,6 +412,7 @@
         "@types/react": "catalog:react",
         "@types/react-dom": "catalog:react",
         "react": "catalog:react",
+        "react-dom": "catalog:react",
         "typescript": "catalog:",
       },
       "peerDependencies": {
@@ -702,6 +704,7 @@
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
         "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
+        "@orpc/client": "catalog:backend",
         "@orpc/contract": "catalog:backend",
         "@orpc/server": "catalog:backend",
         "@types/node": "catalog:node",
@@ -1044,6 +1047,7 @@
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
+        "react-dom": "catalog:react",
         "vite": "catalog:build-tools",
         "vitest": "catalog:",
       },
@@ -1071,6 +1075,7 @@
         "@types/react": "catalog:react",
         "@types/react-dom": "catalog:react",
         "react": "catalog:react",
+        "react-dom": "catalog:react",
         "vitest": "catalog:",
       },
       "peerDependencies": {
@@ -1168,6 +1173,7 @@
         "typescript": "catalog:",
         "unstorage": "^1.17.5",
         "vitest": "catalog:",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "@arki/dot": "workspace:*",
@@ -1560,6 +1566,7 @@
         "workbox-expiration": "catalog:tanstack/start",
         "workbox-routing": "catalog:tanstack/start",
         "workbox-strategies": "catalog:tanstack/start",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/db": "workspace:*",
@@ -1587,7 +1594,6 @@
         "react-dom": "catalog:react",
         "typescript": "catalog:",
         "vitest": "catalog:",
-        "zod": "catalog:",
       },
       "peerDependencies": {
         "@arki/db": "workspace:*",
@@ -1735,9 +1741,11 @@
         "@arki/vitest-config": "workspace:*",
         "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
         "@types/node": "catalog:node",
+        "arktype": "catalog:",
         "drizzle-kit": "catalog:drizzle",
         "testcontainers": "catalog:testing",
         "typescript": "catalog:",
+        "valibot": "catalog:",
         "vitest": "catalog:",
       },
       "peerDependencies": {
@@ -2118,7 +2126,10 @@
         "arki-release": "./src/cli.ts",
       },
       "dependencies": {
+        "@arki/library-tooling": "workspace:*",
         "debug": "catalog:",
+        "typescript": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/db": "workspace:*",
@@ -2127,7 +2138,6 @@
         "@arki/eslint-config": "workspace:*",
         "@arki/failure": "workspace:*",
         "@arki/kv": "workspace:*",
-        "@arki/library-tooling": "workspace:*",
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
@@ -2135,9 +2145,7 @@
         "@types/bun": "catalog:",
         "@types/debug": "catalog:",
         "drizzle-orm": "catalog:drizzle",
-        "typescript": "catalog:",
         "vitest": "catalog:",
-        "zod": "catalog:",
       },
     },
     "tooling/eslint": {
@@ -2175,6 +2183,8 @@
       "devDependencies": {
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
+        "@types/node": "catalog:node",
+        "eslint": "catalog:",
       },
     },
     "tooling/library": {
@@ -2191,9 +2201,11 @@
         "arki-runtimes": "./src/runtimes.ts",
       },
       "dependencies": {
+        "@babel/core": "^7",
         "@playwright/test": "catalog:testing",
         "esbuild": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -2201,12 +2213,10 @@
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",
-        "@babel/core": "^7",
         "@babel/runtime": "^7",
         "@types/babel__core": "^7.20.5",
         "@types/bun": "catalog:",
         "babel-preset-expo": "57.0.14",
-        "vitest": "catalog:",
       },
       "peerDependencies": {
         "@arki/ts": "workspace:*",

@@ -134,9 +134,11 @@
     "@arki/vitest-config": "workspace:*",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "drizzle-kit": "catalog:drizzle",
     "testcontainers": "catalog:testing",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {

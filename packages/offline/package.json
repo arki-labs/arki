@@ -102,7 +102,8 @@
     "superjson": "catalog:utilities",
     "workbox-expiration": "catalog:tanstack/start",
     "workbox-routing": "catalog:tanstack/start",
-    "workbox-strategies": "catalog:tanstack/start"
+    "workbox-strategies": "catalog:tanstack/start",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@arki/db": "workspace:*",
@@ -142,8 +143,7 @@
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   },
   "files": [
     "dist/src/**",

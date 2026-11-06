@@ -1,7 +1,8 @@
 import type { z } from 'zod';
 import { expectTypeOf, it } from 'vitest';
 
-import type { nativeSchema, operationSchema } from './inspection.js';
+import type { nativeSchema } from './inspection.js';
+import type { operationSchema } from './operation-schema.js';
 import type { AnyOperation } from './orpc.js';
 
 it('locks native inspection to its public source types without widening', () => {

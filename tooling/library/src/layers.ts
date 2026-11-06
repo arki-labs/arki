@@ -134,14 +134,36 @@ function loadWorkspaces(root: string): Map<string, Workspace> {
   return found;
 }
 
+const nestedManifestSchema = z.object({
+  dependencies: z.record(z.string(), z.string()).optional(),
+  devDependencies: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * A folder inside a workspace with its own package.json that declares dependencies is its own project
+ * (native-ui's Expo test app in `app/`). Its imports answer to that manifest, so it is not walked.
+ * A marker package.json without dependencies (`{ "type": "module" }`) does not count.
+ */
+function isNestedProject(dir: string): boolean {
+  const file = path.join(dir, 'package.json');
+  if (!existsSync(file)) return false;
+  const manifest = nestedManifestSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+  return manifest.success && (manifest.data.dependencies !== undefined || manifest.data.devDependencies !== undefined);
+}
+
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
   const walk = (current: string): void => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (SOURCE_FILE.test(entry.name) && !entry.name.endsWith('.d.ts') && statSync(full).size <= MAX_FILE_BYTES) {
+      if (entry.isDirectory()) {
+        if (!isNestedProject(full)) walk(full);
+      } else if (
+        SOURCE_FILE.test(entry.name) &&
+        !entry.name.endsWith('.d.ts') &&
+        statSync(full).size <= MAX_FILE_BYTES
+      ) {
         out.push(full);
       }
     }

@@ -132,6 +132,7 @@
     "@types/node": "catalog:node",
     "typescript": "catalog:",
     "unstorage": "^1.17.5",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }
