@@ -6,12 +6,14 @@ import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { UnexpectedDefect } from '@arki/failure';
+
 import type { ResponseCache } from '../idempotency.js';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { buildEngine } from '../compiled.js';
 import { composeMiddleware } from '../engine.js';
-import { HTTP_ERROR_CODES } from '../error.js';
+import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 import { IDEMPOTENCY_FAILURES, idempotent } from '../idempotency.js';
 import { observeHttp } from '../telemetry.js';
 
@@ -184,6 +186,49 @@ describe('default HTTP telemetry', () => {
     expect(spans.map(span => span.name)).toEqual(['http.idempotency', 'http.request']);
     expect(spans[0]?.parentSpanContext?.spanId).toBe(spans[1]?.spanContext().spanId);
     for (const span of spans) expect(span.attributes).toEqual({ 'http.response.status_code': 200 });
+  });
+
+  it('leaves the status unset on a thrown 4xx refusal, so an expected refusal never pages anyone', async () => {
+    const exporter = installTelemetry();
+    const cache: ResponseCache = {
+      begin: () => Promise.resolve('started'),
+      finish: () => Promise.resolve(),
+      abandon: () => Promise.resolve(),
+    };
+    const endpoint = route.post('/write', { id: 'telemetry.write', failures: IDEMPOTENCY_FAILURES });
+    const protectedFetch = composeMiddleware(
+      () => Promise.resolve(Response.json({ ok: true })),
+      [idempotent({ cache, scope: () => 'principal', ttl: 60_000, routes: [endpoint] })],
+    );
+    // The client went away: the idempotency guard refuses with `orThrowHttp`, a thrown 4xx `HttpError`.
+    const response = await protectedFetch(
+      new Request('https://private.example/write', {
+        method: 'POST',
+        headers: { 'idempotency-key': 'key' },
+        body: '{}',
+        signal: AbortSignal.abort(),
+      }),
+    );
+    expect(response.status).toBe(499);
+    const body: unknown = await response.json();
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.name).toBe('http.idempotency');
+    expect(body).toMatchObject({ error: { code: span?.attributes['failure.code'] } });
+    expect(span?.attributes['failure.code']).toEqual(expect.any(String));
+    expect(span?.status.code).toBe(SpanStatusCode.UNSET);
+  });
+
+  it('marks a thrown 5xx HttpError and a plain throw as errors, so a fault still pages someone', async () => {
+    const exporter = installTelemetry();
+    const fault = new HttpError(503, HTTP_ERROR_CODES.internal, 'down');
+    await expect(observeHttp('http.request', () => Promise.reject(fault))).rejects.toBe(fault);
+    const defect = new Error('private detail');
+    await expect(observeHttp('http.request', () => Promise.reject(defect))).rejects.toBe(defect);
+    const [faultSpan, defectSpan] = exporter.getFinishedSpans();
+    expect(faultSpan?.attributes['failure.code']).toBe(HTTP_ERROR_CODES.internal);
+    expect(faultSpan?.status.code).toBe(SpanStatusCode.ERROR);
+    expect(defectSpan?.attributes['failure.code']).toBe(UnexpectedDefect.code);
+    expect(defectSpan?.status.code).toBe(SpanStatusCode.ERROR);
   });
 
   it('records pre-dispatch scope defects without private causes or request data', async () => {

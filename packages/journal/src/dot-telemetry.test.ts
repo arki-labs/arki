@@ -1,8 +1,8 @@
 /**
  * Inside a Dot app, a command run by a usecase opens its `journal.command`
  * span inside the usecase's span, through the command's transaction span. So
- * a trace shows which usecase wrote the events. Real PGlite, real journal,
- * real Dot.
+ * a trace shows which usecase wrote the events. A job the worker runs after
+ * boot starts its own trace. Real PGlite, real journal, real Dot.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -16,7 +16,7 @@ import { orThrow } from '@arki/failure';
 import { captureSpans } from '@arki/testing/otel';
 
 import type { OrderId } from './test-support.js';
-import { journal } from './dot.js';
+import { journal, journalWorker } from './dot.js';
 import { j, meta, openDb, order, orderId, OrderPlaced } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -66,5 +66,36 @@ describe('@arki/journal spans inside a Dot app', () => {
     expect(command.parent).toBe(transaction);
     expect(transaction.parent).toBe(spans.named('feature.orders.place'));
     expect(command.attributes['journal.command.name']).toBe('telemetryPlaceOrder');
+  });
+
+  it('starts a new trace for each job the worker runs, so a background job never appears as part of app startup', async () => {
+    using spans = captureSpans();
+    const handled: OrderId[] = [];
+    const mail = j.effect('telemetryMail', order, {
+      OrderPlaced: e => {
+        handled.push(e.entityId);
+      },
+    });
+    const app = orThrow(
+      await defineApp('journal-worker-telemetry')
+        .infra(dbUnit, journal({ journal: j.compose({ effects: [mail] }) }))
+        .entrypoints(journalWorker({ pollMs: 20 }))
+        .start(),
+    );
+    try {
+      // Written after the app started: the worker picks the job up on a later poll.
+      orThrow(await app.services.journal.run(db, placeOrder, { id: orderId(7002) }, meta));
+      for (let poll = 0; poll < 200 && handled.length === 0; poll++) await new Promise(r => setTimeout(r, 10));
+    } finally {
+      orThrow(await app.dispose());
+    }
+
+    expect(handled).toEqual([orderId(7002)]);
+    const effect = spans.named('journal.effect');
+    const startup = spans.finished.filter(span => span.name === 'dot.unit.start');
+    expect(startup.length).toBeGreaterThan(0);
+    // A root span in a trace of its own: not under the ended `dot.unit.start` span, nor in its trace.
+    expect(effect.parentSpanContext).toBeUndefined();
+    for (const span of startup) expect(effect.spanContext().traceId).not.toBe(span.spanContext().traceId);
   });
 });

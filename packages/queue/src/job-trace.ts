@@ -1,6 +1,6 @@
 /** Small W3C propagation carrier; SDK/exporter configuration remains app-owned. */
 import type { Context } from '@opentelemetry/api';
-import { context, propagation } from '@opentelemetry/api';
+import { context, propagation, ROOT_CONTEXT } from '@opentelemetry/api';
 import { z } from 'zod';
 
 const carrierSchema = z.record(z.string().max(128), z.string().max(4096));
@@ -28,7 +28,9 @@ export function extractJobTrace(metadata: string | undefined): Context | undefin
     if (metadata === undefined || metadata.length > MAX_TRACE_BYTES) return;
     const value: unknown = JSON.parse(metadata);
     const carrier = carrierSchema.safeParse(value);
-    if (carrier.success) return propagation.extract(context.active(), carrier.data);
+    // Extracted onto the root, never the active context: a carrier with no trace in it must not
+    // hand back whatever span happens to be active in the worker.
+    if (carrier.success) return propagation.extract(ROOT_CONTEXT, carrier.data);
   } catch {
     /* Broken telemetry must never reject a delivery. */
   }

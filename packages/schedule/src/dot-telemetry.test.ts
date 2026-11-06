@@ -39,4 +39,30 @@ describe('@arki/schedule spans inside a Dot app', () => {
     expect(spans.named('feature.digest.send').parent).toBe(run);
     expect(run.attributes['schedule.name']).toBe('send-digest');
   });
+
+  it('starts a new trace for each timer tick, so a background job never appears as part of app startup', async () => {
+    using spans = captureSpans();
+    const ticks: string[] = [];
+    const recordTick = () => ticks.push('beat');
+    const tickCore = defineFeature('tick').usecases({ beat: () => recordTick });
+    const tick = tickCore.entrypoints(
+      schedules(tickCore, [{ name: 'beat', every: '1s', handler: ({ usecases }) => usecases.beat() }]),
+    );
+    // The internal clock arms the timer inside Dot's start hook, under the `dot.unit.start` span.
+    const app = orThrow(await defineApp('schedule-tick-telemetry').features([tick]).entrypoints(schedule({})).start());
+    try {
+      for (let wait = 0; wait < 300 && ticks.length === 0; wait++) await new Promise(r => setTimeout(r, 10));
+    } finally {
+      orThrow(await app.dispose());
+    }
+
+    expect(ticks.length).toBeGreaterThan(0);
+    const run = spans.finished.find(span => span.name === 'schedule.run');
+    if (run === undefined) throw new Error('no schedule.run span finished');
+    const startup = spans.finished.filter(span => span.name === 'dot.unit.start');
+    expect(startup.length).toBeGreaterThan(0);
+    // A root span in a trace of its own: not under the ended `dot.unit.start` span, nor in its trace.
+    expect(run.parentSpanContext).toBeUndefined();
+    for (const span of startup) expect(run.spanContext().traceId).not.toBe(span.spanContext().traceId);
+  });
 });

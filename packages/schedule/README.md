@@ -166,7 +166,7 @@ Spans (OpenTelemetry API only, tracer `@arki/schedule`; nothing is exported unti
 | -------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schedule.run` | each scheduling attempt: a timer fire, a durable fire or `trigger(name)`, skips included | `schedule.name`, `schedule.outcome` (`ran`, `refused`, `skipped-overlap`, `skipped-lock`, `handler-failed`, `lock-failed`, `unavailable`), `failure.code` on a refusal or failure |
 
-Only a fault (status 500 or higher, such as a handler defect) sets error status; an expected refusal leaves it unset. A timer fire starts a new trace. In a Dot app, the usecase a schedule handler calls nests under `schedule.run`. Handler payloads, lock keys and private causes are never recorded.
+Only a fault (status 500 or higher, such as a handler defect) sets error status; an expected refusal leaves it unset. A tick the runtime fires itself (an `every` timer, a cron tick or a durable fire) starts a new trace, so it never joins the trace that started the app. `trigger(name)` nests under the caller's span. In a Dot app, the usecase a schedule handler calls nests under `schedule.run`. Handler payloads, lock keys and private causes are never recorded.
 
 Metrics: `schedule.run.duration` (histogram, ms; `schedule.outcome`). The runtime's `handlerFailures`, `lockContention`, `lockFailures` and `lockLost` are plain counters on the runtime object, not OpenTelemetry metrics.
 

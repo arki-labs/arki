@@ -1,4 +1,4 @@
-import type { Span } from '@opentelemetry/api';
+import type { Context, Span } from '@opentelemetry/api';
 import { context, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import { isFault } from '@arki/failure';
@@ -14,16 +14,24 @@ export function observe<T>(operation: () => T): T | undefined {
   }
 }
 
-/** One execution boundary; payloads, lock keys and private causes are never attributes. */
-export async function observeSchedule(name: string, run: () => Promise<ScheduleRunResult>): Promise<ScheduleRunResult> {
+/**
+ * One execution boundary; payloads, lock keys and private causes are never attributes.
+ * `parent` is the context the span starts under: the caller's active context when omitted (a `trigger`),
+ * `ROOT_CONTEXT` for a tick the runtime fires itself, so the tick starts a new trace.
+ */
+export async function observeSchedule(
+  name: string,
+  run: () => Promise<ScheduleRunResult>,
+  parent?: Context,
+): Promise<ScheduleRunResult> {
   const started = performance.now();
   const span: Span | undefined = observe(() =>
-    trace.getTracer('@arki/schedule').startSpan('schedule.run', { attributes: { 'schedule.name': name } }),
+    trace.getTracer('@arki/schedule').startSpan('schedule.run', { attributes: { 'schedule.name': name } }, parent),
   );
   let pending: Promise<ScheduleRunResult> | undefined;
   if (span !== undefined) {
     observe(() =>
-      context.with(trace.setSpan(context.active(), span), () => {
+      context.with(trace.setSpan(parent ?? context.active(), span), () => {
         pending = run();
       }),
     );

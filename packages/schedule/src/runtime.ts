@@ -1,3 +1,5 @@
+import type { Context } from '@opentelemetry/api';
+import { ROOT_CONTEXT } from '@opentelemetry/api';
 import { Cron } from 'croner';
 import { z } from 'zod';
 
@@ -325,8 +327,18 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
     }
   }
 
-  function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
-    return observeSchedule(schedule.name, () => execute(schedule));
+  /** `parent` omitted: the run nests under the caller (`trigger`). */
+  function run(schedule: ScheduleDef<TContext>, parent?: Context): Promise<ScheduleRunResult> {
+    return observeSchedule(schedule.name, () => execute(schedule), parent);
+  }
+
+  /**
+   * A tick the runtime fires itself (timer, cron, durable backend) starts a new trace. Its callback carries
+   * the async context that armed it (in Dot, the ended `dot.unit.start` span), and a background job is not
+   * part of app startup.
+   */
+  function runTick(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
+    return run(schedule, ROOT_CONTEXT);
   }
 
   async function execute(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
@@ -390,7 +402,7 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
   }
 
   function track(schedule: ScheduleDef<TContext>): void {
-    void trackPromise(run(schedule));
+    void trackPromise(runTick(schedule));
   }
 
   function armEvery(schedule: ScheduleDef<TContext>): void {
@@ -413,7 +425,7 @@ export function createScheduleRuntime<TContext>(options: ScheduleRuntimeOptions<
   }
 
   function durableRegistration(schedule: ScheduleDef<TContext>): readonly DurableScheduleRegistration[] {
-    const runOnce = (): Promise<ScheduleRunResult> => trackPromise(run(schedule));
+    const runOnce = (): Promise<ScheduleRunResult> => trackPromise(runTick(schedule));
     if (schedule.cron !== undefined) {
       return [
         {

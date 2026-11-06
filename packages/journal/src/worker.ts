@@ -51,7 +51,7 @@ import type { InternalEffectContext } from './internal-context.js';
 import { journalOwnedEffect, unwatchedRun } from './internal-context.js';
 import { effectOverrides, keepFor, keepUntil, resolveRetention } from './retention.js';
 import { assertRootDb } from './storage.js';
-import { withJournalSpan } from './telemetry.js';
+import { inRootContext, withJournalSpan } from './telemetry.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
 /**
@@ -952,7 +952,10 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             listened = await opts.listen(payload => {
               wake();
               if (opts.taps === false) return;
-              dispatching = dispatching.then(() => deps.dispatch(db, payload, opts.services)).catch(quiet);
+              // A wake can arrive in the context that opened the listener: the taps start their own trace.
+              dispatching = dispatching
+                .then(() => inRootContext(() => deps.dispatch(db, payload, opts.services)))
+                .catch(quiet);
             });
           } catch (error) {
             undo();
@@ -971,8 +974,10 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
           pollMs,
           value2: unlisten === undefined ? '' : ', listening',
         });
-        loop = run();
-        if (deps.sweep !== undefined) sweeping = sweepLoop(deps.sweep);
+        // Each job starts its own trace, never under the span that called `start()` (in Dot, `dot.unit.start`).
+        loop = inRootContext(run);
+        const sweep = deps.sweep;
+        if (sweep !== undefined) sweeping = inRootContext(() => sweepLoop(sweep));
         return;
       },
       async stop() {

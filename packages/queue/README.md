@@ -214,9 +214,9 @@ Spans (OpenTelemetry API only, tracer `@arki/queue`; nothing is exported until t
 | --- | --- | --- |
 | `queue.enqueue` (producer) | each single-job enqueue: validation, id generation and provider acceptance, an unavailable transport included | `messaging.destination.name` (the declared job name), `failure.code` on failure |
 | `queue.flow.enqueue` (producer) | each flow enqueue: validation, tree mapping and the atomic submission | `messaging.destination.name` (the flow name), `failure.code` on failure |
-| `queue.execute` | each worker delivery (BullMQ, pg-boss and outbox runner) | `messaging.destination.name`, `queue.attempt`, `failure.code` on a refusal or failure |
+| `queue.execute` (consumer) | each worker delivery (BullMQ, pg-boss and outbox runner) | `messaging.destination.name`, `queue.attempt`, `failure.code` on a refusal or failure |
 
-Only a fault (status 500 or higher) sets error status; a 4xx refusal leaves it unset. The producer span's context travels in the message (W3C propagation, so the app must configure a propagator) and `queue.execute` continues it. In a Dot app, a job enqueued by a usecase nests under the `feature.<feature>.<usecase>` span. Job input, results and ids are never recorded. Details: [jobs reference](docs/reference/jobs.md).
+Only a fault (status 500 or higher) sets error status; a 4xx refusal leaves it unset. The producer span's context travels in the message (W3C propagation, so the app must configure a propagator) and `queue.execute` continues it. A message with no producer trace starts a new trace: `queue.execute` is then a root span, never a child of whatever started the worker (in Dot, the `dot.unit.start` span). In a Dot app, a job enqueued by a usecase nests under the `feature.<feature>.<usecase>` span. Job input, results and ids are never recorded. Details: [jobs reference](docs/reference/jobs.md).
 
 Metrics: none. Use your backend's own queue metrics (BullMQ, pg-boss) for depth and latency.
 

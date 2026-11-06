@@ -761,8 +761,8 @@ Spans (OpenTelemetry API only, tracer `@arki/http`; nothing is exported until th
 
 | Span | When | Attributes |
 | --- | --- | --- |
-| `http.request` | each request the engine serves (default and Hono engine) | `http.response.status_code`; `failure.code` on an error envelope or a throw. Error status on a 5xx response or a throw |
-| `http.idempotency` | each request a protected idempotency route handles | `http.response.status_code`; `failure.code` and error status on a refusal (a refusal is thrown, so even a 4xx one sets error status) |
+| `http.request` | each request the engine serves (default and Hono engine) | `http.response.status_code`; `failure.code` on an error envelope or a throw. Error status on a 5xx response or a throw, except a thrown `HttpError` below 500 |
+| `http.idempotency` | each request a protected idempotency route handles | `http.response.status_code`; `failure.code` on a refusal; error status only for a fault (5xx). A 4xx refusal (a reused key 422, a cancelled request 499) leaves it unset |
 | `http.webhook.request` | each `verifyWebhook` step: body read plus verification | `failure.code` on failure; error status only for a fault (5xx) |
 | `http.webhook.verify` | each `scheme.verify(...)` | `failure.code` on failure; error status only for a fault |
 | `http.webhook.sign` | each `scheme.sign(...)` | `failure.code` on failure; error status only for a fault |
