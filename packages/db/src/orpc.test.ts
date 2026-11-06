@@ -222,7 +222,7 @@ describe('transactionalProcedure: output inside the transaction', () => {
     const transact = transactionalProcedure(db, { repos: () => repositories });
     const stream = impl.stream.use(transact).handler(async ({ context: { repos } }) => {
       await repos.accounts.add('a', 1);
-      return (async function* () { yield Promise.resolve(1); })();
+      return (async function* () { yield 1; })();
     });
     const error: unknown = await call(stream, {}).catch((error: unknown) => error);
     expect(error).toBeInstanceOf(ORPCError);

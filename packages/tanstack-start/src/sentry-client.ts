@@ -63,9 +63,10 @@ export function initSentryClient(options: InitSentryClientOptions): void {
     dsn,
     environment = import.meta.env.MODE,
     release,
-    tracesSampleRate = import.meta.env.DEV ? 1.0 : 0.1,
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Vite's build-mode flag, not an environment variable
+    tracesSampleRate = import.meta.env.DEV ? 1 : 0.1,
     replaysSessionSampleRate = 0,
-    replaysOnErrorSampleRate = 1.0,
+    replaysOnErrorSampleRate = 1,
     integrations: extraIntegrations = [],
   } = options;
 
@@ -100,4 +101,4 @@ export function initSentryClient(options: InitSentryClientOptions): void {
   });
 }
 
-export { Sentry };
+export * as Sentry from '@sentry/react';

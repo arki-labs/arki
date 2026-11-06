@@ -37,7 +37,7 @@ beforeAll(async () => {
   container = started;
   const setup = new pg.Pool({ connectionString: started.getConnectionUri(), max: 1 });
   pools.push(setup);
-  await ensureLockTable(drizzle({ client: setup }), TABLE);
+  orThrow(await ensureLockTable(drizzle({ client: setup }), TABLE));
 }, 120_000);
 
 afterEach(async () => {

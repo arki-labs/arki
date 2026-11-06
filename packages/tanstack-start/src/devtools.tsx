@@ -30,6 +30,7 @@ import { getLogger } from '@arki/log';
 
 const log = getLogger('arki:tanstack-start');
 
+// eslint-disable-next-line turbo/no-undeclared-env-vars -- Vite's build-mode flag, not an environment variable
 const isDev = import.meta.env.DEV;
 
 type JotaiStore = ReturnType<typeof createStore>;

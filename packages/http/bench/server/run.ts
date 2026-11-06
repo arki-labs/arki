@@ -11,7 +11,7 @@ import { spawn } from 'bun';
 import { loadavg } from 'node:os';
 
 const args = process.argv.slice(2);
-const opt = (flag: string, fallback: string) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1]! : fallback; };
+const opt = (flag: string, fallback: string) => { const i = args.indexOf(flag); return i === -1 ? fallback : args[i + 1]!; };
 const NODE = opt('--node', 'node');
 const BUN = process.execPath;
 const OHA = opt('--oha', 'oha');
@@ -64,8 +64,6 @@ const scenarioFilter = opt('--scenarios', '').split(',').filter(Boolean);
 type Row = { server: string; runtime: Runtime; scenario: string; rps: number; cpuUs: number; p50ms: number; p99ms: number; errors: number; load: number; note?: string };
 const rows: Row[] = [];
 
-const sleep = (ms: number) => new Promise<'timeout'>(r => setTimeout(() => r('timeout'), ms));
-
 /** Drains a child's stdout into lines; `waitFor` resolves with the first new line matching `re`. */
 class Lines {
   private lines: string[] = [];
@@ -85,7 +83,7 @@ class Lines {
         for (const line of parts) {
           this.lines.push(line);
           const i = this.waiters.findIndex(w => w.re.test(line));
-          if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(line);
+          if (i !== -1) this.waiters.splice(i, 1)[0]!.resolve(line);
         }
       }
       this.closed = true;
@@ -98,13 +96,13 @@ class Lines {
     return new Promise(resolve => {
       const w = { re, resolve };
       this.waiters.push(w);
-      setTimeout(() => { const i = this.waiters.indexOf(w); if (i >= 0) { this.waiters.splice(i, 1); resolve(''); } }, ms);
+      setTimeout(() => { const i = this.waiters.indexOf(w); if (i !== -1) { this.waiters.splice(i, 1); resolve(''); } }, ms);
     });
   }
 }
 
 async function waitReady(proc: ReturnType<typeof spawn>, out: Lines): Promise<void> {
-  const line = await out.waitFor(/READY/, 15000);
+  const line = await out.waitFor(/READY/, 15_000);
   if (line === '') throw new Error(`no READY within 15s (exit ${proc.exitCode}):\n${out.all().slice(0, 400)}`);
 }
 
@@ -137,22 +135,23 @@ async function oha(s: Scenario, seconds: string): Promise<OhaJson> {
 }
 
 for (const spec of SERVERS) {
-  if (only.length && !only.includes(spec.name)) continue;
+  if (only.length > 0 && !only.includes(spec.name)) continue;
   for (const runtime of spec.runtimes) {
     const label = `${spec.name}@${runtime}`;
     const exe = runtime === 'bun' ? BUN : NODE;
     const proc = spawn([exe, `${import.meta.dir}/servers/${spec.file}`], { env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production' }, stdout: 'pipe', stderr: 'pipe' });
-    const out = new Lines(proc.stdout as ReadableStream<Uint8Array>);
+    const out = new Lines(proc.stdout);
     try {
       await waitReady(proc, out);
-      const problems = (await Promise.all([...SCENARIOS, ...CHECKS_ONLY].map(verify))).filter(Boolean);
-      if (problems.length) {
+      const verdicts = await Promise.all([...SCENARIOS, ...CHECKS_ONLY].map(scenario => verify(scenario)));
+      const problems = verdicts.filter(Boolean);
+      if (problems.length > 0) {
         console.log(`✗ ${label}: ${problems.join(' | ')}`);
         for (const s of SCENARIOS) rows.push({ server: spec.name, runtime, scenario: s.name, rps: 0, cpuUs: 0, p50ms: 0, p99ms: 0, errors: 0, load: 0, note: problems.join('; ') });
         continue;
       }
       for (const s of SCENARIOS) {
-        if (scenarioFilter.length && !scenarioFilter.includes(s.name)) continue;
+        if (scenarioFilter.length > 0 && !scenarioFilter.includes(s.name)) continue;
         await oha(s, warmup);
         let best: Row | undefined;
         for (let i = 0; i < repeat; i++) {
@@ -167,12 +166,12 @@ for (const spec of SERVERS) {
         rows.push(best!);
         console.log(`  ${label} ${s.name}: ${best!.cpuUs} µs/req  ${best!.rps} rps  p99 ${best!.p99ms}ms  errors ${best!.errors}  load ${best!.load}`);
       }
-    } catch (e) {
+    } catch (error) {
       proc.kill();
       await proc.exited;
       const err = await new Response(proc.stderr).text().catch(() => '');
-      console.log(`✗ ${label}: ${(e as Error).message}\n${err.slice(0, 600)}`);
-      for (const s of SCENARIOS) rows.push({ server: spec.name, runtime, scenario: s.name, rps: 0, cpuUs: 0, p50ms: 0, p99ms: 0, errors: 0, load: 0, note: (e as Error).message.split('\n')[0] });
+      console.log(`✗ ${label}: ${(error as Error).message}\n${err.slice(0, 600)}`);
+      for (const s of SCENARIOS) rows.push({ server: spec.name, runtime, scenario: s.name, rps: 0, cpuUs: 0, p50ms: 0, p99ms: 0, errors: 0, load: 0, note: (error as Error).message.split('\n')[0] });
     } finally {
       proc.kill();
       await proc.exited;
@@ -184,14 +183,14 @@ for (const spec of SERVERS) {
 const byKey = new Map<string, Row[]>();
 for (const r of rows) { const k = `${r.server}@${r.runtime}`; byKey.set(k, [...(byKey.get(k) ?? []), r]); }
 const lines = ['| server | runtime | ping µs/req | param µs/req | post µs/req | ping rps | param rps | post rps | ping p99 ms | load | note |', '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|'];
-const entries = [...byKey.entries()].sort((a, b) => ((a[1][0]?.cpuUs || 1e9) - (b[1][0]?.cpuUs || 1e9)));
+const entries = [...byKey.entries()].toSorted((a, b) => ((a[1][0]?.cpuUs || 1e9) - (b[1][0]?.cpuUs || 1e9)));
 for (const [k, rs] of entries) {
   const get = (n: string) => rs.find(r => r.scenario === n);
   const [server, runtime] = k.split('@');
   const note = rs.find(r => r.note)?.note ?? (rs.some(r => r.errors > 0) ? `errors: ${rs.map(r => r.errors).join('/')}` : '');
   lines.push(`| ${server} | ${runtime} | ${get('ping')?.cpuUs ?? ''} | ${get('param')?.cpuUs ?? ''} | ${get('post')?.cpuUs ?? ''} | ${get('ping')?.rps ?? ''} | ${get('param')?.rps ?? ''} | ${get('post')?.rps ?? ''} | ${get('ping')?.p99ms ?? ''} | ${get('ping')?.load ?? ''} | ${note} |`);
 }
-const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
 await Bun.write(`${import.meta.dir}/results/${stamp}.json`, JSON.stringify({ duration, warmup, conns, repeat, rows }, null, 2));
 await Bun.write(`${import.meta.dir}/results/${stamp}.md`, lines.join('\n') + '\n');
 console.log('\n' + lines.join('\n'));

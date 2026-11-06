@@ -42,11 +42,8 @@ function Menubar({
   const [value, setValue] = React.useState<string | undefined>();
 
   function closeMenu() {
-    if (onValueChangeProp) {
-      onValueChangeProp(undefined);
-      return;
-    }
-    setValue(undefined);
+    // eslint-disable-next-line unicorn/no-useless-undefined -- onValueChange is typed `(value: string | undefined) => void`; the argument is required, and `undefined` is the closed state.
+    (onValueChangeProp ?? setValue)(undefined);
   }
 
   return (

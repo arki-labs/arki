@@ -84,7 +84,8 @@ describe('dbMigrations()', () => {
       // The reader names its own driver type; MigratableDb is what migrateDb accepts, not a query handle.
       needs: { db: service<PgliteDatabase<typeof relations>>() },
       async boot({ db: handle }) {
-        seenLabels = (await handle.select().from(widgets)).map(row => row.label);
+        const rows = await handle.select().from(widgets);
+        seenLabels = rows.map(row => row.label);
       },
     });
 

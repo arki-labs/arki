@@ -36,7 +36,7 @@ const running: Pick<DotApp<Record<string, never>, Failure>, 'dispose'>[] = [];
 beforeAll(async () => {
   const setup = createLibsqlDb({ url, relations });
   closers.push(setup.close);
-  await ensureLockTable(setup.db);
+  orThrow(await ensureLockTable(setup.db));
 });
 
 afterEach(async () => {

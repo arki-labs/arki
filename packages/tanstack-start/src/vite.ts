@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import path from 'node:path';
 
 import type { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import type { NitroModule } from 'nitro/types';
@@ -58,7 +58,7 @@ const missingAssetsNotCached: NitroModule = {
     const assetsDir = nitro.options.buildAssetsDir ?? 'assets';
     nitro.options.publicAssets.push({
       baseURL: `/${assetsDir}`,
-      dir: resolve(nitro.options.output.publicDir, assetsDir),
+      dir: path.resolve(nitro.options.output.publicDir, assetsDir),
       fallthrough: false,
     });
   },

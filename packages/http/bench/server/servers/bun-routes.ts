@@ -2,7 +2,7 @@ import { createItem, JSON_HEADERS, NOT_FOUND, ping, PORT, ready, user } from './
 Bun.serve({
   port: PORT,
   routes: {
-    '/ping': new Response(JSON.stringify(ping()), { headers: JSON_HEADERS }),
+    '/ping': Response.json(ping(), { headers: JSON_HEADERS }),
     '/users/:id': req => Response.json(user(req.params.id)),
     '/items': {
       POST: async req => {

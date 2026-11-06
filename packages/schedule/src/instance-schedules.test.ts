@@ -36,7 +36,7 @@ function recordingLocker() {
   return { keys, locker };
 }
 
-function build(lock: true | string | undefined) {
+function build(lock?: true | string) {
   const { keys, locker } = recordingLocker();
   const lockUnit = infra({ name: 'locks', provides: { locks: () => locker } });
   // The scheduler takes the lock around the run; no handler uses it, so it is entrypoint-only.
@@ -73,7 +73,7 @@ function build(lock: true | string | undefined) {
 
 describe('feature instance schedules', () => {
   it('registers one schedule per instance, and a trigger runs only that instance', async () => {
-    const app = await orThrow(build(undefined).instances.start());
+    const app = await orThrow(build().instances.start());
     expect(app.services.scheduler.names).toEqual(['send-digest#eu', 'send-digest#us']);
     await expect(app.services.scheduler.trigger('send-digest#eu')).resolves.toEqual({
       name: 'send-digest#eu',
@@ -89,7 +89,8 @@ describe('feature instance schedules', () => {
   });
 
   it('types an instance trigger name as `<name>#<instance>` and a plain one as `<name>`', () => {
-    const { reports } = build(undefined);
+    const { reports } = build();
+    expectTypeOf(reports).toHaveProperty('instance');
     expectTypeOf<ScheduleNameOf<[typeof reports]>>().toEqualTypeOf<'send-digest'>();
     expectTypeOf<ScheduleNameOf<[ReturnType<typeof reports.instance<'eu'>>]>>().toEqualTypeOf<'send-digest#eu'>();
   });

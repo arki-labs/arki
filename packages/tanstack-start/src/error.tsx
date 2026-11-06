@@ -29,6 +29,7 @@ type RootErrorComponentProps = ErrorComponentProps<unknown> & {
 
 export function RootErrorComponent({ error, info, reset, className }: RootErrorComponentProps) {
   const normalized = normalizeError(error);
+  // eslint-disable-next-line turbo/no-undeclared-env-vars -- Vite's build-mode flag, not an environment variable
   const isDev = import.meta.env.DEV;
 
   // Forward to Sentry via the local bridge. No-op when the host app

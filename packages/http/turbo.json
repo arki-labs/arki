@@ -4,5 +4,13 @@
   ],
   "tags": [
     "platform"
-  ]
+  ],
+  "tasks": {
+    "test": {
+      "env": [
+        "$TURBO_EXTENDS$",
+        "FETCH_ALLOW_HOSTS"
+      ]
+    }
+  }
 }

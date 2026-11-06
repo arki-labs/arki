@@ -59,6 +59,7 @@ function ToggleGroupItem({
     isLast?: boolean;
   }) {
   const context = useToggleGroupContext();
+  const { size: contextSize } = context;
   const { value } = ToggleGroupPrimitive.useRootContext();
 
   return (
@@ -73,7 +74,7 @@ function ToggleGroupItem({
         className={cn(
           toggleVariants({
             variant: context.variant || variant,
-            size: context.size || size,
+            size: contextSize || size,
           }),
           props.disabled && 'opacity-50',
           ToggleGroupPrimitive.utils.getIsSelected(value, props.value) && 'bg-accent',

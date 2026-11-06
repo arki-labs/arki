@@ -430,10 +430,10 @@ describe('http() with feature instances', () => {
         .entrypoints(http({ port: 0 }))
         .boot(),
     );
-    expect(await (await get(app, '/eu/reports')).json()).toEqual({ region: 'eu' });
-    expect(await (await get(app, '/us/reports')).json()).toEqual({ region: 'us' });
-    expect(await (await get(app, '/eu')).json()).toEqual({ region: 'eu' });
-    expect((await get(app, '/reports')).status).toBe(404);
+    expect(await get(app, '/eu/reports').then(response => response.json())).toEqual({ region: 'eu' });
+    expect(await get(app, '/us/reports').then(response => response.json())).toEqual({ region: 'us' });
+    expect(await get(app, '/eu').then(response => response.json())).toEqual({ region: 'eu' });
+    expect(await get(app, '/reports').then(response => response.status)).toBe(404);
     await orThrow(app.dispose());
   });
 
@@ -446,8 +446,8 @@ describe('http() with feature instances', () => {
         .entrypoints(http({ port: 0, instancePath: (instance, path) => `/v1${path}.${instance}` }))
         .boot(),
     );
-    expect(await (await get(app, '/v1/reports.eu')).json()).toEqual({ region: 'eu' });
-    expect(await (await get(app, '/v1/reports.us')).json()).toEqual({ region: 'us' });
+    expect(await get(app, '/v1/reports.eu').then(response => response.json())).toEqual({ region: 'eu' });
+    expect(await get(app, '/v1/reports.us').then(response => response.json())).toEqual({ region: 'us' });
     await orThrow(app.dispose());
   });
 
@@ -459,7 +459,7 @@ describe('http() with feature instances', () => {
         .entrypoints(http({ port: 0 }))
         .boot(),
     );
-    expect(await (await get(plain, '/reports')).json()).toEqual({ region: 'us' });
+    expect(await get(plain, '/reports').then(response => response.json())).toEqual({ region: 'us' });
     orThrow(await plain.dispose());
 
     const other = defineFeature('reports-two').entrypoints(
@@ -499,8 +499,10 @@ describe('http() with feature instances', () => {
         .entrypoints(http({ port: 0 }))
         .boot(),
     );
-    expect(await (await get(app, '/eu/rpc/orders.list')).json()).toEqual({ path: '/rpc/orders.list' });
-    expect((await get(app, '/rpc/orders.list')).status).toBe(404);
+    expect(await get(app, '/eu/rpc/orders.list').then(response => response.json())).toEqual({
+      path: '/rpc/orders.list',
+    });
+    expect(await get(app, '/rpc/orders.list').then(response => response.status)).toBe(404);
     await orThrow(app.dispose());
   });
 });

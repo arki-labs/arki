@@ -46,7 +46,7 @@ export function initSentryServer(options: InitSentryServerOptions): void {
     dsn,
     environment = process.env.NODE_ENV ?? 'development',
     release,
-    tracesSampleRate = isDev ? 1.0 : 0.1,
+    tracesSampleRate = isDev ? 1 : 0.1,
     integrations: extraIntegrations = [],
   } = options;
 
@@ -84,4 +84,4 @@ export {
   wrapFetchWithSentry,
   wrapMiddlewaresWithSentry,
 } from '@sentry/tanstackstart-react';
-export { Sentry };
+export * as Sentry from '@sentry/node';

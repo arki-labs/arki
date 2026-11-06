@@ -59,9 +59,17 @@ export function withServerErrorOverlay<Rest extends readonly unknown[]>(
 function describe(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
-  const t = typeof value;
-  if (t !== 'object') return `${t}(${String(value).slice(0, 80)})`;
-  return `${(value as object).constructor?.name ?? 'object'} (${Object.prototype.toString.call(value)})`;
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    typeof value === 'symbol' ||
+    typeof value === 'function'
+  ) {
+    return `${typeof value}(${String(value).slice(0, 80)})`;
+  }
+  return `${value.constructor?.name ?? 'object'} (${Object.prototype.toString.call(value)})`;
 }
 
 function normalizeError(error: unknown): Error {
@@ -133,10 +141,10 @@ function renderDevErrorPage(error: Error, request: Request, kind: string): strin
 
 function escapeHtml(input: string): string {
   return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 const MINIMAL_PROD_HTML = `<!DOCTYPE html>

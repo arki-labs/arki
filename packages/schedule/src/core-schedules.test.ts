@@ -65,8 +65,8 @@ describe('schedules(core, defs)', () => {
       {
         name: 'typed',
         every: '1m',
-        handler: services => {
-          expectTypeOf<SuccessOf<typeof services.usecases.sendDue>>().toEqualTypeOf<string>();
+        handler: _services => {
+          expectTypeOf<SuccessOf<typeof _services.usecases.sendDue>>().toEqualTypeOf<string>();
           return null;
         },
       },

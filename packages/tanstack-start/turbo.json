@@ -1,4 +1,9 @@
 {
   "extends": ["//"],
-  "tags": ["features"]
+  "tags": ["features"],
+  "tasks": {
+    "test": {
+      "env": ["$TURBO_EXTENDS$", "ORPC_URL"]
+    }
+  }
 }

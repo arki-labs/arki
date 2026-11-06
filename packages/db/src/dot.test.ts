@@ -137,7 +137,7 @@ describe('@arki/db/dot', () => {
       relations,
       url: () => {
         reads += 1;
-        return undefined;
+        return;
       },
     });
     expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });

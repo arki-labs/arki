@@ -8,4 +8,5 @@
  *
  * See packages/offline/docs/2026-05-16-arki-offline-design.md §3.3.
  */
+// eslint-disable-next-line unicorn/require-module-specifiers -- an intentionally empty module: client/index.ts re-exports it with `export type *`, so it must stay a module until branded ID types exist.
 export type {};

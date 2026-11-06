@@ -274,10 +274,7 @@ class DbBuilderImpl<TRelations extends AnyRelations, TRepos extends Record<strin
       key,
       newFactoriesSize: newFactories.size,
     });
-    return new DbBuilderImpl<TRelations, TRepos & Record<K, R>>(this.db, this.isDev, newFactories) as DbBuilder<
-      TRelations,
-      TRepos & Record<K, R>
-    >;
+    return new DbBuilderImpl<TRelations, TRepos & Record<K, R>>(this.db, this.isDev, newFactories);
   }
 
   projectionMiddleware(fn: ProjectionMiddleware): ProjectionMiddleware {
@@ -336,7 +333,7 @@ class InitialBuilderImpl implements InitialBuilder {
     schema: TSchema,
   ): SchemaBuilder<ReturnType<typeof defineRelations<TSchema>>> {
     debugProjection.debug('[builder] Setting database schema (deriving relations via defineRelations)');
-    const relations = defineRelations(schema) as ReturnType<typeof defineRelations<TSchema>>;
+    const relations = defineRelations<TSchema>(schema);
     return new SchemaBuilderImpl(relations);
   }
 

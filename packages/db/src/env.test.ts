@@ -23,10 +23,10 @@ describe('@arki/db env — DATABASE_URL → DB_URL resolution (iteration 2 Conce
   const originalDatabaseUrl = process.env['DATABASE_URL'];
 
   afterEach(() => {
-    if (originalDbUrl !== undefined) process.env['DB_URL'] = originalDbUrl;
-    else delete process.env['DB_URL'];
-    if (originalDatabaseUrl !== undefined) process.env['DATABASE_URL'] = originalDatabaseUrl;
-    else delete process.env['DATABASE_URL'];
+    if (originalDbUrl === undefined) delete process.env['DB_URL'];
+    else process.env['DB_URL'] = originalDbUrl;
+    if (originalDatabaseUrl === undefined) delete process.env['DATABASE_URL'];
+    else process.env['DATABASE_URL'] = originalDatabaseUrl;
     vi.resetModules();
   });
 

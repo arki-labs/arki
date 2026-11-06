@@ -11,10 +11,7 @@ import { project } from './projection.js';
 import { createScheduleRuntime } from './runtime.js';
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
-  let resolve: () => void = () => {};
-  const promise = new Promise<void>(res => {
-    resolve = res;
-  });
+  const { promise, resolve } = Promise.withResolvers<void>();
   return { promise, resolve };
 }
 
@@ -24,7 +21,7 @@ describe('defineSchedule', () => {
       defineSchedule({
         name: 'bad-cron',
         cron: 'not cron',
-        handler: async () => {},
+        handler: () => Promise.resolve(),
       }),
     ).toThrow(ScheduleError);
   });
@@ -34,7 +31,7 @@ describe('defineSchedule', () => {
       defineSchedule({
         name: 'bad-every',
         every: '0s',
-        handler: async () => {},
+        handler: () => Promise.resolve(),
       }),
     ).toThrow(ScheduleError);
   });
@@ -65,7 +62,7 @@ describe('schedule DOT projection', () => {
       name: 'daily-maintenance',
       cron: '0 2 * * *',
       timezone: 'UTC',
-      handler: async () => {},
+      handler: () => Promise.resolve(),
     });
     const app = orThrow(
       defineApp('schedule-app')
@@ -183,7 +180,7 @@ describe('schedule DOT projection', () => {
       name: 'hourly-sync',
       every: '1h',
       overlap: 'concurrent',
-      handler: async () => {},
+      handler: () => Promise.resolve(),
     });
     const actions = scheduleActions([hourly]).map(action => ({ ...action, plugin: 'schedule' }));
 
@@ -207,8 +204,8 @@ describe('schedule DOT projection', () => {
 
 describe('schedule runtime', () => {
   it('rejects duplicate schedule names', () => {
-    const first = defineSchedule({ name: 'same', every: '1h', handler: async () => {} });
-    const second = defineSchedule({ name: 'same', every: '1h', handler: async () => {} });
+    const first = defineSchedule({ name: 'same', every: '1h', handler: () => Promise.resolve() });
+    const second = defineSchedule({ name: 'same', every: '1h', handler: () => Promise.resolve() });
 
     try {
       createScheduleRuntime({ schedules: [first, second] });
@@ -318,8 +315,8 @@ function registration(fake: FakeDurableScheduler, name: string): DurableSchedule
 
 describe('durable schedules', () => {
   it('defaults to in-process and records durable: true on the definition', () => {
-    const plain = defineSchedule({ name: 'plain', every: '1h', handler: async () => {} });
-    const durable = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const plain = defineSchedule({ name: 'plain', every: '1h', handler: () => Promise.resolve() });
+    const durable = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
 
     expect(plain.durable).toBe(false);
     expect(durable.durable).toBe(true);
@@ -327,13 +324,13 @@ describe('durable schedules', () => {
 
   it('rejects a durable name with ":" at declaration, because the backend uses it as a queue name', () => {
     try {
-      defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+      defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
       throw new Error('Expected a durable name with ":" to throw.');
     } catch (error) {
       expect(error).toBeInstanceOf(ScheduleError);
       expect((error as ScheduleError).code).toBe(SCHEDULE_ERROR_CODES.invalidDefinition);
     }
-    expect(() => defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', handler: async () => {} })).not.toThrow();
+    expect(() => defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', handler: () => Promise.resolve() })).not.toThrow();
   });
 
   it('hands durable schedules to the backend and keeps the rest on in-process timers', async () => {
@@ -343,10 +340,10 @@ describe('durable schedules', () => {
       cron: '0 3 * * *',
       timezone: 'UTC',
       durable: true,
-      handler: async () => {},
+      handler: () => Promise.resolve(),
     });
-    const sweep = defineSchedule({ name: 'sweep', every: '5m', durable: true, handler: async () => {} });
-    const local = defineSchedule({ name: 'local', every: '1h', handler: async () => {} });
+    const sweep = defineSchedule({ name: 'sweep', every: '5m', durable: true, handler: () => Promise.resolve() });
+    const local = defineSchedule({ name: 'local', every: '1h', handler: () => Promise.resolve() });
     const runtime = createScheduleRuntime({ schedules: [nightly, sweep, local], durable: fake });
 
     orThrow(await runtime.start());
@@ -408,7 +405,7 @@ describe('durable schedules', () => {
   });
 
   it('a bare runtime with a durable schedule and no backend fails at start with a coded error', async () => {
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
     const runtime = createScheduleRuntime({ schedules: [nightly] });
 
     try {
@@ -423,7 +420,7 @@ describe('durable schedules', () => {
   });
 
   it('the Dot unit fails boot with a coded error when a durable schedule has no backend', async () => {
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
 
     await expect(
       defineApp('durable-missing')
@@ -436,7 +433,7 @@ describe('durable schedules', () => {
   });
 
   it('the Dot unit fails boot for a durable feature schedule too, naming the schedule', async () => {
-    const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: () => Promise.resolve() });
     const durableFeature = defineFeature('durable-feature').entrypoints(schedules([nightly]));
 
     await expect(
@@ -479,7 +476,7 @@ describe('durable schedules', () => {
   });
 
   it('requires a mounted backend at the type level once durable is passed', () => {
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
 
     // @ts-expect-error schedule({ durable: DurableSchedules }) needs an infra unit that provides DurableSchedules.
     defineApp('durable-no-backend').entrypoints(schedule({ schedules: [nightly], durable: DurableSchedules }));
@@ -494,9 +491,9 @@ describe('durable start failure', () => {
       async start() {
         throw new Error('redis down');
       },
-      async stop() {},
+      stop: () => Promise.resolve(),
     };
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
     const runtime = createScheduleRuntime({ schedules: [nightly], durable: refusing });
 
     const started = await runtime.start();
@@ -506,7 +503,7 @@ describe('durable start failure', () => {
   });
 
   it('start resolves undefined when the durable backend registers', async () => {
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: () => Promise.resolve() });
     const runtime = createScheduleRuntime({ schedules: [nightly], durable: fakeDurableScheduler() });
 
     expect(await runtime.start()).toBeUndefined();

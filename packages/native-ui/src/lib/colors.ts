@@ -8,7 +8,7 @@
  * @returns True if valid hex color
  */
 export function isValidHexColor(color: string): boolean {
-  return /^#([A-F0-9]{6}|[A-F0-9]{3}|[A-F0-9]{8})$/i.test(color);
+  return /^#(?:[A-F0-9]{6}|[A-F0-9]{3}|[A-F0-9]{8})$/i.test(color);
 }
 
 /**
