@@ -2,8 +2,6 @@
  * Type definitions for the geocoding service
  */
 
-import { z } from 'zod';
-
 /** Every supported provider, written once. The type, the env enum and the cache schema all read it. */
 export const GEOCODING_PROVIDERS = [
   'google',
@@ -24,29 +22,26 @@ export type GeocodingProvider = (typeof GEOCODING_PROVIDERS)[number];
  * Address components following Schema.org PostalAddress structure.
  * `locality` is the city, `region` the state or province, `country` an ISO 3166-1 alpha-2 code.
  */
-export const addressComponentsSchema = z.object({
-  streetAddress: z.string().optional(),
-  locality: z.string().optional(),
-  region: z.string().optional(),
-  postalCode: z.string().optional(),
-  country: z.string().optional(),
-});
-
-export type AddressComponents = z.infer<typeof addressComponentsSchema>;
+export type AddressComponents = {
+  streetAddress?: string | undefined;
+  locality?: string | undefined;
+  region?: string | undefined;
+  postalCode?: string | undefined;
+  country?: string | undefined;
+};
 
 /**
- * Result from geocoding operation. Also the shape read back from the cache.
+ * Result from geocoding operation. Also the shape read back from the cache. `latitude` is in [-90, 90],
+ * `longitude` in [-180, 180]. `geocodeResultSchema` (`@arki/geo/zod`) checks it.
  */
-export const geocodeResultSchema = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  formattedAddress: z.string(),
-  addressComponents: addressComponentsSchema,
-  placeId: z.string().optional(),
-  provider: z.enum(GEOCODING_PROVIDERS),
-});
-
-export type GeocodeResult = z.infer<typeof geocodeResultSchema>;
+export type GeocodeResult = {
+  latitude: number;
+  longitude: number;
+  formattedAddress: string;
+  addressComponents: AddressComponents;
+  placeId?: string | undefined;
+  provider: GeocodingProvider;
+};
 
 /**
  * Configuration for geocoding service

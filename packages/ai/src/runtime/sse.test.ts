@@ -4,7 +4,8 @@ import type { z } from 'zod';
 import { serialize } from '@arki/failure';
 
 import { RateLimited } from '../failures';
-import type { RuntimeWireEvent , runtimeWireEventSchema} from './sse';
+import type { RuntimeWireEvent } from './sse';
+import type { runtimeWireEventSchema } from './sse-schemas';
 import { fetchRuntimeEventStream, readRuntimeEventStream, toRuntimeEventStreamResponse } from './sse';
 import type { RuntimeEvent } from './types';
 import { RUNTIME_FAILURES } from './types';

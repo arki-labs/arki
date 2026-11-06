@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 
 import { log } from './log.js';
@@ -37,10 +38,11 @@ const countSchema = z.number().nonnegative();
 
 /**
  * The part of a key-value store `kvQuotaStore` needs. `@arki/kv` fits, so does a test double.
- * `get` checks the stored value against the count schema and returns a failure when Redis is down or the value is not a count.
+ * `get` checks the stored value against the count schema (any Standard Schema, so this type names no Zod type)
+ * and returns a failure when Redis is down or the value is not a count.
  */
 export type KVLike = {
-  get(key: string, schema: typeof countSchema): Promise<number | undefined | Failure>;
+  get(key: string, schema: StandardSchemaV1<unknown, number>): Promise<number | undefined | Failure>;
   set(key: string, value: number, ttlSeconds?: number): Promise<boolean | Failure>;
 };
 

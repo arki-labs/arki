@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import type { PostOverview } from '@arki/content';
 import { isFailure } from '@arki/failure';
 
-import type { postOverviewSchema } from './search-posts';
+import type { postOverviewSchema } from './post-overview-schema';
 import { searchPosts, SearchResponseMalformed, SearchUnavailable } from './search-posts';
 
 const post = {

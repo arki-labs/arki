@@ -18,6 +18,7 @@ Peers are optional. Install `react` and `react-dom` for `@arki/geo/react`. Insta
 | `@arki/geo/geocoding`         | `GeocodingService`, `createGeocodingService`, `geocodingEnv`                                                       | server                   |
 | `@arki/geo/react`             | everything in `@arki/geo`, plus `useCoordinates`, `useDistance`, `useBoundsFromCoordinates`, `useBoundsFromRadius` | browser, React           |
 | `@arki/geo/react/google-maps` | `GoogleMapsProvider`, `GoogleMap`, `GoogleMarker`, `LocationPicker`, street view and polyline helpers              | browser, React           |
+| `@arki/geo/zod`               | `geocodeResultSchema`, `addressComponentsSchema`, `providerAttemptSchema`                                          | anywhere                 |
 
 Import `@arki/geo/geocoding` only on the server. It pulls in the geocoder libraries.
 
@@ -52,6 +53,42 @@ if (point.lat !== 48.8566) throw new Error('wrong latitude');
 const bad = parseCoordinates('north pole');
 if (!InvalidCoordinates.is(bad)) throw new Error('should fail');
 ```
+
+## When not to use this
+
+- You need routing, travel time or isochrones. This package gives straight-line (great-circle) distance.
+- You need geometry on a projected plane or polygon maths. Use a GIS library.
+- You need Mapbox or Leaflet components. Only Google Maps components ship today.
+
+## Runtime support
+
+The maths in `@arki/geo` is pure and runs on Node, Bun, Deno, browsers and Hermes. `@arki/geo/geocoding`
+runs on Node, Bun and Deno only: `node-geocoder` needs Node's `readline` (package.json `arki.entryRuntimes`).
+`@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later.
+
+<!-- runtimes:start -->
+
+| Runtime | Result | Version tested        | Date (UTC) |
+| ------- | ------ | --------------------- | ---------- |
+| node    | pass   | v22.13.1              | 2026-11-05 |
+| bun     | pass   | 1.4.2                 | 2026-11-05 |
+| deno    | pass   | 2.9.8                 | 2026-11-05 |
+| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
+| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
+
+- `./geocoding` runs on node, bun, deno (`scripts/smoke/geocoding.mjs`).
+
+<!-- runtimes:end -->
+
+## Public imports
+
+The table under [Install](#install) lists each entry with what it holds and where it runs. In short:
+
+- `@arki/geo`: `Coordinates`, `Bounds`, `calculateDistance`, `calculateBearing`, `bearingToDirection`, `validateCoordinates`, `parseCoordinates`, bounds and formatting helpers, and every failure.
+- `@arki/geo/geocoding`: `GeocodingService`, `createGeocodingService` and `geocodingEnv`. Server only.
+- `@arki/geo/react`: everything in `@arki/geo`, plus `useCoordinates`, `useDistance`, `useBoundsFromCoordinates` and `useBoundsFromRadius`.
+- `@arki/geo/react/google-maps`: `GoogleMapsProvider`, `GoogleMap`, `GoogleMarker`, `LocationPicker`, and street view and polyline helpers.
+- `@arki/geo/zod`: `geocodeResultSchema`, `addressComponentsSchema` and `providerAttemptSchema`, the Zod schemas behind the plain TS types, for callers that parse with Zod.
 
 ## Geocoding
 
@@ -128,34 +165,19 @@ export function Away({ from, to }: { from: { lat: number; lng: number }; to: { l
 `useDistance` returns `null` when either point is `null`. Apps import the Google Maps components
 from `@arki/geo/react/google-maps` and never import `@vis.gl/react-google-maps` directly.
 
-## When not to use this
-
-- You need routing, travel time or isochrones. This package gives straight-line (great-circle) distance.
-- You need geometry on a projected plane or polygon maths. Use a GIS library.
-- You need Mapbox or Leaflet components. Only Google Maps components ship today.
-
-## Runtime support
-
-The maths in `@arki/geo` is pure and runs on Node, Bun, Deno, browsers and Hermes. `@arki/geo/geocoding`
-runs on Node, Bun and Deno only: `node-geocoder` needs Node's `readline` (package.json `arki.entryRuntimes`).
-`@arki/geo/react` and `@arki/geo/react/google-maps` need React 18 or later.
-
-<!-- runtimes:start -->
-
-| Runtime | Result | Version tested        | Date (UTC) |
-| ------- | ------ | --------------------- | ---------- |
-| node    | pass   | v22.13.1              | 2026-11-05 |
-| bun     | pass   | 1.4.2                 | 2026-11-05 |
-| deno    | pass   | 2.9.8                 | 2026-11-05 |
-| browser | pass   | Chromium 156.0.8078.4 | 2026-11-05 |
-| hermes  | pass   | V1 250829098.0.17     | 2026-11-05 |
-
-- `./geocoding` runs on node, bun, deno (`scripts/smoke/geocoding.mjs`).
-
-<!-- runtimes:end -->
-
 ## Limits
 
 - Distance uses the haversine formula on a sphere (Earth radius 6371 km). Error is up to about 0.5%.
 - The geocoding cache stores results by a hash of the address. It does not cache failures.
 - Provider rate limits and terms of use are yours to follow.
+
+## Documentation
+
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules that bite, the errors and how to verify.
+- [API reference](docs/api.md): every export.
+- [`llms.txt`](llms.txt): the short map an agent reads first.
+- [`AGENTS.md`](AGENTS.md): the laws for changing this package.
+
+## Support
+
+Questions and bugs: <https://github.com/arki-labs/arki/issues>. Include the package version, the geocoding provider and the failure `code`.

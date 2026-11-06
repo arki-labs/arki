@@ -48,6 +48,11 @@
       "import": "./dist/maps/google/index.js",
       "default": "./dist/maps/google/index.js"
     },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",

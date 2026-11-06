@@ -7,7 +7,8 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { DbHandle, JournalTables } from '@arki/journal';
 import { is, recordSchema } from '@arki/schema';
 
-import { MAIL_JOB, mailMessageSchema } from './args.js';
+import { mailMessageSchema } from './args-schemas.js';
+import { MAIL_JOB } from './args.js';
 
 export type QueuedMail = {
   readonly jobId: string;

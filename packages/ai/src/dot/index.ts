@@ -18,6 +18,7 @@ import type { LLMProviderConfig } from '../ai-service/factory.js';
 import type { ProbeOptions } from '../ai-service/probe.js';
 import type { LLMProviderWithUsage } from '../ai-service/types.js';
 import type { VectorSearchProvider } from '../types.js';
+import type { VectorIndex } from '../vector-search/vector-index.js';
 import { createLLMProvider } from '../ai-service/factory.js';
 import { probeLLMProvider } from '../ai-service/probe.js';
 import { createVectorIndex } from '../vector-search/vector-index.js';
@@ -63,7 +64,12 @@ export function vectorIndex<P extends Record<string, unknown>>(options: VectorIn
     name: 'vectorIndex',
     provides: {
       // A bad QDRANT_* value is returned as InvalidEnvironment, which fails the boot.
-      vectorIndex: (): ReturnType<typeof createVectorIndex<P>> | { provider: null; durable: false } => {
+      // `VectorIndex` is named from its own module so the emitted `.d.ts` does not import the root entry,
+      // which re-exports Zod schemas (TYPES_E001).
+      vectorIndex: ():
+        | VectorIndex<P>
+        | Exclude<ReturnType<typeof createVectorIndex<P>>, VectorIndex<P>>
+        | { provider: null; durable: false } => {
         const chosen = typeof options.space === 'function' ? options.space() : options.space;
         if (chosen === null) return { provider: null, durable: false };
         if (provider) return { provider, durable };

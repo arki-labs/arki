@@ -46,7 +46,6 @@ Every exported value, grouped by import path. Types are not listed. The `/react`
 - `normalizeLongitude`: Normalize longitude to the -180 to 180 range by wrapping around the globe. Runs in constant time for any finite input.
 - `padBounds`: Pad bounds by a percentage.
 - `parseCoordinates`: Parse coordinates from a string.
-- `providerAttemptSchema`: One provider's failed try, kept so a failure that ends the lookup still shows every provider.
 - `roundCoordinates`: Round coordinates to specified precision.
 - `toStandardCoordinates`: Convert coordinates from one format to Google Maps format Handles various input formats: - {latitude, longitude} - {lat, lng} - {lat, lon}.
 - `validateCoordinates`: Validate coordinates.
@@ -95,7 +94,6 @@ Every exported value, grouped by import path. Types are not listed. The `/react`
 - `normalizeLongitude`: Normalize longitude to the -180 to 180 range by wrapping around the globe. Runs in constant time for any finite input.
 - `padBounds`: Pad bounds by a percentage.
 - `parseCoordinates`: Parse coordinates from a string.
-- `providerAttemptSchema`: One provider's failed try, kept so a failure that ends the lookup still shows every provider.
 - `roundCoordinates`: Round coordinates to specified precision.
 - `toStandardCoordinates`: Convert coordinates from one format to Google Maps format Handles various input formats: - {latitude, longitude} - {lat, lng} - {lat, lon}.
 - `useBoundsFromCoordinates`: Hook to calculate and work with bounds.
@@ -108,9 +106,7 @@ Every exported value, grouped by import path. Types are not listed. The `/react`
 
 - `GEOCODING_PROVIDERS`: Every supported provider, written once. The type, the env enum and the cache schema all read it.
 - `GeocodingService`: the geocoding service class. It has `geocode`, `reverseGeocode` and `batchGeocode`, tries the primary provider then the fallbacks, and caches results in an optional key value store.
-- `addressComponentsSchema`: Address components following Schema.org PostalAddress structure. `locality` is the city, `region` the state or province, `country` an ISO 3166-1 alpha-2 code.
 - `createGeocodingService`: Create geocoding service instance from configuration.
-- `geocodeResultSchema`: Result from geocoding operation. Also the shape read back from the cache.
 - `geocodingEnv`: the environment definition for geocoding: the provider, fallback providers, provider API keys and cache settings (enabled, TTL, key prefix).
 
 ## @arki/geo/react/google-maps
@@ -154,3 +150,11 @@ Every exported value, grouped by import path. Types are not listed. The `/react`
 - `useMapBounds`: Hook to manage map bounds Provides utilities for calculating and fitting bounds to show multiple locations.
 - `useMapOverlay`: Hook to manage map overlay state Provides state and handlers for: - Expand/collapse on hover - Pin to keep expanded - Fullscreen mode - Resizing with 8-point h.
 - `usePolylineAnimation`: Hook to manage animated polylines on a map Creates and animates polylines with a "marching ants" effect.
+
+## @arki/geo/zod
+
+The Zod schemas behind the plain TS types `ProviderAttempt`, `AddressComponents` and `GeocodeResult`, for callers that parse with Zod.
+
+- `addressComponentsSchema`: Address components following Schema.org PostalAddress structure. `locality` is the city, `region` the state or province, `country` an ISO 3166-1 alpha-2 code.
+- `geocodeResultSchema`: Result from geocoding operation. Also the shape read back from the cache.
+- `providerAttemptSchema`: One provider's failed try, kept so a failure that ends the lookup still shows every provider.

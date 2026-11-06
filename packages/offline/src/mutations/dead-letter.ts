@@ -1,18 +1,17 @@
-import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
-import { queuedMutationSchema } from './model.js';
+import { deadLetterEntrySchema } from './model-schemas.js';
 import type { QueuedMutation } from './model.js';
 import type { QueuedMutationId } from './identity.js';
 import type { QueueStorageFailure } from './failures.js';
-import { readOfflineState, writeOfflineState } from './storage.js';
+import { readOfflineState, writeOfflineState } from './state.js';
 import { observeQueue } from './telemetry.js';
 
-const deadLetterEntrySchema = z.object({
-  mutation: queuedMutationSchema,
-  error: z.object({ message: z.string(), name: z.string() }),
-  deadLetteredAt: z.number().finite(),
-});
-export type DeadLetterEntry = z.output<typeof deadLetterEntrySchema>;
+/** A dead-lettered mutation, why it failed, and when. `deadLetterEntrySchema` (`model-schemas.ts`) checks it. */
+export type DeadLetterEntry = {
+  mutation: QueuedMutation;
+  error: { message: string; name: string };
+  deadLetteredAt: number;
+};
 
 export type DeadLetterStore = {
   list(): Promise<readonly QueuedMutation[] | QueueStorageFailure>;

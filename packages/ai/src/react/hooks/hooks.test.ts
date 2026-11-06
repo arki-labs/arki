@@ -4,8 +4,9 @@ import type { z } from 'zod';
 import { serialize } from '@arki/failure';
 
 import type { RuntimeEvent, RuntimeFailure } from '../../runtime/types';
-import type { GenerationResult, UseAIGenerationReturn , generationResultSchema} from './useAIGeneration';
-import type { SearchResult , searchResultSchema} from './useSemanticSearch';
+import type { generationResultSchema, searchResultSchema } from './schemas';
+import type { GenerationResult, UseAIGenerationReturn } from './useAIGeneration';
+import type { SearchResult } from './useSemanticSearch';
 import { RateLimited } from '../../failures';
 import { RUNTIME_FAILURES } from '../../runtime/types';
 import { useAIGeneration } from './useAIGeneration';

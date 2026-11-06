@@ -12,7 +12,9 @@ import { parse } from '@arki/schema';
 
 import type { RuntimeFailure } from '../../runtime/types.js';
 import type { SearchMode } from '../../types.js';
-import { jsonTextSchema, readFailureResponse } from '../../runtime/sse.js';
+import { readFailureResponse } from '../../runtime/sse.js';
+import { jsonTextSchema } from '../../runtime/sse-schemas.js';
+import { searchResultSchema } from './schemas.js';
 import { connectionFailure } from '../../runtime/types.js';
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
@@ -22,15 +24,6 @@ export type SearchResult<TMetadata = Record<string, unknown>> = {
   highlights?: string[];
   metadata?: TMetadata;
 }
-
-/** A {@link SearchResult} as the search endpoint sends it. A two-way type test locks it to the type. */
-export const searchResultSchema = z.object({
-  id: z.string(),
-  score: z.number(),
-  data: z.record(z.string(), z.unknown()).optional(),
-  highlights: z.array(z.string()).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
 
 /** The search endpoint answers `{ results: SearchResult[] }` or a bare `SearchResult[]`. */
 const searchResponseSchema = jsonTextSchema.pipe(

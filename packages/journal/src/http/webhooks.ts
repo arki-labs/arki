@@ -34,7 +34,7 @@ import type { IdGenerationFailure } from '@arki/contracts';
 import type { Backoff } from '@arki/resilience';
 import { defineId } from '@arki/contracts';
 import { defineFailure, findCause, InvalidInput, invariant, isFailure, UnexpectedFailure } from '@arki/failure';
-import { publicFetch, UnsafeUrl, validatePublicURL } from '@arki/http/public-fetch';
+import { publicFetch, UnsafeUrl } from '@arki/http/public-fetch';
 import { standardWebhooks } from '@arki/http/webhooks';
 import { backoff } from '@arki/resilience';
 import { parse } from '@arki/schema';
@@ -43,6 +43,7 @@ import type { JournalTables } from '../pg.js';
 import type { DbHandle, JobRunner, RootDb, ScheduledJob } from '../types.js';
 import { jobId } from '../id.js';
 import { rollbackOnFailure } from '../rollback.js';
+import { dispatchInput, subscribeInput } from './webhook-schemas.js';
 
 const subscriptionId = defineId('whs_');
 const webhookMessageId = defineId('msg_');
@@ -206,33 +207,18 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const ERROR_TEXT_LIMIT = 1000;
 
-/** A subscriber URL: public https only, refused here so a partner cannot point deliveries at a private address. */
-const publicHttpsUrl = z.url().superRefine((url, ctx) => {
-  const checked = validatePublicURL(url);
-  // An unparsable URL is already an issue of `z.url()`.
-  if (isFailure(checked)) {
-    if (checked.data.reason !== 'invalid_url') ctx.addIssue({ code: 'custom', message: checked.message });
-  } else if (checked.protocol !== 'https:') ctx.addIssue({ code: 'custom', message: 'The URL must use https.' });
-});
-const subscribeInput = z
-  .object({
-    partner: z.string().min(1).max(256),
-    url: publicHttpsUrl,
-    events: z.array(z.string().min(1).max(128)).min(1).readonly(),
-  })
-  .readonly();
-const dispatchInput = z
-  .object({
-    partner: z.string().min(1).max(256),
-    event: z.string().min(1).max(128),
-    payload: z.unknown(),
-  })
-  .readonly();
-
-/** A new endpoint: whose events it gets, where (public https), and which ones. */
-export type SubscribeInput = z.input<typeof subscribeInput>;
-/** One event for a partner's subscribers. `payload` must be JSON. */
-export type DispatchInput = z.input<typeof dispatchInput>;
+/** A new endpoint: whose events it gets, where (public https), and which ones. `webhook-schemas.ts` checks it. */
+export type SubscribeInput = {
+  readonly partner: string;
+  readonly url: string;
+  readonly events: readonly string[];
+};
+/** One event for a partner's subscribers. `payload` must be JSON. `webhook-schemas.ts` checks it. */
+export type DispatchInput = {
+  readonly partner: string;
+  readonly event: string;
+  readonly payload: unknown;
+};
 const deliveryArgs = z.object({ messageId: z.string(), subscriptionId: z.string() });
 
 const encoder = new TextEncoder();

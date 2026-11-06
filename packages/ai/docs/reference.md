@@ -104,7 +104,7 @@ Thrown configuration, node, timeout, cancellation, checkpoint and retry-wait err
 
 Components and hooks live in `@arki/ai/react` (optional peers `react` and `@ai-sdk/react`): `useAIChat`, `useAIGeneration`, `useRuntimeStream`, `useSemanticSearch`, `AIChat`, `StreamingText` and `SearchInterface`.
 
-`generationResultSchema` and `searchResultSchema` are the Zod schemas for what `useAIGeneration` and `useSemanticSearch` read from the server. Use them to check those response bodies.
+`generationResultSchema` and `searchResultSchema`, from `@arki/ai/zod`, are the Zod schemas for what `useAIGeneration` and `useSemanticSearch` read from the server. Use them to check those response bodies.
 
 ```tsx skip="needs a React app and a /api/chat route"
 import { AIChat, useAIChat } from '@arki/ai/react';

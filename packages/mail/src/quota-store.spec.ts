@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { defineFailure, isFailure, orThrow } from '@arki/failure';
+import { parse } from '@arki/schema';
 
 import type { KVLike } from './quota-store.js';
 import { kvQuotaStore } from './quota-store.js';
@@ -28,8 +29,8 @@ function memoryKv(options: { failSet?: boolean; down?: boolean } = {}) {
   const kv: KVLike = {
     get: (key, schema) => {
       if (options.down === true) return Promise.resolve(KvDown({ command: 'get' }));
-      const parsed = schema.safeParse(values.get(key));
-      return Promise.resolve(parsed.success ? parsed.data : undefined);
+      const parsed = parse(schema, values.get(key));
+      return Promise.resolve(isFailure(parsed) ? undefined : parsed);
     },
     set: (key, value) => {
       if (options.down === true) return Promise.resolve(KvDown({ command: 'set' }));

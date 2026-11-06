@@ -34,8 +34,8 @@ import {
   ProviderRejected,
   ProviderUnreachable,
 } from '../core/failures.js';
+import { geocodeResultSchema } from './schemas.js';
 import { observeGeo } from './telemetry.js';
-import { geocodeResultSchema } from './types.js';
 
 const log = getLogger('arki:geo');
 

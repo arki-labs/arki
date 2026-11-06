@@ -5,10 +5,11 @@
 ## Import paths
 
 <!-- llms:start -->
-- `@arki/geo`: Main exports (server-side + shared). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 39 more.
-- `@arki/geo/react`: Client-side exports (React hooks and components). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 45 more.
-- `@arki/geo/geocoding`: `GEOCODING_PROVIDERS`, `GeocodingService`, `addressComponentsSchema`, `createGeocodingService`, `geocodeResultSchema`, `geocodingEnv`; types `AddressComponents`, `BatchGeocodeEntry`, `GeocodeOutcome`, `GeocodeResult`, `GeocodingCache`, `GeocodingConfig`; and 3 more.
+- `@arki/geo`: Main exports (server-side + shared). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 38 more.
+- `@arki/geo/react`: Client-side exports (React hooks and components). `AddressNotFound`, `BoundsError`, `CONVERSION_FACTORS`, `EARTH_RADIUS_KM`, `EARTH_RADIUS_MI`, `GeoError`, `GeocodingCancelled`, `InvalidCoordinates`, `MapProviderError`, `NoAddressAtLocation`, `ProviderRateLimited`, `ProviderRejected`; and 44 more.
+- `@arki/geo/geocoding`: `GEOCODING_PROVIDERS`, `GeocodingService`, `createGeocodingService`, `geocodingEnv`; types `AddressComponents`, `BatchGeocodeEntry`, `GeocodeOutcome`, `GeocodeResult`, `GeocodingCache`, `GeocodingConfig`, `GeocodingEnv`, `GeocodingOptions`; and 1 more.
 - `@arki/geo/react/google-maps`: Google Maps integration. `COLOR_SETS`, `DEFAULT_BOUNDS_PADDING`, `DEFAULT_MAP_CENTER`, `DEFAULT_MAP_CONFIG`, `DEFAULT_MAP_ID`, `DEFAULT_MAP_ZOOM`, `GoogleInfoWindow`, `GoogleMap`, `GoogleMapsProvider`, `GoogleMarker`, `GooglePin`, `HIGHLIGHTED_BOUNDS_PADDING`; and 63 more.
+- `@arki/geo/zod`: The Zod schemas of @arki/geo, for callers that parse with them: a cached or stored `GeocodeResult`, its `AddressComponents`, and a `ProviderAttempt` from a provider failure. `addressComponentsSchema`, `geocodeResultSchema`, `providerAttemptSchema`.
 <!-- llms:end -->
 
 ## Start here

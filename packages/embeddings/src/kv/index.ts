@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import type { Failure } from '@arki/failure';
+import type { StandardSchemaV1 } from '@arki/schema';
 import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
 
@@ -38,9 +39,10 @@ function fromBase64(text: string): Uint8Array {
  * const embedder = withCache(base, kvCacheStore(kv, { prefix: 'reader:emb:' }), { ttlMs: 7 * 86_400_000 });
  */
 export function kvCacheStore(
-  // The two `KV` methods used. `get` checks the value against `storedValueSchema`; a failure is a miss.
+  // The two `KV` methods used. `get` checks the value against a Standard Schema (here `storedValueSchema`);
+  // a failure is a miss. Typed as a Standard Schema, not the Zod one, so the public `.d.ts` names no Zod type.
   kv: {
-    get(key: string, schema: typeof storedValueSchema): Promise<string | undefined | Failure>;
+    get(key: string, schema: StandardSchemaV1<unknown, string>): Promise<string | undefined | Failure>;
     set(key: string, value: string, expirationSeconds?: number): Promise<unknown>;
   },
   options: { readonly prefix?: string } = {},
