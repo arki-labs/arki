@@ -2,7 +2,7 @@
 // `bun run test:runtimes`. No Docker, Postgres or Ollama: the checks use the pure helpers,
 // a real local HTTP fixture server, and the code-based AI scorers (no judge model).
 // The entries that need a test runner or a browser (./vitest-setup, ./ai/vitest,
-// ./ai/playwright, ./e2e, ./containers, ./services/*) are imported to prove they load.
+// ./playwright/ai, ./playwright, ./containers, ./containers/*, ./services/*) are imported to prove they load.
 
 import { metrics, trace } from '@opentelemetry/api';
 import { z } from 'zod';

@@ -34,7 +34,7 @@
       "import": "./dist/ai/index.js",
       "default": "./dist/ai/index.js"
     },
-    "./ai/playwright": {
+    "./playwright/ai": {
       "types": "./dist/ai/playwright.d.ts",
       "import": "./dist/ai/playwright.js",
       "default": "./dist/ai/playwright.js"
@@ -64,7 +64,7 @@
       "import": "./dist/factories.js",
       "default": "./dist/factories.js"
     },
-    "./e2e": {
+    "./playwright": {
       "types": "./dist/e2e/index.d.ts",
       "import": "./dist/e2e/index.js",
       "default": "./dist/e2e/index.js"
@@ -74,7 +74,7 @@
       "import": "./dist/services/http-fixtures.js",
       "default": "./dist/services/http-fixtures.js"
     },
-    "./services/mailpit": {
+    "./containers/mailpit": {
       "types": "./dist/services/mailpit.d.ts",
       "import": "./dist/services/mailpit.js",
       "default": "./dist/services/mailpit.js"
@@ -84,12 +84,12 @@
       "import": "./dist/services/ollama.js",
       "default": "./dist/services/ollama.js"
     },
-    "./services/postgres": {
+    "./containers/postgres": {
       "types": "./dist/services/postgres.d.ts",
       "import": "./dist/services/postgres.js",
       "default": "./dist/services/postgres.js"
     },
-    "./services/redis": {
+    "./containers/redis": {
       "types": "./dist/services/redis.d.ts",
       "import": "./dist/services/redis.js",
       "default": "./dist/services/redis.js"

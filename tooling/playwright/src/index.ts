@@ -127,7 +127,7 @@ function createPlaywrightConfig(options: PlaywrightConfigOptions = {}) {
 }
 
 /**
- * Run policy for suites on a real stack (`e2eConfig` from `@arki/testing/e2e`): one server and
+ * Run policy for suites on a real stack (`e2eConfig` from `@arki/testing/playwright`): one server and
  * one database per worker, so workers are cheap to add. Retries are visible in the report; a test
  * that passes only on a retry is flaky, not green.
  */

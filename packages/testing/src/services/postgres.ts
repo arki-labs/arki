@@ -1,5 +1,5 @@
 /**
- * `@arki/testing/services/postgres` — one Postgres container per run, one migrated template
+ * `@arki/testing/containers/postgres` — one Postgres container per run, one migrated template
  * database, and one clone of it per worker (`CREATE DATABASE … TEMPLATE`, tens of milliseconds).
  */
 import { PostgreSqlContainer } from '@testcontainers/postgresql';

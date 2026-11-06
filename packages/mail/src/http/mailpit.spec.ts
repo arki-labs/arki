@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
-import { mailbox, mailpit as mailpitService } from '@arki/testing/services/mailpit';
+import { mailbox, mailpit as mailpitService } from '@arki/testing/containers/mailpit';
 
 import { MailRejected, MailUncertain } from '../failures.js';
 import { mailpit } from './mailpit.js';

@@ -10,7 +10,7 @@ import { defineApp } from '@arki/dot';
 import { defineFeature } from '@arki/dot/feature';
 import { isFailure, orThrow } from '@arki/failure';
 import { captureSpans } from '@arki/testing/otel';
-import { mailpit as mailpitService } from '@arki/testing/services/mailpit';
+import { mailpit as mailpitService } from '@arki/testing/containers/mailpit';
 
 import type { FetchFn } from './http/post-json.js';
 import { mail } from './dot.js';

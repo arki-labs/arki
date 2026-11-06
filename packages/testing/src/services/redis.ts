@@ -1,5 +1,5 @@
 /**
- * `@arki/testing/services/redis` — one Redis container per worker. A built production server
+ * `@arki/testing/containers/redis` — one Redis container per worker. A built production server
  * demands a KV store at boot, so every worker gets its own.
  */
 import { connect } from 'node:net';

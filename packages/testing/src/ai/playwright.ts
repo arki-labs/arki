@@ -1,5 +1,5 @@
 /**
- * `@arki/testing/ai/playwright` — Playwright's `expect` with `toScore`.
+ * `@arki/testing/playwright/ai` — Playwright's `expect` with `toScore`.
  *
  *   await expect(summary).toScore(grounded({ source }), { judge });
  */

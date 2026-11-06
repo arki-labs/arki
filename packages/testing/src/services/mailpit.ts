@@ -1,5 +1,5 @@
 /**
- * `@arki/testing/services/mailpit` — one Mailpit container per worker, so a worker's mailbox
+ * `@arki/testing/containers/mailpit` — one Mailpit container per worker, so a worker's mailbox
  * is its own. The app sends through `@arki/mail/http/mailpit`; the test reads with `mailbox()`.
  */
 import { GenericContainer, Wait } from 'testcontainers';

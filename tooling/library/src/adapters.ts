@@ -24,6 +24,7 @@ export const ADAPTERS = new Set([
   'mastra',
   'http',
   'containers',
+  'playwright',
   'msw',
   'connections',
   'redis',

@@ -78,7 +78,7 @@ The root entry loads no Docker client and no MSW. The rest are explicit entries.
 | `@arki/testing/vitest-setup`                                                      | the Vitest test API, re-exported                                             | Vitest                                     |
 | `@arki/testing/stack`, `/stack/contract`                                          | declare real services once per app                                           | Vitest                                     |
 | `@arki/testing/services/*`                                                        | `postgres`, `redis`, `mailpit`, `ollama`, `http-fixtures`                    | Docker (not `ollama`, not `http-fixtures`) |
-| `@arki/testing/e2e`                                                               | Playwright config, setup and story helpers for a built app                   | `@playwright/test`, Docker                 |
+| `@arki/testing/playwright`                                                               | Playwright config, setup and story helpers for a built app                   | `@playwright/test`, Docker                 |
 | `@arki/testing/ai`                                                                | scorers, `createJudge`, `defineScorer`                                       | an Ollama daemon for judge scorers         |
 | `@arki/testing/ai/vitest`, `/ai/playwright`                                       | `expect(...).toScore(scorer)`                                                | Vitest or Playwright                       |
 | `@arki/testing/otel`                                                              | `captureSpans`: finished spans with their parents, and collected metrics     | `@opentelemetry/api`                       |

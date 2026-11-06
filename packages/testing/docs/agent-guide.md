@@ -47,7 +47,7 @@ Import scorers from `@arki/testing/ai` and the matcher from `@arki/testing/ai/vi
 
 ### Run an end-to-end story against a built app
 
-Use `@arki/testing/e2e` (`e2eConfig`, `stackSetup`, `e2eTest`, `storyFor`) with the services from `@arki/testing/stack`.
+Use `@arki/testing/playwright` (`e2eConfig`, `stackSetup`, `e2eTest`, `storyFor`) with the services from `@arki/testing/stack`.
 
 ## Rules that bite
 
