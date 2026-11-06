@@ -206,6 +206,22 @@ await finished.promise;
 process.exit(0);
 ```
 
+## Observability
+
+Spans (OpenTelemetry API only, tracer `@arki/queue`; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `queue.enqueue` (producer) | each single-job enqueue: validation, id generation and provider acceptance, an unavailable transport included | `messaging.destination.name` (the declared job name), `failure.code` on failure |
+| `queue.flow.enqueue` (producer) | each flow enqueue: validation, tree mapping and the atomic submission | `messaging.destination.name` (the flow name), `failure.code` on failure |
+| `queue.execute` | each worker delivery (BullMQ, pg-boss and outbox runner) | `messaging.destination.name`, `queue.attempt`, `failure.code` on a refusal or failure |
+
+Only a fault (status 500 or higher) sets error status; a 4xx refusal leaves it unset. The producer span's context travels in the message (W3C propagation, so the app must configure a propagator) and `queue.execute` continues it. In a Dot app, a job enqueued by a usecase nests under the `feature.<feature>.<usecase>` span. Job input, results and ids are never recorded. Details: [jobs reference](docs/reference/jobs.md).
+
+Metrics: none. Use your backend's own queue metrics (BullMQ, pg-boss) for depth and latency.
+
+Not instrumented: job and flow builders and cron patterns — pure declarations with no I/O. The Bull Board UI (`createBoard`) — an operator screen whose HTTP requests the host server spans.
+
 ## Limits
 
 - **Delivery is at least once.** After a worker dies, the job runs again from the start with `ctx.job.attemptsMade` one higher. Boundary: a handler that sends mail and then crashes before it settles sends the mail twice unless it passes `ctx.job.id` as the idempotency key.

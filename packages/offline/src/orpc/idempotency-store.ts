@@ -1,7 +1,7 @@
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Span } from '@opentelemetry/api';
 
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 
 import { idempotencyKeyId } from './idempotency-id.js';
 import type { IdempotencyKeyId } from './idempotency-id.js';
@@ -55,7 +55,8 @@ export function storeIdempotentResponse(
     if (isFailure(result)) {
       const failure = result;
       observe(() => { span?.setAttribute('failure.code', failure.code); });
-      observe(() => { span?.setStatus({ code: SpanStatusCode.ERROR, message: failure.code }); });
+      // Only a fault (status >= 500) is a span error; an expected 4xx refusal leaves the status unset.
+      if (isFault(failure)) observe(() => { span?.setStatus({ code: SpanStatusCode.ERROR, message: failure.code }); });
     }
     observe(() => { span?.end(); });
     return result;

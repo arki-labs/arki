@@ -102,6 +102,10 @@ Browsers. The package has no Node-only imports.
 
 Parsing returns failures from `@arki/failure` with the codes `content.feed_too_large`, `content.feed_malformed`, `content.feed_unsupported` and `content.feed_limit_exceeded`. Check with `isFailure`.
 
+## Observability
+
+Read-only parsing: it parses feeds and RSS and searches data you give it, with no I/O of its own, so no spans or metrics.
+
 ## Limits
 
 `parseFeed` reads at most 10 MiB of text and 10,000 items by default. Pass `maxBytes` or `maxItems` to change them.

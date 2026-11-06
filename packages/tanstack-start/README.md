@@ -260,6 +260,10 @@ The header is trusted as sent. Behind a proxy that overwrites it, that is correc
 - Optimistic rollback is local cache only. It never reverses a database write, a job or an email.
 - `withForwardedProto` copies only GET and HEAD requests.
 
+## Observability
+
+No spans or metrics of its own. The request span belongs to the app server (Nitro, or `@arki/http` when it is mounted), procedures are spanned by oRPC, and the `@arki/tanstack-start/dot` mounts hand each request to the package behind it (oRPC, `@arki/auth`, `@arki/schedule`), which spans its own work (`auth.handler` for the auth mount). Errors go to `@arki/log` and, when configured, Sentry.
+
 ## Documentation
 
 - [Agent guide](docs/agent-guide.md): tasks, step by step.

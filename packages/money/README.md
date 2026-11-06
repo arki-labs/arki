@@ -105,6 +105,10 @@ How to handle them:
 - **`NumberFormatError` or `InvalidArgumentError` from input:** show the user the bad text and ask again. Do not retry.
 - **`ProviderAmountError`:** a provider amount cannot be sent as is (for example a 3-decimal currency on Stripe). Choose another currency or amount.
 
+## Observability
+
+Pure computation: its Drizzle column types only convert values and run no queries, so no spans or metrics.
+
 ## Limits
 
 - **Hybrid storage.** `units` is a `number` while it is a safe integer, and a `bigint` beyond that. This is the canonical form, and `-0` never occurs. The change is invisible to callers: the value stays exact.

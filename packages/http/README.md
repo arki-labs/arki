@@ -755,6 +755,24 @@ Stable API — match on codes, never parse messages.
 `E511` answer 500). Unexpected
 error messages are redacted unless `NODE_ENV=development`.
 
+## Observability
+
+Spans (OpenTelemetry API only, tracer `@arki/http`; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `http.request` | each request the engine serves (default and Hono engine) | `http.response.status_code`; `failure.code` on an error envelope or a throw. Error status on a 5xx response or a throw |
+| `http.idempotency` | each request a protected idempotency route handles | `http.response.status_code`; `failure.code` and error status on a refusal (a refusal is thrown, so even a 4xx one sets error status) |
+| `http.webhook.request` | each `verifyWebhook` step: body read plus verification | `failure.code` on failure; error status only for a fault (5xx) |
+| `http.webhook.verify` | each `scheme.verify(...)` | `failure.code` on failure; error status only for a fault |
+| `http.webhook.sign` | each `scheme.sign(...)` | `failure.code` on failure; error status only for a fault |
+
+Spans start under the active context. In a Dot app a usecase called by a handler is a child of `http.request`, and HTTP work a usecase does (signing a webhook) is a child of the usecase. No span carries a request id, URL, idempotency key, body or private cause.
+
+Metrics: none. The Dot entrypoint's in-flight count (`httpServer.inflight()`) is a plain number for draining, not an OpenTelemetry metric.
+
+Not instrumented: the typed client and `public-fetch` — they call `fetch`, which the runtime's fetch instrumentation (undici) already spans.
+
 ## Limits
 
 - **Request bodies.** A body larger than the route allows answers 413 (`ARKI_HTTP_E413`). A webhook route reads at most `maxBodyBytes`.

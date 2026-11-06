@@ -120,6 +120,10 @@ Components do not return failure values. Mistakes in how you compose them show u
 - The theme never throws. `useTheme()` outside a `ThemeProvider` returns `theme: undefined` and a `setTheme` that does nothing. A blocked `localStorage` drops writes, so the theme lasts until reload. A stored name not in `themes` becomes `defaultTheme`. If system preference detection is missing or throws, `system` resolves to `light`.
 - Hooks under `hooks/*` do not throw for bad input. `useAsyncMemo` returns `{ value, isPending, failure, retry }`: `value` is `undefined` (or your `initial`) until the promise resolves, a rejected promise becomes `failure`, and `retry()` runs the factory again. On the server, `useMediaQuery` and the `useIs*` hooks return `false`, and `useViewport` returns a 1024 by 768 desktop. It returns that same desktop on the first client render too, then reads the real window after mount, so hydration matches the server.
 
+## Observability
+
+Renders in the app's own process. Its only I/O is synchronous `localStorage` reads and writes for the theme and panel layout, which need no span; the app's spans cover everything else.
+
 ## Limits
 
 - Tailwind only sees classes it can scan. If `@source` does not point at the installed `@arki/ui/src`, components render with no styling and no error.

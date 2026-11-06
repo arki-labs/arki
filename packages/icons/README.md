@@ -75,6 +75,10 @@ Nothing here throws at runtime. Mistakes show up as types or as a missing pictur
 - A brand mark is plain data (`title`, `hex`, `path`, `svg`). Importing a name that Simple Icons removed is a build error.
 - `Icon` from `@arki/icons/wc` shows nothing until its data is loaded. Handle the empty state yourself.
 
+## Observability
+
+Runs at build time, not in the app. The Vite plugin lists the built icon files once while bundling, so it has no spans or metrics.
+
 ## Limits
 
 - `Flag` loads `/flags/<size>/<code>.svg` from your own server. Copy the `flagpack-core` SVGs into `public/flags/` or the picture is broken. The package does not copy them.

@@ -950,14 +950,26 @@ migration remains framework T07; arbitrary exceptions stay owned defects.
 repository/query failures, initialization and pool lifecycle need their own typed
 ownership migration; this transaction change does not silently redefine them.
 
-### Transaction observability
+## Observability
 
-Existing `@arki/log` retry events record attempt, SQLSTATE and delay; the shared
-boundary records rollback and classified attempt outcomes under `arki:db:outcome`.
-Driver/query instrumentation remains responsible for database calls. No duplicate
-query spans or application SDK are installed. Default transaction-level spans,
-context propagation and telemetry-failure proofs remain tracked by framework T08;
-these logs alone do not claim complete A-36 coverage.
+Spans (OpenTelemetry API only, tracer `@arki/db`; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `db.transaction` | each `runTransaction(...)`, all retries included; `transactionalProcedure` runs one per request | `failure.code` on a rolled-back outcome |
+| `db.transaction.once` | each single-attempt transaction: the Dot `transactions()` handle, a journal command | `failure.code` on failure |
+| `db.unit_of_work` | each `createUnitOfWork(...)` call | `failure.code` on failure |
+| `db.listen.start` | each `listenOnPool(...)` subscription start | `failure.code` on failure |
+| `db.migrations.read`, `db.migrations.pending`, `db.migrations.apply` | `readMigrations`, `pendingMigrations`, `migrateDb` | `failure.code` on failure |
+| `db.local.init`, `db.local.acquire`, `db.local.close` | `initDbRuntimeLocal`: open, owner lock, close | `failure.code` on failure |
+
+Only a fault (status 500 or higher) or a throw (`failure.unexpected_defect`) sets error status. Spans start under the active context: in a Dot app, a transaction a usecase opens nests under the `feature.<feature>.<usecase>` span. No span carries SQL, parameters, rows or connection strings.
+
+Metrics: `db.operations` (counter; `operation`, `failure.code`), `db.operation.duration` (histogram, seconds; same dimensions).
+
+`@arki/log` retry events record attempt, SQLSTATE and delay; the shared boundary records rollback and classified attempt outcomes under `arki:db:outcome`.
+
+Not instrumented: queries — the driver's instrumentation (`pg`, PGlite, libSQL) spans them, so `@arki/db` adds no duplicate query spans. Schema composition and keyset helpers are pure computation.
 
 ## Limits
 

@@ -188,10 +188,11 @@ cannot replace an outcome or repeat a migration. Raw paths, SQL, names and priva
 causes stay out of spans. These operations do not cancel an in-flight driver call;
 configure native driver timeouts and await its outcome before deciding recovery.
 
-Existing retry logs and `arki:db:outcome` classified attempt logs are the scoped
-observability surface. Driver query instrumentation owns query spans. Default
-transaction spans, propagation and failing-telemetry proof remain T08 work; do not
-claim full A-36 coverage from logs alone.
+Transactions have default spans: `db.transaction` (`runTransaction`, all retries),
+`db.transaction.once` (single attempt) and `db.unit_of_work`. They start under the
+active context, so in a Dot app they nest under the usecase span. Retry logs and
+`arki:db:outcome` classified attempt logs add attempt detail. Driver query
+instrumentation owns query spans. The README `## Observability` lists every span.
 
 ## Errors
 

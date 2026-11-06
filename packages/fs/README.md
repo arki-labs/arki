@@ -408,15 +408,24 @@ operation owns its throws, cancellation and cleanup. Building the handle runs in
 span; the handle's own Flystorage calls carry no `@arki/fs` span. This named foreign bridge does not exempt the owned
 adapters or lifecycle.
 
-### Observability
+## Observability
 
-Owned local/S3 calls, readFirstLine, the upload workflow, files lifecycle and building the legacy
-`initializeStorage` handle (`fs.s3.initialize_storage`) emit default `@arki/fs` spans,
-`fs.operations` counters and `fs.operation.duration` histograms. Applications own the OTel SDK and context
-manager. Active parent context propagates into composed operations; no SDK is configured by the library.
-Only bounded operation names and canonical `failure.code` are recorded: no paths, keys, URLs, bytes,
-credentials, owner IDs or private causes. Reporter faults cannot replace outcomes or execute work twice.
-Pure URL/path/schema/table construction and in-memory test harnesses need no separate execution spans.
+Spans (OpenTelemetry API only, tracer `@arki/fs`; nothing is exported until the app configures an SDK and context manager):
+
+| Span                                                                                        | When                                                      | Attributes                |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------- |
+| `fs.local.put`, `.get`, `.delete`, `.delete_many`, `.exists`, `.sign`, `.metadata`, `.list` | each call of the local storage adapter                    | `failure.code` on failure |
+| `fs.local.read_file`, `.read_first_line`, `.append`, `.glob`, `.delete_paths`               | each local file helper call (`readFirstLine` included)    | `failure.code` on failure |
+| `fs.s3.put`, `.get`, `.delete`, `.delete_many`, `.exists`, `.sign`, `.metadata`, `.list`    | each call of the S3 storage adapter                       | `failure.code` on failure |
+| `fs.s3.initialize_storage`                                                                  | building the legacy `initializeStorage` Flystorage handle | `failure.code` on failure |
+| `fs.upload`                                                                                 | each run of the upload workflow                           | `failure.code` on failure |
+| `fs.files.create_upload`, `.confirm_upload`, `.get`, `.url`, `.remove`, `.cleanup`          | each files-lifecycle call                                 | `failure.code` on failure |
+
+The active parent context propagates into composed operations. Only bounded operation names and canonical `failure.code` are recorded: no paths, keys, URLs, bytes, credentials, owner IDs or private causes. Reporter faults cannot replace outcomes or execute work twice.
+
+Metrics: `fs.operations` (counter; `operation`, `failure.code`), `fs.operation.duration` (histogram, seconds; same dimensions).
+
+Not instrumented: the legacy `initializeStorage` handle's own Flystorage calls — upstream code with its own contract (see above). Pure URL, path, schema and table construction, and the in-memory test harnesses — no I/O, so no separate execution spans.
 
 ## Limits
 

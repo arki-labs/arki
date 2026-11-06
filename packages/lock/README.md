@@ -843,6 +843,25 @@ it('runs the job once while another run holds the key', async () => {
 
 For a `pgLease` service, pass `pgLeasePollGuarantees` (and the same `ttl`): the fake then has `lead` and `semaphore`, and its leases run out when you `advance` the clock past the ttl without renewing.
 
+## Observability
+
+Spans (OpenTelemetry API only, tracer `@arki/lock`; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `lock.run`, `lock.try_run` | each manager `run` / `tryRun`, from the wait to the release | `failure.code` on failure |
+| `lock.acquire`, `lock.try_acquire` | each manual `acquire` / `tryAcquire` | `failure.code` on failure |
+| `lock.extend`, `lock.release` | each guard `extend` / `release` | `failure.code` on failure |
+| `lock.lead` | each `lead(...)` leadership loop | `failure.code` on failure |
+| `lock.store.acquire`, `lock.store.release`, `lock.store.extend` | each backend call of the Postgres, lease, SQLite, Redis and file stores | `failure.code` on failure |
+| `lock.store.waitFor`, `lock.store.dispose`, `lock.store.ddl` | each backend wait, store close and table setup (where the store has one) | `failure.code` on failure |
+
+`lock.held` (409) is an answer: it sets `failure.code` and leaves the status unset. Only a fault (5xx) or a throw sets error status. Spans start under the active context: in a Dot app, a lock a usecase takes nests under the `feature.<feature>.<usecase>` span. No span carries a key, token, fence or callback payload.
+
+Metrics: `lock.operations` (counter; `operation`, `outcome`: `success`, `held`, `failure` or `defect`).
+
+Not instrumented: the memory store and key functions — in-process maps and pure computation, with no backend call to wait on.
+
 ## Limits
 
 - **A lock keeps jobs apart; it does not make a write safe.** Take a lease of 30 s and pause the process for 40 s. The lease has ended, another process holds the lock, and your late write still lands unless the resource checks the fence.

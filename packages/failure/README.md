@@ -479,6 +479,10 @@ A `FailureError` has a stable `code` and a one-sentence `remediation`. Each code
 | `ARKI_FAILURE_E007` | Retired: revival now returns `AsyncSchema`.                                |
 | `ARKI_FAILURE_E008` | An `invariant` condition was falsy.                                        |
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - **A failure is a plain frozen object, not an `Error`.** It has no stack trace. Log `failure.code` and `failure.data`, and keep the `cause` chain for the stack of a caught error.

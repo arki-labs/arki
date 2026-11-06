@@ -64,6 +64,10 @@ The language, slug registry and dictionary entries run on Node, Bun, Deno and br
 
 Lookups return `undefined` when nothing matches. `getLocalizedUrl` returns the English URL unchanged when the target locale is the default or has no slug. An unknown locale falls back to the default locale's messages, and keys such as `__proto__` never match.
 
+## Observability
+
+Renders in the app's own process and does no I/O of its own, so the app's spans cover it and the package adds none.
+
 ## Limits
 
 Built-in messages exist for `en` and `de` only.

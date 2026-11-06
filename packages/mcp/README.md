@@ -122,6 +122,10 @@ A declared contract error comes back as its own canonical failure. An unknown er
 - Tool names match `<feature>_<name>`: a lower-case prefix, an underscore, then the rest.
 - Runtimes: Node, Bun and Deno. See the table above.
 
+## Observability
+
+No spans or metrics of its own. A tool call runs its procedure through the app's oRPC gateway client, and oRPC's instrumentation spans that call; a second span here would duplicate it. A call refused before the gateway is a debug log on `arki:mcp`.
+
 ## Documentation
 
 - [Contract annotations](docs/contracts.md): `asTool`, `fromRpc`, the trusted `ToolCall` and the result envelope.

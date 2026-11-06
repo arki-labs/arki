@@ -95,6 +95,7 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/lock": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@libsql/client": "^0.18.0",

@@ -1,5 +1,5 @@
 import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 
 
 /** Reporting never owns execution, including incorrectly asynchronous app reporters. */
@@ -27,7 +27,8 @@ export async function observeQueue<Value>(name: string, work: () => Promise<Valu
     const result = await execute();
     if (isFailure<unknown>(result)) {
       observe(() => span?.setAttribute('failure.code', result.code));
-      observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code }));
+      // Only a fault (status >= 500) is a span error; an expected 4xx refusal leaves the status unset.
+      if (isFault(result)) observe(() => span?.setStatus({ code: SpanStatusCode.ERROR, message: result.code }));
     }
     return result;
   } catch (error) {

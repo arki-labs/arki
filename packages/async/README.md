@@ -315,6 +315,21 @@ if (!Deadline.is(outcome)) throw new Error('expected a deadline');
 - `race` returns the first task to fulfill, not the first to settle. A fast failure does not win.
 - `debounce` and `throttle` return no result and do not use `this`. Await inside the function when you need a result.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span                                                              | When                                                                                                                          | Attributes                                                                                                                                                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `async.scope`                                                     | each owned lifetime (`scoped`, `openScope`, `dynamicScope`, `createLifetime`), open through cancellation, joining and cleanup | `async.scope.primary.count`, `async.scope.cleanup.count`, `async.scope.finalizer.count`, `async.scope.cancelled`, `async.scope.deadline`; `failure.code` and `failure.status` on failure |
+| `async.all`, `async.mapConcurrent`, `async.race`, `async.timeout` | each call                                                                                                                     | `failure.code` and `failure.status` on failure                                                                                                                                           |
+
+The status is error only for a fault (`isFault`, status 500 or higher); `Cancelled` and other 4xx outcomes leave it unset. Resource values, abort reasons and private causes are never attributes. Task callbacks run in the owner's span, so there is no span per item.
+
+Metrics: `async.scope.duration` (histogram, ms; `async.scope.outcome`) and `async.operation.duration` (histogram, ms; `async.operation`, `async.outcome`).
+
+Not instrumented: raw `Clock` methods, `sleep`, `debounce` and `throttle` — timing parts that the enclosing work's span already covers; a span per timer would only add noise.
+
 ## Documentation
 
 - [Agent guide](./docs/agent-guide.md): tasks, rules that bite, errors.

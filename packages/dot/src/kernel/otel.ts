@@ -271,9 +271,10 @@ export function withOutcomeSpan<Value>(
  * `feature.<featureName>.<usecaseName>`. A value that is not a function is
  * returned as is. Invocation supervision is a separate boundary.
  *
- * - Returns (or resolves to) an `@arki/failure` failure: status ERROR with
- *   `failure.code` and `failure.status`, and no exception event — a failure
- *   is an expected outcome, not a bug.
+ * - Returns (or resolves to) an `@arki/failure` failure: `failure.code` and
+ *   `failure.status`, and no exception event. The status is ERROR only for a
+ *   fault (`isFault`: status 500 or higher); a 4xx refusal is an expected
+ *   outcome and leaves it unset.
  * - Throws (or rejects): the exception is recorded, status ERROR, and the
  *   same value is rethrown.
  * - Anything else: status OK, like the kernel's hook spans.

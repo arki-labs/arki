@@ -84,6 +84,10 @@ export const Route = createFileRoute('/')({
 
 The builders return strings and `Response` objects. They define no failure codes and do not return failures. A sitemap entry with an invalid `Date` is listed without `<lastmod>`, so one bad entry does not fail the whole sitemap. `JsonLdScript` escapes `<` so the data cannot close the script tag.
 
+## Observability
+
+Renders in the app's own process and does no I/O of its own, so the app's spans cover it and the package adds none.
+
 ## Limits
 
 - One sitemap holds at most 50,000 URLs (the Google limit). `renderSitemapIndex` points at shard sitemaps.

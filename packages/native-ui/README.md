@@ -95,6 +95,10 @@ The version column says which proof ran: `runner + iOS release app`, or `runner 
 
 None of the helpers throws on normal input. `isValidHexColor` returns a boolean. Components follow React Native: bad props are a type error, not a runtime failure.
 
+## Observability
+
+Renders in the app's own process and does no I/O of its own, so the app's spans cover it and the package adds none.
+
 ## Limits
 
 - Dark mode and theme tokens come from your NativeWind and Tailwind setup. This package defines no theme.

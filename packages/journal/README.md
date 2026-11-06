@@ -2204,6 +2204,22 @@ Rules and misuse fail in three ways:
 
 The agent guide has the [error table](docs/agent-guide.md#errors) and the [recovery verbs](docs/agent-guide.md#recovery-verbs). With `commandErrors()` from `@arki/journal/orpc`, a returned failure answers the client with its code and status.
 
+## Observability
+
+Spans (OpenTelemetry API only, tracer `@arki/journal`; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `journal.command` | each command run, inside its transaction, around the command hooks | `journal.command.name`, `journal.command.id`, `journal.correlation_id`, `journal.command.idempotent`, `journal.outcome`, `failure.code` on a returned failure |
+| `journal.effect` | each effect attempt, inside its lease, around the effect hooks | `journal.effect.name`, `journal.job.id`, `journal.job.attempt`, `journal.event.type`, `journal.outcome`, `failure.code` on a returned failure |
+| `journal.step` | the body or the undo of each workflow step attempt | `journal.workflow.name`, `journal.workflow.version`, `journal.workflow.run_id`, `journal.step.name`, `journal.step.attempt`, `journal.step.phase`, `journal.outcome`, `failure.code` on a returned failure |
+
+`journal.outcome` is `ok`, `failure` or `defect` (a throw). Only a fault (status 500 or higher) or a throw sets error status. The span is active while the work runs. In a Dot app, a command run by a usecase nests under the `feature.<feature>.<usecase>` span, through the command's `db.transaction.once` span from `@arki/db`. Inputs, payloads, meta, results and error messages are never attributes. Details: [Tracing](#tracing).
+
+Metrics: none.
+
+Not instrumented: worker start and polling — boot runs under Dot's `dot.unit.start` span, and an empty poll is not work. The queries — the database driver's instrumentation spans them.
+
 ## Limits
 
 - **One operation at a time.** One journal operation per transaction. Await every `write` and `run`. `Promise.all` over writes is a misuse.

@@ -158,6 +158,20 @@ for (const result of await Promise.all([first, second])) {
 await runtime.stop();
 ```
 
+## Observability
+
+Spans (OpenTelemetry API only, tracer `@arki/schedule`; nothing is exported until the app configures an SDK):
+
+| Span           | When                                                                                     | Attributes                                                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule.run` | each scheduling attempt: a timer fire, a durable fire or `trigger(name)`, skips included | `schedule.name`, `schedule.outcome` (`ran`, `refused`, `skipped-overlap`, `skipped-lock`, `handler-failed`, `lock-failed`, `unavailable`), `failure.code` on a refusal or failure |
+
+Only a fault (status 500 or higher, such as a handler defect) sets error status; an expected refusal leaves it unset. A timer fire starts a new trace. In a Dot app, the usecase a schedule handler calls nests under `schedule.run`. Handler payloads, lock keys and private causes are never recorded.
+
+Metrics: `schedule.run.duration` (histogram, ms; `schedule.outcome`). The runtime's `handlerFailures`, `lockContention`, `lockFailures` and `lockLost` are plain counters on the runtime object, not OpenTelemetry metrics.
+
+Not instrumented: the lock calls — `@arki/lock` spans them (`lock.*`). Declarations and cron parsing are pure computation.
+
 ## Limits
 
 - **An in-process schedule skips ticks missed while the app is down.** Boundary: a `0 6 * * *` schedule in an app that restarts from 05:55 to 06:05 does not run that day.

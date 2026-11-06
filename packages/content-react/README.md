@@ -82,6 +82,10 @@ Browsers and React server rendering, through a bundler. It does not load in plai
 
 `useSearch` returns failures instead of throwing: `SearchUnavailable` for a network error or non-ok response, `SearchResponseMalformed` for a body that is not a list of posts. `result` is empty then. `Preview` shows a retry button when markdown fails to render.
 
+## Observability
+
+Renders in the app's own process. Its only I/O is the browser `fetch` in `searchPosts` to the app's own `/posts/search` route; the package adds no span, and the route's server-side HTTP spans from the app's server cover the request.
+
 ## Limits
 
 `useSearch` needs a `/posts/search` route that returns a JSON list of posts.

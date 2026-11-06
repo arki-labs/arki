@@ -67,13 +67,15 @@ fits your runtime.
 
 ## Spans
 
-Two span shapes. One per public phase, one per unit hook.
+Four span shapes from the kernel: one per public phase, one per unit hook,
+one per usecase call and one per action run. `telemetryFor` adds the app's
+own spans.
 
 ### Phase span — `dot.app.<phase>`
 
 Emitted by `configure()` / `boot()` / `start()` / `stop()` / `dispose()`.
-Becomes the _active_ span (via `tracer.startActiveSpan`), so children
-created during the phase auto-parent to it.
+It is the _active_ span while the phase runs, so children created during
+the phase auto-parent to it.
 
 ### Unit span — `dot.unit.<hook>`
 
@@ -81,6 +83,29 @@ One per unit per hook execution. The unit name lives on the
 `dot.unit.name` attribute, not in the span name — that lets backends
 aggregate by hook across units. Aggregating "how slow is boot on
 average?" needs all units' `dot.unit.boot` spans to share a name.
+
+### Usecase span — `feature.<feature>.<usecase>`
+
+One per call of a `defineFeature(...).usecases(...)` function
+(`feature.orders.find`). It is active while the usecase runs, so a
+package's spans (`auth.principal`, a database query) nest under it and a
+trace shows which feature did the work. A returned failure sets
+`failure.code` and `failure.status`; a throw records the exception. See
+[Spans for every usecase](./di.md#spans-for-every-usecase).
+
+### Action span — `dot.action`
+
+One per run of an action bound with `@arki/dot/execute`. Attributes:
+`dot.action.id`, `dot.binding` (how it was invoked) and `dot.unit.name`
+(the action id), plus `failure.code` and `failure.status` on a failure.
+
+### Custom spans — `telemetryFor(unit).span(name, …)`
+
+Spans you name, under the active span, tagged with `dot.unit.name`. See
+[Custom instrumentation](#custom-instrumentation).
+
+`dot doctor` also starts and ends one `dot.cli.observability-probe` span to
+check that an SDK is registered.
 
 ### Attribute conventions
 

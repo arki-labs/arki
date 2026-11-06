@@ -63,6 +63,10 @@ Browsers, through a bundler. The `themes` entry also loads under Node, Bun and D
 
 An unknown theme id returns the `github-dark` theme.
 
+## Observability
+
+Renders in the app's own process and does no I/O of its own, so the app's spans cover it and the package adds none.
+
 ## Limits
 
 Highlighting for `json`, `yaml`, `xml`, `markdown`, `typescript`, `javascript`, `css`, `html`, `python` and `sql`. `toml` and `text` are accepted and shown without highlighting.

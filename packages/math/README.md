@@ -160,6 +160,10 @@ control and throw. Arithmetic throws the documented errors below.
 | `ARKI_MATH_E010` | `ConvergenceError`         | the `cause` of the `NotConverged` failure (`orNotConverged` from `@arki/math/errors` turns the throw into it) that `polynomialRoots`, eigenvalues, SVD, `integrate`, `limit` and the root finders return (`.iterations`; `RootConvergenceError`, `IntegrationConvergenceError`, `ExtrapolationConvergenceError` carry `.best`) |
 | `ARKI_MATH_E011` | `NotPositiveDefiniteError` | `choleskyDecompose` met a matrix that is not positive definite                                                                                                                                                                                                                                                                 |
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 Every `Decimal` and `Rational` — input or result — has at most 10 000 digits

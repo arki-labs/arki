@@ -96,6 +96,7 @@
     "@arki/vitest-config": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@opentelemetry/api-logs": "catalog:opentelemetry",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "consola": "^3.4.2",
     "pino": "catalog:",

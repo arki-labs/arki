@@ -241,6 +241,23 @@ Owned node loads/edits, filesystem reads/writes and provider reads emit default 
 - Validation is synchronous. Validation is lazy, so a bad value shows at the first read, not at import.
 - With validation skipped, schemas do not run. Values are raw strings. `reveal` still works on them.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK). Only `@arki/env/node` makes them:
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `env.load` | each `loadEnvFiles()` | `failure.code` on a returned failure |
+| `env.init`, `env.set`, `env.encrypt_file`, `env.decrypt_file`, `env.rotate` | each env-file edit (`initEnvFile`, `setEnvFileValue`, `encryptEnvFile`, `decryptEnvFile`, `rotateEnvFiles`) | `failure.code` on a returned failure |
+| `env.file.read`, `env.file.write` | each env-file read or write | `failure.code` on a returned failure |
+| `env.reference.<provider>` | each secret-reference read through a provider CLI: `op`, `doppler`, `infisical` | `failure.code` on a returned failure |
+
+The status is error for a throw or a fault (`isFault`, status 500 or higher); a 4xx failure leaves it unset. Paths, references, key bytes, values and raw causes are never attributes.
+
+Metrics: `env.operation.duration` (histogram, ms; `env.operation`, `env.outcome` = `ok` or `failed`).
+
+Not instrumented: `createEnv`, schemas, presets and the local text and crypto transforms — pure computation with no I/O.
+
 ## Documentation
 
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.

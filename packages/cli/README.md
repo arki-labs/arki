@@ -280,6 +280,10 @@ The framework's own failures:
 | `cli.confirmation_required` | 5    | The command needs confirmation and there is no terminal. | Pass `--yes`.                               |
 | `cli.cancelled`             | 130  | `SIGINT` or `SIGTERM` ended the run.                     | Check what it changed, then run it again.   |
 
+## Observability
+
+The process boundary only: a CLI run is the process. It reads the file or stdin you point it at, and failures are logged through `@arki/log`, so it makes no spans or metrics.
+
 ## Limits
 
 - **Strict parsing.** Unknown flags fail, and so does a scalar flag given

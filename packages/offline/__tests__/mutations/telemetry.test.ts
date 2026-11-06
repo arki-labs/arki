@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
+import { context, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Context, ContextManager, Span } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 
-import { QueueStorageUnavailable } from '../../src/mutations/failures.ts';
+import { QueueEncodingFailure, QueueStorageUnavailable } from '../../src/mutations/failures.ts';
 import { observeEnqueue } from '../../src/mutations/telemetry.ts';
 
 const contexts = new AsyncLocalStorage<Context>();
@@ -43,6 +43,20 @@ it('inherits the application context and reports only the canonical failure code
   expect(span?.spanContext().spanId).toBe(active);
   expect(span?.attributes).toEqual({ 'failure.code': failure.code });
   expect(span?.events).toEqual([]);
+});
+
+it('marks only a fault as a span error, so expected refusals do not page anyone', async () => {
+  // WHY: founder decision 2026-11-05: span status ERROR means a fault (status >= 500). A 4xx refusal is an
+  // expected outcome; it keeps failure.code for filtering but leaves the status unset.
+  exporter.reset();
+  const fault = QueueStorageUnavailable({ cause: new Error('storage down') });
+  const refusal = QueueEncodingFailure({ cause: new Error('not serializable') });
+  expect(await observeEnqueue(() => Promise.resolve(fault))).toBe(fault);
+  expect(await observeEnqueue(() => Promise.resolve(refusal))).toBe(refusal);
+  const [faultSpan, refusalSpan] = exporter.getFinishedSpans().filter(entry => entry.name === 'offline.queue.enqueue');
+  expect(faultSpan?.status).toEqual({ code: SpanStatusCode.ERROR, message: fault.code });
+  expect(refusalSpan?.status).toEqual({ code: SpanStatusCode.UNSET });
+  expect(refusalSpan?.attributes).toEqual({ 'failure.code': refusal.code });
 });
 
 it('observes rejected asynchronous span reporters without repeating owned work', async () => {

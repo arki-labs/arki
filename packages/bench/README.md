@@ -108,6 +108,10 @@ The command line and the API fail in different ways.
 - **A missing runtime or Node path:** a `runtime-missing` warning, never a silent run on another runtime.
 - **Exit codes:** 0 ok, 1 a check failed (`check`, `--ci`, a regression, a publishable loss), 2 bad command line. See [Commands](#commands).
 
+## Observability
+
+A measurement tool, not app code. It reads and writes files while measuring other packages, and it makes no spans or metrics of its own, because spans would distort what it measures.
+
 ## Limits
 
 - Only a `publish` profile run can be publishable. It uses 5 fresh processes and 10 rounds. `quick` and `explore` never are.

@@ -162,6 +162,10 @@ if (!hasJsonSchema(Name)) throw new Error('expected JSON Schema');
 if (parse(Name, 'Ada') !== 'Ada') throw new Error('validation changed');
 ```
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - This package executes validators; it does not define one.

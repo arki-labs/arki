@@ -137,6 +137,10 @@ const decoded = fromBase64('not base64!');
 if (!isFailure(decoded) || !InvalidBase64.is(decoded)) throw new Error('expected base64 failure');
 ```
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - Segmentation follows Unicode 18 on the fallback path. ICU engines through Unicode 17 still split a leading Indic virama from the consonant after it. A string with that sequence can measure differently on Hermes than on V8.

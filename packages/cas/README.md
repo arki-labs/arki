@@ -93,6 +93,10 @@ Every verb returns a result, returns a failure (for a string) or throws (for an 
 | `OverCasBudget`   | `cas.over_budget`      | The text went over a cas budget. The `cause` is a `CasLimitError` with `budget` and `limit`. |
 | `NoCasValue`      | `cas.no_value`         | The text parses, but it has no value, such as `x/0`, or a number grew too big.               |
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). `factor` checks `factorDegree` (128) and `factorDigits` (300 digits in a coefficient) on each square-free part, `liftDigits` (2 000 digits in the Hensel modulus) before lifting and `recombination` (65 536 candidate products) while recombining; bigint arithmetic spends fuel by size, so hostile inputs throw within a second. A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.

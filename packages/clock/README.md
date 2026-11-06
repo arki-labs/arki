@@ -152,6 +152,10 @@ if (!SleepCancelled.is(outcome)) throw new Error('sleep should have returned can
 if (outcome.cause !== 'user cancelled') throw new Error('cause should be the abort reason');
 ```
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - The longest delay is `MAX_TIMER_MS`: 2^31 - 1 ms, about 24.8 days. `setTimer(fn, MAX_TIMER_MS)` works. `setTimer(fn, MAX_TIMER_MS + 1)` throws `ARKI_CLOCK_E002`. Split a longer wait into steps.

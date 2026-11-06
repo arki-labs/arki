@@ -236,6 +236,15 @@ const app = await defineApp('checkout')
   .boot();
 ```
 
+## Observability
+
+No spans or metrics: `@arki/log` is the log signal, and a span per record would trace the tracer. `@arki/log/otel` joins records to traces instead:
+
+- `otelTrace()` stamps each record built inside an active span with that span's trace id, span id and trace flags. A record built outside a span carries none.
+- `otelSink(provider)` emits each record as an OpenTelemetry LogRecord: severity, the rendered message as the body (or the `emit()` body and event name), the fields plus `log.category`, `log.template` and the resource fields as attributes, the error as the exception, and the trace ids in the record's context, not as attributes.
+
+Proof: `src/otel/span-correlation.test.ts` writes a record inside a real span and checks the emitted LogRecord carries that span's ids.
+
 ## Documentation
 
 - [Agent guide](docs/agent-guide.md): tasks and rules for agents.

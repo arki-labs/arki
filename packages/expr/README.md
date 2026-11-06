@@ -97,6 +97,10 @@ Parsers of outside values return, builders throw. Nothing returns `NaN`, `Infini
 
 Branch on the failure at the edge where users type. Let the other errors reach your error boundary.
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 Every input has a budget. A text or stored AST that goes over one is returned as `ExpressionOverBudget` (`cause` is the `ExprLimitError`); a compile or call that goes over one throws `ExprLimitError`. Either way it stops before the costly work starts.

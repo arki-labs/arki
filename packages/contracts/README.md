@@ -334,6 +334,10 @@ Schema `parse` calls throw a `ZodError` as Zod does. Use `safeParse` for input f
 
 Cursor codecs return `contracts.invalid_cursor` or `contracts.invalid_cursor_value`, plus canonical `schema.validator_defect` / `failure.unexpected_defect` for unexpected faults. Causes stay private. These pure codecs need no separate OTel span; the calling query or transport owns the operation span.
 
+## Observability
+
+Pure computation: it builds schemas and column definitions and runs no I/O, so no spans or metrics.
+
 ## Limits
 
 - **Limit per page.** `pageInput` accepts 1 to 100 rows. The default is 20. Change both with `defaultLimit` and `maxLimit`.

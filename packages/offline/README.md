@@ -511,6 +511,26 @@ Operations return failures as values. Check them with `isFailure` from `@arki/fa
 - `./pwa` runs in a browser service worker only.
 - On the server, `offline.Provider` makes a fresh unpersisted query client for each request.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `offline.queue.enqueue` | each queued mutation | `failure.code` on failure |
+| `offline.queue.drain` | each drain of the queue | `failure.code` on failure |
+| `offline.queue.retry`, `offline.queue.discard` | each retry or discard of a dead-lettered mutation | `failure.code` on failure |
+| `offline.storage.read`, `offline.storage.write`, `offline.storage.clear` | each read, write or clear of the stored queue | `failure.code` on failure |
+| `offline.actor.read`, `offline.actor.remember`, `offline.actor.forget` | each read or change of the stored actor | `failure.code` on failure |
+| `offline.dead_letter.list`, `offline.dead_letter.add`, `offline.dead_letter.remove` | each dead-letter operation | `failure.code` on failure |
+| `offline.idempotency.store` | each server-side idempotency cache write (`@arki/offline/orpc`) | `failure.code` on failure |
+
+Each span is a child of the active span. Ids, inputs, actors and causes are never attributes. A reporter fault cannot suppress or repeat a mutation.
+
+Metrics: none.
+
+Not instrumented: query-cache persistence to IndexedDB (`@arki/offline/query`), collections, the PWA service-worker strategies and the status hooks — they have no span yet; the RPC calls a drain replays are spanned by the app's oRPC client.
+
 ## Documentation
 
 - [API reference](docs/api.md): every export, by import path.

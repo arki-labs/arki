@@ -105,6 +105,10 @@ These return `@arki/failure` failures instead of throwing:
 
 `OLLAMA_FAILURES` lists every failure a judge or an embedder call returns. A scorer turns either one into an `unscorable` score, never a pass. `READ_MANIFEST_FAILURES` lists every failure `readManifest` returns.
 
+## Observability
+
+A test tool: `@arki/testing/otel` captures other packages' spans and metrics for tests and makes none of its own.
+
 ## Limits
 
 - **`withTransaction` only rolls back its own connection.** Code that opens a second connection or another pool commits for real. Rows it writes stay until you call `clearTables`.

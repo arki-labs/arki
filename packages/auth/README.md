@@ -461,6 +461,23 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 - **Session tokens are stored as they are**, as the engine does. The cookie is signed, and lists never return the token.
 - **Not in this version:** email one-time codes, multi-factor, API keys, passkeys, idle and absolute session timeouts, per-account rate budgets, breached-password checks, and auth mail through the outbox. None of them is exported in any form.
 
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK). Both runtimes (`@arki/auth/pg` and `@arki/auth/sqlite`) make them:
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `auth.handler` | each request to `auth.handler(request)` | `http.response.status_code`; `failure.code` when it throws |
+| `auth.principal` | each session read, `auth.principal(headers)` | `failure.code` when it throws |
+| `auth.sign_in_with_id_token` | each native sign-in, `auth.signInWithIdToken(input)` | `failure.code` when it throws |
+| `auth.observer.<event>` | each call of an app observer: `userCreated`, `signIn`, `signInFailed`, `passwordChanged`, `signOut`, `sessionCreated` | `failure.code` when the observer throws |
+
+The status is error for a 5xx response or a throw. Credentials, cookies, emails, user ids and event payloads are never attributes. A reporter fault cannot change or repeat authentication. Each span is a child of the active span, so under Dot it nests under the unit or usecase that called auth (`src/dot-telemetry.test.ts`). Observer code can start its own spans under the observer's span.
+
+Metrics: none.
+
+Not instrumented: the engine's SQL, the limiter's `@arki/kv` calls and the mail send — the database driver, `@arki/kv` and `@arki/mail` own those boundaries.
+
 ## Documentation
 
 - [Reference](./docs/reference.md): the declaration, bindings, principal, policies, native sign-in, events, brands, endpoint contract, moving tables, password hashing, workspaces and testing.
@@ -475,5 +492,3 @@ if (!isAuthError(refusal) || refusal.status !== 403) throw new Error('E403 must 
 Report bugs at [github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues). Report a security problem privately to the maintainers, not in a public issue.
 
 Auth event correlation IDs use the `AuthRequestId` domain type exported by `@arki/auth/ids`. Restore inbound IDs with `authRequestIdSchema` from `@arki/auth/zod`. Existing inbound `x-request-id` values keep their bytes. When secure correlation ID generation fails, auth logs the exact canonical failure and omits the correlated `signIn`/`signInFailed` event; the HTTP response or native sign-in result remains unchanged. Other observers still run. Observers are best effort, not a durable audit delivery mechanism.
-
-The Postgres runtime emits OpenTelemetry spans for `auth.handler`, `auth.principal`, `auth.sign_in_with_id_token` and event observers. Configure the SDK/exporter in the app. Observer code can use the active OTel context for custom spans. Default attributes contain HTTP status and failure code only; credentials and event payloads are excluded. Reporter faults cannot change or repeat authentication.

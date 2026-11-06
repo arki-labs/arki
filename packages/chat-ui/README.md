@@ -96,6 +96,10 @@ Components do not return failures. They render what they are given.
 - A tool call with `status: 'error'` shows its `error` text. A `failed` call shows `failure.message`.
 - `RuntimeConversation` renders `state.error` when `state.status` is `error`.
 
+## Observability
+
+Renders in the app's own process and does no I/O of its own, so the app's spans cover it and the package adds none.
+
 ## Limits
 
 - **Text is not parsed as markdown.** `RuntimeConversation` prints `state.text` as is. Pass `renderText` (for example from `react-markdown`) to format it. `MarkdownMessage` only styles content you already rendered.

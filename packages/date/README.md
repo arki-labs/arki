@@ -130,6 +130,10 @@ try {
 }
 ```
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - Overflow clamps. `add(plainDate('2026-01-31'), { months: 1 })` is `2026-02-28`. Subtraction is therefore not always the inverse of addition. Pass `{ overflow: 'reject' }` to throw instead.

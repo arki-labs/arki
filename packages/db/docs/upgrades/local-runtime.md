@@ -61,6 +61,6 @@ only for a fault (a throw, or a returned failure with status 500 or higher), so
 an expected 4xx outcome leaves the status unset. No paths, PIDs, owner IDs,
 exception messages or private causes are exported.
 Missing or defective instrumentation cannot change a result, duplicate work,
-or release an unconfirmed owner. General transaction/provider observability
-remains T08 work. This slice adds no browser, Hermes, native Deno, Node26 or
+or release an unconfirmed owner. Transaction spans are listed in the README
+`## Observability` section. This slice adds no browser, Hermes, native Deno, Node26 or
 packed-artifact coverage for local database storage.

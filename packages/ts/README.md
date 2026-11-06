@@ -118,6 +118,10 @@ The runtime helpers throw only what your code throws:
 - `lazyObject(build)`: `build` runs on the first property access, so a failure appears there, not at import. The next access retries.
 - `expectImportPure` throws a plain `Error` with the subprocess output when an import reads the environment, throws or does not finish. It also throws when you pass no entry paths. The package defines no error codes.
 
+## Observability
+
+Pure computation: no I/O, so no spans or metrics.
+
 ## Limits
 
 - `RecordToPath` and `PathValue` treat arrays as leaves. `RecordToPath<{ list: { id: number }[] }>` is `'list'`, not `'list.0'`.

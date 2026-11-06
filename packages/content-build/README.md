@@ -88,6 +88,10 @@ This is build tooling, so it throws instead of returning failures.
 - A content file that fails to read, parse, validate or transform rejects the build with an error that lists one line per failing file. `vite build` fails on it. `vite dev` rebuilds on change and only logs it.
 - `arki-content` exits 0 on success, 1 when a content file or a snapshot fetch failed, and 2 for wrong usage. It must run from the folder that holds `content.config.ts`.
 
+## Observability
+
+Runs at build time, not in the app. It reads files and fetches remote images while building; a build run is the process, so it has no spans or metrics of its own.
+
 ## Limits
 
 - `compileMarkdown` is plain GitHub-flavoured markdown. It is not MDX.
