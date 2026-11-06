@@ -597,6 +597,7 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
  *   such as email templates (e.g. `['/infra/mail/templates/']`) — which a usecase
  *   may still runtime-import.
  *   `siblingImports`: severity of `sibling-imports` (default `'error'`); `'warn'` while a backend migrates.
+ * @returns {import('eslint').Linter.Config[]}
  */
 export function featureLayers({ root, src = 'src', legacy = [], clients = [], pure = [], siblingImports = 'error' }) {
   if (typeof root !== 'string' || !nodePath.isAbsolute(root)) {
@@ -623,7 +624,11 @@ export function featureLayers({ root, src = 'src', legacy = [], clients = [], pu
   ];
 
   /** One config per file class, so each file gets exactly one `no-restricted-imports` list. */
-  const rule = (/** @type {Pattern[]} */ patterns) => ({ 'no-restricted-imports': ['error', { patterns }] });
+  /**
+   * @param {Pattern[]} patterns
+   * @returns {{ 'no-restricted-imports': ['error', { patterns: Pattern[] }] }}
+   */
+  const rule = patterns => ({ 'no-restricted-imports': ['error', { patterns }] });
 
   return [
     {

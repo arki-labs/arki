@@ -239,9 +239,9 @@ function provenanceBlock(result: BenchResult, options: MarkdownOptions): string[
   const items = [
     `- command: \`${options.command ?? `arki-bench run --profile ${result.profile}`}\``,
     `- profile: ${result.profile}`,
-    `- packages: ${[`@arki/bench ${env.harness.version}`, ...packages].map(escapeCell).join(', ')}`,
+    `- packages: ${[`@arki/bench ${env.harness.version}`, ...packages].map(cell => escapeCell(cell)).join(', ')}`,
     machine ? `- machine: ${escapeCell(machine)}` : undefined,
-    inputs.length > 0 ? `- inputs: ${inputs.map(escapeCell).join(', ')}` : undefined,
+    inputs.length > 0 ? `- inputs: ${inputs.map(input => escapeCell(input)).join(', ')}` : undefined,
     env.git ? `- source commit: ${env.git.revision}${env.git.dirty ? ' (uncommitted changes)' : ''}` : undefined,
   ].filter((line): line is string => line !== undefined);
   const sha = env.git?.revision.toLowerCase();

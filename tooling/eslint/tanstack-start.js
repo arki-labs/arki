@@ -91,7 +91,7 @@ const noServices = {
  *
  *   export default [...rootConfig, ...tanstackStartDot()];
  *
- * @returns {Awaited<import('typescript-eslint').Config>}
+ * @returns {import('eslint').Linter.Config[]}
  */
 export function tanstackStartDot() {
   return [

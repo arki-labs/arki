@@ -2,7 +2,8 @@
 'use client';
 
 import { useContext } from 'react';
-import { IconContext, type IconWeight } from '@phosphor-icons/react';
+import { IconContext } from '@phosphor-icons/react';
+import type { IconWeight } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 
 /**

@@ -118,5 +118,5 @@ export type SpinnerName = (typeof spinnerNames)[number];
 
 /** URL of a spinner's SVG file. Resolved by bundlers and Node through `import.meta.url`. */
 export function getSpinnerUrl(name: SpinnerName): URL {
-  return new URL(`./${name}.svg`, import.meta.url);
+  return new URL(`${name}.svg`, import.meta.url);
 }
