@@ -1,7 +1,6 @@
 ---
 '@arki/db': minor
 '@arki/journal': minor
-'@arki/pubsub': minor
 '@arki/live': minor
 ---
 

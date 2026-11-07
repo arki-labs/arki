@@ -1,16 +1,11 @@
 ---
 "@arki/admin": patch
-"@arki/ai": patch
-"@arki/async": patch
 "@arki/db": patch
 "@arki/dot": patch
-"@arki/env": patch
-"@arki/fs": patch
 "@arki/http": patch
 "@arki/journal": patch
 "@arki/kv": patch
 "@arki/lock": patch
-"@arki/payments": patch
 "@arki/queue": patch
 "@arki/resilience": patch
 "@arki/schedule": patch

@@ -1,8 +1,6 @@
 ---
 '@arki/geo': patch
 '@arki/seo': patch
-'@arki/tanstack-start': patch
-'@arki/queue': patch
 '@arki/payments-native': patch
 ---
 
