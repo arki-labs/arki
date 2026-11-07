@@ -62,10 +62,11 @@ export const CustomerSegmentNotFound = /* @__PURE__ */ defineFailure('payments.c
 });
 
 /**
- * A campaign update removes a step that already sent a communication. The sent message keeps its
- * step (its history points at it), so the update was refused and nothing changed.
+ * A campaign update removes a step that already sent a communication, or `deleteCampaign` deletes
+ * a campaign with such a step. The sent message keeps its step (its history points at it), so the
+ * update or delete was refused and nothing changed.
  *
- * @fix Keep the step in `templates` (change its content or delay instead), or deactivate the campaign and create a new one.
+ * @fix Keep the step in `templates` (change its content or delay instead), or deactivate (archive) the campaign instead of deleting it.
  * @verify bun run test -- src/dunning/campaign-service.test.ts
  */
 export const DunningTemplateInUse = /* @__PURE__ */ defineFailure('payments.dunning_template_in_use', {

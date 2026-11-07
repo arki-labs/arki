@@ -98,6 +98,19 @@ function eligibleCustomers(rows: unknown): EligibleCustomer[] {
   }));
 }
 
+/** How many times a failed execution is retried before it stays failed. */
+const MAX_EXECUTION_RETRIES = 3;
+
+/**
+ * When to retry an execution that threw after `retryCount` retries: 30 minutes, then 60, then 120
+ * (doubling), and `null` once it has used all `MAX_EXECUTION_RETRIES` retries.
+ */
+function nextRetryAfter(retryCount: number): Instant | null {
+  if (retryCount >= MAX_EXECUTION_RETRIES) return null;
+
+  return add(now(), { minutes: 2 ** retryCount * 30 });
+}
+
 /** The payment row `checkAndStopOnPaymentSuccess` reads; node-postgres sends `bigint` as text. */
 const paymentRowSchema = z.object({
   amount_minor: z.union([z.number().int(), z.string().regex(/^-?\d+$/)]),
@@ -268,10 +281,39 @@ export class DunningCampaignService {
   }
 
   /**
-   * Delete a campaign and all related data
+   * Delete a campaign with its steps, executions and analytics. A campaign whose step already sent a
+   * communication cannot be deleted (the sent message keeps its step): it returns
+   * `DunningTemplateInUse` and nothing changes; archive the campaign instead. An unknown id deletes
+   * nothing.
    */
-  async deleteCampaign(campaignId: DunningCampaignId): Promise<void> {
-    await this.campaignRepo.delete(campaignId);
+  async deleteCampaign(campaignId: DunningCampaignId): Promise<FailureOf<typeof DunningTemplateInUse> | undefined> {
+    const { dunningCommunications, dunningTemplates } = this.tables;
+
+    return this.db.transaction(async tx => {
+      const campaignRepo = createDunningCampaignRepository(tx, {
+        dunningCampaigns: this.tables.dunningCampaigns,
+        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
+      });
+      // Lock the steps first: a communication written for one now waits for this transaction, and
+      // the check below sees every communication written before it (the foreign key restricts the delete)
+      await tx
+        .select({ id: dunningTemplates.id })
+        .from(dunningTemplates)
+        .where(eq(dunningTemplates.campaignId, campaignId))
+        .for('update');
+      const [used] = await tx
+        .select({ templateId: dunningTemplates.id, stepNumber: dunningTemplates.stepNumber })
+        .from(dunningCommunications)
+        .innerJoin(dunningTemplates, eq(dunningTemplates.id, dunningCommunications.templateId))
+        .where(eq(dunningTemplates.campaignId, campaignId))
+        .limit(1);
+      if (used) {
+        return DunningTemplateInUse({ templateId: used.templateId, stepNumber: used.stepNumber });
+      }
+
+      await campaignRepo.delete(campaignId);
+      return;
+    });
   }
 
   /**
@@ -541,7 +583,8 @@ export class DunningCampaignService {
 
   /**
    * Run the scheduled executions that are due. Returns how many ran and each one that threw (it is
-   * marked `failed`); a fault that stops the whole tick is thrown.
+   * marked `failed` with a `nextRetryAt`, so `retryFailedExecutions` retries it); a fault that stops
+   * the whole tick is thrown.
    */
   async processScheduledExecutions(limit = 100): Promise<DunningTickReport> {
     const scheduledExecutions = await this.executionRepo.findScheduledExecutions(limit);
@@ -562,11 +605,11 @@ export class DunningCampaignService {
           error: error instanceof Error ? error.message : String(error),
         });
         report.failed.push(tickFault(executionDb.id, error));
-        await this.executionRepo.updateStatus(
+        // A run that threw is retried later by retryFailedExecutions
+        await this.executionRepo.recordFailure(
           executionDb.id,
-          'failed',
-          undefined,
           error instanceof Error ? error.message : 'Unknown error',
+          nextRetryAfter(executionDb.retryCount),
         );
       }
     }
@@ -1046,26 +1089,23 @@ export class DunningCampaignService {
   }
 
   /**
-   * Retry failed executions with exponential backoff
-   * This method finds executions that are ready to retry (nextRetryAt is in the past)
-   * and attempts to execute them again. If they fail again, it schedules the next retry
-   * with exponential backoff. Returns how many were retried and each retry that threw again.
+   * Retry the failed executions whose `nextRetryAt` has passed. Each retry counts once in
+   * `retryCount` and runs the execution again. A retry that throws is `failed` again with the next
+   * `nextRetryAt` (30 minutes, then 60, then 120), so a later call picks it again; after
+   * `MAX_EXECUTION_RETRIES` (3) retries it stays failed with no `nextRetryAt`. Returns how many were
+   * retried and each retry that threw again.
    */
   async retryFailedExecutions(limit = 50): Promise<DunningTickReport> {
     const retryableExecutions = await this.executionRepo.findRetryableExecutions(limit);
     const report: DunningTickReport = { processed: retryableExecutions.length, failed: [] };
 
     for (const executionDb of retryableExecutions) {
+      // The retry this run makes: startRetry writes the same count
+      const retryCount = executionDb.retryCount + 1;
       try {
-        // Increment retry count
-        await this.executionRepo.incrementRetryCount(executionDb.id);
+        await this.executionRepo.startRetry(executionDb.id);
 
-        // Reset status to running for immediate execution
-        await this.executionRepo.updateStatus(executionDb.id, 'running');
-
-        // Execute the retry
-        const execution = executionDb;
-        const stopped = await this.executeIndividualExecution(execution);
+        const stopped = await this.executeIndividualExecution(executionDb);
         if (isFailure(stopped)) {
           logger.error('Payment success check failed', { executionId: executionDb.id, code: stopped.code });
           report.failed.push(tickFault(executionDb.id, stopped));
@@ -1073,18 +1113,18 @@ export class DunningCampaignService {
       } catch (error) {
         logger.error('Retry failed for execution', {
           executionId: executionDb.id,
+          retryCount,
           error: error instanceof Error ? error.message : String(error),
         });
         report.failed.push(tickFault(executionDb.id, error));
 
-        // If max retries reached, mark as permanently failed
-        if (executionDb.retryCount >= 3) {
-          await this.executionRepo.updateStatus(executionDb.id, 'failed', undefined, 'Max retries exceeded');
-        } else {
-          // Schedule next retry with exponential backoff
-          const nextRetry = add(now(), { minutes: Math.pow(2, executionDb.retryCount) * 30 });
-          await this.executionRepo.incrementRetryCount(executionDb.id, nextRetry);
-        }
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        const nextRetryAt = nextRetryAfter(retryCount);
+        await this.executionRepo.recordFailure(
+          executionDb.id,
+          nextRetryAt ? message : `Max retries exceeded: ${message}`,
+          nextRetryAt,
+        );
       }
     }
     return report;

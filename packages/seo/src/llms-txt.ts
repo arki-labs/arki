@@ -72,7 +72,8 @@ export function generateLlmsFullTxt(input: LlmsFullTxtInput): string {
     for (const item of section.items) {
       lines.push(`### ${item.title}`, `URL: ${item.url}`, `Description: ${item.description}`);
 
-      const detail = input.details[item.title];
+      // Own keys only: a title such as `constructor` must not read a prototype member.
+      const detail = Object.hasOwn(input.details, item.title) ? input.details[item.title] : undefined;
       if (detail) {
         lines.push('', detail);
       }

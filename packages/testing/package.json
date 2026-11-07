@@ -176,7 +176,8 @@
     "@opentelemetry/sdk-metrics": "catalog:opentelemetry",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "drizzle-orm": "catalog:drizzle",
-    "pg": "catalog:drizzle"
+    "pg": "catalog:drizzle",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
@@ -192,8 +193,7 @@
     "msw": "catalog:testing",
     "testcontainers": "catalog:testing",
     "valibot": "catalog:",
-    "vitest": "catalog:",
-    "zod": "catalog:"
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@opentelemetry/api": "catalog:opentelemetry",

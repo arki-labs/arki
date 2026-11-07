@@ -20,6 +20,7 @@ import { backoff } from '@arki/resilience';
 import type { MailMessage, MailTransport, SentMail, TransportFailure } from '../types.js';
 import { MAIL_ERROR_CODES } from '../errors.js';
 import {
+  MailEnqueueContended,
   MailInvalidInput,
   MailInvalidMessage,
   MailQuotaExhausted,
@@ -217,6 +218,53 @@ describe('what is accepted into the queue', () => {
     expect(second).toEqual({ jobId: first.jobId, deduped: true });
     await drainAll(outbox.runner);
     expect(calls).toHaveLength(1);
+  });
+
+  it('a dedupe race that frees the key between the refused insert and the select queues the mail instead of throwing', async () => {
+    // WHY: the worker may send and delete the queued job in that gap. That is a normal concurrent case, not a caller bug; the key is free, so the mail is queued.
+    const { transport, calls } = provider('ok');
+    const outbox = outboxWith(transport);
+    const result = await db.transaction(tx => {
+      const realInsert = tx.insert.bind(tx);
+      let refused = false;
+      // The first insert answers like the dedupe index refused it (no row), and no job holds the key: the state after the worker deleted the winner.
+      const racing = Object.create(tx, {
+        insert: {
+          value: (table: Parameters<typeof tx.insert>[0]) => {
+            if (refused) return realInsert(table);
+            refused = true;
+            return { values: () => ({ onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }) }) };
+          },
+        },
+      });
+      return outbox.enqueue(racing, magicLink, { url: 'https://app.dev/l/1' }, { to, idempotencyKey: 'raced-1' });
+    });
+    const queued = await orThrow(Promise.resolve(result));
+    expect(queued.deduped).toBe(false);
+    await drainAll(outbox.runner);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a key that keeps changing hands returns MailEnqueueContended after three tries and queues nothing', async () => {
+    // WHY: constant contention on one idempotency key is an outside condition, not a caller bug; the caller gets a typed, retryable failure instead of a plain Error that loses its transaction.
+    const outbox = outboxWith(provider('ok').transport);
+    let attempts = 0;
+    const result = await db.transaction(tx => {
+      // Every insert answers like the dedupe index refused it, and the real select finds no job holding the key: another writer won it and its job was sent each time.
+      const racing = Object.create(tx, {
+        insert: {
+          value: () => {
+            attempts += 1;
+            return { values: () => ({ onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }) }) };
+          },
+        },
+      });
+      return outbox.enqueue(racing, magicLink, { url: 'https://app.dev/l/2' }, { to, idempotencyKey: 'contended-1' });
+    });
+    expect(MailEnqueueContended.is(result)).toBe(true);
+    expect(MailEnqueueContended.is(result) && result.data.attempts).toBe(3);
+    expect(attempts).toBe(3);
+    expect(await queue().queued()).toEqual([]);
   });
 
   it('bad input is returned as MailInvalidInput and nothing is queued; the caller decides about its write', async () => {

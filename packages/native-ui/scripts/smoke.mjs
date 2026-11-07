@@ -30,6 +30,15 @@ const fired = debounce(() => {
 fired();
 await new Promise((resolve) => setTimeout(resolve, 40));
 
+const throwsRange = (run) => {
+  try {
+    run();
+    return "no throw";
+  } catch (error) {
+    return error instanceof RangeError ? "RangeError" : "other";
+  }
+};
+
 const checks = [
   [
     "cn keeps the last conflicting utility",
@@ -46,6 +55,14 @@ const checks = [
   ["valid hex colour", isValidHexColor("#a1b2c3"), true],
   ["invalid hex colour is refused", isValidHexColor("#zzz"), false],
   ["hex to rgba", hexToRgba("#ff0000", 0.5), "rgba(255, 0, 0, 0.5)"],
+  ["hex to rgba reads #rgb", hexToRgba("#f00"), "rgba(255, 0, 0, 1)"],
+  ["hex to rgba reads #rrggbbaa", hexToRgba("#ff000080"), "rgba(255, 0, 0, 0.502)"],
+  ["lighten reads #rgb", lightenColor("#abc", 10), "#c4d5e6"],
+  ["lighten keeps the alpha pair", lightenColor("#ff000080", 10), "#ff1a1a80"],
+  ["darken reads #rgb", darkenColor("#abc", 10), "#91a2b3"],
+  ["lighten refuses non-hex text", throwsRange(() => lightenColor("zzz", 10)), "RangeError"],
+  ["darken refuses text without #", throwsRange(() => darkenColor("aabbcc", 10)), "RangeError"],
+  ["hex to rgba refuses non-hex text", throwsRange(() => hexToRgba("red")), "RangeError"],
   [
     "lighten and darken are inverse at the ends",
     `${lightenColor("#000000", 100)}/${darkenColor("#ffffff", 100)}`,

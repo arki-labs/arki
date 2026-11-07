@@ -21,7 +21,9 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { defineFailure } from '@arki/failure';
 import { is } from '@arki/schema';
+import { z } from 'zod';
 
 import type { EventMapDocument, EventMapProblem, EventMapScanEntry } from './projection.js';
 
@@ -61,6 +63,8 @@ async function procedureFiles(root: string, problems: EventMapProblem[]): Promis
   return found.toSorted();
 }
 
+const missingFileError = z.object({ code: z.literal('ENOENT') });
+const isMissingFile = (error: unknown): boolean => is(error, missingFileError);
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** What one import statement names: the specifier, and the export names it keeps (`'*'`: every export). */
@@ -140,7 +144,14 @@ export async function scanEntrypoints(options: { readonly root: string }): Promi
     const segments = file.split('/');
     const feature = segments[segments.indexOf('entrypoints') - 1] ?? path.basename(options.root);
     const commands = new Map<string, { name: string; writes: readonly string[] }>();
-    for (const statement of importsOf(await readFile(absolute, 'utf8'))) {
+    let source: string;
+    try {
+      source = await readFile(absolute, 'utf8');
+    } catch (error) {
+      problems.push({ file, reason: `cannot read the file: ${messageOf(error)}` });
+      continue;
+    }
+    for (const statement of importsOf(source)) {
       const target = await resolveFile(absolute, statement.specifier);
       if (target === undefined) {
         problems.push({ file, reason: `import "${statement.specifier}" does not resolve to a file` });
@@ -175,6 +186,21 @@ export async function project(manifest: ManifestLike, cwd: string = process.cwd(
   const scan = await scanEntrypoints({ root: path.resolve(cwd, entrypointRoot) });
   return withEntrypoints(document, scan.entries, scan.problems);
 }
+
+/**
+ * `checkEventMapFile` could not read the Mermaid file (for a reason other than "no such file") or could not write it.
+ * `detail` names the file and the file-system error.
+ * @fix Make the file readable, and its folder writable when `update` is true, then run the check again.
+ * @verify bun run test -- src/event-map.test.ts
+ */
+export const EventMapFileFailed = defineFailure('journal.event_map_file_failed', {
+  status: 500,
+  data: z.object({ detail: z.string() }),
+  message: '{detail}',
+  remediation: 'Make the file readable, and its folder writable when update is true, then run the check again.',
+});
+/** An {@link EventMapFileFailed} failure value. */
+export type EventMapFileFailed = ReturnType<typeof EventMapFileFailed>;
 
 /** The result of `checkEventMapFile`. A `stale` or `missing` file carries a line diff for the test report. */
 export type EventMapFileCheck =
@@ -219,15 +245,22 @@ export async function checkEventMapFile(options: {
   readonly file: string;
   readonly mermaid: string;
   readonly update?: boolean;
-}): Promise<EventMapFileCheck> {
-  const current = await readFile(options.file, 'utf8').then(
-    text => text,
-    () => null,
-  );
+}): Promise<EventMapFileCheck | EventMapFileFailed> {
+  let current: string | null;
+  try {
+    current = await readFile(options.file, 'utf8');
+  } catch (error) {
+    if (!isMissingFile(error)) return EventMapFileFailed({ detail: `cannot read ${options.file}: ${messageOf(error)}` });
+    current = null;
+  }
   if (current === options.mermaid) return { state: 'fresh' };
   if (options.update === true) {
-    await mkdir(path.dirname(options.file), { recursive: true });
-    await writeFile(options.file, options.mermaid);
+    try {
+      await mkdir(path.dirname(options.file), { recursive: true });
+      await writeFile(options.file, options.mermaid);
+    } catch (error) {
+      return EventMapFileFailed({ detail: `cannot write ${options.file}: ${messageOf(error)}` });
+    }
     return { state: 'written' };
   }
   if (current === null) return { state: 'missing', diff: lineDiff([], options.mermaid.split('\n')) };

@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { describe, expect, it } from 'vitest';
 
 import { describeServiceContract, newRunId } from '../stack/contract.js';
@@ -55,4 +57,41 @@ describe('mailbox', () => {
       await started.stop();
     }
   }, 120_000);
+});
+
+describe('mailbox answer shape', () => {
+  async function serve(body: string): Promise<{ httpUrl: string; close: () => Promise<void> }> {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(body);
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('the test server has no port');
+    return {
+      httpUrl: `http://127.0.0.1:${address.port}`,
+      close: () => new Promise<void>(resolve => server.close(() => resolve())),
+    };
+  }
+
+  it('refuses an answer whose shape is not Mailpit\'s instead of passing it on as mail', async () => {
+    // A proxy error page or a changed API answers 200 with a body that is not a message list.
+    const wrong = await serve(JSON.stringify({ messages: 'maintenance' }));
+    try {
+      await expect(mailbox(wrong.httpUrl).all()).rejects.toThrow(/unexpected shape/);
+    } finally {
+      await wrong.close();
+    }
+  });
+
+  it('reads a well-formed list and ignores fields it does not use', async () => {
+    const right = await serve(
+      JSON.stringify({ total: 1, messages: [{ ID: 'm1', Subject: 'Hi', To: [{ Address: 'a@app.test', Name: 'A' }] }] }),
+    );
+    try {
+      expect(await mailbox(right.httpUrl).all()).toEqual([{ id: 'm1', subject: 'Hi', to: ['a@app.test'] }]);
+    } finally {
+      await right.close();
+    }
+  });
 });

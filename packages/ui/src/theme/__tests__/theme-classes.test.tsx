@@ -105,4 +105,19 @@ describe('theme classes', () => {
     act(() => view.result.current.setTheme('dark'));
     expect(new Set(root.classList)).toEqual(new Set(['dark', 'is-dark']));
   });
+
+  it('provider: the transition-blocking style node may be gone before its timer fires', () => {
+    vi.useFakeTimers();
+    try {
+      const view = mountProvider({ themes, themeClasses, defaultTheme: 'light', disableTransitionOnChange: true });
+      act(() => view.result.current.setTheme('dark'));
+      expect(document.head.querySelectorAll('style').length).toBeGreaterThan(0);
+      // Something else (a head swap, another script) removes the node first.
+      for (const node of document.head.querySelectorAll('style')) node.remove();
+      expect(() => vi.advanceTimersByTime(5)).not.toThrow();
+      expect(document.head.querySelectorAll('style')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -23,7 +23,7 @@ import type {
   TaxJurisdiction,
   TaxRecord,
 } from './types.js';
-import { exemptionTargetSchema } from './contracts.js';
+import { exemptionPeriodSchema, exemptionTargetSchema } from './contracts.js';
 import { TaxReferenceNotFound } from './failures.js';
 
 type NotFound = FailureOf<typeof TaxReferenceNotFound>;
@@ -246,11 +246,14 @@ export class TaxExemptionRepository {
 
   /**
    * The new row. One that names no customer, product code or jurisdiction would exempt every sale:
-   * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written.
+   * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written. So does
+   * `exemptionPeriodSchema` for one whose `validTo` is before its `validFrom`.
    */
   async createExemption(data: NewTaxExemption): Promise<TaxExemption | SchemaFailure> {
     const target = parse(exemptionTargetSchema, data);
     if (isFailure(target)) return target;
+    const period = parse(exemptionPeriodSchema, data);
+    if (isFailure(period)) return period;
 
     const [created] = await this.db.insert(this.taxExemptions).values(data).returning();
     invariant(created, 'the tax exemption insert returned no row');
@@ -387,14 +390,45 @@ export class TaxExemptionRepository {
       .orderBy(this.taxExemptions.validTo);
   }
 
-  /** The updated row, or `TaxReferenceNotFound` when no exemption has `id`. */
-  async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption): Promise<TaxExemption | NotFound> {
-    const [updated] = await this.db
-      .update(this.taxExemptions)
-      .set({ ...data, updatedAt: now() })
-      .where(eq(this.taxExemptions.id, id))
-      .returning();
-    return updated ?? TaxReferenceNotFound({ kind: 'exemption', id });
+  /**
+   * The updated row, or `TaxReferenceNotFound` when no exemption has `id`. The row as the update
+   * leaves it must still name a customer, a product code or a jurisdiction (`exemptionTargetSchema`)
+   * and must not end before it starts (`exemptionPeriodSchema`): otherwise it returns `InvalidInput`
+   * and nothing is written. A field left `undefined` keeps its stored value; `null` clears it.
+   */
+  async updateExemption(
+    id: TaxExemptionId,
+    data: UpdateTaxExemption,
+  ): Promise<TaxExemption | NotFound | SchemaFailure> {
+    return this.db.transaction(async tx => {
+      // Lock the row, so the check and the write see the same stored values
+      const [current] = await tx
+        .select()
+        .from(this.taxExemptions)
+        .where(eq(this.taxExemptions.id, id))
+        .for('update');
+      if (!current) return TaxReferenceNotFound({ kind: 'exemption', id });
+
+      const next = {
+        customerId: data.customerId === undefined ? current.customerId : data.customerId,
+        productCode: data.productCode === undefined ? current.productCode : data.productCode,
+        jurisdictionId: data.jurisdictionId === undefined ? current.jurisdictionId : data.jurisdictionId,
+        validFrom: data.validFrom ?? current.validFrom,
+        validTo: data.validTo === undefined ? current.validTo : data.validTo,
+      };
+      const target = parse(exemptionTargetSchema, next);
+      if (isFailure(target)) return target;
+      const period = parse(exemptionPeriodSchema, next);
+      if (isFailure(period)) return period;
+
+      const [updated] = await tx
+        .update(this.taxExemptions)
+        .set({ ...data, updatedAt: now() })
+        .where(eq(this.taxExemptions.id, id))
+        .returning();
+      invariant(updated, 'the locked tax exemption update returned no row');
+      return updated;
+    });
   }
 
   /** The approved row, or `TaxReferenceNotFound` when no exemption has `id`. */

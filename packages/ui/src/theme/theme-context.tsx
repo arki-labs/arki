@@ -122,7 +122,7 @@ function applyTheme(
 
     // Remove after a tick
     setTimeout(() => {
-      document.head.removeChild(css);
+      css.remove();
     }, 1);
   }
 

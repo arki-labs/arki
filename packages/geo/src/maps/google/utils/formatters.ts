@@ -43,24 +43,4 @@ export function formatZoomLevel(zoom: number): string {
   return 'Building';
 }
 
-/**
- * Parse coordinates from string
- *
- * @example
- * parseCoordinates("37.7749, -122.4194")
- * // Returns: { lat: 37.7749, lng: -122.4194 }
- */
-export function parseCoordinates(coordString: string): Coordinates | null {
-  const parts = coordString.split(',').map(s => s.trim());
-
-  if (parts.length !== 2) return null;
-
-  const lat = Number.parseFloat(parts[0]!);
-  const lng = Number.parseFloat(parts[1]!);
-
-  if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
-  if (lat < -90 || lat > 90) return null;
-  if (lng < -180 || lng > 180) return null;
-
-  return { lat, lng };
-}
+export { parseCoordinates } from '../../../core/coordinates.js';

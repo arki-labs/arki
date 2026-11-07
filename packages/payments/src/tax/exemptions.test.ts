@@ -111,7 +111,7 @@ describe('a new exemption', () => {
     expect(applicable.map(e => e.id)).toEqual([created.id]);
   });
 
-  it('cannot end before it starts: the contract and the table both say no', async () => {
+  it('cannot end before it starts: the contract, the repository and the table all say no', async () => {
     const input = {
       type: 'customer' as const,
       customerId: 'cus_dates',
@@ -123,7 +123,54 @@ describe('a new exemption', () => {
 
     expect(createExemptionSchema.safeParse(input).success).toBe(false);
     expect(createExemptionSchema.safeParse({ ...input, validTo: input.validFrom }).success).toBe(true);
-    await expect(repos.exemptions.createExemption(input)).rejects.toThrow();
+    // A caller that skips the contract gets a failure it can answer with, not the table's raw CHECK error
+    const refused = await repos.exemptions.createExemption(input);
+    expect(refused).toMatchObject({ code: 'schema.invalid_input' });
+    expect(InvalidInput.is(refused) && refused.data.issues[0]?.message).toMatch(/validTo must not be before validFrom/);
+    expect(await db.select().from(tax.taxExemptions).where(eq(tax.taxExemptions.customerId, 'cus_dates'))).toEqual([]);
+    await expect(db.insert(tax.taxExemptions).values(input)).rejects.toThrow();
+  });
+});
+
+describe('an exemption update', () => {
+  // An admin edits one field at a time; the row the edit leaves behind must still pass the table CHECKs
+  it('that leaves no target, or an end before the start, returns schema.invalid_input and writes nothing', async () => {
+    const created = orThrow(await repos.exemptions.createExemption({
+      type: 'customer',
+      customerId: 'cus_update',
+      exemptionCode: 'UPDATE',
+      reason: 'Registered charity',
+      validFrom: instant('2026-06-01T00:00:00Z'),
+    }));
+
+    const noTarget = await repos.exemptions.updateExemption(created.id, {
+      customerId: null,
+      productCode: null,
+      jurisdictionId: null,
+      reason: 'cleared',
+    });
+    expect(noTarget).toMatchObject({ code: 'schema.invalid_input' });
+    expect(InvalidInput.is(noTarget) && noTarget.data.issues[0]?.message).toMatch(/needs a customer/);
+
+    const endsEarly = await repos.exemptions.updateExemption(created.id, { validTo: instant('2026-05-01T00:00:00Z') });
+    expect(endsEarly).toMatchObject({ code: 'schema.invalid_input' });
+    expect(InvalidInput.is(endsEarly) && endsEarly.data.issues[0]?.message).toMatch(/validTo must not be before/);
+
+    // Moving the start past a stored end is the same refusal, read from the stored row
+    orThrow(await repos.exemptions.updateExemption(created.id, { validTo: instant('2026-07-01T00:00:00Z') }));
+    const startsLate = await repos.exemptions.updateExemption(created.id, { validFrom: instant('2026-08-01T00:00:00Z') });
+    expect(startsLate).toMatchObject({ code: 'schema.invalid_input' });
+
+    const stored = await repos.exemptions.findExemptionById(created.id);
+    expect(stored).toMatchObject({ customerId: 'cus_update', reason: 'Registered charity' });
+    expect(stored?.validFrom.toString()).toBe('2026-06-01T00:00:00Z');
+    expect(stored?.validTo?.toString()).toBe('2026-07-01T00:00:00Z');
+
+    // A valid edit that swaps the target in one update still goes through
+    const moved = orThrow(await repos.exemptions.updateExemption(created.id, { customerId: null, productCode: 'txcd_moved' }));
+    expect(moved).toMatchObject({ customerId: null, productCode: 'txcd_moved' });
+    // Leave no pending review behind for the stats test
+    orThrow(await repos.exemptions.revokeExemption(created.id));
   });
 });
 

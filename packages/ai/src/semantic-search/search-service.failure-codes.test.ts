@@ -50,4 +50,13 @@ describe('SemanticSearchService returns the embedder failure and SpaceMismatch',
     expect(vectorProvider.getDocumentCount()).toBe(0);
     service.destroy();
   });
+
+  it.each([0, -3, 1.5, Number.NaN])('indexDocuments throws on batchSize %s instead of looping forever', async batchSize => {
+    // WHY: batchSize 0 never advanced the loop and a negative one walked backwards: the process hung. The caller picked the number, so it is a bug, thrown at once.
+    const embedder = fakeEmbedder({ dimensions: 3 });
+    const service = new SemanticSearchService({ embedder, vectorProvider: new MockVectorProvider({ space: embedder.space }) });
+
+    await expect(service.indexDocuments([{ id: 'a', text: 'alpha' }], batchSize)).rejects.toThrow(/batchSize must be a positive integer/);
+    service.destroy();
+  });
 });

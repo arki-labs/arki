@@ -6,7 +6,7 @@ Read `llms.txt` first for the map. This guide is the detail. When this guide and
 
 1. `@arki/intl/language` re-exports `all-iso-language-codes` lookups and adds `isLanguageCode(tag)` for BCP 47 tags such as `en-US`.
 2. `@arki/intl/slug-registry` holds `SlugRegistry`. It maps a resource id and a locale to a slug, and back.
-3. `@arki/intl/dictionaries` merges the built-in `en` and `de` messages with your feature dictionaries.
+3. `@arki/intl/dictionaries` merges the built-in `en` and `de` messages with your feature dictionaries. It returns a `DictionaryLoadFailed` failure when a dictionary or loader rejects.
 4. `@arki/intl/types` and `@arki/intl/react` hold types only.
 5. `@arki/intl/tanstack-start` mounts the `use-intl` provider: `AppLocaleProvider`, `LocaleProvider` and `useLocale`.
 6. Nothing here throws for a missing match. The answer is `undefined` or a fallback.

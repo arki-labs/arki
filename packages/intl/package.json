@@ -95,6 +95,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/failure": "workspace:*",
     "all-iso-language-codes": "catalog:",
     "is-language-code": "catalog:",
     "use-intl": "catalog:"

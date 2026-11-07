@@ -111,6 +111,7 @@ For queued mail, assert on committed rows with `mailQueueAssertions(db, tables)`
 | `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. `data.reason`: `cancelled`, `timeout`, `network`, `unreadable`. | yes, never on another one |
 | `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written.                     | no                        |
 | `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`.                          | no                        |
+| `MailEnqueueContended` | `mail.enqueue_contended` | 503 | Other writers kept taking the mail's `idempotencyKey`. Nothing queued. | yes, retry the write |
 | `MailExpired`        | `mail.expired`         | 410    | A queued mail expired before it was sent.                  | no                        |
 
 ### Errors (thrown)

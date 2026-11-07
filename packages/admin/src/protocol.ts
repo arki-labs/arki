@@ -257,9 +257,18 @@ export async function importPublicKey(publicKey: string): Promise<CryptoKey> {
 
 /** Import an Ed25519 private key for signing. Non-extractable. */
 export async function importPrivateKey(privateKey: string): Promise<CryptoKey> {
-  return requireWebCrypto().subtle.importKey('pkcs8', keyBytes(privateKey, 48, 'private key'), 'Ed25519', false, [
-    'sign',
-  ]);
+  const bytes = keyBytes(privateKey, 48, 'private key');
+  try {
+    return await requireWebCrypto().subtle.importKey('pkcs8', bytes, 'Ed25519', false, ['sign']);
+  } catch (error) {
+    // The right length is not enough: the bytes must also be a PKCS#8 Ed25519 key.
+    throw new AdminError(
+      ADMIN_ERROR_CODES.invalidConfig,
+      'The private key has the right length but is not an Ed25519 PKCS#8 key.',
+      'Generate keys with generateForemanKeyPair() and copy them unchanged.',
+      { cause: error },
+    );
+  }
 }
 
 /** The canonical base64url of a public key, so two spellings of the same bytes compare equal. */

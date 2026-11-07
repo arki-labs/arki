@@ -492,17 +492,40 @@ export class DunningExecutionRepository {
       .limit(limit);
   }
 
-  async incrementRetryCount(
-    id: DunningExecutionId,
-    nextRetryAt?: Instant,
-  ): Promise<DunningExecution | undefined> {
+  /**
+   * Start one retry of a failed execution, in one update: it is `running` again, its `retryCount`
+   * goes up by one and it has no `nextRetryAt` until it fails again. Returns the updated row, or
+   * `undefined` for an unknown id.
+   */
+  async startRetry(id: DunningExecutionId): Promise<DunningExecution | undefined> {
     const [execution] = await this.db
       .update(this.dunningExecutions)
       .set({
+        status: 'running',
+        startedAt: now(),
         retryCount: sql`${this.dunningExecutions.retryCount} + 1`,
-        nextRetryAt,
+        nextRetryAt: null,
         updatedAt: now(),
       })
+      .where(eq(this.dunningExecutions.id, id))
+      .returning();
+
+    return execution;
+  }
+
+  /**
+   * Record a run that threw, in one update: status `failed`, the error message and when to retry it.
+   * `findRetryableExecutions` picks it again once `nextRetryAt` has passed; `null` means it is never
+   * retried. Returns the updated row, or `undefined` for an unknown id.
+   */
+  async recordFailure(
+    id: DunningExecutionId,
+    errorMessage: string,
+    nextRetryAt: Instant | null,
+  ): Promise<DunningExecution | undefined> {
+    const [execution] = await this.db
+      .update(this.dunningExecutions)
+      .set({ status: 'failed', errorMessage, nextRetryAt, completedAt: now(), updatedAt: now() })
       .where(eq(this.dunningExecutions.id, id))
       .returning();
 

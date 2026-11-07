@@ -153,7 +153,7 @@ Not instrumented: repositories and journal commands (the app's database driver a
 - A refund and what the payment already gives back cannot add up to more than was paid. The extra returns `RefundAmountExceeded`.
 - A payment has at most one pending refund. A second request returns `DuplicatePendingRefund`.
 - A refund under the auto-approve limit is approved without a person. The default is 10.00 in USD and EUR, 1500 in JPY (`autoApproveLimits`).
-- A refund in another currency than the payment is bad input. It throws, it does not return a failure.
+- A refund in another currency than the payment returns `RefundCurrencyMismatch` (`payments.refund_currency_mismatch`, 422). Nothing is written.
 - Amounts are decimal text in the payment's currency, such as `'12.50'`.
 - A repeated `idempotencyKey` with different parameters returns `IdempotencyConflict`.
 - Provider faults are thrown, not returned: `rate_limited` and `unavailable` can pass on retry; `authentication`, `invalid_request` and `not_configured` cannot.

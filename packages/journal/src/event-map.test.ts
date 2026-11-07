@@ -8,7 +8,7 @@
  * a lie of omission, so the graph is compared whole, and the text and Mermaid views are committed files: a change
  * to either is a visible diff in review.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ import { orThrow } from '@arki/failure';
 
 import type { EventMapEdge, EventMapNode } from './projection.js';
 import { journal, journalWorker } from './dot.js';
-import { checkEventMapFile, project, render, scanEntrypoints } from './event-map.js';
+import { checkEventMapFile, EventMapFileFailed, project, render, scanEntrypoints } from './event-map.js';
 import { ordersFeature } from './fixtures/event-map/app/src/features/orders/feature.js';
 import { paymentsFeature } from './fixtures/event-map/app/src/features/payments/feature.js';
 import { dbUnit } from './fixtures/event-map/app/src/db.js';
@@ -244,6 +244,38 @@ describe('scanEntrypoints({ root })', () => {
     });
     const scan = await scanEntrypoints({ root });
     expect(scan.entries[0]?.commands).toEqual([{ name: 'a', writes: ['Done'] }]);
+  });
+});
+
+describe('scanEntrypoints({ root }) with an unreadable procedure file', () => {
+  // Why: one broken symlink must not hide the rest of the map; `EventMapProblem` promises "the map is drawn without it".
+  it('reports a broken symlink as a problem and still scans the other files', async () => {
+    const root = await sandbox({
+      'shop/usecases/a.mjs': aCommand('a'),
+      'shop/entrypoints/good.mjs': "import { a } from '../usecases/a.mjs';\nexport const x = a;",
+    });
+    await symlink(path.join(root, 'missing-target.mjs'), path.join(root, 'shop/entrypoints/broken.mjs'));
+    const scan = await scanEntrypoints({ root });
+    expect(scan.entries.map(entry => entry.file)).toEqual(['shop/entrypoints/good.mjs']);
+    expect(scan.problems).toHaveLength(1);
+    expect(scan.problems[0]).toMatchObject({ file: 'shop/entrypoints/broken.mjs' });
+    expect(scan.problems[0]?.reason).toContain('cannot read the file');
+  });
+});
+
+describe('checkEventMapFile({ file, mermaid, update }) file-system failures', () => {
+  // Why: a test helper that rejects with a raw fs error, or calls an unreadable file "missing", sends the reader to the wrong fix.
+  it('returns EventMapFileFailed when the folder cannot be created, and for a read error that is not "no such file"', async () => {
+    const folder = await sandbox({ 'blocker.txt': 'a file, not a folder' });
+    const below = await checkEventMapFile({
+      file: path.join(folder, 'blocker.txt/docs/map.mmd'),
+      mermaid: 'x',
+      update: true,
+    });
+    expect(below).toMatchObject({ code: 'journal.event_map_file_failed' });
+    const directory = await checkEventMapFile({ file: folder, mermaid: 'x' });
+    expect(directory).toMatchObject({ code: 'journal.event_map_file_failed' });
+    expect(EventMapFileFailed.code).toBe('journal.event_map_file_failed');
   });
 });
 

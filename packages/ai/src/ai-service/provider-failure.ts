@@ -19,6 +19,7 @@ import {
   StreamProviderError,
   TypeValidationError,
 } from 'ai';
+import { GatewayError } from '@ai-sdk/gateway';
 import { OllamaError } from 'ai-sdk-ollama';
 
 import { z } from '@arki/contracts';
@@ -98,6 +99,8 @@ export function providerFailure(error: unknown, call: ProviderCall): ProviderFai
   const names = { provider: call.provider, model: call.model };
   if (cause !== error && isAbort(cause)) return Cancelled({ cause: error });
   if (APICallError.isInstance(cause)) return statusFailure(cause.statusCode, cause.responseHeaders, call, error);
+  // The AI SDK gateway (a model given as a string id) throws its own family, not APICallError.
+  if (GatewayError.isInstance(cause)) return statusFailure(cause.statusCode, undefined, call, error);
   if (StreamProviderError.isInstance(cause)) return statusFailure(cause.statusCode, undefined, call, error);
   if (LoadAPIKeyError.isInstance(cause)) return ProviderUnauthorized(names, { cause: error });
   // ai-sdk-ollama wraps every client throw: an HTTP answer carries `status_code`, anything else

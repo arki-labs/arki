@@ -481,6 +481,19 @@ describe('T(admin-protocol) negotiation and configuration', () => {
     ).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.invalidConfig });
   });
 
+  it('answers ARKI_ADMIN_E014, not a raw DOMException, for a private key of the right length that is not PKCS#8', async () => {
+    // 48 bytes pass the length check; crypto.subtle rejects them as an Ed25519 PKCS#8 key.
+    const wrongBytes = toBase64Url(new Uint8Array(48).fill(7));
+    const client = createForemanClient({
+      target: { aud: AUD, baseUrl: BASE_URL, appKey: appPair.publicKey },
+      readKey: wrongBytes,
+      fetch: async () => new Response('unreachable', { status: 500 }),
+    });
+    // A bad key is a bug in the caller's setup, so it throws, like a missing execute key.
+    await expect(client.negotiate()).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.invalidConfig });
+    await expect(importPrivateKey(wrongBytes)).rejects.toMatchObject({ code: ADMIN_ERROR_CODES.invalidConfig });
+  });
+
   it('refuses a dispatcher whose read key is also an execute key', () => {
     expect(() =>
       setup({ keys: { read: { current: readPair.publicKey }, execute: { current: readPair.publicKey } } }),

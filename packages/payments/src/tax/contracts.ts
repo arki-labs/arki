@@ -150,6 +150,17 @@ export const exemptionTargetSchema = z
     exemptionTargetIssue,
   );
 
+/**
+ * When an exemption applies: it must not end before it starts (`validTo` may equal `validFrom`; no
+ * `validTo` means it never ends). `TaxExemptionRepository` checks every new and updated row with it.
+ */
+export const exemptionPeriodSchema = z
+  .object({ validFrom: instantSchema(), validTo: instantSchema().nullish() })
+  .refine(period => period.validTo == null || !isBefore(period.validTo, period.validFrom), {
+    path: ['validTo'],
+    message: 'validTo must not be before validFrom',
+  });
+
 export const createExemptionSchema = z
   .object({
   type: exemptionTypeSchema,
@@ -173,7 +184,7 @@ export const createExemptionSchema = z
     .optional(),
   })
   .refine(exemption => exemptionTargetSchema.safeParse(exemption).success, exemptionTargetIssue)
-  .refine(exemption => exemption.validTo === undefined || !isBefore(exemption.validTo, exemption.validFrom), {
+  .refine(exemption => exemptionPeriodSchema.safeParse(exemption).success, {
     path: ['validTo'],
     message: 'validTo must not be before validFrom',
   });

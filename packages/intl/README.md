@@ -55,7 +55,7 @@ The language, slug registry and dictionary entries run on Node, Bun, Deno and br
 | --- | --- |
 | `@arki/intl/language` | Re-exports of `all-iso-language-codes` (`getName`, `getEnglishName`, `getNativeName`, `isValid`, `getAll639_1`, ...) and `isLanguageCode(tag)`, which checks a BCP 47 tag such as `en-US`. |
 | `@arki/intl/slug-registry` | `SlugRegistry`: `getSlug(resourceId, locale)`, `getResourceId(slug, locale, scope?)`, `getLocalizedUrl(resourceId, targetLocale, defaultLocale, englishUrl)`. |
-| `@arki/intl/dictionaries` | `loadMessagesFromMultipleDictionaries(locale, defaultLocale, featureDictionaries)`. Merges the built-in `en` and `de` messages with your feature dictionaries. |
+| `@arki/intl/dictionaries` | `loadMessagesFromMultipleDictionaries(locale, defaultLocale, featureDictionaries)`. Merges the built-in `en` and `de` messages with your feature dictionaries. Returns a `DictionaryLoadFailed` failure (`intl.dictionary_load_failed`, the cause attached) when a dictionary or loader rejects. |
 | `@arki/intl/types` | Types `AppLocaleConfig` and `LocalizedResourceSlug`. |
 | `@arki/intl/react` | Type `LinkComponent`: a link component type any router can satisfy. |
 | `@arki/intl/tanstack-start` | `AppLocaleProvider` (picks the built-in messages for a locale), `LocaleProvider` and `useLocale`. |

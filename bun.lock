@@ -58,6 +58,7 @@
       "version": "0.2.1",
       "dependencies": {
         "@ai-sdk/anthropic": "catalog:ai",
+        "@ai-sdk/gateway": "^4.0.108",
         "@ai-sdk/google": "catalog:ai",
         "@ai-sdk/groq": "catalog:ai",
         "@ai-sdk/mistral": "catalog:ai",
@@ -1065,6 +1066,7 @@
       "name": "@arki/intl",
       "version": "0.2.0",
       "dependencies": {
+        "@arki/failure": "workspace:*",
         "all-iso-language-codes": "catalog:",
         "is-language-code": "catalog:",
         "use-intl": "catalog:",
@@ -2013,6 +2015,7 @@
         "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
         "drizzle-orm": "catalog:drizzle",
         "pg": "catalog:drizzle",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/eslint-config": "workspace:*",
@@ -2029,7 +2032,6 @@
         "testcontainers": "catalog:testing",
         "valibot": "catalog:",
         "vitest": "catalog:",
-        "zod": "catalog:",
       },
       "peerDependencies": {
         "@opentelemetry/api": "catalog:opentelemetry",

@@ -5,6 +5,7 @@
  * a bad key forever and shows a cut-off answer as complete.
  */
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { GatewayAuthenticationError, GatewayForbiddenError, GatewayInternalServerError, GatewayRateLimitError } from '@ai-sdk/gateway';
 import { APICallError, NoObjectGeneratedError, RetryError, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { OllamaError } from 'ai-sdk-ollama';
@@ -101,6 +102,17 @@ describe('providerFailure: SDK errors become typed failures', () => {
     controller.abort();
     expect(providerFailure(apiError(500), { ...call, signal: controller.signal }).code).toBe('ai.cancelled');
     expect(providerFailure(new DOMException('aborted', 'AbortError'), call).code).toBe('ai.cancelled');
+  });
+
+  it('gateway errors keep their meaning: 429 is RateLimited, 401 and 403 are ProviderUnauthorized, 500 is ProviderFailed', () => {
+    // WHY: a model given as a string id goes through the AI SDK gateway, which throws its own error family (not APICallError); without this a gateway 429 became a defect.
+    expect(RateLimited.is(providerFailure(new GatewayRateLimitError(), call))).toBe(true);
+    expect(providerFailure(new GatewayAuthenticationError({ message: 'bad key', statusCode: 401 }), call).code).toBe('ai.unauthorized');
+    expect(providerFailure(new GatewayForbiddenError(), call).code).toBe('ai.unauthorized');
+    const down = providerFailure(new GatewayInternalServerError(), call);
+    expect(ProviderFailed.is(down) && down.data.status).toBe(500);
+    const retried = new RetryError({ message: 'gave up', reason: 'maxRetriesExceeded', errors: [new GatewayRateLimitError()] });
+    expect(providerFailure(retried, call).code).toBe('ai.rate_limited');
   });
 
   it('an Ollama HTTP error keeps its status; an Ollama that cannot be reached is ProviderFailed', () => {

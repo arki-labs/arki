@@ -604,7 +604,7 @@ export class IntegrationTester<
 
     // Get all table names from schema
     const tables = Object.values(this.config.schema).filter(
-      (value): value is PgTable => matchesSchema(value, recordSchema),
+      (value): value is PgTable => is(value, PgTable),
     );
 
     for (const table of tables) {

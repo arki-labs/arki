@@ -5,6 +5,7 @@
 
 import type { EmbedFailure, Embedder } from '@arki/embeddings';
 import { embed, embedMany, isEmbedFailure, isSameSpace, SpaceMismatch } from '@arki/embeddings';
+import { invariant } from '@arki/failure';
 
 import type { VectorSearchProvider } from '../types.js';
 import type { SearchOptions } from '../validation.js';
@@ -399,7 +400,10 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   }
 
   /**
-   * Index documents for vector search
+   * Index documents for vector search, `batchSize` documents per embed call (default 100).
+   *
+   * @throws FailureError (`invariant`) when `batchSize` is not a positive integer: the caller chose
+   * the number, so a bad one is a bug, and it would otherwise loop forever.
    */
   async indexDocuments(
     documents: {
@@ -409,6 +413,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     }[],
     batchSize = 100,
   ): Promise<{ success: boolean; count: number } | EmbedFailure> {
+    invariant(Number.isInteger(batchSize) && batchSize > 0, () => `indexDocuments batchSize must be a positive integer, got ${batchSize}`);
     debugSemantic.debug('[SearchService] Indexing documents (total: {total}, batchSize: {batchSize})', {
       total: documents.length,
       batchSize,

@@ -50,7 +50,7 @@ From `@arki/journal/event-map` (Node only; it uses `node:fs`):
 
 - `project(manifest, cwd?)`: what Dot loads for `dot explain --as event-map`. It is `projectGraph` plus the scan of the manifest's `entrypointRoot`, resolved against `cwd` (default `process.cwd()`).
 - `scanEntrypoints({ root })`: reads the procedure files under the absolute folder `root`. Returns `{ entries, problems }`.
-- `checkEventMapFile({ file, mermaid, update? })`: compares `mermaid` with the file. Returns `{ state: 'fresh' }`, `{ state: 'written' }` (when `update` is true), or `{ state: 'stale' | 'missing', diff }`.
+- `checkEventMapFile({ file, mermaid, update? })`: compares `mermaid` with the file. Returns `{ state: 'fresh' }`, `{ state: 'written' }` (when `update` is true), or `{ state: 'stale' | 'missing', diff }`. It returns an `EventMapFileFailed` failure (`journal.event_map_file_failed`) when the file cannot be read (other than "no such file") or, with `update`, cannot be written. A procedure file the scan cannot read is a `problems` entry; the scan still returns.
 - `render`: the same function as in `@arki/journal/projection`.
 
 `journal({ j, entrypointRoot })` sets the folder the scan reads, relative to the folder `dot` runs in (default `'src/features'`).

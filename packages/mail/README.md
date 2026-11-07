@@ -91,15 +91,16 @@ A template validator that throws or rejects returns canonical `schema.validator_
 
 `send` does not throw for a mail that was not sent. It returns a failure value, defined with `@arki/failure` and exported from `@arki/mail`. A mail that is not sent for a reason your code must expect is a returned failure, defined with `@arki/failure` and exported from `@arki/mail`. Check it with `isFailure`, a definition's `is`, or `match`. At an HTTP or oRPC boundary it answers with its status.
 
-| Failure              | Code                   | Status | When                                                                                                                                        |
-| -------------------- | ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MailInvalidInput`   | `mail.invalid_input`   | 422    | The template's schema refused the input. `data`: `template`, `issues`.                                                                      |
-| `MailQuotaExhausted` | `mail.quota_exhausted` | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                                                                           |
-| `MailRejected`       | `mail.rejected`        | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`, `retryAfterMs` (its `Retry-After`).                       |
-| `MailUncertain`      | `mail.uncertain`       | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`, `reason` (`cancelled`, `timeout`, `network`, `unreadable`). |
-| `MailInvalidMessage` | `mail.invalid_message` | 422    | The message cannot be sent as written. `data`: `problem`. Nothing was sent.                                                                 |
-| `MailTooLarge`       | `mail.too_large`       | 413    | A queued mail is over `maxBytes`. `data`: `bytes`, `maxBytes`. Nothing was queued.                                                          |
-| `MailExpired`        | `mail.expired`         | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.                                                                |
+| Failure                | Code                     | Status | When                                                                                                                                        |
+| ---------------------- | ------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MailInvalidInput`     | `mail.invalid_input`     | 422    | The template's schema refused the input. `data`: `template`, `issues`.                                                                      |
+| `MailQuotaExhausted`   | `mail.quota_exhausted`   | 429    | Every transport is over quota. Nothing was sent. `data`: `month`.                                                                           |
+| `MailRejected`         | `mail.rejected`          | 422    | The service refused the mail. `data`: `transport`, `retryable`, `upstreamStatus`, `retryAfterMs` (its `Retry-After`).                       |
+| `MailUncertain`        | `mail.uncertain`         | 503    | No readable answer. The mail may have been sent. `data`: `transport`, `detail`, `reason` (`cancelled`, `timeout`, `network`, `unreadable`). |
+| `MailInvalidMessage`   | `mail.invalid_message`   | 422    | The message cannot be sent as written. `data`: `problem`. Nothing was sent.                                                                 |
+| `MailTooLarge`         | `mail.too_large`         | 413    | A queued mail is over `maxBytes`. `data`: `bytes`, `maxBytes`. Nothing was queued.                                                          |
+| `MailEnqueueContended` | `mail.enqueue_contended` | 503    | Other writers kept taking the mail's `idempotencyKey` while it queued. `data`: `attempts`. Nothing was queued; retry the write.             |
+| `MailExpired`          | `mail.expired`           | 410    | A queued mail passed its `expiresAt`. Nothing was sent. `data`: `expiresAt`.                                                                |
 
 A mistake in how the package is used is thrown as `MailError`, with a stable `code`:
 
@@ -273,7 +274,7 @@ await journal.worker(db, { jobs: outbox.runner });
 - `expiresAt` stops a stale mail: past it, the job is dead with `MailExpired` and nothing is sent. Use it for sign-in links.
 - A queued mail has exactly one `to` recipient and no Cc or Bcc.
 - `retry` sets the waits (default 5 s doubling to 1 h, 5 tries). Only `MailUncertain` and a `MailRejected` with `data.retryable` are tried again; any other failure is dead on its first try.
-- `enqueue` returns `MailInvalidInput` for bad input, and queues nothing; your code decides whether the write still commits. It also returns `MailInvalidMessage` for a message that cannot be sent as written and `MailTooLarge` when the message is over `maxBytes` (256 KiB). It throws `MailError`: `E009` for the root database instead of a transaction, `E002` unless there is exactly one `to` recipient.
+- `enqueue` returns `MailInvalidInput` for bad input, and queues nothing; your code decides whether the write still commits. It also returns `MailInvalidMessage` for a message that cannot be sent as written, `MailTooLarge` when the message is over `maxBytes` (256 KiB), and `MailEnqueueContended` when other writers kept taking its `idempotencyKey` (retry the write). It throws `MailError`: `E009` for the root database instead of a transaction, `E002` unless there is exactly one `to` recipient.
 
 ## Dot
 

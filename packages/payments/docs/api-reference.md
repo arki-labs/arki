@@ -180,4 +180,5 @@ From `@arki/payments/dunning`:
 - Configuration inputs: `createTaxConfigSchema`, `updateTaxConfigSchema`, `updateConfigurationInputSchema`, `setDefaultConfigurationInputSchema`.
 - Jurisdiction inputs: `createJurisdictionSchema`, `getJurisdictionsByCountryInputSchema`, `getJurisdictionHierarchyInputSchema`.
 - Exemption inputs: `createExemptionSchema`, `getCustomerExemptionsInputSchema`, `getExpiringExemptionsInputSchema`, `approveExemptionInputSchema`, `revokeExemptionInputSchema`.
+- Exemption row rules, checked by `TaxExemptionRepository` on every create and update: `exemptionTargetSchema` (names a customer, a product code or a jurisdiction) and `exemptionPeriodSchema` (`validTo` not before `validFrom`).
 - Reporting inputs: `getCustomerTaxSummaryInputSchema`, `getCustomerAnnualSummaryInputSchema`, `generateComplianceReportInputSchema`, `exportTaxDataInputSchema`.

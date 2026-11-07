@@ -133,3 +133,18 @@ export const MailTooLarge = defineFailure('mail.too_large', {
   message: 'The queued mail is {bytes} bytes; the limit is {maxBytes}.',
   remediation: 'Shorten the content, or raise `maxBytes`. Put large files elsewhere and link them.',
 });
+
+/**
+ * Other writers kept winning this mail's `idempotencyKey` while `enqueue` queued it: each time the
+ * dedupe index refused the insert, the job that held the key was gone before it could be read.
+ * Nothing was queued. Only constant contention on one key causes this.
+ *
+ * @fix Retry the write; the key settles once the other writers finish.
+ * @verify bun run test -- src/pg
+ */
+export const MailEnqueueContended = defineFailure('mail.enqueue_contended', {
+  status: 503,
+  data: z.object({ attempts: z.number() }),
+  message: 'The mail was not queued: its idempotency key changed hands {attempts} times.',
+  remediation: 'Retry the write; the key settles once the other writers finish.',
+});

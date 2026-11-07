@@ -10,11 +10,11 @@ import { orThrow } from '@arki/failure';
  */
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { count, defineRelations, eq } from 'drizzle-orm';
+import { count, defineRelations, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { add, now, sub } from '@arki/date';
+import { add, now, sub, toMillis } from '@arki/date';
 
 import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
@@ -217,6 +217,50 @@ describe('updateCampaign templates', () => {
     expect(updateDunningCampaignInputSchema.safeParse({ templates: [] }).success).toBe(false);
     expect(updateDunningCampaignInputSchema.safeParse({ templates: [step, step] }).success).toBe(false);
     expect(updateDunningCampaignInputSchema.safeParse({ templates: [step] }).success).toBe(true);
+  });
+});
+
+describe('deleteCampaign', () => {
+  it('deletes a campaign that never sent anything, with its steps', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Never ran' }, 'usr_admin');
+
+    expect(await service.deleteCampaign(created.id)).toBeUndefined();
+
+    expect(await service.getCampaign(created.id)).toBeNull();
+    const steps = await db
+      .select()
+      .from(tables.dunningTemplates)
+      .where(eq(tables.dunningTemplates.campaignId, created.id));
+    expect(steps).toEqual([]);
+  });
+
+  // An admin deletes a campaign that already ran: the sent message keeps its step, so the route needs a 409 to answer with
+  it('refuses a campaign whose step already sent a communication with payments.dunning_template_in_use, and deletes nothing', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Already ran' }, 'usr_admin');
+    const [first, second] = created.templates;
+    if (!first || !second) throw new Error('campaign needs two steps');
+    const sent = await execution(created.id, 'completed');
+    await db.insert(tables.dunningCommunications).values({
+      executionId: sent.id,
+      customerId,
+      templateId: second.id,
+      channel: 'email',
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'sent',
+    });
+
+    const result = await service.deleteCampaign(created.id);
+
+    expect(result?.code).toBe('payments.dunning_template_in_use');
+    expect(DunningTemplateInUse.is(result) && result.data).toEqual({ templateId: second.id, stepNumber: 2 });
+    const after = await service.getCampaign(created.id);
+    expect(after?.templates.map(template => template.id)).toEqual([first.id, second.id]);
+    const executions = await db
+      .select()
+      .from(tables.dunningExecutions)
+      .where(eq(tables.dunningExecutions.campaignId, created.id));
+    expect(executions.map(row => row.id)).toEqual([sent.id]);
   });
 });
 
@@ -644,6 +688,104 @@ describe('a tick reports a stored payment the stop check cannot read', () => {
 
     expect(report.failed.find(entry => entry.id === id)?.code).toBe('money.unknown_currency');
     expect(await statusOf(laterId)).toBe('scheduled');
+  });
+});
+
+describe('a run that throws is retried with backoff', () => {
+  /**
+   * The database refuses to record the completion of this one execution, so every run of it throws
+   * after the message step. That is the fault retryFailedExecutions exists for.
+   */
+  async function refusedExecution() {
+    await db.execute(
+      sql.raw(
+        [
+          'CREATE OR REPLACE FUNCTION refuse_dunning_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN',
+          "IF NEW.status = 'completed' AND NEW.trigger_data->>'refuse' = 'completion' THEN",
+          "RAISE EXCEPTION 'the database refused the completion'; END IF; RETURN NEW; END $$",
+        ].join(' '),
+      ),
+    );
+    await db.execute(
+      sql`CREATE TRIGGER refuse_dunning_completion BEFORE UPDATE ON ${tables.dunningExecutions} FOR EACH ROW EXECUTE FUNCTION refuse_dunning_completion()`,
+    );
+    const campaignId = await createdCampaign('Retry: refused completion');
+    const campaign = await service.getCampaign(campaignId);
+    const [row] = await db
+      .insert(tables.dunningExecutions)
+      .values({
+        campaignId,
+        templateId: campaign?.templates[0]?.id,
+        customerId,
+        triggerType: 'manual',
+        triggerData: { refuse: 'completion' },
+        status: 'scheduled',
+        scheduledAt: sub(now(), { minutes: 1 }),
+      })
+      .returning();
+    if (!row) throw new Error('execution not inserted');
+
+    return row.id;
+  }
+
+  async function stored(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    const [row] = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.id, id));
+    if (!row) throw new Error('execution not found');
+
+    return row;
+  }
+
+  /** Whole minutes from now until the stored next retry, or null when there is none. */
+  async function minutesToNextRetry(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    const { nextRetryAt } = await stored(id);
+
+    return nextRetryAt ? Math.round((toMillis(nextRetryAt) - Date.now()) / 60_000) : null;
+  }
+
+  /** Time passes: the stored next retry is now due. */
+  async function retryIsDue(id: (typeof tables.dunningExecutions.$inferSelect)['id']) {
+    await db
+      .update(tables.dunningExecutions)
+      .set({ nextRetryAt: sub(now(), { minutes: 1 }) })
+      .where(eq(tables.dunningExecutions.id, id));
+  }
+
+  it('fails with a next retry, is picked again each time it is due, counts each retry once, and stops after three', async () => {
+    const id = await refusedExecution();
+    try {
+      const scheduled = await service.processScheduledExecutions(1000);
+      expect(scheduled.failed.map(fault => fault.id)).toContain(id);
+      expect(await stored(id)).toMatchObject({ status: 'failed', retryCount: 0 });
+      expect(await minutesToNextRetry(id)).toBe(30);
+
+      // Not due yet: nothing picks it
+      const early = await service.retryFailedExecutions(1000);
+      expect(early.failed.map(fault => fault.id)).not.toContain(id);
+
+      for (const [retryCount, minutes] of [
+        [1, 60],
+        [2, 120],
+      ] as const) {
+        await retryIsDue(id);
+        const report = await service.retryFailedExecutions(1000);
+        expect(report.failed.map(fault => fault.id)).toContain(id);
+        expect(await stored(id)).toMatchObject({ status: 'failed', retryCount });
+        expect(await minutesToNextRetry(id)).toBe(minutes);
+      }
+
+      await retryIsDue(id);
+      await service.retryFailedExecutions(1000);
+      const last = await stored(id);
+      expect(last).toMatchObject({ status: 'failed', retryCount: 3, nextRetryAt: null });
+      expect(last.errorMessage).toMatch(/^Max retries exceeded: /);
+
+      // Out of retries: a later tick never picks it again
+      const after = await service.retryFailedExecutions(1000);
+      expect(after.failed.map(fault => fault.id)).not.toContain(id);
+      expect(await stored(id)).toMatchObject({ retryCount: 3 });
+    } finally {
+      await db.execute(sql`DROP TRIGGER refuse_dunning_completion ON ${tables.dunningExecutions}`);
+    }
   });
 });
 
