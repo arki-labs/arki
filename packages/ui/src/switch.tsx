@@ -1,10 +1,9 @@
 /** Switch: an on and off toggle. */
 'use client';
 
-import * as React from 'react';
 import { Switch as SwitchPrimitive } from '@base-ui/react/switch';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
   return (

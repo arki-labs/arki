@@ -1,10 +1,9 @@
 /** Avatar: a user picture with a fallback. */
 'use client';
 
-import * as React from 'react';
 import { Avatar as AvatarPrimitive } from '@base-ui/react/avatar';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function Avatar({ className, ...props }: AvatarPrimitive.Root.Props) {
   return (

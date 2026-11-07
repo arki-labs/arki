@@ -7,7 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 import { DotsSixVertical, CornersOut, CornersIn } from '@arki/icons/phosphor';
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 

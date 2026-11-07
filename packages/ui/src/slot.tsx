@@ -1,7 +1,7 @@
 /** `Slot`: merge props onto a child element. */
 import * as React from 'react';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function assignRefs<T>(refs: (React.Ref<T> | undefined)[], value: T | null) {
   for (const ref of refs) {

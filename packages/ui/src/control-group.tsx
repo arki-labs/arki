@@ -1,7 +1,7 @@
 /** Control group: joins related inputs and buttons into one bar. */
 import * as React from 'react';
-import { cn } from './cn';
-import { Slot } from './slot';
+import { cn } from './cn.js';
+import { Slot } from './slot.js';
 
 const ControlGroupContext = React.createContext<Pick<ControlGroupProps, 'orientation'>>({
   orientation: 'horizontal',

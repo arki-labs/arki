@@ -4,7 +4,7 @@ import { cva } from 'class-variance-authority';
 
 import { Check, Info, Siren, Warning } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 const iconClassName = 'my-1.5 mr-2 h-4 w-4 shrink-0';
 

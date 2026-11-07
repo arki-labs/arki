@@ -1,11 +1,10 @@
 /** Radio group: choose one option from a list. */
 'use client';
 
-import * as React from 'react';
 import { Radio as RadioPrimitive } from '@base-ui/react/radio';
 import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
   return <RadioGroupPrimitive data-slot="radio-group" className={cn('grid gap-3', className)} {...props} />;

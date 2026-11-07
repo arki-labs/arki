@@ -1,11 +1,10 @@
 /** Collapsible: one section that opens and closes. */
 'use client';
 
-import * as React from 'react';
 import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
 
 function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props) {
   return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />;

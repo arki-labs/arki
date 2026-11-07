@@ -5,9 +5,9 @@ import type { FC } from 'react';
 import * as React from 'react';
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
-import { cn } from './cn';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
+import { cn } from './cn.js';
 
 function TooltipProvider({
   delay = 0,

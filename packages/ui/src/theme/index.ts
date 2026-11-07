@@ -8,4 +8,4 @@ export {
   type ResolvedTheme,
   type ThemeProviderProps,
   type UseThemeReturn,
-} from './theme-context';
+} from './theme-context.js';

@@ -2,8 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-import type { ThemeDetectionOptions } from './script';
-import { themeDetectionFn } from './script';
+import type { ThemeDetectionOptions } from './script.js';
+import { themeDetectionFn } from './script.js';
 
 const MEDIA = '(prefers-color-scheme: dark)';
 const STORAGE_KEY = 'theme';

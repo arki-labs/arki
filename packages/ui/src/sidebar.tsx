@@ -7,17 +7,17 @@ import { cva } from 'class-variance-authority';
 
 import { SidebarIcon, SidebarSimpleIcon } from '@arki/icons/phosphor';
 import { getLogger } from '@arki/log';
-import { useIsClient } from './hooks/is-client';
-import { useIsMobile, useIsTablet } from './hooks/media-query';
+import { useIsClient } from './hooks/is-client.js';
+import { useIsMobile, useIsTablet } from './hooks/media-query.js';
 
-import { Button } from './button';
-import { cn } from './cn';
-import { Slot } from './slot';
-import { Input } from './input';
-import { Separator } from './separator';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './sheet';
-import { Skeleton } from './skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, WithTooltip } from './tooltip';
+import { Button } from './button.js';
+import { cn } from './cn.js';
+import { Slot } from './slot.js';
+import { Input } from './input.js';
+import { Separator } from './separator.js';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './sheet.js';
+import { Skeleton } from './skeleton.js';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, WithTooltip } from './tooltip.js';
 
 // One logger per sidebar concern; output shows only when the app configures `@arki/log`.
 const sidebarLog = getLogger('arki:ui:sidebar');

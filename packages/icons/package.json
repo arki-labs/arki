@@ -26,33 +26,39 @@
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "browser": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "browser": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     },
     "./flags": {
       "types": "./dist/src/flags/index.d.ts",
-      "import": "./src/flags/index.tsx",
-      "browser": "./src/flags/index.tsx"
+      "import": "./dist/src/flags/index.js",
+      "browser": "./dist/src/flags/index.js",
+      "default": "./dist/src/flags/index.js"
     },
     "./brands": {
       "types": "./dist/src/brands/index.d.ts",
-      "import": "./src/brands/index.ts",
-      "browser": "./src/brands/index.ts"
+      "import": "./dist/src/brands/index.js",
+      "browser": "./dist/src/brands/index.js",
+      "default": "./dist/src/brands/index.js"
     },
     "./phosphor": {
       "types": "./dist/src/phosphor.d.ts",
-      "import": "./src/phosphor.ts",
-      "browser": "./src/phosphor.ts"
+      "import": "./dist/src/phosphor.js",
+      "browser": "./dist/src/phosphor.js",
+      "default": "./dist/src/phosphor.js"
     },
     "./phosphor/ssr": {
       "types": "./dist/src/phosphor-ssr.d.ts",
-      "import": "./src/phosphor-ssr.ts",
-      "browser": "./src/phosphor-ssr.ts"
+      "import": "./dist/src/phosphor-ssr.js",
+      "browser": "./dist/src/phosphor-ssr.js",
+      "default": "./dist/src/phosphor-ssr.js"
     },
     "./phosphor/defaults": {
       "types": "./dist/src/phosphor-defaults.d.ts",
-      "import": "./src/phosphor-defaults.tsx",
-      "browser": "./src/phosphor-defaults.tsx"
+      "import": "./dist/src/phosphor-defaults.js",
+      "browser": "./dist/src/phosphor-defaults.js",
+      "default": "./dist/src/phosphor-defaults.js"
     },
     "./vite": {
       "types": "./dist/src/vite.d.ts",
@@ -60,43 +66,51 @@
     },
     "./spinners": {
       "types": "./dist/src/spinners/index.d.ts",
-      "import": "./src/spinners/index.ts",
-      "browser": "./src/spinners/index.ts"
+      "import": "./dist/src/spinners/index.js",
+      "browser": "./dist/src/spinners/index.js",
+      "default": "./dist/src/spinners/index.js"
     },
     "./brands/index": {
       "types": "./dist/src/brands/index.d.ts",
-      "import": "./src/brands/index.ts",
-      "browser": "./src/brands/index.ts"
+      "import": "./dist/src/brands/index.js",
+      "browser": "./dist/src/brands/index.js",
+      "default": "./dist/src/brands/index.js"
     },
     "./home": {
       "types": "./dist/src/home.d.ts",
-      "import": "./src/home.tsx",
-      "browser": "./src/home.tsx"
+      "import": "./dist/src/home.js",
+      "browser": "./dist/src/home.js",
+      "default": "./dist/src/home.js"
     },
     "./index": {
       "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "browser": "./src/index.ts"
+      "import": "./dist/src/index.js",
+      "browser": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     },
     "./phosphor-ssr": {
       "types": "./dist/src/phosphor-ssr.d.ts",
-      "import": "./src/phosphor-ssr.ts",
-      "browser": "./src/phosphor-ssr.ts"
+      "import": "./dist/src/phosphor-ssr.js",
+      "browser": "./dist/src/phosphor-ssr.js",
+      "default": "./dist/src/phosphor-ssr.js"
     },
     "./spinners/index": {
       "types": "./dist/src/spinners/index.d.ts",
-      "import": "./src/spinners/index.ts",
-      "browser": "./src/spinners/index.ts"
+      "import": "./dist/src/spinners/index.js",
+      "browser": "./dist/src/spinners/index.js",
+      "default": "./dist/src/spinners/index.js"
     },
     "./types": {
       "types": "./dist/src/types.d.ts",
-      "import": "./src/types.ts",
-      "browser": "./src/types.ts"
+      "import": "./dist/src/types.js",
+      "browser": "./dist/src/types.js",
+      "default": "./dist/src/types.js"
     },
     "./wc": {
       "types": "./dist/src/wc.d.ts",
-      "import": "./src/wc.ts",
-      "browser": "./src/wc.ts"
+      "import": "./dist/src/wc.js",
+      "browser": "./dist/src/wc.js",
+      "default": "./dist/src/wc.js"
     },
     "./package.json": "./package.json"
   },
@@ -165,22 +179,15 @@
   ],
   "scripts": {
     "bench": "bun run build && arki-bench",
-    "build": "tsc && tsc -p tsconfig.vite.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs = require('node:fs'); for (const f of fs.readdirSync('src/spinners')) if (f.endsWith('.svg')) fs.copyFileSync('src/spinners/' + f, 'dist/src/spinners/' + f)\"",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:runtimes": "arki-runtimes",
     "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
-  },
-  "arki": {
-    "runtimes": [
-      "bun",
-      "deno",
-      "browser"
-    ]
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -217,6 +224,13 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "arki": {
+    "runtimes": [
+      "bun",
+      "deno",
+      "browser"
+    ]
   },
   "module:jsx": "src"
 }

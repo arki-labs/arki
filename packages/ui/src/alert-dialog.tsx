@@ -4,10 +4,10 @@
 import * as React from 'react';
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
-import { buttonVariants } from './button';
-import { cn } from './cn';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
+import { buttonVariants } from './button.js';
+import { cn } from './cn.js';
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;

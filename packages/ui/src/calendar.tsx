@@ -6,8 +6,8 @@ import { DayPicker } from 'react-day-picker';
 
 import { CaretDown, CaretLeft, CaretRight, CaretUp } from '@arki/icons/phosphor';
 
-import { buttonVariants } from './button';
-import { cn } from './cn';
+import { buttonVariants } from './button.js';
+import { cn } from './cn.js';
 
 type CalendarProps = React.ComponentProps<typeof DayPicker> & {
   fullWidth?: boolean;

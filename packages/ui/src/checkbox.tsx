@@ -1,12 +1,11 @@
 /** Checkbox: a tick box. */
 'use client';
 
-import * as React from 'react';
 import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox';
 
 import { CheckIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (

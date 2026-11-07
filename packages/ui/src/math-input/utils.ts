@@ -1,4 +1,4 @@
-import { MATH_CONSTANTS } from './constants';
+import { MATH_CONSTANTS } from './constants.js';
 
 /**
  * Maps a stored number to its human-readable display string.

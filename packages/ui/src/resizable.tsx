@@ -6,7 +6,7 @@ import * as ResizablePrimitive from 'react-resizable-panels';
 
 import { DotsSixVerticalIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function ResizablePanelGroup({ className, ...props }: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>) {
   return (

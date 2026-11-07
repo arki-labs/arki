@@ -6,7 +6,7 @@ import { Menubar as MenubarPrimitive } from '@base-ui/react/menubar';
 
 import { CaretRightIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -22,7 +22,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from './dropdown-menu';
+} from './dropdown-menu.js';
 
 function Menubar({ className, ...props }: MenubarPrimitive.Props) {
   return (

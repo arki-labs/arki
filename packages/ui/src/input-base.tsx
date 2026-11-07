@@ -3,8 +3,8 @@
 
 import * as React from 'react';
 
-import { Button } from './button';
-import { cn } from './cn';
+import { Button } from './button.js';
+import { cn } from './cn.js';
 
 /** Give every ref the same value: a callback ref is called with it, an object ref is set to it. */
 function assignRefs<T>(refs: (React.Ref<T> | undefined)[], value: T | null) {

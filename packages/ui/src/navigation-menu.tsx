@@ -1,13 +1,12 @@
 /** Navigation menu: top-level links with fly-out panels. */
 'use client';
 
-import * as React from 'react';
 import { NavigationMenu as NavigationMenuPrimitive } from '@base-ui/react/navigation-menu';
 import { cva } from 'class-variance-authority';
 
 import { CaretDownIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function NavigationMenu({
   className,

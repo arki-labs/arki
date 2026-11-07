@@ -6,11 +6,11 @@ import { colord, extend } from 'colord';
 import namesPlugin from 'colord/plugins/names';
 import { RgbaStringColorPicker } from 'react-colorful';
 
-import type { ButtonProps } from './button';
-import { Button } from './button';
-import { cn } from './cn';
-import { Input } from './input';
-import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import type { ButtonProps } from './button.js';
+import { Button } from './button.js';
+import { cn } from './cn.js';
+import { Input } from './input.js';
+import { Popover, PopoverContent, PopoverTrigger } from './popover.js';
 
 extend([namesPlugin]);
 

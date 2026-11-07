@@ -6,8 +6,8 @@ import { Command as CommandPrimitive } from 'cmdk';
 
 import { MagnifyingGlassIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
+import { cn } from './cn.js';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog.js';
 
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
   return (

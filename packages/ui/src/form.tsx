@@ -7,9 +7,9 @@ import * as React from 'react';
 import { useId } from 'react';
 import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
 
-import { cn } from './cn';
-import { Label } from './label';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
+import { cn } from './cn.js';
+import { Label } from './label.js';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip.js';
 
 const Form = FormProvider;
 

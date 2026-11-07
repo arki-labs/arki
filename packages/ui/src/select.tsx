@@ -6,7 +6,7 @@ import { Select as SelectPrimitive } from '@base-ui/react/select';
 
 import { CaretDownIcon, CaretUpIcon, CheckIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 type SelectProps<Value extends string = string> = Omit<
   React.ComponentProps<typeof SelectPrimitive.Root>,

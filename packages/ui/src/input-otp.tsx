@@ -6,7 +6,7 @@ import { OTPInput, OTPInputContext } from 'input-otp';
 
 import { MinusIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function InputOTP({
   className,

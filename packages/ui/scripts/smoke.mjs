@@ -1,5 +1,5 @@
-// Cross-runtime smoke test. Runs the published entries (this package ships its source, so
-// they are resolved by name, as a consumer would) in headless Chromium via
+// Cross-runtime smoke test. Runs the published entries (the compiled `dist/` JavaScript,
+// resolved by name, as a consumer would) in headless Chromium via
 // `bun run test:runtimes` (the only engine this package claims). Components are rendered
 // and clicked in a real DOM; the pure helpers and the theme script are called directly.
 

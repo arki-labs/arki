@@ -1,10 +1,10 @@
 /** Toolbar: a bar of buttons and dividers. */
 import type { ButtonHTMLAttributes, ComponentProps } from 'react';
 
-import type { ButtonProps } from './button';
-import { Button } from './button';
-import { cn } from './cn';
-import { Surface } from './surface';
+import type { ButtonProps } from './button.js';
+import { Button } from './button.js';
+import { cn } from './cn.js';
+import { Surface } from './surface.js';
 
 export type ToolbarWrapperProps = {
   shouldShowContent?: boolean;

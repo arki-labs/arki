@@ -3,9 +3,9 @@
 
 import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card';
 
-import type { AsChildProp } from './as-child';
-import { withAsChild } from './as-child';
-import { cn } from './cn';
+import type { AsChildProp } from './as-child.js';
+import { withAsChild } from './as-child.js';
+import { cn } from './cn.js';
 
 function HoverCard({
   // Radix-era props that Base UI moved to PreviewCardTrigger. Accepted and

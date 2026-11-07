@@ -6,10 +6,10 @@ import type { ComponentProps } from 'react';
 import { format } from '@arki/date/format';
 import { CalendarIcon } from '@arki/icons/phosphor';
 
-import { Button } from './button';
-import { Calendar } from './calendar';
-import { cn } from './cn';
-import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import { Button } from './button.js';
+import { Calendar } from './calendar.js';
+import { cn } from './cn.js';
+import { Popover, PopoverContent, PopoverTrigger } from './popover.js';
 
 type DatePickerProps = {
   date?: Date;

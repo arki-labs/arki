@@ -5,14 +5,14 @@ import * as React from 'react';
 
 import { Sigma } from '@arki/icons/phosphor';
 
-import { Button } from '../button';
-import { cn } from '../cn';
-import { Input } from '../input';
-import { Popover, PopoverContent, PopoverTrigger } from '../popover';
-import { Separator } from '../separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../tabs';
-import { CATEGORY_LABELS, CATEGORY_ORDER, MATH_CONSTANTS } from './constants';
-import { displayToNumber, numberToDisplay, parseFraction } from './utils';
+import { Button } from '../button.js';
+import { cn } from '../cn.js';
+import { Input } from '../input.js';
+import { Popover, PopoverContent, PopoverTrigger } from '../popover.js';
+import { Separator } from '../separator.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../tabs.js';
+import { CATEGORY_LABELS, CATEGORY_ORDER, MATH_CONSTANTS } from './constants.js';
+import { displayToNumber, numberToDisplay, parseFraction } from './utils.js';
 
 export type MathInputProps = {
   value: number | null;

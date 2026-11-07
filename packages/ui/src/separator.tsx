@@ -1,10 +1,9 @@
 /** Separator: a divider line. */
 'use client';
 
-import * as React from 'react';
 import { Separator as SeparatorPrimitive } from '@base-ui/react/separator';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function Separator({
   className,

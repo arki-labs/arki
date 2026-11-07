@@ -1,7 +1,7 @@
 /** Input: a text field. */
 import * as React from 'react';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
   return (

@@ -4,7 +4,7 @@
 import { useCallback, useRef } from 'react';
 import { getLogger } from '@arki/log';
 
-import { useViewport } from './use-viewport';
+import { useViewport } from './use-viewport.js';
 
 const touchLog = getLogger('arki:ui:touch');
 

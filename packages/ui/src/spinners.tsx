@@ -1,7 +1,7 @@
 /** Spinners: loading indicators. */
 import type { ComponentProps } from 'react';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 export { PulseLoader } from 'react-spinners';
 

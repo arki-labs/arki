@@ -3,9 +3,9 @@ import * as React from 'react';
 
 import { CaretLeftIcon, CaretRightIcon, DotsThreeIcon } from '@arki/icons/phosphor';
 
-import type { Button } from './button';
-import { buttonVariants } from './button';
-import { cn } from './cn';
+import type { Button } from './button.js';
+import { buttonVariants } from './button.js';
+import { cn } from './cn.js';
 
 function Pagination({ className, ...props }: React.ComponentProps<'nav'>) {
   return (

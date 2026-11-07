@@ -1,12 +1,11 @@
 /** Popover: a floating panel anchored to a button. */
 'use client';
 
-import * as React from 'react';
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
-import { cn } from './cn';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
+import { cn } from './cn.js';
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />;

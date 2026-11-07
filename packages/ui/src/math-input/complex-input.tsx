@@ -1,8 +1,8 @@
 /** Complex input: a field for complex numbers. */
 'use client';
 
-import { cn } from '../cn';
-import { MathInput } from './index';
+import { cn } from '../cn.js';
+import { MathInput } from './index.js';
 
 export type ComplexInputProps = {
   real: number | null;

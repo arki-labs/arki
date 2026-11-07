@@ -6,9 +6,9 @@ import { Dialog as SheetPrimitive } from '@base-ui/react/dialog';
 
 import { XIcon } from '@arki/icons/phosphor';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
-import { cn } from './cn';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
+import { cn } from './cn.js';
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;

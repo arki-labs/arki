@@ -27,439 +27,527 @@
   "exports": {
     "./utils": {
       "types": "./dist/src/cn.d.ts",
-      "import": "./src/cn.ts",
-      "browser": "./src/cn.ts"
+      "import": "./dist/src/cn.js",
+      "browser": "./dist/src/cn.js",
+      "default": "./dist/src/cn.js"
     },
     "./cn": {
       "types": "./dist/src/cn.d.ts",
-      "import": "./src/cn.ts",
-      "browser": "./src/cn.ts"
+      "import": "./dist/src/cn.js",
+      "browser": "./dist/src/cn.js",
+      "default": "./dist/src/cn.js"
     },
     "./copy-text": {
       "types": "./dist/src/copy-text.d.ts",
-      "import": "./src/copy-text.ts",
-      "browser": "./src/copy-text.ts"
+      "import": "./dist/src/copy-text.js",
+      "browser": "./dist/src/copy-text.js",
+      "default": "./dist/src/copy-text.js"
     },
     "./accordion": {
       "types": "./dist/src/accordion.d.ts",
-      "import": "./src/accordion.tsx",
-      "browser": "./src/accordion.tsx"
+      "import": "./dist/src/accordion.js",
+      "browser": "./dist/src/accordion.js",
+      "default": "./dist/src/accordion.js"
     },
     "./alert": {
       "types": "./dist/src/alert.d.ts",
-      "import": "./src/alert.tsx",
-      "browser": "./src/alert.tsx"
+      "import": "./dist/src/alert.js",
+      "browser": "./dist/src/alert.js",
+      "default": "./dist/src/alert.js"
     },
     "./alert-dialog": {
       "types": "./dist/src/alert-dialog.d.ts",
-      "import": "./src/alert-dialog.tsx",
-      "browser": "./src/alert-dialog.tsx"
+      "import": "./dist/src/alert-dialog.js",
+      "browser": "./dist/src/alert-dialog.js",
+      "default": "./dist/src/alert-dialog.js"
     },
     "./aspect-ratio": {
       "types": "./dist/src/aspect-ratio.d.ts",
-      "import": "./src/aspect-ratio.tsx",
-      "browser": "./src/aspect-ratio.tsx"
+      "import": "./dist/src/aspect-ratio.js",
+      "browser": "./dist/src/aspect-ratio.js",
+      "default": "./dist/src/aspect-ratio.js"
     },
     "./avatar": {
       "types": "./dist/src/avatar.d.ts",
-      "import": "./src/avatar.tsx",
-      "browser": "./src/avatar.tsx"
+      "import": "./dist/src/avatar.js",
+      "browser": "./dist/src/avatar.js",
+      "default": "./dist/src/avatar.js"
     },
     "./badge": {
       "types": "./dist/src/badge.d.ts",
-      "import": "./src/badge.tsx",
-      "browser": "./src/badge.tsx"
+      "import": "./dist/src/badge.js",
+      "browser": "./dist/src/badge.js",
+      "default": "./dist/src/badge.js"
     },
     "./breadcrumb": {
       "types": "./dist/src/breadcrumb.d.ts",
-      "import": "./src/breadcrumb.tsx",
-      "browser": "./src/breadcrumb.tsx"
+      "import": "./dist/src/breadcrumb.js",
+      "browser": "./dist/src/breadcrumb.js",
+      "default": "./dist/src/breadcrumb.js"
     },
     "./button": {
       "types": "./dist/src/button.d.ts",
-      "import": "./src/button.tsx",
-      "browser": "./src/button.tsx"
+      "import": "./dist/src/button.js",
+      "browser": "./dist/src/button.js",
+      "default": "./dist/src/button.js"
     },
     "./calendar": {
       "types": "./dist/src/calendar.d.ts",
-      "import": "./src/calendar.tsx",
-      "browser": "./src/calendar.tsx"
+      "import": "./dist/src/calendar.js",
+      "browser": "./dist/src/calendar.js",
+      "default": "./dist/src/calendar.js"
     },
     "./callout": {
       "types": "./dist/src/callout.d.ts",
-      "import": "./src/callout.tsx",
-      "browser": "./src/callout.tsx"
+      "import": "./dist/src/callout.js",
+      "browser": "./dist/src/callout.js",
+      "default": "./dist/src/callout.js"
     },
     "./card": {
       "types": "./dist/src/card.d.ts",
-      "import": "./src/card.tsx",
-      "browser": "./src/card.tsx"
+      "import": "./dist/src/card.js",
+      "browser": "./dist/src/card.js",
+      "default": "./dist/src/card.js"
     },
     "./carousel": {
       "types": "./dist/src/carousel.d.ts",
-      "import": "./src/carousel.tsx",
-      "browser": "./src/carousel.tsx"
+      "import": "./dist/src/carousel.js",
+      "browser": "./dist/src/carousel.js",
+      "default": "./dist/src/carousel.js"
     },
     "./chart": {
       "types": "./dist/src/chart.d.ts",
-      "import": "./src/chart.tsx",
-      "browser": "./src/chart.tsx"
+      "import": "./dist/src/chart.js",
+      "browser": "./dist/src/chart.js",
+      "default": "./dist/src/chart.js"
     },
     "./checkbox": {
       "types": "./dist/src/checkbox.d.ts",
-      "import": "./src/checkbox.tsx",
-      "browser": "./src/checkbox.tsx"
+      "import": "./dist/src/checkbox.js",
+      "browser": "./dist/src/checkbox.js",
+      "default": "./dist/src/checkbox.js"
     },
     "./collapsible": {
       "types": "./dist/src/collapsible.d.ts",
-      "import": "./src/collapsible.tsx",
-      "browser": "./src/collapsible.tsx"
+      "import": "./dist/src/collapsible.js",
+      "browser": "./dist/src/collapsible.js",
+      "default": "./dist/src/collapsible.js"
     },
     "./color-picker": {
       "types": "./dist/src/color-picker.d.ts",
-      "import": "./src/color-picker.tsx",
-      "browser": "./src/color-picker.tsx"
+      "import": "./dist/src/color-picker.js",
+      "browser": "./dist/src/color-picker.js",
+      "default": "./dist/src/color-picker.js"
     },
     "./command": {
       "types": "./dist/src/command.d.ts",
-      "import": "./src/command.tsx",
-      "browser": "./src/command.tsx"
+      "import": "./dist/src/command.js",
+      "browser": "./dist/src/command.js",
+      "default": "./dist/src/command.js"
     },
     "./context-menu": {
       "types": "./dist/src/context-menu.d.ts",
-      "import": "./src/context-menu.tsx",
-      "browser": "./src/context-menu.tsx"
+      "import": "./dist/src/context-menu.js",
+      "browser": "./dist/src/context-menu.js",
+      "default": "./dist/src/context-menu.js"
     },
     "./control-group": {
       "types": "./dist/src/control-group.d.ts",
-      "import": "./src/control-group.tsx",
-      "browser": "./src/control-group.tsx"
+      "import": "./dist/src/control-group.js",
+      "browser": "./dist/src/control-group.js",
+      "default": "./dist/src/control-group.js"
     },
     "./date-picker": {
       "types": "./dist/src/date-picker.d.ts",
-      "import": "./src/date-picker.tsx",
-      "browser": "./src/date-picker.tsx"
+      "import": "./dist/src/date-picker.js",
+      "browser": "./dist/src/date-picker.js",
+      "default": "./dist/src/date-picker.js"
     },
     "./dialog": {
       "types": "./dist/src/dialog.d.ts",
-      "import": "./src/dialog.tsx",
-      "browser": "./src/dialog.tsx"
+      "import": "./dist/src/dialog.js",
+      "browser": "./dist/src/dialog.js",
+      "default": "./dist/src/dialog.js"
     },
     "./drawer": {
       "types": "./dist/src/drawer.d.ts",
-      "import": "./src/drawer.tsx",
-      "browser": "./src/drawer.tsx"
+      "import": "./dist/src/drawer.js",
+      "browser": "./dist/src/drawer.js",
+      "default": "./dist/src/drawer.js"
     },
     "./dropdown-menu": {
       "types": "./dist/src/dropdown-menu.d.ts",
-      "import": "./src/dropdown-menu.tsx",
-      "browser": "./src/dropdown-menu.tsx"
+      "import": "./dist/src/dropdown-menu.js",
+      "browser": "./dist/src/dropdown-menu.js",
+      "default": "./dist/src/dropdown-menu.js"
     },
     "./form": {
       "types": "./dist/src/form.d.ts",
-      "import": "./src/form.tsx",
-      "browser": "./src/form.tsx"
+      "import": "./dist/src/form.js",
+      "browser": "./dist/src/form.js",
+      "default": "./dist/src/form.js"
     },
     "./glass-card": {
       "types": "./dist/src/glass-card.d.ts",
-      "import": "./src/glass-card.tsx",
-      "browser": "./src/glass-card.tsx"
+      "import": "./dist/src/glass-card.js",
+      "browser": "./dist/src/glass-card.js",
+      "default": "./dist/src/glass-card.js"
     },
     "./hover-card": {
       "types": "./dist/src/hover-card.d.ts",
-      "import": "./src/hover-card.tsx",
-      "browser": "./src/hover-card.tsx"
+      "import": "./dist/src/hover-card.js",
+      "browser": "./dist/src/hover-card.js",
+      "default": "./dist/src/hover-card.js"
     },
     "./input": {
       "types": "./dist/src/input.d.ts",
-      "import": "./src/input.tsx",
-      "browser": "./src/input.tsx"
+      "import": "./dist/src/input.js",
+      "browser": "./dist/src/input.js",
+      "default": "./dist/src/input.js"
     },
     "./input-base": {
       "types": "./dist/src/input-base.d.ts",
-      "import": "./src/input-base.tsx",
-      "browser": "./src/input-base.tsx"
+      "import": "./dist/src/input-base.js",
+      "browser": "./dist/src/input-base.js",
+      "default": "./dist/src/input-base.js"
     },
     "./input-otp": {
       "types": "./dist/src/input-otp.d.ts",
-      "import": "./src/input-otp.tsx",
-      "browser": "./src/input-otp.tsx"
+      "import": "./dist/src/input-otp.js",
+      "browser": "./dist/src/input-otp.js",
+      "default": "./dist/src/input-otp.js"
     },
     "./katex": {
       "types": "./dist/src/katex.d.ts",
-      "import": "./src/katex.tsx",
-      "browser": "./src/katex.tsx"
+      "import": "./dist/src/katex.js",
+      "browser": "./dist/src/katex.js",
+      "default": "./dist/src/katex.js"
     },
     "./label": {
       "types": "./dist/src/label.d.ts",
-      "import": "./src/label.tsx",
-      "browser": "./src/label.tsx"
+      "import": "./dist/src/label.js",
+      "browser": "./dist/src/label.js",
+      "default": "./dist/src/label.js"
     },
     "./math-input": {
       "types": "./dist/src/math-input/index.d.ts",
-      "import": "./src/math-input/index.tsx",
-      "browser": "./src/math-input/index.tsx"
+      "import": "./dist/src/math-input/index.js",
+      "browser": "./dist/src/math-input/index.js",
+      "default": "./dist/src/math-input/index.js"
     },
     "./complex-input": {
       "types": "./dist/src/math-input/complex-input.d.ts",
-      "import": "./src/math-input/complex-input.tsx",
-      "browser": "./src/math-input/complex-input.tsx"
+      "import": "./dist/src/math-input/complex-input.js",
+      "browser": "./dist/src/math-input/complex-input.js",
+      "default": "./dist/src/math-input/complex-input.js"
     },
     "./menubar": {
       "types": "./dist/src/menubar.d.ts",
-      "import": "./src/menubar.tsx",
-      "browser": "./src/menubar.tsx"
+      "import": "./dist/src/menubar.js",
+      "browser": "./dist/src/menubar.js",
+      "default": "./dist/src/menubar.js"
     },
     "./navigation-menu": {
       "types": "./dist/src/navigation-menu.d.ts",
-      "import": "./src/navigation-menu.tsx",
-      "browser": "./src/navigation-menu.tsx"
+      "import": "./dist/src/navigation-menu.js",
+      "browser": "./dist/src/navigation-menu.js",
+      "default": "./dist/src/navigation-menu.js"
     },
     "./pagination": {
       "types": "./dist/src/pagination.d.ts",
-      "import": "./src/pagination.tsx",
-      "browser": "./src/pagination.tsx"
+      "import": "./dist/src/pagination.js",
+      "browser": "./dist/src/pagination.js",
+      "default": "./dist/src/pagination.js"
     },
     "./panel": {
       "types": "./dist/src/panel.d.ts",
-      "import": "./src/panel.tsx",
-      "browser": "./src/panel.tsx"
+      "import": "./dist/src/panel.js",
+      "browser": "./dist/src/panel.js",
+      "default": "./dist/src/panel.js"
     },
     "./popover": {
       "types": "./dist/src/popover.d.ts",
-      "import": "./src/popover.tsx",
-      "browser": "./src/popover.tsx"
+      "import": "./dist/src/popover.js",
+      "browser": "./dist/src/popover.js",
+      "default": "./dist/src/popover.js"
     },
     "./progress": {
       "types": "./dist/src/progress.d.ts",
-      "import": "./src/progress.tsx",
-      "browser": "./src/progress.tsx"
+      "import": "./dist/src/progress.js",
+      "browser": "./dist/src/progress.js",
+      "default": "./dist/src/progress.js"
     },
     "./radio-group": {
       "types": "./dist/src/radio-group.d.ts",
-      "import": "./src/radio-group.tsx",
-      "browser": "./src/radio-group.tsx"
+      "import": "./dist/src/radio-group.js",
+      "browser": "./dist/src/radio-group.js",
+      "default": "./dist/src/radio-group.js"
     },
     "./resizable": {
       "types": "./dist/src/resizable.d.ts",
-      "import": "./src/resizable.tsx",
-      "browser": "./src/resizable.tsx"
+      "import": "./dist/src/resizable.js",
+      "browser": "./dist/src/resizable.js",
+      "default": "./dist/src/resizable.js"
     },
     "./scroll-area": {
       "types": "./dist/src/scroll-area.d.ts",
-      "import": "./src/scroll-area.tsx",
-      "browser": "./src/scroll-area.tsx"
+      "import": "./dist/src/scroll-area.js",
+      "browser": "./dist/src/scroll-area.js",
+      "default": "./dist/src/scroll-area.js"
     },
     "./scroll-to-top": {
       "types": "./dist/src/scroll-to-top.d.ts",
-      "import": "./src/scroll-to-top.tsx",
-      "browser": "./src/scroll-to-top.tsx"
+      "import": "./dist/src/scroll-to-top.js",
+      "browser": "./dist/src/scroll-to-top.js",
+      "default": "./dist/src/scroll-to-top.js"
     },
     "./select": {
       "types": "./dist/src/select.d.ts",
-      "import": "./src/select.tsx",
-      "browser": "./src/select.tsx"
+      "import": "./dist/src/select.js",
+      "browser": "./dist/src/select.js",
+      "default": "./dist/src/select.js"
     },
     "./separator": {
       "types": "./dist/src/separator.d.ts",
-      "import": "./src/separator.tsx",
-      "browser": "./src/separator.tsx"
+      "import": "./dist/src/separator.js",
+      "browser": "./dist/src/separator.js",
+      "default": "./dist/src/separator.js"
     },
     "./sheet": {
       "types": "./dist/src/sheet.d.ts",
-      "import": "./src/sheet.tsx",
-      "browser": "./src/sheet.tsx"
+      "import": "./dist/src/sheet.js",
+      "browser": "./dist/src/sheet.js",
+      "default": "./dist/src/sheet.js"
     },
     "./sidebar": {
       "types": "./dist/src/sidebar.d.ts",
-      "import": "./src/sidebar.tsx",
-      "browser": "./src/sidebar.tsx"
+      "import": "./dist/src/sidebar.js",
+      "browser": "./dist/src/sidebar.js",
+      "default": "./dist/src/sidebar.js"
     },
     "./skeleton": {
       "types": "./dist/src/skeleton.d.ts",
-      "import": "./src/skeleton.tsx",
-      "browser": "./src/skeleton.tsx"
+      "import": "./dist/src/skeleton.js",
+      "browser": "./dist/src/skeleton.js",
+      "default": "./dist/src/skeleton.js"
     },
     "./slider": {
       "types": "./dist/src/slider.d.ts",
-      "import": "./src/slider.tsx",
-      "browser": "./src/slider.tsx"
+      "import": "./dist/src/slider.js",
+      "browser": "./dist/src/slider.js",
+      "default": "./dist/src/slider.js"
     },
     "./sonner": {
       "types": "./dist/src/sonner.d.ts",
-      "import": "./src/sonner.tsx",
-      "browser": "./src/sonner.tsx"
+      "import": "./dist/src/sonner.js",
+      "browser": "./dist/src/sonner.js",
+      "default": "./dist/src/sonner.js"
     },
     "./spinners": {
       "types": "./dist/src/spinners.d.ts",
-      "import": "./src/spinners.tsx",
-      "browser": "./src/spinners.tsx"
+      "import": "./dist/src/spinners.js",
+      "browser": "./dist/src/spinners.js",
+      "default": "./dist/src/spinners.js"
     },
     "./surface": {
       "types": "./dist/src/surface.d.ts",
-      "import": "./src/surface.tsx",
-      "browser": "./src/surface.tsx"
+      "import": "./dist/src/surface.js",
+      "browser": "./dist/src/surface.js",
+      "default": "./dist/src/surface.js"
     },
     "./switch": {
       "types": "./dist/src/switch.d.ts",
-      "import": "./src/switch.tsx",
-      "browser": "./src/switch.tsx"
+      "import": "./dist/src/switch.js",
+      "browser": "./dist/src/switch.js",
+      "default": "./dist/src/switch.js"
     },
     "./table": {
       "types": "./dist/src/table.d.ts",
-      "import": "./src/table.tsx",
-      "browser": "./src/table.tsx"
+      "import": "./dist/src/table.js",
+      "browser": "./dist/src/table.js",
+      "default": "./dist/src/table.js"
     },
     "./tabs": {
       "types": "./dist/src/tabs.d.ts",
-      "import": "./src/tabs.tsx",
-      "browser": "./src/tabs.tsx"
+      "import": "./dist/src/tabs.js",
+      "browser": "./dist/src/tabs.js",
+      "default": "./dist/src/tabs.js"
     },
     "./textarea": {
       "types": "./dist/src/textarea.d.ts",
-      "import": "./src/textarea.tsx",
-      "browser": "./src/textarea.tsx"
+      "import": "./dist/src/textarea.js",
+      "browser": "./dist/src/textarea.js",
+      "default": "./dist/src/textarea.js"
     },
     "./textarea-with-autosize": {
       "types": "./dist/src/textarea-with-autosize.d.ts",
-      "import": "./src/textarea-with-autosize.tsx",
-      "browser": "./src/textarea-with-autosize.tsx"
+      "import": "./dist/src/textarea-with-autosize.js",
+      "browser": "./dist/src/textarea-with-autosize.js",
+      "default": "./dist/src/textarea-with-autosize.js"
     },
     "./timeline": {
       "types": "./dist/src/timeline.d.ts",
-      "import": "./src/timeline.tsx",
-      "browser": "./src/timeline.tsx"
+      "import": "./dist/src/timeline.js",
+      "browser": "./dist/src/timeline.js",
+      "default": "./dist/src/timeline.js"
     },
     "./toggle": {
       "types": "./dist/src/toggle.d.ts",
-      "import": "./src/toggle.tsx",
-      "browser": "./src/toggle.tsx"
+      "import": "./dist/src/toggle.js",
+      "browser": "./dist/src/toggle.js",
+      "default": "./dist/src/toggle.js"
     },
     "./toggle-group": {
       "types": "./dist/src/toggle-group.d.ts",
-      "import": "./src/toggle-group.tsx",
-      "browser": "./src/toggle-group.tsx"
+      "import": "./dist/src/toggle-group.js",
+      "browser": "./dist/src/toggle-group.js",
+      "default": "./dist/src/toggle-group.js"
     },
     "./tool-panels": {
       "types": "./dist/src/tool-panels.d.ts",
-      "import": "./src/tool-panels.tsx",
-      "browser": "./src/tool-panels.tsx"
+      "import": "./dist/src/tool-panels.js",
+      "browser": "./dist/src/tool-panels.js",
+      "default": "./dist/src/tool-panels.js"
     },
     "./toolbar": {
       "types": "./dist/src/toolbar.d.ts",
-      "import": "./src/toolbar.tsx",
-      "browser": "./src/toolbar.tsx"
+      "import": "./dist/src/toolbar.js",
+      "browser": "./dist/src/toolbar.js",
+      "default": "./dist/src/toolbar.js"
     },
     "./tooltip": {
       "types": "./dist/src/tooltip.d.ts",
-      "import": "./src/tooltip.tsx",
-      "browser": "./src/tooltip.tsx"
+      "import": "./dist/src/tooltip.js",
+      "browser": "./dist/src/tooltip.js",
+      "default": "./dist/src/tooltip.js"
     },
     "./styles/animations.css": "./src/styles/animations.css",
     "./styles/nav.css": "./src/styles/nav.css",
     "./as-child": {
       "types": "./dist/src/as-child.d.ts",
-      "import": "./src/as-child.tsx",
-      "browser": "./src/as-child.tsx"
+      "import": "./dist/src/as-child.js",
+      "browser": "./dist/src/as-child.js",
+      "default": "./dist/src/as-child.js"
     },
     "./math-input/complex-input": {
       "types": "./dist/src/math-input/complex-input.d.ts",
-      "import": "./src/math-input/complex-input.tsx",
-      "browser": "./src/math-input/complex-input.tsx"
+      "import": "./dist/src/math-input/complex-input.js",
+      "browser": "./dist/src/math-input/complex-input.js",
+      "default": "./dist/src/math-input/complex-input.js"
     },
     "./math-input/index": {
       "types": "./dist/src/math-input/index.d.ts",
-      "import": "./src/math-input/index.tsx",
-      "browser": "./src/math-input/index.tsx"
+      "import": "./dist/src/math-input/index.js",
+      "browser": "./dist/src/math-input/index.js",
+      "default": "./dist/src/math-input/index.js"
     },
     "./slot": {
       "types": "./dist/src/slot.d.ts",
-      "import": "./src/slot.tsx",
-      "browser": "./src/slot.tsx"
+      "import": "./dist/src/slot.js",
+      "browser": "./dist/src/slot.js",
+      "default": "./dist/src/slot.js"
     },
     "./hooks/async-memo": {
       "types": "./dist/src/hooks/async-memo.d.ts",
-      "import": "./src/hooks/async-memo.tsx",
-      "browser": "./src/hooks/async-memo.tsx"
+      "import": "./dist/src/hooks/async-memo.js",
+      "browser": "./dist/src/hooks/async-memo.js",
+      "default": "./dist/src/hooks/async-memo.js"
     },
     "./hooks/copy-to-clipboard": {
       "types": "./dist/src/hooks/copy-to-clipboard.d.ts",
-      "import": "./src/hooks/copy-to-clipboard.tsx",
-      "browser": "./src/hooks/copy-to-clipboard.tsx"
+      "import": "./dist/src/hooks/copy-to-clipboard.js",
+      "browser": "./dist/src/hooks/copy-to-clipboard.js",
+      "default": "./dist/src/hooks/copy-to-clipboard.js"
     },
     "./hooks/debounce": {
       "types": "./dist/src/hooks/debounce.d.ts",
-      "import": "./src/hooks/debounce.tsx",
-      "browser": "./src/hooks/debounce.tsx"
+      "import": "./dist/src/hooks/debounce.js",
+      "browser": "./dist/src/hooks/debounce.js",
+      "default": "./dist/src/hooks/debounce.js"
     },
     "./hooks/hotkeys": {
       "types": "./dist/src/hooks/hotkeys.d.ts",
-      "import": "./src/hooks/hotkeys.tsx",
-      "browser": "./src/hooks/hotkeys.tsx"
+      "import": "./dist/src/hooks/hotkeys.js",
+      "browser": "./dist/src/hooks/hotkeys.js",
+      "default": "./dist/src/hooks/hotkeys.js"
     },
     "./hooks/is-client": {
       "types": "./dist/src/hooks/is-client.d.ts",
-      "import": "./src/hooks/is-client.tsx",
-      "browser": "./src/hooks/is-client.tsx"
+      "import": "./dist/src/hooks/is-client.js",
+      "browser": "./dist/src/hooks/is-client.js",
+      "default": "./dist/src/hooks/is-client.js"
     },
     "./hooks/local-storage": {
       "types": "./dist/src/hooks/local-storage.d.ts",
-      "import": "./src/hooks/local-storage.tsx",
-      "browser": "./src/hooks/local-storage.tsx"
+      "import": "./dist/src/hooks/local-storage.js",
+      "browser": "./dist/src/hooks/local-storage.js",
+      "default": "./dist/src/hooks/local-storage.js"
     },
     "./hooks/long-press": {
       "types": "./dist/src/hooks/long-press.d.ts",
-      "import": "./src/hooks/long-press.tsx",
-      "browser": "./src/hooks/long-press.tsx"
+      "import": "./dist/src/hooks/long-press.js",
+      "browser": "./dist/src/hooks/long-press.js",
+      "default": "./dist/src/hooks/long-press.js"
     },
     "./hooks/media-query": {
       "types": "./dist/src/hooks/media-query.d.ts",
-      "import": "./src/hooks/media-query.tsx",
-      "browser": "./src/hooks/media-query.tsx"
+      "import": "./dist/src/hooks/media-query.js",
+      "browser": "./dist/src/hooks/media-query.js",
+      "default": "./dist/src/hooks/media-query.js"
     },
     "./hooks/pagination": {
       "types": "./dist/src/hooks/pagination.d.ts",
-      "import": "./src/hooks/pagination.tsx",
-      "browser": "./src/hooks/pagination.tsx"
+      "import": "./dist/src/hooks/pagination.js",
+      "browser": "./dist/src/hooks/pagination.js",
+      "default": "./dist/src/hooks/pagination.js"
     },
     "./hooks/timeout": {
       "types": "./dist/src/hooks/timeout.d.ts",
-      "import": "./src/hooks/timeout.tsx",
-      "browser": "./src/hooks/timeout.tsx"
+      "import": "./dist/src/hooks/timeout.js",
+      "browser": "./dist/src/hooks/timeout.js",
+      "default": "./dist/src/hooks/timeout.js"
     },
     "./hooks/toggle": {
       "types": "./dist/src/hooks/toggle.d.ts",
-      "import": "./src/hooks/toggle.tsx",
-      "browser": "./src/hooks/toggle.tsx"
+      "import": "./dist/src/hooks/toggle.js",
+      "browser": "./dist/src/hooks/toggle.js",
+      "default": "./dist/src/hooks/toggle.js"
     },
     "./hooks/touch": {
       "types": "./dist/src/hooks/touch.d.ts",
-      "import": "./src/hooks/touch.tsx",
-      "browser": "./src/hooks/touch.tsx"
+      "import": "./dist/src/hooks/touch.js",
+      "browser": "./dist/src/hooks/touch.js",
+      "default": "./dist/src/hooks/touch.js"
     },
     "./hooks/use-swipe-gesture": {
       "types": "./dist/src/hooks/use-swipe-gesture.d.ts",
-      "import": "./src/hooks/use-swipe-gesture.tsx",
-      "browser": "./src/hooks/use-swipe-gesture.tsx"
+      "import": "./dist/src/hooks/use-swipe-gesture.js",
+      "browser": "./dist/src/hooks/use-swipe-gesture.js",
+      "default": "./dist/src/hooks/use-swipe-gesture.js"
     },
     "./hooks/use-touch-feedback": {
       "types": "./dist/src/hooks/use-touch-feedback.d.ts",
-      "import": "./src/hooks/use-touch-feedback.tsx",
-      "browser": "./src/hooks/use-touch-feedback.tsx"
+      "import": "./dist/src/hooks/use-touch-feedback.js",
+      "browser": "./dist/src/hooks/use-touch-feedback.js",
+      "default": "./dist/src/hooks/use-touch-feedback.js"
     },
     "./hooks/use-viewport": {
       "types": "./dist/src/hooks/use-viewport.d.ts",
-      "import": "./src/hooks/use-viewport.tsx",
-      "browser": "./src/hooks/use-viewport.tsx"
+      "import": "./dist/src/hooks/use-viewport.js",
+      "browser": "./dist/src/hooks/use-viewport.js",
+      "default": "./dist/src/hooks/use-viewport.js"
     },
     "./theme": {
       "types": "./dist/src/theme/index.d.ts",
-      "import": "./src/theme/index.ts",
-      "browser": "./src/theme/index.ts"
+      "import": "./dist/src/theme/index.js",
+      "browser": "./dist/src/theme/index.js",
+      "default": "./dist/src/theme/index.js"
     },
     "./theme/script": {
       "types": "./dist/src/theme/script.d.ts",
-      "import": "./src/theme/script.ts"
+      "import": "./dist/src/theme/script.js",
+      "browser": "./dist/src/theme/script.js",
+      "default": "./dist/src/theme/script.js"
     },
     "./package.json": "./package.json"
   },
@@ -694,16 +782,11 @@
     "LICENSE",
     "package.json"
   ],
-  "arki": {
-    "runtimes": [
-      "browser"
-    ]
-  },
   "scripts": {
     "bench": "bun run build && arki-bench",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run --configLoader runner",
@@ -769,6 +852,11 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "arki": {
+    "runtimes": [
+      "browser"
+    ]
   },
   "module:jsx": "src"
 }

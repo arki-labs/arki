@@ -1,5 +1,5 @@
 /** KaTeX math, as `BlockMath` and `InlineMath`. */
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import type { ReactNode, ComponentType } from 'react';
 import KaTeX from 'katex';
 

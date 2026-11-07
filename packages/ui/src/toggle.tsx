@@ -2,11 +2,10 @@
 'use client';
 
 import type { VariantProps } from 'class-variance-authority';
-import * as React from 'react';
 import { Toggle as TogglePrimitive } from '@base-ui/react/toggle';
 import { cva } from 'class-variance-authority';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 const toggleVariants = cva(
   "outline-ring/50 ring-ring/10 hover:bg-muted hover:text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:outline-ring/40 dark:ring-ring/20 inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-[color,box-shadow] transition-colors focus-visible:ring-4 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 aria-invalid:focus-visible:ring-0 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",

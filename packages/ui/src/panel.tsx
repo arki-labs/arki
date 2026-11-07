@@ -1,8 +1,8 @@
 /** Panel: a titled work area with sections and dividers. */
 import type { ComponentProps } from 'react';
-import { cn } from './cn';
-import { Slot } from './slot';
-import { Surface } from './surface';
+import { cn } from './cn.js';
+import { Slot } from './slot.js';
+import { Surface } from './surface.js';
 
 export type PanelProps = {
   spacing?: 'medium' | 'small';

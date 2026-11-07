@@ -19,7 +19,7 @@ AGENTS.md = laws, docs/agent-guide.md = tasks, llms.txt = map.
 
 ## Changing this package
 
-Edit or add `src/<name>.tsx`. Start the file with a one-line `/** ... */` summary: `llms.txt` reads it. Add the `exports` row (copy a neighbour: `types`, `import`, `browser`). Then run `bun ../../tooling/library/src/llms.ts --write` and add the subpath to the README "Public imports" table. Check the component under all three systems.
+Edit or add `src/<name>.tsx`. Start the file with a one-line `/** ... */` summary: `llms.txt` reads it. Add the `exports` row (copy a neighbour: `types`, `import`, `browser`, `default`, all pointing at `dist/src/<name>`). Relative imports name the `.js` file (`./cn.js`): `bun run build` compiles `src/` to `dist/` with `tsc -p tsconfig.build.json`. Then run `bun ../../tooling/library/src/llms.ts --write` and add the subpath to the README "Public imports" table. Check the component under all three systems.
 
 ## Verify
 

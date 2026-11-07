@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import type { TextareaAutosizeProps } from 'react-textarea-autosize';
 import TextareaAutosize from 'react-textarea-autosize';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 export type TextareaWithAutosizeProps = TextareaAutosizeProps;
 

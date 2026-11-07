@@ -5,7 +5,7 @@ import { Accordion as AccordionPrimitive } from '@base-ui/react/accordion';
 
 import { CaretDownIcon, CaretUpIcon } from '@arki/icons/phosphor';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 type AccordionCompatProps = Omit<AccordionPrimitive.Root.Props, 'value' | 'defaultValue' | 'onValueChange'> & {
   /** Radix-era prop: 'single' or 'multiple'. Maps to Base UI `multiple`. */

@@ -1,10 +1,9 @@
 /** Progress: a progress bar. */
 'use client';
 
-import * as React from 'react';
 import { Progress as ProgressPrimitive } from '@base-ui/react/progress';
 
-import { cn } from './cn';
+import { cn } from './cn.js';
 
 type ProgressProps = {
   indicatorClassName?: string;

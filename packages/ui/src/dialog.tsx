@@ -6,9 +6,9 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 
 import { XIcon } from '@arki/icons/phosphor';
 
-import { withAsChild } from './as-child';
-import type { AsChildProp } from './as-child';
-import { cn } from './cn';
+import { withAsChild } from './as-child.js';
+import type { AsChildProp } from './as-child.js';
+import { cn } from './cn.js';
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
