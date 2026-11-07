@@ -33,13 +33,13 @@ export function SearchButton() {
 
 - You want one icon from one set. Import `@phosphor-icons/react` or `lucide-react` directly. This package adds the defaults providers and the other sets, not new icons.
 - You need the smallest possible bundle. One Phosphor icon costs about the same as the direct import, but the Iconify data in `node_modules` is large.
-- Your bundler cannot handle `.tsx` source or CSS imports. See Runtime support.
+- Your bundler cannot handle CSS imports. See Runtime support.
 
 ## Runtime support
 
-Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
+Ships compiled JavaScript (`dist/`). `./spinners` needs a bundler: `react-spinners` is CommonJS without named exports.
 
-`bun run test:runtimes` renders an icon to HTML, reads the brand data and checks the spinner names on Bun, Deno and a browser. Plain Node is not claimed: the package ships TypeScript source, and Node does not strip types inside `node_modules`. On Node, import it through a bundler (Vite, Next, TanStack Start). Hermes is not claimed: the package targets web React.
+`bun run test:runtimes` renders an icon to HTML, reads the brand data and checks the spinner names on Bun, Deno and a browser. Plain Node is not claimed yet: every entry but `./spinners` loads there, but no Node leg has been recorded. Hermes is not claimed: the package targets web React.
 
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |

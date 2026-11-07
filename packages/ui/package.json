@@ -856,6 +856,10 @@
   "arki": {
     "runtimes": [
       "browser"
+    ],
+    "bundlerOnly": [
+      "./styles/animations.css",
+      "./styles/nav.css"
     ]
   },
   "module:jsx": "src"

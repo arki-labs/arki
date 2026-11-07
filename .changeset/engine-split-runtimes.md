@@ -31,7 +31,6 @@
 '@arki/schedule': patch
 '@arki/tanstack-start': patch
 '@arki/testing': patch
-'@arki/ui': patch
 '@arki/chat-ui': patch
 '@arki/content-react': patch
 '@arki/code-editor': patch

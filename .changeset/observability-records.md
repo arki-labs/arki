@@ -12,7 +12,6 @@
 '@arki/date': patch
 '@arki/expr': patch
 '@arki/failure': patch
-'@arki/icons': patch
 '@arki/intl': patch
 '@arki/math': patch
 '@arki/money': patch
@@ -22,7 +21,6 @@
 '@arki/string': patch
 '@arki/testing': patch
 '@arki/ts': patch
-'@arki/ui': patch
 ---
 
 Each package README now records what it instruments, including why these packages need no spans.

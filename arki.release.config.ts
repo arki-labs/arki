@@ -92,10 +92,9 @@ export const config: ReleaseConfig = {
       // since 2026-10-21: `@arki/auth` peers on `@arki/ui` and `@arki/icons`,
       // and nothing here depends on that wave.
       packages: ['@arki/icons', '@arki/ui'],
-      // Source-first: these ship TypeScript source as the runtime entry plus
-      // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
-      // READMEs say so. Compiled dist output is a later, separate decision.
-      buildOutput: 'source',
+      // Compiled since 2026-11-07: exports point at dist/src/*.js. The raw
+      // .tsx entries kept Vite from pre-bundling them, so an app's dev server
+      // never hydrated. src/ still ships for Tailwind's @source scan.
     },
     {
       id: 'infrastructure-adapters',

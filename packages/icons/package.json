@@ -230,6 +230,9 @@
       "bun",
       "deno",
       "browser"
+    ],
+    "bundlerOnly": [
+      "./spinners"
     ]
   },
   "module:jsx": "src"

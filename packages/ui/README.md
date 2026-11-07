@@ -81,7 +81,7 @@ export function Example() {
 
 ## Runtime support
 
-Source-distributed: ships TypeScript/TSX, needs a bundler (Vite with the TanStack Start stack).
+Ships compiled JavaScript (`dist/`) for a bundler (Vite with the TanStack Start stack). The CSS entries need a bundler. `src/` ships too, so Tailwind can scan it with `@source`.
 
 <!-- runtimes:start -->
 | Runtime | Result | Version tested | Date (UTC) |
