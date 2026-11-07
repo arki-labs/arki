@@ -1,5 +1,12 @@
 # @arki/log
 
+## 0.4.1
+
+### Patch Changes
+
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- 53d25f7: The README has an `## Observability` section: `@arki/log` makes no spans, and `@arki/log/otel` puts the active span's trace and span ids on each record. A new test proves it with a real tracer. No code change.
+
 ## 0.4.0
 
 ### Minor Changes

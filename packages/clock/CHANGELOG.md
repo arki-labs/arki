@@ -1,5 +1,16 @@
 # @arki/clock
 
+## 0.2.1
+
+### Patch Changes
+
+- 53d25f7: Each package README now records what it instruments, including why these packages need no spans.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- Updated dependencies [53d25f7]
+- Updated dependencies [4ac08a9]
+- Updated dependencies [4f24c6d]
+  - @arki/failure@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes

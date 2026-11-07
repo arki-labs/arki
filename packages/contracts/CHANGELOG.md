@@ -1,5 +1,17 @@
 # @arki/contracts
 
+## 0.4.2
+
+### Patch Changes
+
+- 53d25f7: Each package README now records what it instruments, including why these packages need no spans.
+- 4f24c6d: Declares the engines it supports and documents them in the README.
+- Updated dependencies [53d25f7]
+- Updated dependencies [4ac08a9]
+- Updated dependencies [4f24c6d]
+  - @arki/failure@0.4.0
+  - @arki/schema@0.3.1
+
 ## 0.4.1
 
 ### Patch Changes

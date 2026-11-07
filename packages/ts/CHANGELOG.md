@@ -1,5 +1,16 @@
 # @arki/ts
 
+## 0.1.1
+
+### Patch Changes
+
+- 53d25f7: Each package README now records what it instruments, including why these packages need no spans.
+- d74e617: `package.json` now declares the five engines the package is proven on (Node, Bun, Deno, browser, Hermes),
+  and the README table now shows a passing Hermes run. Code is unchanged.
+
+  no docs impact: README updated in this change.
+  no demo impact: code unchanged.
+
 ## 0.1.0
 
 ### Minor Changes
