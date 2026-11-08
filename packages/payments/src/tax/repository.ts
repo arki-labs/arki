@@ -7,7 +7,7 @@ import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
-import { parse } from '@arki/schema';
+import { is, parse } from '@arki/schema';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
 import type { TaxTables } from './tables.js';
@@ -23,7 +23,7 @@ import type {
   TaxJurisdiction,
   TaxRecord,
 } from './types.js';
-import { exemptionPeriodSchema, exemptionTargetSchema } from './contracts.js';
+import { exemptionPeriodSchema, exemptionTargetSchema, getExpiringExemptionsInputSchema } from './contracts.js';
 import { TaxReferenceNotFound } from './failures.js';
 
 type NotFound = FailureOf<typeof TaxReferenceNotFound>;
@@ -42,6 +42,25 @@ export type TaxDatabase =
 export type UpdateTaxConfiguration = Partial<Omit<NewTaxConfig, 'id'>>;
 export type UpdateTaxJurisdiction = Partial<Omit<NewTaxJurisdiction, 'id'>>;
 export type UpdateTaxExemption = Partial<Omit<NewTaxExemption, 'id'>>;
+
+/**
+ * `TaxReferenceNotFound` (kind `jurisdiction`) when `id` names no jurisdiction. Otherwise the row is
+ * locked until the transaction ends, so a write that points at it cannot meet a deleted row (a raw
+ * Postgres 23503). `null` and `undefined` name nothing to check.
+ */
+async function lockJurisdiction(
+  tx: TaxDatabase,
+  taxJurisdictions: TaxTables['taxJurisdictions'],
+  id: TaxJurisdictionId | null | undefined,
+): Promise<NotFound | undefined> {
+  if (id === undefined || id === null) return undefined;
+  const [found] = await tx
+    .select({ id: taxJurisdictions.id })
+    .from(taxJurisdictions)
+    .where(eq(taxJurisdictions.id, id))
+    .for('key share');
+  return found ? undefined : TaxReferenceNotFound({ kind: 'jurisdiction', id });
+}
 
 /**
  * Tax Configuration Repository
@@ -140,10 +159,19 @@ export class TaxJurisdictionRepository {
     this.taxJurisdictions = tables.taxJurisdictions;
   }
 
-  async createJurisdiction(data: NewTaxJurisdiction): Promise<TaxJurisdiction> {
-    const [created] = await this.db.insert(this.taxJurisdictions).values(data).returning();
-    invariant(created, 'the tax jurisdiction insert returned no row');
-    return created;
+  /**
+   * The new row, or `TaxReferenceNotFound` (kind `jurisdiction`) when `parentId` names no
+   * jurisdiction. The parent is locked until the insert, so it cannot be deleted in between.
+   */
+  async createJurisdiction(data: NewTaxJurisdiction): Promise<TaxJurisdiction | NotFound> {
+    return this.db.transaction(async tx => {
+      const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.parentId);
+      if (missing) return missing;
+
+      const [created] = await tx.insert(this.taxJurisdictions).values(data).returning();
+      invariant(created, 'the tax jurisdiction insert returned no row');
+      return created;
+    });
   }
 
   async findJurisdictionById(id: TaxJurisdictionId): Promise<TaxJurisdiction | null> {
@@ -216,14 +244,22 @@ export class TaxJurisdictionRepository {
     return hierarchy;
   }
 
-  /** The updated row, or `TaxReferenceNotFound` when no jurisdiction has `id`. */
+  /**
+   * The updated row, or `TaxReferenceNotFound` (kind `jurisdiction`) when no jurisdiction has `id`,
+   * or when the new `parentId` names none. The new parent is locked until the update.
+   */
   async updateJurisdiction(id: TaxJurisdictionId, data: UpdateTaxJurisdiction): Promise<TaxJurisdiction | NotFound> {
-    const [updated] = await this.db
-      .update(this.taxJurisdictions)
-      .set({ ...data, updatedAt: now() })
-      .where(eq(this.taxJurisdictions.id, id))
-      .returning();
-    return updated ?? TaxReferenceNotFound({ kind: 'jurisdiction', id });
+    return this.db.transaction(async tx => {
+      const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.parentId);
+      if (missing) return missing;
+
+      const [updated] = await tx
+        .update(this.taxJurisdictions)
+        .set({ ...data, updatedAt: now() })
+        .where(eq(this.taxJurisdictions.id, id))
+        .returning();
+      return updated ?? TaxReferenceNotFound({ kind: 'jurisdiction', id });
+    });
   }
 
   async deleteJurisdiction(id: TaxJurisdictionId): Promise<void> {
@@ -238,26 +274,35 @@ export class TaxJurisdictionRepository {
 export class TaxExemptionRepository {
   private readonly db: TaxDatabase;
   private readonly taxExemptions: TaxTables['taxExemptions'];
+  private readonly taxJurisdictions: TaxTables['taxJurisdictions'];
 
-  constructor(db: TaxDatabase, tables: Pick<TaxTables, 'taxExemptions'>) {
+  constructor(db: TaxDatabase, tables: Pick<TaxTables, 'taxExemptions' | 'taxJurisdictions'>) {
     this.db = db;
     this.taxExemptions = tables.taxExemptions;
+    this.taxJurisdictions = tables.taxJurisdictions;
   }
 
   /**
    * The new row. One that names no customer, product code or jurisdiction would exempt every sale:
    * `exemptionTargetSchema` refuses it with `InvalidInput`, and nothing is written. So does
-   * `exemptionPeriodSchema` for one whose `validTo` is before its `validFrom`.
+   * `exemptionPeriodSchema` for one whose `validTo` is before its `validFrom`. A `jurisdictionId`
+   * that names no jurisdiction returns `TaxReferenceNotFound` (kind `jurisdiction`); the
+   * jurisdiction is locked until the insert, so it cannot be deleted in between.
    */
-  async createExemption(data: NewTaxExemption): Promise<TaxExemption | SchemaFailure> {
+  async createExemption(data: NewTaxExemption): Promise<TaxExemption | NotFound | SchemaFailure> {
     const target = parse(exemptionTargetSchema, data);
     if (isFailure(target)) return target;
     const period = parse(exemptionPeriodSchema, data);
     if (isFailure(period)) return period;
 
-    const [created] = await this.db.insert(this.taxExemptions).values(data).returning();
-    invariant(created, 'the tax exemption insert returned no row');
-    return created;
+    return this.db.transaction(async tx => {
+      const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.jurisdictionId);
+      if (missing) return missing;
+
+      const [created] = await tx.insert(this.taxExemptions).values(data).returning();
+      invariant(created, 'the tax exemption insert returned no row');
+      return created;
+    });
   }
 
   async findExemptionById(id: TaxExemptionId): Promise<TaxExemption | null> {
@@ -371,7 +416,16 @@ export class TaxExemptionRepository {
       .orderBy(this.taxExemptions.validFrom);
   }
 
+  /**
+   * Active exemptions that end within the next `days` days. `days` is from 1 to 365, as
+   * `getExpiringExemptionsInputSchema` reads it from a request: anything else (NaN, a huge number)
+   * is a bug in the caller, and throws `FailureError` (`invariant`) before the query.
+   */
   async findExpiringExemptions(days = 30): Promise<TaxExemption[]> {
+    invariant(
+      is(days, getExpiringExemptionsInputSchema.shape.days),
+      () => `findExpiringExemptions needs days from 1 to 365, received ${String(days)}`,
+    );
     // Local-time calendar days, as before. The raw `sql` parameter below needs a string.
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + days);
@@ -391,7 +445,8 @@ export class TaxExemptionRepository {
   }
 
   /**
-   * The updated row, or `TaxReferenceNotFound` when no exemption has `id`. The row as the update
+   * The updated row, or `TaxReferenceNotFound` when no exemption has `id` (kind `exemption`) or the
+   * new `jurisdictionId` names no jurisdiction (kind `jurisdiction`). The row as the update
    * leaves it must still name a customer, a product code or a jurisdiction (`exemptionTargetSchema`)
    * and must not end before it starts (`exemptionPeriodSchema`): otherwise it returns `InvalidInput`
    * and nothing is written. A field left `undefined` keeps its stored value; `null` clears it.
@@ -420,6 +475,8 @@ export class TaxExemptionRepository {
       if (isFailure(target)) return target;
       const period = parse(exemptionPeriodSchema, next);
       if (isFailure(period)) return period;
+      const missing = await lockJurisdiction(tx, this.taxJurisdictions, data.jurisdictionId);
+      if (missing) return missing;
 
       const [updated] = await tx
         .update(this.taxExemptions)
@@ -683,7 +740,10 @@ export function createTaxRepositories(db: TaxDatabase, tables: TaxRepositoryTabl
   return {
     configurations: new TaxConfigurationRepository(db, { taxConfigurations: tables.taxConfigurations }),
     jurisdictions: new TaxJurisdictionRepository(db, { taxJurisdictions: tables.taxJurisdictions }),
-    exemptions: new TaxExemptionRepository(db, { taxExemptions: tables.taxExemptions }),
+    exemptions: new TaxExemptionRepository(db, {
+      taxExemptions: tables.taxExemptions,
+      taxJurisdictions: tables.taxJurisdictions,
+    }),
     records: new TaxRecordRepository(db, { taxRecords: tables.taxRecords }),
     audit: new TaxAuditRepository(db, { taxAuditEntries: tables.taxAuditEntries }),
   };

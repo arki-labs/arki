@@ -47,6 +47,11 @@ export function fromMinorColumn(units: number | string, currency: string): Money
  * is rounded to the currency's decimals. Half-even: a float sits on either side
  * of the written amount, never on purpose at a half, so the mode only decides
  * true ties without a bias. The column migration rounds the same way.
+ *
+ * A builder for stored values, so it throws: `NumericRangeError` for a number that is not finite
+ * or past 2^53 minor units, and `UnknownCurrencyError` for a code outside ISO 4217. Its callers
+ * are journal folds over events this package wrote, which cannot return a failure: a throw there
+ * means a corrupt event log.
  */
 export function fromStoredNumber(value: number, currency: string): Money {
   return money(value, currency.toUpperCase(), { rounding: 'halfEven' });

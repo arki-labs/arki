@@ -3,7 +3,7 @@ import { fromDate, now, sub } from '@arki/date';
 import type { Failure } from '@arki/failure';
 import { invariant, isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
-import { Money, sum } from '@arki/money';
+import { Currency, CurrencyMismatchError, Money, ProviderAmount, sum, UnknownCurrencyError } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
@@ -59,6 +59,16 @@ export function jurisdictionOwnsLine(jurisdiction: TaxJurisdiction, line: TaxBre
   if (jurisdiction.stateCode !== null && state !== subdivisionCode(jurisdiction.stateCode)) return false;
 
   return line.jurisdiction.toLowerCase() === jurisdiction.name.toLowerCase();
+}
+
+/**
+ * The ISO 4217 currency of `code` (any case). A custom currency is valid `Money`, but Stripe has no
+ * unit rule for it: `money.provider_amount`, as the provider returns for a custom-currency amount.
+ */
+function stripeCurrency(code: string) {
+  const upper = code.toUpperCase();
+  const currency = Currency.parse(upper);
+  return isFailure(currency) ? ProviderAmount({ cause: new UnknownCurrencyError(upper) }) : currency;
 }
 
 /**
@@ -161,10 +171,13 @@ export class TaxService {
    * jurisdiction): one without would exempt every sale, so it is never applied.
    *
    * A Stripe amount that `@arki/money` refuses (an unknown currency, units off Stripe's rule) is returned as a
-   * `MoneyFailure`, so a sale is never priced with a wrong tax.
+   * `MoneyFailure`, so a sale is never priced with a wrong tax. So is a sale Stripe cannot price:
+   * `money.provider_amount` for a currency outside ISO 4217 (a custom currency; Stripe is not asked),
+   * and for a Stripe answer in another currency than the sale's.
    */
   async calculateTax(input: TaxCalculationInput) {
-    const currency = input.currency.toUpperCase();
+    const currency = stripeCurrency(input.currency);
+    if (isFailure(currency)) return currency;
     // An exemption "for a customer" must name the customer; same for the other two types
     const applicable = await this.reads.exemptions.findApplicableExemptions(input.customerId);
     const scoped = applicable.filter(
@@ -219,6 +232,10 @@ export class TaxService {
         customerDetails: input.customerDetails,
       });
       if (isFailure(result)) return result;
+      // Stripe answers in one currency; one other than the sale's cannot be added to its exempt lines
+      if (result.amountTotal.currency.code !== currency.code) {
+        return ProviderAmount({ cause: new CurrencyMismatchError(result.amountTotal.currency.code, currency.code) });
+      }
 
       subtotal = exemptSubtotal.plus(result.amountTotal.minus(result.taxAmountExclusive));
       taxAmount = result.taxAmountExclusive;
@@ -283,7 +300,8 @@ export class TaxService {
    * `breakdown` is the tax the checkout's `calculateTax` returned for this sale. It is stored, one
    * record per jurisdiction and rate, and is what `getCustomerTaxSummary` and the compliance report
    * add up. Recording a `reference` twice (for the same `type`) returns the first record and does
-   * not call the provider again. A failure is the caller's to handle, as in `calculateTax`.
+   * not call the provider again. A failure is the caller's to handle, as in `calculateTax`; a currency
+   * outside ISO 4217 returns `money.provider_amount` before anything is read or recorded.
    */
   async createTaxTransaction(params: {
     reference: string;
@@ -307,18 +325,19 @@ export class TaxService {
     /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
     originalReference?: string;
   }) {
-    const currency = params.currency.toUpperCase();
+    const currency = stripeCurrency(params.currency);
+    if (isFailure(currency)) return currency;
     const taxCode = params.lineItems[0]?.taxCode;
 
     // Per jurisdiction and rate: one record each, whatever number of lines carried it
     const grouped = new Map<string, { jurisdiction: string; rate: number; amounts: Money[] }>();
     for (const line of params.breakdown) {
-      if (line.amount.currency.code !== currency) {
+      if (line.amount.currency.code !== currency.code) {
         return TaxCurrencyMismatch({
           reference: params.reference,
           jurisdiction: line.jurisdiction,
           taxCurrency: line.amount.currency.code,
-          transactionCurrency: currency,
+          transactionCurrency: currency.code,
         });
       }
       const key = `${line.jurisdiction}\u0000${line.rate}`;
@@ -409,7 +428,7 @@ export class TaxService {
         jurisdiction: line.jurisdiction,
         rate: String(line.rate),
         taxAmountMinor: line.taxAmount.toMinorNumber(),
-        currency,
+        currency: currency.code,
         taxCode,
         customerId: params.customerId,
         paymentId: params.paymentId,

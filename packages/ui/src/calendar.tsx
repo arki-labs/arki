@@ -4,24 +4,66 @@
 import * as React from 'react';
 import { DayPicker } from 'react-day-picker';
 
+import { isValidTimeZone } from '@arki/date/zone';
 import { CaretDown, CaretLeft, CaretRight, CaretUp } from '@arki/icons/phosphor';
+import { getLogger } from '@arki/log';
 
 import { buttonVariants } from './button.js';
 import { cn } from './cn.js';
+
+/** Enable with `DEBUG=arki:ui:calendar`. */
+const calendarLog = getLogger('arki:ui:calendar');
 
 type CalendarProps = React.ComponentProps<typeof DayPicker> & {
   fullWidth?: boolean;
   size?: 'sm' | 'md' | 'lg';
 };
 
+/** A month in milliseconds, rounded up, and the largest distance from 1970 a JS `Date` can hold. */
+const MONTH_MS = 31 * 24 * 60 * 60 * 1000;
+const DATE_RANGE_MS = 8.64e15;
+
+/**
+ * The date when react-day-picker can show it, else `undefined`. It throws "Invalid time value" in
+ * render for an Invalid Date, and for a Date in the first month of the JS Date range (it computes the
+ * month before). One month of margin at both ends keeps that check simple.
+ */
+function showableDate(date: Date | undefined): Date | undefined {
+  return date && Math.abs(date.getTime()) < DATE_RANGE_MS - MONTH_MS ? date : undefined;
+}
+
+/**
+ * A month grid. A `timeZone` often comes from a stored profile, so an unknown one falls back to the
+ * browser's zone (logged at DEBUG) instead of throwing in render. A `month`, `defaultMonth`, `today`,
+ * `startMonth` or `endMonth` that is an Invalid Date (or within a month of the ends of the Date range) is ignored, and a range
+ * with such an end counts as no range.
+ */
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
   fullWidth = false,
   size = 'md',
-  ...props
+  timeZone,
+  month,
+  defaultMonth,
+  today,
+  startMonth,
+  endMonth,
+  ...rest
 }: CalendarProps) {
+  const knownTimeZone = timeZone === undefined || isValidTimeZone(timeZone) ? timeZone : undefined;
+  if (knownTimeZone !== timeZone) {
+    calendarLog.debug('Unknown time zone {timeZone}; using the browser time zone', { timeZone });
+  }
+  // react-day-picker throws "Invalid range" when a day is clicked while a range end is an Invalid Date.
+  const props =
+    rest.mode === 'range' &&
+    rest.selected &&
+    (showableDate(rest.selected.from) !== rest.selected.from || showableDate(rest.selected.to) !== rest.selected.to)
+      ? { ...rest, selected: undefined }
+      : rest;
+
   const sizeClasses = {
     sm: {
       padding: 'p-2',
@@ -124,6 +166,12 @@ function Calendar({
           return <CaretDown className={cn('size-4', className)} {...props} weight="regular" />;
         },
       }}
+      timeZone={knownTimeZone}
+      month={showableDate(month)}
+      defaultMonth={showableDate(defaultMonth)}
+      today={showableDate(today)}
+      startMonth={showableDate(startMonth)}
+      endMonth={showableDate(endMonth)}
       {...props}
     />
   );

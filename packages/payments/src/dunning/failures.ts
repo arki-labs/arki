@@ -23,6 +23,32 @@ export const DunningCampaignNotFound = /* @__PURE__ */ defineFailure('payments.d
 });
 
 /**
+ * No dunning step (template) has this id. Nothing was written.
+ *
+ * @fix Check the step id; read the campaign to list its steps.
+ * @verify bun run test -- src/dunning/campaign-service.test.ts
+ */
+export const DunningTemplateNotFound = /* @__PURE__ */ defineFailure('payments.dunning_template_not_found', {
+  status: 404,
+  data: z.object({ templateId: z.string() }),
+  message: 'Dunning step {templateId} not found',
+  remediation: 'Check the step id; read the campaign to list its steps.',
+});
+
+/**
+ * No dunning execution has this id. Nothing was written.
+ *
+ * @fix Check the execution id; list the campaign's executions to find it.
+ * @verify bun run test -- src/dunning/campaign-service.test.ts
+ */
+export const DunningExecutionNotFound = /* @__PURE__ */ defineFailure('payments.dunning_execution_not_found', {
+  status: 404,
+  data: z.object({ executionId: z.string() }),
+  message: 'Dunning execution {executionId} not found',
+  remediation: "Check the execution id; list the campaign's executions to find it.",
+});
+
+/**
  * The campaign exists but is not active, so it cannot run. Nothing was written.
  *
  * @fix Set the campaign status to `active` first.

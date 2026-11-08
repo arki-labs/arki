@@ -355,6 +355,16 @@ describe('allocation', () => {
     expect(() => whole.split(0)).toThrow(InvalidArgumentError);
     expect(() => whole.split(10_001)).toThrow(ResourceLimitError);
   });
+
+  // Why: the 10 000-part limit is documented; a caller must get that exact error, not a generic one or an array it did not ask for.
+  it('split(10_001) throws the documented ResourceLimitError, and split(10_000) still splits', () => {
+    const whole = money(1, 'EUR');
+    expect(() => whole.split(10_001)).toThrow(
+      expect.objectContaining({ code: 'ARKI_MATH_E007', message: 'split makes at most 10000 parts' }),
+    );
+    expect(() => whole.split(10_001)).toThrow(ResourceLimitError);
+    expect(whole.split(10_000)).toHaveLength(10_000);
+  });
 });
 
 describe('comparison and aggregates', () => {

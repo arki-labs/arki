@@ -25,6 +25,7 @@ import type {
   DunningTemplate,
 } from '../types.js';
 import { PaymentsConfigurationInvalid } from '../../core/failures.js';
+import { PaymentProviderError } from '../../core/providers/provider-error.js';
 import { observePayments } from '../../core/telemetry.js';
 import {
   NotificationChannelUnavailable,
@@ -39,8 +40,9 @@ import { createDunningCommunicationRepository } from '../repository.js';
 /**
  * Interface for communication providers (email, SMS, etc.). `send` and `getDeliveryStatus` return a
  * `NotificationProviderFailure` for an answer the caller must handle (a refusal, a timeout, a body
- * that is not the documented shape, a recipient that is not valid for the channel) and throw only
- * when the provider cannot be reached at all.
+ * that is not the documented shape, a recipient or message id that is not valid for the channel) and
+ * throw only when the provider cannot be reached at all: a `PaymentProviderError` with code
+ * `unavailable` (retryable), the network error as its cause.
  */
 export type CommunicationProvider = {
   readonly channel: CommunicationChannel;
@@ -122,6 +124,15 @@ const jsonTextSchema = z.string().transform((text, context) => {
 /** The error body Resend and Twilio both send: a `message`, among other fields. */
 const providerErrorBodySchema = jsonTextSchema.pipe(z.looseObject({ message: z.string() }));
 
+/**
+ * A provider message id as the caller passes it. It goes into a URL path, so text with a lone UTF-16
+ * surrogate (which `encodeURIComponent` cannot encode) is refused as `schema.invalid_input`.
+ */
+const providerMessageIdSchema = z
+  .string()
+  .min(1)
+  .regex(/^\P{Cs}*$/u, 'The message id has a lone UTF-16 surrogate');
+
 /** A date the provider sends as text; text that is not a date is refused. */
 const providerDateSchema = z.string().pipe(z.coerce.date());
 
@@ -129,7 +140,8 @@ const providerDateSchema = z.string().pipe(z.coerce.date());
  * One HTTP call to a provider under `timeoutMs`. With `body: 'read'` the body's first
  * {@link MAX_PROVIDER_BODY_BYTES} bytes are read; with `body: 'discard'` it is cancelled unread and
  * `body` is `''`. A call that does not finish in time returns `NotificationProviderTimeout`; a
- * provider that cannot be reached at all throws, with the network error as its cause.
+ * provider that cannot be reached at all throws `PaymentProviderError('unavailable')`, with the
+ * network error as its cause.
  */
 async function callProvider(
   target: ProviderTarget,
@@ -148,7 +160,7 @@ async function callProvider(
     return reply;
   } catch (error) {
     if (timeout.aborted) return NotificationProviderTimeout({ ...target, timeoutMs }, { cause: error });
-    throw new Error(`The ${target.provider} request failed`, { cause: error });
+    throw new PaymentProviderError('unavailable', `The ${target.provider} request failed`, { cause: error });
   }
 }
 
@@ -278,9 +290,11 @@ export class EmailProvider implements CommunicationProvider {
 
   async getDeliveryStatus(messageId: string) {
     return observePayments('notification.delivery_status', this.target, async () => {
+      const id = parse(providerMessageIdSchema, messageId);
+      if (isFailure(id)) return id;
       const reply = await callProvider(
         this.target,
-        `${this.baseUrl}/emails/${encodeURIComponent(messageId)}`,
+        `${this.baseUrl}/emails/${encodeURIComponent(id)}`,
         { headers: { Authorization: `Bearer ${this.config.apiKey}` } },
         this.timeoutMs,
       );
@@ -408,9 +422,11 @@ export class SMSProvider implements CommunicationProvider {
 
   async getDeliveryStatus(messageId: string) {
     return observePayments('notification.delivery_status', this.target, async () => {
+      const id = parse(providerMessageIdSchema, messageId);
+      if (isFailure(id)) return id;
       const reply = await callProvider(
         this.target,
-        `${this.accountUrl}/Messages/${encodeURIComponent(messageId)}.json`,
+        `${this.accountUrl}/Messages/${encodeURIComponent(id)}.json`,
         { headers: { Authorization: this.authorization } },
         this.timeoutMs,
       );
@@ -666,8 +682,10 @@ export class CommunicationOrchestrationService {
    * Send communication for a dunning execution. Returns the communication row marked `sent`, or the
    * provider's failure (refused, timed out, unreadable answer, invalid recipient) after the row is
    * marked `failed` with that failure's message. A channel with no provider registered returns
-   * `NotificationChannelUnavailable` and writes nothing. A provider that cannot be reached throws,
-   * after the row is marked `failed`.
+   * `NotificationChannelUnavailable`, and an execution, step or customer with no row returns its
+   * not-found failure (`CommunicationReferenceMissing`); both write nothing. A provider that cannot be reached throws
+   * (`PaymentProviderError('unavailable')`) after the row is marked `failed`; when marking the row
+   * fails too, an `AggregateError` holds both errors, the send error first.
    */
   async sendCommunication(
     execution: DunningExecution,
@@ -694,6 +712,8 @@ export class CommunicationOrchestrationService {
       content: template.communication.content,
       status: 'pending',
     });
+    // The execution, step or customer has no row (deleted, or never stored): nothing is written or sent
+    if (isFailure(communication)) return communication;
 
     try {
       // Send the communication
@@ -725,10 +745,18 @@ export class CommunicationOrchestrationService {
       });
       return sent ?? communication;
     } catch (error) {
-      // Update communication status on error
-      await this.communicationRepo.updateStatus(communication.id, 'failed', {
-        failureReason: error instanceof Error ? error.message : 'Unknown error',
-      });
+      // Update communication status on error; a failing status write never hides the send error
+      try {
+        await this.communicationRepo.updateStatus(communication.id, 'failed', {
+          failureReason: error instanceof Error ? error.message : 'Unknown error',
+        });
+      } catch (statusError) {
+        throw new AggregateError(
+          [error, statusError],
+          'The communication was not sent, and marking it failed did not work either',
+          { cause: statusError },
+        );
+      }
 
       throw error;
     }
@@ -947,7 +975,7 @@ export class CommunicationOrchestrationService {
   /**
    * Get delivery status for a communication: `null` when the communication, its provider message id,
    * or a provider that reports status is missing; the provider's failure when it refuses, times out
-   * or answers in another shape. A provider that cannot be reached throws.
+   * or answers in another shape. A provider that cannot be reached throws `PaymentProviderError('unavailable')`.
    */
   async getDeliveryStatus(communicationId: DunningCommunicationId) {
     const communication = await this.communicationRepo.findById(communicationId);

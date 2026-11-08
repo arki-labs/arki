@@ -20,9 +20,11 @@ import { scanRegex } from './scan-regex.js';
  * before sending to external LLM services.
  */
 export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
-  // Email addresses
+  // Email addresses. Linear on any text: an address starts only at the first word character of a run
+  // of address characters, or right after the domain of an address it is glued to (`a@b.com.x@y.com`).
+  // Starting at every word inside a long run (`a.a.a.a…`) would rescan the run each time: quadratic.
   {
-    pattern: /\b[\w.%+-]+@[A-Z0-9.-]+\.[A-Z|]{2,}\b/gi,
+    pattern: /\w(?:(?<=(?:^|[^\w.%+-])[.%+-]*\w)|(?<=@[A-Z0-9.-]{0,253}[A-Z]{2}[.%+-]+\w))[\w.%+-]*@[A-Z0-9.-]+\.[A-Z|]{2,}\b/gi,
     replacement: '[EMAIL REDACTED]',
     description: 'Email address',
   },
@@ -48,9 +50,11 @@ export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
     description: 'Credit card number',
   },
 
-  // US Street addresses (basic pattern)
+  // US Street addresses (basic pattern). Linear on any text: the street name is at most 8 words before
+  // the suffix, each word matched one way. An open `[\w\s]+` ran to the end of the text from every
+  // number and backtracked through all of it: quadratic.
   {
-    pattern: /\b\d{1,5}\s[\w\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)[\s,]+(?:apt\.?\s*\d+[\s,]*)?[a-z]+,?\s*[a-z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
+    pattern: /\b\d{1,5}\s+(?:\w+\s+){0,8}\w*(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)[\s,]+(?:apt\.?\s*\d+[\s,]*)?[a-z]+,?\s*[a-z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
     replacement: '[ADDRESS REDACTED]',
     description: 'Street address',
   },

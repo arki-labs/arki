@@ -4,10 +4,11 @@
 import type { ImperativePanelGroupHandle, ImperativePanelHandle } from 'react-resizable-panels';
 import * as React from 'react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, PanelResizeHandle } from 'react-resizable-panels';
 
 import { DotsSixVertical, CornersOut, CornersIn } from '@arki/icons/phosphor';
 import { cn } from './cn.js';
+import { ResizablePanelGroup } from './resizable.js';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +48,8 @@ function useToolPanelGroup() {
  * Adds maximize/restore semantics so any panel within the group can be
  * expanded to fill 100% while the rest collapse, then restored to the
  * previously saved layout.  Layout is auto-persisted to localStorage using
- * `"${storagePrefix}-${id}"` as the key.
+ * `"${storagePrefix}-${id}"` as the key; a saved layout that does not fit the
+ * panels is ignored (see `ResizablePanelGroup`).
  */
 function ToolPanelGroup({
   id,
@@ -90,22 +92,29 @@ function ToolPanelGroup({
 
   const restore = useCallback(() => {
     setMaximizedPanelId(null);
-    if (savedLayout.current) {
-      groupRef.current?.setLayout(savedLayout.current);
-      savedLayout.current = null;
+    const layout = savedLayout.current;
+    savedLayout.current = null;
+    const group = groupRef.current;
+    if (!layout || !group) return;
+    // A panel mounted or unmounted while maximized: the saved layout no longer fits, and the library
+    // throws on a layout of the wrong length. Expand the collapsed panels instead.
+    if (layout.length === group.getLayout().length) {
+      group.setLayout(layout);
+      return;
     }
+    for (const ref of panelRefs.current.values()) ref.current?.expand();
   }, []);
 
   return (
     <ToolPanelGroupContext.Provider value={{ maximizedPanelId, maximize, restore, registerPanel, unregisterPanel }}>
-      <PanelGroup
+      <ResizablePanelGroup
         ref={groupRef}
         direction={direction}
         autoSaveId={`${storagePrefix}-${id}`}
         className={cn('flex h-full w-full', direction === 'vertical' && 'flex-col', className)}
       >
         {children}
-      </PanelGroup>
+      </ResizablePanelGroup>
     </ToolPanelGroupContext.Provider>
   );
 }

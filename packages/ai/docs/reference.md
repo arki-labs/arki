@@ -156,7 +156,7 @@ All of this lives in `@arki/ai/cost`. Prices are USD per 1,000 tokens.
 - `PRICE_BASES`: how a price was found: `local`, `list-price` or `default-rate`.
 - `LOCAL_PROVIDERS` and `isLocalProvider(provider)`: providers that run on your machine (`ollama`, also `ollama.chat`). A call there costs 0.
 - `estimateTokens(text)` (about 4 characters per token) and `estimateTokensFromWords(count)` (about 1.3 tokens per word): rough counts for English, for planning. Use a real tokenizer when you need exact numbers.
-- `createCostEstimator()` builds a `CostEstimator`; `costEstimator` is a ready instance. It prices LLM calls and embeddings and sums estimates.
+- `createCostEstimator({ fallbackPricing })` builds a `CostEstimator`; `costEstimator` is a ready instance. It prices LLM calls and embeddings and sums estimates. `fallbackPricing` is the rate for a hosted model with no list price (default `DEFAULT_PRICING`).
 - `createBudgetManager(kv, options)` builds a `BudgetManager` over an `@arki/kv` store. It tracks spend per user per period, `checkBudget` returns `BudgetExceeded` before a call, and `recordSpend` books the cost after. `DEFAULT_BUDGET_LIMITS` is 1 USD per hour, 10 per day, 50 per week, 100 per month. Override them for your app.
 - `createCostCircuitBreaker(config)` stops all calls once failures or cost pass a threshold, then lets a few through to test recovery. `createUserCircuitBreakerManager(config)` builds a `UserCircuitBreakerManager`, which keeps one breaker per user (`getForUser`, `getOpenCircuits`, `resetUser`). `DEFAULT_CIRCUIT_CONFIG` opens after 3 failures or 10 USD, and needs 2 successes to close after 60 seconds.
 

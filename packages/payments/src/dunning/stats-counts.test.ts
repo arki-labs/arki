@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { now, sub } from '@arki/date';
+import { orThrow } from '@arki/failure';
 
 import { core, customerId, schema, userId, users } from '../test-support.js';
 import { createDunningRepository } from './repository.js';
@@ -108,7 +109,7 @@ describe('stats read through raw aggregates', () => {
       paymentsRecovered: 1,
       revenueRecoveredMinor: 1999,
     });
-    const execution = await repositories.executions.create({
+    const stored = await repositories.executions.create({
       campaignId: campaign.id,
       customerId,
       triggerType: 'manual',
@@ -117,6 +118,7 @@ describe('stats read through raw aggregates', () => {
       scheduledAt: now(),
       retryCount: 0,
     });
+    const execution = orThrow(stored);
 
     const summary = await repositories.campaigns.getAnalyticsSince(sub(now(), { hours: 2 }), campaign.id);
     const top = await repositories.campaigns.findTopPerformer(sub(now(), { hours: 2 }));

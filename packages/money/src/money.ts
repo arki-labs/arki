@@ -402,7 +402,11 @@ export class Money<C extends string = string> {
     return distribute(this, weights, total, options?.remainder ?? 'largest');
   }
 
-  /** Splits into `parts` equal shares that differ by at most one unit: `money(10, 'EUR').split(3)` → `[3.34, 3.33, 3.33]`. */
+  /**
+   * Splits into `parts` equal shares that differ by at most one unit: `money(10, 'EUR').split(3)` → `[3.34, 3.33, 3.33]`.
+   * `parts` is a whole number from 1 to 10 000: fewer throws `InvalidArgumentError`, more throws `ResourceLimitError`
+   * (`allocate` takes at most 10 000 ratios the same way), so one call cannot build an unbounded array.
+   */
   split(parts: number, options?: AllocateOptions): Money<C>[] {
     if (!Number.isInteger(parts) || parts < 1)
       throw new InvalidArgumentError(`split needs a whole number of parts ≥ 1, got ${parts}`);

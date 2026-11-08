@@ -9,6 +9,12 @@ describe('DatePicker', () => {
     expect(screen.getByText('Pick a date')).toBeTruthy();
   });
 
+  it('shows the largest valid Date (the last representable day) instead of throwing a RangeError', () => {
+    // A stored or API date can be any valid Date; the picker must still render it.
+    render(<DatePicker date={new Date(8.64e15)} setDate={vi.fn()} />);
+    expect(screen.getByText(/275760/)).toBeTruthy();
+  });
+
   it('shows the formatted date for a valid Date', () => {
     render(<DatePicker date={new Date(2026, 9, 5)} setDate={vi.fn()} />);
     expect(screen.getByText('October 5th, 2026')).toBeTruthy();

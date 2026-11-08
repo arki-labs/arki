@@ -3,11 +3,13 @@ import { and, count, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
+import type { FailureOf } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
+import type { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { CoreTables } from '../../core/tables.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type { DunningCampaignId } from '../primitives.js';
@@ -21,6 +23,9 @@ import { createCommunicationOrchestrationService } from './communication-service
 import { createCustomerSegmentationService } from './segmentation-service.js';
 
 const logger = getLogger('dunning.integration');
+
+/** What an event handler that updates the risk profile can return: a stored amount money refuses, or an unknown customer. */
+type HandlerFailure = MoneyFailure | FailureOf<typeof ReferenceNotFound>;
 
 /**
  * Events that trigger dunning campaigns
@@ -124,7 +129,7 @@ export class DunningIntegrationService {
     amount: Money;
     failureCount: number;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     logger.info('Processing payment failure', {
       customerId: event.customerId,
       paymentId: event.paymentId,
@@ -193,7 +198,7 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     logger.info('Processing subscription status change', {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
@@ -260,7 +265,9 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Handle successful payment events (can stop dunning campaigns)
+   * Handle successful payment events (can stop dunning campaigns). An unknown customer returns
+   * `ReferenceNotFound`; a database error while stopping the active executions is thrown, never logged
+   * and dropped, so the caller can retry the event.
    */
   async handlePaymentSuccess(event: {
     paymentId: PaymentId;
@@ -268,7 +275,7 @@ export class DunningIntegrationService {
     subscriptionId?: SubscriptionId;
     amount: Money;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     logger.info('Processing successful payment', {
       customerId: event.customerId,
       paymentId: event.paymentId,
@@ -321,7 +328,7 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
     if (isFailure(customerSegments)) return customerSegments;
 
@@ -363,7 +370,7 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     // Stop any active dunning campaigns for this subscription
     // Update customer risk profile to reflect cancellation
     const riskProfile = await this.segmentationService.updateCustomerRiskProfile(event.customerId);
@@ -385,7 +392,7 @@ export class DunningIntegrationService {
     oldStatus: string;
     newStatus: string;
     metadata?: Record<string, unknown>;
-  }): Promise<void | MoneyFailure> {
+  }): Promise<void | HandlerFailure> {
     // Stop any active dunning campaigns for this customer
     await this.stopDunningCampaignsOnPaymentSuccess(event.customerId, event.subscriptionId);
 
@@ -402,7 +409,8 @@ export class DunningIntegrationService {
   }
 
   /**
-   * Stop active dunning campaigns when payment succeeds (if configured)
+   * Stop active dunning campaigns when payment succeeds (if configured). The executions are cancelled
+   * in one statement: a database error is thrown, so a caller never sees success while dunning goes on.
    */
   private async stopDunningCampaignsOnPaymentSuccess(
     customerId: CustomerId,
@@ -422,40 +430,41 @@ export class DunningIntegrationService {
         ),
       );
 
-    for (const execution of activeExecutions) {
-      // Check if the campaign is configured to stop on payment success
-      if (execution.settings.stopOnPaymentSuccess) {
-        try {
-          await this.db
-            .update(this.dunningExecutions)
-            .set({
-              status: 'cancelled',
-              completedAt: now(),
-              result: {
-                customersProcessed: 0,
-                communicationsSent: 0,
-                errors: [],
-                performance: {
-                  processingTime: 0,
-                  successRate: 1,
-                },
-              },
-            })
-            .where(eq(this.dunningExecutions.id, execution.id));
+    // Only campaigns configured to stop on payment success are stopped
+    const stopped = activeExecutions.filter(execution => execution.settings.stopOnPaymentSuccess);
+    if (stopped.length === 0) return;
 
-          logger.info('Stopped dunning execution due to payment success', {
-            executionId: execution.id,
-            customerId: customerId,
-            campaignId: execution.campaignId,
-          });
-        } catch (error) {
-          logger.error('Failed to stop dunning execution', {
-            executionId: execution.id,
-            customerId: customerId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
+    await this.db
+      .update(executions)
+      .set({
+        status: 'cancelled',
+        completedAt: now(),
+        result: {
+          customersProcessed: 0,
+          communicationsSent: 0,
+          errors: [],
+          performance: {
+            processingTime: 0,
+            successRate: 1,
+          },
+        },
+      })
+      .where(
+        and(
+          inArray(
+            executions.id,
+            stopped.map(execution => execution.id),
+          ),
+          inArray(executions.status, ['scheduled', 'running']),
+        ),
+      );
+
+    for (const execution of stopped) {
+      logger.info('Stopped dunning execution due to payment success', {
+        executionId: execution.id,
+        customerId: customerId,
+        campaignId: execution.campaignId,
+      });
     }
   }
 

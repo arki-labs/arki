@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { orThrow } from '@arki/failure';
-import { money, UnknownCurrency } from '@arki/money';
+import { Currency, money, ProviderAmount, UnknownCurrency } from '@arki/money';
 
 import { createCustomerId } from '../core/primitives.js';
 import { PaymentProviderError, TaxAddressIncomplete } from '../core/providers/provider-error.js';
@@ -78,6 +78,24 @@ describe('calculateTax', () => {
     expect(UnknownCurrency.is(await tax.calculateTax(input))).toBe(true);
   });
 
+  // The README promises a Stripe answer money refuses comes back as a MoneyFailure: one in another
+  // currency cannot be added to the sale's own amounts, so it must not throw CurrencyMismatchError
+  it('returns money.provider_amount when Stripe answers in another currency than the sale, never a throw', async () => {
+    const { tax } = serviceAnswering(200, {
+      object: 'tax.calculation',
+      currency: 'eur',
+      amount_total: 11_900,
+      tax_amount_exclusive: 1900,
+      tax_amount_inclusive: 0,
+      line_items: { data: [] },
+    });
+
+    const refused = await tax.calculateTax(input);
+
+    expect(ProviderAmount.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ code: 'money.provider_amount' });
+  });
+
   it('returns TaxAddressIncomplete for an address with no country, and asks Stripe nothing', async () => {
     const { tax, requests } = serviceAnswering(200, {});
 
@@ -134,6 +152,41 @@ describe('calculateSubscriptionTax and calculateOneTimeTax', () => {
     });
 
     expect(TaxAddressIncomplete.is(refused)).toBe(true);
+    expect(requests).toEqual([]);
+  });
+});
+
+describe('a sale in a custom currency', () => {
+  // A custom currency is valid Money, but Stripe has no unit rule for it: the checkout must get the
+  // money failure the provider gives for one, never UnknownCurrencyError
+  const gems = Currency.custom({ code: 'GEMS', scale: 0 });
+
+  it('calculateOneTimeTax returns money.provider_amount and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.calculateOneTimeTax({
+      customerId: input.customerId,
+      amount: money('5', gems),
+      description: 'Gem pack',
+    });
+
+    expect(refused).toMatchObject({ code: 'money.provider_amount' });
+    expect(requests).toEqual([]);
+  });
+
+  it('createTaxTransaction returns money.provider_amount and asks Stripe nothing', async () => {
+    const { tax, requests } = serviceAnswering(200, {});
+
+    const refused = await tax.createTaxTransaction({
+      reference: 'pi_gems',
+      type: 'sale',
+      customerId: input.customerId,
+      lineItems: [{ amount: money('5', gems), description: 'Gem pack', reference: 'line_1' }],
+      currency: 'GEMS',
+      breakdown: [],
+    });
+
+    expect(refused).toMatchObject({ code: 'money.provider_amount' });
     expect(requests).toEqual([]);
   });
 });

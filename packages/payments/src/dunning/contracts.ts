@@ -19,6 +19,30 @@ import {
   riskCategoryValues,
 } from './primitives.js';
 
+/** Whether a key or a string anywhere in this JSON value holds U+0000. */
+function holdsNul(value: unknown): boolean {
+  let found = false;
+  JSON.stringify(value, (key: string, item: unknown) => {
+    if (key.includes('\u0000') || (typeof item === 'string' && item.includes('\u0000'))) found = true;
+    return item;
+  });
+  return found;
+}
+
+/**
+ * Text Postgres can store. A `text`, `varchar` or `jsonb` value cannot hold U+0000: Postgres refuses
+ * it (SQLSTATE 22021, or 22P05 in jsonb), so the contract refuses it first, as `schema.invalid_input`.
+ */
+const pgText = z.string().refine(value => !value.includes('\u0000'), 'Text cannot contain the NUL character (U+0000)');
+
+/** A JSON object stored in a jsonb column: no key or string anywhere in it may hold U+0000. */
+const jsonRecord = z
+  .record(pgText, z.unknown())
+  .refine(value => !holdsNul(value), 'JSON cannot contain the NUL character (U+0000)');
+
+/** The largest value of a Postgres `integer` (int4) column, 2^31 - 1. A larger one is refused with SQLSTATE 22003. */
+const INT4_MAX = 2_147_483_647;
+
 // Base validation schemas for enums
 
 /**
@@ -55,7 +79,7 @@ export const campaignTriggerSchema = z.object({
   type: z.enum(['payment_failure', 'subscription_status', 'time_based', 'manual']),
   conditions: z.object({
     paymentFailureCount: z.number().int().min(1).optional(),
-    subscriptionStatus: z.array(z.string()).optional(),
+    subscriptionStatus: z.array(pgText).optional(),
     daysSinceLastPayment: z.number().int().min(0).optional(),
     daysSinceFailure: z.number().int().min(0).optional(),
     trialEndingDays: z.number().int().min(0).optional(),
@@ -64,7 +88,7 @@ export const campaignTriggerSchema = z.object({
   filters: z
     .object({
       customerSegments: z.array(customerSegmentIdSchema).optional(),
-      planTiers: z.array(z.string()).optional(),
+      planTiers: z.array(pgText).optional(),
       subscriptionAge: z
         .object({
           min: z.number().int().min(0).optional(),
@@ -84,20 +108,20 @@ export const campaignSettingsSchema = z.object({
   stopOnPaymentSuccess: z.boolean(),
   respectUnsubscribe: z.boolean(),
   businessHoursOnly: z.boolean(),
-  timezone: z.string().optional(),
+  timezone: pgText.optional(),
   allowedDays: z.array(z.number().int().min(0).max(6)).optional(), // 0-6 for days of week
-  abTestVariant: z.string().optional(),
+  abTestVariant: pgText.optional(),
 });
 
 export const communicationTemplateSchema = z.object({
   channel: communicationChannelSchema,
-  subject: z.string().min(1).max(500).optional(),
-  content: z.string().min(1),
-  variables: z.array(z.string()),
+  subject: pgText.min(1).max(500).optional(),
+  content: pgText.min(1),
+  variables: z.array(pgText),
   design: z
     .object({
-      theme: z.string().optional(),
-      brandColors: z.record(z.string(), z.string()).optional(),
+      theme: pgText.optional(),
+      brandColors: z.record(pgText, pgText).optional(),
       logoUrl: z.url().optional(),
     })
     .optional(),
@@ -117,7 +141,7 @@ export const segmentCriteriaSchema = z.object({
       timeframe: z.number().int().min(1), // days
     })
     .optional(),
-  planTier: z.array(z.string()).optional(),
+  planTier: z.array(pgText).optional(),
   lastPaymentDate: z
     .object({
       daysAgo: z.number().int().min(0),
@@ -136,12 +160,12 @@ export const segmentCriteriaSchema = z.object({
       max: z.number().min(0).max(100).optional(),
     })
     .optional(),
-  customAttributes: z.record(z.string(), z.unknown()).optional(),
+  customAttributes: jsonRecord.optional(),
 });
 
 export const riskScoreSchema = z.object({
   overall: z.number().min(0).max(100),
-  factors: z.record(z.string(), z.number()),
+  factors: z.record(pgText, z.number()),
   category: riskCategorySchema,
   lastCalculated: instantSchema(),
   trends: z.object({
@@ -154,9 +178,9 @@ export const riskScoreSchema = z.object({
 // Input validation schemas for API operations
 /** One step of a campaign, as create and update accept it. */
 export const dunningCampaignTemplateInputSchema = z.object({
-  name: z.string().min(1).max(255),
-  stepNumber: z.number().int().min(1),
-  delayHours: z.number().int().min(0),
+  name: pgText.min(1).max(255),
+  stepNumber: z.number().int().min(1).max(INT4_MAX),
+  delayHours: z.number().int().min(0).max(INT4_MAX),
   communication: communicationTemplateSchema,
 });
 
@@ -169,8 +193,8 @@ export const dunningCampaignTemplatesSchema = z
   });
 
 export const createDunningCampaignInputSchema = z.object({
-  name: z.string().min(1).max(255),
-  description: z.string().max(1000).optional(),
+  name: pgText.min(1).max(255),
+  description: pgText.max(1000).optional(),
   type: dunningCampaignTypeSchema,
   trigger: campaignTriggerSchema,
   settings: campaignSettingsSchema,
@@ -179,8 +203,8 @@ export const createDunningCampaignInputSchema = z.object({
 });
 
 export const updateDunningCampaignInputSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  description: z.string().max(1000).optional(),
+  name: pgText.min(1).max(255).optional(),
+  description: pgText.max(1000).optional(),
   type: dunningCampaignTypeSchema.optional(),
   status: dunningCampaignStatusSchema.optional(),
   trigger: campaignTriggerSchema.optional(),
@@ -192,41 +216,41 @@ export const updateDunningCampaignInputSchema = z.object({
 
 export const createDunningTemplateInputSchema = z.object({
   campaignId: dunningCampaignIdSchema,
-  name: z.string().min(1).max(255),
-  description: z.string().max(1000).optional(),
-  stepNumber: z.number().int().min(1),
-  delayHours: z.number().int().min(0),
+  name: pgText.min(1).max(255),
+  description: pgText.max(1000).optional(),
+  stepNumber: z.number().int().min(1).max(INT4_MAX),
+  delayHours: z.number().int().min(0).max(INT4_MAX),
   communication: communicationTemplateSchema,
-  abTestVariant: z.string().max(50).optional(),
+  abTestVariant: pgText.max(50).optional(),
 });
 
 export const updateDunningTemplateInputSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  description: z.string().max(1000).optional(),
-  stepNumber: z.number().int().min(1).optional(),
-  delayHours: z.number().int().min(0).optional(),
+  name: pgText.min(1).max(255).optional(),
+  description: pgText.max(1000).optional(),
+  stepNumber: z.number().int().min(1).max(INT4_MAX).optional(),
+  delayHours: z.number().int().min(0).max(INT4_MAX).optional(),
   communication: communicationTemplateSchema.optional(),
   isActive: z.boolean().optional(),
-  abTestVariant: z.string().max(50).optional(),
+  abTestVariant: pgText.max(50).optional(),
 });
 
 export const createCustomerSegmentInputSchema = z.object({
-  name: z.string().min(1).max(255),
-  description: z.string().max(1000).optional(),
+  name: pgText.min(1).max(255),
+  description: pgText.max(1000).optional(),
   type: customerSegmentTypeSchema,
   criteria: segmentCriteriaSchema,
   autoUpdate: z.boolean().default(true),
-  updateFrequency: z.number().int().min(1).default(24), // hours
+  updateFrequency: z.number().int().min(1).max(INT4_MAX).default(24), // hours
 });
 
 export const updateCustomerSegmentInputSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  description: z.string().max(1000).optional(),
+  name: pgText.min(1).max(255).optional(),
+  description: pgText.max(1000).optional(),
   type: customerSegmentTypeSchema.optional(),
   criteria: segmentCriteriaSchema.optional(),
   isActive: z.boolean().optional(),
   autoUpdate: z.boolean().optional(),
-  updateFrequency: z.number().int().min(1).optional(),
+  updateFrequency: z.number().int().min(1).max(INT4_MAX).optional(),
 });
 
 export const executeCampaignInputSchema = z.object({
@@ -248,13 +272,13 @@ export const campaignAnalyticsInputSchema = z.object({
     end: instantSchema(),
   }),
   granularity: z.enum(['hour', 'day', 'week', 'month']).default('day'),
-  metrics: z.array(z.string()).optional(),
+  metrics: z.array(pgText).optional(),
 });
 
 export const updateExecutionStatusInputSchema = z.object({
   executionId: dunningExecutionIdSchema,
   status: executionStatusSchema,
-  errorMessage: z.string().optional(),
+  errorMessage: pgText.optional(),
   result: z
     .object({
       customersProcessed: z.number().int().min(0),
@@ -262,7 +286,7 @@ export const updateExecutionStatusInputSchema = z.object({
       errors: z.array(
         z.object({
           customerId: customerIdSchema,
-          error: z.string(),
+          error: pgText,
           timestamp: instantSchema(),
         }),
       ),
@@ -281,17 +305,17 @@ export const updateCommunicationStatusInputSchema = z.object({
   deliveredAt: instantSchema().optional(),
   openedAt: instantSchema().optional(),
   clickedAt: instantSchema().optional(),
-  failureReason: z.string().optional(),
-  providerMessageId: z.string().optional(),
-  providerResponse: z.record(z.string(), z.unknown()).optional(),
-  trackingData: z.record(z.string(), z.unknown()).optional(),
+  failureReason: pgText.optional(),
+  providerMessageId: pgText.optional(),
+  providerResponse: jsonRecord.optional(),
+  trackingData: jsonRecord.optional(),
 });
 
 export const communicationWebhookSchema = z.object({
   communicationId: dunningCommunicationIdSchema,
   event: z.enum(['sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained']),
   timestamp: instantSchema(),
-  providerData: z.record(z.string(), z.unknown()).optional(),
+  providerData: jsonRecord.optional(),
 });
 
 export const bulkExecuteCampaignInputSchema = z.object({
@@ -314,7 +338,7 @@ export const customerRiskProfileInputSchema = z.object({
     successfulPayments: z.number().int().min(0),
     failedPayments: z.number().int().min(0),
     averageAmount: z.number().min(0),
-    currency: z.string().optional(),
+    currency: pgText.optional(),
     lastPaymentDate: instantSchema().optional(),
     streakDays: z.number().int().min(0),
   }),
@@ -323,20 +347,20 @@ export const customerRiskProfileInputSchema = z.object({
     activeSubscriptions: z.number().int().min(0),
     canceledSubscriptions: z.number().int().min(0),
     averageDuration: z.number().min(0), // months
-    currentStatus: z.string().optional(),
+    currentStatus: pgText.optional(),
   }),
   engagementMetrics: z.object({
     score: z.number().min(0).max(100),
     lastActivity: instantSchema().optional(),
     activityFrequency: z.number().min(0), // activities per week
-    featureUsage: z.record(z.string(), z.number()),
+    featureUsage: z.record(pgText, z.number()),
   }),
   communicationPreferences: z.object({
     preferredChannel: communicationChannelSchema.optional(),
     unsubscribed: z.boolean(),
     unsubscribedChannels: z.array(communicationChannelSchema),
-    timezone: z.string().optional(),
-    language: z.string().optional(),
+    timezone: pgText.optional(),
+    language: pgText.optional(),
   }),
 });
 
@@ -346,7 +370,7 @@ export const listDunningCampaignsQuerySchema = z.object({
   offset: z.number().int().min(0).default(0),
   type: dunningCampaignTypeSchema.optional(),
   status: dunningCampaignStatusSchema.optional(),
-  search: z.string().optional(),
+  search: pgText.optional(),
   sortBy: z.enum(['name', 'type', 'status', 'createdAt', 'updatedAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -356,7 +380,7 @@ export const listCustomerSegmentsQuerySchema = z.object({
   offset: z.number().int().min(0).default(0),
   type: customerSegmentTypeSchema.optional(),
   isActive: z.boolean().optional(),
-  search: z.string().optional(),
+  search: pgText.optional(),
   sortBy: z.enum(['name', 'type', 'customerCount', 'createdAt', 'updatedAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });

@@ -281,9 +281,13 @@ const localProviderNames: ReadonlySet<string> = new Set(LOCAL_PROVIDERS);
  */
 export function priceOf(call: PricedCall): Price {
   if (call.provider !== undefined && isLocalProvider(call.provider)) return { usd: 0, basis: 'local' };
-  const pricing = getModelPricing(call.model);
-  const usd = (call.inputTokens / 1000) * pricing.inputPer1k + (call.outputTokens / 1000) * pricing.outputPer1k;
+  const usd = usdAt(getModelPricing(call.model), call.inputTokens, call.outputTokens);
   return { usd, basis: hasKnownPricing(call.model) ? 'list-price' : 'default-rate' };
+}
+
+/** The USD cost of `inputTokens` and `outputTokens` at `pricing`. */
+export function usdAt(pricing: ModelPricing, inputTokens: number, outputTokens: number): number {
+  return (inputTokens / 1000) * pricing.inputPer1k + (outputTokens / 1000) * pricing.outputPer1k;
 }
 
 /**

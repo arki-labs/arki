@@ -226,14 +226,14 @@ describe('compliance status and deadlines', () => {
   });
 
   it('is non-compliant when a jurisdiction requires registration and none is stored, then follows the registration', async () => {
-    await repos.jurisdictions.createJurisdiction({
+    orThrow(await repos.jurisdictions.createJurisdiction({
       name: 'Germany',
       code: 'DE',
       type: 'country',
       countryCode: 'DE',
       registrationRequired: true,
       filingFrequency: 'quarterly',
-    });
+    }));
 
     const missing = await reporting.validateComplianceStatus();
     expect(missing.status).toBe('non_compliant');
@@ -268,14 +268,14 @@ describe('compliance status and deadlines', () => {
 
   // The frequency is free text in the jurisdiction row: an Object.prototype name once made the loop run forever
   it('skips a jurisdiction whose filing frequency is named like an object member', async () => {
-    await repos.jurisdictions.createJurisdiction({
+    orThrow(await repos.jurisdictions.createJurisdiction({
       name: 'Germany (odd row)',
       code: 'DE-X',
       type: 'country',
       countryCode: 'DE',
       registrationRequired: true,
       filingFrequency: 'constructor',
-    });
+    }));
 
     const deadlines = await reporting.getUpcomingDeadlines(instant('2033-10-14T00:00:00Z'));
     expect(deadlines.map(deadline => deadline.jurisdiction)).toEqual(['Germany']);

@@ -37,3 +37,42 @@ describe('PIIRedactor with caller patterns (F9)', () => {
     }
   });
 });
+
+describe('PIIRedactor default email and street-address patterns (audit-2 #10)', () => {
+  const redactor = new PIIRedactor();
+
+  // Why: the patterns run on user text before it reaches a model; a rewrite for speed must still catch the same PII.
+  it.each([
+    ['My email is john@example.com', 'My email is [EMAIL REDACTED]'],
+    ['Contact: -john.doe+tag@mail.example.co.uk.', 'Contact: -[EMAIL REDACTED].'],
+    ['e.g.john@x.com', '[EMAIL REDACTED]'],
+    [
+      'first.last@sub-domain.example.com, second@ex.org;third@ex.net',
+      '[EMAIL REDACTED], [EMAIL REDACTED];[EMAIL REDACTED]',
+    ],
+    ['a@b.com.x@y.com', '[EMAIL REDACTED].[EMAIL REDACTED]'],
+    ['I live at 123 Main Street, Springfield, IL 62701', 'I live at [ADDRESS REDACTED]'],
+    ['4567 Martin Luther King Jr Blvd, Apt 5, Oakland, CA 94601', '[ADDRESS REDACTED]'],
+    ['7 Oak Ct, Austin, TX 78701 and 8 Pine Ln, Dallas, TX 75201', '[ADDRESS REDACTED] and [ADDRESS REDACTED]'],
+  ])('redacts %j', (input, redacted) => {
+    expect(redactor.redact(input).redactedText).toBe(redacted);
+  });
+
+  it.each(['x@y', 'foo@bar.c', 'no email here', '10 Downing Street, London'])('leaves %j alone', input => {
+    expect(redactor.hasPII(input)).toBe(false);
+  });
+
+  // Why: a pattern that backtracks over the whole text from every start blocked the event loop for ~33 s on
+  // 256 KB of '1 ', so one pasted log could stall the server.
+  it.each([
+    ['1 ', '1 '.repeat(131_072)],
+    ['a.', 'a.'.repeat(131_072)],
+    ['aa.', 'aa.'.repeat(87_381)],
+  ])('256 KB of %j with no PII is scanned in under a second', (_name, text) => {
+    const started = performance.now();
+    expect(redactor.hasPII(text)).toBe(false);
+    expect(redactor.detect(text)).toEqual([]);
+    expect(redactor.redact(text).piiCount).toBe(0);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});

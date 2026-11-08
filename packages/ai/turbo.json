@@ -3,7 +3,13 @@
   "tags": ["platform"],
   "tasks": {
     "test": {
-      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY", "AI_TEST_MODEL", "AI_TELEMETRY_RECORD_CONTENT"]
+      "env": [
+        "$TURBO_EXTENDS$",
+        "ENCRYPTION_KEY",
+        "AI_TEST_MODEL",
+        "AI_TELEMETRY_RECORD_CONTENT",
+        "AI_DETERMINISTIC_SEED"
+      ]
     }
   }
 }

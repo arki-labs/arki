@@ -1,6 +1,8 @@
 import type { IdGenerationFailure } from '@arki/contracts';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
+import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
+import { parse } from '@arki/schema';
 import type Stripe from 'stripe';
 
 import type { UserId } from '../core/user-id.js';
@@ -30,7 +32,29 @@ type ProjectionFailure =
   | FailureOf<typeof UnknownProviderCustomer>
   | FailureOf<typeof SubscriptionWithoutItems>
   | FailureOf<typeof UnknownSubscriptionStatus>
+  | SchemaFailure
   | JournalWriteFailure;
+
+/**
+ * A Stripe time in Unix seconds, up to the last second of year 9999, read as an `Instant`. The
+ * webhook body is outside data: `fromUnix` throws for a number that is not finite or past its
+ * range (JSON can carry `1e400`, read as `Infinity`), so the schema refuses those first.
+ */
+const unixSecondsSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(253_402_300_799)
+  .transform(seconds => fromUnix(seconds));
+
+/** The times `projectStripeSubscription` stores, read from the subscription and its first item. */
+const subscriptionTimesSchema = z.object({
+  currentPeriodStart: unixSecondsSchema,
+  currentPeriodEnd: unixSecondsSchema,
+  trialStart: unixSecondsSchema.nullable(),
+  trialEnd: unixSecondsSchema.nullable(),
+  canceledAt: unixSecondsSchema.nullable(),
+});
 
 /**
  * Project a Stripe Subscription object onto our `subscriptions` table.
@@ -48,8 +72,9 @@ type ProjectionFailure =
  *
  * The event is outside data, so what cannot be stored is returned before anything is written:
  * `UnknownProviderCustomer` (no local customer row, such as a subscription made in the Stripe
- * dashboard: never invent an owner), `SubscriptionWithoutItems` (no billing period to read) and
- * `UnknownSubscriptionStatus` (a status Stripe added later: never guessed).
+ * dashboard: never invent an owner), `SubscriptionWithoutItems` (no billing period to read),
+ * `UnknownSubscriptionStatus` (a status Stripe added later: never guessed) and `InvalidInput`
+ * (`schema.invalid_input`: a period, trial or cancel time that is not whole Unix seconds up to year 9999).
  */
 export async function projectStripeSubscription(params: {
   repo: Pick<PaymentRepository, 'findCustomerByProviderCustomerId'>;
@@ -74,18 +99,24 @@ export async function projectStripeSubscription(params: {
   const status = subscriptionStatusSchema.safeParse(sub.status);
   if (!status.success) return UnknownSubscriptionStatus({ status: sub.status });
 
+  // `||`: a missing time is `null`, and Stripe's 0 has always meant none too
+  const times = parse(subscriptionTimesSchema, {
+    currentPeriodStart: item.current_period_start,
+    currentPeriodEnd: item.current_period_end,
+    trialStart: sub.trial_start || null,
+    trialEnd: sub.trial_end || null,
+    canceledAt: sub.canceled_at || null,
+  });
+  if (isFailure(times)) return times;
+
   const result = await writes.syncSubscription({
     userId: customer.userId,
     customerId: customer.id,
     planId,
     providerSubscriptionId: sub.id,
     status: status.data,
-    currentPeriodStart: fromUnix(item.current_period_start),
-    currentPeriodEnd: fromUnix(item.current_period_end),
-    trialStart: sub.trial_start ? fromUnix(sub.trial_start) : null,
-    trialEnd: sub.trial_end ? fromUnix(sub.trial_end) : null,
+    ...times,
     cancelAtPeriodEnd: sub.cancel_at_period_end,
-    canceledAt: sub.canceled_at ? fromUnix(sub.canceled_at) : null,
     metadata: sub.metadata,
   });
   if (isFailure(result)) return result;
@@ -236,7 +267,7 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig) {
     /**
      * Verify + project a Stripe webhook. Returns `InvalidWebhookSignature` for a bad signature (answer
      * it with HTTP 400), `SubscriptionWithoutItems` or `PriceNotConfigured` for a subscription it cannot
-     * map to a plan, the failures of `projectStripeSubscription`, and the journal's refused writes.
+     * map to a plan, the failures of `projectStripeSubscription` (`InvalidInput` for a time that is not Unix seconds), and the journal's refused writes.
      * Nothing is written for any of them; a webhook route must not acknowledge them.
      */
     async handleWebhook(

@@ -10,7 +10,7 @@ import type { SparseSpace, SparseVector } from '@arki/embeddings/sparse';
 
 import type { VectorScrollPage, VectorSearchProvider, VectorSearchResult } from '../../types.js';
 import { debugVector } from '../../debug.js';
-import { getErrorMessage, VectorSearchError } from '../../errors.js';
+import { ConfigurationError, getErrorMessage, VectorSearchError } from '../../errors.js';
 import { VectorStoreUnavailable } from '../../failures.js';
 import { observeAi } from '../../observe.js';
 
@@ -118,7 +118,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     { space, sparseSpace }: { space: EmbeddingSpace; sparseSpace?: SparseSpace },
   ) {
     // A bad URL is a configuration fault: fail when the provider is built, not on the first query.
-    if (!URL.canParse(config.url)) throw new VectorSearchError(`Qdrant url is not a valid URL: "${config.url}"`);
+    if (!URL.canParse(config.url)) throw new ConfigurationError(`Qdrant url is not a valid URL: "${config.url}"`);
     this.space = space;
     if (sparseSpace !== undefined) this.sparseSpace = sparseSpace;
     this.collectionName = config.collectionName;

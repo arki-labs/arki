@@ -34,12 +34,14 @@ import type { ModelMessage } from 'ai';
 import { Output } from 'ai';
 import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
 
+import { z } from '@arki/contracts';
 import { isFailure } from '@arki/failure';
 import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type { ProviderFailure } from '../failures.js';
 import { debugService } from '../debug.js';
-import { env } from '../env.js';
+import { ConfigurationError } from '../errors.js';
+import { deterministicSeedSchema } from '../setting-schemas.js';
 import { modelSchema } from './model-schema.js';
 import { finishFailure, providerFailure, readTextParts } from './provider-failure.js';
 import { aiTelemetry } from './telemetry.js';
@@ -136,10 +138,29 @@ const DEFAULT_MAX_RETRIES = 1;
  * `@ai-sdk/openai`-against-`/v1` setups. The `ai-sdk-ollama` provider
  * expects a host without the `/v1` suffix, so we strip it when present.
  * That way operators can keep one env var across both call paths.
+ * A host that is not an http or https URL throws `ConfigurationError` when the service is built.
  */
 function resolveHost(explicit?: string): string {
   const raw = explicit ?? process.env['OLLAMA_HOST'] ?? process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434';
-  return raw.replace(/\/v1\/?$/, '');
+  const host = raw.replace(/\/v1\/?$/, '');
+  if (!ollamaHostSchema.safeParse(host).success)
+    throw new ConfigurationError(
+      `Ollama host "${host}" is not an http or https URL. Fix \`host\`, OLLAMA_HOST or OLLAMA_BASE_URL, e.g. http://localhost:11434.`,
+    );
+  return host;
+}
+
+const ollamaHostSchema = z.url({ protocol: /^https?$/ });
+
+/**
+ * `AI_DETERMINISTIC_SEED`, read on its own: the service reads only its own settings, so a bad
+ * variable it never uses (say `QDRANT_URL`) cannot stop it. An empty value counts as unset.
+ */
+function deterministicSeedFromEnv(): number | undefined {
+  const raw = process.env['AI_DETERMINISTIC_SEED'];
+  const parsed = deterministicSeedSchema.safeParse(raw === '' ? undefined : raw);
+  if (!parsed.success) throw new ConfigurationError(`AI_DETERMINISTIC_SEED must be a whole number, got "${raw ?? ''}".`);
+  return parsed.data;
 }
 
 /**
@@ -160,7 +181,7 @@ export class OllamaService {
   constructor(config: OllamaServiceConfig = {}) {
     this.model = config.model ?? DEFAULT_MODEL;
     this.defaultTemperature = config.temperature ?? DEFAULT_TEMPERATURE;
-    this.deterministicSeed = config.deterministicSeed ?? env.AI_DETERMINISTIC_SEED;
+    this.deterministicSeed = config.deterministicSeed ?? deterministicSeedFromEnv();
     this.defaultMaxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.keepAlive = config.keepAlive;
     this.think = config.think;

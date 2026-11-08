@@ -11,11 +11,12 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { defineRelations, eq } from 'drizzle-orm';
+import { defineRelations, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { add, now } from '@arki/date';
+import { findDatabaseError } from '@arki/db/errors';
 import { InvalidInput, orThrow, UnexpectedFailure } from '@arki/failure';
 
 import type { DunningExecutionId } from './primitives.js';
@@ -25,6 +26,7 @@ import type {
   InAppNotificationStore,
   StoredInAppNotification,
 } from './services/communication-service.js';
+import { PaymentProviderError } from '../core/providers/provider-error.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
 import {
   NotificationChannelUnavailable,
@@ -250,6 +252,41 @@ describe('EmailProvider (Resend)', () => {
     const unreadable = await email().getDeliveryStatus('email_123');
 
     expect(NotificationProviderResponseInvalid.is(unreadable)).toBe(true);
+  });
+});
+
+/** A thrown provider fault that a later retry can fix. */
+function unavailable(error: unknown) {
+  return error instanceof PaymentProviderError && error.code === 'unavailable' && error.retryable;
+}
+
+describe('a provider that cannot be reached, or a message id it cannot be asked about', () => {
+  // Nothing listens on port 1: the connection is refused before any answer
+  const offline = {
+    apiKey: 're_test',
+    fromEmail: 'billing@example.com',
+    fromName: 'Billing',
+    apiBaseUrl: 'http://127.0.0.1:1',
+  };
+
+  it('send and getDeliveryStatus throw PaymentProviderError unavailable (retryable), with the network error as cause', async () => {
+    const provider = new EmailProvider(offline);
+
+    await expect(provider.send(request)).rejects.toSatisfy(unavailable);
+    await expect(provider.getDeliveryStatus('email_123')).rejects.toSatisfy(
+      error => unavailable(error) && error instanceof Error && error.cause instanceof Error,
+    );
+  });
+
+  it('a message id with a lone UTF-16 surrogate returns schema.invalid_input and makes no request', async () => {
+    const before = requestCount;
+
+    const fromEmail = await email().getDeliveryStatus('email_\uD800');
+    const fromSms = await sms().getDeliveryStatus('SM\uDC00');
+
+    expect(fromEmail).toMatchObject({ code: 'schema.invalid_input' });
+    expect(fromSms).toMatchObject({ code: 'schema.invalid_input' });
+    expect(requestCount).toBe(before);
   });
 });
 
@@ -591,6 +628,59 @@ describe('CommunicationOrchestrationService.sendCommunication', () => {
     const sent = orThrow(await service.sendCommunication(execution, template, customer));
 
     expect(sent).toMatchObject({ status: 'sent', providerMessageId: 'email_sent' });
+  });
+
+  it('a provider that cannot be reached is thrown as unavailable after the row is marked failed', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(
+      new EmailProvider({
+        apiKey: 're_test',
+        fromEmail: 'billing@example.com',
+        fromName: 'Billing',
+        apiBaseUrl: 'http://127.0.0.1:1',
+      }),
+    );
+    const { execution, template } = await scheduledExecution();
+
+    await expect(service.sendCommunication(execution, template, customer)).rejects.toSatisfy(
+      error => error instanceof PaymentProviderError && error.code === 'unavailable',
+    );
+    expect(await communicationsOf(execution.id)).toEqual([
+      expect.objectContaining({ status: 'failed', failureReason: 'The resend request failed' }),
+    ]);
+  });
+
+  // The send error is what the caller must act on: a status write that fails as well may not replace it
+  it('when marking the row failed fails too, both errors are thrown, the send error first', async () => {
+    const service = new CommunicationOrchestrationService(db, tables);
+    service.registerProvider(
+      new EmailProvider({
+        apiKey: 're_test',
+        fromEmail: 'billing@example.com',
+        fromName: 'Billing',
+        apiBaseUrl: 'http://127.0.0.1:1',
+      }),
+    );
+    const { execution, template } = await scheduledExecution();
+    // New writes of `failed` are refused; rows other tests already failed stay as they are
+    const communications = tables.dunningCommunications;
+    await db.execute(
+      sql`alter table ${communications} add constraint communications_never_failed check (status <> 'failed') not valid`,
+    );
+
+    try {
+      const thrown: unknown = await service
+        .sendCommunication(execution, template, customer)
+        .catch((error: unknown) => error);
+
+      expect(thrown).toBeInstanceOf(AggregateError);
+      const errors = thrown instanceof AggregateError ? thrown.errors : [];
+      expect(errors[0]).toBeInstanceOf(PaymentProviderError);
+      expect(errors[0]).toMatchObject({ code: 'unavailable' });
+      expect(errors[1]).toSatisfy((error: unknown) => findDatabaseError(error)?.sqlState === '23514');
+    } finally {
+      await db.execute(sql`alter table ${communications} drop constraint communications_never_failed`);
+    }
   });
 
   it('processPendingCommunications lists each communication it could not send', async () => {

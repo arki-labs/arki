@@ -64,7 +64,10 @@ export const DEFAULT_INJECTION_PATTERNS: DetectionPattern[] = [
     description: 'Known jailbreak attempt (DAN)',
   },
   {
-    pattern: /\bjailbreak\b|\bunlock\b.+?\bmode\b/i,
+    // `(?:(?!\bunlock\b).)+?`: the text between never holds another `unlock`, so each part of a line is read from
+    // one `unlock` only (`.+?` read on from every `unlock` of a line with no `mode`: quadratic). Same inputs match;
+    // the match starts at the last `unlock` before `mode`.
+    pattern: /\bjailbreak\b|\bunlock\b(?:(?!\bunlock\b).)+?\bmode\b/i,
     description: 'Explicit jailbreak attempt',
   },
 

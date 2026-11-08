@@ -24,7 +24,7 @@ import type {
   UpdateDunningCampaignInput,
 } from '../contracts.js';
 import type { DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
-import type { DunningDatabase } from '../repository.js';
+import type { DunningDatabase, ExecutionReferenceMissing } from '../repository.js';
 import { valueList } from '../sql-list.js';
 import type { DunningTables } from '../tables.js';
 import type {
@@ -132,13 +132,8 @@ export class DunningCampaignService {
     private readonly communicationServiceFactory: () => CommunicationOrchestrationService,
     private readonly _paymentRetryService?: PaymentRetryService,
   ) {
-    this.campaignRepo = createDunningCampaignRepository(db, {
-      dunningCampaigns: tables.dunningCampaigns,
-      dunningCampaignAnalytics: tables.dunningCampaignAnalytics,
-    });
-    this.templateRepo = createDunningTemplateRepository(db, {
-      dunningTemplates: tables.dunningTemplates,
-    });
+    this.campaignRepo = createDunningCampaignRepository(db, tables);
+    this.templateRepo = createDunningTemplateRepository(db, tables);
     this.executionRepo = createDunningExecutionRepository(db, {
       dunningExecutions: tables.dunningExecutions,
     });
@@ -157,11 +152,8 @@ export class DunningCampaignService {
   async createCampaign(input: CreateDunningCampaignInput, createdBy: string): Promise<DunningCampaignWithSteps> {
     return this.db.transaction(async tx => {
       // The repositories run on the transaction: a template that fails takes the campaign with it
-      const campaignRepo = createDunningCampaignRepository(tx, {
-        dunningCampaigns: this.tables.dunningCampaigns,
-        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
-      });
-      const templateRepo = createDunningTemplateRepository(tx, { dunningTemplates: this.tables.dunningTemplates });
+      const campaignRepo = createDunningCampaignRepository(tx, this.tables);
+      const templateRepo = createDunningTemplateRepository(tx, this.tables);
 
       const campaignModel = await campaignRepo.create({
         ...input,
@@ -179,6 +171,7 @@ export class DunningCampaignService {
           delayHours: templateInput.delayHours,
           communication: templateInput.communication,
         });
+        invariant(!isFailure(template), 'the campaign this transaction just wrote is missing');
         templates.push(template);
       }
 
@@ -205,16 +198,22 @@ export class DunningCampaignService {
     updatedBy: string,
   ): Promise<DunningCampaignWithSteps | null | FailureOf<typeof DunningTemplateInUse>> {
     const { templates: nextTemplates, ...campaignFields } = input;
-    const { dunningCommunications } = this.tables;
+    const { dunningCommunications, dunningTemplates } = this.tables;
 
     return this.db.transaction(async tx => {
-      const campaignRepo = createDunningCampaignRepository(tx, {
-        dunningCampaigns: this.tables.dunningCampaigns,
-        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
-      });
-      const templateRepo = createDunningTemplateRepository(tx, { dunningTemplates: this.tables.dunningTemplates });
+      const campaignRepo = createDunningCampaignRepository(tx, this.tables);
+      const templateRepo = createDunningTemplateRepository(tx, this.tables);
 
-      const existing = nextTemplates ? await templateRepo.findByCampaignId(campaignId) : [];
+      // Lock the steps first: a communication written for one now waits for this transaction, and the
+      // check below sees every communication written before it (the foreign key restricts the delete)
+      const existing = nextTemplates
+        ? await tx
+            .select()
+            .from(dunningTemplates)
+            .where(eq(dunningTemplates.campaignId, campaignId))
+            .orderBy(dunningTemplates.stepNumber)
+            .for('update')
+        : [];
       const keptSteps = new Set(nextTemplates?.map(template => template.stepNumber));
       const removed = existing.filter(template => !keptSteps.has(template.stepNumber));
 
@@ -237,7 +236,10 @@ export class DunningCampaignService {
       }
 
       if (nextTemplates) {
-        for (const template of removed) await templateRepo.delete(template.id);
+        for (const template of removed) {
+          const refused = await templateRepo.delete(template.id);
+          invariant(!refused, 'a step the locked check found unused has a communication');
+        }
         for (const next of nextTemplates) {
           const current = existing.find(template => template.stepNumber === next.stepNumber);
           if (current) {
@@ -247,7 +249,8 @@ export class DunningCampaignService {
               communication: next.communication,
             });
           } else {
-            await templateRepo.create({ campaignId, ...next });
+            const created = await templateRepo.create({ campaignId, ...next });
+            invariant(!isFailure(created), 'the campaign this transaction just updated is missing');
           }
         }
       }
@@ -287,33 +290,7 @@ export class DunningCampaignService {
    * nothing.
    */
   async deleteCampaign(campaignId: DunningCampaignId): Promise<FailureOf<typeof DunningTemplateInUse> | undefined> {
-    const { dunningCommunications, dunningTemplates } = this.tables;
-
-    return this.db.transaction(async tx => {
-      const campaignRepo = createDunningCampaignRepository(tx, {
-        dunningCampaigns: this.tables.dunningCampaigns,
-        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
-      });
-      // Lock the steps first: a communication written for one now waits for this transaction, and
-      // the check below sees every communication written before it (the foreign key restricts the delete)
-      await tx
-        .select({ id: dunningTemplates.id })
-        .from(dunningTemplates)
-        .where(eq(dunningTemplates.campaignId, campaignId))
-        .for('update');
-      const [used] = await tx
-        .select({ templateId: dunningTemplates.id, stepNumber: dunningTemplates.stepNumber })
-        .from(dunningCommunications)
-        .innerJoin(dunningTemplates, eq(dunningTemplates.id, dunningCommunications.templateId))
-        .where(eq(dunningTemplates.campaignId, campaignId))
-        .limit(1);
-      if (used) {
-        return DunningTemplateInUse({ templateId: used.templateId, stepNumber: used.stepNumber });
-      }
-
-      await campaignRepo.delete(campaignId);
-      return;
-    });
+    return this.campaignRepo.delete(campaignId);
   }
 
   /**
@@ -331,7 +308,8 @@ export class DunningCampaignService {
    * Execute a campaign manually or through automation: one scheduled execution per active step for
    * each eligible customer. An unknown campaign returns `DunningCampaignNotFound`, a campaign that is
    * not active `DunningCampaignNotActive`, one with no active step `DunningCampaignWithoutSteps`;
-   * each writes nothing.
+   * each writes nothing. A row deleted while the executions are written returns its not-found failure
+   * (`ExecutionReferenceMissing`); the executions written before it stay.
    */
   async executeCampaign(
     input: ExecuteCampaignInput,
@@ -341,6 +319,7 @@ export class DunningCampaignService {
     | FailureOf<typeof DunningCampaignNotFound>
     | FailureOf<typeof DunningCampaignNotActive>
     | FailureOf<typeof DunningCampaignWithoutSteps>
+    | ExecutionReferenceMissing
   > {
     const campaign = await this.campaignRepo.findById(input.campaignId);
     if (!campaign) {
@@ -398,6 +377,8 @@ export class DunningCampaignService {
           scheduledAt,
           retryCount: 0,
         });
+        // A row deleted since it was read (the campaign, a step or the customer): the executions written so far stay
+        if (isFailure(execution)) return execution;
 
         executions.push(execution);
         currentDelay += template.delayHours;

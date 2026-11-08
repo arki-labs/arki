@@ -193,7 +193,7 @@ money(share, 'EUR', { rounding: 'halfEven' });
 
 ## Splitting
 
-`allocate(ratios, { remainder })` and `split(parts, { remainder })` always add back to the whole. Leftover units go to the parts whose exact share lost the most (`'largest'`, the default), or from the start (`'first'`) or end (`'last'`). A zero ratio never receives a unit. Ratios may be decimals: `allocate(['0.5', '0.25', '0.25'])`.
+`allocate(ratios, { remainder })` and `split(parts, { remainder })` always add back to the whole. Both make at most 10 000 parts: more throws `ResourceLimitError` (`split makes at most 10000 parts`), so one call cannot build an unbounded array. Leftover units go to the parts whose exact share lost the most (`'largest'`, the default), or from the start (`'first'`) or end (`'last'`). A zero ratio never receives a unit. Ratios may be decimals: `allocate(['0.5', '0.25', '0.25'])`.
 
 ## Currencies
 

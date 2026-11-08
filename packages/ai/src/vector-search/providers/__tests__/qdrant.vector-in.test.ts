@@ -3,7 +3,7 @@ import { trace } from '@opentelemetry/api';
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { VectorSearchError } from '../../../errors';
+import { ConfigurationError } from '../../../errors';
 import { QdrantVectorProvider } from '../qdrant';
 
 // ── Qdrant client mock ────────────────────────────────────────
@@ -173,8 +173,18 @@ describe('QdrantVectorProvider — outages are not "not found" (F11)', () => {
     await expect(p.getDocument('a')).rejects.toThrow('fetch failed');
   });
 
-  it('a url that is not a URL fails when the provider is built, as a VectorSearchError', () => {
-    expect(() => new QdrantVectorProvider({ ...config, url: 'not a url' }, { space })).toThrow(VectorSearchError);
+  // A mistyped QDRANT_URL is a configuration fault, not a store outage: it stops the provider when it is
+  // built, as the package's ConfigurationError, before any client call.
+  it('a url that is not a URL fails when the provider is built, as a ConfigurationError', () => {
+    expect(() => new QdrantVectorProvider({ ...config, url: 'not a url' }, { space })).toThrow(
+      expect.objectContaining({
+        name: 'ConfigurationError',
+        code: 'CONFIGURATION_ERROR',
+        message: 'Qdrant url is not a valid URL: "not a url"',
+      }),
+    );
+    expect(() => new QdrantVectorProvider({ ...config, url: 'http://' }, { space })).toThrow(ConfigurationError);
+    expect(client.getCollections).not.toHaveBeenCalled();
   });
 });
 

@@ -5,11 +5,12 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { defineRelations } from 'drizzle-orm';
+import { defineRelations, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
+import { findDatabaseError } from '@arki/db/errors';
 import { orThrow } from '@arki/failure';
 import { money, UnknownCurrency } from '@arki/money';
 
@@ -301,6 +302,37 @@ describe('on a database without relations', () => {
 
     expect(answer).toBeUndefined();
     expect(after).toMatchObject({ id: execution.id, status: 'cancelled' });
+    await client.close();
+  });
+});
+
+describe('handlePaymentSuccess never drops a failed cancel', () => {
+  // A customer who paid must stop getting dunning mail: when the cancel fails, the caller has to know so it can retry
+  it('throws the database error when the active execution cannot be cancelled, and the execution stays scheduled', async () => {
+    const { client, db, service: handlers, customerId } = await plainDatabase();
+    const { campaign, template } = await campaignWithStep(db, true);
+    await db.insert(dunning.dunningExecutions).values({
+      campaignId: campaign.id,
+      templateId: template.id,
+      customerId,
+      triggerType: 'payment_failure',
+      triggerData: {},
+      scheduledAt: add(now(), { hours: 1 }),
+    });
+    // The database refuses the cancel, as it would on a lock timeout or a lost connection
+    await db.execute(
+      sql`alter table ${dunning.dunningExecutions} add constraint executions_never_cancelled check (status <> 'cancelled')`,
+    );
+
+    const answer = handlers.handlePaymentSuccess({
+      paymentId: orThrow(createPaymentId()),
+      customerId,
+      amount: money('50', 'EUR'),
+    });
+
+    await expect(answer).rejects.toSatisfy(error => findDatabaseError(error)?.sqlState === '23514');
+    const [after] = await db.select().from(dunning.dunningExecutions);
+    expect(after).toMatchObject({ status: 'scheduled' });
     await client.close();
   });
 });

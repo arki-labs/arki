@@ -56,7 +56,8 @@ export function MathInput({
 
   // Sync display string when value changes externally (adjusting state while rendering, not in an effect)
   const [previousValue, setPreviousValue] = React.useState(value);
-  if (value !== previousValue) {
+  // Object.is, not !==: NaN (a 0/0 result) is never !== itself, which would set state on every render.
+  if (!Object.is(value, previousValue)) {
     setPreviousValue(value);
     setDisplayValue(numberToDisplay(value));
   }

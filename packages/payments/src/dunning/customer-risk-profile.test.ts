@@ -15,10 +15,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
 import { instant, isInstant } from '@arki/date';
+import { orThrow } from '@arki/failure';
 import { AssertError } from '@arki/schema';
 
 import type { CustomerRiskProfile } from './types.js';
+import { createCustomerId } from '../core/primitives.js';
+import { ReferenceNotFound } from '../core/providers/provider-error.js';
+import { userIdFactory } from '../core/user-id.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
+import { createCustomerRiskProfileRepository } from './repository.js';
 import { readCustomerRiskProfile } from './stored-risk-profile.js';
 import { createDunningTables } from './tables.js';
 
@@ -145,5 +150,83 @@ describe('customer risk profile dates in jsonb', () => {
     if (!corrupt) throw new Error('the risk profile row was not stored');
 
     expect(() => readCustomerRiskProfile(corrupt)).toThrow(AssertError);
+  });
+});
+
+async function newCustomer(label: string) {
+  const id = orThrow(createCustomerId());
+  const owner = orThrow(userIdFactory.create());
+  await db.insert(users).values({ id: owner });
+  await db.insert(core.customers).values({ id, userId: owner, providerCustomerId: `cus_${label}`, email: `${label}@example.com` });
+  return id;
+}
+
+async function profilesOf(id: CustomerRiskProfile['customerId']) {
+  return db.select().from(dunning.customerRiskProfiles).where(eq(dunning.customerRiskProfiles.customerId, id));
+}
+
+describe('CustomerRiskProfileRepository writes', () => {
+  // Two payment events for a new customer arrive together: both upserts are first, and a second profile would split its history
+  it('two first upserts at once leave one profile, holding one of the two writes', async () => {
+    const repository = createCustomerRiskProfileRepository(db, dunning);
+    const buyer = await newCustomer('concurrent');
+    const base = profile();
+
+    const [first, second] = await Promise.all([
+      repository.upsert({ ...base, customerId: buyer, riskScore: { ...base.riskScore, overall: 10 } }),
+      repository.upsert({ ...base, customerId: buyer, riskScore: { ...base.riskScore, overall: 90 } }),
+    ]);
+    const rows = await profilesOf(buyer);
+
+    expect(rows).toHaveLength(1);
+    expect([10, 90]).toContain(rows[0]?.riskScore.overall);
+    expect(orThrow(first).id).toBe(rows[0]?.id);
+    expect(orThrow(second).id).toBe(rows[0]?.id);
+  });
+
+  it('a second upsert replaces the stored profile in place', async () => {
+    const repository = createCustomerRiskProfileRepository(db, dunning);
+    const buyer = await newCustomer('replaced');
+    const base = profile();
+
+    const created = orThrow(await repository.upsert({ ...base, customerId: buyer }));
+    const replaced = orThrow(
+      await repository.upsert({ ...base, customerId: buyer, segmentIds: ['seg_vip'], metadata: { source: 'retry' } }),
+    );
+
+    expect(replaced.id).toBe(created.id);
+    expect(replaced).toMatchObject({ segmentIds: ['seg_vip'], metadata: { source: 'retry' } });
+    expect(await profilesOf(buyer)).toHaveLength(1);
+  });
+
+  // A payment event for a customer the app never stored must name the missing customer, not leak a raw foreign key error
+  it('upsert and create for an unknown customer return payments.reference_not_found and write nothing', async () => {
+    const repository = createCustomerRiskProfileRepository(db, dunning);
+    const unknown = orThrow(createCustomerId());
+
+    const upserted = await repository.upsert({ ...profile(), customerId: unknown });
+    const created = await repository.create({ ...profile(), customerId: unknown });
+
+    for (const refused of [upserted, created]) {
+      expect(ReferenceNotFound.is(refused)).toBe(true);
+      expect(refused).toMatchObject({
+        code: 'payments.reference_not_found',
+        data: { kind: 'customer', id: unknown, missing: 'row' },
+      });
+    }
+    expect(await profilesOf(unknown)).toEqual([]);
+  });
+
+  it('a refused write inside a caller transaction leaves that transaction usable', async () => {
+    const buyer = await newCustomer('in-transaction');
+
+    const written = await db.transaction(async tx => {
+      const repository = createCustomerRiskProfileRepository(tx, dunning);
+      const refused = await repository.upsert({ ...profile(), customerId: orThrow(createCustomerId()) });
+      expect(refused).toMatchObject({ code: 'payments.reference_not_found' });
+      return orThrow(await repository.upsert({ ...profile(), customerId: buyer }));
+    });
+
+    expect(await profilesOf(buyer)).toEqual([expect.objectContaining({ id: written.id })]);
   });
 });

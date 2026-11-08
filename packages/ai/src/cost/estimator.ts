@@ -11,12 +11,13 @@
 import type { Price } from './pricing.js';
 import type { CostEstimate, ModelPricing } from './types.js';
 import {
-  calculateLLMCost,
+  DEFAULT_PRICING,
   estimateTokens,
   estimateTokensFromWords,
   getModelPricing,
   hasKnownPricing,
   priceOf,
+  usdAt,
 } from './pricing.js';
 
 // ============================================
@@ -46,8 +47,15 @@ import {
  * ```
  */
 export class CostEstimator {
-  constructor(_options?: { fallbackPricing?: ModelPricing }) {
-    // Options reserved for future extensibility
+  /** The rate for a hosted model with no list price; `DEFAULT_PRICING` when unset. */
+  private readonly fallbackPricing: ModelPricing;
+
+  /**
+   * @param options - `fallbackPricing`: the rate for a hosted model with no list price, in place of
+   *   `DEFAULT_PRICING`. Its prices still carry the basis `default-rate`.
+   */
+  constructor(options: { readonly fallbackPricing?: ModelPricing } = {}) {
+    this.fallbackPricing = options.fallbackPricing ?? DEFAULT_PRICING;
   }
 
   // ============================================
@@ -63,7 +71,7 @@ export class CostEstimator {
    * @returns Cost in USD
    */
   estimateLLMCost(model: string, inputTokens: number, outputTokens: number): number {
-    return calculateLLMCost(model, inputTokens, outputTokens);
+    return this.estimateLLMPrice(model, inputTokens, outputTokens).usd;
   }
 
   /**
@@ -83,7 +91,9 @@ export class CostEstimator {
     outputTokens: number,
     options: { readonly provider?: string } = {}
   ): Price {
-    return priceOf({ ...options, model, inputTokens, outputTokens });
+    const price = priceOf({ ...options, model, inputTokens, outputTokens });
+    if (price.basis !== 'default-rate') return price;
+    return { usd: usdAt(this.fallbackPricing, inputTokens, outputTokens), basis: 'default-rate' };
   }
 
   /**
@@ -115,10 +125,10 @@ export class CostEstimator {
    * Get pricing info for a model.
    *
    * @param model - Model identifier
-   * @returns Pricing info (uses fallback if unknown)
+   * @returns Pricing info (the estimator's `fallbackPricing` if unknown)
    */
   getModelPricing(model: string): ModelPricing {
-    return getModelPricing(model);
+    return hasKnownPricing(model) ? getModelPricing(model) : this.fallbackPricing;
   }
 
   /**
@@ -216,7 +226,7 @@ export class CostEstimator {
  * @returns Configured CostEstimator
  */
 export function createCostEstimator(options?: {
-  fallbackPricing?: ModelPricing;
+  readonly fallbackPricing?: ModelPricing;
 }): CostEstimator {
   return new CostEstimator(options);
 }

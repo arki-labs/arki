@@ -158,6 +158,10 @@ Not instrumented: repositories and journal commands (the app's database driver a
 - A repeated `idempotencyKey` with different parameters returns `IdempotencyConflict`.
 - Provider faults are thrown, not returned: `rate_limited` and `unavailable` can pass on retry; `authentication`, `invalid_request` and `not_configured` cannot.
 - Tables, repositories and journal commands need Postgres through Drizzle. There is no other store.
+- The dunning contracts refuse what Postgres refuses, as `schema.invalid_input`: text holding U+0000 (also inside stored JSON), and `stepNumber`, `delayHours` or `updateFrequency` above 2^31 - 1.
+- A dunning write that names a row that does not exist returns that row's not-found failure, never a foreign-key error: `DunningCampaignNotFound`, `DunningTemplateNotFound`, `DunningExecutionNotFound`, or `ReferenceNotFound` for a customer, subscription or payment. A campaign or step that sent a communication cannot be deleted: `DunningTemplateInUse`.
+- A customer has one risk profile (a unique index on `customer_id`). `upsert` replaces it in one statement.
+- A notification provider that cannot be reached throws `PaymentProviderError` with code `unavailable`, like the payment providers.
 
 ## Documentation
 

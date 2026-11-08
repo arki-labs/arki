@@ -1,14 +1,19 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { and, asc, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 
+import { findDatabaseError } from '@arki/db/errors';
+import type { FailureOf } from '@arki/failure';
 import { invariant } from '@arki/failure';
 
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/primitives.js';
+import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type {
   CreateCustomerSegmentInput,
   CreateDunningCampaignInput,
@@ -42,6 +47,12 @@ import type {
   NewDunningExecution,
 } from './types.js';
 import { sumMinorByCurrency } from './analytics-money.js';
+import {
+  DunningCampaignNotFound,
+  DunningExecutionNotFound,
+  DunningTemplateInUse,
+  DunningTemplateNotFound,
+} from './failures.js';
 import { readCustomerRiskProfile } from './stored-risk-profile.js';
 
 /**
@@ -55,20 +66,72 @@ export type DunningDatabase =
   | NodePgTransaction<AnyRelations>
   | PgliteDatabase<AnyRelations>;
 
+/** An execution write that points at a campaign, step, customer, subscription or payment with no row. */
+export type ExecutionReferenceMissing =
+  | FailureOf<typeof DunningCampaignNotFound>
+  | FailureOf<typeof DunningTemplateNotFound>
+  | FailureOf<typeof ReferenceNotFound>;
+
+/** A communication write that points at an execution, step or customer with no row. */
+export type CommunicationReferenceMissing =
+  | FailureOf<typeof DunningExecutionNotFound>
+  | FailureOf<typeof DunningTemplateNotFound>
+  | FailureOf<typeof ReferenceNotFound>;
+
+/** SQLSTATE `foreign_key_violation`: the row a new row points at does not exist. */
+const FOREIGN_KEY_VIOLATION = '23503';
+
+/** One foreign key of a new row: its column, the value written there, and the failure when no row has that value. */
+type Reference<Missing> = { column: PgColumn; value: string | null | undefined; missing: () => Missing };
+
+/**
+ * Runs one insert in its own transaction (a savepoint inside the caller's), so a refused row leaves
+ * the caller's transaction usable. When the database refuses the row with a foreign key violation,
+ * each reference is looked up in the table its foreign key points at, and the first value with no row
+ * returns its `missing()` failure; nothing is written. Any other error is thrown, and so is a
+ * violation no reference explains.
+ */
+async function insertOrMissing<Row, Missing>(
+  db: DunningDatabase,
+  table: PgTable,
+  insert: (tx: DunningDatabase) => Promise<Row>,
+  references: readonly Reference<Missing>[],
+): Promise<Row | Missing> {
+  try {
+    return await db.transaction(async tx => insert(tx));
+  } catch (error) {
+    if (findDatabaseError(error)?.sqlState !== FOREIGN_KEY_VIOLATION) throw error;
+    const keys = getTableConfig(table).foreignKeys.map(key => key.reference());
+    for (const { column, value, missing } of references) {
+      const key = keys.find(candidate => candidate.columns[0] === column);
+      const target = key?.foreignColumns[0];
+      if (!key || !target || value === null || value === undefined) continue;
+      const [found] = await db.select({ found: sql`1` }).from(key.foreignTable).where(eq(target, value)).limit(1);
+      if (!found) return missing();
+    }
+    throw error;
+  }
+}
+
+/** The tables the campaign repository reads: its steps and their communications decide whether a delete may run. */
 type CampaignTables = Pick<
   DunningTables,
-  'dunningCampaigns' | 'dunningCampaignAnalytics'
+  'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningCommunications'
 >;
 
 export class DunningCampaignRepository {
   private readonly db: DunningDatabase;
   private readonly dunningCampaigns: DunningTables['dunningCampaigns'];
   private readonly dunningCampaignAnalytics: DunningTables['dunningCampaignAnalytics'];
+  private readonly dunningTemplates: DunningTables['dunningTemplates'];
+  private readonly dunningCommunications: DunningTables['dunningCommunications'];
 
   constructor(db: DunningDatabase, tables: CampaignTables) {
     this.db = db;
     this.dunningCampaigns = tables.dunningCampaigns;
     this.dunningCampaignAnalytics = tables.dunningCampaignAnalytics;
+    this.dunningTemplates = tables.dunningTemplates;
+    this.dunningCommunications = tables.dunningCommunications;
   }
 
   async findById(id: DunningCampaignId): Promise<DunningCampaign | null> {
@@ -132,8 +195,32 @@ export class DunningCampaignRepository {
     return (campaign) ?? null;
   }
 
-  async delete(id: DunningCampaignId): Promise<void> {
-    await this.db.delete(this.dunningCampaigns).where(eq(this.dunningCampaigns.id, id));
+  /**
+   * Deletes the campaign with its steps, executions and analytics. A campaign whose step already sent
+   * a communication is kept (the sent message keeps its step): it returns `DunningTemplateInUse` and
+   * nothing changes. An unknown id deletes nothing.
+   */
+  async delete(id: DunningCampaignId): Promise<FailureOf<typeof DunningTemplateInUse> | undefined> {
+    const campaigns = this.dunningCampaigns;
+    const templates = this.dunningTemplates;
+    const communications = this.dunningCommunications;
+
+    return this.db.transaction(async tx => {
+      // Lock the campaign, then its steps: a new step or a communication written for one now waits for
+      // this transaction, and the check below sees every communication written before it
+      await tx.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.id, id)).for('update');
+      await tx.select({ id: templates.id }).from(templates).where(eq(templates.campaignId, id)).for('update');
+      const [used] = await tx
+        .select({ templateId: templates.id, stepNumber: templates.stepNumber })
+        .from(communications)
+        .innerJoin(templates, eq(templates.id, communications.templateId))
+        .where(eq(templates.campaignId, id))
+        .limit(1);
+      if (used) return DunningTemplateInUse(used);
+
+      await tx.delete(campaigns).where(eq(campaigns.id, id));
+      return;
+    });
   }
 
   async findByType(type: DunningCampaignType): Promise<DunningCampaign[]> {
@@ -270,13 +357,18 @@ export class DunningCampaignRepository {
   }
 }
 
+/** The tables the step repository reads: a step's communications decide whether it may be deleted. */
+type TemplateTables = Pick<DunningTables, 'dunningTemplates' | 'dunningCommunications'>;
+
 export class DunningTemplateRepository {
   private readonly db: DunningDatabase;
   private readonly dunningTemplates: DunningTables['dunningTemplates'];
+  private readonly dunningCommunications: DunningTables['dunningCommunications'];
 
-  constructor(db: DunningDatabase, tables: Pick<DunningTables, 'dunningTemplates'>) {
+  constructor(db: DunningDatabase, tables: TemplateTables) {
     this.db = db;
     this.dunningTemplates = tables.dunningTemplates;
+    this.dunningCommunications = tables.dunningCommunications;
   }
 
   async findById(id: DunningTemplateId): Promise<DunningTemplate | null> {
@@ -296,23 +388,32 @@ export class DunningTemplateRepository {
       .orderBy(this.dunningTemplates.stepNumber);
   }
 
-  async create(input: CreateDunningTemplateInput): Promise<DunningTemplate> {
-    const [template] = await this.db
-      .insert(this.dunningTemplates)
-      .values({
-        campaignId: input.campaignId,
-        name: input.name,
-        description: input.description,
-        stepNumber: input.stepNumber,
-        delayHours: input.delayHours,
-        communication: input.communication,
-        abTestVariant: input.abTestVariant,
-      })
-      .returning();
+  /** The new step, or `DunningCampaignNotFound` when no campaign has `input.campaignId`; nothing is written then. */
+  async create(input: CreateDunningTemplateInput): Promise<DunningTemplate | FailureOf<typeof DunningCampaignNotFound>> {
+    const table = this.dunningTemplates;
+    return insertOrMissing(
+      this.db,
+      table,
+      async tx => {
+        const [template] = await tx
+          .insert(this.dunningTemplates)
+          .values({
+            campaignId: input.campaignId,
+            name: input.name,
+            description: input.description,
+            stepNumber: input.stepNumber,
+            delayHours: input.delayHours,
+            communication: input.communication,
+            abTestVariant: input.abTestVariant,
+          })
+          .returning();
 
-    invariant(template, 'Failed to create dunning template');
+        invariant(template, 'Failed to create dunning template');
 
-    return template;
+        return template;
+      },
+      [{ column: table.campaignId, value: input.campaignId, missing: () => DunningCampaignNotFound({ campaignId: input.campaignId }) }],
+    );
   }
 
   async update(
@@ -328,8 +429,33 @@ export class DunningTemplateRepository {
     return (template) ?? null;
   }
 
-  async delete(id: DunningTemplateId): Promise<void> {
-    await this.db.delete(this.dunningTemplates).where(eq(this.dunningTemplates.id, id));
+  /**
+   * Deletes the step. A step that already sent a communication is kept (the sent message keeps its
+   * step): it returns `DunningTemplateInUse` and nothing changes. An unknown id deletes nothing.
+   */
+  async delete(id: DunningTemplateId): Promise<FailureOf<typeof DunningTemplateInUse> | undefined> {
+    const templates = this.dunningTemplates;
+    const communications = this.dunningCommunications;
+
+    return this.db.transaction(async tx => {
+      // Lock the step first: a communication written for it now waits for this transaction, and the
+      // check below sees every communication written before it
+      const [step] = await tx
+        .select({ templateId: templates.id, stepNumber: templates.stepNumber })
+        .from(templates)
+        .where(eq(templates.id, id))
+        .for('update');
+      if (!step) return;
+      const [used] = await tx
+        .select({ id: communications.id })
+        .from(communications)
+        .where(eq(communications.templateId, id))
+        .limit(1);
+      if (used) return DunningTemplateInUse(step);
+
+      await tx.delete(templates).where(eq(templates.id, id));
+      return;
+    });
   }
 
   async findActiveTemplates(campaignId: DunningCampaignId): Promise<DunningTemplate[]> {
@@ -395,10 +521,37 @@ export class DunningExecutionRepository {
       .offset(offset);
   }
 
-  async create(
+  /**
+   * The new execution, or the failure that names the row it points at that does not exist:
+   * `DunningCampaignNotFound`, `DunningTemplateNotFound`, or `ReferenceNotFound` for the customer,
+   * subscription or payment. Nothing is written then.
+   */
+  async create(input: Omit<NewDunningExecution, 'id' | 'createdAt' | 'updatedAt'>): Promise<
+    DunningExecution | ExecutionReferenceMissing
+  > {
+    const table = this.dunningExecutions;
+    return insertOrMissing<DunningExecution, ExecutionReferenceMissing>(this.db, table, tx => this.insertExecution(tx, input), [
+      { column: table.campaignId, value: input.campaignId, missing: () => DunningCampaignNotFound({ campaignId: input.campaignId }) },
+      { column: table.templateId, value: input.templateId, missing: () => DunningTemplateNotFound({ templateId: String(input.templateId) }) },
+      { column: table.customerId, value: input.customerId, missing: () => customerNotFound(input.customerId) },
+      {
+        column: table.subscriptionId,
+        value: input.subscriptionId,
+        missing: () => ReferenceNotFound({ kind: 'subscription', id: String(input.subscriptionId), missing: 'row' }),
+      },
+      {
+        column: table.paymentId,
+        value: input.paymentId,
+        missing: () => ReferenceNotFound({ kind: 'payment', id: String(input.paymentId), missing: 'row' }),
+      },
+    ]);
+  }
+
+  private async insertExecution(
+    db: DunningDatabase,
     input: Omit<NewDunningExecution, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<DunningExecution> {
-    const [execution] = await this.db
+    const [execution] = await db
       .insert(this.dunningExecutions)
       .values({
         campaignId: input.campaignId,
@@ -595,10 +748,27 @@ export class DunningCommunicationRepository {
       .offset(offset);
   }
 
-  async create(
+  /**
+   * The new communication, or the failure that names the row it points at that does not exist:
+   * `DunningExecutionNotFound`, `DunningTemplateNotFound`, or `ReferenceNotFound` for the customer.
+   * Nothing is written then.
+   */
+  async create(input: Omit<NewDunningCommunication, 'id' | 'createdAt' | 'updatedAt'>): Promise<
+    DunningCommunication | CommunicationReferenceMissing
+  > {
+    const table = this.dunningCommunications;
+    return insertOrMissing<DunningCommunication, CommunicationReferenceMissing>(this.db, table, tx => this.insertCommunication(tx, input), [
+      { column: table.executionId, value: input.executionId, missing: () => DunningExecutionNotFound({ executionId: input.executionId }) },
+      { column: table.templateId, value: input.templateId, missing: () => DunningTemplateNotFound({ templateId: input.templateId }) },
+      { column: table.customerId, value: input.customerId, missing: () => customerNotFound(input.customerId) },
+    ]);
+  }
+
+  private async insertCommunication(
+    db: DunningDatabase,
     input: Omit<NewDunningCommunication, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<DunningCommunication> {
-    const [communication] = await this.db
+    const [communication] = await db
       .insert(this.dunningCommunications)
       .values({
         executionId: input.executionId,
@@ -804,6 +974,29 @@ export class CustomerSegmentRepository {
   }
 }
 
+/** What a risk profile write takes: the stored row without its id and timestamps. */
+type RiskProfileInput = Omit<CustomerRiskProfile, 'id' | 'createdAt' | 'updatedAt'>;
+
+/** The risk profile write that names a customer with no row. */
+type CustomerNotFound = FailureOf<typeof ReferenceNotFound>;
+
+function customerNotFound(customerId: CustomerId): CustomerNotFound {
+  return ReferenceNotFound({ kind: 'customer', id: customerId, missing: 'row' });
+}
+
+/** The columns a risk profile write sets, besides `customer_id`. */
+function riskProfileFields(input: RiskProfileInput) {
+  return {
+    segmentIds: input.segmentIds,
+    riskScore: input.riskScore,
+    paymentHistory: input.paymentHistory,
+    subscriptionHistory: input.subscriptionHistory,
+    engagementMetrics: input.engagementMetrics,
+    communicationPreferences: input.communicationPreferences,
+    metadata: input.metadata,
+  };
+}
+
 export class CustomerRiskProfileRepository {
   private readonly db: DunningDatabase;
   private readonly customerRiskProfiles: DunningTables['customerRiskProfiles'];
@@ -823,24 +1016,26 @@ export class CustomerRiskProfileRepository {
     return profile && readCustomerRiskProfile(profile);
   }
 
-  async create(
-    input: Omit<CustomerRiskProfile, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<CustomerRiskProfile | undefined> {
-    const [profile] = await this.db
-      .insert(this.customerRiskProfiles)
-      .values({
-        customerId: input.customerId,
-        segmentIds: input.segmentIds,
-        riskScore: input.riskScore,
-        paymentHistory: input.paymentHistory,
-        subscriptionHistory: input.subscriptionHistory,
-        engagementMetrics: input.engagementMetrics,
-        communicationPreferences: input.communicationPreferences,
-        metadata: input.metadata,
-      })
-      .returning();
-
-    return profile && readCustomerRiskProfile(profile);
+  /**
+   * The new profile, or `ReferenceNotFound` (`kind: 'customer'`) when no customer has
+   * `input.customerId`; nothing is written then. A customer has one profile: a second `create` for it
+   * is refused by the unique index, so use `upsert` to replace one.
+   */
+  async create(input: RiskProfileInput): Promise<CustomerRiskProfile | CustomerNotFound> {
+    const table = this.customerRiskProfiles;
+    return insertOrMissing(
+      this.db,
+      table,
+      async tx => {
+        const [profile] = await tx
+          .insert(table)
+          .values({ customerId: input.customerId, ...riskProfileFields(input) })
+          .returning();
+        invariant(profile, 'the risk profile insert returned no row');
+        return readCustomerRiskProfile(profile);
+      },
+      [{ column: table.customerId, value: input.customerId, missing: () => customerNotFound(input.customerId) }],
+    );
   }
 
   async update(
@@ -856,16 +1051,29 @@ export class CustomerRiskProfileRepository {
     return profile && readCustomerRiskProfile(profile);
   }
 
-  async upsert(
-    input: Omit<CustomerRiskProfile, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<CustomerRiskProfile | undefined> {
-    const existing = await this.findByCustomerId(input.customerId);
+  /**
+   * Writes the customer's one profile: inserts it, or replaces the stored one in the same statement
+   * (the unique index on `customer_id`), so two first upserts at once still leave one row. Returns
+   * `ReferenceNotFound` (`kind: 'customer'`) when no customer has `input.customerId`; nothing is written then.
+   */
+  async upsert(input: RiskProfileInput): Promise<CustomerRiskProfile | CustomerNotFound> {
+    const table = this.customerRiskProfiles;
+    const fields = riskProfileFields(input);
 
-    if (existing) {
-      return this.update(input.customerId, input);
-    } else {
-      return this.create(input);
-    }
+    return insertOrMissing(
+      this.db,
+      table,
+      async tx => {
+        const [profile] = await tx
+          .insert(table)
+          .values({ customerId: input.customerId, ...fields })
+          .onConflictDoUpdate({ target: table.customerId, set: { ...fields, updatedAt: now() } })
+          .returning();
+        invariant(profile, 'the risk profile upsert returned no row');
+        return readCustomerRiskProfile(profile);
+      },
+      [{ column: table.customerId, value: input.customerId, missing: () => customerNotFound(input.customerId) }],
+    );
   }
 
   async findByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
@@ -928,7 +1136,7 @@ export function createDunningCampaignRepository(
 
 export function createDunningTemplateRepository(
   db: DunningDatabase,
-  tables: Pick<DunningTables, 'dunningTemplates'>,
+  tables: TemplateTables,
 ): DunningTemplateRepository {
   return new DunningTemplateRepository(db, tables);
 }

@@ -135,3 +135,33 @@ describe('sleep with a clock', () => {
     clock.advance(60_000);
   });
 });
+
+// Why: a broken clock is a defect in a provider the caller trusted; `sleep` must hand back the one documented
+// `failure.unexpected_defect` with the real cause, never throw it or report it as a cancel.
+describe('sleep with a clock that fails (audit-2 #14)', () => {
+  it('returns failure.unexpected_defect with the cause when the clock throws', async () => {
+    const broke = new Error('clock broke');
+    const clock = Object.assign(new MockClock(), {
+      sleep: (): never => {
+        throw broke;
+      },
+    });
+    expect(await sleep(10, { clock })).toMatchObject({
+      code: 'failure.unexpected_defect',
+      status: 500,
+      message: 'The operation could not complete.',
+      cause: broke,
+    });
+  });
+
+  it('returns failure.unexpected_defect with the cause when the clock rejects', async () => {
+    const broke = new Error('timer lost');
+    const clock = Object.assign(new MockClock(), { sleep: () => Promise.reject(broke) });
+    expect(await sleep(10, { clock })).toMatchObject({ code: 'failure.unexpected_defect', cause: broke });
+  });
+
+  it('returns failure.unexpected_defect with the answer as cause when the clock answers something it may not', async () => {
+    const clock = Object.assign(new MockClock(), { sleep: () => Promise.resolve('late') });
+    expect(await sleep(10, { clock })).toMatchObject({ code: 'failure.unexpected_defect', cause: 'late' });
+  });
+});

@@ -7,6 +7,7 @@ import { z } from '@arki/contracts';
 import { defineEnv } from '@arki/env/core';
 
 import { LLM_PROVIDERS } from './ai-service/provider-names.js';
+import { deterministicSeedSchema } from './setting-schemas.js';
 
 /**
  * Defaults that must also hold when validation is skipped (`SKIP_ENV_VALIDATION=1`).
@@ -53,7 +54,7 @@ export const env = defineEnv({
     LLM_MODEL: z.string().optional(),
     // Tests only: when set, every createLLMProvider() call runs at temperature 0 with this seed,
     // so a real local model answers the same input the same way run after run.
-    AI_DETERMINISTIC_SEED: z.coerce.number().int().optional(),
+    AI_DETERMINISTIC_SEED: deterministicSeedSchema,
 
     // Vector search (Qdrant). The embedding settings live in `@arki/embeddings`.
     QDRANT_URL: z.url().optional(),

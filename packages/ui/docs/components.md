@@ -24,7 +24,7 @@ Most components are small wrappers over a Base UI primitive. They take the primi
 - `Slider`: pick a value or a range by dragging.
 - `Select` parts: `SelectTrigger` (the closed box), `SelectValue` (the chosen value), `SelectContent` (the open list), `SelectItem` (one option), `SelectGroup` and `SelectLabel` (a titled group), `SelectSeparator` (a divider), `SelectScrollUpButton` and `SelectScrollDownButton` (scroll arrows for long lists).
 - `DatePicker`: an input that opens a `Calendar`.
-- `Calendar`: a month grid where the user picks days.
+- `Calendar`: a month grid where the user picks days. An unknown `timeZone` falls back to the browser time zone, and an Invalid Date `month` or `defaultMonth` shows the current month.
 - `ColorPicker`: choose a colour from a panel or a hex field.
 - `MathInput`: a field for typing maths with a keypad. `ComplexInput` is the same for complex numbers.
 - `BlockMath`, `InlineMath`: render a LaTeX string with KaTeX, on its own line or inside text.
@@ -82,7 +82,7 @@ Most components are small wrappers over a Base UI primitive. They take the primi
 - `ScrollArea`, `ScrollBar`: a scroll region with styled scrollbars.
 - `Accordion`: stacked sections that open and close. Parts: `AccordionItem`, `AccordionTrigger`, `AccordionContent`.
 - `Collapsible`: one section that opens and closes. Parts: `CollapsibleTrigger`, `CollapsibleContent`.
-- `Resizable`: panels the user drags to resize. Parts: `ResizablePanelGroup`, `ResizablePanel`, `ResizableHandle`.
+- `Resizable`: panels the user drags to resize. Parts: `ResizablePanelGroup`, `ResizablePanel`, `ResizableHandle`. With `autoSaveId` the layout is saved and restored; a saved layout that does not fit the panels is ignored.
 - `Panel`: a titled work area. Parts: `PanelHeader`, `PanelHeadline` (the title), `PanelSection`, `PanelDivider`, `PanelFooter`.
 - `ToolPanelGroup`, `ToolPanel`, `ToolPanelHandle`: resizable side panels for tool-style apps. A group keeps layout state, a panel is one pane, a handle is the drag bar between them. `useToolPanelGroup` reads the group state, for example which panel is maximized.
 - `PanelExpandButton`: a maximize and restore button for a tool panel header.

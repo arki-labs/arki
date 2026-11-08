@@ -12,7 +12,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
-import { FAILURE_ERROR_CODES, FailureError, invariant } from '@arki/failure';
+import { FAILURE_ERROR_CODES, FailureError, invariant, orThrow } from '@arki/failure';
 
 import { core, customerId, rejectionOf, schema, userId, users } from '../test-support.js';
 import type { CreateCustomerSegmentInput, CreateDunningCampaignInput } from './contracts.js';
@@ -133,7 +133,7 @@ describe('reads on a database without relations', () => {
     expect((await idsOf(repositories.templates.findByCampaignId(campaign.id)))).toEqual([template.id]);
     expect((await idsOf(repositories.templates.findActiveTemplates(campaign.id)))).toEqual([template.id]);
 
-    const execution = await repositories.executions.create({
+    const stored = await repositories.executions.create({
       campaignId: campaign.id,
       templateId: template.id,
       customerId,
@@ -143,6 +143,7 @@ describe('reads on a database without relations', () => {
       scheduledAt: instant('2020-01-01T00:00:00Z'),
       retryCount: 0,
     });
+    const execution = orThrow(stored);
     expect((await valueOf(repositories.executions.findById(execution.id), 'status'))).toBe('scheduled');
     expect((await idsOf(repositories.executions.findScheduledExecutions()))).toEqual([execution.id]);
     expect(

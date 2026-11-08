@@ -1,4 +1,5 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
+import { findDatabaseError } from '@arki/db/errors';
 import { orThrow } from '@arki/failure';
 
 /**
@@ -21,12 +22,18 @@ import type { CreateDunningCampaignInput } from './contracts.js';
 import { updateDunningCampaignInputSchema } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
 import { DunningCampaignNotFound, DunningCampaignWithoutSteps, DunningTemplateInUse } from './failures.js';
-import { createDunningCampaignId } from './primitives.js';
+import { createDunningCampaignId, createDunningExecutionId, createDunningTemplateId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
 import { core, customerId, planId, schema, userId, users } from '../test-support.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import { createDunningTables } from './tables.js';
+import {
+  createDunningCampaignRepository,
+  createDunningCommunicationRepository,
+  createDunningExecutionRepository,
+  createDunningTemplateRepository,
+} from './repository.js';
 
 const dunning = createDunningTables({
   schema,
@@ -137,8 +144,11 @@ describe('createCampaign', () => {
     const campaigns = await countOf(tables.dunningCampaigns);
     const templates = await countOf(tables.dunningTemplates);
 
-    // 2^31 hours does not fit the integer column: Postgres rejects the second template
-    await expect(service.createCampaign(campaignInput([0, 2_147_483_648]), 'usr_admin')).rejects.toThrow();
+    // 2^31 hours does not fit the integer column. The contract refuses it; a caller that skips the
+    // contract gets Postgres's numeric_value_out_of_range (22003) on the second template
+    await expect(service.createCampaign(campaignInput([0, 2_147_483_648]), 'usr_admin')).rejects.toSatisfy(
+      error => findDatabaseError(error)?.sqlState === '22003',
+    );
 
     expect(await countOf(tables.dunningCampaigns)).toBe(campaigns);
     expect(await countOf(tables.dunningTemplates)).toBe(templates);
@@ -261,6 +271,165 @@ describe('deleteCampaign', () => {
       .from(tables.dunningExecutions)
       .where(eq(tables.dunningExecutions.campaignId, created.id));
     expect(executions.map(row => row.id)).toEqual([sent.id]);
+  });
+});
+
+describe('the dunning repositories answer a missing or referenced row with a failure', () => {
+  // An admin tool deletes through the repository: a campaign that already ran must answer 409, not a raw foreign key error
+  it('DunningCampaignRepository.delete refuses a campaign whose step sent a communication with payments.dunning_template_in_use', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Repository delete' }, 'usr_admin');
+    const [first, second] = created.templates;
+    if (!first || !second) throw new Error('campaign needs two steps');
+    const sent = await execution(created.id, 'completed');
+    await db.insert(tables.dunningCommunications).values({
+      executionId: sent.id,
+      customerId,
+      templateId: first.id,
+      channel: 'email',
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'sent',
+    });
+
+    const refused = await createDunningCampaignRepository(db, tables).delete(created.id);
+
+    expect(refused).toMatchObject({
+      code: 'payments.dunning_template_in_use',
+      data: { templateId: first.id, stepNumber: 1 },
+    });
+    const kept = await service.getCampaign(created.id);
+    expect(kept?.templates.map(template => template.id)).toEqual([first.id, second.id]);
+  });
+
+  it('DunningTemplateRepository.create for an unknown campaign returns payments.dunning_campaign_not_found and writes nothing', async () => {
+    const unknown = orThrow(createDunningCampaignId());
+    const templates = await countOf(tables.dunningTemplates);
+
+    const refused = await createDunningTemplateRepository(db, tables).create({
+      campaignId: unknown,
+      name: 'Orphan step',
+      stepNumber: 1,
+      delayHours: 0,
+      communication: { channel: 'email', content: 'Please update your card', variables: [] },
+    });
+
+    expect(DunningCampaignNotFound.is(refused)).toBe(true);
+    expect(refused).toMatchObject({ code: 'payments.dunning_campaign_not_found', data: { campaignId: unknown } });
+    expect(await countOf(tables.dunningTemplates)).toBe(templates);
+  });
+
+  it('DunningTemplateRepository.delete refuses a step that sent a communication with payments.dunning_template_in_use', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Step delete' }, 'usr_admin');
+    const [first, second] = created.templates;
+    if (!first || !second) throw new Error('campaign needs two steps');
+    const sent = await execution(created.id, 'completed');
+    await db.insert(tables.dunningCommunications).values({
+      executionId: sent.id,
+      customerId,
+      templateId: second.id,
+      channel: 'email',
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'sent',
+    });
+    const steps = createDunningTemplateRepository(db, tables);
+
+    const refused = await steps.delete(second.id);
+    const deleted = await steps.delete(first.id);
+
+    expect(refused).toMatchObject({
+      code: 'payments.dunning_template_in_use',
+      data: { templateId: second.id, stepNumber: 2 },
+    });
+    expect(deleted).toBeUndefined();
+    const left = await service.getCampaign(created.id);
+    expect(left?.templates.map(template => template.id)).toEqual([second.id]);
+  });
+
+  it('DunningExecutionRepository.create names the missing campaign, step or customer with its not-found code', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0]), name: 'Execution refs' }, 'usr_admin');
+    const [step] = created.templates;
+    if (!step) throw new Error('campaign needs a step');
+    const executions = createDunningExecutionRepository(db, tables);
+    const valid = {
+      campaignId: created.id,
+      templateId: step.id,
+      customerId,
+      triggerType: 'manual',
+      triggerData: {},
+      scheduledAt: now(),
+    };
+    const unknownCampaign = orThrow(createDunningCampaignId());
+    const unknownStep = orThrow(createDunningTemplateId());
+    const unknownCustomer = orThrow(createCustomerId());
+
+    expect(await executions.create({ ...valid, campaignId: unknownCampaign })).toMatchObject({
+      code: 'payments.dunning_campaign_not_found',
+      data: { campaignId: unknownCampaign },
+    });
+    expect(await executions.create({ ...valid, templateId: unknownStep })).toMatchObject({
+      code: 'payments.dunning_template_not_found',
+      data: { templateId: unknownStep },
+    });
+    expect(await executions.create({ ...valid, customerId: unknownCustomer })).toMatchObject({
+      code: 'payments.reference_not_found',
+      data: { kind: 'customer', id: unknownCustomer, missing: 'row' },
+    });
+    const rows = await db.select().from(tables.dunningExecutions).where(eq(tables.dunningExecutions.campaignId, created.id));
+    expect(rows).toEqual([]);
+  });
+
+  it('DunningCommunicationRepository.create names a missing execution or step with its not-found code', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0]), name: 'Communication refs' }, 'usr_admin');
+    const [step] = created.templates;
+    if (!step) throw new Error('campaign needs a step');
+    const ran = await execution(created.id, 'completed');
+    const communications = createDunningCommunicationRepository(db, tables);
+    const valid = {
+      executionId: ran.id,
+      customerId,
+      templateId: step.id,
+      channel: 'email' as const,
+      recipient: 'buyer@example.com',
+      content: 'Please update your card',
+      status: 'pending' as const,
+    };
+    const unknownExecution = orThrow(createDunningExecutionId());
+    const unknownStep = orThrow(createDunningTemplateId());
+
+    expect(await communications.create({ ...valid, executionId: unknownExecution })).toMatchObject({
+      code: 'payments.dunning_execution_not_found',
+      data: { executionId: unknownExecution },
+    });
+    expect(await communications.create({ ...valid, templateId: unknownStep })).toMatchObject({
+      code: 'payments.dunning_template_not_found',
+      data: { templateId: unknownStep },
+    });
+    const rows = await db
+      .select()
+      .from(tables.dunningCommunications)
+      .where(eq(tables.dunningCommunications.executionId, ran.id));
+    expect(rows).toEqual([]);
+  });
+
+  // PGlite has one connection, so the race itself cannot run here. A message written between the check and
+  // the delete must wait on a row lock; the lock has to be taken before the check reads the communications.
+  it('updateCampaign locks the steps before it checks them for sent communications', async () => {
+    const created = await service.createCampaign({ ...campaignInput([0, 24]), name: 'Locked update' }, 'usr_admin');
+    const queries: string[] = [];
+    const logged = drizzle({ client, relations, logger: { logQuery: query => queries.push(query) } });
+    const watched = new DunningCampaignService(logged, serviceTables, () => {
+      throw new Error('no communications in this test');
+    });
+
+    orThrow(await watched.updateCampaign(created.id, { templates: campaignInput([0]).templates }, 'usr_admin'));
+
+    const lock = queries.findIndex(query => query.includes('"dunning_templates"') && query.endsWith('for update'));
+    const check = queries.findIndex(query => query.includes('from "pay"."dunning_communications"'));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(check).toBeGreaterThan(lock);
+    const updated = await service.getCampaign(created.id);
+    expect(updated?.templates.map(template => template.stepNumber)).toEqual([1]);
   });
 });
 

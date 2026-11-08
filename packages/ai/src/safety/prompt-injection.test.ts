@@ -34,3 +34,18 @@ describe('PromptInjectionDetector with caller patterns (F9)', () => {
     expect(detector.detect('please open the vault')).toHaveLength(1);
   });
 });
+
+describe('PromptInjectionDetector default patterns on large input', () => {
+  // Why: the detector reads user text. A long line of `unlock` with no `mode` made the jailbreak pattern read on
+  // from every `unlock`; one check must take one pass, and still catch `unlock … mode`.
+  it('checks a large line of unlock words in one pass and still finds unlock … mode', () => {
+    const detector = new PromptInjectionDetector();
+    const flood = 'unlock '.repeat(150_000);
+    const started = performance.now();
+    const clean = detector.hasInjection(flood);
+    const caught = detector.hasInjection(`${flood}developer mode`);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect([clean, caught]).toEqual([false, true]);
+    expect(detector.detect('please unlock the secret unlock dev mode now')[0]?.matchedText).toBe('unlock dev mode');
+  });
+});

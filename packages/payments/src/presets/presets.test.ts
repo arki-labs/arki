@@ -1,6 +1,6 @@
 // Fixture setup needs scalar IDs; stop before the scenario if entropy is unavailable.
 import type { FailureOf } from '@arki/failure';
-import { orThrow } from '@arki/failure';
+import { InvalidInput, orThrow } from '@arki/failure';
 import { RandomSourceUnavailable } from '@arki/contracts';
 import { CommandConflict } from '@arki/journal';
 
@@ -358,6 +358,22 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
 
     expect(UnknownSubscriptionStatus.is(failure)).toBe(true);
     expect(failure).toMatchObject({ code: 'payments.unknown_subscription_status', data: { status: 'on_vacation' } });
+  });
+
+  // A webhook body is outside data: a time `fromUnix` cannot read must come back as the schema's
+  // failure the route rejects, never as a RangeError thrown out of the handler
+  it.each([
+    ['a trial end past year 9999', { trial_end: 1e300 }],
+    ['a fractional cancel time', { canceled_at: 1.5 }],
+    ['a period end JSON reads as Infinity', { items: { data: [{ current_period_start: JAN_1, current_period_end: 'INFINITY', price: { id: PRICE_ID } }] } }],
+  ])('%s is rejected as schema.invalid_input and nothing is written', async (_case, changes) => {
+    const subscriptionId = `sub_bad_time_${String(_case.length)}`;
+    const payload = subscriptionEvent('customer.subscription.created', subscriptionId, changes).replace('"INFINITY"', '1e400');
+
+    const failure = await expectRefused(billing.handleWebhook(payload, sign(payload)), subscriptionId);
+
+    expect(InvalidInput.is(failure)).toBe(true);
+    expect(failure).toMatchObject({ code: 'schema.invalid_input' });
   });
 
   it('a signed event that is not a subscription change is acknowledged as not handled and writes nothing', async () => {

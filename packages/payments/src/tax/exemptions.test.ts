@@ -206,17 +206,72 @@ describe('an id with no row', () => {
   });
 });
 
+describe('a jurisdiction id that names no jurisdiction', () => {
+  // An admin form passes the id it was given; a stale or mistyped one must be a failure the route can answer with 404, never a raw Postgres 23503
+  it('is refused as TaxReferenceNotFound by every jurisdiction and exemption write, and nothing is written', async () => {
+    const missing = orThrow(createTaxJurisdictionId());
+    const notFound = { code: 'payments.tax_reference_not_found', data: { kind: 'jurisdiction', id: missing } };
+
+    const orphan = await repos.jurisdictions.createJurisdiction({
+      name: 'Orphan State',
+      code: 'OS',
+      type: 'state',
+      countryCode: 'OS',
+      parentId: missing,
+    });
+    expect(orphan).toMatchObject(notFound);
+    expect(await repos.jurisdictions.findJurisdictionByCode('OS', 'OS')).toBeNull();
+
+    const country = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Refland', code: 'RF', type: 'country', countryCode: 'RF' }));
+    expect(await repos.jurisdictions.updateJurisdiction(country.id, { parentId: missing })).toMatchObject(notFound);
+    const unmoved = await repos.jurisdictions.findJurisdictionById(country.id);
+    expect(unmoved?.parentId).toBeNull();
+
+    const exemption = {
+      type: 'jurisdiction' as const,
+      customerId: 'cus_missing_place',
+      exemptionCode: 'NOWHERE',
+      reason: 'Exempt in a place that does not exist',
+      validFrom: past,
+    };
+    expect(await repos.exemptions.createExemption({ ...exemption, jurisdictionId: missing })).toMatchObject(notFound);
+    expect(await repos.exemptions.findCustomerExemptionsInRange('cus_missing_place', past, instant('2100-01-01T00:00:00Z'))).toEqual([]);
+
+    const created = orThrow(await repos.exemptions.createExemption({ ...exemption, jurisdictionId: country.id }));
+    expect(await repos.exemptions.updateExemption(created.id, { jurisdictionId: missing })).toMatchObject(notFound);
+    const kept = await repos.exemptions.findExemptionById(created.id);
+    expect(kept?.jurisdictionId).toBe(country.id);
+    // The stats test below counts pending exemptions in this database
+    await repos.exemptions.deleteExemption(created.id);
+  });
+});
+
+describe('the exemptions about to expire', () => {
+  // `days` is typed, so NaN or a huge count is the caller's bug: it must fail as an invariant before the query, never as `RangeError: Invalid Date`
+  it.each([Number.NaN, 0, 366, 1e15])('refuses %s days with the invariant failure code', async days => {
+    const error = await rejectionOf(repos.exemptions.findExpiringExemptions(days));
+
+    expect(error).toBeInstanceOf(FailureError);
+    expect(error).toMatchObject({ code: FAILURE_ERROR_CODES.invariant });
+  });
+
+  it('takes 1 and 365 days, the range the request schema allows', async () => {
+    await expect(repos.exemptions.findExpiringExemptions(1)).resolves.toBeInstanceOf(Array);
+    await expect(repos.exemptions.findExpiringExemptions(365)).resolves.toBeInstanceOf(Array);
+  });
+});
+
 describe('a jurisdiction hierarchy', () => {
   // `parentId` can be updated to point anywhere, so a stored chain may loop; reading it must still end
   it('stops where a parent chain comes back to itself', async () => {
-    const country = await repos.jurisdictions.createJurisdiction({ name: 'Loopland', code: 'LP', type: 'country', countryCode: 'LP' });
-    const state = await repos.jurisdictions.createJurisdiction({
+    const country = orThrow(await repos.jurisdictions.createJurisdiction({ name: 'Loopland', code: 'LP', type: 'country', countryCode: 'LP' }));
+    const state = orThrow(await repos.jurisdictions.createJurisdiction({
       name: 'Loop State',
       code: 'LS',
       type: 'state',
       countryCode: 'LP',
       parentId: country.id,
-    });
+    }));
     orThrow(await repos.jurisdictions.updateJurisdiction(country.id, { parentId: state.id }));
 
     const hierarchy = await repos.jurisdictions.findJurisdictionHierarchy(state.id);
@@ -354,12 +409,12 @@ describe('calculateTax with exemptions', () => {
   });
 
   it('removes the tax of an exempt jurisdiction from the breakdown', async () => {
-    const germany = await repos.jurisdictions.createJurisdiction({
+    const germany = orThrow(await repos.jurisdictions.createJurisdiction({
       name: 'Germany',
       code: 'DE',
       type: 'country',
       countryCode: 'DE',
-    });
+    }));
     const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'jurisdiction',
       jurisdictionId: germany.id,
@@ -383,12 +438,12 @@ describe('calculateTax with exemptions', () => {
   });
 
   it('tells same-named places in different countries apart: Georgia the country is exempt, Georgia the US state is not', async () => {
-    const georgia = await repos.jurisdictions.createJurisdiction({
+    const georgia = orThrow(await repos.jurisdictions.createJurisdiction({
       name: 'Georgia',
       code: 'GE',
       type: 'country',
       countryCode: 'GE',
-    });
+    }));
     const exemption = orThrow(await repos.exemptions.createExemption({
       type: 'jurisdiction',
       jurisdictionId: georgia.id,
@@ -428,14 +483,14 @@ describe('calculateTax with exemptions', () => {
         type: 'state',
         countryCode: 'US',
         stateCode: 'CA',
-      }),
+      }).then(created => orThrow(created)),
       repos.jurisdictions.createJurisdiction({
         name: 'Alameda County',
         code: 'ALAMEDA',
         type: 'county',
         countryCode: 'US',
         stateCode: 'CA',
-      }),
+      }).then(created => orThrow(created)),
     ]);
     const owns = jurisdictionOwnsLine;
     const stateLine = line('California', 'state', 'CA');

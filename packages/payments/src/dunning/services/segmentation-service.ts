@@ -22,6 +22,7 @@ import type {
   SegmentCriteria,
 } from '../types.js';
 import { toMinorColumn } from '../../core/money.js';
+import type { ReferenceNotFound } from '../../core/providers/provider-error.js';
 import type { DunningTickReport } from '../failures.js';
 import { CustomerSegmentNotFound, tickFault } from '../failures.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
@@ -888,9 +889,11 @@ export class CustomerSegmentationService {
   }
 
   /**
-   * Update or create customer risk profile
+   * Update or create the customer risk profile. An unknown customer returns `ReferenceNotFound` (`kind: 'customer'`).
    */
-  async updateCustomerRiskProfile(customerId: CustomerId): Promise<CustomerRiskProfile | MoneyFailure> {
+  async updateCustomerRiskProfile(
+    customerId: CustomerId,
+  ): Promise<CustomerRiskProfile | MoneyFailure | FailureOf<typeof ReferenceNotFound>> {
     const riskScore = await this.calculateCustomerRiskScore(customerId);
     const paymentHistory = await this.getCustomerPaymentHistory(customerId);
     const subscriptionHistory = await this.getCustomerSubscriptionHistory(customerId);
@@ -921,9 +924,8 @@ export class CustomerSegmentationService {
       metadata: null,
     };
 
-    const dbProfile = await this.riskProfileRepo.upsert(profileData);
-    invariant(dbProfile, () => `the risk profile upsert for customer ${customerId} returned no row`);
-    return dbProfile;
+    // An unknown customer returns `ReferenceNotFound`; the upsert writes nothing then
+    return this.riskProfileRepo.upsert(profileData);
   }
 
   /**

@@ -131,7 +131,7 @@
     },
     "packages/async": {
       "name": "@arki/async",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -358,7 +358,7 @@
     },
     "packages/clock": {
       "name": "@arki/clock",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@arki/failure": "workspace:*",
       },
@@ -531,7 +531,7 @@
     },
     "packages/contracts": {
       "name": "@arki/contracts",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/schema": "workspace:*",
@@ -565,7 +565,7 @@
     },
     "packages/date": {
       "name": "@arki/date",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@arki/clock": "workspace:*",
         "@arki/failure": "workspace:*",
@@ -833,7 +833,7 @@
     },
     "packages/failure": {
       "name": "@arki/failure",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@standard-schema/spec": "^1.1.0",
       },
@@ -1324,7 +1324,7 @@
     },
     "packages/log": {
       "name": "@arki/log",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@arki/bench": "workspace:*",
         "@arki/eslint-config": "workspace:*",
@@ -1845,7 +1845,7 @@
     },
     "packages/schema": {
       "name": "@arki/schema",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@standard-schema/spec": "^1.1.0",
@@ -1905,7 +1905,7 @@
     },
     "packages/string": {
       "name": "@arki/string",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@arki/failure": "workspace:*",
         "@arki/log": "workspace:*",
@@ -2053,7 +2053,7 @@
     },
     "packages/ts": {
       "name": "@arki/ts",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "devDependencies": {
         "@arki/bench": "workspace:*",
         "@arki/eslint-config": "workspace:*",
@@ -2073,8 +2073,10 @@
       "version": "0.2.0",
       "dependencies": {
         "@arki/date": "workspace:*",
+        "@arki/failure": "workspace:*",
         "@arki/icons": "workspace:*",
         "@arki/log": "workspace:*",
+        "@arki/schema": "workspace:*",
         "@base-ui/react": "catalog:",
         "@hookform/resolvers": "catalog:validation",
         "@mantine/hooks": "catalog:",
@@ -2101,11 +2103,11 @@
         "tailwind-merge": "catalog:styling",
         "usehooks-ts": "catalog:",
         "vaul": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@arki/bench": "workspace:*",
         "@arki/eslint-config": "workspace:*",
-        "@arki/failure": "workspace:*",
         "@arki/prettier-config": "workspace:*",
         "@arki/tsconfig": "workspace:*",
         "@arki/vitest-config": "workspace:*",

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CostEstimator } from './estimator';
+import { CostEstimator, createCostEstimator } from './estimator';
 import { calculateLLMCost, DEFAULT_PRICING, getModelPricing, hasKnownPricing, priceOf } from './pricing';
 
 describe('priceOf', () => {
@@ -66,5 +66,34 @@ describe('CostEstimator says how a price was worked out (F8)', () => {
       usd: 0,
       basis: 'local',
     });
+  });
+});
+
+describe('CostEstimator fallbackPricing (audit-2 noticed)', () => {
+  // Why: the option was accepted and then ignored, so a team that set its own rate for unknown models was
+  // still billed against DEFAULT_PRICING in every estimate and budget check.
+  it('prices an unknown hosted model at fallbackPricing, still marked default-rate', () => {
+    const estimator = createCostEstimator({ fallbackPricing: { inputPer1k: 0.002, outputPer1k: 0.004 } });
+
+    expect(estimator.estimateLLMPrice('brand-new-model', 1000, 500)).toEqual({ usd: 0.004, basis: 'default-rate' });
+    expect(estimator.estimateLLMCost('brand-new-model', 1000, 500)).toBe(0.004);
+    expect(estimator.createEstimate('summary', 'brand-new-model', 1000, 500)).toMatchObject({
+      estimatedCostUsd: 0.004,
+      basis: 'default-rate',
+    });
+    expect(estimator.getModelPricing('brand-new-model')).toEqual({ inputPer1k: 0.002, outputPer1k: 0.004 });
+  });
+
+  it('leaves list prices and local providers alone, and uses DEFAULT_PRICING when unset', () => {
+    const estimator = new CostEstimator({ fallbackPricing: { inputPer1k: 0.002, outputPer1k: 0.004 } });
+
+    expect(estimator.estimateLLMPrice('gpt-4o', 1000, 500)).toEqual(
+      priceOf({ model: 'gpt-4o', inputTokens: 1000, outputTokens: 500 }),
+    );
+    expect(estimator.estimateLLMPrice('gemma4:latest', 100, 100, { provider: 'ollama' })).toEqual({
+      usd: 0,
+      basis: 'local',
+    });
+    expect(new CostEstimator().getModelPricing('brand-new-model')).toEqual(DEFAULT_PRICING);
   });
 });

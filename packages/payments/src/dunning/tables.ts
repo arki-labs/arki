@@ -1,7 +1,7 @@
 import { idColumns } from '@arki/db/id';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, integer, jsonb, real, text, varchar } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, integer, jsonb, real, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import type { Instant } from '@arki/date';
 import { instant } from '@arki/db/temporal';
@@ -275,7 +275,10 @@ function buildDunningTables({ schema, customerIdRef, paymentIdRef, subscriptionI
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     createdAt: instant('created_at').notNull().default(sql`now()`),
     updatedAt: instant('updated_at').notNull().default(sql`now()`),
-  });
+  }, (table) => [
+    // One profile per customer: `upsert` replaces it in one statement, so concurrent first writes cannot make two
+    uniqueIndex('customer_risk_profiles_customer_id_idx').on(table.customerId),
+  ]);
 
   const dunningCampaignAnalytics = schema.table('dunning_campaign_analytics', {
     id: varchar('id', { length: 255 }).primaryKey(),
