@@ -1,5 +1,12 @@
 # @arki/date
 
+## 0.5.2
+
+### Patch Changes
+
+- 2a9dea1: `parseISO` reads the offset part of a time in one pass. Time text with many `Z`, `+` or `-` signs and a line break at the end made it read to the end again from each sign: seconds per 100 KB. It accepts and rejects the same text as before.
+- 2a9dea1: The README Limits section says that `startOf` and `endOf` throw `RangeError` when the start or end of the unit falls outside Temporal's range (`-271821-04-19` to `+275760-09-13`).
+
 ## 0.5.1
 
 ### Patch Changes
