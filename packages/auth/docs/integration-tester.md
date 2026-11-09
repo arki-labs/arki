@@ -131,6 +131,8 @@ await tester.clearTablesByPattern(/^temp_/);
 await tester.clearTablesExcept(users, settings);
 ```
 
+Each helper deletes a child table before the parents it references, whatever order the schema exports them in, so foreign keys never refuse the cleanup.
+
 ## Seed
 
 ```ts skip="needs an initialised tester and app tables"

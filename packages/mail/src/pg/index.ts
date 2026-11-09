@@ -27,15 +27,23 @@ import type { MailTemplate, renderTemplate } from '../template.js';
 import type { SendOptions } from '../types.js';
 import type { QueuedArgs } from './args.js';
 import { isMailError, MAIL_ERROR_CODES, MailError } from '../errors.js';
-import type { MailInvalidMessage } from '../failures.js';
-import { MailEnqueueContended, MailExpired, MailRejected, MailTooLarge, MailUncertain } from '../failures.js';
-import { listOf } from '../message.js';
+import {
+  MailEnqueueContended,
+  MailExpired,
+  MailInvalidMessage,
+  MailRejected,
+  MailTooLarge,
+  MailUncertain,
+} from '../failures.js';
+import { holdsNul, listOf } from '../message.js';
 import { MAIL_JOB, queuedArgs } from './args.js';
 
 export { MAIL_JOB } from './args.js';
 
 const WAKE_PAYLOAD = '{"queue":1}';
 const DEFAULT_MAX_BYTES = 256 * 1024;
+/** The journal's `dedupe_key varchar(256)`: the longest `idempotencyKey`, in characters (code points). */
+const MAX_IDEMPOTENCY_KEY = 256;
 /** How often `enqueue` tries the insert when the dedupe key keeps changing hands under it. */
 const ENQUEUE_ATTEMPTS = 3;
 /** 5 s, 10 s, 20 s, … capped at 1 h; dead after the 5th try. */
@@ -62,7 +70,8 @@ export type MailOutbox = {
   /**
    * Queues one mail inside `tx`. Returns `MailInvalidInput` when the template's schema refuses
    * the input, `MailInvalidMessage` when the message cannot be sent as written (an empty address,
-   * a line break), `MailTooLarge` when it is over `maxBytes`, and `MailEnqueueContended` when other
+   * a line break, a NUL character, an `idempotencyKey` that is empty, holds NUL or is over 256
+   * characters), `MailTooLarge` when it is over `maxBytes`, and `MailEnqueueContended` when other
    * writers kept taking its `idempotencyKey` while it queued; nothing is queued. Throws
    * {@link MailError}: `E009` for the root database, `E002` unless there is exactly one `to`
    * recipient. The same `idempotencyKey` while a job is still queued returns that job (`deduped: true`).
@@ -98,6 +107,18 @@ class QueuedSendFailed extends Error {
   }
 }
 
+/** Why the journal's dedupe column cannot store `key`, or `undefined` when it can. */
+function idempotencyKeyProblem(key: string | undefined): string | undefined {
+  if (key === undefined) return undefined;
+  if (key === '') return 'The idempotencyKey is empty.';
+  if (holdsNul(key)) return 'The idempotencyKey contains the NUL character (U+0000).';
+  const characters = [...key].length;
+  if (characters > MAX_IDEMPOTENCY_KEY) {
+    return `The idempotencyKey is ${characters} characters; the limit is ${MAX_IDEMPOTENCY_KEY}.`;
+  }
+  return undefined;
+}
+
 /** A later try can help: the service may not have taken the mail, or refused it for now (429, 5xx). */
 const worthRetrying = (failure: Failure): boolean =>
   MailUncertain.is(failure) || (MailRejected.is(failure) && failure.data.retryable);
@@ -123,6 +144,8 @@ export function mailOutbox(options: MailOutboxOptions): MailOutbox {
         'A queued mail has exactly one `to` recipient and no cc or bcc.',
       );
     }
+    const badKey = idempotencyKeyProblem(enqueueOptions.idempotencyKey);
+    if (badKey !== undefined) return MailInvalidMessage({ problem: badKey });
     const composed = await mailer.compose(template, input, enqueueOptions);
     if (isFailure(composed)) return composed;
 

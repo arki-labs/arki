@@ -5,7 +5,7 @@
 import { orThrow } from '@arki/failure';
 import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { PgTable } from 'drizzle-orm/pg-core';
+import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import type { StartedTestContainer } from 'testcontainers';
 import { is, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -583,10 +583,7 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
-    for (const table of tables) {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
-      await this._db.delete(table);
-    }
+    await this.deleteAllRows(tables);
   }
 
   /**
@@ -607,10 +604,7 @@ export class IntegrationTester<
       (value): value is PgTable => is(value, PgTable),
     );
 
-    for (const table of tables) {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
-      await this._db.delete(table);
-    }
+    await this.deleteAllRows(tables);
   }
 
   /**
@@ -635,10 +629,7 @@ export class IntegrationTester<
       .filter((entry): entry is [string, PgTable] => regex.test(entry[0]) && is(entry[1], PgTable))
       .map(([, table]) => table);
 
-    for (const table of tables) {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
-      await this._db.delete(table);
-    }
+    await this.deleteAllRows(tables);
   }
 
   /**
@@ -662,9 +653,22 @@ export class IntegrationTester<
       (value): value is PgTable => is(value, PgTable) && !exceptSet.has(value),
     );
 
-    for (const table of tables) {
+    await this.deleteAllRows(tables);
+  }
+
+  /**
+   * Deletes every row of `tables`, a table before any table it references: a parent emptied before
+   * its child still holds rows would be refused by the foreign key (SQLSTATE 23503), whatever order
+   * the schema exports them in. Tables in a foreign-key cycle keep their given order.
+   */
+  private async deleteAllRows(tables: readonly PgTable[]): Promise<void> {
+    const db = this._db;
+    if (!db) {
+      throw new Error('Tester not initialized. Call setup() first.');
+    }
+    for (const table of childrenFirst(tables)) {
       // eslint-disable-next-line drizzle/enforce-delete-with-where -- clearing every row is the point of this helper
-      await this._db.delete(table);
+      await db.delete(table);
     }
   }
 
@@ -1405,3 +1409,30 @@ export class IntegrationTester<
 }
 
 export type * from './types.js';
+
+/**
+ * `tables` ordered so each comes before every other listed table it references through a foreign
+ * key. A self-reference is ignored (one `DELETE` clears it); a cycle keeps the given order.
+ */
+function childrenFirst(tables: readonly PgTable[]): PgTable[] {
+  const parentsOf = new Map(
+    tables.map(table => [
+      table,
+      new Set(
+        getTableConfig(table)
+          .foreignKeys.map(foreignKey => foreignKey.reference().foreignTable)
+          .filter(parent => parent !== table && tables.includes(parent)),
+      ),
+    ]),
+  );
+  const ordered: PgTable[] = [];
+  let remaining = [...tables];
+  while (remaining.length > 0) {
+    // A table no remaining table references can go now.
+    const free = remaining.filter(table => !remaining.some(other => parentsOf.get(other)?.has(table)));
+    const next = free.length > 0 ? free : remaining;
+    ordered.push(...next);
+    remaining = remaining.filter(table => !next.includes(table));
+  }
+  return ordered;
+}

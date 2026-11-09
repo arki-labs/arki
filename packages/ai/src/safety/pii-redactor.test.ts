@@ -78,8 +78,9 @@ describe('PIIRedactor default email and street-address patterns (audit-2 #10)', 
   it.each(['1 ', 'a.', 'aa.'])('text of %j with no PII scans in time that grows linearly with its length', unit => {
     const small = unit.repeat(Math.ceil(65_536 / unit.length));
     const large = unit.repeat(Math.ceil(262_144 / unit.length));
-    scanMs(small);
-    const smallMs = Math.max(scanMs(small), 5);
-    expect(scanMs(large) / smallMs).toBeLessThan(10);
+    // The fastest of three runs drops pauses from other work on the machine.
+    const fastest = (text: string) => Math.min(scanMs(text), scanMs(text), scanMs(text));
+    const smallMs = Math.max(fastest(small), 5);
+    expect(fastest(large) / smallMs).toBeLessThan(10);
   });
 });

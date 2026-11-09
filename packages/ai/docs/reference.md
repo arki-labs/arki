@@ -172,7 +172,7 @@ Import from `@arki/ai/safety`. Run these on input before it reaches a model, and
 
 ## Semantic search service
 
-`SemanticSearchService` ties an embedding model, a vector index and a cache into one search call. `search(options)` returns results or an `EmbedFailure`. `indexDocuments` adds documents. `getSuggestions(prefix)` gives popular queries. `getMetrics()` shows hits and timings. Call `destroy()` when done.
+`SemanticSearchService` ties an embedding model, a vector index and a cache into one search call. `search(options)` returns results or an `EmbedFailure`. `indexDocuments` adds documents; it returns an `EmbedFailure`, or `VectorStoreUnavailable` when the store refuses a write (indexing the same documents again is safe), and throws for a store that needs sparse vectors. `getSuggestions(prefix)` gives popular queries. `getMetrics()` shows hits and timings. Call `destroy()` when done.
 
 - `createVectorSearchProvider(config)`: builds the vector index. `type: 'qdrant'` talks to Qdrant, `type: 'mock'` gives a `MockVectorProvider`.
 - `MockVectorProvider`: an in-memory index that holds documents with embeddings. Use it in tests and local demos, never in production.

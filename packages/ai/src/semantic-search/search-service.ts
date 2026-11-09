@@ -11,7 +11,8 @@ import type { VectorSearchProvider } from '../types.js';
 import type { SearchOptions } from '../validation.js';
 import type { SearchCache } from './cache.js';
 import { debugSemantic } from '../debug.js';
-import { KeywordSearchUnavailable } from '../failures.js';
+import { getErrorMessage } from '../errors.js';
+import { KeywordSearchUnavailable, VectorStoreUnavailable } from '../failures.js';
 import { SearchAnalyticsCollector } from './analytics.js';
 import { InMemorySearchCache } from './cache.js';
 
@@ -402,8 +403,16 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Index documents for vector search, `batchSize` documents per embed call (default 100).
    *
+   * Returns the embedder's failure, or `SpaceMismatch`, before any point of that batch is written.
+   * Returns `VectorStoreUnavailable` (operation `index`) when the store refuses a write: every write
+   * of that batch has settled by then, and the earlier batches are stored. Its `reason` says how
+   * many documents were written. A write replaces the point with the same id, so indexing the same
+   * documents again is safe.
+   *
    * @throws FailureError (`invariant`) when `batchSize` is not a positive integer: the caller chose
-   * the number, so a bad one is a bug, and it would otherwise loop forever.
+   * the number, so a bad one is a bug, and it would otherwise loop forever. Also when the store holds
+   * a sparse vector per point (`vectorProvider.sparseSpace`): this service builds dense vectors only,
+   * so every write would be refused; index such a store with the code that builds its sparse vectors.
    */
   async indexDocuments(
     documents: {
@@ -412,8 +421,12 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       metadata?: TMetadata;
     }[],
     batchSize = 100,
-  ): Promise<{ success: boolean; count: number } | EmbedFailure> {
+  ): Promise<{ success: boolean; count: number } | EmbedFailure | VectorStoreUnavailable> {
     invariant(Number.isInteger(batchSize) && batchSize > 0, () => `indexDocuments batchSize must be a positive integer, got ${batchSize}`);
+    invariant(
+      this.config.vectorProvider.sparseSpace === undefined,
+      'indexDocuments writes dense vectors only, and this store needs a sparse vector per point',
+    );
     debugSemantic.debug('[SearchService] Indexing documents (total: {total}, batchSize: {batchSize})', {
       total: documents.length,
       batchSize,
@@ -444,8 +457,9 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       if (!isSameSpace(this.config.vectorProvider.space, embedded.space)) {
         return SpaceMismatch({ expected: this.config.vectorProvider.space, actual: embedded.space });
       }
-      // `embedMany` answers exactly one vector per input, in input order.
-      await Promise.all(
+      // `embedMany` answers exactly one vector per input, in input order. Every write settles before
+      // a failure returns, so none is still in flight when the caller sees it.
+      const writes = await Promise.allSettled(
         embedded.vectors.flatMap((vector, index) => {
           const doc = batch[index];
           if (doc === undefined) return [];
@@ -453,6 +467,12 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
           return [this.config.vectorProvider.upsertVector(doc.id, vector, { text: doc.text.slice(0, 1000), ...doc.metadata })];
         }),
       );
+      const refused = writes.find(write => write.status === 'rejected');
+      if (refused !== undefined) {
+        const written = indexed + writes.filter(write => write.status === 'fulfilled').length;
+        const reason = `${getErrorMessage(refused.reason)} (${written} of ${documents.length} documents written)`;
+        return VectorStoreUnavailable({ operation: 'index', reason }, { cause: refused.reason });
+      }
 
       indexed += batch.length;
     }

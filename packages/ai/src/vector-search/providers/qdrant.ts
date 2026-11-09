@@ -17,7 +17,8 @@ import { observeAi } from '../../observe.js';
 /**
  * Qdrant only accepts point IDs that are an unsigned integer or a UUID. Callers, however, use
  * arbitrary application IDs (e.g. prefixed IDs like `ps_ab12…`). Passing those straight through
- * yields a silent `400 Bad Request` on upsert. We therefore normalize any non-int/non-UUID ID to a
+ * yields a silent `400 Bad Request` on upsert. We therefore normalize any non-int/non-UUID ID (and a
+ * digit ID past `Number.MAX_SAFE_INTEGER`, which a number cannot hold exactly) to a
  * deterministic UUIDv5-style value (stable across runs, so re-indexing overwrites rather than
  * duplicates) and stash the original under `SOURCE_ID_KEY` so reads return the caller's ID verbatim.
  */
@@ -32,7 +33,8 @@ const SPARSE_VECTOR_NAME = 'sparse';
 
 async function toPointId(id: string | number): Promise<string | number> {
   if (typeof id === 'number') return id;
-  if (/^\d+$/.test(id)) return Number(id);
+  // Digits pass as an integer id only while the number is exact: past 2^53 two ids would round to one point.
+  if (/^\d+$/.test(id) && Number.isSafeInteger(Number(id))) return Number(id);
   if (UUID_RE.test(id)) return id;
   // Deterministic UUIDv5-style derivation: SHA-1 the ID, then force the version (5) and RFC-4122
   // variant nibbles into a well-formed UUID string. Qdrant validates the format, not v5 semantics.

@@ -115,7 +115,7 @@ The root entry `@arki/string` re-exports everything. Each concern also has its o
 
 ## Failure behaviour
 
-Interpolation and UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent interpolation and codecs return `StringValue` or the same failures. No submitted input is included in failures.
+Interpolation and UTF-8/base64 APIs return canonical `@arki/failure` values with stable codes, status 400, and remediation. `levenshtein` and `jaroWinkler` with `maxCells` return `ComparisonTooLarge` (status 413) above the limit. Successes remain plain numbers, bytes, or text. Narrow with `isFailure` before using them; fluent interpolation and codecs return `StringValue` or the same failures. No submitted input is included in failures.
 
 Breaking: `tryFromBase64` is removed; use `fromBase64`, which returns canonical failures instead of `null`. Replace null checks and encoding `StringError` catches with failure narrowing. Interpolation returns `MissingValue` for missing values; narrow before reading a fluent result. Replace `missing: 'throw'` with `missing: 'fail'`; E005 is removed. Other static misuse still throws `StringError` from `@arki/string/errors`; only E001 (invalid argument) and E004 (malformed template) remain. E002/E003 are removed; narrow codec outcomes with `InvalidUtf8.is` or `InvalidBase64.is`.
 
@@ -262,6 +262,20 @@ jaroWinkler(fold('Émile Zola'), fold('emile zola')); // 1
   to a distance. It does no script conversion; that is `transliterate` in `/slug`.
 - `levenshtein`, `diceCoefficient` (grapheme bigrams) and `jaroWinkler` (name
   matching, prefix-boosted) are all measured in graphemes.
+- `levenshtein` and `jaroWinkler` cost time that grows with the grapheme count of
+  `a` times that of `b`: two 100,000-grapheme texts are 10^10 steps. For text from
+  outside, pass `{ maxCells }`. Above it they return the `ComparisonTooLarge`
+  failure (`string.comparison_too_large`, status 413) and compute nothing. Without
+  the option they always return a number.
+
+```ts
+import { isFailure } from '@arki/failure';
+import { levenshtein } from '@arki/string/distance';
+
+const distance = levenshtein('kitten', 'sitting', { maxCells: 1_000_000 });
+if (isFailure(distance)) throw new Error(distance.message); // too long to compare
+distance; // 3
+```
 
 ### Segment
 

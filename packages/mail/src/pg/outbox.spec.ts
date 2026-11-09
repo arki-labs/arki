@@ -296,6 +296,39 @@ describe('what is accepted into the queue', () => {
     expect(await queue().queued()).toEqual([]);
   });
 
+  // Template input and keys often come from users or request headers: a value Postgres would refuse
+  // must come back as a failure the caller can show, never a raw driver error that fails the write.
+  it('a NUL character in the rendered mail is a returned MailInvalidMessage, not a Postgres error', async () => {
+    const outbox = outboxWith(provider('ok').transport);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/\u0000' }, { to }),
+    );
+    expect(result).toMatchObject({ code: 'mail.invalid_message', status: 422 });
+    expect(await queue().queued()).toEqual([]);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['holding a NUL character', 'order\u00001'],
+    ['over 256 characters', 'k'.repeat(257)],
+  ])('an idempotencyKey %s is a returned MailInvalidMessage and queues nothing', async (_case, idempotencyKey) => {
+    const outbox = outboxWith(provider('ok').transport);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, idempotencyKey }),
+    );
+    expect(result).toMatchObject({ code: 'mail.invalid_message', status: 422 });
+    expect(await queue().queued()).toEqual([]);
+  });
+
+  it('an idempotencyKey of exactly 256 characters, counted in code points, is queued', async () => {
+    const outbox = outboxWith(provider('ok').transport);
+    const idempotencyKey = '\u{1F600}'.repeat(256);
+    const result = await db.transaction(tx =>
+      outbox.enqueue(tx, magicLink, { url: 'https://app.dev/l/1' }, { to, idempotencyKey }),
+    );
+    expect(orThrow(result).deduped).toBe(false);
+  });
+
   // The service said how long to wait; asking again sooner only burns a try.
   it('waits at least as long as the service asked in Retry-After before the next try', async () => {
     const asked = MailRejected({ transport: 'fake', retryable: true, upstreamStatus: 429, retryAfterMs: 90_000 });

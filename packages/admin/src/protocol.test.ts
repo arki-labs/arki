@@ -280,6 +280,16 @@ describe('T(admin-protocol) app-side rejections', () => {
     expect(response.status).toBe(status);
   });
 
+  it('a client whose read key the app does not hold gets admin.unauthenticated back from read()', async () => {
+    // WHY: Foreman tells "re-enroll this key" from "the app is down" by the code; the wire E007 must
+    // reach the caller as the returned failure, not as a module refusal or a throw.
+    const { client } = setup({ client: { readKey: impostorPair.privateKey } });
+
+    const result = await client.read('queue.failedJobs', { limit: 5 }, ['queue:read']);
+
+    expect(result).toMatchObject({ code: 'admin.unauthenticated', status: 401 });
+  });
+
   it('rejects scopes that do not cover the permission, and never runs the action', async () => {
     const { client, executed } = setup();
     await expectAdminError(

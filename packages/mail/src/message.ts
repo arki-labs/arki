@@ -1,6 +1,8 @@
 /**
  * Checks on a message before any transport sees it. A line break in a header or an address
  * would let input add headers of its own (header injection), so it is refused, not cleaned.
+ * A NUL character (U+0000) is refused too: no mail can carry it, and Postgres refuses it in the
+ * outbox row (SQLSTATE 22P05), so `send` and `enqueue` agree.
  */
 import type { FailureOf } from '@arki/failure';
 
@@ -21,6 +23,17 @@ const RESERVED_HEADERS = new Set([
 ]);
 
 const LINE_BREAK = /[\r\n]/;
+const NUL = '\u0000';
+
+/** Whether a key or a string anywhere in this value holds U+0000. */
+export function holdsNul(value: unknown): boolean {
+  let found = false;
+  JSON.stringify(value, (key: string, item: unknown) => {
+    if (key.includes(NUL) || (typeof item === 'string' && item.includes(NUL))) found = true;
+    return item;
+  });
+  return found;
+}
 
 /** Addresses as a list; `undefined` is an empty list. */
 export function listOf(addresses: Addresses | undefined): readonly string[] {
@@ -44,6 +57,9 @@ function problemWith(message: MailMessage): string | undefined {
   if (addresses.some(address => address.trim() === '')) return 'An address is empty.';
   if (addresses.some(address => LINE_BREAK.test(address))) return 'An address contains a line break.';
   if (LINE_BREAK.test(message.subject)) return 'The subject contains a line break.';
+  for (const [field, value] of Object.entries(message)) {
+    if (holdsNul(value)) return `The ${field} contains the NUL character (U+0000).`;
+  }
   for (const [name, value] of Object.entries(message.headers ?? {})) {
     if (LINE_BREAK.test(name) || LINE_BREAK.test(value)) return `Header "${name}" contains a line break.`;
     if (RESERVED_HEADERS.has(name.toLowerCase())) {

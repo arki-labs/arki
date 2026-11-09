@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { diceCoefficient, jaroWinkler, levenshtein } from './distance.js';
+import type { FailureOf } from '@arki/failure';
+
+import type { CellLimit } from './distance.js';
+import { ComparisonTooLarge, diceCoefficient, jaroWinkler, levenshtein } from './distance.js';
 import { fold } from './unicode.js';
 
 describe('levenshtein', () => {
@@ -64,5 +67,54 @@ describe('jaroWinkler', () => {
 
   it('is what a name matcher needs: folding first makes accents and case irrelevant', () => {
     expect(jaroWinkler(fold('Émile Zola'), fold('emile zola'))).toBe(1);
+  });
+});
+
+// Both are quadratic by nature: two long texts from outside (a pasted document, an uploaded file)
+// would hold the thread for minutes. `maxCells` lets a caller bound the work and get a typed answer.
+describe('maxCells bounds the quadratic comparisons', () => {
+  const long = 'ab'.repeat(500); // 1,000 graphemes
+
+  it('without maxCells both still return a plain number at any length', () => {
+    const distance = levenshtein(long, `${long}x`);
+    const similarity = jaroWinkler(long, `${long}x`);
+    expectTypeOf(distance).toEqualTypeOf<number>();
+    expectTypeOf(similarity).toEqualTypeOf<number>();
+    expect(distance).toBe(1);
+    expect(similarity).toBeGreaterThan(0.99);
+  });
+
+  it('above maxCells both return ComparisonTooLarge instead of computing', () => {
+    // 1,000 × 1,001 graphemes = 1,001,000 cells.
+    const distance = levenshtein(long, `${long}x`, { maxCells: 1_000_000 });
+    const similarity = jaroWinkler(long, `${long}x`, { maxCells: 1_000_000, prefixScale: 0.2 });
+    expectTypeOf(distance).toEqualTypeOf<number | FailureOf<typeof ComparisonTooLarge>>();
+    expect(distance).toMatchObject({ code: 'string.comparison_too_large', status: 413 });
+    expect(ComparisonTooLarge.is(similarity)).toBe(true);
+  });
+
+  it('at or below maxCells they compute the same answer as without it, counting cells in graphemes', () => {
+    // 'cafe' (4) × 'cafe' + combining accent (4 graphemes, 5 code units) = 16 cells.
+    expect(levenshtein('cafe', 'cafe\u0301', { maxCells: 16 })).toBe(1);
+    expect(jaroWinkler('MARTHA', 'MARHTA', { maxCells: 36 })).toBe(jaroWinkler('MARTHA', 'MARHTA'));
+    expect(levenshtein(long, `${long}x`, { maxCells: Infinity })).toBe(1);
+  });
+
+  it('equal strings need no comparison and answer at any length', () => {
+    expect(levenshtein(long, long, { maxCells: 0 })).toBe(0);
+    expect(jaroWinkler(long, long, { maxCells: 0 })).toBe(1);
+  });
+
+  it('a maxCells that is negative or NaN is a caller bug and throws E001', () => {
+    expect(() => levenshtein('a', 'b', { maxCells: -1 })).toThrowError(/ARKI_STRING_E001/);
+    expect(() => jaroWinkler('a', 'b', { maxCells: Number.NaN })).toThrowError(/ARKI_STRING_E001/);
+  });
+
+  it('an options value whose maxCells may be set is typed as possibly failing', () => {
+    const options: CellLimit = {};
+    expectTypeOf(levenshtein('a', 'b', options)).toEqualTypeOf<number | FailureOf<typeof ComparisonTooLarge>>();
+    expectTypeOf(jaroWinkler('a', 'b', { prefixScale: 0.2, ...options })).toEqualTypeOf<
+      number | FailureOf<typeof ComparisonTooLarge>
+    >();
   });
 });

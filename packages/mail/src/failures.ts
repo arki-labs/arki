@@ -108,17 +108,19 @@ export const MailExpired = defineFailure('mail.expired', {
 
 /**
  * The message cannot be sent as written: no recipient, an empty address, a line break in an address,
- * the subject or a header (header injection), or a header the message owns. Nothing was sent.
+ * the subject or a header (header injection), a header the message owns, or a NUL character (U+0000)
+ * in any field. `enqueue` also returns it for an `idempotencyKey` that is empty, holds NUL or is over
+ * 256 characters (the journal's dedupe column). Nothing was sent or queued.
  * Recipients are usually typed by a user, so this is an expected outcome, not a bug.
  *
- * @fix Show the user what is wrong with the address, or remove the line break or reserved header. The same message fails again.
+ * @fix Show the user what is wrong with the address, or remove the line break, NUL character or reserved header. The same message fails again.
  * @verify bun run test -- src/message.spec.ts
  */
 export const MailInvalidMessage = defineFailure('mail.invalid_message', {
   status: 422,
   data: z.object({ problem: z.string() }),
   message: 'The mail cannot be sent as written: {problem}',
-  remediation: 'Fix the address, subject or header named in the message. The same message fails again.',
+  remediation: 'Fix the field named in the message. The same message fails again.',
 });
 
 /**

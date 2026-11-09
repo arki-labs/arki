@@ -74,6 +74,21 @@ describe('QdrantVectorProvider — point ids stay stable for stored points', () 
     expect(client.retrieve).toHaveBeenCalledWith('c', expect.objectContaining({ ids: [GOLDEN[0]?.[1]] }));
   });
 
+  it('digit ids past 2^53 are hashed, so two of them never round to one point and overwrite each other', async () => {
+    const provider = new QdrantVectorProvider(config, { space });
+    await provider.deleteDocumentsBatch([
+      '12345678901234567890',
+      '12345678901234567891',
+      String(Number.MAX_SAFE_INTEGER),
+    ]);
+
+    // The largest exact integer still passes through as a number.
+    expect(client.delete).toHaveBeenCalledWith('c', {
+      points: ['7e0a1242-bd8e-5904-8f27-dca45f5f72ad', '142d8896-2ce8-510e-8dde-b2f625869d3c', Number.MAX_SAFE_INTEGER],
+      wait: true,
+    });
+  });
+
   it('unsigned integers and UUIDs pass through unchanged, since Qdrant accepts them as they are', async () => {
     const provider = new QdrantVectorProvider(config, { space });
     await provider.deleteDocumentsBatch(['42', '0f8fad5b-d9cb-469f-a165-70867728950e']);

@@ -23,6 +23,9 @@ describe('checkMessage', () => {
     ['a line break in a header value', { ...base, headers: { 'X-Ref': 'a\r\nBcc: victim@example.com' } }],
     ['a reserved header', { ...base, headers: { Bcc: 'victim@example.com' } }],
     ['an empty address', { ...base, cc: [''] }],
+    // Postgres cannot store U+0000 (the outbox row would fail with SQLSTATE 22P05), and no mail can carry it.
+    ['a NUL character in the text', { ...base, text: 'Hello\u0000' }],
+    ['a NUL character in a tag', { ...base, tags: { ref: 'a\u0000b' } }],
     // Recipients are usually typed by a user, so a bad one is an outcome to show, never a crash.
   ])('refuses %s with a returned MailInvalidMessage, and never throws', (_case, message) => {
     const refused = checkMessage(message);

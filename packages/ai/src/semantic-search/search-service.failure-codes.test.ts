@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { isEmbedFailure, RateLimited } from '@arki/embeddings';
 import { fakeEmbedder } from '@arki/embeddings/testing';
 
+import { VectorStoreUnavailable } from '../failures';
 import { MockVectorProvider } from '../vector-search/providers/mock';
+import { QdrantVectorProvider } from '../vector-search/providers/qdrant';
 import { SemanticSearchService } from './search-service';
 
 describe('SemanticSearchService returns the embedder failure and SpaceMismatch', () => {
@@ -48,6 +50,37 @@ describe('SemanticSearchService returns the embedder failure and SpaceMismatch',
 
     expect(isEmbedFailure(result) && result.code).toBe('embeddings.rate_limited');
     expect(vectorProvider.getDocumentCount()).toBe(0);
+    service.destroy();
+  });
+
+  it('indexDocuments returns VectorStoreUnavailable when the store cannot be reached, instead of throwing', async () => {
+    // WHY: a store outage is an expected outcome the caller retries; a raw client error escaped as a throw.
+    const embedder = fakeEmbedder({ dimensions: 3 });
+    // A real Qdrant client aimed at a port nothing listens on: the connection is refused.
+    const vectorProvider = new QdrantVectorProvider({ url: 'http://127.0.0.1:1', collectionName: 'docs' }, { space: embedder.space });
+    const service = new SemanticSearchService({ embedder, vectorProvider });
+
+    const result = await service.indexDocuments([
+      { id: 'a', text: 'alpha' },
+      { id: 'b', text: 'beta' },
+    ]);
+
+    expect(result).toMatchObject({ code: 'ai.vector_store_unavailable', status: 503, data: { operation: 'index' } });
+    expect(VectorStoreUnavailable.is(result) && result.data.reason).toMatch(/\(0 of 2 documents written\)$/);
+    service.destroy();
+  });
+
+  it('indexDocuments refuses a store that needs sparse vectors before embedding or writing anything', async () => {
+    // WHY: the service writes dense vectors only, so every write to a hybrid store was refused one by one.
+    const embedder = fakeEmbedder({ dimensions: 3, failures: { alpha: RateLimited({}) } });
+    const vectorProvider = new QdrantVectorProvider(
+      { url: 'http://127.0.0.1:1', collectionName: 'docs' },
+      { space: embedder.space, sparseSpace: { ...embedder.space, dimensions: 30_522, vocabulary: 'naver/splade-v3' } },
+    );
+    const service = new SemanticSearchService({ embedder, vectorProvider });
+
+    // The embedder would fail on 'alpha': a throw instead of that failure proves nothing was embedded first.
+    await expect(service.indexDocuments([{ id: 'a', text: 'alpha' }])).rejects.toThrow(/sparse vector per point/);
     service.destroy();
   });
 

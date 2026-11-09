@@ -22,7 +22,7 @@
 - `@arki/string/keywords`: Keyword and key-phrase frequency for SEO-style analysis. `STOP_WORDS`, `keywords`; types `Keyword`, `KeywordLanguage`, `KeywordOptions`.
 - `@arki/string/vocabulary`: Vocabulary statistics: how varied and how long the words of a text are. `lexicalDiversity`, `simpsonsDiversityIndex`, `uniqueWordCount`, `wordFrequencies`, `wordLengthStats`, `yulesK`; types `VocabularyOptions`, `WordFrequency`, `WordLengthStats`.
 - `@arki/string/metrics`: One object with every count, score, and statistic for a text — the "word counter" dashboard. `TextAnalysis`, `analyze`, `textMetrics`; types `TextInput`, `TextMetrics`.
-- `@arki/string/distance`: String similarity measured in graphemes, so `é` and a flag count as one unit whichever way they are encoded. `diceCoefficient`, `jaroWinkler`, `levenshtein`; types `JaroWinklerOptions`.
+- `@arki/string/distance`: String similarity measured in graphemes, so `é` and a flag count as one unit whichever way they are encoded. `ComparisonTooLarge`, `diceCoefficient`, `jaroWinkler`, `levenshtein`; types `CellLimit`, `JaroWinklerOptions`. `levenshtein` and `jaroWinkler` grow with a × b graphemes; pass `{ maxCells }` to get `ComparisonTooLarge` instead of computing.
 - `@arki/string/hash`: Non-negative 32-bit hash of `text` over its UTF-16 code units: the classic `h * 31 + unit` (Java `String.hashCode`) with the sign dropped. `hashCode`.
 - `@arki/string/fluent`: `StringValue`, `str`; types `NormalizationForm`, `Transform`.
 <!-- llms:end -->
