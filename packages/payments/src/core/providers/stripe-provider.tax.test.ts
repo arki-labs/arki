@@ -201,6 +201,30 @@ describe('createTaxTransaction', () => {
     expect(requests).toHaveLength(0);
   });
 
+  it('returns money.out_of_range for a sale line or a partial refund total past 2^53 of Stripe units, before calling Stripe', async () => {
+    const { stripe, requests } = provider(() => ({ body: {} }));
+    const tooLarge = money('100000000000000000', 'USD');
+
+    const sale = await stripe.createTaxTransaction({
+      reference: 'order_huge',
+      type: 'sale',
+      customerId: customer.id,
+      currency: 'USD',
+      lineItems: [{ amount: tooLarge, reference: 'plan' }],
+    });
+    const refund = await stripe.createTaxTransaction({
+      reference: 'refund_huge',
+      type: 'refund',
+      currency: 'USD',
+      originalTransactionId: 'tax_txn_1',
+      lineItems: [{ amount: tooLarge, reference: 'plan' }],
+    });
+
+    expect(sale).toMatchObject({ code: 'money.out_of_range' });
+    expect(refund).toMatchObject({ code: 'money.out_of_range' });
+    expect(requests).toHaveLength(0);
+  });
+
   it('returns payments.tax_address_incomplete for a sale whose address has no country, before calling Stripe', async () => {
     // The package's customerDetails input schema allows an address without a country
     const { stripe, requests } = provider(() => ({ body: {} }));

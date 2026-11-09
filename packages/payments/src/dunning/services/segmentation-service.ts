@@ -895,10 +895,12 @@ export class CustomerSegmentationService {
 
   /**
    * Update or create the customer risk profile. An unknown customer returns `ReferenceNotFound` (`kind: 'customer'`).
+   * The repository's `schema.invalid_input` for JSON Postgres cannot store is passed on; the profile is built from
+   * rows Postgres already stored, so it is not expected here.
    */
   async updateCustomerRiskProfile(
     customerId: CustomerId,
-  ): Promise<CustomerRiskProfile | MoneyFailure | FailureOf<typeof ReferenceNotFound>> {
+  ): Promise<CustomerRiskProfile | MoneyFailure | FailureOf<typeof ReferenceNotFound> | SchemaFailure> {
     const riskScore = await this.calculateCustomerRiskScore(customerId);
     const paymentHistory = await this.getCustomerPaymentHistory(customerId);
     const subscriptionHistory = await this.getCustomerSubscriptionHistory(customerId);

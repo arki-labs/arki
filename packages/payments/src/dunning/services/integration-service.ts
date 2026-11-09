@@ -3,7 +3,7 @@ import { and, count, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
-import type { FailureOf } from '@arki/failure';
+import type { FailureOf, SchemaFailure } from '@arki/failure';
 import { isFailure } from '@arki/failure';
 import type { MoneyFailure } from '@arki/money';
 import { Money } from '@arki/money';
@@ -24,8 +24,11 @@ import { createCustomerSegmentationService } from './segmentation-service.js';
 
 const logger = getLogger('dunning.integration');
 
-/** What an event handler that updates the risk profile can return: a stored amount money refuses, or an unknown customer. */
-type HandlerFailure = MoneyFailure | FailureOf<typeof ReferenceNotFound>;
+/**
+ * What an event handler that updates the risk profile can return: a stored amount money refuses, an unknown
+ * customer, or the risk profile write's `schema.invalid_input`.
+ */
+type HandlerFailure = MoneyFailure | FailureOf<typeof ReferenceNotFound> | SchemaFailure;
 
 /**
  * Events that trigger dunning campaigns

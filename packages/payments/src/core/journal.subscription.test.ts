@@ -362,6 +362,17 @@ describe('markSubscriptionPastDue and activateSubscription (dunning and payment 
     );
   });
 
+  it('rejects marking a canceled subscription past due: it has no payment left to chase', async () => {
+    const subscriptionId = await seed('canceled');
+
+    await expectRejected(
+      () => journal.run(db, commands.markSubscriptionPastDue, { subscriptionId }, meta),
+      'journal.conflict',
+      `Subscription ${subscriptionId} is canceled, so it cannot be past due`,
+      subscriptionId,
+    );
+  });
+
   it('activates a past due subscription when the retried payment goes through', async () => {
     const subscriptionId = await seed('past_due');
 

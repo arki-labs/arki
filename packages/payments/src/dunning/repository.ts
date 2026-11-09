@@ -16,7 +16,7 @@ import { fromDate, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/primitives.js';
 import type { UserId } from '../core/user-id.js';
-import { INT4_MAX, pgJsonRecordSchema, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
+import { INT4_MAX, pgJsonRecordSchema, pgJsonSchema, pgTextSchema, pgVarcharSchema } from '../core/pg-values.js';
 import { ReferenceNotFound } from '../core/providers/provider-error.js';
 import type {
   CreateCustomerSegmentInput,
@@ -108,6 +108,21 @@ const communicationValuesSchema = z.looseObject({
   providerMessageId: pgVarcharSchema(255).nullish(),
   providerResponse: pgJsonRecordSchema.nullish(),
   trackingData: pgJsonRecordSchema.nullish(),
+  metadata: pgJsonRecordSchema.nullish(),
+});
+
+/**
+ * The JSON a caller writes into a risk profile row, checked against the jsonb columns before the write:
+ * U+0000 in any key or string, or a bigint, returns `schema.invalid_input` instead of a raw SQLSTATE 22P05
+ * or a driver TypeError.
+ */
+const riskProfileValuesSchema = z.looseObject({
+  segmentIds: pgJsonSchema.optional(),
+  riskScore: pgJsonRecordSchema.optional(),
+  paymentHistory: pgJsonRecordSchema.optional(),
+  subscriptionHistory: pgJsonRecordSchema.optional(),
+  engagementMetrics: pgJsonRecordSchema.optional(),
+  communicationPreferences: pgJsonRecordSchema.optional(),
   metadata: pgJsonRecordSchema.nullish(),
 });
 
@@ -1097,11 +1112,14 @@ export class CustomerRiskProfileRepository {
   /**
    * The new profile, or `ReferenceNotFound` (`kind: 'customer'`) when no customer has
    * `input.customerId`; nothing is written then. A customer has one profile: a second `create` for it
-   * returns `CustomerRiskProfileExists` and changes nothing, so use `upsert` to replace one.
+   * returns `CustomerRiskProfileExists` and changes nothing, so use `upsert` to replace one. JSON its
+   * columns cannot store returns `schema.invalid_input` and writes nothing.
    */
   async create(
     input: RiskProfileInput,
-  ): Promise<CustomerRiskProfile | CustomerNotFound | FailureOf<typeof CustomerRiskProfileExists>> {
+  ): Promise<CustomerRiskProfile | CustomerNotFound | FailureOf<typeof CustomerRiskProfileExists> | SchemaFailure> {
+    const checked = parse(riskProfileValuesSchema, input);
+    if (isFailure(checked)) return checked;
     const table = this.customerRiskProfiles;
     return insertOrMissing(
       this.db,
@@ -1119,10 +1137,16 @@ export class CustomerRiskProfileRepository {
     );
   }
 
+  /**
+   * The updated profile, or `undefined` when the customer has no profile. JSON its columns cannot store
+   * returns `schema.invalid_input` and writes nothing.
+   */
   async update(
     customerId: CustomerId,
     input: Partial<Omit<CustomerRiskProfile, 'id' | 'customerId' | 'createdAt' | 'updatedAt'>>,
-  ): Promise<CustomerRiskProfile | undefined> {
+  ): Promise<CustomerRiskProfile | undefined | SchemaFailure> {
+    const checked = parse(riskProfileValuesSchema, input);
+    if (isFailure(checked)) return checked;
     const [profile] = await this.db
       .update(this.customerRiskProfiles)
       .set({ ...input, updatedAt: now() })
@@ -1135,9 +1159,12 @@ export class CustomerRiskProfileRepository {
   /**
    * Writes the customer's one profile: inserts it, or replaces the stored one in the same statement
    * (the unique index on `customer_id`), so two first upserts at once still leave one row. Returns
-   * `ReferenceNotFound` (`kind: 'customer'`) when no customer has `input.customerId`; nothing is written then.
+   * `ReferenceNotFound` (`kind: 'customer'`) when no customer has `input.customerId`, and
+   * `schema.invalid_input` for JSON its columns cannot store; nothing is written then.
    */
-  async upsert(input: RiskProfileInput): Promise<CustomerRiskProfile | CustomerNotFound> {
+  async upsert(input: RiskProfileInput): Promise<CustomerRiskProfile | CustomerNotFound | SchemaFailure> {
+    const checked = parse(riskProfileValuesSchema, input);
+    if (isFailure(checked)) return checked;
     const table = this.customerRiskProfiles;
     const fields = riskProfileFields(input);
 

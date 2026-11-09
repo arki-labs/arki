@@ -231,6 +231,35 @@ describe('CustomerRiskProfileRepository writes', () => {
     expect(stored[0]?.riskScore.overall).toBe(first.riskScore.overall);
   });
 
+  // The JSON columns refuse U+0000 (raw SQLSTATE 22P05) and the driver throws a TypeError on a bigint: each door must answer with a typed failure instead
+  it('create, upsert and update return schema.invalid_input for U+0000 or a bigint in the JSON, and write nothing', async () => {
+    const repository = createCustomerRiskProfileRepository(db, dunning);
+    const fresh = await newCustomer('bad-json-fresh');
+    const stored = await newCustomer('bad-json-stored');
+    const base = profile();
+    const kept = orThrow(await repository.create({ ...base, customerId: stored, metadata: { source: 'kept' } }));
+    const badJson = [
+      { metadata: { note: 'nul \u0000 here' } },
+      { metadata: { ['key\u0000']: 'x' } },
+      { metadata: { seats: 2n } },
+      { communicationPreferences: { ...base.communicationPreferences, timezone: 'Europe/\u0000Paris' } },
+    ];
+
+    for (const bad of badJson) {
+      const answers = [
+        await repository.create({ ...base, ...bad, customerId: fresh }),
+        await repository.upsert({ ...base, ...bad, customerId: fresh }),
+        await repository.upsert({ ...base, ...bad, customerId: stored }),
+        await repository.update(stored, bad),
+      ];
+      for (const answer of answers) expect(answer).toMatchObject({ code: 'schema.invalid_input' });
+    }
+    expect(await profilesOf(fresh)).toEqual([]);
+    const after = await profilesOf(stored);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: kept.id, metadata: { source: 'kept' }, updatedAt: kept.updatedAt });
+  });
+
   it('a refused write inside a caller transaction leaves that transaction usable', async () => {
     const buyer = await newCustomer('in-transaction');
 

@@ -17,6 +17,8 @@ import { instant } from '@arki/date';
 import { invariant, isFailure } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
 
+import { pgTextSchema } from '../pg-values.js';
+
 /** Event data is stored as JSON, so a time travels as an ISO string. */
 export function toIso(value: Instant): string {
   return value.toString();
@@ -123,8 +125,9 @@ export type RowReference<Missing> = {
  * Looks up the row each reference points at, in the table the column's foreign key names, and locks
  * it (`FOR KEY SHARE`) until the transaction ends, so the write that follows cannot meet a missing or
  * just-deleted row (a raw Postgres 23503). Returns the first `missing()` for a value no row holds, or
- * `undefined` when every row is there. A `null` or `undefined` value names nothing to check. Run it
- * in the transaction that writes.
+ * `undefined` when every row is there. A value Postgres cannot store (U+0000) is held by no row, so it
+ * returns its `missing()` without a query (the lookup would fail with a raw 22021). A `null` or
+ * `undefined` value names nothing to check. Run it in the transaction that writes.
  */
 export async function lockReferences<Missing>(
   db: Pick<DbHandle, 'select'>,
@@ -134,6 +137,7 @@ export async function lockReferences<Missing>(
   const keys = getTableConfig(table).foreignKeys.map(key => key.reference());
   for (const { column, value, missing } of references) {
     if (value === null || value === undefined) continue;
+    if (!pgTextSchema.safeParse(value).success) return missing();
     const key = keys.find(candidate => candidate.columns[0] === column);
     const target = key?.foreignColumns[0];
     invariant(key && target, () => `[@arki/payments] ${column.name} has no foreign key to look the row up by`);

@@ -115,3 +115,89 @@ describe('./cohere rerankers', () => {
     }
   });
 });
+
+const answer = (response: () => Response) => stubRerankFetch(response).fetch;
+const dropped: FetchLike = () => Promise.reject(new TypeError('fetch failed'));
+const scores = (indices: readonly number[]) => ({ results: indices.map(index => ({ index, relevance_score: 0.5 })) });
+
+// Why: a caller decides retry, fix-config, back-off or split from the code alone. Each failure the protocol
+// reranker returns is kept here by its exact code, for both factories, through the same scripted fetch.
+describe.each([
+  { name: 'createCohereReranker', make: (fetch: FetchLike) => cohere(fetch) },
+  { name: 'createCohereCompatibleReranker', make: compatible },
+])('$name exact failure codes', ({ make }) => {
+  const documents = ['a', 'b'];
+  const codeOf = async (fetch: FetchLike, signal?: AbortSignal) => {
+    const result = await make(fetch).rerank('q', documents, signal === undefined ? {} : { signal });
+    return isFailure(result) ? { code: result.code, data: result.data } : 'ok';
+  };
+
+  it('429 is embeddings.rate_limited with the Retry-After wait', async () => {
+    const fetch = answer(() => new Response('slow down', { status: 429, headers: { 'retry-after': '3' } }));
+    expect(await codeOf(fetch)).toEqual({ code: 'embeddings.rate_limited', data: { retryAfterMs: 3000 } });
+  });
+
+  it('401 and 403 are embeddings.configuration', async () => {
+    for (const status of [401, 403]) {
+      expect(await codeOf(answer(() => new Response('denied', { status })))).toMatchObject({
+        code: 'embeddings.configuration',
+      });
+    }
+  });
+
+  it('404 is embeddings.model_unavailable unknown-model', async () => {
+    expect(await codeOf(answer(() => new Response('no such model', { status: 404 })))).toMatchObject({
+      code: 'embeddings.model_unavailable',
+      data: { reason: 'unknown-model' },
+    });
+  });
+
+  it('503, 500, 502 and a dropped connection are embeddings.model_unavailable unreachable', async () => {
+    const fetches = [503, 500, 502].map(status => answer(() => new Response('down', { status })));
+    for (const fetch of [...fetches, dropped]) {
+      expect(await codeOf(fetch)).toMatchObject({
+        code: 'embeddings.model_unavailable',
+        data: { reason: 'unreachable' },
+      });
+    }
+  });
+
+  it('an abort while the request is in flight is embeddings.cancelled', async () => {
+    const controller = new AbortController();
+    const hanging: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+        controller.abort();
+      });
+    expect(await codeOf(hanging, controller.signal)).toMatchObject({ code: 'embeddings.cancelled' });
+  });
+
+  it('malformed JSON, a wrong shape, a short, repeated or out-of-range index, and a 418 are embeddings.invalid_output', async () => {
+    const bodies = [
+      () => new Response('{"results": [', { status: 200, headers: { 'content-type': 'application/json' } }),
+      () => Response.json({ results: [{ index: 'zero', relevance_score: 1 }] }),
+      () => Response.json(scores([0])),
+      () => Response.json(scores([0, 0])),
+      () => Response.json(scores([0, 2])),
+      () => new Response('teapot', { status: 418 }),
+    ];
+    for (const body of bodies) {
+      expect(await codeOf(answer(body))).toMatchObject({ code: 'embeddings.invalid_output' });
+    }
+  });
+
+  it('more documents than maxDocuments is embeddings.unsupported_input on the batch, with no request', async () => {
+    const { fetch, calls } = stubRerankFetch(() => Response.json({ results: [] }));
+    const reranker = make(fetch);
+    const result = await reranker.rerank(
+      'q',
+      Array.from({ length: reranker.maxDocuments + 1 }, () => 'x'),
+      {},
+    );
+    expect(isFailure(result) && { code: result.code, data: result.data }).toEqual({
+      code: 'embeddings.unsupported_input',
+      data: { index: reranker.maxDocuments, part: 'batch' },
+    });
+    expect(calls).toHaveLength(0);
+  });
+});
